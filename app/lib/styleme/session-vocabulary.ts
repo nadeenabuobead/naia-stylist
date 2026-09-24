@@ -79,9 +79,23 @@ export const STYLEME_POSITIVE_STATE_IDS: readonly string[] = [
 // ─────────────────────────────────────────────────────────────────────────────
 // Step 2 — Intention: "What do you want your clothes to do today?"  (max 2)
 // ─────────────────────────────────────────────────────────────────────────────
-// EXACTLY the 12 approved intention IDs. Labels are display copy; the IDs below
-// are what every approved GarmentStyleMeProfile.intentionPotentials record is
-// keyed by. Changing a label requires NO garment retagging.
+// The 16 approved intention IDs. Labels are display copy; the IDs below are what
+// every approved GarmentStyleMeProfile.intentionPotentials record is keyed by.
+// Changing a label requires NO garment retagging.
+//
+// The last four were added in the 2026-09 taxonomy expansion. They are genuine
+// new dimensions of garment truth, not synonyms of existing ones:
+//   feel-elevated  — refined and considered. NOT formal, tailored, expensive-
+//                    looking or black. A polished casual piece can carry it.
+//   stand-out      — real visual presence. NOT "black", NOT "structured", and a
+//                    bright colour is not automatically Strong.
+//   feel-fun       — playful, light, enjoyable styling energy. Distinct from
+//                    express-myself, which can be serious, minimal or edgy.
+//                    Casual is not fun.
+//   feel-powerful  — deliberate presence and impact. NOT tailored, structured,
+//                    black, sharp or formal by default.
+// Every one of them is decided per garment by a human reviewer. No heuristic in
+// this codebase may derive them — see styleme-profile-gate.ts.
 
 export const STYLEME_INTENTION_OPTIONS: readonly StyleMeOption[] = [
   { id: "feel-like-myself",   label: "Help me feel like myself" },
@@ -96,6 +110,31 @@ export const STYLEME_INTENTION_OPTIONS: readonly StyleMeOption[] = [
   { id: "feel-sharper",       label: "Help me feel sharper" },
   { id: "feel-less-exposed",  label: "Help me feel less exposed" },
   { id: "express-myself",     label: "Let me express myself" },
+  { id: "feel-elevated",      label: "Help me feel elevated" },
+  { id: "stand-out",          label: "Let me stand out" },
+  { id: "feel-fun",           label: "Make it feel fun" },
+  { id: "feel-powerful",      label: "Help me feel powerful" },
+] as const;
+
+/**
+ * Intention IDs added in the 2026-09 expansion (12 → 16).
+ *
+ * Exported so the garment profile can tell "human reviewed" from "this dimension
+ * did not exist when the garment was approved". An existing approved profile has
+ * no key for these until a reviewer supplies one; absence is NOT approved None.
+ */
+export const STYLEME_NEW_INTENTION_IDS: readonly string[] = [
+  "feel-elevated",
+  "stand-out",
+  "feel-fun",
+  "feel-powerful",
+] as const;
+
+/** The 12 intentions that predate the expansion — every approved profile rates these. */
+export const STYLEME_ORIGINAL_INTENTION_IDS: readonly string[] = [
+  "feel-like-myself", "confidence", "ground-me", "give-structure",
+  "make-it-easy", "feel-put-together", "feel-attractive", "give-energy",
+  "feel-softer", "feel-sharper", "feel-less-exposed", "express-myself",
 ] as const;
 
 // ─────────────────────────────────────────────────────────────────────────────

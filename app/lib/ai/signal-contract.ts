@@ -1326,6 +1326,38 @@ export const ANSWER_REGISTRY: readonly AnswerMapping[] = [
     behaviours: [RECOMMENDATION_BEHAVIOURS.PROFILE_AMPLIFY],
     rankingWeight: "none",
   },
+  // Taxonomy expansion (2026-09), 12 → 16. Scored exactly like the original
+  // intentions: through approved GarmentStyleMeProfile.intentionPotentials, via
+  // the shared intention-fit path. No SMCM/desired-feeling translation, and no
+  // State value may activate any of them.
+  {
+    id: "feel-elevated",
+    questionId: SQ.INTENTIONS,
+    activatedFields: [],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.PROFILE_AMPLIFY],
+    rankingWeight: "none",
+  },
+  {
+    id: "stand-out",
+    questionId: SQ.INTENTIONS,
+    activatedFields: [],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.PROFILE_AMPLIFY],
+    rankingWeight: "none",
+  },
+  {
+    id: "feel-fun",
+    questionId: SQ.INTENTIONS,
+    activatedFields: [],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.PROFILE_AMPLIFY],
+    rankingWeight: "none",
+  },
+  {
+    id: "feel-powerful",
+    questionId: SQ.INTENTIONS,
+    activatedFields: [],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.PROFILE_AMPLIFY],
+    rankingWeight: "none",
+  },
 
   // ── Session: Body Needs — Rev 3 context-only Physical Needs ──────────────────
   // softer-easier-fabrics / still-want-shape / structured-shape pass through

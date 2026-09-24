@@ -18,6 +18,25 @@
 // that overrides any blanket register exclusion rule.
 
 import type { ClosetAnchorInput, OutfitCandidate, OutfitSlot } from "./styleme-recommendation.types.js";
+import { NEW_INTENTION_IDS } from "../admin/styleme-garment-profile.vocab.js";
+
+// ── Expansion intentions: approved truth only, never derived ──────────────────
+//
+// feel-elevated / stand-out / feel-fun / feel-powerful were added to the taxonomy
+// after the closet was reviewed, so most garments have no rating for them yet.
+//
+// They deliberately have NO heuristic fallback. Every tempting shortcut is wrong:
+// tailored is not powerful, black is not stand-out, polished is not elevated,
+// casual is not fun. Deriving them would also erase the distinction between "a
+// human decided None" and "nobody has looked at this yet", which is the whole
+// point of tracking the expansion separately.
+//
+// So an unreviewed expansion intention contributes the neutral, evidence-free
+// score used elsewhere for outfit-level intentions — never a positive signal, and
+// never as much as an approved Supporting (0.5) or Strong (1.0). Only a human
+// rating in intentionPotentials can move these.
+const NEUTRAL_NO_EVIDENCE = 0.4;
+const EXPANSION_INTENTION_IDS: ReadonlySet<string> = new Set<string>(NEW_INTENTION_IDS);
 
 // ── Dress register rank ────────────────────────────────────────────────────────
 
@@ -342,6 +361,9 @@ function legacyPieceIntentionScore(item: ClosetAnchorInput, intentionId: string)
     case "feel-put-together":
     case "give-energy":
     default:
+      // Expansion intentions have no legacy tag heuristic either — an un-profiled
+      // garment carries no evidence for elevated / stand-out / fun / powerful.
+      if (EXPANSION_INTENTION_IDS.has(intentionId)) return NEUTRAL_NO_EVIDENCE;
       return 0.4;
   }
 }
@@ -410,6 +432,9 @@ function formCharacterScore(item: ClosetAnchorInput, intentionId: string): numbe
       return 0.4;
     }
     default:
+      // Expansion intentions are approved-truth-only: no construction, colour,
+      // register or silhouette field may stand in for a human rating.
+      if (EXPANSION_INTENTION_IDS.has(intentionId)) return NEUTRAL_NO_EVIDENCE;
       return 0.4;
   }
 }

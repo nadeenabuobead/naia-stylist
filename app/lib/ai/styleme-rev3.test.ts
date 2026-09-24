@@ -1361,7 +1361,7 @@ describe("R3.21b — State IDs never collide with intention IDs", () => {
 
 // ── R3.22 — Intention UI: exact approved IDs and labels ───────────────────────
 
-describe("R3.22 — Intention UI: exact 12 approved IDs and labels", () => {
+describe("R3.22 — Intention UI: exact 16 approved IDs and labels", () => {
   const intentionSrc = readFileSync(join(ROOT, "app/routes/style-me/intention.tsx"), "utf8");
 
   // IDs are the approved garment taxonomy. Labels are display copy only.
@@ -1378,6 +1378,11 @@ describe("R3.22 — Intention UI: exact 12 approved IDs and labels", () => {
     "feel-sharper":      "Help me feel sharper",
     "feel-less-exposed": "Help me feel less exposed",
     "express-myself":    "Let me express myself",
+    // 2026-09 taxonomy expansion — genuine new dimensions, not label synonyms.
+    "feel-elevated":     "Help me feel elevated",
+    "stand-out":         "Let me stand out",
+    "feel-fun":          "Make it feel fun",
+    "feel-powerful":     "Help me feel powerful",
   };
 
   for (const [id, label] of Object.entries(APPROVED_LABELS)) {
@@ -1389,7 +1394,7 @@ describe("R3.22 — Intention UI: exact 12 approved IDs and labels", () => {
     });
   }
 
-  it("intention ID set is exactly the approved 12 — no taxonomy expansion", () => {
+  it("intention ID set is exactly the approved 16", () => {
     assert.deepEqual(
       [...STYLEME_INTENTION_OPTIONS.map((o) => o.id)].sort(),
       [...Object.keys(APPROVED_LABELS)].sort(),
@@ -1401,11 +1406,13 @@ describe("R3.22 — Intention UI: exact 12 approved IDs and labels", () => {
     assert.ok(!/id: "/.test(intentionSrc), "intention.tsx must not declare its own option IDs");
   });
 
+  // State IDs and near-miss spellings must never leak into the intention set.
   const REJECTED_INTENTION_IDS = [
-    "feel-confident", "feel-elevated", "stand-out", "have-fun", "powerful", "feel-energised",
+    "feel-confident", "feel-energised", "feel-calm", "feel-social",
+    "have-fun", "powerful", "elevated", "standout",
   ];
   for (const id of REJECTED_INTENTION_IDS) {
-    it(`intention vocabulary must NOT contain "${id}" (would require taxonomy expansion)`, () => {
+    it(`intention vocabulary must NOT contain "${id}"`, () => {
       assert.equal(STYLEME_INTENTION_OPTIONS.some((o) => o.id === id), false);
     });
   }

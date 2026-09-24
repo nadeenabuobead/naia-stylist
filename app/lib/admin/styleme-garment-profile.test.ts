@@ -62,9 +62,12 @@ describe("SGP-V01 vocabulary constants have expected values", () => {
     assert.ok(OCCASION_IDS.includes("night-out"));
   });
 
-  it("intentions has exactly 12 IDs", () => {
-    assert.equal(INTENTION_IDS.length, 12);
+  it("intentions has exactly 16 IDs — 12 original + 4 from the 2026-09 expansion", () => {
+    assert.equal(INTENTION_IDS.length, 16);
     assert.ok(INTENTION_IDS.includes("feel-less-exposed"));
+    for (const id of ["feel-elevated", "stand-out", "feel-fun", "feel-powerful"]) {
+      assert.ok(INTENTION_IDS.includes(id as never), `${id} must be part of the taxonomy`);
+    }
   });
 
   it("profileStatus has 3 values", () => {

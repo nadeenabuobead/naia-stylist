@@ -30,6 +30,9 @@ export {
   OCCASION_IDS,
   OCCASION_FIT_RATINGS,
   INTENTION_IDS,
+  ORIGINAL_INTENTION_IDS,
+  NEW_INTENTION_IDS,
+  getIntentionReviewState,
   INTENTION_RATINGS,
   PROFILE_STATUS_VALUES,
 } from "~/lib/admin/styleme-garment-profile.vocab";
@@ -68,6 +71,7 @@ import {
   OCCASION_IDS,
   OCCASION_FIT_RATINGS,
   INTENTION_IDS,
+  ORIGINAL_INTENTION_IDS,
   INTENTION_RATINGS,
   PROFILE_STATUS_VALUES,
   type ProfileStatus,
@@ -191,8 +195,12 @@ export function checkApprovalCompleteness(data: StyleMeProfileInput): StyleMePro
     }
   }
 
+  // Approval requires the original 12 intentions. The four added in the 2026-09
+  // expansion are surfaced as pending review in the admin rather than blocking
+  // approval — otherwise the expansion would silently un-approve every garment
+  // that was legitimately reviewed under the previous taxonomy.
   const int = data.intentionPotentials ?? {};
-  for (const id of INTENTION_IDS) {
+  for (const id of ORIGINAL_INTENTION_IDS) {
     if (!int[id]) {
       errs.push({ field: "intentionPotentials", message: `intentionPotentials missing rating for "${id}"` });
     }

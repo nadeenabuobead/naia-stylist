@@ -68,12 +68,66 @@ export type OccasionId = (typeof OCCASION_IDS)[number];
 export const OCCASION_FIT_RATINGS = ["Strong","Acceptable","No"] as const;
 export type OccasionFitRating = (typeof OCCASION_FIT_RATINGS)[number];
 
-export const INTENTION_IDS = [
+// ── Intention taxonomy ─────────────────────────────────────────────────────────
+//
+// 16 dimensions of approved garment truth. Customer-facing labels live in
+// app/lib/styleme/session-vocabulary.ts — these IDs are the storage contract for
+// GarmentStyleMeProfile.intentionPotentials and must never be renamed.
+
+/** The 12 intentions every approved profile already rates. Required for approval. */
+export const ORIGINAL_INTENTION_IDS = [
   "feel-like-myself","confidence","ground-me","give-structure","make-it-easy",
   "feel-put-together","feel-attractive","give-energy","feel-softer",
   "feel-sharper","feel-less-exposed","express-myself",
 ] as const;
+
+/**
+ * Added in the 2026-09 expansion. An approved profile created before the
+ * expansion has NO key for these, which means "not reviewed yet" — a different
+ * thing from a human deciding "None". Approval is therefore NOT blocked on them;
+ * the admin surfaces them as pending review instead. See getIntentionReviewState.
+ */
+export const NEW_INTENTION_IDS = [
+  "feel-elevated","stand-out","feel-fun","feel-powerful",
+] as const;
+
+export const INTENTION_IDS = [
+  ...ORIGINAL_INTENTION_IDS,
+  ...NEW_INTENTION_IDS,
+] as const;
 export type IntentionId = (typeof INTENTION_IDS)[number];
+
+export interface IntentionReviewState {
+  /** Intention IDs a human has rated on this profile. */
+  reviewed: string[];
+  /** Original-12 IDs still missing — these DO block approval. */
+  missingOriginal: string[];
+  /** Expansion IDs still missing — these do NOT block approval, but need review. */
+  pendingNew: string[];
+  /** True when all 16 dimensions carry a human rating. */
+  isFullyReviewed: boolean;
+}
+
+/**
+ * Classifies which intention dimensions a stored profile has actually been
+ * reviewed for. Key absence is the only signal — a stored "None" counts as
+ * reviewed, because a human chose it.
+ */
+export function getIntentionReviewState(
+  intentionPotentials: Record<string, string> | null | undefined,
+): IntentionReviewState {
+  const stored = intentionPotentials ?? {};
+  const isRated = (id: string) => typeof stored[id] === "string" && stored[id].length > 0;
+  const reviewed = INTENTION_IDS.filter(isRated);
+  const missingOriginal = ORIGINAL_INTENTION_IDS.filter((id) => !isRated(id));
+  const pendingNew = NEW_INTENTION_IDS.filter((id) => !isRated(id));
+  return {
+    reviewed: [...reviewed],
+    missingOriginal: [...missingOriginal],
+    pendingNew: [...pendingNew],
+    isFullyReviewed: missingOriginal.length === 0 && pendingNew.length === 0,
+  };
+}
 
 export const INTENTION_RATINGS = ["Strong","Supporting","None"] as const;
 export type IntentionRating = (typeof INTENTION_RATINGS)[number];

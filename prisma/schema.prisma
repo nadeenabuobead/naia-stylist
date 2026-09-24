@@ -1232,11 +1232,17 @@ model GarmentStyleMeProfile {
   // Values: "Strong"|"Acceptable"|"No"
   occasionFit Json?
 
-  // Intention potential ratings — JSON object keyed by intention ID
-  // Keys: feel-like-myself|confidence|ground-me|give-structure|make-it-easy|
+  // Intention potential ratings — JSON object keyed by intention ID.
+  // Keys (16): feel-like-myself|confidence|ground-me|give-structure|make-it-easy|
   //       feel-put-together|feel-attractive|give-energy|feel-softer|feel-sharper|
-  //       feel-less-exposed|express-myself
+  //       feel-less-exposed|express-myself|
+  //       feel-elevated|stand-out|feel-fun|feel-powerful
   // Values: "Strong"|"Supporting"|"None"
+  //
+  // The last four were added in the 2026-09 taxonomy expansion. Because this is a
+  // JSON column, that required no migration and no backfill. A KEY THAT IS ABSENT
+  // MEANS "not reviewed yet" and is NOT equivalent to a stored "None" — nothing
+  // may write a default value for these; only a human reviewer supplies them.
   intentionPotentials Json?
 
   // Pairing guidance (free text)

@@ -44,7 +44,7 @@ const srcOf = (rel: string) => readFileSync(join(ROOT, rel), "utf8");
 // 1. Revised Step 2 display labels map to the SAME existing intention IDs
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("SMV.1 — revised Intention labels map to the existing 12 intention IDs", () => {
+describe("SMV.1 — Intention labels map to the canonical 16 intention IDs", () => {
   const REVISED_LABEL_TO_ID: Record<string, string> = {
     "Help me feel like myself":   "feel-like-myself",
     "Help me feel confident":  "confidence",
@@ -58,6 +58,11 @@ describe("SMV.1 — revised Intention labels map to the existing 12 intention ID
     "Help me feel sharper":       "feel-sharper",
     "Help me feel less exposed":  "feel-less-exposed",
     "Let me express myself":      "express-myself",
+    // 2026-09 taxonomy expansion (12 → 16).
+    "Help me feel elevated":      "feel-elevated",
+    "Let me stand out":           "stand-out",
+    "Make it feel fun":           "feel-fun",
+    "Help me feel powerful":      "feel-powerful",
   };
 
   for (const [label, id] of Object.entries(REVISED_LABEL_TO_ID)) {
@@ -76,13 +81,13 @@ describe("SMV.1 — revised Intention labels map to the existing 12 intention ID
     );
   });
 
-  it("no new intention dimension was introduced", () => {
-    const FORBIDDEN = ["feel-elevated", "stand-out", "have-fun", "powerful", "feel-energised", "feel-confident", "feel-calm"];
+  it("no State ID or near-miss spelling leaked into the intention set", () => {
+    const FORBIDDEN = ["feel-energised", "feel-confident", "feel-calm", "feel-social", "have-fun", "powerful", "elevated"];
     for (const id of FORBIDDEN) {
       assert.equal(
         STYLEME_INTENTION_OPTIONS.some((o) => o.id === id),
         false,
-        `"${id}" would be a taxonomy expansion, not a copy change`,
+        `"${id}" is not a valid intention ID`,
       );
     }
   });
@@ -372,7 +377,7 @@ describe("SMV.9 — the copy refinement requires no garment-profile migration", 
       [...STYLEME_INTENTION_OPTIONS.map((o) => o.id)].sort(),
       [...INTENTION_IDS].sort(),
     );
-    assert.equal(INTENTION_IDS.length, 12);
+    assert.equal(INTENTION_IDS.length, 16);
   });
 
   it("Step 3 IDs are unchanged, so no stored StylingSession.bodyNeeds value is orphaned", () => {
