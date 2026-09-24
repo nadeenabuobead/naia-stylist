@@ -37,6 +37,9 @@ const STYLEME_SESSION_KEYS = [
   "styleMeCoverageConditional",
   // Website context — "naia" (Closet-only) or "nadine" (Closet + NADINE catalogue)
   "styleMeMode",
+  // Provenance — set only by /api/styleme-handoff. Distinguishes a NADINE product
+  // handoff from an ordinary closet Rev 3 session; see app/lib/styleme/handoff.ts.
+  "styleMeHandoffOrigin",
 ] as const;
 
 export async function clearStyleMeSession(request: Request): Promise<string> {

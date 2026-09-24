@@ -1,3 +1,18 @@
+// app/routes/quick-style/_index.tsx
+//
+// ⚠️ NOT CANONICAL STYLEME. This is a separate, older single-page funnel reached
+// only from the storefront "Style Me" floating button. It has its own mood /
+// feeling / occasion / body-need vocabularies which are NOT the Rev 3 signal set,
+// it never collects formality, and it does not use app/lib/styleme/session-vocabulary.ts.
+//
+// Canonical StyleMe is /style-me/state → intention → physical-need → occasion.
+// Do NOT add dependencies on this route, and do NOT copy its vocabulary into Rev 3.
+//
+// FOLLOW-UP (separate product decision, deliberately out of scope here): decide
+// whether a lightweight guest entry point should exist at all. If it should, it
+// needs rebuilding as a different presentation of the canonical Rev 3 signals
+// rather than a parallel questionnaire.
+
 import { useState } from "react";
 import { data, Form, redirect } from "react-router";
 import type { ActionFunctionArgs } from "react-router";

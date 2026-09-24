@@ -12,6 +12,7 @@ import {
 import { loadNaiaModel, computeModelReadinessFromRecord } from "~/lib/ai/my-naia-model.server";
 import { prisma } from "~/lib/prisma.server";
 import { getSession, commitSession, clearStyleMeSession } from "~/lib/session.server";
+import { CANONICAL_STYLEME_ENTRY } from "~/lib/styleme/handoff";
 import { readPendingSave, writePendingSave, clearPendingSave } from "~/lib/pending-save.server";
 import {
   buildEngineInput,
@@ -293,7 +294,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     } else {
       // Legacy path
       if (!mood || !mood.length || !feelings || !feelings.length || !bodyNeeds || !bodyNeeds.length || !occasion || !source) {
-        return redirect("/style-me/mood");
+        // Incomplete legacy session — restart at the canonical Rev 3 entry.
+        return redirect(CANONICAL_STYLEME_ENTRY);
       }
     }
 
@@ -421,9 +423,9 @@ export async function action({ request }: ActionFunctionArgs) {
       const cookieSession = await getSession(request.headers.get("Cookie"));
       cookieSession.set("styleMeAdjustVibe", "true");
       if (sessionId) cookieSession.set("styleMeAdjustVibeSourceId", sessionId);
-      const isRev3 = !!cookieSession.get("styleMeState");
-      const entryPoint = isRev3 ? "/style-me/state" : "/style-me/mood";
-      return redirect(entryPoint, {
+      // Adjust Vibe always re-asks through the canonical Rev 3 questionnaire,
+      // including for a legacy session — the old questionnaire is retired.
+      return redirect(CANONICAL_STYLEME_ENTRY, {
         headers: { "Set-Cookie": await commitSession(cookieSession) },
       });
     }

@@ -7,6 +7,7 @@ export function meta() {
 import { useState } from "react";
 import { commitSession, getSession } from "~/lib/session.server";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
+import { readNadineHandoff, CANONICAL_STYLEME_ENTRY } from "~/lib/styleme/handoff";
 import prisma from "~/db.server";
 import { autoSelectClosetAnchor } from "~/lib/ai/styleme-anchor.server";
 import { buildPrivateDownloadUrl, getCloudinaryConfig } from "~/lib/cloudinary-admin.server";
@@ -67,18 +68,44 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const bodyNeeds = session.get("styleMeBodyNeeds") as string[] | undefined;
   const occasion = session.get("styleMeOccasion") as string | undefined;
 
-  // Accept Rev 3 path (styleMeState) or legacy path (mood + feelings)
+  // Accept Rev 3 path (styleMeState) or legacy path (mood + feelings).
+  // An incomplete session always restarts at the canonical Rev 3 entry — the
+  // legacy questionnaire is no longer offered to anyone.
   if (!isRev3 && (!mood || !feelings)) {
-    return redirect("/style-me/mood");
+    return redirect(CANONICAL_STYLEME_ENTRY);
   }
   if (!bodyNeeds || !occasion) {
-    return redirect(isRev3 ? "/style-me/physical-need" : "/style-me/comfort");
+    return redirect(isRev3 ? "/style-me/physical-need" : CANONICAL_STYLEME_ENTRY);
   }
 
   const source = session.get("styleMeSource") as string | undefined;
 
-  // Rev3: standalone StyleMe is closet-only — force to my-closet unconditionally,
-  // including stale sessions that already carry source="both" or "naia-piece".
+  // ── Rev 3 source lock ──────────────────────────────────────────────────────
+  // Standalone Rev 3 StyleMe is closet-only: any session carrying source="both"
+  // or "naia-piece" is forced back to my-closet. That protection is unchanged.
+  //
+  // The ONE exception is a verified NADINE product handoff. readNadineHandoff
+  // returns non-null only when the session carries the provenance stamp written
+  // by /api/styleme-handoff AND a handle that is still in the locked catalogue,
+  // so a stale or client-invented handle cannot buy its way out of the lock.
+  // Such a session keeps source="naia-piece" + mode="nadine" and goes straight to
+  // the result, where resolveActionAnchor() resolves that exact product.
+  const nadineHandoff = isRev3 ? readNadineHandoff(session) : null;
+
+  if (nadineHandoff) {
+    // Re-assert the handoff shape in case an earlier step or a stale cookie
+    // disagreed; then skip the source/anchor screens this session never needs.
+    if (source !== "naia-piece" || session.get("styleMeMode") !== "nadine") {
+      session.set("styleMeSource", "naia-piece");
+      session.set("styleMeMode", "nadine");
+    }
+    session.unset("styleMeClosetAnchorId");
+    session.unset("styleMeAnchorMode");
+    return redirect("/style-me/result", {
+      headers: { "Set-Cookie": await commitSession(session) },
+    });
+  }
+
   if (isRev3 && source !== "my-closet") {
     session.set("styleMeSource", "my-closet");
     session.set("styleMeMode", "naia");
@@ -291,7 +318,9 @@ export async function action({ request }: ActionFunctionArgs) {
           headers: { "Set-Cookie": await commitSession(session) },
         });
       }
-      // Legacy: save source for hydration before clearing.
+      // Legacy session (no styleMeState): save source for hydration before clearing.
+      // The Back target below is /style-me/source, whose loader now restarts an
+      // incomplete legacy session at the canonical Rev 3 entry.
       const prevSrc = session.get("styleMeSource") as string | undefined;
       if (prevSrc) session.set("styleMeSourcePrev", prevSrc);
       session.unset("styleMeSource");

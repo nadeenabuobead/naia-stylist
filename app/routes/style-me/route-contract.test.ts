@@ -29,84 +29,49 @@ describe("Phase 4B3 recovery — route contract", () => {
     assert.equal(existsSync(join(dir, "practical.tsx")), false);
   });
 
-  // ── mood.tsx ────────────────────────────────────────────────────
+  // ── mood.tsx / feeling.tsx / comfort.tsx ────────────────────────
+  // These were the legacy questionnaire. They are now compatibility redirects
+  // into canonical Rev 3 — see nadine-handoff-rev3.test.ts for the behavioural
+  // contract. The assertions below pin that they never become steps again.
 
-  it("mood stores styleMeMood as a string (single select)", () => {
-    const text = src("mood.tsx");
-    assert.ok(text.includes('session.set("styleMeMood", mood)'), "sets styleMeMood");
-    assert.ok(!text.includes('session.set("styleMeMood", moods)'), "not storing moods array");
-    assert.ok(text.includes('formData.get("mood")'), "reads mood field");
-  });
+  for (const legacy of ["mood.tsx", "feeling.tsx", "comfort.tsx"]) {
+    it(`${legacy} is a compatibility redirect, not a questionnaire step`, () => {
+      const text = src(legacy);
+      assert.ok(text.includes("COMPATIBILITY REDIRECT"), `${legacy} must be marked as a redirect`);
+      assert.ok(!text.includes("export default function"), `${legacy} must not render a step UI`);
+      assert.ok(!text.includes("SmContinue"), `${legacy} must not render flow controls`);
+    });
 
-  it("mood redirects to /style-me/feeling", () => {
-    const text = src("mood.tsx");
-    assert.ok(text.includes('redirect("/style-me/feeling"'), "redirects to feeling");
-  });
+    it(`${legacy} sends the customer to the canonical Rev 3 entry`, () => {
+      const text = src(legacy);
+      assert.ok(text.includes("CANONICAL_STYLEME_ENTRY"), `${legacy} must redirect to the canonical entry`);
+      assert.ok(!text.includes('redirect("/style-me/feeling"'), `${legacy} must not chain the legacy flow`);
+      assert.ok(!text.includes('redirect("/style-me/comfort"'), `${legacy} must not chain the legacy flow`);
+      assert.ok(!text.includes('redirect("/style-me/occasion"'), `${legacy} must not chain the legacy flow`);
+    });
 
-  it("mood is single-select (not multi-select)", () => {
-    const text = src("mood.tsx");
-    assert.ok(text.includes("useState<string | null>"), "single-select state");
-    assert.ok(!text.includes("useState<string[]>"), "no multi-select state");
-  });
+    it(`${legacy} no longer writes legacy questionnaire answers`, () => {
+      const text = src(legacy);
+      assert.ok(!text.includes('session.set("styleMeMood"'), `${legacy} must not write styleMeMood`);
+      assert.ok(!text.includes('session.set("styleMeFeelings"'), `${legacy} must not write styleMeFeelings`);
+      assert.ok(!text.includes('session.set("styleMeBodyNeeds"'), `${legacy} must not write styleMeBodyNeeds`);
+      assert.ok(!text.includes('session.set("styleMePractical"'), `${legacy} must not write styleMePractical`);
+    });
 
-  // ── feeling.tsx ─────────────────────────────────────────────────
+    it(`${legacy} never clears a NADINE handoff anchor`, () => {
+      const text = src(legacy);
+      assert.ok(
+        !text.includes('unset("styleMeNadineAnchorHandle")'),
+        `${legacy} must not destroy the handoff anchor — this was the original defect`,
+      );
+    });
 
-  it("feeling uses field name 'feelings' (JSON array, multi-select)", () => {
-    const text = src("feeling.tsx");
-    assert.ok(text.includes('formData.get("feelings")'), "reads feelings field");
-    assert.ok(!text.includes('formData.get("feeling")'), "not reading singular feeling field");
-  });
-
-  it("feeling stores styleMeFeelings as an array", () => {
-    const text = src("feeling.tsx");
-    assert.ok(text.includes('session.set("styleMeFeelings"'), "sets styleMeFeelings");
-    assert.ok(!text.includes('session.set("styleMeFeeling"'), "not setting singular styleMeFeeling");
-  });
-
-  it("feeling redirects to /style-me/comfort (not occasion)", () => {
-    const text = src("feeling.tsx");
-    assert.ok(text.includes('redirect("/style-me/comfort"'), "redirects to comfort");
-    assert.ok(!text.includes('redirect("/style-me/occasion"'), "not redirecting to occasion");
-  });
-
-  // ── comfort.tsx ──────────────────────────────────────────────────
-
-  it("comfort uses field name 'bodyNeeds' (JSON array, multi-select)", () => {
-    const text = src("comfort.tsx");
-    assert.ok(text.includes('formData.get("bodyNeeds")'), "reads bodyNeeds field");
-    assert.ok(!text.includes('formData.get("comfort")'), "not reading singular comfort field");
-  });
-
-  it("comfort stores styleMeBodyNeeds (normalized canonical IDs)", () => {
-    const text = src("comfort.tsx");
-    assert.ok(text.includes('session.set("styleMeBodyNeeds"'), "sets styleMeBodyNeeds");
-    assert.ok(!text.includes('session.set("styleMeComfort"'), "not setting styleMeComfort");
-    assert.ok(text.includes("BODY_NEED_NORMALIZATION_MAP"), "applies normalization map");
-  });
-
-  it("comfort redirects to /style-me/occasion (not source, not coverage)", () => {
-    const text = src("comfort.tsx");
-    assert.ok(text.includes('redirect("/style-me/occasion"'), "redirects to occasion");
-    assert.ok(!text.includes('redirect("/style-me/source"'), "not redirecting to source");
-    assert.ok(!text.includes('redirect("/style-me/coverage"'), "not redirecting to coverage");
-  });
-
-  it("comfort loader reads styleMeFeelings from session", () => {
-    const text = src("comfort.tsx");
-    assert.ok(text.includes('session.get("styleMeFeelings")'), "reads styleMeFeelings");
-    assert.ok(!text.includes('session.get("styleMeFeeling")'), "not reading singular styleMeFeeling");
-  });
-
-  it("comfort back link is /style-me/feeling", () => {
-    const text = src("comfort.tsx");
-    assert.ok(text.includes('backTo="/style-me/feeling"'), "back link to feeling");
-    assert.ok(!text.includes('backTo="/style-me/occasion"'), "not back to occasion");
-  });
-
-  it("comfort imports signal-contract for normalization", () => {
-    const text = src("comfort.tsx");
-    assert.ok(text.includes("signal-contract"), "imports signal-contract for BODY_NEED_NORMALIZATION_MAP");
-  });
+    it(`${legacy} handles a stale POST as well as a GET`, () => {
+      const text = src(legacy);
+      assert.ok(text.includes("export async function loader"), `${legacy} must export a loader`);
+      assert.ok(text.includes("export async function action"), `${legacy} must export an action`);
+    });
+  }
 
   // ── occasion.tsx ─────────────────────────────────────────────────
 
@@ -125,14 +90,13 @@ describe("Phase 4B3 recovery — route contract", () => {
     assert.ok(!text.includes('redirect("/style-me/today-colours"'), "not redirecting to today-colours");
   });
 
-  it("occasion back link is derived from isRev3 (physical-need for Rev3, comfort for legacy)", () => {
+  it("occasion back link is the canonical Fit/Comfort step for every session", () => {
     const text = src("occasion.tsx");
-    // Rev 3: back to /style-me/physical-need
-    assert.ok(text.includes('"/style-me/physical-need"'), "Rev 3 path links to physical-need");
-    // Legacy: back to /style-me/comfort
-    assert.ok(text.includes('"/style-me/comfort"'), "legacy path links to comfort");
-    // Dynamic derivation — backTo is set via isRev3, not a single hardcoded literal
-    assert.ok(text.includes("isRev3"), "backTo is conditional on isRev3");
+    // /style-me/comfort is a compatibility redirect now, so Back must never
+    // target it — a legacy session goes forward into Rev 3, not back into the
+    // retired questionnaire.
+    assert.ok(text.includes('const backTo = "/style-me/physical-need"'), "back goes to physical-need");
+    assert.ok(!text.includes('"/style-me/comfort"'), "must not link to the retired comfort step");
     assert.ok(!text.includes('backTo="/style-me/feeling"'), "not back to feeling");
   });
 
@@ -339,60 +303,33 @@ describe("Phase 4B3 recovery — route contract", () => {
     );
   });
 
-  // ── Step 2A: Desired Feeling copy + softer ──────────────────────
+  // ── Step 2A: Desired Feeling + Fit/Comfort copy ─────────────────
+  // Retired. The Step 2A wording contracts lived on feeling.tsx and comfort.tsx,
+  // which are now compatibility redirects. The equivalent canonical contracts are
+  // asserted against the shared vocabulary in
+  // app/lib/styleme/session-vocabulary.test.ts (labels ↔ stable IDs) and
+  // app/lib/ai/styleme-rev3.test.ts (R3.22 Intention, R3.23 Fit/Comfort).
 
-  it("feeling H1 reads 'How do you want to feel in your outfit?'", () => {
-    const text = src("feeling.tsx");
-    assert.ok(
-      text.includes("How do you want to feel in your outfit?"),
-      "feeling H1 uses the Step 2A copy",
-    );
-  });
-
-  // ── Step 2A: What You Need Today — two groups, independent caps ─
-
-  it("comfort renders two visually grouped sections: Fit & Feel and Practical Today", () => {
-    const text = src("comfort.tsx");
-    assert.ok(text.includes("Fit &amp; Feel") || text.includes("Fit & Feel"), "has a Fit & Feel group label");
-    assert.ok(text.includes("Practical Today"), "has a Practical Today group label");
-  });
-
-  it("comfort does not offer a duplicate 'Feel relaxed' pill; 'Nothing clingy today' remains", () => {
-    const text = src("comfort.tsx");
-    assert.ok(!text.includes('"Feel relaxed"'), "no duplicate Feel relaxed option");
-    assert.ok(text.includes("Nothing clingy today"), "Nothing clingy today kept");
-  });
-
-  it("comfort keeps Give me some structure and drops the raw 'structured' label duplication", () => {
-    const text = src("comfort.tsx");
-    assert.ok(text.includes("Give me some structure"), "structured option present with Step 2A wording");
-  });
-
-  it("comfort enforces independent 2-max caps for Fit & Feel and Practical", () => {
-    const text = src("comfort.tsx");
-    assert.ok(text.includes("BODY_NEEDS_MAX = 2"), "Fit & Feel cap is 2");
-    assert.ok(text.includes("PRACTICAL_MAX = 2"), "Practical cap is 2");
-  });
-
-  it("comfort 'nothing-specific' is mutually exclusive with other Fit & Feel selections", () => {
-    const text = src("comfort.tsx");
-    assert.ok(
-      text.includes('id === "nothing-specific"'),
-      "toggle handler special-cases nothing-specific for mutual exclusivity",
-    );
-  });
-
-  it("comfort has 5 Practical options mapped to the existing PSM tokens", () => {
-    const text = src("comfort.tsx");
-    for (const token of ["movement-friendly", "quick-to-style", "long-day", "practical-footwear", "day-to-night"]) {
-      assert.ok(text.includes(token), `practical option ${token} present`);
+  it("the retired Step 2A screens no longer carry questionnaire copy", () => {
+    for (const legacy of ["feeling.tsx", "comfort.tsx"]) {
+      const text = src(legacy);
+      assert.ok(!text.includes("sm-pills"), `${legacy} must not render option pills`);
+      assert.ok(!text.includes("sm-heading"), `${legacy} must not render a question heading`);
     }
   });
 
-  it("comfort action stores Practical separately from Fit & Feel (styleMePractical vs styleMeBodyNeeds)", () => {
-    const text = src("comfort.tsx");
-    assert.ok(text.includes('session.set("styleMeBodyNeeds"'), "sets styleMeBodyNeeds");
-    assert.ok(text.includes('session.set("styleMePractical"'), "sets styleMePractical separately");
+  it("Practical Today tokens are still carried by the session contract", () => {
+    // styleMePractical is written by the Rev 3 intention translation
+    // (make-it-easy → quick-to-style), not by a dedicated screen.
+    const resultText = src("result.tsx");
+    assert.ok(resultText.includes("INTENTION_PRACTICAL_MAP"), "practical tokens come from intentions now");
+    assert.ok(resultText.includes('"quick-to-style"'), "make-it-easy still maps to quick-to-style");
+  });
+
+  it("Fit/Comfort exclusivity is enforced on the canonical step", () => {
+    const text = src("physical-need.tsx");
+    assert.ok(text.includes("EXCLUSIVE_ID"), "nothing-specific exclusivity lives on physical-need now");
+    assert.ok(text.includes("MAX_SELECTIONS = 2"), "the 2-max cap is preserved");
   });
 
   // ── Step 2A: Occasion + conditional Formality (same screen) ─────

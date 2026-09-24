@@ -7,6 +7,7 @@ export function meta() {
 import { useState } from "react";
 import { commitSession, getSession } from "~/lib/session.server";
 import { SESSION_QUESTIONS, SQ } from "~/lib/ai/signal-contract";
+import { CANONICAL_STYLEME_ENTRY } from "~/lib/styleme/handoff";
 import { SmPage } from "~/components/style-me/SmPage";
 import { SmContinue } from "~/components/style-me/SmContinue";
 import naiaStyles from "~/styles/naia-design-system.css?url";
@@ -72,10 +73,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const bodyNeeds = session.get("styleMeBodyNeeds");
 
   if (!isRev3 && !isLegacy) {
-    return redirect("/style-me/mood");
+    return redirect(CANONICAL_STYLEME_ENTRY);
   }
   if (!bodyNeeds) {
-    return redirect(isRev3 ? "/style-me/physical-need" : "/style-me/comfort");
+    return redirect(isRev3 ? "/style-me/physical-need" : CANONICAL_STYLEME_ENTRY);
   }
 
   // Hydrate previously selected occasion and formality for Back navigation.
@@ -141,7 +142,9 @@ export default function StyleMeOccasion() {
   // Normalize Rev 3 UI ID before checking formality occasions (which use canonical IDs).
   const normalizedForFormality = selected ? (REV3_OCCASION_MAP[selected] ?? selected) : null;
   const showFormality = !!normalizedForFormality && FORMALITY_OCCASIONS.has(normalizedForFormality);
-  const backTo = isRev3 ? "/style-me/physical-need" : "/style-me/comfort";
+  // Back always targets the canonical Fit/Comfort step. /style-me/comfort is a
+  // compatibility redirect now and must never be offered as a destination.
+  const backTo = "/style-me/physical-need";
 
   const selectOccasion = (id: string) => {
     setSelected(id);

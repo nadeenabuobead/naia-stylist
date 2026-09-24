@@ -4,7 +4,8 @@
 // Options (IDs + labels) live in ~/lib/styleme/session-vocabulary. Labels are
 // display copy; the IDs below carry the QA-tested body-need semantics.
 // Canonical Rev3 IDs are stored verbatim in styleMeBodyNeeds (no normalization).
-// Legacy normalization happens only in comfort.tsx and quick-style for backward compat.
+// Legacy normalization for retired flows is not performed here; the retired
+// questionnaire steps are now compatibility redirects (see mood/feeling/comfort).
 
 import { Form, Link, redirect, useLoaderData } from "react-router";
 import type { ActionFunctionArgs, LinksFunction, LoaderFunctionArgs } from "react-router";

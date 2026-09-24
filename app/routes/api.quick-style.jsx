@@ -1,3 +1,17 @@
+// app/routes/api.quick-style.jsx
+//
+// ⚠️ UNREACHABLE AND NOT CANONICAL. No caller exists anywhere in the repo — the
+// /quick-style page posts to its own route action, not here. This file is a
+// standalone AI pipeline (direct fetch to api.anthropic.com with a hand-written
+// prompt) that bypasses computeStyleMeResult, approved GarmentStyleMeProfile
+// truth, the wording system, and entitlement/quota handling.
+//
+// Reported as removable. Left in place in this commit because deleting it is not
+// required by any test and is a separate decision from the handoff consolidation.
+// If it is ever wired up, note that it currently trusts `customerId` from the
+// request body — that must be replaced with a server-resolved session identity
+// before it handles any traffic.
+
 export async function action({ request }) {
   try {
     const body = await request.json();

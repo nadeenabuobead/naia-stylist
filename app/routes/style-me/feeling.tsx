@@ -1,108 +1,41 @@
-import { Form, Link } from "react-router";
-import { data, redirect, type ActionFunctionArgs, type LoaderFunctionArgs, type LinksFunction } from "react-router";
+// app/routes/style-me/feeling.tsx
+// COMPATIBILITY REDIRECT — retired legacy questionnaire step 2.
+//
+// The canonical StyleMe questionnaire is Rev 3: State → Intention → Fit/Comfort
+// → Occasion. This route survives only so stale links, browser history and
+// half-finished legacy sessions are not stranded on a 404.
+//
+// MIGRATION: a session holding legacy answers (styleMeMood / styleMeFeelings)
+// and no styleMeState restarts at State with those answers dropped. We do NOT
+// map old emotional IDs onto the 12 intention IDs — no approved mapping exists,
+// and inventing one would silently change what the customer said. Re-asking is
+// the honest option. Occasion, formality, source, mode and any NADINE handoff
+// anchor are vocabulary-compatible and are preserved across the transition.
 
-export function meta() {
-  return [{ title: "How do you want to feel? | nAia Style Me" }];
-}
-import { useState } from "react";
-import { commitSession, getSession } from "~/lib/session.server";
-import { SmPage } from "~/components/style-me/SmPage";
-import { SmContinue } from "~/components/style-me/SmContinue";
-import naiaStyles from "~/styles/naia-design-system.css?url";
+import { redirect, type LoaderFunctionArgs, type ActionFunctionArgs } from "react-router";
+import { getSession, commitSession } from "~/lib/session.server";
+import {
+  CANONICAL_STYLEME_ENTRY,
+  clearLegacyQuestionnaireKeys,
+  hasStrandedLegacySession,
+} from "~/lib/styleme/handoff";
 
-export const links: LinksFunction = () => [
-  { rel: "stylesheet", href: naiaStyles },
-];
-
-const desiredFeelings = [
-  { id: "more-confident", label: "More confident" },
-  { id: "more-put-together", label: "More put together" },
-  { id: "softer", label: "Softer" },
-  { id: "more-powerful", label: "More powerful" },
-  { id: "more-feminine", label: "More feminine" },
-  { id: "more-effortless", label: "More effortless" },
-  { id: "more-elevated", label: "More elevated" },
-  { id: "more-attractive", label: "More attractive" },
-  { id: "like-myself", label: "Like myself again" },
-];
-
-const VALID_FEELING_IDS = new Set(desiredFeelings.map((f) => f.id));
-
-export async function loader({ request }: LoaderFunctionArgs) {
+async function toCanonicalEntry(request: Request) {
   const session = await getSession(request.headers.get("Cookie"));
-  const mood = session.get("styleMeMood");
-
-  if (!mood) {
-    return redirect("/style-me/mood");
+  if (!hasStrandedLegacySession(session)) {
+    return redirect(CANONICAL_STYLEME_ENTRY);
   }
-
-  return data({ mood });
-}
-
-export async function action({ request }: ActionFunctionArgs) {
-  const formData = await request.formData();
-  const feelingsRaw = formData.get("feelings") as string;
-
-  let feelings: string[] = [];
-  try { feelings = JSON.parse(feelingsRaw || "[]"); } catch { /* invalid JSON */ }
-
-  const valid = feelings.filter((id) => VALID_FEELING_IDS.has(id)).slice(0, 2);
-  if (!valid.length) {
-    return data({ error: "Please select how you want to feel" }, { status: 400 });
-  }
-
-  const session = await getSession(request.headers.get("Cookie"));
-  session.set("styleMeFeelings", valid);
-
-  return redirect("/style-me/comfort", {
+  clearLegacyQuestionnaireKeys(session);
+  return redirect(CANONICAL_STYLEME_ENTRY, {
     headers: { "Set-Cookie": await commitSession(session) },
   });
 }
 
-export default function StyleMeFeeling() {
-  const [selected, setSelected] = useState<string[]>([]);
+export async function loader({ request }: LoaderFunctionArgs) {
+  return toCanonicalEntry(request);
+}
 
-  const toggle = (id: string) => {
-    setSelected((prev) => {
-      if (prev.includes(id)) return prev.filter((s) => s !== id);
-      if (prev.length < 2) return [...prev, id];
-      return prev;
-    });
-  };
-
-  const canSubmit = selected.length > 0;
-  const atMax = selected.length === 2;
-
-  return (
-    <SmPage backTo="/style-me/mood" step={2}>
-      <p className="sm-step-label">Desired Feeling</p>
-      <h1 className="sm-heading">How do you want to feel in your outfit?</h1>
-      <p className="sm-sub">Choose up to two — or just one.</p>
-
-      <Form method="post">
-        <div className="sm-pills">
-          {desiredFeelings.map((feeling) => {
-            const isSelected = selected.includes(feeling.id);
-            const isDisabled = !isSelected && atMax;
-            return (
-              <button
-                key={feeling.id}
-                type="button"
-                onClick={() => toggle(feeling.id)}
-                className={`sm-pill${isSelected ? " sm-pill--on" : ""}${isDisabled ? " sm-pill--off" : ""}`}
-              >
-                {feeling.label}
-              </button>
-            );
-          })}
-        </div>
-
-        <input type="hidden" name="feelings" value={JSON.stringify(selected)} />
-        <div className="sm-step-buttons">
-          <Link to="/style-me/mood" className="sm-btn-back">← Back</Link>
-          <SmContinue disabled={!canSubmit} />
-        </div>
-      </Form>
-    </SmPage>
-  );
+// A stale form POST from a cached legacy page must not 405 — send it onward too.
+export async function action({ request }: ActionFunctionArgs) {
+  return toCanonicalEntry(request);
 }
