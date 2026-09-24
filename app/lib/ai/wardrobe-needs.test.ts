@@ -12,7 +12,8 @@ import assert from "node:assert/strict";
 import {
   computeWardrobeNeeds,
   classifyUsability,
-  describeLooks,
+  outfitClassKey,
+  supportedPair,
   currentStyleDirection,
   garmentRegister,
   styleMeSessionRegister,
@@ -78,6 +79,50 @@ function makeLook(formality: string, n: number, overrides: Partial<WardrobeGarme
   return out;
 }
 
+/**
+ * n genuinely different top shapes against n genuinely different bottoms —
+ * varied enough that each pair reads as its own look. Contrast with makeLook(),
+ * whose pieces are interchangeable clones.
+ */
+const TOP_SHAPES = [
+  { silhouette: "fitted",   fitProfile: "tailored", primaryColor: "Black" },
+  { silhouette: "oversized", fitProfile: "loose",   primaryColor: "Navy"  },
+  { silhouette: "boxy",     fitProfile: "relaxed",  primaryColor: "Cream" },
+  { silhouette: "wrap",     fitProfile: "fitted",   primaryColor: "Green" },
+  { silhouette: "column",   fitProfile: "slim",     primaryColor: "Grey"  },
+];
+const BOTTOM_SHAPES = [
+  { silhouette: "straight", fitProfile: "tailored", primaryColor: "Charcoal" },
+  { silhouette: "flared",   fitProfile: "flowy",    primaryColor: "Beige"    },
+  { silhouette: "tapered",  fitProfile: "slim",     primaryColor: "Navy"     },
+  { silhouette: "a-line",   fitProfile: "relaxed",  primaryColor: "Brown"    },
+  { silhouette: "balloon",  fitProfile: "oversized", primaryColor: "Black"   },
+];
+
+function variedLooks(
+  formality: string,
+  n: number,
+  overrides: Partial<WardrobeGarment> = {},
+): WardrobeGarment[] {
+  const out: WardrobeGarment[] = [];
+  // All wardrobe neutrals, so they sit in one depth cluster — the variety is in
+  // shape and fit, which is what actually makes a look read differently.
+  const neutral = { hueFamily: null, wardrobeNeutral: true, lightDark: "dark" as const, energyTier: "neutral-versatile" as const };
+  for (let i = 0; i < n; i++) {
+    const t = TOP_SHAPES[i % TOP_SHAPES.length];
+    const b = BOTTOM_SHAPES[i % BOTTOM_SHAPES.length];
+    out.push(makeGarment({
+      slot: "top", category: "TOPS", formality, topLength: "hip-length", hemLength: "n/a",
+      occasions: ["Weekend"], colourProfile: neutral, ...t, ...overrides,
+    }));
+    out.push(makeGarment({
+      slot: "bottom", category: "BOTTOMS", formality, topLength: "n/a", hemLength: "full",
+      occasions: ["Weekend"], colourProfile: neutral, ...b, ...overrides,
+    }));
+  }
+  return out;
+}
+
 function makePassport(overrides: Partial<WardrobePassport> = {}): WardrobePassport {
   const base: WardrobePassport = {
     lifestyle: [],
@@ -118,23 +163,83 @@ const enoughText = (needs: WardrobeNeeds) => needs.enough.map((f) => `${f.title}
 
 describe("§WN-1 depth that is already sufficient", () => {
   it("1 — lots of basics with adequate everyday coverage reads as enough, never as a gap", () => {
-    // 8 everyday looks, all neutral, plus a stated everyday life.
-    const items = makeLook("casual", 8);
+    // Genuine variety: five distinguishable top shapes against five bottoms.
+    const items = variedLooks("casual", 5);
     const needs = run(items, { passport: makePassport({ lifestyle: ["everyday-casual"] }) });
 
     const everyday = registerOf(needs, "everyday");
-    assert.ok(everyday.usableLooks >= 6, `expected deep everyday coverage, got ${everyday.usableLooks}`);
+    assert.ok(everyday.distinctLooks >= 6, `expected deep everyday coverage, got ${everyday.distinctLooks}`);
     assert.ok(!moreIds(needs).includes("everyday"), "a well-covered everyday register must never be a gap");
     assert.ok(needs.enough.length > 0, "deep neutral everyday depth should register as enough");
     assert.match(enoughText(needs), /unlikely to materially expand what you can wear/);
   });
 
   it("1b — the enough claim names the cluster, not the whole wardrobe", () => {
-    const needs = run(makeLook("casual", 8), { passport: makePassport({ lifestyle: ["everyday-casual"] }) });
+    const needs = run(variedLooks("casual", 5), { passport: makePassport({ lifestyle: ["everyday-casual"] }) });
     // "enough tops" is never a true statement on its own; the claim must be scoped.
     for (const finding of needs.enough) {
       assert.match(finding.title, /everyday|work|occasion/, `unscoped enough claim: ${finding.title}`);
     }
+  });
+});
+
+// ── §WN-1c The Cartesian trap ─────────────────────────────────────────────────
+
+describe("§WN-1c depth is not a cross product", () => {
+  it("1c — 13 interchangeable tops and 13 interchangeable bottoms are not 169 looks", () => {
+    const items = makeLook("casual", 13); // 26 pieces, all clones of each other
+    const needs = run(items, { passport: makePassport({ lifestyle: ["everyday-casual"] }) });
+    const everyday = registerOf(needs, "everyday");
+
+    assert.equal(everyday.usableCount, 26, "all 26 pieces are usable");
+    assert.ok(everyday.combinations > 100, `the raw cross product really is large (${everyday.combinations})`);
+    // ...and yet there is exactly one outfit formula here.
+    assert.equal(everyday.distinctLooks, 1, `interchangeable pieces make one look, got ${everyday.distinctLooks}`);
+    assert.ok(
+      !needs.enough.some((f) => f.register === "everyday"),
+      "a wardrobe of clones must never be called deep on the strength of its combination count",
+    );
+  });
+
+  it("1d — many pieces that do not combine are reported as repetition, not as 'buy more'", () => {
+    const needs = run(makeLook("casual", 13), { passport: makePassport({ lifestyle: ["everyday-casual"] }) });
+    const finding = needs.couldUseMore.find((f) => f.register === "everyday");
+    assert.ok(finding, "26 near-identical pieces serving a stated life is a real finding");
+    assert.equal(finding!.kind, "repetition");
+    assert.match(finding!.body, /same outfit/);
+    assert.match(finding!.body, /wouldn't widen what you can wear/);
+    // The one thing it must never do is recommend more of the same.
+    assert.doesNotMatch(finding!.body, /you could use more of|buy more like/i);
+  });
+
+  it("1e — the page never says 'enough' and 'need more' about one register", () => {
+    for (const fixture of [makeLook("casual", 13), variedLooks("casual", 5), makeLook("casual", 5)]) {
+      const needs = run(fixture, { passport: makePassport({ lifestyle: ["everyday-casual"] }) });
+      const enoughRegisters = new Set(needs.enough.map((f) => f.register));
+      for (const f of needs.couldUseMore) {
+        assert.ok(!enoughRegisters.has(f.register), `contradiction on ${f.register}`);
+      }
+    }
+  });
+
+  it("1f — a pair needs a reason about the two garments, not just a shared register", () => {
+    // Same formality, nothing else in common that scorePair can name.
+    const a = makeGarment({ slot: "top", formality: "casual", colourProfile: null, fitProfile: null, silhouette: null, visualWeight: null, occasions: [] });
+    const b = makeGarment({ slot: "bottom", formality: "casual", colourProfile: null, fitProfile: null, silhouette: null, visualWeight: null, occasions: [] });
+    assert.equal(supportedPair(a, b), false, "register agreement alone is not compatibility evidence");
+
+    // Give them a real relationship and it qualifies.
+    const c = makeGarment({ slot: "bottom", formality: "casual", occasions: ["Weekend"] });
+    const d = makeGarment({ slot: "top", formality: "casual", occasions: ["Weekend"] });
+    assert.equal(supportedPair(c, d), true, "a shared occasion tag she applied is real evidence");
+  });
+
+  it("1g — interchangeability ignores identity and tracks what changes a look", () => {
+    const a = makeGarment({ slot: "top", silhouette: "fitted", fitProfile: "tailored" });
+    const b = makeGarment({ slot: "top", silhouette: "fitted", fitProfile: "tailored" });
+    const c = makeGarment({ slot: "top", silhouette: "oversized", fitProfile: "loose" });
+    assert.equal(outfitClassKey(a), outfitClassKey(b), "two identical tops are one option");
+    assert.notEqual(outfitClassKey(a), outfitClassKey(c), "a different shape is a different option");
   });
 });
 
@@ -143,7 +248,7 @@ describe("§WN-1 depth that is already sufficient", () => {
 describe("§WN-2 gaps relative to the life she described", () => {
   it("2 — thin occasion depth plus a stated dinners life is a real opportunity", () => {
     const items = [
-      ...makeLook("casual", 9),                                   // 9 everyday looks
+      ...variedLooks("casual", 5),                                // real everyday range
       makeGarment({ slot: "dress", category: "DRESSES", formality: "evening", hemLength: "midi", topLength: "n/a" }),
     ];
     const needs = run(items, {
@@ -160,11 +265,13 @@ describe("§WN-2 gaps relative to the life she described", () => {
 
   it("2b — the opportunity is stated in complete looks, not piece counts", () => {
     const needs = run(
-      [...makeLook("casual", 9), makeGarment({ slot: "dress", category: "DRESSES", formality: "evening" })],
+      [...variedLooks("casual", 5), makeGarment({ slot: "dress", category: "DRESSES", formality: "evening" })],
       { passport: makePassport({ lifestyle: ["dinners-going-out"] }) },
     );
     const finding = needs.couldUseMore.find((f) => f.register === "occasion")!;
-    assert.match(finding.body, /complete look/);
+    // The body says what it means for her; it never quotes an internal count.
+    assert.match(finding.body, /very little in your Closet that combines/);
+    assert.doesNotMatch(finding.body, /\d+ complete look/);
   });
 });
 
@@ -234,7 +341,7 @@ describe("§WN-4 effective depth", () => {
     const finding = needs.couldUseMore.find((f) => f.register === "occasion");
     if (finding) {
       assert.notEqual(finding.kind, "effective-depth", "missing analysis must not masquerade as a coverage conflict");
-      assert.match(finding.body, /hasn't read yet/, "an unread wardrobe must say so");
+      assert.match(finding.body, /still being read/, "an unread wardrobe must say so");
     }
   });
 
@@ -259,15 +366,16 @@ describe("§WN-5 a small wardrobe that works is not a gap", () => {
   it("5 — low raw count with strong usable coverage produces no fake gap", () => {
     // Three occasion looks from six pieces — small, but every piece works.
     const items = [
-      ...makeLook("casual", 4),
-      ...makeLook("evening", 3, { hemLength: "maxi" }),
+      ...variedLooks("casual", 4),
+      ...variedLooks("evening", 3, { hemLength: "maxi" }),
     ];
     const needs = run(items, {
       passport: makePassport({ lifestyle: ["dinners-going-out", "everyday-casual"] }),
     });
 
     const r = registerOf(needs, "occasion");
-    assert.ok(r.usableLooks > 2, `3 working looks should clear the thin threshold, got ${r.usableLooks}`);
+    assert.ok(r.usableCount <= 6, "this really is a small register");
+    assert.ok(r.distinctLooks > 2, `a small but varied register should clear the thin threshold, got ${r.distinctLooks}`);
     assert.ok(!moreIds(needs).includes("occasion"), "a small register that covers her needs is not a gap");
   });
 });
@@ -423,7 +531,7 @@ describe("§WN-9 outcome feedback", () => {
 
 describe("§WN-10 no urgent shopping need", () => {
   it("10 — a wardrobe that covers her stated life is told nothing needs buying", () => {
-    const items = [...makeLook("casual", 5), ...makeLook("evening", 4, { hemLength: "maxi" })];
+    const items = [...variedLooks("casual", 5), ...variedLooks("evening", 4, { hemLength: "maxi" })];
     const needs = run(items, {
       passport: makePassport({ lifestyle: ["everyday-casual", "dinners-going-out"] }),
     });
@@ -438,7 +546,7 @@ describe("§WN-10 no urgent shopping need", () => {
   });
 
   it("10b — the headline block never repeats one finding twice", () => {
-    const items = [...makeLook("casual", 8), makeGarment({ slot: "dress", formality: "evening" })];
+    const items = [...variedLooks("casual", 5), makeGarment({ slot: "dress", formality: "evening" })];
     const needs = run(items, { passport: makePassport({ lifestyle: ["everyday-casual", "dinners-going-out"] }) });
     const ids = needs.headlines.map((h) => h.id);
     assert.equal(new Set(ids).size, ids.length, `duplicate headline: ${ids.join(", ")}`);
@@ -490,23 +598,26 @@ describe("§WN-11 structural guards", () => {
     assert.ok(needs.styleMe.strongIntentions.includes("feel put together"));
   });
 
-  it("11d-2 — look counts stop being numbers once the number stops being useful", () => {
-    // The arithmetic is real, but 13 tops x 13 bottoms = 169 is not information.
-    assert.equal(describeLooks(0), "no complete look");
-    assert.equal(describeLooks(1), "one complete look");
-    assert.equal(describeLooks(5), "5 complete looks");
-    assert.equal(describeLooks(12), "12 complete looks");
-    assert.equal(describeLooks(169), "more ways to dress than nAia needs to count");
+  it("11d-2 — no internal number or engineering label reaches the customer", () => {
+    const needs = run(variedLooks("casual", 5), { passport: makePassport({ lifestyle: ["everyday-casual"] }) });
+    const shown = [
+      ...needs.headlines.map((h) => h.text),
+      ...needs.registers.map((r) => `${r.depthLabel} ${r.depthNote}`),
+      ...[...needs.enough, ...needs.couldUseMore].map((f) => `${f.title} ${f.body}`),
+      ...needs.synthesis.lines.map((l) => `${l.passportSays} ${l.closetShows} ${l.reading}`),
+    ].join(" ");
 
-    // And nothing on the page prints the raw figure past the cap.
-    const needs = run(makeLook("casual", 13), { passport: makePassport({ lifestyle: ["everyday-casual"] }) });
-    const everyday = registerOf(needs, "everyday");
-    assert.ok(everyday.usableLooks > 100, "the fixture really is combinatorially large");
-    assert.doesNotMatch(enoughText(needs), /\b169\b/, "a raw combination count must never reach the customer");
+    for (const word of ["raw", "blocked", "unread", "usable count", "combination count", "threshold", "distinctLooks", "cluster"]) {
+      assert.doesNotMatch(shown.toLowerCase(), new RegExp(`\\b${word}\\b`), `engineering term "${word}" reached the page`);
+    }
+    // The depth verdict is a conclusion, not a tally.
+    for (const r of needs.registers) {
+      assert.doesNotMatch(r.depthLabel, /\d/, `depth label should not carry a number: "${r.depthLabel}"`);
+    }
   });
 
   it("11e — every finding carries evidence naming its signal", () => {
-    const items = [...makeLook("casual", 9), makeGarment({ slot: "dress", formality: "evening" })];
+    const items = [...variedLooks("casual", 5), makeGarment({ slot: "dress", formality: "evening" })];
     const needs = run(items, { passport: makePassport({ lifestyle: ["everyday-casual", "dinners-going-out"] }) });
     for (const finding of [...needs.enough, ...needs.couldUseMore]) {
       assert.ok(finding.evidence.length > 0, `${finding.id} has no evidence`);

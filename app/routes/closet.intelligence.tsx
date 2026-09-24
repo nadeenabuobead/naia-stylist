@@ -17,7 +17,6 @@ import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 import { getCloudinaryConfig, buildPrivateDownloadUrl } from "~/lib/cloudinary-admin.server";
 import { loadWardrobeIntelligence } from "~/lib/ai/wardrobe-intelligence.server";
-import { describeLooks } from "~/lib/ai/wardrobe-needs";
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: naiaStyles }];
 
@@ -459,7 +458,7 @@ export default function WardrobeIntelligencePage() {
               <section className="wi-section wi-needs" aria-labelledby="wi-needs-h">
                 <h2 id="wi-needs-h" className="wi-section-title">What your wardrobe can dress you for</h2>
                 <p className="wi-section-sub">
-                  Counted as complete looks you could actually wear — not as pieces owned.
+                  Read as what you could actually put on and wear — not as how many pieces you own.
                 </p>
 
                 <ul className="wi-registers">
@@ -469,16 +468,8 @@ export default function WardrobeIntelligencePage() {
                         {r.label}
                         {r.needed && <span className="wi-register-flag">you told nAia this matters</span>}
                       </p>
-                      <p className="wi-register-count">{describeLooks(r.usableLooks)}</p>
-                      {(r.blockedCount > 0 || r.unknownCount > 0) && (
-                        <p className="wi-register-note">
-                          {r.blockedCount > 0 && (
-                            <>{r.blockedCount} {r.blockedCount === 1 ? "piece sits" : "pieces sit"} outside how you&rsquo;ve said you dress</>
-                          )}
-                          {r.blockedCount > 0 && r.unknownCount > 0 && " · "}
-                          {r.unknownCount > 0 && <>{r.unknownCount} not read yet</>}
-                        </p>
-                      )}
+                      <p className="wi-register-verdict">{r.depthLabel}</p>
+                      <p className="wi-register-note">{r.depthNote}</p>
                     </li>
                   ))}
                 </ul>
@@ -865,7 +856,7 @@ const css = `
   .wi-register{border-top:1px solid var(--naia-border);padding-top:14px}
   .wi-register-name{font-family:var(--naia-ff-ui);font-size:9px;letter-spacing:2.5px;text-transform:uppercase;color:rgba(40,21,12,0.55);margin:0 0 10px;display:flex;flex-wrap:wrap;gap:8px;align-items:baseline}
   .wi-register-flag{font-size:8.5px;letter-spacing:1.6px;color:var(--naia-accent);text-transform:uppercase}
-  .wi-register-count{font-family:var(--naia-ff-body);font-size:1.0625rem;font-style:italic;line-height:1.55;color:var(--naia-ink);margin:0}
+  .wi-register-verdict{font-family:var(--naia-ff-body);font-size:1.0625rem;font-style:italic;line-height:1.5;color:var(--naia-ink);margin:0 0 8px}
   .wi-register-note{font-family:var(--naia-ff-ui);font-size:11.5px;line-height:1.65;color:rgba(40,21,12,0.55);margin:8px 0 0}
 
   .wi-depth{margin-bottom:40px}

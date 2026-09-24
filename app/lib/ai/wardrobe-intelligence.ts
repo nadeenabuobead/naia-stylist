@@ -3229,6 +3229,8 @@ export {
   STATED_FRICTION,
   scorePair,
   partnersOf,
+  STRUCTURED_FITS,
+  SOFT_FITS,
   statedAs,
   norm,
   ratio,
