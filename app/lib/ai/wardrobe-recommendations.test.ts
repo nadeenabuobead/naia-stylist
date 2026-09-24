@@ -479,6 +479,60 @@ describe("§WR-2p the partner count and coverage use the right scope", () => {
   });
 });
 
+// ── §WR-2q Colours are ranked alternatives, not a specification ──────────────
+
+describe("§WR-2q colour reads as a choice, not a requirement", () => {
+  const workGapItems = () => [
+    ...variedLooks("casual", 4),
+    ...Array.from({ length: 3 }, (_, i) =>
+      makeGarment({ slot: "top", formality: "smart-casual", ...TOP_SHAPES[i % TOP_SHAPES.length] })),
+    makeGarment({ slot: "top", formality: "business-casual", silhouette: "fitted", fitProfile: "tailored" }),
+    makeGarment({ slot: "top", formality: "business-casual", silhouette: "boxy", fitProfile: "relaxed" }),
+    ...Array.from({ length: 2 }, () =>
+      makeGarment({ slot: "bottom", category: "BOTTOMS", formality: "business-casual", topLength: "n/a", hemLength: "full", silhouette: "straight", fitProfile: "tailored" })),
+  ];
+
+  it("2q — the attribute names ONE colour, never a list of three", () => {
+    const { recs } = run(workGapItems(), makePassport({
+      lifestyle: ["everyday-casual", "work-office"],
+      favoriteColors: ["black", "grey", "red-burgundy"],
+    }));
+    const work = recs.recommendations.find((r) => r.register === "work");
+    assert.ok(work);
+    const colour = work!.attributes.find((a) => a.kind === "colour");
+    assert.ok(colour, "a stated palette should refine the colour");
+    // "grey, red and burgundy" read as though one garment must be all three.
+    assert.doesNotMatch(colour!.label, /,/, `label lists several colours: "${colour!.label}"`);
+    assert.doesNotMatch(colour!.label, /\band\b/, `label reads as a requirement: "${colour!.label}"`);
+    // The full set is still exposed for Buy or Skip to match on.
+    assert.ok(work!.criteria.colourFamilies.length > 1);
+    assert.equal(work!.criteria.colourFamilies[0], colour!.label, "the label is the lead of the ranked set");
+  });
+
+  it("2q-2 — the body ranks them, leading with the colour she owns least of", () => {
+    const { recs } = run(workGapItems(), makePassport({
+      lifestyle: ["everyday-casual", "work-office"],
+      favoriteColors: ["black", "grey", "red-burgundy"],
+    }));
+    const work = recs.recommendations.find((r) => r.register === "work");
+    assert.ok(work);
+    assert.match(work!.body, /would add the most — it's the colour you named that your Closet has least of/);
+    assert.match(work!.body, /would also sit within the palette you told nAia you like/);
+    // Alternatives are offered with "or", and only the sentence start is capitalised.
+    assert.doesNotMatch(work!.body, /\bor [A-Z]/, "mid-sentence capital in the alternatives");
+  });
+
+  it("2q-3 — a single loved colour names no alternatives", () => {
+    const { recs } = run(workGapItems(), makePassport({
+      lifestyle: ["everyday-casual", "work-office"],
+      favoriteColors: ["grey"],
+    }));
+    const work = recs.recommendations.find((r) => r.register === "work");
+    assert.ok(work);
+    assert.doesNotMatch(work!.body, /would also sit within the palette/);
+  });
+});
+
 // ── §WR-3 A recommendation must actually be usable ────────────────────────────
 
 describe("§WR-3 the proposal has to work with what she owns", () => {

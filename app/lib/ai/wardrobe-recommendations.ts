@@ -492,6 +492,8 @@ function buildRecommendation(
 
   // ── Rung 3: attributes, each cited and each tested ───────────────────────
   const attributes: RecommendationAttribute[] = [];
+  let colourLead: string | null = null;
+  let colourAlternatives: string[] = [];
   const criteria: RecommendationCriteria = { register, slot, colourFamilies: [], structure: null, coverage: [] };
   let best = broadUnlocks;
 
@@ -534,10 +536,17 @@ function buildRecommendation(
     const colourUnlocks = unlocks(withColour, partnerPool);
     if (colourUnlocks.length >= best.length) {
       const shown = loved.slice(0, 3);
+      // `loved` is ordered least-owned first, so the head is the colour she
+      // named that her Closet has least of. The rest are ALTERNATIVES, not
+      // extra requirements — listing them flat read as though one garment
+      // should somehow be grey and red and burgundy at once.
+      const [lead, ...alternatives] = shown;
+      colourLead = lead;
+      colourAlternatives = alternatives;
       attributes.push({
         kind: "colour",
         values: shown,
-        label: joinList(shown.map((f) => f.toLowerCase())),
+        label: lead,
         source: "passport",
       });
       criteria.colourFamilies = shown;
@@ -579,6 +588,17 @@ function buildRecommendation(
         ? `You own ${REGISTER_WORD[register]} pieces, but fewer of them meet the way you've told nAia you prefer to dress.`
         : `Your ${REGISTER_WORD[register]} dressing is the thinner side of your wardrobe.`;
 
+  // Colour is a ranked suggestion, not a specification. The lead is the colour
+  // she named that she owns least of, so it adds an option she does not have;
+  // the others are simply also inside her palette.
+  const colourNote = colourLead
+    ? ` ${capitaliseFirst(colourLead)} would add the most — it's the colour you named that your Closet has least of.${
+        colourAlternatives.length > 0
+          ? ` ${capitaliseFirst(joinOr(colourAlternatives))} would also sit within the palette you told nAia you like.`
+          : ""
+      }`
+    : "";
+
   return {
     id: `rec-${register}-${slot}`,
     register,
@@ -586,8 +606,8 @@ function buildRecommendation(
     title,
     attributes,
     body: selfSufficient
-      ? `${reasonForGap} A piece like this is a complete look on its own, so it adds an option you can wear without needing anything else to work with it.`
-      : `${reasonForGap} A piece like this would work with ${best.length} of the pieces you already own, so it adds new ways to dress rather than another version of something you have.`,
+      ? `${reasonForGap} A piece like this is a complete look on its own, so it adds an option you can wear without needing anything else to work with it.${colourNote}`
+      : `${reasonForGap} A piece like this would work with ${best.length} of the pieces you already own, so it adds new ways to dress rather than another version of something you have.${colourNote}`,
     unlocksIds: best.slice(0, 6).map((g) => g.id),
     criteria,
     evidence,
@@ -661,6 +681,18 @@ export function computeWardrobeRecommendations(input: {
   }
 
   return { state: "available", recommendations, notAPriority: buildNotAPriority(needs) };
+}
+
+// ── Small helpers ─────────────────────────────────────────────────────────────
+
+/** "red or burgundy" — alternatives, never a list of requirements. */
+function joinOr(parts: string[]): string {
+  if (parts.length <= 1) return parts[0] ?? "";
+  return `${parts.slice(0, -1).join(", ")} or ${parts[parts.length - 1]}`;
+}
+
+function capitaliseFirst(s: string): string {
+  return s.length === 0 ? s : s[0].toUpperCase() + s.slice(1);
 }
 
 export const WARDROBE_RECOMMENDATIONS_VERSION = "1.0.0";
