@@ -68,6 +68,7 @@ import {
   STRUCTURAL_EXCLUDES,
   passesOutfitFunctionGate,
   outfitFunctionPriority,
+  DRESS_REGISTER_RANK,
 } from "./styleme-profile-gate.js";
 
 // ── Passport option label resolver ───────────────────────────────────────────
@@ -600,16 +601,23 @@ export function deterministicWording(
     return " " + parts.join(" ");
   })();
 
-  // Softer note — explains the styling relationship when 'softer' is a desired feeling.
-  // Must reference fabric/line/construction, not just restate the desire.
+  // Softer note — only references fabric when the completion pieces' own descriptions
+  // contain fluid/draped/flowing evidence. Never fabricates fabric claims for closet-only
+  // outfits (no completion pieces) or for pieces with no soft-fabric description.
   const softerNote = (() => {
     if (!desiredFeelings.includes("softer")) return "";
     if (completionPieces.length > 0) {
-      return primaryTitle
-        ? ` The fluid, draped fabrication in the completion softens the overall line alongside ${primaryTitle}.`
-        : " The fluid, draped fabrication in the completion carries softness through the full look without losing shape.";
+      const descAll = completionPieces.map((p) => p.description.toLowerCase()).join(" ");
+      const hasFabricEvidence =
+        descAll.includes("fluid") || descAll.includes("draped") ||
+        descAll.includes("flowing") || descAll.includes("flowy");
+      if (hasFabricEvidence) {
+        return primaryTitle
+          ? ` The fluid, draped fabrication in the completion softens the overall line alongside ${primaryTitle}.`
+          : " The fluid, draped fabrication in the completion carries softness through the full look without losing shape.";
+      }
     }
-    return " Fluid fabrication and a relaxed construction carry softness through the full look.";
+    return " The look is composed with softness in mind.";
   })();
 
   // Anchor note — explains the anchor's colour, energy, and relationship to the look.
@@ -1128,7 +1136,9 @@ export function computeEnergyFit(
 // ── Shared outfit feature functions (all return [0,1]; used by singleIntentionUnitScore) ──
 
 const STRUCTURE_TAGS = new Set(["structured", "tailored", "sharp", "polished", "fitted", "minimalist"]);
-const FLOW_TAGS = new Set(["flowing", "relaxed", "soft", "loose", "flowy", "oversized"]);
+// "soft" intentionally excluded — closet AI uses it for physical fabric softness,
+// not the feel-softer emotional intention. Physical soft ≠ feel-softer emotion.
+const FLOW_TAGS = new Set(["flowing", "relaxed", "loose", "flowy", "oversized"]);
 
 export function outfitIdentityScore(
   candidate: OutfitCandidate,
@@ -2674,9 +2684,19 @@ export async function callClaudeForNaiaSelection(
           // Physical fabric vs emotional feel-softer distinction
           const fb = ap.fabricBehaviour ?? [];
           if (fb.length > 0) parts.push(`fabricBehaviour: ${fb.join(", ")}`);
-          // Key intention potentials for feel-softer and feel-less-exposed claim guards
+          // Intention potentials for all active session intentions — surface each rated
+          // value (including None) so Claude cannot claim satisfaction without evidence.
+          // Un-profiled items have no ap/ip so Claude receives no rating = no claim.
           const ip = ap.intentionPotentials as Record<string, string> | null | undefined;
-          if (ip) {
+          if (ip && activeIntentions.length > 0) {
+            for (const intentionId of activeIntentions) {
+              const rating = ip[intentionId];
+              if (rating !== undefined && rating !== null) {
+                parts.push(`${intentionId}: ${rating}`);
+              }
+            }
+          } else if (ip) {
+            // No active session intentions but surface feel-softer/feel-less-exposed guards.
             const fs = ip["feel-softer"];
             const fle = ip["feel-less-exposed"];
             if (fs) parts.push(`feel-softer: ${fs}`);
@@ -2808,11 +2828,13 @@ export async function callClaudeForNaiaSelection(
     "\n17. Do not invent goals, outcomes, or aspirations for the customer unless they appear in Becoming/aspiration or Current style focus in STYLE PASSPORT above." +
     "\n18. CONSTRUCTION GROUNDING: Structural language (sharp, structured, tailored, crisp, polished) in copy requires a CLOTHING piece's 'construction: structured' or 'construction: tailored' to appear in its metadata above. Bags, accessories, and jewellery with 'construction: structured' may be described as structured accessories — they cannot justify that the outfit satisfies a 'More structure / a more defined shape' Fit/Comfort need; that claim requires a clothing piece (top, bottom, dress, set, or outerwear) with construction: structured or construction: tailored. Colour, darkness, or a fitted silhouette alone are never structural signals and must not be described as making an outfit feel sharper or more structured. If Intention includes 'make-it-easy', ease claims (effortless, easy to wear, throw-on, low-maintenance) require the garment to have 'styling effort: easy' in its metadata above. When the metadata does not support the claimed quality, describe the outfit through its occasion appropriateness, mood, and Passport alignment instead." +
     "\n19. STATEMENT PIECE: Only call a garment 'the statement piece', 'the hero', or 'the focal point' when its metadata shows 'statement-level: statement' or 'outfit-function: statement'. A garment with statement-level: quiet or statement-level: moderate is a refined accent, supporting layer, or visual interest — never the statement. Do not promote quiet or moderate pieces." +
-    "\n20. COVERAGE PRECISION: Use exact coverage language. 'hem-length: midi' means below-knee/mid-calf coverage — never write 'full leg coverage', 'covers fully', or 'covers everything'. 'hem-length: maxi' or 'hem-length: full' may be described as full-length coverage. Do not infer lower-body coverage from upper-body garments or vice versa." +
-    "\n21. WAIST DEFINITION: Only claim a garment 'defines the waist', 'shapes the waist', or 'creates waist definition' when its metadata shows 'waistShape: belted', 'waistShape: tied', or 'waistShape: wrap'. A tailored or structured construction does NOT automatically define the waist — those are different properties. When waistShape is absent or does not show explicit definition evidence, describe the garment through its silhouette, proportion, or occasion fit instead." +
-    "\n22. PHYSICAL SOFTNESS vs EMOTIONAL FEEL-SOFTER: These are distinct. 'fabricBehaviour: soft' or 'fabricBehaviour: fluid' means the fabric is physically soft/fluid — you may describe the fabric as soft, fluid, or lightweight. 'feel-softer' is an intention potential. Only say the garment makes the look feel softer when 'feel-softer: Strong' or 'feel-softer: Supporting' appears in its metadata. If 'feel-softer: None' — do not claim the garment makes the look feel softer, even if the fabric is physically soft. Describe the fabric quality and the garment's physical role instead." +
+    "\n20. COVERAGE PRECISION: Use exact coverage language. 'hem-length: midi' means below-knee/mid-calf coverage — never write 'full leg coverage', 'covers fully', or 'covers everything'. 'hem-length: maxi' or 'hem-length: full' may be described as full-length coverage ONLY when nothing in the garment name, label, or style description indicates a slit or cut-out. If the garment name, label, or description mentions a slit, high slit, or cut-out, do not claim full leg coverage regardless of hemLength. Do not infer lower-body coverage from upper-body garments or vice versa." +
+    "\n21. WAIST DEFINITION: Only claim a garment 'defines the waist', 'shapes the waist', 'creates waist definition', 'accentuates the waist', 'nips the waist', or any similar phrasing when its metadata shows 'waistShape: belted', 'waistShape: tied', or 'waistShape: wrap'. A tailored or structured construction does NOT automatically define the waist. When waistShape is absent from the metadata entirely, do NOT make any waist-shaping or waist-definition claim for that garment — describe it through its silhouette, proportion, or occasion fit only." +
+    "\n22. PHYSICAL SOFTNESS vs EMOTIONAL FEEL-SOFTER: These are distinct. 'fabricBehaviour: soft' or 'fabricBehaviour: fluid' means the fabric is physically soft/fluid — you may describe the fabric as soft, fluid, or lightweight. 'feel-softer' is an intention potential. Only say the garment makes the look feel softer when 'feel-softer: Strong' or 'feel-softer: Supporting' appears in its metadata. If 'feel-softer: None' — do not claim the garment makes the look feel softer, even if the fabric is physically soft. If no feel-softer rating appears in the garment's metadata at all — treat it as unrated, not as positive evidence. Describe the fabric quality and the garment's physical role instead." +
     "\n23. REGISTER CLAIMS: Do not describe an outfit or garment as polished, elevated, refined, or smart solely because it is black, dark, clean, white, or structured in colour. Polished and smart-casual claims require register evidence from the actual occasion and formality signal in TODAY'S BRIEF, combined with approved dressRegister or known formality rank in the metadata. A white sneaker is not polished; a black top is not automatically elevated. Describe what the garment actually contributes — colour harmony, proportion, ease — not a register you are inferring from colour alone." +
-    "\n24. WAIST COMFORT vs LOOSENESS: 'nothing-tight-waist' and 'loose-comfortable' are different body needs. An elastic waistband satisfies nothing-tight-waist. A relaxed/oversized/wide-leg silhouette satisfies loose-comfortable. A garment with a relaxed silhouette but a fixed waistband satisfies looseness but not waist comfort. Do not conflate them in the wording.";
+    "\n24. WAIST COMFORT vs LOOSENESS: 'nothing-tight-waist' and 'loose-comfortable' are different body needs. An elastic waistband satisfies nothing-tight-waist. A relaxed/oversized/wide-leg silhouette satisfies loose-comfortable. A garment with a relaxed silhouette but a fixed waistband satisfies looseness but not waist comfort. Do not conflate them in the wording." +
+    "\n25. REQUIRED COVERAGE LAYERS: If the outfit includes an outerwear or layering piece that is needed to satisfy a Fit/Comfort body need (feel-less-exposed, more-coverage) or a Passport dressing constraint (arms-covered, shoulders-covered, dresses-modestly, conservative-neckline), do NOT describe that layer as 'easy to remove', 'optional', 'can be left at home', 'just for warmth', or any other phrase that frames it as non-essential. It is a structural part of the look for this customer's needs. You may describe its style, colour, and proportion contribution." +
+    "\n26. INTENTION EVIDENCE REQUIREMENT: When a session intention (e.g. feel-sharper, give-structure, make-it-easy, feel-attractive, confidence, ground-me, give-energy, express-myself) is listed in TODAY'S BRIEF, you may only claim a garment satisfies or contributes to that intention when a rating of 'Strong' or 'Supporting' appears for that intention ID in the garment's metadata above. If the metadata shows 'intention-id: None' for that intention, do not claim the garment satisfies it. If no rating for that intention appears in the garment's metadata at all — treat it as unrated, not as positive evidence — do not claim the outfit delivers that intention through that piece.";
 
   const userMessage =
     `Select the best complete outfit for this customer and write all wording for it.\n\n` +
@@ -3777,8 +3799,19 @@ export function selectAdditionalClosetGarments(
     const intentionBonus = activeIntentions.length > 0
       ? activeIntentions.reduce((sum, id) => sum + computeItemIntentionWeight(item, id), 0) * 1.5
       : 0;
+    // Register alignment bonus: reward approved-profile items whose dressRegister rank
+    // falls within the session's target formality range. Mirrors the anchor-level
+    // registerBonus so formality preference differentiates candidates beyond the gates.
+    const targetRange = getTargetFormalityRange(session.occasion, session.formalityConditional ?? null);
+    const itemRegisterRank = item.approvedProfile?.dressRegister
+      ? (DRESS_REGISTER_RANK[item.approvedProfile.dressRegister] ?? null)
+      : null;
+    const registerBonus = itemRegisterRank !== null
+      && itemRegisterRank >= targetRange.min
+      && itemRegisterRank <= targetRange.max
+      ? 0.5 : 0;
     // Apply outfitFunction priority: anchor pieces boosted, supporting pieces penalised.
-    const score = (baseScore + bodyNeedSlotBonus + intentionBonus) * outfitFunctionPriority(item);
+    const score = (baseScore + bodyNeedSlotBonus + intentionBonus + registerBonus) * outfitFunctionPriority(item);
 
     if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true") {
       console.log("[nAia-slot-score]", JSON.stringify({
@@ -3786,6 +3819,7 @@ export function selectAdditionalClosetGarments(
         baseScore,
         bodyNeedSlotBonus: Math.round(bodyNeedSlotBonus * 1000) / 1000,
         intentionBonus: Math.round(intentionBonus * 1000) / 1000,
+        registerBonus: Math.round(registerBonus * 1000) / 1000,
         intentionPotentials: activeIntentions.length > 0
           ? Object.fromEntries(activeIntentions.map((iid) => [
               iid,

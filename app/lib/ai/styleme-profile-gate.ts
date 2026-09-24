@@ -291,7 +291,9 @@ export function passesLayeringRequirement(
 // Kept in sync with STRUCTURE_TAGS / FLOW_TAGS in styleme-result.server.ts.
 // "fitted" is intentionally excluded — a fitted silhouette is not a structured garment.
 const GATE_STRUCTURE_TAGS = new Set(["structured", "tailored", "sharp", "polished", "minimalist"]);
-const GATE_FLOW_TAGS = new Set(["flowing", "relaxed", "soft", "loose", "flowy", "oversized"]);
+// "soft" intentionally excluded — closet AI uses it for physical fabric softness,
+// not the feel-softer emotional intention. Physical soft ≠ feel-softer emotion.
+const GATE_FLOW_TAGS = new Set(["flowing", "relaxed", "loose", "flowy", "oversized"]);
 
 // Per-piece legacy intention score for UN-PROFILED garments.
 // Uses style tags, fitProfile, and garment attributes — the same signals the outfit-level
