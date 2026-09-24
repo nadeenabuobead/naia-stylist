@@ -171,7 +171,21 @@ describe("§WN-1 depth that is already sufficient", () => {
     assert.ok(everyday.distinctLooks >= 6, `expected deep everyday coverage, got ${everyday.distinctLooks}`);
     assert.ok(!moreIds(needs).includes("everyday"), "a well-covered everyday register must never be a gap");
     assert.ok(needs.enough.length > 0, "deep neutral everyday depth should register as enough");
-    assert.match(enoughText(needs), /unlikely to materially expand what you can wear/);
+    assert.match(enoughText(needs), /Another similar piece is unlikely to materially expand what you can wear/);
+    // Where a thinner register exists, the alternative is offered positively
+    // rather than as a comparison the customer has to unpack.
+    assert.doesNotMatch(enoughText(needs), /, where .* would\./);
+  });
+
+  it("1a-2 — a thinner register is named as something to strengthen, not as a comparison", () => {
+    const items = [
+      ...variedLooks("casual", 5),
+      makeGarment({ slot: "top", formality: "business-casual" }),
+      makeGarment({ slot: "bottom", category: "BOTTOMS", formality: "business-casual", topLength: "n/a", hemLength: "full" }),
+    ];
+    const needs = run(items, { passport: makePassport({ lifestyle: ["everyday-casual", "work-office"] }) });
+    assert.ok(needs.enough.length > 0, "everyday should still read as enough");
+    assert.match(enoughText(needs), /strengthening your work options would add more\./);
   });
 
   it("1b — the enough claim names the cluster, not the whole wardrobe", () => {
@@ -324,10 +338,20 @@ describe("§WN-4 effective depth", () => {
     assert.match(finding!.title, /not quantity/i);
     assert.match(
       finding!.body,
+      /but only 2 currently meet your stated coverage preferences — including keeping your arms covered\./,
+    );
+    assert.match(
+      finding!.body,
       /it's occasion and evening dressing that fits the way you've told nAia you prefer to dress\./,
     );
     // The point is fit-to-her, not a vague appeal to what she would "actually" wear.
     assert.doesNotMatch(finding!.body, /you'd actually wear/);
+    // The standard is named once, at the close — not repeated mid-sentence.
+    assert.equal(
+      (finding!.body.match(/the way you've told nAia you prefer to dress/g) ?? []).length,
+      1,
+      "the standard should be stated once, not twice in one paragraph",
+    );
   });
 
   it("4b — unanalysed pieces are unknown, never blocked, and cannot create a gap", () => {
@@ -431,12 +455,34 @@ describe("§WN-7 Passport and Closet tension", () => {
     const line = needs.synthesis.lines.find((l) => l.id === "synth-neutral");
     assert.ok(line, "a neutral-appetite reading should exist");
     assert.equal(line!.kind, "alignment");
-    assert.equal(line!.reading, "Your Closet strongly reflects the neutral palette you described.");
+    assert.equal(line!.reading, "Your Closet is strongly neutral, matching the balance you said you prefer.");
 
     // Palette agreement is evidence of a match, not of deliberateness, restraint
     // or any other motive. nAia does not read intent out of colour data.
     for (const word of ["deliberate", "accidental", "restraint", "intentional", "disciplined"]) {
       assert.doesNotMatch(line!.reading.toLowerCase(), new RegExp(word), `motive inferred: "${word}"`);
+    }
+  });
+
+  it("6d — the two palette readings name different things and never claim purchase behaviour", () => {
+    const items = variedLooks("casual", 5).map((g) => ({ ...g, primaryColor: "Black" }));
+    const needs = run(items, {
+      passport: makePassport({ favoriteColors: ["black"], neutralVsColour: "mostly-neutral" }),
+    });
+
+    const colour = needs.synthesis.lines.find((l) => l.id === "synth-colour");
+    const neutral = needs.synthesis.lines.find((l) => l.id === "synth-neutral");
+    assert.ok(colour && neutral, "both palette dimensions should read");
+
+    assert.equal(colour!.reading, "The colours in your Closet closely match the palette you told nAia you love.");
+    assert.equal(neutral!.reading, "Your Closet is strongly neutral, matching the balance you said you prefer.");
+    assert.notEqual(colour!.reading, neutral!.reading, "two dimensions must not read as one");
+
+    // The Closet proves ownership, never how or when a piece was acquired.
+    for (const reading of [colour!.reading, neutral!.reading]) {
+      for (const word of ["what you buy", "you bought", "purchase", "shopping"]) {
+        assert.doesNotMatch(reading.toLowerCase(), new RegExp(word), `purchase behaviour claimed: "${word}"`);
+      }
     }
   });
 

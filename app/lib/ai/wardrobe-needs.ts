@@ -77,6 +77,13 @@ const DEPTH_PHRASE: Readonly<Record<RegisterId, string>> = {
   occasion: "occasion and evening",
 };
 
+/** Bare register word for possessive copy: "your work options". */
+const DEPTH_SHORT: Readonly<Record<RegisterId, string>> = {
+  everyday: "everyday",
+  work: "work",
+  occasion: "occasion",
+};
+
 /** Closet `occasions` tags → register. Only used when formality is unreadable. */
 const OCCASION_REGISTER: Readonly<Record<string, RegisterId>> = {
   work: "work", office: "work", business: "work", professional: "work",
@@ -365,6 +372,9 @@ function neededRegisters(
  * that does not exist. So absent metadata resolves to "unknown", which is
  * counted and shown but never used as evidence of a gap.
  */
+// Blocked reasons are written as gerund phrases ("keeping your arms covered")
+// because they are consumed inside a sentence: "…only 2 currently meet your
+// stated coverage preferences — including keeping your arms covered."
 export function classifyUsability(
   garment: WardrobeGarment,
   passport: WardrobePassport | null,
@@ -380,7 +390,7 @@ export function classifyUsability(
       for (const token of passport.avoidColors) {
         const families = PASSPORT_COLOUR_FAMILIES[norm(token) ?? ""] ?? [];
         if (families.includes(family)) {
-          return { usability: "blocked", reason: `a colour you asked nAia to avoid` };
+          return { usability: "blocked", reason: `avoiding colours you asked nAia to leave out` };
         }
       }
     }
@@ -408,43 +418,43 @@ export function classifyUsability(
       prefs.has("arms-covered"),
       garment.sleeveLength,
       (v) => v === "full" || v === "three-quarter",
-      "you've said you keep your arms covered",
+      "keeping your arms covered",
     ),
     check(
       prefs.has("avoid-sleeveless") && !prefs.has("arms-covered"),
       garment.sleeveLength,
       (v) => v !== "sleeveless",
-      "you've said you avoid sleeveless styles",
+      "avoiding sleeveless styles",
     ),
     check(
       prefs.has("chest-neckline-covered") || prefs.has("prefer-higher-necklines"),
       garment.necklineCoverage,
       (v) => v === "high" || v === "crew" || v === "mock" || v === "cowl-high",
-      "you've said you keep your neckline covered",
+      "keeping your neckline covered",
     ),
     check(
       prefs.has("legs-covered"),
       garment.hemLength,
       (v) => v === "full" || v === "maxi",
-      "you've said you keep your legs covered",
+      "keeping your legs covered",
     ),
     check(
       prefs.has("longer-tops") && isTopLike,
       garment.topLength,
       (v) => v === "hip-length" || v === "longline" || v === "tunic",
-      "you've said you prefer longer tops",
+      "preferring longer tops",
     ),
     check(
       prefs.has("no-cropped-tops") && isTopLike,
       garment.topLength,
       (v) => v !== "cropped",
-      "you've said you avoid cropped tops",
+      "avoiding cropped tops",
     ),
     check(
       prefs.has("looser-fitting"),
       garment.fitProfile,
       (v) => v === "relaxed" || v === "loose" || v === "oversized" || v === "flowy",
-      "you've said you prefer looser-fitting clothes",
+      "preferring looser-fitting clothes",
     ),
   ].filter(Boolean) as Array<{ usability: Usability; reason: string | null }>;
 
@@ -721,8 +731,8 @@ function buildFindings(
         kind: "effective-depth",
         register: r.register,
         title: `Your ${REGISTER_NOUN[r.register]} gap is not quantity`,
-        body: `You own ${r.rawCount} pieces that read as ${r.label}, but only ${r.usableCount} of them sit the way you've told nAia you prefer to dress${
-          leadReason ? ` — ${leadReason}` : ""
+        body: `You own ${r.rawCount} pieces that read as ${r.label}, but only ${r.usableCount} currently meet your stated coverage preferences${
+          leadReason ? ` — including ${leadReason}` : ""
         }. What's missing isn't more ${REGISTER_NOUN[r.register]}; it's ${REGISTER_NOUN[r.register]} that fits the way you've told nAia you prefer to dress.`,
         garmentIds: blockedPieces.slice(0, 6).map((g) => g.id),
         evidence: [
@@ -801,7 +811,7 @@ function buildFindings(
       register: c.register,
       title: `You already have enough ${description}`,
       body: `You own ${c.items.length} of these that work with the rest of your Closet, and your ${REGISTER_NOUN[c.register]} already has real range. Another similar piece is unlikely to materially expand what you can wear${
-        thinnerAlternative ? `, where ${REGISTER_NOUN[thinnerAlternative.register]} would` : ""
+        thinnerAlternative ? `; strengthening your ${DEPTH_SHORT[thinnerAlternative.register]} options would add more` : ""
       }.`,
       garmentIds: c.items.slice(0, 6).map((g) => g.id),
       evidence: [
@@ -863,7 +873,9 @@ function buildSynthesis(
           kind: "alignment",
           passportSays: "the colours you said you love",
           closetShows: `${matching.length} of ${withColour.length} pieces sit in those families`,
-          reading: "Your Closet genuinely reflects the palette you described — what you buy and what you say you like are the same thing.",
+          // Names the colours, not a purchasing habit: the Closet proves what she
+          // owns, never how or when she came to own it.
+          reading: "The colours in your Closet closely match the palette you told nAia you love.",
           evidence: [
             ev("passport-signal", "favoriteColors", `You named ${joinList(passport.favoriteColors.slice(0, 3))}.`, []),
             ev("garment-fact", "primaryColor", `${matching.length} of ${withColour.length} pieces fall in those families.`, matching.map((g) => g.id)),
@@ -898,9 +910,10 @@ function buildSynthesis(
         kind: "alignment",
         passportSays: "you lean neutral",
         closetShows: `${Math.round(neutralShare * 100)}% of what nAia can read is neutral`,
-        // States the alignment only. An aligned palette is evidence of a match
-        // between what she said and what she owns — not evidence of intent.
-        reading: "Your Closet strongly reflects the neutral palette you described.",
+        // States the alignment only — a match between what she said and what she
+        // owns, never evidence of intent. Named for the BALANCE it measures, so
+        // it cannot be mistaken for the named-colour reading above.
+        reading: "Your Closet is strongly neutral, matching the balance you said you prefer.",
         evidence: [ev("garment-fact", "colourProfile", `${Math.round(neutralShare * 100)}% neutral.`, [])],
       });
     } else if (saysColour && neutralShare >= 0.75) {
