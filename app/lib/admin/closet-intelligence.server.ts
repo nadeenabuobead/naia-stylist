@@ -11,6 +11,7 @@
 
 import prisma from "~/db.server";
 import type { ClosetCategory, Prisma } from "@prisma/client";
+import { getIntentionReviewState } from "./styleme-garment-profile.vocab";
 
 // ── Review status display ─────────────────────────────────────────────────────
 
@@ -50,7 +51,18 @@ export interface ClosetItemListFilters {
   missingMetadata?: boolean;
   /** Restrict list to a single customer by their DB id */
   customerId?: string;
+  /**
+   * StyleMe garment profile: review state of the four intentions added in the
+   * 2026-09 taxonomy expansion (feel-elevated / stand-out / feel-fun /
+   * feel-powerful). "needs-review" = at least one of the four has no stored
+   * rating; "complete" = all four are rated. A stored "None" counts as reviewed —
+   * a human chose it. Only key presence is consulted.
+   */
+  newIntentionReview?: NewIntentionReviewFilter;
 }
+
+/** List filter values for the new-intention review sweep. */
+export type NewIntentionReviewFilter = "needs-review" | "complete";
 
 export const PAGE_SIZE = 25;
 
@@ -155,6 +167,39 @@ const NON_SILHOUETTE_CATEGORIES = new Set(["SHOES", "BAGS", "ACCESSORIES", "JEWE
 
 // ── List ──────────────────────────────────────────────────────────────────────
 
+// The new-intention review sweep reuses getIntentionReviewState — the same helper
+// that renders the per-garment badge — so a list filter can never disagree with
+// what the reviewer sees when they open the item.
+export interface NewIntentionReviewSummary {
+  /** Closet items in scope (all items, matching the existing summary's denominator). */
+  total: number;
+  /** Items where all four expansion intentions are rated. */
+  reviewed: number;
+  /** Items with at least one unrated expansion intention. */
+  pending: number;
+}
+
+/**
+ * Counts how far the four-intention review sweep has progressed.
+ *
+ * Derived purely from key presence in GarmentStyleMeProfile.intentionPotentials.
+ * An item with no StyleMe profile counts as pending, not reviewed.
+ */
+export async function getNewIntentionReviewSummary(): Promise<NewIntentionReviewSummary> {
+  const [total, rows] = await Promise.all([
+    prisma.closetItem.count(),
+    prisma.closetItem.findMany({
+      select: { id: true, styleMeProfile: { select: { intentionPotentials: true } } },
+    }),
+  ]);
+  let reviewed = 0;
+  for (const row of rows as Array<{ styleMeProfile: { intentionPotentials: unknown } | null }>) {
+    const potentials = row.styleMeProfile?.intentionPotentials as Record<string, string> | null;
+    if (getIntentionReviewState(potentials).pendingNew.length === 0) reviewed++;
+  }
+  return { total, reviewed, pending: total - reviewed };
+}
+
 export interface ClosetReviewSummary {
   total: number;
   aiOnly: number;
@@ -193,6 +238,14 @@ export interface ClosetItemRow {
   lowConfidence: boolean;
   missingMetadata: boolean;
   needsVocabUpdate: boolean;
+  /**
+   * True when all four expansion intentions carry a stored rating on this item's
+   * approved StyleMe profile. False when any is still missing — including when
+   * the item has no StyleMe profile at all.
+   */
+  newIntentionsReviewed: boolean;
+  /** How many of the four expansion intentions still have no rating (0-4). */
+  pendingNewIntentionCount: number;
   customerId: string;
   customerEmail: string | null;
   createdAt: Date;
@@ -299,6 +352,36 @@ export async function listClosetItems(
     andClauses.push({ customerId: filters.customerId });
   }
 
+  // newIntentionReview: which items still need a human rating for the four
+  // intentions added in the 2026-09 expansion. Completion is decided in JS via
+  // getIntentionReviewState rather than a JSON path query, for the same reason
+  // lowConfidence above post-filters: the list must agree exactly with the badge
+  // shown on the item page, and both then read from one helper.
+  if (filters.newIntentionReview) {
+    const candidatesWhere: Prisma.ClosetItemWhereInput = {};
+    if (andClauses.length > 0) candidatesWhere.AND = [...andClauses];
+
+    const candidates = await prisma.closetItem.findMany({
+      where: candidatesWhere,
+      select: { id: true, styleMeProfile: { select: { intentionPotentials: true } } },
+    });
+
+    type NewIntentionCandidate = {
+      id: string;
+      styleMeProfile: { intentionPotentials: unknown } | null;
+    };
+    const wantComplete = filters.newIntentionReview === "complete";
+    const matchingIds = (candidates as NewIntentionCandidate[])
+      .filter((c: NewIntentionCandidate) => {
+        const potentials = c.styleMeProfile?.intentionPotentials as Record<string, string> | null;
+        const isComplete = getIntentionReviewState(potentials).pendingNew.length === 0;
+        return wantComplete ? isComplete : !isComplete;
+      })
+      .map((c: NewIntentionCandidate) => c.id);
+
+    andClauses.push({ id: { in: matchingIds } });
+  }
+
   if (andClauses.length > 0) {
     where.AND = andClauses;
   }
@@ -328,6 +411,9 @@ export async function listClosetItems(
         adminReview: {
           select: { reviewStatus: true, adminNotes: true, overrides: true },
         },
+        styleMeProfile: {
+          select: { intentionPotentials: true },
+        },
         customer: {
           select: { email: true },
         },
@@ -343,6 +429,9 @@ export async function listClosetItems(
     const overallConf = computeOverallStoredConfidence(item.fieldConfidence, item.category, item.subcategory);
     const isAnalyzed = item.analysisStatus === "ready";
     const silhouetteRequired = !NON_SILHOUETTE_CATEGORIES.has(item.category);
+    const newIntentionState = getIntentionReviewState(
+      item.styleMeProfile?.intentionPotentials as Record<string, string> | null,
+    );
     const missMeta = isAnalyzed && (
       item.subcategory == null ||
       (silhouetteRequired && item.silhouette == null) ||
@@ -367,6 +456,8 @@ export async function listClosetItems(
       lowConfidence: overallConf === "LOW",
       missingMetadata: missMeta,
       needsVocabUpdate: (item.adminReview?.adminNotes ?? "").startsWith("[VOCAB_GAP]"),
+      newIntentionsReviewed: newIntentionState.pendingNew.length === 0,
+      pendingNewIntentionCount: newIntentionState.pendingNew.length,
       customerId: item.customerId,
       customerEmail: item.customer?.email ?? null,
       createdAt: item.createdAt,
