@@ -212,7 +212,7 @@ function PassportSnapshot({ profile }: { profile: Record<string, unknown> }) {
   // 2. Style expression — what they want their clothes to communicate.
   const expression = arr("styleExpression", ["not-sure"]);
   if (expression.length > 0) {
-    signals.push({ label: "Style says", value: joinCapped(expression.map(e => labelFrom(STYLE_EXPRESSION_LABELS, e)), 3) });
+    signals.push({ label: "Personality", value: joinCapped(expression.map(e => labelFrom(STYLE_EXPRESSION_LABELS, e)), 3) });
   }
 
   // 3. Exploration level — how far nAia should push.

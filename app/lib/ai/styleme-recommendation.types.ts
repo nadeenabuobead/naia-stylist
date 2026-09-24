@@ -105,7 +105,7 @@ export interface StyleMeProfileSignals {
   // Carried for prompt/context use. None of these carry a numeric scoring weight
   // in this revision — see app/lib/passport/rev7-vocabulary.ts.
 
-  /** What the customer wants their clothes to communicate about them. */
+  /** Personality — words the customer says feel most like them. */
   styleExpression?: string[];
   /** How far nAia should move beyond the customer's familiar choices. */
   explorationLevel?: string;

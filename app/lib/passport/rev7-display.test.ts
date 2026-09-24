@@ -223,7 +223,7 @@ describe("R7D.5b — the Rev 6+ dossier overview renders the Rev 7 sections", ()
 
   for (const [label, sectionId] of [
     ["Style Direction",   "style-directions"],
-    ["Style Expression",  "style-expression"],
+    ["Personality",       "style-expression"],
     ["Style Exploration", "exploration"],
     ["Dressing Habits",   "dressing-habits"],
   ] as const) {

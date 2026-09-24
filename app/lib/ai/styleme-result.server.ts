@@ -2583,7 +2583,7 @@ export async function callClaudeForNaiaSelection(
       ? `Note: ${unmappedDirectionsStr} — treat as a first-class style signal. It is part of this customer's stated direction even though the NADINE catalogue carries no matching archetype tag.`
       : null,
     styleExpressionStr
-      ? `Style Expression (what this customer wants their clothes to communicate about them): ${styleExpressionStr}.`
+      ? `Personality (words this customer says feel most like them): ${styleExpressionStr}.`
       : null,
     explorationLevelStr
       ? `Exploration Level (how far nAia should move beyond this customer's familiar choices): ${explorationLevelStr}.`

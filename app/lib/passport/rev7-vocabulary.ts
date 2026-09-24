@@ -27,18 +27,37 @@ export function isRev7Profile(profileVersion: number | null | undefined): boolea
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 3. Style Expression — what the user wants their clothes to communicate (NEW)
+// 3. Personality — words the customer says feel most like them.
+//    Field name styleExpression is retained deliberately: renaming it would be a
+//    schema/API change. Only the user- and model-facing copy describes personality.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const STYLE_EXPRESSION_IDS = [
-  "quiet-confidence", "polished", "effortless", "bold", "creative",
-  "sophisticated", "relaxed", "powerful", "playful", "individual",
-  "understated", "unexpected", "not-sure",
+  // Offered vocabulary. playful, creative and not-sure carry over from the
+  // previous set because the same word survives — their IDs are reused, not churned.
+  "confident", "calm", "energetic", "easygoing", "thoughtful", "playful",
+  "practical", "creative", "outgoing", "private", "spontaneous", "organised",
+  "independent", "not-sure",
+  // Withdrawn from the question, still valid for stored answers —
+  // see RETIRED_STYLE_EXPRESSION_IDS.
+  "quiet-confidence", "polished", "effortless", "bold", "sophisticated",
+  "relaxed", "powerful", "individual", "understated", "unexpected",
 ] as const;
 
 export const STYLE_EXPRESSION_VALID_IDS: ReadonlySet<string> = new Set(STYLE_EXPRESSION_IDS);
 export const STYLE_EXPRESSION_MAX = 3;
 export const STYLE_EXPRESSION_EXCLUSIVE_IDS: ReadonlySet<string> = new Set(["not-sure"]);
+
+/**
+ * Style-expression values withdrawn when Q3 became a personality question.
+ * Kept in STYLE_EXPRESSION_IDS for the same reason as the retired dressing
+ * habits: a stored answer must keep validating on re-save, and must keep
+ * resolving to real copy. Nothing is migrated or deleted.
+ */
+export const RETIRED_STYLE_EXPRESSION_IDS: ReadonlySet<string> = new Set([
+  "quiet-confidence", "polished", "effortless", "bold", "sophisticated",
+  "relaxed", "powerful", "individual", "understated", "unexpected",
+]);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 4. Style Exploration — how far nAia should move beyond familiar choices (NEW)
@@ -92,6 +111,9 @@ export const DRESSING_HABIT_VALID_IDS: ReadonlySet<string> = new Set(DRESSING_HA
 export const RETIRED_DRESSING_HABIT_IDS: ReadonlySet<string> = new Set([
   "want-it-easier",
   "buy-but-cant-style",
+  // Withdrawn because Q4 Style Exploration already captures this signal.
+  "play-it-safe",
+  "enjoy-experimenting",
 ]);
 export const DRESSING_HABIT_MAX = 2;
 export const DRESSING_HABIT_EXCLUSIVE_IDS: ReadonlySet<string> = new Set(["none-of-these"]);

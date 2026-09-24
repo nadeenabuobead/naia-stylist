@@ -380,7 +380,7 @@ STYLE IDENTITY
 ${styleProfile.styleDirections?.length > 0
   ? `- Style Directions (the visual aesthetics this customer is drawn to): ${styleProfile.styleDirections.filter(id => id !== "not-sure").map(id => optionLabel("style-directions", id)).join(", ")}`
   : `- Style personalities: ${styleProfile.stylePersonalities?.map(id => optionLabel("style-personalities", id)).join(", ") || "not specified"}`}
-${styleProfile.styleExpression?.length > 0 ? `- Style Expression (what this customer wants their clothes to communicate about them): ${styleProfile.styleExpression.filter(id => id !== "not-sure").map(id => optionLabel("style-expression", id)).join(", ")}` : ""}
+${styleProfile.styleExpression?.length > 0 ? `- Personality (words this customer says feel most like them): ${styleProfile.styleExpression.filter(id => id !== "not-sure").map(id => optionLabel("style-expression", id)).join(", ")}` : ""}
 ${styleProfile.explorationLevel && styleProfile.explorationLevel !== "not-sure" ? `- Exploration Level (how far nAia should move beyond this customer's familiar choices): ${optionLabel("exploration-level", styleProfile.explorationLevel)}` : ""}
 ${styleProfile.dressingHabits?.length > 0 ? `- Dressing Habits (behavioural context — how this customer approaches getting dressed, not an aesthetic preference): ${styleProfile.dressingHabits.filter(id => id !== "none-of-these").map(id => optionLabel("dressing-habits", id)).join("; ")}` : ""}
 - Desired feelings when dressed: ${styleProfile.desiredFeelings?.join(", ") || "not specified"}

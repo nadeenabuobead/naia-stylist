@@ -47,6 +47,7 @@ import {
   resolveScoringArchetypes,
   RESERVED_DRESSING_PREFERENCE_IDS,
   RETIRED_DRESSING_HABIT_IDS,
+  RETIRED_STYLE_EXPRESSION_IDS,
   DRESSING_REQUIREMENTS_NOTE_TRIGGER_ID,
   DRESSING_REQUIREMENTS_NOTE_MAX,
   NO_COLOUR_PREFERENCE_ID,
@@ -247,34 +248,66 @@ describe("R7.2 — Rev 7 question set", () => {
 describe("R7.2b — Q3/Q12 copy and the withdrawn dressing habits", () => {
   const offeredHabits = (q("dressing-habits")?.options ?? []).filter(o => !o.retired && !o.reserved);
 
-  it("Q3 asks how the style should come across", () => {
-    assert.equal(q("style-expression")?.title, "How would you like your style to come across?");
+  const offeredExpression = (q("style-expression")?.options ?? []).filter(o => !o.retired && !o.reserved);
+
+  it("Q3 asks which words feel most like the customer", () => {
+    assert.equal(q("style-expression")?.title, "Which words feel most like you?");
   });
 
-  it("Q3 is otherwise untouched — 13 options, cap 3, nothing withdrawn", () => {
-    assert.equal(q("style-expression")?.options?.length, 13);
+  it("Q3 offers exactly the fourteen personality words, in order", () => {
+    assert.deepEqual(offeredExpression.map(o => o.label), [
+      "Confident", "Calm", "Energetic", "Easygoing", "Thoughtful", "Playful",
+      "Practical", "Creative", "Outgoing", "Private", "Spontaneous", "Organised",
+      "Independent", "I'm not sure yet",
+    ]);
     assert.equal(q("style-expression")?.maxSelections, STYLE_EXPRESSION_MAX);
-    assert.equal((q("style-expression")?.options ?? []).filter(o => o.retired || o.reserved).length, 0);
+  });
+
+  it("Q3 reuses the IDs of words that survived the rewrite", () => {
+    for (const id of ["playful", "creative", "not-sure"]) {
+      assert.ok(offeredExpression.some(o => o.id === id),
+        `${id} must keep its stable ID rather than being churned`);
+    }
+  });
+
+  // The previous Q3 vocabulary is a compatibility case, not a deletion.
+  it("every withdrawn Q3 value stays valid, labelled and unoffered", () => {
+    assert.equal(RETIRED_STYLE_EXPRESSION_IDS.size, 10);
+    for (const id of RETIRED_STYLE_EXPRESSION_IDS) {
+      assert.ok(STYLE_EXPRESSION_VALID_IDS.has(id),
+        `${id} must stay valid server-side or a customer's next save would be rejected`);
+      const label = ALL_OPTION_LABELS[id];
+      assert.ok(label && label !== id, `${id} must still resolve to real copy`);
+      assert.ok(!offeredExpression.some(o => o.id === id), `${id} must not be offered`);
+    }
   });
 
   it("Q12 asks how the customer usually gets dressed", () => {
     assert.equal(q("dressing-habits")?.title, "Which of these best describes how you usually get dressed?");
   });
 
-  it("Q12 offers exactly the eleven approved options, in order", () => {
+  it("Q12 offers exactly the nine approved options, in order", () => {
     assert.deepEqual(offeredHabits.map(o => o.label), [
       "I know what I like, but repeat the same outfits",
       "I have plenty of clothes but struggle to put outfits together",
       "I often feel like I have nothing to wear",
       "I overthink what to wear",
       "I usually know exactly what I want to wear",
-      "I tend to play it safe",
-      "I enjoy experimenting",
       "What I want to wear changes with my mood",
       "I choose comfort first and build from there",
       "I save outfit inspiration but struggle to recreate it with my own clothes",
       "None of these really describe me",
     ]);
+  });
+
+  // Withdrawn because Q4 Style Exploration already captures the same signal.
+  it("play-it-safe and enjoy-experimenting are withdrawn but still safe", () => {
+    for (const id of ["play-it-safe", "enjoy-experimenting"]) {
+      assert.ok(RETIRED_DRESSING_HABIT_IDS.has(id), `${id} must be marked retired`);
+      assert.ok(DRESSING_HABIT_VALID_IDS.has(id), `${id} must stay valid server-side`);
+      assert.ok(!offeredHabits.some(o => o.id === id), `${id} must not be offered`);
+      assert.ok(ALL_OPTION_LABELS[id], `${id} must still resolve to real copy`);
+    }
   });
 
   it("comfort-first keeps its stable ID and only changes label", () => {
@@ -285,7 +318,7 @@ describe("R7.2b — Q3/Q12 copy and the withdrawn dressing habits", () => {
 
   // The two withdrawn habits are a compatibility case, not a deletion: a customer
   // may already have one stored, and re-saving that section submits it back.
-  for (const id of ["want-it-easier", "buy-but-cant-style"]) {
+  for (const id of ["want-it-easier", "buy-but-cant-style"] as const) {
     it(`${id} is withdrawn from the question but still safe for stored answers`, () => {
       assert.ok(RETIRED_DRESSING_HABIT_IDS.has(id), "must be marked retired");
       assert.ok(DRESSING_HABIT_VALID_IDS.has(id),

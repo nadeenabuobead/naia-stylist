@@ -248,12 +248,12 @@ const SECTIONS: SectionDef[] = [
   // 2b. STYLE EXPRESSION — what the customer wants their clothes to communicate.
   {
     id: "style-expression",
-    label: "Style Expression",
-    question: "How would you like your style to come across?",
+    label: "Personality",
+    question: "Which words feel most like you?",
     helper: "Choose up to 3.",
     optional: true,
     subFields: [
-      { draftKey: "style-expression" as DraftKey, apiKey: "styleExpression", subLabel: "What I want my style to say", kind: "array" as FieldKind, questionId: "style-expression" },
+      { draftKey: "style-expression" as DraftKey, apiKey: "styleExpression", subLabel: "Words that feel like me", kind: "array" as FieldKind, questionId: "style-expression" },
     ],
   },
   // 2c. STYLE EXPLORATION — how far nAia should move beyond familiar choices.
@@ -640,11 +640,11 @@ const REFRESH_SCREENS: RefreshScreen[] = [
   },
   {
     screenId: "r-expression",
-    label: "Your Style Expression",
-    question: "How would you like your style to come across?",
+    label: "Your Personality",
+    question: "Which words feel most like you?",
     helper: "Choose up to 3.",
     fields: [
-      { draftKey: "style-expression" as DraftKey, apiKey: "styleExpression", subLabel: "What I want my style to say", kind: "array" as FieldKind, questionId: "style-expression" },
+      { draftKey: "style-expression" as DraftKey, apiKey: "styleExpression", subLabel: "Words that feel like me", kind: "array" as FieldKind, questionId: "style-expression" },
     ],
   },
   {
@@ -1939,11 +1939,11 @@ export default function PassportPage() {
               </div>
             </div>
 
-            {/* Row 2b: Style Expression | Style Exploration (Rev 7) */}
+            {/* Row 2b: Personality | Style Exploration (Rev 7) */}
             <div className="sp-ov-grid">
               <div className="sp-ov-grid-cell">
                 <div className="sp-ov-section-header-row">
-                  <span className="sp-ov-section-header">Style Expression</span>
+                  <span className="sp-ov-section-header">Personality</span>
                   <button type="button" className="sp-ov-edit-btn" onClick={() => editSection("style-expression")}>EDIT</button>
                 </div>
                 {styleExpression.length > 0 ? (

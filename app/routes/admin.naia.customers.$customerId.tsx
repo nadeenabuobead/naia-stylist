@@ -163,7 +163,7 @@ function PassportSection({ ctx }: { ctx: CustomerStylingPassportContext | null }
   const v6Rows: Array<{ label: string; field: string; values: string[] }> = [
     { label: "Current Focus", field: "currentGoal", values: ctx.currentGoal },
     { label: "Outfit Priorities", field: "successfulOutfitGives", values: ctx.successfulOutfitGives },
-    { label: "Style Expression", field: "styleExpression", values: ctx.styleExpression },
+    { label: "Personality", field: "styleExpression", values: ctx.styleExpression },
     { label: "Style Exploration", field: "explorationLevel", values: ctx.explorationLevel ? [ctx.explorationLevel] : [] },
     { label: "Style Direction", field: "styleDirections", values: ctx.styleDirections },
     // Legacy style field — only shown when the customer has no Rev 7 answer.

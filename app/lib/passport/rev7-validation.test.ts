@@ -360,7 +360,7 @@ describe("R7V.6 — dressing requirements remain constraints, not preferences", 
 
   it("the four new signals are labelled so the model understands each distinction", () => {
     for (const src of [RESULT, WISHLIST]) {
-      assert.ok(src.includes("what this customer wants their clothes to communicate"));
+      assert.ok(src.includes("words this customer says feel most like them"));
       assert.ok(src.includes("how far nAia should move beyond"));
       assert.ok(src.includes("the visual aesthetics this customer is drawn to"));
       assert.ok(src.includes("behavioural context"));
