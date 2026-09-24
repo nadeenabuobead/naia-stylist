@@ -418,6 +418,67 @@ describe("§WR-2n the ladder uses every signal it already has", () => {
   });
 });
 
+// ── §WR-2p Live-data regressions ─────────────────────────────────────────────
+
+describe("§WR-2p the partner count and coverage use the right scope", () => {
+  it("2p — compatibility is measured across the wardrobe, not only the register", () => {
+    // Two work tops, two work bottoms, plus smart-casual tops that scorePair
+    // genuinely accepts for a work bottom (one step of dress apart).
+    // Measuring only the work register scored 2 against a minimum of 3 and
+    // suppressed the recommendation entirely — the level-of-dress rule was
+    // being applied twice, once by scorePair and again by the pool.
+    const items = [
+      ...variedLooks("casual", 4),
+      ...Array.from({ length: 3 }, (_, i) =>
+        makeGarment({ slot: "top", formality: "smart-casual", ...TOP_SHAPES[i % TOP_SHAPES.length] })),
+      // Two work tops of DIFFERENT shapes, two bottoms of the same shape —
+      // the live customer's exact profile, where the bottom side is the
+      // bottleneck by variety even though both sides hold two pieces.
+      makeGarment({ slot: "top", formality: "business-casual", silhouette: "fitted", fitProfile: "tailored" }),
+      makeGarment({ slot: "top", formality: "business-casual", silhouette: "boxy", fitProfile: "relaxed" }),
+      ...Array.from({ length: 2 }, () =>
+        makeGarment({ slot: "bottom", category: "BOTTOMS", formality: "business-casual", topLength: "n/a", hemLength: "full", silhouette: "straight", fitProfile: "tailored" })),
+    ];
+    const { needs, recs } = run(items, makePassport({ lifestyle: ["everyday-casual", "work-office"] }));
+
+    assert.ok(needs.couldUseMore.some((f) => f.register === "work"), "the gap is real");
+    const work = recs.recommendations.find((r) => r.register === "work");
+    assert.ok(work, "a diagnosable gap must not be suppressed by a starved partner count");
+    assert.ok(work!.unlocksIds.length >= 3, `expected partners beyond the register, got ${work!.unlocksIds.length}`);
+  });
+
+  it("2p-2 — a coverage requirement is only attached to garments it can describe", () => {
+    // legs-covered describes a bottom or a dress; arms-covered describes a top.
+    // A single top/dress gate dropped every leg requirement from bottom
+    // recommendations, so "prefers full-length trousers" produced a bottom
+    // recommendation with no length at all.
+    const items = [
+      ...variedLooks("casual", 4),
+      ...Array.from({ length: 3 }, (_, i) =>
+        makeGarment({ slot: "top", formality: "smart-casual", ...TOP_SHAPES[i % TOP_SHAPES.length] })),
+      makeGarment({ slot: "top", formality: "business-casual", silhouette: "fitted", fitProfile: "tailored" }),
+      makeGarment({ slot: "top", formality: "business-casual", silhouette: "boxy", fitProfile: "relaxed" }),
+      ...Array.from({ length: 2 }, () =>
+        makeGarment({ slot: "bottom", category: "BOTTOMS", formality: "business-casual", topLength: "n/a", hemLength: "full", silhouette: "straight", fitProfile: "tailored" })),
+    ];
+    const { recs } = run(items, makePassport({
+      lifestyle: ["everyday-casual", "work-office"],
+      dressingPreferences: ["legs-covered", "prefer-full-length-trousers", "arms-covered"],
+    }));
+    const work = recs.recommendations.find((r) => r.register === "work");
+    assert.ok(work);
+    if (work!.criteria.slot === "bottom") {
+      assert.ok(
+        work!.criteria.coverage.includes("legs-covered") ||
+          work!.criteria.coverage.includes("prefer-full-length-trousers"),
+        "a leg requirement belongs on a bottom",
+      );
+      assert.ok(!work!.criteria.coverage.includes("arms-covered"), "an arm requirement does not describe a bottom");
+      assert.match(work!.attributes.find((a) => a.kind === "coverage")?.label ?? "", /full length/);
+    }
+  });
+});
+
 // ── §WR-3 A recommendation must actually be usable ────────────────────────────
 
 describe("§WR-3 the proposal has to work with what she owns", () => {

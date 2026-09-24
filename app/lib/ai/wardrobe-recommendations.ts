@@ -165,16 +165,26 @@ const STRUCTURE_LABEL: Readonly<Record<string, string>> = {
   soft: "a softer, easier shape",
 };
 
-/** Coverage preferences that describe a garment, in her words as a phrase. */
-const COVERAGE_LABEL: Readonly<Record<string, string>> = {
-  "arms-covered": "sleeves",
-  "avoid-sleeveless": "sleeves",
-  "chest-neckline-covered": "a higher neckline",
-  "prefer-higher-necklines": "a higher neckline",
-  "legs-covered": "full length",
-  "longer-tops": "a longer cut",
-  "no-cropped-tops": "not cropped",
-  "looser-fitting": "an easier fit",
+/**
+ * Coverage preferences that describe a garment, in her words as a phrase —
+ * and which garments each one can describe.
+ *
+ * Slot matters. "Keeps her legs covered" is a statement about a bottom or a
+ * dress and says nothing about a top; "keeps her arms covered" is the reverse.
+ * A single top/dress/outerwear gate dropped every leg-related requirement from
+ * bottom recommendations, so a customer who had told nAia she prefers
+ * full-length trousers was recommended "a work bottom" with no length at all.
+ */
+const COVERAGE_RULES: Readonly<Record<string, { label: string; slots: readonly string[] }>> = {
+  "arms-covered":               { label: "sleeves",            slots: ["top", "dress", "outerwear"] },
+  "avoid-sleeveless":           { label: "sleeves",            slots: ["top", "dress", "outerwear"] },
+  "chest-neckline-covered":     { label: "a higher neckline",  slots: ["top", "dress"] },
+  "prefer-higher-necklines":    { label: "a higher neckline",  slots: ["top", "dress"] },
+  "longer-tops":                { label: "a longer cut",       slots: ["top"] },
+  "no-cropped-tops":            { label: "not cropped",        slots: ["top"] },
+  "legs-covered":               { label: "full length",        slots: ["bottom", "dress"] },
+  "prefer-full-length-trousers":{ label: "full length",        slots: ["bottom"] },
+  "looser-fitting":             { label: "an easier fit",      slots: ["top", "bottom", "dress", "outerwear"] },
 };
 
 // ── Candidate construction ────────────────────────────────────────────────────
@@ -315,14 +325,17 @@ function dominantFit(pool: WardrobeGarment[]): "structured" | "soft" | null {
   return null;
 }
 
-/** Coverage requirements she has actually stated. */
-function statedCoverage(passport: WardrobePassport | null): string[] {
-  const prefs = (passport?.dressingPreferences ?? []).filter((p) => COVERAGE_LABEL[p]);
+/** Coverage requirements she stated that can actually describe THIS garment. */
+function statedCoverage(passport: WardrobePassport | null, slot: string): string[] {
+  const prefs = (passport?.dressingPreferences ?? []).filter(
+    (p) => COVERAGE_RULES[p]?.slots.includes(slot),
+  );
   // Collapse duplicates that mean the same thing on a garment ("sleeves").
   const seenLabels = new Set<string>();
   return prefs.filter((p) => {
-    if (seenLabels.has(COVERAGE_LABEL[p])) return false;
-    seenLabels.add(COVERAGE_LABEL[p]);
+    const label = COVERAGE_RULES[p].label;
+    if (seenLabels.has(label)) return false;
+    seenLabels.add(label);
     return true;
   });
 }
@@ -421,6 +434,22 @@ function buildRecommendation(
   const registerPool = items.filter(
     (g) => garmentRegister(g) === register && classifyUsability(g, passport).usability === "usable",
   );
+
+  /**
+   * Who the proposed piece could actually be worn with.
+   *
+   * The WHOLE usable wardrobe, not just this register. scorePair() already
+   * enforces a level-of-dress distance of one step, so a smart-casual top is
+   * counted for a work bottom and a casual one is not — the constraint is
+   * applied exactly once, by the rule that owns it.
+   *
+   * Restricting this to the register pool applied that same constraint a second
+   * time and starved the count: a customer with two work tops scored 2 against
+   * a minimum of 3, and a perfectly diagnosable gap produced no recommendation
+   * at all. Measured correctly the same wardrobe scores 4, and the two casual
+   * tops scorePair rejects are still rejected.
+   */
+  const partnerPool = items.filter((g) => classifyUsability(g, passport).usability === "usable");
   const evidence: Evidence[] = [
     ev("passport-signal", "lifestyle", `You've told nAia ${REGISTER_WORD[register]} dressing is part of your life.`, []),
   ];
@@ -445,7 +474,7 @@ function buildRecommendation(
   // ── Rung 2: slot ─────────────────────────────────────────────────────────
   // The broad candidate is the baseline every attribute is measured against.
   const broad = candidateGarment(register, slot);
-  const broadUnlocks = unlocks(broad, registerPool.length > 0 ? registerPool : items);
+  const broadUnlocks = unlocks(broad, partnerPool.length > 0 ? partnerPool : items);
 
   // A one-piece IS a complete look. Requiring it to combine with three owned
   // garments asks the wrong question — a dress needs no partner to be wearable,
@@ -478,7 +507,7 @@ function buildRecommendation(
     const contrast = lean === "soft" ? "structured" : "soft";
     const conflictsWithPassport = contrast === "structured" && statedLooser;
     const withFit = candidateGarment(register, slot, { fit: contrast === "structured" ? STRUCTURED_FIT : SOFT_FIT });
-    const fitUnlocks = unlocks(withFit, registerPool);
+    const fitUnlocks = unlocks(withFit, partnerPool);
     if (!conflictsWithPassport && fitUnlocks.length > best.length) {
       attributes.push({
         kind: "structure",
@@ -502,7 +531,7 @@ function buildRecommendation(
       hueFamily: loved[0],
       fit: criteria.structure === "structured" ? STRUCTURED_FIT : criteria.structure === "soft" ? SOFT_FIT : null,
     });
-    const colourUnlocks = unlocks(withColour, registerPool);
+    const colourUnlocks = unlocks(withColour, partnerPool);
     if (colourUnlocks.length >= best.length) {
       const shown = loved.slice(0, 3);
       attributes.push({
@@ -520,9 +549,9 @@ function buildRecommendation(
   }
 
   // Coverage — a hard requirement she stated, so it is never optional.
-  const coverage = statedCoverage(passport);
-  if (coverage.length > 0 && (slot === "top" || slot === "dress" || slot === "outerwear")) {
-    const labels = coverage.map((c) => COVERAGE_LABEL[c]).slice(0, 2);
+  const coverage = statedCoverage(passport, slot);
+  if (coverage.length > 0) {
+    const labels = coverage.map((c) => COVERAGE_RULES[c].label).slice(0, 2);
     attributes.push({ kind: "coverage", values: coverage, label: joinList(labels), source: "passport" });
     criteria.coverage = coverage;
     evidence.push(

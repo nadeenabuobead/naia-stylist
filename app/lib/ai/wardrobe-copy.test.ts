@@ -190,6 +190,30 @@ describe("§WC-2 pairing reasons lose the jargon, not the meaning", () => {
     assert.notEqual(plainText(curly), curly, "the curly variant must be rewritten too");
   });
 
+  it("2f — nAia never describes wear behaviour it does not track", () => {
+    // The transparency footer states nAia does not know what she actually
+    // wears. Any sentence that describes HOW or HOW OFTEN she wears a piece
+    // contradicts that, whatever the underlying evidence was.
+    const engine = "That usually means you\u2019re wearing it the same way each time \u2014 not that it\u2019s the wrong piece.";
+    const out = plainText(engine);
+    assert.notEqual(out, engine);
+    assert.match(out, /Fewer partners means fewer different outfits/);
+    assert.doesNotMatch(out, /wearing it/);
+  });
+
+  it("2g — no inferred-wear phrasing survives the plain-language pass", () => {
+    const inferred = [
+      "That usually means you\u2019re wearing it the same way each time.",
+      "That usually means you're wearing it the same way each time.",
+    ];
+    for (const s of inferred) {
+      const out = plainText(s);
+      for (const pattern of [/you['\u2019]re wearing it/, /you wear it/, /how often you wear/]) {
+        assert.doesNotMatch(out, pattern, `inferred wear survived: "${out}"`);
+      }
+    }
+  });
+
   it("2c — an unrecognised reason passes through rather than being mangled", () => {
     const novel = "Some future reason the engine has not written yet.";
     assert.equal(plainPairReason(novel), novel);

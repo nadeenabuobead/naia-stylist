@@ -287,6 +287,17 @@ const PHRASE_REWRITES: ReadonlyArray<[RegExp, string]> = [
   [rx("\\bhaven't appeared in a saved or generated look\\b"),
    "haven't been used by nAia in a saved or generated look"],
 
+  // ── nAia does not track wear, so it must never describe it ──
+  //
+  // "That usually means you're wearing it the same way each time" infers how
+  // often and how she wears a garment. nAia holds no wear data at all — the
+  // transparency footer says so — and the underlying evidence is a partner
+  // count in the compatibility graph. The replacement states that fact.
+  [rx("\\bThat usually means you're wearing it the same way each time — not that it's the wrong piece\\."),
+   "Fewer partners means fewer different outfits nAia can build around it — not that it's the wrong piece."],
+  [rx("\\bThat usually means you're wearing it the same way each time\\b"),
+   "Fewer partners means fewer different outfits nAia can build around it"],
+
   // "reads as" — accurate internally, opaque to a customer.
   [rx("\\bpieces nAia has assessed read\\b"), "pieces nAia has looked at are"],
   [rx("\\bwith fit data read\\b"), "nAia could read the fit of are"],

@@ -434,47 +434,6 @@ export default function WardrobeIntelligencePage() {
                   </div>
                 )}
 
-                {recommendations.state === "available" && recommendations.recommendations.length > 0 && (
-                  <div className="wi-block">
-                    <p className="wi-sublabel">What would add the most</p>
-                    {recommendations.recommendations.map((rec) => (
-                      <article key={rec.id} className="wi-rec">
-                        <h3 className="wi-rec-title">{rec.title}</h3>
-                        {rec.attributes.length > 0 && (
-                          <p className="wi-rec-attrs">
-                            {rec.attributes.map((attr, index) => (
-                              <span key={attr.kind}>
-                                {index > 0 && <span className="wi-rec-sep" aria-hidden="true">·</span>}
-                                {attr.label}
-                              </span>
-                            ))}
-                          </p>
-                        )}
-                        <p className="wi-rec-body">{rec.body}</p>
-                        {rec.unlocksIds.length > 0 && (
-                          <div className="wi-strip">
-                            {rec.unlocksIds.map((id) => (
-                              <Thumb key={id} card={byId.get(id)} size={56} />
-                            ))}
-                          </div>
-                        )}
-                      </article>
-                    ))}
-                  </div>
-                )}
-
-                {recommendations.notAPriority.length > 0 && (
-                  <div className="wi-block">
-                    <p className="wi-sublabel wi-sublabel--quiet">Not a priority right now</p>
-                    {recommendations.notAPriority.map((item) => (
-                      <article key={item.id} className="wi-rec wi-rec--quiet">
-                        <h3 className="wi-rec-title">{item.title}</h3>
-                        <p className="wi-rec-body">{item.body}</p>
-                      </article>
-                    ))}
-                  </div>
-                )}
-
                 <div className="wi-verdict">
                   <h3 className="wi-verdict-q">Do you need to buy anything?</h3>
                   {needs.couldUseMore.length === 0 ? (
@@ -486,8 +445,8 @@ export default function WardrobeIntelligencePage() {
                     <>
                       <p className="wi-verdict-a">
                         {needs.couldUseMore.length === 1
-                          ? "One part of your wardrobe would genuinely benefit."
-                          : "Two parts of your wardrobe would genuinely benefit."}
+                          ? "Yes — one part of your wardrobe would benefit."
+                          : "Yes — two parts of your wardrobe would benefit."}
                       </p>
                       <p className="wi-verdict-why">
                         {needsAreas} {needs.couldUseMore.length === 1 ? "is" : "are"} where it would help.
@@ -495,6 +454,51 @@ export default function WardrobeIntelligencePage() {
                         nothing else needs buying right now.
                       </p>
                     </>
+                  )}
+
+                  {/* The next question a customer actually asks — "what should
+                      I look for?" — answered in the same place as the verdict.
+                      These sat in a separate block above it, so the buy-or-not
+                      answer and the thing to buy were read apart. */}
+                  {recommendations.state === "available" && recommendations.recommendations.length > 0 && (
+                    <div className="wi-verdict-next">
+                      <p className="wi-sublabel">What to look for</p>
+                      {recommendations.recommendations.map((rec) => (
+                        <article key={rec.id} className="wi-rec">
+                          <h4 className="wi-rec-title">{rec.title}</h4>
+                          {rec.attributes.length > 0 && (
+                            <p className="wi-rec-attrs">
+                              {rec.attributes.map((attr, index) => (
+                                <span key={attr.kind}>
+                                  {index > 0 && <span className="wi-rec-sep" aria-hidden="true">·</span>}
+                                  {attr.label}
+                                </span>
+                              ))}
+                            </p>
+                          )}
+                          <p className="wi-rec-body">{rec.body}</p>
+                          {rec.unlocksIds.length > 0 && (
+                            <div className="wi-strip">
+                              {rec.unlocksIds.map((id) => (
+                                <Thumb key={id} card={byId.get(id)} size={56} />
+                              ))}
+                            </div>
+                          )}
+                        </article>
+                      ))}
+                    </div>
+                  )}
+
+                  {recommendations.notAPriority.length > 0 && (
+                    <div className="wi-verdict-next">
+                      <p className="wi-sublabel wi-sublabel--quiet">Not a priority</p>
+                      {recommendations.notAPriority.map((item) => (
+                        <article key={item.id} className="wi-rec wi-rec--quiet">
+                          <h4 className="wi-rec-title">{item.title}</h4>
+                          <p className="wi-rec-body">{item.body}</p>
+                        </article>
+                      ))}
+                    </div>
                   )}
                 </div>
               </section>
@@ -1025,6 +1029,7 @@ const css = `
   .wi-verdict-a{font-family:var(--naia-ff-display);font-size:1.5rem;font-weight:200;line-height:1.2;letter-spacing:0.01em;color:var(--naia-ink);margin:0 0 12px;max-width:22em}
   @media(min-width:900px){.wi-verdict-a{font-size:1.875rem}}
   .wi-verdict-why{font-family:var(--naia-ff-body);font-size:1rem;font-style:italic;line-height:1.65;color:rgba(40,21,12,0.7);margin:0;max-width:34em}
+  .wi-verdict-next{margin-top:34px}
 
   /* ── Activity evidence (quiet) ────────────────────────────────────── */
   /* ── What your styling history shows ──────────────────────────────── */
