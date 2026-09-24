@@ -40,6 +40,7 @@ import {
   computePaletteCoverage,
   garmentRegister,
   classifyUsability,
+  outfitClassKey,
   type RegisterId,
   type RegisterReading,
   type DepthFinding,
@@ -331,39 +332,56 @@ function statedCoverage(passport: WardrobePassport | null): string[] {
 /**
  * Which part of an outfit is actually the constraint at this register.
  *
- * SCARCITY IS NOT NEED. Every branch here must answer "what capability is she
- * missing", never "what does she own least of". A low count is a supporting
- * signal; the reason for a recommendation is always a gap the needs engine has
- * already proven, and the slot is only how that gap gets closed.
+ * SCARCITY IS NOT NEED. Every branch answers "what capability is missing",
+ * never "what does she own least of". The reason for a recommendation is always
+ * a gap the needs engine already proved; the slot is only how that gap closes.
  *
- * Returns null when nothing is clearly the bottleneck — in which case the
- * recommendation stays at "direction" and names no garment type at all.
+ * Returns null when nothing is clearly the bottleneck — the recommendation then
+ * stays at "direction" and names no garment type at all.
  */
 function constrainedSlot(
   pool: WardrobeGarment[],
   allItems: WardrobeGarment[],
   register: RegisterId,
   gapKind: DepthFinding["kind"],
+  passport: WardrobePassport | null,
 ): string | null {
-  const tops = pool.filter((g) => TOP_SLOTS.has(g.slot)).length;
-  const bottoms = pool.filter((g) => BOTTOM_SLOTS.has(g.slot)).length;
-  const onePieces = pool.filter((g) => ONE_PIECE_SLOTS.has(g.slot)).length;
+  const tops = pool.filter((g) => TOP_SLOTS.has(g.slot));
+  const bottoms = pool.filter((g) => BOTTOM_SLOTS.has(g.slot));
+  const onePieces = pool.filter((g) => ONE_PIECE_SLOTS.has(g.slot));
 
-  // 1. A missing half. She cannot build a complete look at all — the capability
-  //    is absent, not merely thin.
-  if (tops >= SLOT_CONSTRAINT_MIN && bottoms === 0) return "bottom";
-  if (bottoms >= SLOT_CONSTRAINT_MIN && tops === 0) return "top";
+  // 1. A missing half. She cannot build a complete look at all.
+  if (tops.length >= SLOT_CONSTRAINT_MIN && bottoms.length === 0) return "bottom";
+  if (bottoms.length >= SLOT_CONSTRAINT_MIN && tops.length === 0) return "top";
 
-  // 2. An occasion register with pieces but no way to finish a look, and no
-  //    one-piece either: a dress answers it in a single garment.
-  if (register === "occasion" && onePieces === 0 && (tops === 0 || bottoms === 0)) return "dress";
+  // 2. An effective-depth gap: she owns the pieces and they do not meet what she
+  //    told nAia about how she dresses. The missing capability is a piece of the
+  //    SAME kind that does meet it, so the slot is wherever her own coverage
+  //    requirements are blocking the most pieces. This is her stated preference
+  //    deciding the answer, not a count — and it was previously unused, which is
+  //    why an entirely diagnosable gap reported "not yet which kind of piece".
+  if (gapKind === "effective-depth") {
+    const blockedBySlot = new Map<string, number>();
+    for (const g of allItems) {
+      if (garmentRegister(g) !== register) continue;
+      if (classifyUsability(g, passport).usability !== "blocked") continue;
+      if (!SLOT_NOUN[g.slot]) continue;
+      blockedBySlot.set(g.slot, (blockedBySlot.get(g.slot) ?? 0) + 1);
+    }
+    const worst = [...blockedBySlot.entries()].sort((a, b) => b[1] - a[1])[0];
+    if (worst && worst[1] >= SLOT_CONSTRAINT_MIN) return worst[0];
+  }
 
-  // 3. Layering — ONLY where the proven gap is repetition. She owns both halves
-  //    and they keep making the same outfit, so the missing capability is a way
-  //    to change a look she already has. A wardrobe with no outer layer that is
-  //    otherwise working is not a gap, and "no outer layer + enough pieces" on
-  //    its own is exactly the scarcity reasoning this function must refuse.
-  if (gapKind === "repetition" && tops > 0 && bottoms > 0) {
+  // 3. An occasion register with no way to finish a look and no one-piece.
+  if (register === "occasion" && onePieces.length === 0 && (tops.length === 0 || bottoms.length === 0)) {
+    return "dress";
+  }
+
+  // 4. Layering — ONLY where the proven gap is repetition. She owns both halves
+  //    and they keep making the same outfit, so a way to change an existing look
+  //    is the missing capability. "No outer layer + enough pieces" on its own is
+  //    exactly the scarcity reasoning this function must refuse.
+  if (gapKind === "repetition" && tops.length > 0 && bottoms.length > 0) {
     const outerAnywhere = allItems.filter((g) => g.slot === "outerwear").length;
     const core = allItems.filter(
       (g) => TOP_SLOTS.has(g.slot) || BOTTOM_SLOTS.has(g.slot) || ONE_PIECE_SLOTS.has(g.slot),
@@ -371,10 +389,22 @@ function constrainedSlot(
     if (outerAnywhere === 0 && core >= 8) return "outerwear";
   }
 
-  // 4. Both halves present and one is genuinely the limiting side.
-  if (tops > 0 && bottoms > 0) {
-    if (bottoms * 2 <= tops) return "bottom";
-    if (tops * 2 <= bottoms) return "top";
+  // 5. Variety within a slot, measured in interchangeability classes rather than
+  //    piece counts. Five tops that are all the same top is one option, not five;
+  //    the side with fewer genuinely different pieces is the bottleneck even when
+  //    it holds MORE garments. Counting pieces alone missed this.
+  const classesOf = (group: WardrobeGarment[]) => new Set(group.map(outfitClassKey)).size;
+  if (tops.length > 0 && bottoms.length > 0) {
+    const topClasses = classesOf(tops);
+    const bottomClasses = classesOf(bottoms);
+    if (topClasses < bottomClasses) return "top";
+    if (bottomClasses < topClasses) return "bottom";
+  }
+
+  // 6. Both halves present and one is genuinely the limiting side by count.
+  if (tops.length > 0 && bottoms.length > 0) {
+    if (bottoms.length * 2 <= tops.length) return "bottom";
+    if (tops.length * 2 <= bottoms.length) return "top";
   }
   return null;
 }
@@ -396,7 +426,7 @@ function buildRecommendation(
   ];
 
   // ── Rung 1: direction ────────────────────────────────────────────────────
-  const slot = constrainedSlot(registerPool, items, register, finding.kind);
+  const slot = constrainedSlot(registerPool, items, register, finding.kind, passport);
   if (!slot) {
     return {
       id: `rec-${register}`,
@@ -416,7 +446,13 @@ function buildRecommendation(
   // The broad candidate is the baseline every attribute is measured against.
   const broad = candidateGarment(register, slot);
   const broadUnlocks = unlocks(broad, registerPool.length > 0 ? registerPool : items);
-  if (broadUnlocks.length < MIN_UNLOCKS) {
+
+  // A one-piece IS a complete look. Requiring it to combine with three owned
+  // garments asks the wrong question — a dress needs no partner to be wearable,
+  // and gating it like a top silently suppressed the single most diagnosable
+  // gap there is (an occasion wardrobe blocked by her own coverage rules).
+  const selfSufficient = ONE_PIECE_SLOTS.has(slot);
+  if (!selfSufficient && broadUnlocks.length < MIN_UNLOCKS) {
     // Adding this would not meaningfully combine with what she owns. Saying so
     // is more useful than recommending something that will sit unworn.
     return null;
@@ -497,7 +533,13 @@ function buildRecommendation(
   const specificity: Specificity = attributes.length > 0 ? "detailed" : "slot";
   const noun = SLOT_NOUN[slot] ?? slot;
   const structureWord = criteria.structure === "structured" ? "structured " : criteria.structure === "soft" ? "softer " : "";
-  const title = `A ${structureWord}${REGISTER_WORD[register]} ${noun}`;
+  // When the gap is that her own coverage rules rule pieces out, say so in the
+  // title: "an occasion dress with more coverage" is the actual answer, where
+  // "an occasion dress" reads as though she simply owns too few.
+  const coverageSuffix =
+    finding.kind === "effective-depth" && criteria.coverage.length > 0 ? " with more coverage" : "";
+  const phrase = `${structureWord}${REGISTER_WORD[register]} ${noun}${coverageSuffix}`;
+  const title = `${/^[aeiou]/i.test(phrase) ? "An" : "A"} ${phrase}`;
 
   // The body explains what it would DO, not what it is. The reason to buy is
   // the combinations it creates, and that number is measured, not asserted.
@@ -514,7 +556,9 @@ function buildRecommendation(
     specificity,
     title,
     attributes,
-    body: `${reasonForGap} A piece like this would work with ${best.length} of the pieces you already own, so it adds new ways to dress rather than another version of something you have.`,
+    body: selfSufficient
+      ? `${reasonForGap} A piece like this is a complete look on its own, so it adds an option you can wear without needing anything else to work with it.`
+      : `${reasonForGap} A piece like this would work with ${best.length} of the pieces you already own, so it adds new ways to dress rather than another version of something you have.`,
     unlocksIds: best.slice(0, 6).map((g) => g.id),
     criteria,
     evidence,

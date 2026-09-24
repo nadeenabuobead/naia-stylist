@@ -230,49 +230,73 @@ export function plainPairReason(reason: string, pieceCount = 2): string {
  * Phrases the engine uses in free text. Applied in order, each at most once per
  * string. Deliberately narrow: these replace known wordings, never guess.
  */
+/**
+ * Engine prose is written with BOTH apostrophe characters — ASCII ' in most
+ * places and the typographic ’ in others. A pattern written with one silently
+ * fails against the other, which is exactly how "but it hasn’t appeared in one
+ * of your nAia looks yet" survived every rewrite and reached the page.
+ *
+ * `rx` builds a pattern where every apostrophe matches either character, so a
+ * rule can never again depend on which one an engine author happened to type.
+ */
+function rx(source: string, flags = "g"): RegExp {
+  return new RegExp(source.replace(/'/g, "['\u2019]"), flags);
+}
+
 const PHRASE_REWRITES: ReadonlyArray<[RegExp, string]> = [
   // Heroes
-  [/\bSits comfortably with\b/g, "Pairs easily with"],
-  [/\bIts colour behaves as a wardrobe neutral, so it rarely limits what it goes with\./g,
+  [rx("\\bSits comfortably with\\b"), "Pairs easily with"],
+  [rx("\\bIts colour behaves as a wardrobe neutral, so it rarely limits what it goes with\\."),
    "Its colour goes with almost anything, so it rarely limits what you can wear it with."],
-  [/\bit goes with everything\b/g, "it goes with almost everything"],
+  [rx("\\bit goes with everything\\b"), "it goes with almost everything"],
   // Rediscover / heroes — Passport alignment
-  [/\bmatches your Passport on style personality and colour\b/g,
+  [rx("\\bmatches your Passport on style personality and colour\\b"),
    "matches the style and colours you described in your Passport"],
-  [/\bMatches your Passport on style personality and colour\b/g,
+  [rx("\\bMatches your Passport on style personality and colour\\b"),
    "Matches the style and colours you described in your Passport"],
-  [/\bstyle personality\b/g, "style"],
+  [rx("\\bstyle personality\\b"), "style"],
   // Registers and roles
-  [/\bthe wardrobe roles you need are already represented\b/g,
+  [rx("\\bthe wardrobe roles you need are already represented\\b"),
    "you already have the main types of pieces your wardrobe needs"],
-  [/\bacross (\d+) parts of the wardrobe\b/g, "across $1 different parts of your wardrobe"],
-  [/\bPieces that cross registers are what let a wardrobe stretch without growing\./g,
+  [rx("\\bacross (\\d+) parts of the wardrobe\\b"), "across $1 different parts of your wardrobe"],
+  [rx("\\bPieces that cross registers are what let a wardrobe stretch without growing\\."),
    "Pieces that work for more than one kind of day are what let a wardrobe stretch without getting bigger."],
-  [/\bcross registers\b/g, "work across different kinds of day"],
-  [/\bregisters\b/g, "kinds of day"],
-  // Absence from a generated look is a fact about what nAia chose, not about
-  // anything the customer did. Written from nAia's side.
-  [/\bThis hasn't appeared in one of your nAia looks yet\b/g,
+  [rx("\\bcross registers\\b"), "work across different kinds of day"],
+  [rx("\\bregisters\\b"), "kinds of day"],
+  [rx("\\bstronger in one register\\b"), "stronger for one kind of day"],
+  [rx("\\bone register\\b"), "one kind of day"],
+  [rx("\\bregister\\b"), "kind of day"],
+
+  // ── nAia's own selection is never written as the customer's failure ──
+  //
+  // Absence from a generated look is a fact about what nAia chose. Every one of
+  // these previously read as though she had neglected the garment.
+  [rx("\\bbut it hasn't appeared in one of your nAia looks yet\\b"),
+   "but nAia hasn't used it in a generated look yet"],
+  [rx("\\bThis hasn't appeared in one of your nAia looks yet\\b"),
    "nAia hasn't used this piece in a generated look yet"],
-  [/\bAnother that hasn't reached one of your nAia looks\b/g,
+  [rx("\\bAnother that hasn't reached one of your nAia looks\\b"),
    "nAia hasn't reached for this one either"],
-  [/\bAlso absent from your nAia looks so far\b/g, "nAia hasn't used this one yet either"],
-  [/\bIt hasn't appeared in a generated or saved look yet\b/g,
+  [rx("\\bAlso absent from your nAia looks so far\\b"), "nAia hasn't used this one yet either"],
+  [rx("\\bIt hasn't appeared in a generated or saved look yet\\b"),
    "nAia hasn't used it in a generated or saved look yet"],
-  [/\bhasn't appeared in one of your nAia looks\b/g, "hasn't been used by nAia in a look"],
-  [/\bstronger in one register\b/g, "stronger for one kind of day"],
-  [/\bone register\b/g, "one kind of day"],
-  [/\bregister\b/g, "kind of day"],
+  [rx("\\bbut haven't appeared in a saved or generated look yet\\b"),
+   "but nAia hasn't used them in a saved or generated look yet"],
+  [rx("\\ba piece you simply haven't styled yet\\b"), "a piece nAia simply hasn't used yet"],
+  [rx("\\bhasn't appeared in one of your nAia looks\\b"), "hasn't been used by nAia in a look"],
+  [rx("\\bhaven't appeared in a saved or generated look\\b"),
+   "haven't been used by nAia in a saved or generated look"],
+
   // "reads as" — accurate internally, opaque to a customer.
-  [/\bpieces nAia has assessed read\b/g, "pieces nAia has looked at are"],
-  [/\bwith fit data read\b/g, "nAia could read the fit of are"],
-  [/\bcarry (light|medium|substantial) visual weight\b/g, "look $1 rather than heavy or flimsy"],
-  [/\bsubstantial visual weight\b/g, "a heavier, more solid look"],
-  [/\bvisual weight\b/g, "visual heaviness"],
+  [rx("\\bpieces nAia has assessed read\\b"), "pieces nAia has looked at are"],
+  [rx("\\bwith fit data read\\b"), "nAia could read the fit of are"],
+  [rx("\\bcarry (light|medium|substantial) visual weight\\b"), "look $1 rather than heavy or flimsy"],
+  [rx("\\bsubstantial visual weight\\b"), "a heavier, more solid look"],
+  [rx("\\bvisual weight\\b"), "visual heaviness"],
   // A raw combination count reads as analytics, not help.
-  [/\bnAia can build \d+ combinations from what you own without you adding anything\b/g,
+  [rx("\\bnAia can build \\d+ combinations from what you own without you adding anything\\b"),
    "nAia can already put these together in plenty of different ways without you adding anything"],
-  [/\bcan build \d+ combinations\b/g, "can already put these together in plenty of ways"],
+  [rx("\\bcan build \\d+ combinations\\b"), "can already put these together in plenty of ways"],
 ];
 
 /** Plain-language pass for engine free text. Idempotent and lossless. */
@@ -369,6 +393,68 @@ export function lifestyleMatch(displays: RegisterDisplay[]): MatchDimension | nu
     state: "gap",
     stateText: MATCH_STATE_TEXT.gap,
     reading: `${sentenceCase(joinPlain(weak))} ${weak.length === 1 ? "has" : "have"} less variety than the life you described.`,
+  };
+}
+
+/**
+ * Passport dimensions the ENGINE already compares but the page was not showing.
+ *
+ * buildPassportView() emits three: colour, structure and register. Colour is
+ * covered better by the palette-coverage reading, and register by the lifestyle
+ * line, so only `structure` is surfaced here — as Shape, because "structure" is
+ * not a word a customer uses about her own clothes.
+ */
+const COMPARISON_DIMENSION: Readonly<Record<string, string>> = {
+  structure: "Shape",
+};
+
+export function comparisonDimension(
+  c: { id: string; stated: string; observed: string; reading: string; strength: string },
+): MatchDimension | null {
+  const dimension = COMPARISON_DIMENSION[c.id];
+  if (!dimension) return null;
+  // The engine grades its own confidence; "strong" evidence is a match, and
+  // anything weaker is reported as partial rather than upgraded.
+  const state: MatchState = c.strength === "strong" ? "strong" : "partial";
+
+  // The engine's reading is written to sit UNDER a "you said" row — on its own
+  // it dangles ("Your Closet strongly reflects that."). The stated half is
+  // folded back in so the line stands by itself, which is the only form the
+  // page now shows.
+  const reading = `${plainText(c.stated).trim()} ${plainText(c.reading).trim()}`;
+
+  return { id: `match-${c.id}`, dimension, state, stateText: MATCH_STATE_TEXT[state], reading };
+}
+
+/**
+ * How much of her Closet meets the way she told nAia she prefers to be covered.
+ *
+ * Deliberately silent when nothing is blocked. A zero here means either "she
+ * stated no requirements" or "everything passes", and the page cannot tell
+ * those apart from register data alone — so it says nothing rather than
+ * claiming a match it has not earned.
+ */
+export function coverageMatch(
+  registers: ReadonlyArray<{ blockedCount: number; usableCount: number; heading: string }>,
+): MatchDimension | null {
+  const blocked = registers.reduce((sum, r) => sum + r.blockedCount, 0);
+  if (blocked === 0) return null;
+
+  const readable = registers.reduce((sum, r) => sum + r.blockedCount + r.usableCount, 0);
+  if (readable === 0) return null;
+
+  const worst = [...registers].sort((a, b) => b.blockedCount - a.blockedCount)[0];
+  const share = blocked / readable;
+  const state: MatchState = share >= 0.25 ? "gap" : "partial";
+
+  return {
+    id: "match-coverage",
+    dimension: "Coverage",
+    state,
+    stateText: MATCH_STATE_TEXT[state],
+    reading: `${blocked} ${blocked === 1 ? "piece doesn't" : "pieces don't"} meet the way you've told nAia you prefer to be covered${
+      worst && worst.blockedCount > 0 ? `, mostly in your ${worst.heading.toLowerCase()} pieces` : ""
+    }.`,
   };
 }
 

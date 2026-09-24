@@ -335,6 +335,89 @@ describe("§WR-2k a thin loved colour refines a need; it never invents one", () 
   });
 });
 
+// ── §WR-2n Signals that exist must actually be used ──────────────────────────
+
+describe("§WR-2n the ladder uses every signal it already has", () => {
+  it("2n — an effective-depth gap names the slot her own coverage rules block", () => {
+    // Eight occasion dresses, six ruled out by a preference she stated. The
+    // missing capability is diagnosable: a dress that meets her coverage.
+    // This previously fell through every branch and reported "not yet which
+    // kind of piece would fix it".
+    const items = [
+      ...variedLooks("casual", 6),
+      makeGarment({ slot: "dress", category: "DRESSES", formality: "evening", hemLength: "maxi", topLength: "n/a", silhouette: "column" }),
+      makeGarment({ slot: "dress", category: "DRESSES", formality: "evening", hemLength: "maxi", topLength: "n/a", silhouette: "a-line" }),
+      ...Array.from({ length: 6 }, () =>
+        makeGarment({ slot: "dress", category: "DRESSES", formality: "evening", sleeveLength: "sleeveless", hemLength: "maxi", topLength: "n/a" })),
+    ];
+    const { needs, recs } = run(items, makePassport({
+      lifestyle: ["everyday-casual", "dinners-going-out"],
+      dressingPreferences: ["arms-covered"],
+    }));
+
+    assert.ok(needs.couldUseMore.some((f) => f.register === "occasion" && f.kind === "effective-depth"));
+    const occasion = recs.recommendations.find((r) => r.register === "occasion");
+    assert.ok(occasion, "an effective-depth gap is diagnosable and must not stay vague");
+    assert.notEqual(occasion!.specificity, "direction", "the blocked-slot signal identifies the garment type");
+    assert.equal(occasion!.criteria.slot, "dress");
+    assert.ok(occasion!.criteria.coverage.includes("arms-covered"));
+    assert.match(occasion!.title, /with more coverage/);
+  });
+
+  it("2n-2 — a one-piece is not rejected for failing a cross-slot partner test", () => {
+    // A dress is a complete look on its own; requiring three owned partners
+    // asked the wrong question and suppressed the recommendation entirely.
+    const items = [
+      ...variedLooks("casual", 6),
+      makeGarment({ slot: "dress", category: "DRESSES", formality: "evening", hemLength: "maxi", topLength: "n/a" }),
+      makeGarment({ slot: "dress", category: "DRESSES", formality: "evening", hemLength: "maxi", topLength: "n/a" }),
+      ...Array.from({ length: 6 }, () =>
+        makeGarment({ slot: "dress", category: "DRESSES", formality: "evening", sleeveLength: "sleeveless", hemLength: "maxi", topLength: "n/a" })),
+    ];
+    const { recs } = run(items, makePassport({
+      lifestyle: ["everyday-casual", "dinners-going-out"],
+      dressingPreferences: ["arms-covered"],
+    }));
+    const occasion = recs.recommendations.find((r) => r.register === "occasion");
+    assert.ok(occasion);
+    assert.match(occasion!.body, /complete look on its own/);
+  });
+
+  it("2n-3 — the limiting side is measured in variety, not only in piece count", () => {
+    // Five work tops that are all the same top, four bottoms that differ.
+    // By count the tops look healthier; by variety they are the bottleneck.
+    const items = [
+      ...variedLooks("casual", 6),
+      ...Array.from({ length: 5 }, () =>
+        makeGarment({ slot: "top", formality: "business-casual", silhouette: "fitted", fitProfile: "tailored" })),
+      ...Array.from({ length: 4 }, (_, i) =>
+        makeGarment({ slot: "bottom", category: "BOTTOMS", formality: "business-casual", topLength: "n/a", hemLength: "full", ...BOTTOM_SHAPES[i % BOTTOM_SHAPES.length] })),
+    ];
+    const { recs } = run(items, makePassport({ lifestyle: ["everyday-casual", "work-office"] }));
+    const work = recs.recommendations.find((r) => r.register === "work");
+    if (work && work.criteria.slot !== null && work.criteria.slot !== "outerwear") {
+      assert.equal(work.criteria.slot, "top", "the side with one repeated shape is the constraint");
+    }
+  });
+
+  it("2n-4 — the article agrees with the noun that follows it", () => {
+    const items = [
+      ...variedLooks("casual", 6),
+      makeGarment({ slot: "dress", category: "DRESSES", formality: "evening", hemLength: "maxi", topLength: "n/a" }),
+      makeGarment({ slot: "dress", category: "DRESSES", formality: "evening", hemLength: "maxi", topLength: "n/a" }),
+      ...Array.from({ length: 6 }, () =>
+        makeGarment({ slot: "dress", category: "DRESSES", formality: "evening", sleeveLength: "sleeveless", hemLength: "maxi", topLength: "n/a" })),
+    ];
+    const { recs } = run(items, makePassport({
+      lifestyle: ["everyday-casual", "dinners-going-out"],
+      dressingPreferences: ["arms-covered"],
+    }));
+    for (const rec of recs.recommendations) {
+      assert.doesNotMatch(rec.title, /^A [aeiou]/i, `article disagrees: "${rec.title}"`);
+    }
+  });
+});
+
 // ── §WR-3 A recommendation must actually be usable ────────────────────────────
 
 describe("§WR-3 the proposal has to work with what she owns", () => {

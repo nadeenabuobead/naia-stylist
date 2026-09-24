@@ -22,6 +22,8 @@ import {
   summaryEntries,
   lifestyleMatch,
   matchDimension,
+  comparisonDimension,
+  coverageMatch,
   heroLabel,
   traitLabel,
   plainPairReason,
@@ -183,17 +185,34 @@ export default function WardrobeIntelligencePage() {
   const [openObservation, setOpenObservation] = useState<string | null>(null);
   const [openRediscover, setOpenRediscover] = useState<string | null>(null);
 
-  const { dna, heroes, pairings, observations, opportunities, wear } = intelligence;
+  const { dna, heroes, pairings, observations, opportunities, passportView, wear } = intelligence;
 
   // ── Presentation-only derivations ─────────────────────────────────────────
   const registers = needs.registers
     .filter((r) => r.rawCount > 0 || r.needed)
-    .map((r) => ({ key: r.register, ...registerDisplay(r) }));
+    // blockedCount / usableCount ride along for the coverage reading in
+    // chapter 5; they are never rendered as numbers on their own.
+    .map((r) => ({ key: r.register, blockedCount: r.blockedCount, usableCount: r.usableCount, ...registerDisplay(r) }));
   const summary = needs.state === "available" ? summaryEntries(needs).slice(0, 3) : [];
-  const matches = [
+  // Chapter 5 draws on every dimension that is genuinely evidenced: lifestyle
+  // from the register readings, colour and colour balance from the palette
+  // synthesis, shape from the engine's own Passport comparison, and coverage
+  // from her stated dressing requirements. Duplicates are dropped by dimension
+  // name so the same comparison never appears twice under two labels.
+  const rawMatches = [
     ...(lifestyleMatch(registers) ? [lifestyleMatch(registers)!] : []),
     ...(needs.synthesis.state === "available" ? needs.synthesis.lines.map(matchDimension) : []),
+    ...(passportView.state !== "learning"
+      ? passportView.comparisons
+          .map(comparisonDimension)
+          .filter((m): m is NonNullable<typeof m> => m !== null)
+      : []),
+    ...(coverageMatch(registers) ? [coverageMatch(registers)!] : []),
   ];
+  const seenDimensions = new Set<string>();
+  const matches = rawMatches.filter((m) =>
+    seenDimensions.has(m.dimension) ? false : (seenDimensions.add(m.dimension), true),
+  );
   const topRequest = needs.styleMe.requests[0] ?? null;
   const enoughGroups = needs.state === "available" ? groupEnough(needs.enough) : [];
   const hasNeedsChapter =
@@ -207,16 +226,27 @@ export default function WardrobeIntelligencePage() {
     .join(" and ");
   const needsAreas = needsAreaNames.charAt(0).toUpperCase() + needsAreaNames.slice(1);
 
-  // A garment already named in an observation must not be re-explained under
-  // Rediscover. The pattern belongs to one section and the action to the other;
-  // saying both about the same piece reads as the page repeating itself.
-  const observedIds = new Set(observations.flatMap((o) => o.garmentIds));
-  const rediscover = opportunities.rediscover.filter((p) => !observedIds.has(p.garmentId));
+  // Rediscover is the ACTION and lives in chapter 3; the "untapped potential"
+  // observation is the same finding stated as a PATTERN in chapter 4.
+  //
+  // Suppressing the Rediscover entry (the earlier approach) deleted the action
+  // and left only the pattern — so the actionable, garment-level content ended
+  // up in the chapter about what nAia has learned, which is not its job. The
+  // pattern is the one that gives way: Rediscover already names the same pieces
+  // and gives the customer something to do about them.
+  const rediscover = opportunities.rediscover;
+  const rediscoverIds = new Set(rediscover.map((p) => p.garmentId));
+  const shownObservations = observations.filter(
+    (o) =>
+      o.kind !== "untapped-potential" ||
+      o.garmentIds.length === 0 ||
+      !o.garmentIds.every((id) => rediscoverIds.has(id)),
+  );
 
   const hasWorksChapter =
     heroes.state !== "learning" || pairings.state !== "learning" || rediscover.length > 0;
   const hasLearningChapter =
-    observations.length > 0 ||
+    shownObservations.length > 0 ||
     needs.styleMe.state === "available" ||
     needs.outcomes.state === "available";
 
@@ -612,11 +642,11 @@ export default function WardrobeIntelligencePage() {
               <section className="wi-chapter" aria-labelledby="wi-learn-h">
                 <h2 id="wi-learn-h" className="wi-chapter-title">What nAia is learning about you</h2>
 
-                {observations.length > 0 && (
+                {shownObservations.length > 0 && (
                   <div className="wi-block">
                     <p className="wi-sublabel">What nAia is noticing</p>
                     <ol className="wi-notes">
-                      {observations.map((obs, index) => {
+                      {shownObservations.map((obs, index) => {
                         const isDiscovery = obs.tier === "discovery";
                         const inlinePieces = obs.garmentIds.length > 0 && obs.garmentIds.length <= 3;
                         const expanded = openObservation === obs.id;
@@ -817,13 +847,23 @@ const css = `
      balance only affects how it breaks when it genuinely cannot. */
   @media(min-width:900px){
     .wi-opening-reading{max-width:62ch;text-wrap:balance}
-    .wi-opening-facts{max-width:34em}
   }
   .wi-opening-reading{font-family:var(--naia-ff-body);font-size:1.6rem;font-style:italic;line-height:1.45;color:var(--naia-ink);margin:0 0 18px}
   @media(min-width:768px){.wi-opening-reading{font-size:1.9rem}}
+  /* The three snapshot stats.
+     Each separator is rendered INSIDE its stat, so a stat that wraps carries
+     its dot onto the new line — that is where the stray leading "·" came from.
+     Above 700px the row simply does not wrap; below it the stats stack and the
+     separators are hidden entirely, so a dot can never start a line. */
   .wi-opening-facts{display:flex;flex-wrap:wrap;gap:6px 0;margin:0;font-family:var(--naia-ff-ui);font-size:11px;letter-spacing:1.6px;text-transform:uppercase;color:rgba(40,21,12,0.55)}
-  .wi-fact{display:inline-flex;align-items:baseline}
+  @media(min-width:700px){.wi-opening-facts{flex-wrap:nowrap}}
+  .wi-fact{display:inline-flex;align-items:baseline;white-space:nowrap}
   .wi-fact-sep{padding:0 12px;color:rgba(40,21,12,0.3)}
+  /* Below the no-wrap threshold, stack rather than wrap mid-row. */
+  @media(max-width:699px){
+    .wi-opening-facts{flex-direction:column;gap:8px}
+    .wi-fact-sep{display:none}
+  }
   .wi-fact-value{font-family:var(--naia-ff-display);font-size:18px;font-weight:300;letter-spacing:0;color:var(--naia-ink);margin-right:7px}
 
   /* ── Sections ─────────────────────────────────────────────────────────── */
@@ -942,7 +982,6 @@ const css = `
   .wi-opening{margin-bottom:52px}
   @media(min-width:900px){
     .wi-opening-reading{max-width:62ch;text-wrap:balance}
-    .wi-opening-facts{max-width:34em}
   }
 
   /* Compact Wardrobe DNA, in chapter 1 and nowhere else. */

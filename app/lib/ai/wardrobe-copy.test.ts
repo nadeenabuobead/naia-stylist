@@ -151,6 +151,45 @@ describe("§WC-2 pairing reasons lose the jargon, not the meaning", () => {
     assert.doesNotMatch(out, /This hasn't appeared/);
   });
 
+  it("2e-2 — EVERY blame-attribution string the engine can emit is rewritten", () => {
+    // These are the exact strings in wardrobe-intelligence.ts. Each frames a
+    // nAia SELECTION decision as though the customer had neglected the garment.
+    // Note the curly apostrophe in the first: patterns written with the ASCII
+    // one silently failed against it, which is how this reached the live page.
+    const engineStrings = [
+      "Beige Tailored Blazer matches what you told nAia you want and works with 12 pieces you own \u2014 but it hasn\u2019t appeared in one of your nAia looks yet.",
+      "This hasn't appeared in one of your nAia looks yet, though it works with 12 pieces you already own.",
+      "Another that hasn't reached one of your nAia looks \u2014 12 pieces you own work with it.",
+      "Also absent from your nAia looks so far, despite 12 that work with it.",
+      "It hasn't appeared in a generated or saved look yet.",
+      "4 pieces connect well with your wardrobe but haven't appeared in a saved or generated look yet.",
+      "Opportunities appear once nAia can see enough of your wardrobe to tell a real gap from a piece you simply haven't styled yet.",
+    ];
+
+    for (const engine of engineStrings) {
+      const out = plainText(engine);
+      assert.notEqual(out, engine, `not rewritten: "${engine}"`);
+      // The sentence must now be about what nAia did.
+      assert.match(out, /nAia/, `no nAia attribution in "${out}"`);
+      // And must no longer read as the customer's omission.
+      for (const blame of [
+        /\byou simply haven['\u2019]t styled\b/,
+        /\bThis hasn['\u2019]t appeared in one of your nAia looks\b/,
+        /\bbut it hasn['\u2019]t appeared in one of your nAia looks\b/,
+        /\bbut haven['\u2019]t appeared in a saved or generated look\b/,
+      ]) {
+        assert.doesNotMatch(out, blame, `blame phrasing survived in "${out}"`);
+      }
+    }
+  });
+
+  it("2e-3 — a rewrite works regardless of which apostrophe character was typed", () => {
+    const ascii = "This hasn't appeared in one of your nAia looks yet, though it works with 3 pieces you already own.";
+    const curly = ascii.replace(/'/g, "\u2019");
+    assert.notEqual(plainText(ascii), ascii);
+    assert.notEqual(plainText(curly), curly, "the curly variant must be rewritten too");
+  });
+
   it("2c — an unrecognised reason passes through rather than being mangled", () => {
     const novel = "Some future reason the engine has not written yet.";
     assert.equal(plainPairReason(novel), novel);
