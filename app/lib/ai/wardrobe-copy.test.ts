@@ -23,6 +23,7 @@ import {
   headlineTopic,
   matchDimension,
   lifestyleMatch,
+  visibleObservations,
   type RegisterDisplay,
 } from "./wardrobe-copy.ts";
 import type { RegisterReading } from "./wardrobe-needs.ts";
@@ -214,6 +215,18 @@ describe("§WC-2 pairing reasons lose the jargon, not the meaning", () => {
     }
   });
 
+  it("2h — the intention-concentration copy loses the jargon, keeps the count", () => {
+    assert.equal(
+      plainText("Your strongest pieces pull the same way"),
+      "A lot of your wardrobe supports the same feeling",
+    );
+    const out = plainText("22 of your pieces read strongest for that. It\u2019s a clear strength — and it means other moods have fewer pieces behind them.");
+    assert.equal(out, "22 pieces are especially strong at that, while other moods have fewer options behind them.");
+    // The count is evidence and must survive verbatim.
+    assert.match(out, /\b22\b/);
+    assert.doesNotMatch(out, /read strongest|pull the same way/);
+  });
+
   it("2c — an unrecognised reason passes through rather than being mangled", () => {
     const novel = "Some future reason the engine has not written yet.";
     assert.equal(plainPairReason(novel), novel);
@@ -299,6 +312,50 @@ describe("§WC-6 the same conclusion is not printed twice", () => {
     // The two palette readings are one subject.
     assert.equal(headlineTopic("synth-colour"), headlineTopic("synth-neutral"));
     assert.notEqual(headlineTopic("need-work"), headlineTopic("need-occasion-effective"));
+  });
+});
+
+// ── §WC-6d One idea, one place ───────────────────────────────────────────────
+
+describe("§WC-6d underused pieces are never shown twice", () => {
+  const obs = (kind: string, garmentIds: string[]) => ({ kind, garmentIds });
+
+  it("6d-1 — PARTIAL overlap is enough to suppress the duplicate observation", () => {
+    // The live case: Rediscover shows 3 pieces, the observation names 4, and
+    // 2 are shared. Requiring every garment to match let this print twice.
+    const rediscoverIds = new Set(["a", "b", "c"]);
+    const shown = visibleObservations(
+      [obs("untapped-potential", ["a", "b", "x", "y"]), obs("repetition", ["m", "n"])],
+      rediscoverIds,
+    );
+    assert.equal(shown.length, 1);
+    assert.equal(shown[0].kind, "repetition", "only the genuinely different pattern survives");
+  });
+
+  it("6d-2 — a single shared garment is enough", () => {
+    const shown = visibleObservations([obs("untapped-potential", ["a", "x", "y", "z"])], new Set(["a"]));
+    assert.deepEqual(shown, []);
+  });
+
+  it("6d-3 — an untapped observation about entirely different pieces still shows", () => {
+    const shown = visibleObservations([obs("untapped-potential", ["x", "y"])], new Set(["a", "b"]));
+    assert.equal(shown.length, 1, "no overlap means no duplication");
+  });
+
+  it("6d-4 — no other observation kind is ever suppressed by Rediscover", () => {
+    const kinds = [
+      "repetition", "contradiction-potential-struggle", "contradiction-alignment-unused",
+      "contradiction-favourite-isolated", "struggle-pattern", "colour-pattern",
+      "passport-alignment", "wardrobe-imbalance", "self-reported-reach",
+      "connection-density", "intention-concentration",
+    ];
+    const shown = visibleObservations(kinds.map((k) => obs(k, ["a"])), new Set(["a"]));
+    assert.equal(shown.length, kinds.length, "chapter 4 keeps every genuinely different pattern");
+  });
+
+  it("6d-5 — an observation with no garments is never suppressed", () => {
+    const shown = visibleObservations([obs("untapped-potential", [])], new Set(["a", "b"]));
+    assert.equal(shown.length, 1);
   });
 });
 

@@ -24,6 +24,7 @@ import {
   matchDimension,
   comparisonDimension,
   coverageMatch,
+  visibleObservations,
   heroLabel,
   traitLabel,
   plainPairReason,
@@ -236,12 +237,7 @@ export default function WardrobeIntelligencePage() {
   // and gives the customer something to do about them.
   const rediscover = opportunities.rediscover;
   const rediscoverIds = new Set(rediscover.map((p) => p.garmentId));
-  const shownObservations = observations.filter(
-    (o) =>
-      o.kind !== "untapped-potential" ||
-      o.garmentIds.length === 0 ||
-      !o.garmentIds.every((id) => rediscoverIds.has(id)),
-  );
+  const shownObservations = visibleObservations(observations, rediscoverIds);
 
   const hasWorksChapter =
     heroes.state !== "learning" || pairings.state !== "learning" || rediscover.length > 0;

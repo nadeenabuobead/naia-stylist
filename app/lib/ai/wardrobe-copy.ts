@@ -298,6 +298,17 @@ const PHRASE_REWRITES: ReadonlyArray<[RegExp, string]> = [
   [rx("\\bThat usually means you're wearing it the same way each time\\b"),
    "Fewer partners means fewer different outfits nAia can build around it"],
 
+  // ── "pull the same way" means nothing to a customer ──
+  //
+  // The claim is that a lot of her wardrobe is strong at ONE feeling, leaving
+  // others thinner. The count and the evidence are unchanged; only the words.
+  [rx("\\bYour strongest pieces pull the same way\\b"),
+   "A lot of your wardrobe supports the same feeling"],
+  [rx("\\b(\\d+) of your pieces read strongest for that\\. It's a clear strength — and it means other moods have fewer pieces behind them\\."),
+   "$1 pieces are especially strong at that, while other moods have fewer options behind them."],
+  [rx("\\b(\\d+) of your pieces read strongest for that\\b"),
+   "$1 pieces are especially strong at that"],
+
   // "reads as" — accurate internally, opaque to a customer.
   [rx("\\bpieces nAia has assessed read\\b"), "pieces nAia has looked at are"],
   [rx("\\bwith fit data read\\b"), "nAia could read the fit of are"],
@@ -467,6 +478,33 @@ export function coverageMatch(
       worst && worst.blockedCount > 0 ? `, mostly in your ${worst.heading.toLowerCase()} pieces` : ""
     }.`,
   };
+}
+
+/**
+ * Which observations chapter 4 may show.
+ *
+ * "Pieces worth another look" (chapter 3) and the "untapped potential"
+ * observation are the same idea: pieces that are better connected than their
+ * use suggests. Chapter 3 gives the customer something to DO about them, so it
+ * keeps them; the observation is the one that gives way.
+ *
+ * ANY shared garment is enough to suppress it. An earlier version required
+ * every garment to match, so a four-piece observation that shared two pieces
+ * with Rediscover still printed and the customer read the same idea twice.
+ *
+ * Only `untapped-potential` is affected — every other pattern chapter 4 finds
+ * is genuinely different work and survives untouched.
+ */
+export function visibleObservations<T extends { kind: string; garmentIds: string[] }>(
+  observations: readonly T[],
+  rediscoverIds: ReadonlySet<string>,
+): T[] {
+  return observations.filter(
+    (o) =>
+      o.kind !== "untapped-potential" ||
+      o.garmentIds.length === 0 ||
+      !o.garmentIds.some((id) => rediscoverIds.has(id)),
+  );
 }
 
 // ── Summary selection ─────────────────────────────────────────────────────────
