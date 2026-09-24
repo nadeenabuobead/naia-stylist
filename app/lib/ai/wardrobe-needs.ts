@@ -70,6 +70,13 @@ const REGISTER_NOUN: Readonly<Record<RegisterId, string>> = {
   occasion: "occasion and evening dressing",
 };
 
+/** How a register is named inside a depth sentence: "limited depth for X dressing". */
+const DEPTH_PHRASE: Readonly<Record<RegisterId, string>> = {
+  everyday: "everyday, casual",
+  work: "polished, work-ready",
+  occasion: "occasion and evening",
+};
+
 /** Closet `occasions` tags → register. Only used when formality is unreadable. */
 const OCCASION_REGISTER: Readonly<Record<string, RegisterId>> = {
   work: "work", office: "work", business: "work", professional: "work",
@@ -616,7 +623,7 @@ function readRegisters(
       depthNote =
         usable.length >= REDUNDANT_PIECES
           ? `You own a lot that reads this way, but the pieces are close enough to each other that they mostly make the same outfit.`
-          : `There's very little here that combines into something you could actually wear out.`;
+          : `You currently have limited depth for ${DEPTH_PHRASE[register]} dressing.`;
     } else {
       depthLabel = `Workable ${shortNoun} depth`;
       depthNote = `There's enough here to dress you, though not a lot of room to vary it.`;
@@ -716,7 +723,7 @@ function buildFindings(
         title: `Your ${REGISTER_NOUN[r.register]} gap is not quantity`,
         body: `You own ${r.rawCount} pieces that read as ${r.label}, but only ${r.usableCount} of them sit the way you've told nAia you prefer to dress${
           leadReason ? ` — ${leadReason}` : ""
-        }. What's missing isn't more ${REGISTER_NOUN[r.register]}; it's ${REGISTER_NOUN[r.register]} you'd actually wear.`,
+        }. What's missing isn't more ${REGISTER_NOUN[r.register]}; it's ${REGISTER_NOUN[r.register]} that fits the way you've told nAia you prefer to dress.`,
         garmentIds: blockedPieces.slice(0, 6).map((g) => g.id),
         evidence: [
           ev("passport-signal", "lifestyle / dressingPreferences", `You've told nAia ${r.needPhrase} is part of your life, and stated how you prefer to be covered.`, []),
@@ -891,7 +898,9 @@ function buildSynthesis(
         kind: "alignment",
         passportSays: "you lean neutral",
         closetShows: `${Math.round(neutralShare * 100)}% of what nAia can read is neutral`,
-        reading: "Your restraint with colour is consistent — this is a deliberate wardrobe, not an accidental one.",
+        // States the alignment only. An aligned palette is evidence of a match
+        // between what she said and what she owns — not evidence of intent.
+        reading: "Your Closet strongly reflects the neutral palette you described.",
         evidence: [ev("garment-fact", "colourProfile", `${Math.round(neutralShare * 100)}% neutral.`, [])],
       });
     } else if (saysColour && neutralShare >= 0.75) {

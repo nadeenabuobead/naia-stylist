@@ -321,8 +321,13 @@ describe("§WN-4 effective depth", () => {
     const finding = needs.couldUseMore.find((f) => f.register === "occasion");
     assert.ok(finding, "occasion should surface");
     assert.equal(finding!.kind, "effective-depth");
-    assert.match(finding!.body, /not quantity|isn't more/i);
     assert.match(finding!.title, /not quantity/i);
+    assert.match(
+      finding!.body,
+      /it's occasion and evening dressing that fits the way you've told nAia you prefer to dress\./,
+    );
+    // The point is fit-to-her, not a vague appeal to what she would "actually" wear.
+    assert.doesNotMatch(finding!.body, /you'd actually wear/);
   });
 
   it("4b — unanalysed pieces are unknown, never blocked, and cannot create a gap", () => {
@@ -417,6 +422,22 @@ describe("§WN-7 Passport and Closet tension", () => {
     assert.ok(line, "a neutral-appetite reading should exist");
     assert.equal(line!.kind, "tension");
     assert.match(line!.reading, /appetite is there/i);
+  });
+
+  it("6c — an aligned palette is reported as alignment, never as intent", () => {
+    const items = variedLooks("casual", 5);
+    const needs = run(items, { passport: makePassport({ neutralVsColour: "mostly-neutral" }) });
+
+    const line = needs.synthesis.lines.find((l) => l.id === "synth-neutral");
+    assert.ok(line, "a neutral-appetite reading should exist");
+    assert.equal(line!.kind, "alignment");
+    assert.equal(line!.reading, "Your Closet strongly reflects the neutral palette you described.");
+
+    // Palette agreement is evidence of a match, not of deliberateness, restraint
+    // or any other motive. nAia does not read intent out of colour data.
+    for (const word of ["deliberate", "accidental", "restraint", "intentional", "disciplined"]) {
+      assert.doesNotMatch(line!.reading.toLowerCase(), new RegExp(word), `motive inferred: "${word}"`);
+    }
   });
 
   it("7b — where no dimension is evidenced, nAia says the connection isn't clear", () => {
@@ -596,6 +617,22 @@ describe("§WN-11 structural guards", () => {
     ];
     const needs = run(items, { sessions });
     assert.ok(needs.styleMe.strongIntentions.includes("feel put together"));
+  });
+
+  it("11c-2 — a thin register names itself in the depth note", () => {
+    // Work is named in her lifestyle but barely present in the Closet.
+    const items = [
+      ...variedLooks("casual", 5),
+      makeGarment({ slot: "top", formality: "business-casual" }),
+      makeGarment({ slot: "bottom", category: "BOTTOMS", formality: "business-casual", topLength: "n/a", hemLength: "full" }),
+    ];
+    const needs = run(items, { passport: makePassport({ lifestyle: ["work-office", "everyday-casual"] }) });
+
+    const work = registerOf(needs, "work");
+    assert.equal(work.depthLabel, "Limited usable work depth");
+    assert.equal(work.depthNote, "You currently have limited depth for polished, work-ready dressing.");
+    // The note says what is thin, not how the engine decided it was thin.
+    assert.doesNotMatch(work.depthNote, /combine|wear out|\d/);
   });
 
   it("11d-2 — no internal number or engineering label reaches the customer", () => {
