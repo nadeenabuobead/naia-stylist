@@ -38,7 +38,7 @@ const REV7_FIELDS = [
 const rev7Profile = {
   stylePersonalities: ["old-money"],          // stale legacy row — must not be used
   styleDirections: ["polished-refined", "sporty-functional"],
-  styleExpression: ["quiet-confidence", "understated"],
+  styleExpression: ["calm", "thoughtful"],   // current Personality vocabulary
   explorationLevel: "familiar-small-twists",
   dressingHabits: ["overthink", "play-it-safe"],
   dressingRequirementsNote: "  I follow a community dress code.  ",
@@ -194,7 +194,11 @@ describe("R7V.4 — Rev 7 fields reach the recommendation layer", () => {
   const signals = buildProfileSignals(rev7Profile)!;
 
   it("styleExpression is surfaced", () => {
-    assert.deepEqual(signals.styleExpression, ["quiet-confidence", "understated"]);
+    assert.deepEqual(signals.styleExpression, ["calm", "thoughtful"]);
+  });
+
+  it("no legacy fallback is carried once a current Personality answer exists", () => {
+    assert.equal((signals as { legacyStyleExpression?: string[] }).legacyStyleExpression, undefined);
   });
 
   it("explorationLevel is surfaced", () => {

@@ -13,6 +13,7 @@ import {
 } from "../lib/cloudinary-admin.server";
 import { emitBuySkipSubmitted, recordJourneyEventAwaited } from "../lib/ai/journey-events.server";
 import { ALL_QUESTIONS, ALL_OPTION_LABELS } from "../lib/onboarding/quiz-data";
+import { splitStyleExpression } from "../lib/passport/rev7-vocabulary";
 import { checkEntitlement } from "../lib/plan/entitlement.server";
 import { moderateImageContent } from "../lib/image-moderation.server";
 import { screenGarmentSuitability } from "../lib/image-suitability.server";
@@ -345,6 +346,16 @@ async function analyzeItem(request) {
     const safeUnsureAbout = sanitize(unsureAbout);
     const safeSize        = sanitize(size);
 
+    // Q3 became the Personality question and its vocabulary was replaced.
+    // splitStyleExpression guarantees the two lists are mutually exclusive, so a
+    // retired answer is never labelled Personality and the two never combine.
+    const expressionSplit = splitStyleExpression(styleProfile?.styleExpression ?? []);
+    const personalityStr = expressionSplit.current
+      .filter(id => id !== "not-sure")
+      .map(id => optionLabel("style-expression", id)).join(", ");
+    const legacyExpressionStr = expressionSplit.legacy
+      .map(id => optionLabel("style-expression", id)).join(", ");
+
     let analysisResponse;
     try {
       analysisResponse = await fetch("https://api.anthropic.com/v1/messages", {
@@ -380,7 +391,8 @@ STYLE IDENTITY
 ${styleProfile.styleDirections?.length > 0
   ? `- Style Directions (the visual aesthetics this customer is drawn to): ${styleProfile.styleDirections.filter(id => id !== "not-sure").map(id => optionLabel("style-directions", id)).join(", ")}`
   : `- Style personalities: ${styleProfile.stylePersonalities?.map(id => optionLabel("style-personalities", id)).join(", ") || "not specified"}`}
-${styleProfile.styleExpression?.length > 0 ? `- Personality (words this customer says feel most like them): ${styleProfile.styleExpression.filter(id => id !== "not-sure").map(id => optionLabel("style-expression", id)).join(", ")}` : ""}
+${personalityStr ? `- Personality (words this customer says feel most like them): ${personalityStr}` : ""}
+${!personalityStr && legacyExpressionStr ? `- Earlier Style Expression (answers from a previous Passport question about how the customer wanted their clothes to come across — not their Personality answer, which they have not given yet): ${legacyExpressionStr}` : ""}
 ${styleProfile.explorationLevel && styleProfile.explorationLevel !== "not-sure" ? `- Exploration Level (how far nAia should move beyond this customer's familiar choices): ${optionLabel("exploration-level", styleProfile.explorationLevel)}` : ""}
 ${styleProfile.dressingHabits?.length > 0 ? `- Dressing Habits (behavioural context — how this customer approaches getting dressed, not an aesthetic preference): ${styleProfile.dressingHabits.filter(id => id !== "none-of-these").map(id => optionLabel("dressing-habits", id)).join("; ")}` : ""}
 - Desired feelings when dressed: ${styleProfile.desiredFeelings?.join(", ") || "not specified"}

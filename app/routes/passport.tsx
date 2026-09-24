@@ -11,7 +11,7 @@ export const links: LinksFunction = () => [
 ];
 import type { OnboardingAnswers, QuizQuestion } from "~/lib/onboarding/quiz-data";
 import { quizQuestions, LEGACY_QUESTIONS, COLOUR_FAMILIES, NOTES_HELPER_TEXT } from "~/lib/onboarding/quiz-data";
-import { REV7_PROFILE_VERSION } from "~/lib/passport/rev7-vocabulary";
+import { REV7_PROFILE_VERSION, currentStyleExpression } from "~/lib/passport/rev7-vocabulary";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 
@@ -1071,7 +1071,7 @@ function getSectionDetail(def: SectionDef, answers: OnboardingAnswers): ReactNod
 
 type Mode =
   | { kind: "overview" }
-  | { kind: "flow"; queue: SectionId[]; index: number; done?: boolean }
+  | { kind: "flow"; queue: SectionId[]; index: number; done?: boolean; rev7TopUp?: true }
   | { kind: "picker" }
   | { kind: "refresh"; stepIndex: number; done?: boolean };
 
@@ -1262,6 +1262,11 @@ export default function PassportPage() {
       if (primary.kind === "single" || primary.kind === "text") {
         return !v || (typeof v === "string" && !v.trim());
       }
+      if (primary.draftKey === "style-expression") {
+        // Retired Q3 values answered a different question, so a profile holding
+        // only those has NOT answered Personality and must still be offered it.
+        return currentStyleExpression(Array.isArray(v) ? v as string[] : []).length === 0;
+      }
       return !Array.isArray(v) || v.length === 0;
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1341,6 +1346,13 @@ export default function PassportPage() {
         let filtered = arr;
         if (draftKey === "favorite-colors") {
           filtered = arr.filter(id => !LEGACY_COLOUR_IDS.has(id));
+        } else if (draftKey === "style-expression") {
+          // Q3 changed meaning, not just its option list: a stored "polished"
+          // answered a different question. Retired IDs are never prefilled, so
+          // they cannot render as selected, be re-picked, or consume a cap slot.
+          // The stored value is untouched until the customer saves a real answer
+          // (see the empty-draft guard in saveSection).
+          filtered = currentStyleExpression(arr);
         } else if (draftKey === "lifestyle") {
           const validIds = new Set((QUESTION_BY_ID["lifestyle"]?.options ?? []).map(o => o.id));
           filtered = arr.filter(id => validIds.has(id));
@@ -1365,7 +1377,7 @@ export default function PassportPage() {
     if (!missingRev7Sections.length) return;
     window.history.pushState({ passport: "flow" }, "");
     initEdits(missingRev7Sections[0].id);
-    setMode({ kind: "flow", queue: missingRev7Sections.map(sec => sec.id), index: 0 });
+    setMode({ kind: "flow", queue: missingRev7Sections.map(sec => sec.id), index: 0, rev7TopUp: true });
   }
 
   function startUpdate() {
@@ -1411,6 +1423,10 @@ export default function PassportPage() {
         const arr = (Array.isArray(saved) ? saved : []) as string[];
         const valid = REV6_VALID_IDS[rf.questionId];
         (edits as Record<string, unknown>)[rf.draftKey] = valid ? arr.filter(id => valid.has(id)) : arr;
+      } else if (rf.draftKey === "style-expression") {
+        // Same rule as initEdits: retired Q3 answers are not Personality answers.
+        (edits as Record<string, unknown>)[rf.draftKey] =
+          currentStyleExpression(Array.isArray(saved) ? saved as string[] : []);
       } else {
         // Preserve as-is (fields new in Rev 6 — all stored IDs are compatible)
         if (rf.kind === "text") {
@@ -1633,6 +1649,21 @@ export default function PassportPage() {
     }
 
     let patch = computeSectionPatch(def, flowEdits, savedAnswers);
+
+    // The Personality draft is prefilled with current IDs only, so a customer
+    // whose stored answers are all retired starts from an empty selection.
+    // computeSectionPatch would read that as "cleared" and write [] over their
+    // history. Nothing was chosen, so nothing is written.
+    if (patch !== null && Object.hasOwn(patch, "styleExpression")) {
+      const drafted = (patch["styleExpression"] as string[] | undefined) ?? [];
+      const storedRaw = (savedAnswers as Record<string, unknown>)["style-expression"];
+      const stored = Array.isArray(storedRaw) ? storedRaw as string[] : [];
+      if (drafted.length === 0 && currentStyleExpression(stored).length === 0 && stored.length > 0) {
+        const { styleExpression: _dropped, ...rest } = patch as Record<string, unknown>;
+        patch = Object.keys(rest).length > 0 ? rest : null;
+      }
+    }
+
     if (sectionId === "about-you") {
       const genderDraft = (flowEdits as Record<string, unknown>)["gender"] as string | undefined;
       if (genderDraft !== "another-gender") {
@@ -1662,7 +1693,12 @@ export default function PassportPage() {
     setSaveStatus("saving");
     try {
       const requestBody: Record<string, unknown> = { ...patch, baseProfileUpdatedAt: profileUpdatedAt };
-      if (isLegacyCustomer) {
+      const isFinalRev7TopUpStep =
+        mode.kind === "flow" && mode.rev7TopUp === true && mode.index + 1 >= mode.queue.length;
+      if (isLegacyCustomer || isFinalRev7TopUpStep) {
+        // Rev 6 customers previously never sent this, so finishing every Rev 7
+        // question left them stamped at 6 forever. The API still verifies that
+        // all required Rev 7 fields are populated before stamping 7.
         requestBody.onboardingComplete = true;
       }
       if (sectionId === "fit") {
@@ -1698,6 +1734,10 @@ export default function PassportPage() {
     const selStr = ((flowEdits as Record<string, unknown>)[sf.draftKey] as string | undefined) ?? "";
     const max   = MAX_SELECTIONS[sf.questionId] ?? 99;
     const atCap = sel.length >= max;
+    // Every other question keeps showing a retired option that is still selected,
+    // because the answer remains true. Q3 is the exception: its vocabulary was
+    // replaced, so a retired value must never appear in the Personality picker.
+    const isStyleExpression = sf.draftKey === "style-expression";
 
     if (sf.kind === "text") {
       const val = selStr || "";
@@ -1719,7 +1759,7 @@ export default function PassportPage() {
     if (sf.kind === "single") {
       return (
         <div className="sp-option-grid">
-          {(q?.options ?? []).filter(o => (!o.reserved && !o.retired) || sel.includes(o.id) || selStr === o.id).map(o => {
+          {(q?.options ?? []).filter(o => (!o.reserved && !o.retired) || (!isStyleExpression && (sel.includes(o.id) || selStr === o.id))).map(o => {
             const isSel = selStr === o.id;
             return (
               <button
@@ -1767,7 +1807,7 @@ export default function PassportPage() {
     // array (multi-select pills) — body area keys use mutual-exclusion handler
     return (
       <div className="sp-option-grid">
-        {(q?.options ?? []).filter(o => (!o.reserved && !o.retired) || sel.includes(o.id) || selStr === o.id).map(o => {
+        {(q?.options ?? []).filter(o => (!o.reserved && !o.retired) || (!isStyleExpression && (sel.includes(o.id) || selStr === o.id))).map(o => {
           const isSel = sel.includes(o.id);
           const handleClick =
             sf.draftKey === "body-focus-areas" ? () => handleBodyAreaToggle("body-focus-areas", "bodyFocusAreas", o.id) :
@@ -1804,7 +1844,10 @@ export default function PassportPage() {
       const dressingPrefs = getArr("dressing-preferences");
       // Rev 7
       const styleDirections  = getArr("style-directions");
-      const styleExpression  = getArr("style-expression");
+      // Only current-vocabulary answers are Personality. A profile holding just
+      // retired Q3 values reads as "not yet set" so the Rev 7 invitation can
+      // collect a real answer; the stored history is left alone.
+      const styleExpression  = currentStyleExpression(getArr("style-expression"));
       const dressingHabits   = getArr("dressing-habits");
       const explorationLevel = (a["exploration-level"] as string | undefined) ?? "";
       const noteText    = (a["final-notes"] as string | undefined)?.trim() ?? "";

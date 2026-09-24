@@ -8,7 +8,7 @@
 
 import { ALL_QUESTIONS, ALL_OPTION_LABELS } from "../onboarding/quiz-data.js";
 import { closetItemToSlot } from "./closet-slot.js";
-import { projectStyleDirectionsToArchetypes } from "../passport/rev7-vocabulary.js";
+import { projectStyleDirectionsToArchetypes, splitStyleExpression } from "../passport/rev7-vocabulary.js";
 import { runRecommendation, buildSessionFingerprint } from "./styleme-recommendation.js";
 import type {
   StyleMeEngineInput,
@@ -149,7 +149,13 @@ export function buildProfileSignals(
 
   // ── Rev 7 ───────────────────────────────────────────────────────────────────
   // Context only. No numeric weight is assigned to any of these in this revision.
-  if (profile.styleExpression?.length) signals.styleExpression = profile.styleExpression;
+  // Only current-vocabulary answers are Personality. Retired Q3 values answered a
+  // different question and are carried separately so nothing blends them.
+  {
+    const { current, legacy } = splitStyleExpression(profile.styleExpression ?? []);
+    if (current.length) signals.styleExpression = current;
+    else if (legacy.length) signals.legacyStyleExpression = legacy;
+  }
   if (profile.explorationLevel) signals.explorationLevel = profile.explorationLevel;
   if (profile.styleDirections?.length) {
     signals.styleDirections = profile.styleDirections;
@@ -2557,8 +2563,15 @@ export async function callClaudeForNaiaSelection(
     .map((id) => optionLabel("style-directions", id)).join(", ");
   const unmappedDirectionsStr = (profile?.unmappedStyleDirections ?? [])
     .map((id) => optionLabel("style-directions", id)).join(", ");
-  const styleExpressionStr = (profile?.styleExpression ?? [])
+  // Q3's vocabulary was replaced when it became the Personality question.
+  // `current` and `legacy` are mutually exclusive by construction: the legacy
+  // list is populated only while the customer has no current answer, so the two
+  // vocabularies are never blended and legacy words are never called Personality.
+  const styleExpressionSplit = splitStyleExpression(profile?.styleExpression ?? []);
+  const styleExpressionStr = styleExpressionSplit.current
     .filter((id) => id !== "not-sure")
+    .map((id) => optionLabel("style-expression", id)).join(", ");
+  const legacyStyleExpressionStr = styleExpressionSplit.legacy
     .map((id) => optionLabel("style-expression", id)).join(", ");
   const explorationLevelStr = profile?.explorationLevel && profile.explorationLevel !== "not-sure"
     ? optionLabel("exploration-level", profile.explorationLevel)
@@ -2584,6 +2597,9 @@ export async function callClaudeForNaiaSelection(
       : null,
     styleExpressionStr
       ? `Personality (words this customer says feel most like them): ${styleExpressionStr}.`
+      : null,
+    !styleExpressionStr && legacyStyleExpressionStr
+      ? `Earlier Style Expression (answers from a previous Passport question about how the customer wanted their clothes to come across — not their Personality answer, which they have not given yet): ${legacyStyleExpressionStr}.`
       : null,
     explorationLevelStr
       ? `Exploration Level (how far nAia should move beyond this customer's familiar choices): ${explorationLevelStr}.`

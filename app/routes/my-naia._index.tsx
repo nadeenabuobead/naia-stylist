@@ -13,7 +13,7 @@ import {
 } from "~/lib/cloudinary-admin.server";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import { ALL_OPTION_LABELS } from "~/lib/onboarding/quiz-data";
-import { REV7_PROFILE_VERSION } from "~/lib/passport/rev7-vocabulary";
+import { REV7_PROFILE_VERSION, currentStyleExpression } from "~/lib/passport/rev7-vocabulary";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 
 export const links: LinksFunction = () => [
@@ -209,8 +209,10 @@ function PassportSnapshot({ profile }: { profile: Record<string, unknown> }) {
     }
   }
 
-  // 2. Style expression — what they want their clothes to communicate.
-  const expression = arr("styleExpression", ["not-sure"]);
+  // 2. Personality — words the customer says feel most like them.
+  // Current Q3 vocabulary only: retired values answered a different question and
+  // must never be presented to the customer as their Personality.
+  const expression = currentStyleExpression(arr("styleExpression", ["not-sure"]));
   if (expression.length > 0) {
     signals.push({ label: "Personality", value: joinCapped(expression.map(e => labelFrom(STYLE_EXPRESSION_LABELS, e)), 3) });
   }
@@ -438,10 +440,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // A Rev 6 Passport is complete for its own generation but has not answered the
   // Rev 7 questions. Those fields are optional in the editor, so the Passport is
   // never marked incomplete — the customer is invited to add them instead.
+  // Personality is counted on current IDs only: a Rev 6 profile holding just
+  // retired Q3 answers still has this question to answer, so it must keep the
+  // invitation even once styleDirections is filled in.
   const missingRev7Answers =
     profileVersion !== null &&
     profileVersion < REV7_PROFILE_VERSION &&
-    ((p as any)?.styleDirections?.length ?? 0) === 0;
+    (((p as any)?.styleDirections?.length ?? 0) === 0 ||
+      currentStyleExpression((p as any)?.styleExpression ?? []).length === 0);
 
   return {
     firstName: customer.firstName ?? null,

@@ -105,8 +105,14 @@ export interface StyleMeProfileSignals {
   // Carried for prompt/context use. None of these carry a numeric scoring weight
   // in this revision — see app/lib/passport/rev7-vocabulary.ts.
 
-  /** Personality — words the customer says feel most like them. */
+  /** Personality — words the customer says feel most like them. Current Q3 vocabulary only. */
   styleExpression?: string[];
+  /**
+   * Withdrawn Q3 answers from the pre-Personality question ("how do you want
+   * your clothes to come across"). Present ONLY while the customer has no
+   * current Personality answer, and never merged into styleExpression.
+   */
+  legacyStyleExpression?: string[];
   /** How far nAia should move beyond the customer's familiar choices. */
   explorationLevel?: string;
   /**

@@ -13,6 +13,7 @@
 import { Link, useLoaderData } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
 import { requireAdminSession } from "~/lib/internal-auth.server";
+import { splitStyleExpression } from "~/lib/passport/rev7-vocabulary";
 import {
   getAdminCustomerDetail,
   type AdminCustomerDetail,
@@ -160,10 +161,16 @@ function PassportSection({ ctx }: { ctx: CustomerStylingPassportContext | null }
   // V6 = explicit version flag OR V6-only fields present (guards against null profileVersion for pre-tracking completions)
   const isV6 = (ctx.profileVersion != null && ctx.profileVersion >= 6) || ctx.successfulOutfitGives.length > 0 || ctx.currentGoal.length > 0;
 
+  const personalitySplit = splitStyleExpression(ctx.styleExpression);
+
   const v6Rows: Array<{ label: string; field: string; values: string[] }> = [
     { label: "Current Focus", field: "currentGoal", values: ctx.currentGoal },
     { label: "Outfit Priorities", field: "successfulOutfitGives", values: ctx.successfulOutfitGives },
-    { label: "Personality", field: "styleExpression", values: ctx.styleExpression },
+    { label: "Personality", field: "styleExpression", values: personalitySplit.current },
+    // Withdrawn Q3 vocabulary. Shown only while the customer has no current
+    // Personality answer, and never under the Personality label — these words
+    // answered "how do you want your clothes to come across", a different question.
+    { label: "Earlier Style Expression", field: "styleExpression", values: personalitySplit.legacy },
     { label: "Style Exploration", field: "explorationLevel", values: ctx.explorationLevel ? [ctx.explorationLevel] : [] },
     { label: "Style Direction", field: "styleDirections", values: ctx.styleDirections },
     // Legacy style field — only shown when the customer has no Rev 7 answer.

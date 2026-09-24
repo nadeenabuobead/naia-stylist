@@ -59,6 +59,50 @@ export const RETIRED_STYLE_EXPRESSION_IDS: ReadonlySet<string> = new Set([
   "relaxed", "powerful", "individual", "understated", "unexpected",
 ]);
 
+/**
+ * The 14 IDs the Personality question actually offers today.
+ *
+ * STYLE_EXPRESSION_VALID_IDS is deliberately wider: it still accepts the
+ * withdrawn IDs so an un-migrated profile can re-save without failing
+ * validation. This set is the narrower "what counts as a current answer to
+ * Q3" test, and it is what every picker, cap and completeness check uses.
+ *
+ * The distinction matters because Q3 did not merely lose options — the
+ * question changed meaning. A stored "polished" answered "how do you want
+ * your clothes to come across", not "which words feel like you". Treating it
+ * as a Personality answer would be wrong, not just stale.
+ */
+export const STYLE_EXPRESSION_CURRENT_IDS: ReadonlySet<string> = new Set(
+  STYLE_EXPRESSION_IDS.filter(id => !RETIRED_STYLE_EXPRESSION_IDS.has(id)),
+);
+
+/** Current-vocabulary Personality answers, in stored order. */
+export function currentStyleExpression(values: readonly string[] | null | undefined): string[] {
+  return (values ?? []).filter(id => STYLE_EXPRESSION_CURRENT_IDS.has(id));
+}
+
+/**
+ * Withdrawn Q3 answers, in stored order. Only meaningful when
+ * currentStyleExpression() is empty — once a customer answers the new
+ * question their current answers are the whole truth and these are dropped.
+ */
+export function legacyStyleExpression(values: readonly string[] | null | undefined): string[] {
+  return (values ?? []).filter(id => RETIRED_STYLE_EXPRESSION_IDS.has(id));
+}
+
+/**
+ * Splits a stored styleExpression into the two mutually exclusive views every
+ * surface needs. `legacy` is non-empty ONLY when there is no current answer,
+ * so no caller can accidentally blend the two vocabularies.
+ */
+export function splitStyleExpression(values: readonly string[] | null | undefined): {
+  current: string[];
+  legacy: string[];
+} {
+  const current = currentStyleExpression(values);
+  return { current, legacy: current.length > 0 ? [] : legacyStyleExpression(values) };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 4. Style Exploration — how far nAia should move beyond familiar choices (NEW)
 // ─────────────────────────────────────────────────────────────────────────────

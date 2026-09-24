@@ -13,6 +13,7 @@ import {
   STYLE_EXPRESSION_VALID_IDS,
   STYLE_EXPRESSION_MAX,
   STYLE_EXPRESSION_EXCLUSIVE_IDS,
+  currentStyleExpression,
   EXPLORATION_LEVEL_VALID_IDS,
   STYLE_DIRECTION_VALID_IDS,
   STYLE_DIRECTION_MAX,
@@ -537,7 +538,9 @@ export async function action({ request }) {
       if (!v.every(id => STYLE_EXPRESSION_VALID_IDS.has(id)) || new Set(v).size !== v.length) {
         return Response.json({ error: "invalid_body" }, { status: 400 });
       }
-      if (v.length > STYLE_EXPRESSION_MAX) {
+      // Retired IDs stay valid so an un-migrated profile can re-save, but they
+      // are not Personality answers and must not consume the cap.
+      if (currentStyleExpression(v).length > STYLE_EXPRESSION_MAX) {
         return Response.json({ error: "invalid_body" }, { status: 400 });
       }
     }
@@ -691,7 +694,13 @@ export async function action({ request }) {
   }
   // Rev 7 exclusive rules
   if (Object.hasOwn(body, "styleExpression")) {
-    body["styleExpression"] = applyExclusiveRule(body["styleExpression"], STYLE_EXPRESSION_EXCLUSIVE_IDS);
+    const withExclusive = applyExclusiveRule(body["styleExpression"], STYLE_EXPRESSION_EXCLUSIVE_IDS);
+    // Q3's vocabulary was replaced, not extended. A submission carrying at least
+    // one current answer is a real Personality answer, so any retired value
+    // riding along is stale and is dropped. An all-retired array is an
+    // un-migrated profile re-saving and is preserved untouched.
+    const current = currentStyleExpression(withExclusive);
+    body["styleExpression"] = current.length > 0 ? current : withExclusive;
   }
   if (Object.hasOwn(body, "styleDirections")) {
     body["styleDirections"] = applyExclusiveRule(body["styleDirections"], STYLE_DIRECTION_EXCLUSIVE_IDS);
@@ -847,10 +856,14 @@ export async function action({ request }) {
     //                         legacy customer's stored value must not gate completion
     //
     // lifestyle has no selection cap at Rev 7; one or more valid IDs satisfies it.
+    //
+    // styleExpression is measured on CURRENT Personality IDs only: a Rev 6
+    // profile still holding retired Q3 answers has not answered the new
+    // question, and must not be stamped Rev 7 on the strength of them.
     const requiredRev7Arrays = [
       ["currentGoal",           profileData.currentGoal],
       ["successfulOutfitGives", profileData.successfulOutfitGives],
-      ["styleExpression",       profileData.styleExpression],
+      ["styleExpression",       currentStyleExpression(profileData.styleExpression)],
       ["styleDirections",       profileData.styleDirections],
       ["lifestyle",             profileData.lifestyle],
       ["favoriteColors",        profileData.favoriteColors],

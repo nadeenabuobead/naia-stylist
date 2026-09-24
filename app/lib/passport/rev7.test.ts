@@ -345,8 +345,13 @@ describe("R7.2b — Q3/Q12 copy and the withdrawn dressing habits", () => {
       "both onboarding pickers must filter retired options");
     assert.equal((passport.match(/!o\.reserved && !o\.retired/g) ?? []).length, 2,
       "both Passport pickers must filter retired options");
-    assert.ok(passport.includes("|| sel.includes(o.id) || selStr === o.id"),
+    assert.ok(passport.includes("sel.includes(o.id) || selStr === o.id"),
       "a value the customer already holds must stay visible so it can be removed");
+    // Q3 is the one exception: its vocabulary was replaced rather than trimmed,
+    // so a retired answer is history, not a removable current selection.
+    // See rev7-q3-compat.test.ts (Q3C.2).
+    assert.equal((passport.match(/!isStyleExpression && \(sel\.includes\(o\.id\)/g) ?? []).length, 2,
+      "both Passport pickers must exempt style-expression from that rule");
   });
 });
 
