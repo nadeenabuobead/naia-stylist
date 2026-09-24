@@ -1,6 +1,8 @@
 // app/routes/style-me/physical-need.tsx
-// Rev 3 Screen 3 — "Any physical comfort needs right now?"
+// Rev 3 Screen 3 — "Any fit or comfort preferences today?"
 // Max 2 selections. "nothing-specific" is exclusive (clears other selections).
+// Options (IDs + labels) live in ~/lib/styleme/session-vocabulary. Labels are
+// display copy; the IDs below carry the QA-tested body-need semantics.
 // Canonical Rev3 IDs are stored verbatim in styleMeBodyNeeds (no normalization).
 // Legacy normalization happens only in comfort.tsx and quick-style for backward compat.
 
@@ -9,6 +11,10 @@ import type { ActionFunctionArgs, LinksFunction, LoaderFunctionArgs } from "reac
 import { useState } from "react";
 import { getSession, commitSession } from "~/lib/session.server.js";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
+import {
+  STYLEME_FIT_COMFORT_OPTIONS,
+  STYLEME_FIT_COMFORT_EXCLUSIVE_ID,
+} from "~/lib/styleme/session-vocabulary";
 import { SmPage } from "~/components/style-me/SmPage";
 import { SmContinue } from "~/components/style-me/SmContinue";
 import naiaStyles from "~/styles/naia-design-system.css?url";
@@ -19,20 +25,10 @@ export const links: LinksFunction = () => [
 
 const MAX_SELECTIONS = 2;
 
-const PHYSICAL_NEED_OPTIONS: Array<{ id: string; label: string }> = [
-  { id: "nothing-tight-waist",   label: "Nothing tight around my waist" },
-  { id: "less-body-conscious",   label: "Nothing too body-hugging" },
-  { id: "more-coverage",         label: "More coverage" },
-  { id: "softer-easier-fabrics", label: "Softer / easier fabrics" },
-  { id: "loose-comfortable",     label: "Loose and comfortable" },
-  { id: "still-want-shape",      label: "I still want shape" },
-  { id: "waist-definition",      label: "I want waist definition" },
-  { id: "structured-shape",      label: "More structure / a more defined shape" },
-  { id: "nothing-specific",      label: "Nothing specific" },
-];
+const PHYSICAL_NEED_OPTIONS = STYLEME_FIT_COMFORT_OPTIONS;
 
 const VALID_IDS = new Set(PHYSICAL_NEED_OPTIONS.map((o) => o.id));
-const EXCLUSIVE_ID = "nothing-specific";
+const EXCLUSIVE_ID = STYLEME_FIT_COMFORT_EXCLUSIVE_ID;
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const session = await getSession(request.headers.get("Cookie"));
@@ -65,11 +61,11 @@ export async function action({ request }: ActionFunctionArgs) {
   const selected = raw.includes(EXCLUSIVE_ID) ? [EXCLUSIVE_ID] : raw;
 
   if (selected.length === 0) {
-    return { error: "Please choose at least one physical need, or choose 'Nothing specific'." };
+    return { error: "Please choose at least one fit or comfort preference, or choose 'No specific preference'." };
   }
 
   if (selected.length > MAX_SELECTIONS) {
-    return { error: `Please choose up to ${MAX_SELECTIONS} physical needs.` };
+    return { error: `Please choose up to ${MAX_SELECTIONS} fit or comfort preferences.` };
   }
 
   // Store raw canonical IDs for back-navigation hydration.
@@ -100,7 +96,7 @@ export default function PhysicalNeedPage() {
   return (
     <SmPage step={3}>
       <p className="sm-step-label">Fit / Comfort</p>
-      <h1 className="sm-heading">Any fit or comfort needs right now?</h1>
+      <h1 className="sm-heading">Any fit or comfort preferences today?</h1>
       <p className="sm-sub">Choose up to {MAX_SELECTIONS}.</p>
 
       <Form method="post">

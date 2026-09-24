@@ -87,6 +87,12 @@ import type { ClosetAnchorInput, StyleMeEngineInput, StyleMeRecommendationResult
 import { resolveActionAnchor } from "./styleme-anchor.server.ts";
 import type { NormalizedStyleAnchor } from "./styleme-recommendation.types.ts";
 import { closetItemToSlot } from "./closet-slot.ts";
+import {
+  STYLEME_STATE_LABELS,
+  STYLEME_INTENTION_LABELS,
+  STYLEME_FIT_COMFORT_LABELS,
+  STYLEME_INTENTION_OPTIONS,
+} from "../styleme/session-vocabulary.ts";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -3356,18 +3362,30 @@ describe("§ND — nAia-mode New Look diversity", () => {
 // ── §QA-RG — QA Regression Tests (Test-1 fix verification) ───────────────────
 
 describe("§QA-RG.A — Issue 1: REV3_STATE_LABELS stale copy", () => {
-  it("QA-RG.A.1 — result.tsx REV3_STATE_LABELS source contract: nothing-in-particular = 'I feel pretty neutral'", () => {
+  it("QA-RG.A.1 — REV3_STATE_LABELS source contract: nothing-in-particular = 'I feel pretty neutral'", () => {
+    assert.equal(
+      STYLEME_STATE_LABELS["nothing-in-particular"],
+      "I feel pretty neutral",
+      'State vocabulary must map "nothing-in-particular" → "I feel pretty neutral"',
+    );
+    assert.ok(
+      !Object.values(STYLEME_STATE_LABELS).includes("Nothing in particular"),
+      'State vocabulary must NOT contain stale copy "Nothing in particular"',
+    );
+  });
+
+  it("QA-RG.A.2 — the result page reads its State/Intention labels from the shared vocabulary", () => {
     const src = readFileSync(
       new URL("../../routes/style-me/result.tsx", import.meta.url).pathname,
       "utf8",
     );
     assert.ok(
-      src.includes('"nothing-in-particular": "I feel pretty neutral"'),
-      'REV3_STATE_LABELS must map "nothing-in-particular" → "I feel pretty neutral"',
+      src.includes("const REV3_STATE_LABELS = STYLEME_STATE_LABELS"),
+      "result.tsx must not keep a private copy of the State labels",
     );
     assert.ok(
-      !src.includes('"nothing-in-particular": "Nothing in particular"'),
-      'REV3_STATE_LABELS must NOT contain stale copy "Nothing in particular"',
+      src.includes("const REV3_INTENTION_LABELS = STYLEME_INTENTION_LABELS"),
+      "result.tsx must not keep a private copy of the Intention labels",
     );
   });
 });

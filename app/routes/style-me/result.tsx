@@ -3,6 +3,7 @@ import { Form, Link, useLoaderData, useFetcher } from "react-router";
 import { data, redirect, type LoaderFunctionArgs, type ActionFunctionArgs, type ShouldRevalidateFunctionArgs, type LinksFunction } from "react-router";
 import { useState, useEffect, type Dispatch, type SetStateAction, type CSSProperties } from "react";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
+import { STYLEME_STATE_LABELS, STYLEME_INTENTION_LABELS } from "~/lib/styleme/session-vocabulary";
 import {
   getCloudinaryConfig,
   validatePublicIdOwnership,
@@ -1031,32 +1032,10 @@ export function shouldRevalidate({
 const MIN_LOADING_MS = 4800;
 const loadingMessages = ["Reading the runways...", "Reading what you need from the outfit...", "Matching textures and fabrics...", "Finalizing your look..."];
 
-const REV3_STATE_LABELS: Record<string, string> = {
-  "feel-good": "I feel good",
-  "stressed-overloaded": "Stressed / overloaded",
-  "low-energy": "Low-energy",
-  "not-feeling-like-myself": "I don't really feel like myself",
-  "physically-uncomfortable": "Physically uncomfortable",
-  "self-conscious": "Self-conscious",
-  "going-through-change": "I'm going through a change / something",
-  "want-reset": "I want a reset",
-  "nothing-in-particular": "I feel pretty neutral",
-  "other": "Something else",
-};
-const REV3_INTENTION_LABELS: Record<string, string> = {
-  "feel-like-myself": "Help me feel like myself",
-  "confidence":       "Give me confidence",
-  "ground-me":        "Ground me",
-  "give-structure":   "Give me structure",
-  "make-it-easy":     "Make things feel easy",
-  "feel-put-together": "Help me feel put together",
-  "feel-attractive":  "Make me feel attractive",
-  "give-energy":      "Give me energy",
-  "feel-softer":      "Help me feel softer",
-  "feel-sharper":     "Help me feel sharper",
-  "feel-less-exposed": "Help me feel less exposed",
-  "express-myself":   "Let me express myself",
-};
+// Session-summary labels come from the questionnaire vocabulary so the result
+// page can never show wording the customer did not actually read on the screens.
+const REV3_STATE_LABELS = STYLEME_STATE_LABELS;
+const REV3_INTENTION_LABELS = STYLEME_INTENTION_LABELS;
 const MOOD_LABELS: Record<string, string> = {
   "confident": "Confident", "tired": "Low-energy", "overwhelmed": "Overwhelmed",
   "adventurous": "Adventurous", "romantic": "Romantic", "powerful": "Powerful",

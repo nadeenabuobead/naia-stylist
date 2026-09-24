@@ -53,6 +53,11 @@ import type {
   ResultDirection,
 } from "./styleme-result.types.js";
 import { getMappingById, PRODUCT_TEMPLATE_FIELDS } from "./signal-contract.js";
+import {
+  STYLEME_STATE_LABELS,
+  STYLEME_INTENTION_LABELS,
+  STYLEME_FIT_COMFORT_LABELS,
+} from "../styleme/session-vocabulary.js";
 import type { ProductEvaluation } from "./styleme-recommendation.types.js";
 import {
   passesProfileOccasionGate,
@@ -2376,34 +2381,20 @@ interface NaiaSelectionResponse {
 // These mirror the options defined in the session route files. Kept here as a
 // single source of truth for model payload formatting.
 
+// State + Intention labels are the customer-facing questionnaire copy, so the
+// model reads exactly what the customer read. "other" gets a prompt-only suffix
+// pointing at the free-text note rendered on the next line.
 export const NAIA_STATE_LABELS: Record<string, string> = {
-  "feel-good":                "I feel good",
-  "stressed-overloaded":      "Stressed / overloaded",
-  "low-energy":               "Low-energy",
-  "not-feeling-like-myself":  "I don't really feel like myself",
-  "physically-uncomfortable": "Physically uncomfortable",
-  "self-conscious":           "Self-conscious",
-  "going-through-change":     "I'm going through something",
-  "want-reset":               "I feel like I need a reset",
-  "nothing-in-particular":    "I feel pretty neutral",
-  "other":                    "Other (see note below)",
+  ...STYLEME_STATE_LABELS,
+  "other": "Other (see note below)",
 };
 
 export const NAIA_INTENTION_LABELS: Record<string, string> = {
-  "feel-like-myself":  "Help me feel like myself",
-  "confidence":        "Give me confidence",
-  "ground-me":         "Ground me",
-  "give-structure":    "Give me structure",
-  "make-it-easy":      "Make things feel easy",
-  "feel-put-together": "Help me feel put together",
-  "feel-attractive":   "Make me feel attractive",
-  "give-energy":       "Give me energy",
-  "feel-softer":       "Help me feel softer",
-  "feel-sharper":      "Help me feel sharper",
-  "feel-less-exposed": "Help me feel less exposed",
-  "express-myself":    "Let me express myself",
+  ...STYLEME_INTENTION_LABELS,
 };
 
+// Canonical/legacy engine body-need IDs keep their own prompt phrasing; the
+// Rev 3 Fit / Comfort IDs reuse the customer-facing labels verbatim.
 export const NAIA_BODY_NEED_LABELS: Record<string, string> = {
   "waist-definition":                "Define my waist",
   "soft-and-forgiving-around-waist": "Feel easy around my waist",
@@ -2414,13 +2405,13 @@ export const NAIA_BODY_NEED_LABELS: Record<string, string> = {
   "elongates":                       "Create a longer line",
   "balances":                        "Balance my proportions",
   "comfortable-elevated":            "Comfortable but polished",
-  // Canonical Rev3 Physical Need IDs
-  "nothing-tight-waist":             "Nothing too tight around my waist",
-  "less-body-conscious":             "Nothing too body-hugging",
-  "loose-comfortable":               "Loose and comfortable",
-  "softer-easier-fabrics":           "Softer / easier fabrics",
-  "still-want-shape":                "I still want shape",
-  "structured-shape":                "More structure / a more defined shape",
+  // Canonical Rev3 Fit / Comfort IDs — customer-facing wording.
+  // "nothing-specific" is deliberately omitted: it signals the absence of a
+  // requirement and is filtered out before the label lookup, so giving it a
+  // prompt label would let it read as a requirement.
+  ...Object.fromEntries(
+    Object.entries(STYLEME_FIT_COMFORT_LABELS).filter(([id]) => id !== "nothing-specific"),
+  ),
 };
 
 export const NAIA_CURRENT_GOAL_LABELS: Record<string, string> = {
@@ -2925,7 +2916,7 @@ export async function callClaudeForNaiaSelection(
     "\n15. Do not infer body-zone concerns from a garment name alone — only from explicit Fit/Comfort selections or Passport body-avoid areas listed above." +
     "\n16. Do not rename the occasion — use the exact occasion label as given in TODAY'S BRIEF." +
     "\n17. Do not invent goals, outcomes, or aspirations for the customer unless they appear in Becoming/aspiration or Current style focus in STYLE PASSPORT above." +
-    "\n18. CONSTRUCTION GROUNDING: Structural language (sharp, structured, tailored, crisp, polished) in copy requires a CLOTHING piece's 'construction: structured' or 'construction: tailored' to appear in its metadata above. Bags, accessories, and jewellery with 'construction: structured' may be described as structured accessories — they cannot justify that the outfit satisfies a 'More structure / a more defined shape' Fit/Comfort need; that claim requires a clothing piece (top, bottom, dress, set, or outerwear) with construction: structured or construction: tailored. Colour, darkness, or a fitted silhouette alone are never structural signals and must not be described as making an outfit feel sharper or more structured. If Intention includes 'make-it-easy', ease claims (effortless, easy to wear, throw-on, low-maintenance) require the garment to have 'styling effort: easy' in its metadata above. When the metadata does not support the claimed quality, describe the outfit through its occasion appropriateness, mood, and Passport alignment instead." +
+    "\n18. CONSTRUCTION GROUNDING: Structural language (sharp, structured, tailored, crisp, polished) in copy requires a CLOTHING piece's 'construction: structured' or 'construction: tailored' to appear in its metadata above. Bags, accessories, and jewellery with 'construction: structured' may be described as structured accessories — they cannot justify that the outfit satisfies a '" + STYLEME_FIT_COMFORT_LABELS["structured-shape"] + "' Fit/Comfort need; that claim requires a clothing piece (top, bottom, dress, set, or outerwear) with construction: structured or construction: tailored. Colour, darkness, or a fitted silhouette alone are never structural signals and must not be described as making an outfit feel sharper or more structured. If Intention includes 'make-it-easy', ease claims (effortless, easy to wear, throw-on, low-maintenance) require the garment to have 'styling effort: easy' in its metadata above. When the metadata does not support the claimed quality, describe the outfit through its occasion appropriateness, mood, and Passport alignment instead." +
     "\n19. STATEMENT PIECE: Only call a garment 'the statement piece', 'the hero', or 'the focal point' when its metadata shows 'statement-level: statement' or 'outfit-function: statement'. A garment with statement-level: quiet or statement-level: moderate is a refined accent, supporting layer, or visual interest — never the statement. Do not promote quiet or moderate pieces." +
     "\n20. COVERAGE PRECISION: Use exact coverage language. 'hem-length: midi' means below-knee/mid-calf coverage — never write 'full leg coverage', 'covers fully', or 'covers everything'. 'hem-length: maxi' or 'hem-length: full' may be described as full-length coverage ONLY when nothing in the garment name, label, or style description indicates a slit or cut-out. If the garment name, label, or description mentions a slit, high slit, or cut-out, do not claim full leg coverage regardless of hemLength. Do not infer lower-body coverage from upper-body garments or vice versa." +
     "\n21. WAIST DEFINITION: Only claim a garment 'defines the waist', 'shapes the waist', 'creates waist definition', 'accentuates the waist', 'nips the waist', or any similar phrasing when its metadata shows 'waistShape: belted', 'waistShape: tied', or 'waistShape: wrap'. A tailored or structured construction does NOT automatically define the waist. When waistShape is absent from the metadata entirely, do NOT make any waist-shaping or waist-definition claim for that garment — describe it through its silhouette, proportion, or occasion fit only." +

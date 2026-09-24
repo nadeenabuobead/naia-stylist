@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { STYLEME_STATE_LABELS } from "~/lib/styleme/session-vocabulary";
 
 const dir = join(import.meta.dirname ?? new URL(".", import.meta.url).pathname);
 
@@ -1078,10 +1079,14 @@ describe("StyleMe Rev 3 Pre-QA cleanup — regression tests", () => {
   it("G: REV3_STATE_LABELS map is defined with human-readable labels", () => {
     const text = src("result.tsx");
     assert.ok(text.includes("REV3_STATE_LABELS"), "REV3_STATE_LABELS must be defined");
-    assert.ok(text.includes('"stressed-overloaded"'), "must include stressed-overloaded key");
-    assert.ok(text.includes('"Stressed / overloaded"'), "must map to human-readable label");
-    assert.ok(text.includes('"feel-good"'), "must include feel-good key");
-    assert.ok(text.includes('"I feel good"'), "must map feel-good to human label");
+    // The map now comes from the shared questionnaire vocabulary so the summary
+    // can never drift from the wording the customer read on the screens.
+    assert.ok(
+      text.includes("const REV3_STATE_LABELS = STYLEME_STATE_LABELS"),
+      "REV3_STATE_LABELS must be sourced from the shared vocabulary",
+    );
+    assert.equal(STYLEME_STATE_LABELS["stressed-overloaded"], "Stressed / overloaded");
+    assert.equal(STYLEME_STATE_LABELS["feel-good"], "I feel good");
   });
 
   // H. one intention renders correctly (join with ·)

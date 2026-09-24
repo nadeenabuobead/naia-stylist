@@ -15,6 +15,14 @@ import {
   BODY_NEED_NORMALIZATION_MAP,
 } from "./signal-contract.js";
 import { computeResultDirections, buildProfileHint, STYLEME_WORDING_SYSTEM_PROMPT } from "./styleme-result.server.js";
+import {
+  STYLEME_STATE_OPTIONS,
+  STYLEME_INTENTION_OPTIONS,
+  STYLEME_FIT_COMFORT_OPTIONS,
+  STYLEME_STATE_LABELS,
+  STYLEME_INTENTION_LABELS,
+  STYLEME_FIT_COMFORT_LABELS,
+} from "../styleme/session-vocabulary.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../../..");
 
@@ -932,12 +940,11 @@ describe("R3.19 — Physical Need mapping verification (Rev 3 IDs)", () => {
   );
 
   it("Rev 3 Physical Need route has 9 options", () => {
-    const count = (physicalNeedSrc.match(/id: "/g) ?? []).length;
-    assert.equal(count, 9, "Must have exactly 9 physical need option IDs");
+    assert.equal(STYLEME_FIT_COMFORT_OPTIONS.length, 9, "Must have exactly 9 fit/comfort option IDs");
   });
 
   it("nothing-specific is present as exclusive option", () => {
-    assert.ok(physicalNeedSrc.includes('"nothing-specific"'));
+    assert.ok(STYLEME_FIT_COMFORT_OPTIONS.some((o) => o.id === "nothing-specific"));
     assert.ok(physicalNeedSrc.includes("EXCLUSIVE_ID"));
   });
 
@@ -1237,22 +1244,10 @@ describe("R3.V.PH — buildProfileHint: profile hint generation", () => {
 
 // ── R3.21 — State UI: exact approved IDs and labels ───────────────────────────
 
-describe("R3.21 — State UI: exact 10 approved IDs and labels", () => {
+describe("R3.21 — State UI: approved IDs and labels (session vocabulary)", () => {
   const stateSrc = readFileSync(join(ROOT, "app/routes/style-me/state.tsx"), "utf8");
 
-  const APPROVED_STATE_IDS = [
-    "feel-good",
-    "stressed-overloaded",
-    "low-energy",
-    "not-feeling-like-myself",
-    "physically-uncomfortable",
-    "self-conscious",
-    "going-through-change",
-    "want-reset",
-    "nothing-in-particular",
-    "other",
-  ];
-
+  // The 10 original Rev 3 States. IDs are persisted and must never change.
   const APPROVED_STATE_LABELS: Record<string, string> = {
     "feel-good":                  "I feel good",
     "stressed-overloaded":        "Stressed / overloaded",
@@ -1266,34 +1261,101 @@ describe("R3.21 — State UI: exact 10 approved IDs and labels", () => {
     "other":                      "Other",
   };
 
-  for (const id of APPROVED_STATE_IDS) {
-    it(`state UI contains approved ID "${id}"`, () => {
-      assert.ok(stateSrc.includes(`"${id}"`), `state.tsx must include id "${id}"`);
+  // States added in the 2026-09 positive rebalance.
+  const POSITIVE_STATE_LABELS: Record<string, string> = {
+    "feel-confident":  "I feel confident",
+    "feel-energised":  "I feel energised",
+    "feel-calm":       "I feel calm",
+    "feel-social":     "I feel excited / social",
+  };
+
+  for (const [id, label] of Object.entries({ ...APPROVED_STATE_LABELS, ...POSITIVE_STATE_LABELS })) {
+    it(`state vocabulary contains approved ID "${id}"`, () => {
+      assert.ok(
+        STYLEME_STATE_OPTIONS.some((o) => o.id === id),
+        `STYLEME_STATE_OPTIONS must include id "${id}"`,
+      );
     });
-    it(`state UI has exact approved label for "${id}"`, () => {
-      const label = APPROVED_STATE_LABELS[id];
-      assert.ok(stateSrc.includes(label), `state.tsx must include label "${label}" for "${id}"`);
+    it(`state vocabulary has exact approved label for "${id}"`, () => {
+      assert.equal(STYLEME_STATE_LABELS[id], label);
     });
   }
+
+  it("state screen renders options from the shared vocabulary", () => {
+    assert.ok(
+      stateSrc.includes("STYLEME_STATE_OPTIONS"),
+      "state.tsx must render the shared vocabulary, not a local copy",
+    );
+    assert.ok(
+      !/id: "/.test(stateSrc),
+      "state.tsx must not declare its own option IDs",
+    );
+  });
+
+  it("State option set is exactly the 10 original + 4 positive States", () => {
+    assert.equal(STYLEME_STATE_OPTIONS.length, 14);
+    assert.deepEqual(
+      [...STYLEME_STATE_OPTIONS.map((o) => o.id)].sort(),
+      [...Object.keys(APPROVED_STATE_LABELS), ...Object.keys(POSITIVE_STATE_LABELS)].sort(),
+    );
+  });
 
   const REJECTED_STATE_IDS = [
     "feeling-good", "tired", "confident", "unmotivated", "anxious", "excited",
   ];
 
   for (const id of REJECTED_STATE_IDS) {
-    it(`state UI must NOT contain rejected ID "${id}"`, () => {
-      // Check the OPTIONS array specifically — the ID shouldn't appear as an option value
-      const idInOptions = stateSrc.includes(`id: "${id}"`);
-      assert.equal(idInOptions, false, `state.tsx must not have option id "${id}"`);
+    it(`state vocabulary must NOT contain rejected ID "${id}"`, () => {
+      assert.equal(STYLEME_STATE_OPTIONS.some((o) => o.id === id), false);
     });
   }
 
   it("state UI must NOT show unapproved label 'I'm feeling good'", () => {
-    assert.ok(!stateSrc.includes("I'm feeling good"), "must not use old label");
+    assert.ok(!Object.values(STYLEME_STATE_LABELS).includes("I'm feeling good"));
   });
 
-  it("state UI must NOT show unapproved label 'Not feeling like myself' (missing \"I don't really\")", () => {
-    assert.ok(!stateSrc.includes('"Not feeling like myself"'), "must use approved label with full phrase");
+  it("state UI must NOT show unapproved label 'Not feeling like myself'", () => {
+    assert.ok(!Object.values(STYLEME_STATE_LABELS).includes("Not feeling like myself"));
+  });
+});
+
+// ── R3.21b — States are not intentions ───────────────────────────────────────
+
+describe("R3.21b — State IDs never collide with intention IDs", () => {
+  it("no State ID is also an intention ID", () => {
+    const intentionIds = new Set(STYLEME_INTENTION_OPTIONS.map((o) => o.id));
+    const collisions = STYLEME_STATE_OPTIONS.map((o) => o.id).filter((id) => intentionIds.has(id));
+    assert.deepEqual(collisions, [], "State and Intention must remain distinct dimensions");
+  });
+
+  it("every State carries rankingWeight 'none' in ANSWER_REGISTRY", () => {
+    for (const option of STYLEME_STATE_OPTIONS) {
+      const entry = ANSWER_REGISTRY.find((m) => m.id === option.id && m.questionId === SQ.STATE);
+      assert.ok(entry, `ANSWER_REGISTRY must register State "${option.id}"`);
+      assert.equal(entry!.rankingWeight, "none", `State "${option.id}" must not carry ranking weight`);
+      assert.deepEqual(entry!.activatedFields, [], `State "${option.id}" must activate no product fields`);
+    }
+  });
+
+  it("'feel-energised' State does not activate the 'give-energy' intention", () => {
+    const entry = ANSWER_REGISTRY.find((m) => m.id === "feel-energised" && m.questionId === SQ.STATE);
+    assert.ok(entry);
+    assert.equal(entry!.rankingWeight, "none");
+    const asIntention = ANSWER_REGISTRY.find((m) => m.id === "feel-energised" && m.questionId === SQ.INTENTIONS);
+    assert.equal(asIntention, undefined, "feel-energised must not exist as an intention answer");
+  });
+
+  it("'feel-confident' State does not activate the 'confidence' intention", () => {
+    const entry = ANSWER_REGISTRY.find((m) => m.id === "feel-confident" && m.questionId === SQ.STATE);
+    assert.ok(entry);
+    assert.equal(entry!.rankingWeight, "none");
+    const asIntention = ANSWER_REGISTRY.find((m) => m.id === "feel-confident" && m.questionId === SQ.INTENTIONS);
+    assert.equal(asIntention, undefined, "feel-confident must not exist as an intention answer");
+  });
+
+  it("'feel-calm' State does not activate the 'feel-softer' intention", () => {
+    const asIntention = ANSWER_REGISTRY.find((m) => m.id === "feel-calm" && m.questionId === SQ.INTENTIONS);
+    assert.equal(asIntention, undefined, "feel-calm must not exist as an intention answer");
   });
 });
 
@@ -1302,15 +1364,16 @@ describe("R3.21 — State UI: exact 10 approved IDs and labels", () => {
 describe("R3.22 — Intention UI: exact 12 approved IDs and labels", () => {
   const intentionSrc = readFileSync(join(ROOT, "app/routes/style-me/intention.tsx"), "utf8");
 
+  // IDs are the approved garment taxonomy. Labels are display copy only.
   const APPROVED_LABELS: Record<string, string> = {
     "feel-like-myself":  "Help me feel like myself",
-    "confidence":        "Give me confidence",
+    "confidence":        "Help me feel confident",
     "ground-me":         "Ground me",
     "give-structure":    "Give me structure",
     "make-it-easy":      "Make things feel easy",
     "feel-put-together": "Help me feel put together",
     "feel-attractive":   "Make me feel attractive",
-    "give-energy":       "Give me energy",
+    "give-energy":       "Bring some energy",
     "feel-softer":       "Help me feel softer",
     "feel-sharper":      "Help me feel sharper",
     "feel-less-exposed": "Help me feel less exposed",
@@ -1318,64 +1381,84 @@ describe("R3.22 — Intention UI: exact 12 approved IDs and labels", () => {
   };
 
   for (const [id, label] of Object.entries(APPROVED_LABELS)) {
-    it(`intention UI has approved ID "${id}"`, () => {
-      assert.ok(intentionSrc.includes(`"${id}"`), `intention.tsx must include id "${id}"`);
+    it(`intention vocabulary has approved ID "${id}"`, () => {
+      assert.ok(STYLEME_INTENTION_OPTIONS.some((o) => o.id === id));
     });
-    it(`intention UI has exact label for "${id}": "${label}"`, () => {
-      assert.ok(intentionSrc.includes(label), `intention.tsx must include "${label}"`);
+    it(`intention vocabulary has exact label for "${id}": "${label}"`, () => {
+      assert.equal(STYLEME_INTENTION_LABELS[id], label);
     });
   }
 
-  it('intention UI must NOT contain "feel-confident" (rejected ID)', () => {
-    assert.ok(!intentionSrc.includes('"feel-confident"'), "use 'confidence', not 'feel-confident'");
+  it("intention ID set is exactly the approved 12 — no taxonomy expansion", () => {
+    assert.deepEqual(
+      [...STYLEME_INTENTION_OPTIONS.map((o) => o.id)].sort(),
+      [...Object.keys(APPROVED_LABELS)].sort(),
+    );
   });
 
-  it('intention UI must NOT use old label "Feel confident"', () => {
-    assert.ok(!intentionSrc.includes('"Feel confident"'), "must use approved label 'Give me confidence'");
+  it("intention screen renders options from the shared vocabulary", () => {
+    assert.ok(intentionSrc.includes("STYLEME_INTENTION_OPTIONS"));
+    assert.ok(!/id: "/.test(intentionSrc), "intention.tsx must not declare its own option IDs");
   });
 
-  it('intention UI must NOT use old label "Feel like myself"', () => {
-    assert.ok(!intentionSrc.includes('"Feel like myself"'), "must use 'Help me feel like myself'");
+  const REJECTED_INTENTION_IDS = [
+    "feel-confident", "feel-elevated", "stand-out", "have-fun", "powerful", "feel-energised",
+  ];
+  for (const id of REJECTED_INTENTION_IDS) {
+    it(`intention vocabulary must NOT contain "${id}" (would require taxonomy expansion)`, () => {
+      assert.equal(STYLEME_INTENTION_OPTIONS.some((o) => o.id === id), false);
+    });
+  }
+
+  it("the friendlier confidence label still maps to the 'confidence' ID", () => {
+    const entry = STYLEME_INTENTION_OPTIONS.find((o) => o.label === "Help me feel confident");
+    assert.equal(entry?.id, "confidence");
+  });
+
+  it("the friendlier energy label still maps to the 'give-energy' ID", () => {
+    const entry = STYLEME_INTENTION_OPTIONS.find((o) => o.label === "Bring some energy");
+    assert.equal(entry?.id, "give-energy");
   });
 });
 
 // ── R3.23 — Physical Need UI: exact 9 approved IDs ───────────────────────────
 
-describe("R3.23 — Physical Need UI: exact 9 approved IDs, correct labels", () => {
+describe("R3.23 — Fit / Comfort UI: exact 9 approved IDs, correct labels", () => {
   const physSrc = readFileSync(join(ROOT, "app/routes/style-me/physical-need.tsx"), "utf8");
 
-  const APPROVED_IDS = [
-    "nothing-tight-waist",
-    "less-body-conscious",
-    "more-coverage",
-    "softer-easier-fabrics",
-    "loose-comfortable",
-    "still-want-shape",
-    "waist-definition",
-    "structured-shape",
-    "nothing-specific",
-  ];
-
+  // IDs carry the QA-tested body-need semantics. Labels are display copy only.
   const APPROVED_LABELS: Record<string, string> = {
-    "nothing-tight-waist":   "Nothing tight around my waist",
-    "less-body-conscious":   "Nothing too body-hugging",
+    "nothing-tight-waist":   "More room around my waist",
+    "less-body-conscious":   "A little more ease through the body",
     "more-coverage":         "More coverage",
-    "softer-easier-fabrics": "Softer / easier fabrics",
+    "softer-easier-fabrics": "Soft / easy fabrics",
     "loose-comfortable":     "Loose and comfortable",
-    "still-want-shape":      "I still want shape",
-    "waist-definition":      "I want waist definition",
-    "structured-shape":      "More structure / a more defined shape",
-    "nothing-specific":      "Nothing specific",
+    "still-want-shape":      "Keep some shape",
+    "waist-definition":      "Waist definition",
+    "structured-shape":      "More structure / definition",
+    "nothing-specific":      "No specific preference",
   };
 
-  for (const id of APPROVED_IDS) {
-    it(`physical-need UI contains approved ID "${id}"`, () => {
-      assert.ok(physSrc.includes(`"${id}"`), `physical-need.tsx must include "${id}"`);
+  for (const [id, label] of Object.entries(APPROVED_LABELS)) {
+    it(`fit/comfort vocabulary contains approved ID "${id}"`, () => {
+      assert.ok(STYLEME_FIT_COMFORT_OPTIONS.some((o) => o.id === id));
     });
-    it(`physical-need UI has approved label for "${id}"`, () => {
-      assert.ok(physSrc.includes(APPROVED_LABELS[id]), `must include label "${APPROVED_LABELS[id]}"`);
+    it(`fit/comfort vocabulary has approved label for "${id}"`, () => {
+      assert.equal(STYLEME_FIT_COMFORT_LABELS[id], label);
     });
   }
+
+  it("fit/comfort ID set is exactly the 9 QA-tested IDs", () => {
+    assert.deepEqual(
+      [...STYLEME_FIT_COMFORT_OPTIONS.map((o) => o.id)].sort(),
+      [...Object.keys(APPROVED_LABELS)].sort(),
+    );
+  });
+
+  it("fit/comfort screen renders options from the shared vocabulary", () => {
+    assert.ok(physSrc.includes("STYLEME_FIT_COMFORT_OPTIONS"));
+    assert.ok(!/id: "/.test(physSrc), "physical-need.tsx must not declare its own option IDs");
+  });
 
   const REJECTED_IDS = [
     "less-coverage", "more-structure", "less-structure", "more-comfort",
@@ -1383,17 +1466,19 @@ describe("R3.23 — Physical Need UI: exact 9 approved IDs, correct labels", () 
   ];
 
   for (const id of REJECTED_IDS) {
-    it(`physical-need UI must NOT contain rejected ID "${id}"`, () => {
-      assert.ok(!physSrc.includes(`id: "${id}"`), `physical-need.tsx must not have option "${id}"`);
+    it(`fit/comfort vocabulary must NOT contain rejected ID "${id}"`, () => {
+      assert.equal(STYLEME_FIT_COMFORT_OPTIONS.some((o) => o.id === id), false);
     });
   }
 
-  it('physical-need UI must NOT use old label "Want to feel less body-conscious"', () => {
-    assert.ok(!physSrc.includes("Want to feel less body-conscious"), "use approved label 'Less body-conscious'");
+  it("no fit/comfort label is phrased as a symptom ('Nothing ...')", () => {
+    const negative = Object.values(STYLEME_FIT_COMFORT_LABELS).filter((l) => l.startsWith("Nothing"));
+    assert.deepEqual(negative, [], "Fit / Comfort reads as preferences, not a symptom checklist");
   });
 
-  it('physical-need UI must NOT use old label "Still want some shape"', () => {
-    assert.ok(!physSrc.includes("Still want some shape"), "use approved label 'I still want shape'");
+  it("heading is a preference question, not a needs question", () => {
+    assert.ok(physSrc.includes("Any fit or comfort preferences today?"));
+    assert.ok(!physSrc.includes("Any fit or comfort needs right now?"));
   });
 });
 
