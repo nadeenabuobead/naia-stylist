@@ -46,6 +46,10 @@ import {
   type StyleMeSessionFact,
   type OutcomeFact,
 } from "~/lib/ai/wardrobe-needs";
+import {
+  computeWardrobeRecommendations,
+  type WardrobeRecommendations,
+} from "~/lib/ai/wardrobe-recommendations";
 
 // db.server is plain JS, so the Prisma client is untyped at this boundary.
 // This row shape is the explicit contract for everything this module reads.
@@ -83,6 +87,8 @@ export interface WardrobeIntelligenceBundle {
   intelligence: WardrobeIntelligence;
   /** Synthesis layer: what the wardrobe DOES, on top of what it IS. */
   needs: WardrobeNeeds;
+  /** What kind of piece would close the gaps `needs` already found. */
+  recommendations: WardrobeRecommendations;
   /** Garment lookup for the UI — images, names, categories. */
   garments: WardrobeGarment[];
 }
@@ -268,7 +274,13 @@ export async function loadWardrobeIntelligence(
     outcomes,
   });
 
-  return { intelligence, needs, garments };
+  const recommendations = computeWardrobeRecommendations({
+    needs,
+    items: garments,
+    passport: options.passport,
+  });
+
+  return { intelligence, needs, recommendations, garments };
 }
 
 // ── Usage facts (real records only — NOT wear tracking) ───────────────────────

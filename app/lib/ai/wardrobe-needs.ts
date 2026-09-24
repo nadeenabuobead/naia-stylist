@@ -270,6 +270,13 @@ export interface StyleMeReading {
   learningNote?: string;
   /** Pieces StyleMe repeatedly reaches for. Generated, not worn. */
   reachedFor: Array<{ garmentId: string; appearances: number; note: string }>;
+  /**
+   * How often she asked for each kind of dressing, most-asked first. Purely
+   * descriptive: a count of readable requests, with no threshold applied and no
+   * conclusion attached. `struggles` below is the judgement; this is the fact,
+   * and keeping them separate stops the page presenting one finding twice.
+   */
+  requests: Array<{ register: RegisterId; sessions: number }>;
   /** Registers StyleMe was asked for but could barely fill from the Closet. */
   struggles: Array<{ register: RegisterId; sessions: number; note: string }>;
   /** Intentions the wardrobe can support, from curated garment truth only. */
@@ -983,14 +990,14 @@ function buildStyleMeReading(
     return {
       state: "learning",
       learningNote: "nAia hasn't read your StyleMe history into this page yet.",
-      reachedFor: [], struggles: [], strongIntentions: [], thinIntentions: [],
+      reachedFor: [], requests: [], struggles: [], strongIntentions: [], thinIntentions: [],
     };
   }
   if (sessions.length === 0) {
     return {
       state: "learning",
       learningNote: "Once you've used StyleMe a few times, nAia can show which pieces it keeps reaching for.",
-      reachedFor: [], struggles: [], strongIntentions: [], thinIntentions: [],
+      reachedFor: [], requests: [], struggles: [], strongIntentions: [], thinIntentions: [],
     };
   }
 
@@ -1035,11 +1042,18 @@ function buildStyleMeReading(
     }
   }
 
+  // Descriptive request counts. Unreadable requests (register null) are left
+  // out rather than bucketed somewhere to make the list look complete.
+  const requests = [...askedBy.entries()]
+    .filter(([register]) => register !== null && register !== "null")
+    .map(([register, sessions]) => ({ register: register as RegisterId, sessions }))
+    .sort((a, b) => b.sessions - a.sessions);
+
   const anything = reachedFor.length > 0 || struggles.length > 0 || strongIntentions.length > 0;
   return {
     state: anything ? "available" : "learning",
     learningNote: anything ? undefined : "nAia needs a little more StyleMe history before it can see a pattern worth naming.",
-    reachedFor, struggles,
+    reachedFor, requests, struggles,
     strongIntentions: strongIntentions.slice(0, 3),
     thinIntentions: thinIntentions.slice(0, 2),
   };
@@ -1141,7 +1155,7 @@ export function computeWardrobeNeeds(input: WardrobeNeedsInput): WardrobeNeeds {
     learningNote: `nAia reads your wardrobe as a whole once there are at least ${MIN_WARDROBE_SIZE} pieces in it.`,
     registers: [], enough: [], couldUseMore: [], noUrgentNeed: null,
     synthesis: { state: "learning", learningNote: "Your Passport and Closet are compared once there's enough of a Closet to compare.", lines: [] },
-    styleMe: { state: "learning", learningNote: "StyleMe history appears here once you've used it.", reachedFor: [], struggles: [], strongIntentions: [], thinIntentions: [] },
+    styleMe: { state: "learning", learningNote: "StyleMe history appears here once you've used it.", reachedFor: [], requests: [], struggles: [], strongIntentions: [], thinIntentions: [] },
     outcomes: buildOutcomeReading(outcomes),
     headlines: [],
   };

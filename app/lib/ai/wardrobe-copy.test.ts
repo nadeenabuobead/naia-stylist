@@ -19,7 +19,6 @@ import {
   traitLabel,
   plainPairReason,
   plainText,
-  styleMeReachText,
   groupEnough,
   headlineTopic,
   matchDimension,
@@ -136,6 +135,22 @@ describe("§WC-2 pairing reasons lose the jargon, not the meaning", () => {
     assert.doesNotMatch(out, /read deliberate, so they're meant/);
   });
 
+  it("2d — the wording matches the number of garments actually shown", () => {
+    const engine = "You've tagged these for weekend.";
+    assert.match(plainPairReason(engine, 2), /both of these/);
+    assert.match(plainPairReason(engine, 3), /all three of these/);
+    assert.match(plainPairReason(engine, 4), /these pieces/);
+    // The copy must never contradict the images beside it.
+    assert.doesNotMatch(plainPairReason(engine, 3), /\bboth\b/);
+    assert.doesNotMatch(plainPairReason(engine, 4), /\bboth\b|\ball three\b/);
+  });
+
+  it("2e — nAia's own selection is never written as the customer's failure", () => {
+    const out = plainText("This hasn't appeared in one of your nAia looks yet, though it works with 12 pieces you already own.");
+    assert.match(out, /^nAia hasn't used this piece in a generated look yet/);
+    assert.doesNotMatch(out, /This hasn't appeared/);
+  });
+
   it("2c — an unrecognised reason passes through rather than being mangled", () => {
     const novel = "Some future reason the engine has not written yet.";
     assert.equal(plainPairReason(novel), novel);
@@ -190,23 +205,6 @@ describe("§WC-4 engine prose is translated, not paraphrased away", () => {
     assert.equal(plainText(plain), plain);
     const once = plainText("Sits comfortably with 3 other pieces in your Closet.");
     assert.equal(plainText(once), once);
-  });
-});
-
-// ── §WC-5 StyleMe activity ────────────────────────────────────────────────────
-
-describe("§WC-5 activity counts", () => {
-  it("5 — a large count becomes frequency; a small one stays exact", () => {
-    assert.equal(styleMeReachText(85), "nAia reaches for this piece often when styling you.");
-    assert.equal(styleMeReachText(12), "nAia has built 12 of your looks around this piece.");
-  });
-
-  it("5b — generated is never described as worn", () => {
-    for (const n of [1, 12, 85, 400]) {
-      const out = styleMeReachText(n);
-      assert.doesNotMatch(out, /\byou wore\b|\byou've worn\b|\bworn\b/i, `wear implied: "${out}"`);
-      assert.match(out, /nAia/, "the sentence must stay about what nAia did");
-    }
   });
 });
 

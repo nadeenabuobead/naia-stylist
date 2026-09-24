@@ -148,10 +148,15 @@ export function traitLabel(trait: WardrobeTrait): string {
  * mangled, so a future engine reason degrades to the engine's own wording
  * instead of disappearing.
  */
+/** Placeholder the pair rewrites use until the row's garment count is known. */
+const PIECE_SUBJECT = "__PIECES__";
+
 const PAIR_REWRITES: ReadonlyArray<[RegExp, (m: RegExpExecArray) => string]> = [
   [
     /^You've tagged these for (.+)\.$/,
-    (m) => `You've tagged both of these for ${m[1]}, so they're meant for the same kind of day.`,
+    // "both" is filled in by plainPairReason once it knows how many pieces the
+    // row actually shows — saying "both" over three images contradicts them.
+    (m) => `You've tagged ${PIECE_SUBJECT} for ${m[1]}, so they're meant for the same kind of day.`,
   ],
   [
     /^One is tailored and the other relaxed — the structure is what makes it read deliberate\.$/,
@@ -205,10 +210,18 @@ function rewriteOneReason(sentence: string): string {
  * its own — matching across the join produced sentences that read as one claim
  * and said something the engine never concluded.
  */
-export function plainPairReason(reason: string): string {
+/**
+ * @param pieceCount how many garments the row shows. The copy must never
+ *   contradict the images beside it: "both" over three thumbnails is wrong.
+ */
+export function plainPairReason(reason: string, pieceCount = 2): string {
+  const subject =
+    pieceCount <= 2 ? "both of these" : pieceCount === 3 ? "all three of these" : "these pieces";
   const sentences = reason.match(/[^.]+\./g);
-  if (!sentences) return rewriteOneReason(reason.trim());
-  return sentences.map((sentence) => rewriteOneReason(sentence.trim())).join(" ");
+  const rewritten = sentences
+    ? sentences.map((sentence) => rewriteOneReason(sentence.trim())).join(" ")
+    : rewriteOneReason(reason.trim());
+  return rewritten.split(PIECE_SUBJECT).join(subject);
 }
 
 // ── Sentence-level rewrites used across several sections ──────────────────────
@@ -237,6 +250,16 @@ const PHRASE_REWRITES: ReadonlyArray<[RegExp, string]> = [
    "Pieces that work for more than one kind of day are what let a wardrobe stretch without getting bigger."],
   [/\bcross registers\b/g, "work across different kinds of day"],
   [/\bregisters\b/g, "kinds of day"],
+  // Absence from a generated look is a fact about what nAia chose, not about
+  // anything the customer did. Written from nAia's side.
+  [/\bThis hasn't appeared in one of your nAia looks yet\b/g,
+   "nAia hasn't used this piece in a generated look yet"],
+  [/\bAnother that hasn't reached one of your nAia looks\b/g,
+   "nAia hasn't reached for this one either"],
+  [/\bAlso absent from your nAia looks so far\b/g, "nAia hasn't used this one yet either"],
+  [/\bIt hasn't appeared in a generated or saved look yet\b/g,
+   "nAia hasn't used it in a generated or saved look yet"],
+  [/\bhasn't appeared in one of your nAia looks\b/g, "hasn't been used by nAia in a look"],
   [/\bstronger in one register\b/g, "stronger for one kind of day"],
   [/\bone register\b/g, "one kind of day"],
   [/\bregister\b/g, "kind of day"],
@@ -259,24 +282,6 @@ export function plainText(text: string): string {
     out = out.replace(pattern, replacement);
   }
   return out;
-}
-
-// ── StyleMe activity ──────────────────────────────────────────────────────────
-
-/**
- * Large generated-look counts read as analytics, not as help. Past a point the
- * exact figure adds nothing a customer can act on, so it becomes a statement of
- * frequency. The count itself is untouched in the data.
- *
- * Wording stays firmly on the generated side — "nAia builds", never "you wore".
- */
-const OFTEN_THRESHOLD = 15;
-
-export function styleMeReachText(appearances: number): string {
-  if (appearances >= OFTEN_THRESHOLD) {
-    return "nAia reaches for this piece often when styling you.";
-  }
-  return `nAia has built ${appearances} of your looks around this piece.`;
 }
 
 // ── Passport ↔ Closet dimensions ──────────────────────────────────────────────

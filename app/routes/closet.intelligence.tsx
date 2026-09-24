@@ -26,7 +26,6 @@ import {
   traitLabel,
   plainPairReason,
   plainText,
-  styleMeReachText,
   groupEnough,
 } from "~/lib/ai/wardrobe-copy";
 
@@ -68,7 +67,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     derivedIntentionIntelligence: process.env.WARDROBE_V2_INTENTIONS === "true",
   };
 
-  const { intelligence, needs, garments } = await loadWardrobeIntelligence(customer.id, {
+  const { intelligence, needs, recommendations, garments } = await loadWardrobeIntelligence(customer.id, {
     imageUrlById,
     flags,
     passport: profile
@@ -116,7 +115,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     imageUrl: g.imageUrl,
   }));
 
-  return data({ intelligence, needs, garmentCards });
+  return data({ intelligence, needs, recommendations, garmentCards });
 }
 
 type GarmentCard = {
@@ -179,32 +178,47 @@ function LearningNote({ children }: { children: React.ReactNode }) {
 }
 
 export default function WardrobeIntelligencePage() {
-  const { intelligence, needs, garmentCards } = useLoaderData<typeof loader>();
+  const { intelligence, needs, recommendations, garmentCards } = useLoaderData<typeof loader>();
   const byId = new Map<string, GarmentCard>(garmentCards.map((c: GarmentCard) => [c.id, c]));
   const [openObservation, setOpenObservation] = useState<string | null>(null);
   const [openRediscover, setOpenRediscover] = useState<string | null>(null);
 
-  const { dna, heroes, pairings, observations, opportunities, passportView, wear } = intelligence;
+  const { dna, heroes, pairings, observations, opportunities, wear } = intelligence;
 
   // ── Presentation-only derivations ─────────────────────────────────────────
-  // Every value below is a re-wording or a re-selection of something the engine
-  // already concluded. Nothing is computed from garments here.
   const registers = needs.registers
     .filter((r) => r.rawCount > 0 || r.needed)
     .map((r) => ({ key: r.register, ...registerDisplay(r) }));
-  const summary = needs.state === "available" ? summaryEntries(needs) : [];
+  const summary = needs.state === "available" ? summaryEntries(needs).slice(0, 3) : [];
   const matches = [
     ...(lifestyleMatch(registers) ? [lifestyleMatch(registers)!] : []),
     ...(needs.synthesis.state === "available" ? needs.synthesis.lines.map(matchDimension) : []),
   ];
-  // Plain names of the areas that need work, for the buy-or-not verdict.
+  const topRequest = needs.styleMe.requests[0] ?? null;
+  const enoughGroups = needs.state === "available" ? groupEnough(needs.enough) : [];
+  const hasNeedsChapter =
+    registers.length > 0 ||
+    enoughGroups.length > 0 ||
+    needs.couldUseMore.length > 0 ||
+    recommendations.recommendations.length > 0;
+
   const needsAreaNames = needs.couldUseMore
     .map((f) => registers.find((r) => r.key === f.register)?.heading.toLowerCase() ?? f.register)
     .join(" and ");
   const needsAreas = needsAreaNames.charAt(0).toUpperCase() + needsAreaNames.slice(1);
-  const hasNeedsAnswer =
-    needs.state === "available" &&
-    (needs.enough.length > 0 || needs.couldUseMore.length > 0 || Boolean(needs.noUrgentNeed));
+
+  // A garment already named in an observation must not be re-explained under
+  // Rediscover. The pattern belongs to one section and the action to the other;
+  // saying both about the same piece reads as the page repeating itself.
+  const observedIds = new Set(observations.flatMap((o) => o.garmentIds));
+  const rediscover = opportunities.rediscover.filter((p) => !observedIds.has(p.garmentId));
+
+  const hasWorksChapter =
+    heroes.state !== "learning" || pairings.state !== "learning" || rediscover.length > 0;
+  const hasLearningChapter =
+    observations.length > 0 ||
+    needs.styleMe.state === "available" ||
+    needs.outcomes.state === "available";
 
   return (
     <MyNaiaLayout compact>
@@ -220,7 +234,6 @@ export default function WardrobeIntelligencePage() {
           <span className="wi-switch-item is-on" aria-current="page">Wardrobe Intelligence</span>
         </nav>
 
-        {/* ── Masthead ───────────────────────────────────────────────────── */}
         <header className="wi-masthead">
           <p className="wi-eyebrow">Wardrobe Intelligence</p>
           <h1 className="wi-title">Your wardrobe, <span className="sp-shell-accent">understood.</span></h1>
@@ -234,97 +247,147 @@ export default function WardrobeIntelligencePage() {
           </section>
         )}
 
-        {/* ── Opening: what nAia understands, then a little support ────────
-            The reading is the headline; the facts sit under it on one line.
-            Its container is deliberately wide so the generated sentence stays
-            on one line on desktop — the wording is never trimmed to fit. */}
-        <section className="wi-opening" aria-label="Wardrobe snapshot">
-          {intelligence.snapshotReading && (
-            <p className="wi-opening-reading">{intelligence.snapshotReading}</p>
+        {/* ══ 1 · YOUR WARDROBE RIGHT NOW ═══════════════════════════════════
+            Everything a customer needs to understand her wardrobe in seconds:
+            what it is, the three strongest conclusions, and what it's made of.
+            Wardrobe DNA lives here and nowhere else. */}
+        <section className="wi-chapter" aria-labelledby="wi-now-h">
+          <h2 id="wi-now-h" className="wi-chapter-title">Your wardrobe right now</h2>
+
+          <div className="wi-opening">
+            {intelligence.snapshotReading && (
+              <p className="wi-opening-reading">{intelligence.snapshotReading}</p>
+            )}
+            <p className="wi-opening-facts">
+              {intelligence.snapshot.map((metric, index) => (
+                <span key={metric.id} className="wi-fact">
+                  {index > 0 && <span className="wi-fact-sep" aria-hidden="true">·</span>}
+                  <span className="wi-fact-value">{metric.value}</span> {metric.label}
+                </span>
+              ))}
+            </p>
+          </div>
+
+          {intelligence.ready && summary.length > 0 && (
+            <div className="wi-block">
+              <p className="wi-sublabel">What nAia knows right now</p>
+              <ul className="wi-knows-list">
+                {summary.map((entry) => (
+                  <li key={entry.id} className="wi-knows-item">
+                    <h3 className="wi-knows-head">{entry.headline}</h3>
+                    {entry.explain && <p className="wi-knows-text">{entry.explain}</p>}
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
-          <p className="wi-opening-facts">
-            {intelligence.snapshot.map((metric, index) => (
-              <span key={metric.id} className="wi-fact">
-                {index > 0 && <span className="wi-fact-sep" aria-hidden="true">·</span>}
-                <span className="wi-fact-value">{metric.value}</span> {metric.label}
-              </span>
-            ))}
-          </p>
+
+          {/* Compact DNA. Descriptive only — the conclusion about the palette
+              lives once, in chapter 5, so the two never restate each other. */}
+          {intelligence.ready && (dna.palette.length > 0 || dna.shapes.length > 0 || dna.traits.length > 0) && (
+            <div className="wi-block">
+              <p className="wi-sublabel">What your Closet is made of</p>
+              <div className="wi-dna-grid">
+                {dna.palette.length > 0 && (
+                  <div className="wi-dna-cell">
+                    <p className="wi-microhead">Your main colours</p>
+                    <div className="wi-palette">
+                      {dna.palette.slice(0, 5).map((colour) => (
+                        <div key={colour.colour} className="wi-palette-row">
+                          <span className="wi-swatch" style={swatchStyle(colour.colour)} aria-hidden="true" />
+                          <span className="wi-palette-name">{colour.colour}</span>
+                          <span className="wi-palette-count">{colour.count}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {dna.shapes.length > 0 && (
+                  <div className="wi-dna-cell">
+                    <p className="wi-microhead">Shapes you come back to</p>
+                    <p className="wi-shapes-line">
+                      {dna.shapes.map((shape, index) => (
+                        <span key={shape.label}>
+                          {index > 0 && <span className="wi-shapes-sep" aria-hidden="true">·</span>}
+                          {shape.label}
+                        </span>
+                      ))}
+                    </p>
+                    {dna.shapesReading && <p className="wi-reading wi-reading--sm">{dna.shapesReading}</p>}
+                  </div>
+                )}
+
+                {dna.traits.length > 0 && (
+                  <div className="wi-dna-cell">
+                    <p className="wi-microhead">Overall character</p>
+                    <div className="wi-traits">
+                      {dna.traits.map((trait) => (
+                        <div key={trait.id} className="wi-trait">
+                          <span className="wi-trait-label">{traitLabel(trait)}</span>
+                          <span className="wi-trait-evidence">{plainText(trait.evidence)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </section>
 
         {intelligence.ready && (
           <>
-            {/* ══ THE ANSWER ═══════════════════════════════════════════════
-                Three blocks, in the order a customer actually asks: what did
-                you find, what can I dress for, and do I need to buy anything.
-                Everything below them is evidence for these. */}
+            {/* ══ 2 · WHAT YOUR WARDROBE NEEDS ═══════════════════════════════
+                One story: what you're covered for, what you have plenty of,
+                where there's less range, what would add something new, and
+                whether anything actually needs buying. */}
+            {hasNeedsChapter && (
+              <section className="wi-chapter" aria-labelledby="wi-needs-h">
+                <h2 id="wi-needs-h" className="wi-chapter-title">What your wardrobe needs</h2>
 
-            {/* ── What nAia knows right now ───────────────────────────────
-                At most four conclusions, each a different subject. The engine
-                ranks them; this shows the strongest of each kind so the same
-                finding never appears twice wearing different words. */}
-            {summary.length > 0 && (
-              <section className="wi-lead" aria-labelledby="wi-knows-h">
-                <h2 id="wi-knows-h" className="wi-lead-title">What nAia knows right now</h2>
-                <ul className="wi-knows-list">
-                  {summary.map((entry) => (
-                    <li key={entry.id} className="wi-knows-item">
-                      <h3 className="wi-knows-head">{entry.headline}</h3>
-                      {entry.explain && <p className="wi-knows-text">{entry.explain}</p>}
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            )}
+                {registers.length > 0 && (
+                  <div className="wi-block">
+                    <p className="wi-sublabel">What you can dress for</p>
+                    <ul className="wi-registers">
+                      {registers.map((r) => (
+                        <li key={r.key} className={`wi-register is-${r.state}`}>
+                          <p className="wi-register-name">
+                            {r.heading}
+                            {r.needed && <span className="wi-register-flag">you told nAia this matters</span>}
+                          </p>
+                          <p className="wi-register-verdict">{r.stateText}</p>
+                          <p className="wi-register-note">{r.plain}</p>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
 
-            {/* ── What your wardrobe can dress you for ────────────────────
-                Three states in plain words. The engine's depth reading is
-                mapped to the customer's vocabulary and nothing else changes. */}
-            {registers.length > 0 && (
-              <section className="wi-lead" aria-labelledby="wi-dress-h">
-                <h2 id="wi-dress-h" className="wi-lead-title">What your wardrobe can dress you for</h2>
-                <p className="wi-lead-sub">
-                  Based on what you could actually put on and wear — not how many pieces you own.
-                </p>
-
-                <ul className="wi-registers">
-                  {registers.map((r) => (
-                    <li key={r.key} className={`wi-register is-${r.state}`}>
-                      <p className="wi-register-name">
-                        {r.heading}
-                        {r.needed && <span className="wi-register-flag">you told nAia this matters</span>}
-                      </p>
-                      <p className="wi-register-verdict">{r.stateText}</p>
-                      <p className="wi-register-note">{r.plain}</p>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            )}
-
-            {/* ── What your wardrobe needs ────────────────────────────────
-                One place for the whole shopping question. Enough, more, and
-                the buy-or-not conclusion used to sit in three separate
-                sections; the last one was an eyebrow small enough to miss. */}
-            {hasNeedsAnswer && (
-              <section className="wi-lead wi-needs" aria-labelledby="wi-needs-h">
-                <h2 id="wi-needs-h" className="wi-lead-title">What your wardrobe needs</h2>
-
-                {needs.enough.length > 0 && (
-                  <div className="wi-need-group">
-                    <p className="wi-need-tier">You have enough of</p>
-                    {groupEnough(needs.enough).map((finding) => (
+                {enoughGroups.length > 0 && (
+                  <div className="wi-block">
+                    <p className="wi-sublabel">You have enough of</p>
+                    {enoughGroups.map((finding) => (
                       <article key={finding.id} className="wi-finding">
                         <h3 className="wi-finding-title">{finding.title}</h3>
                         <p className="wi-finding-body">{finding.body}</p>
+                        {/* The pieces the claim is about, so the conclusion has
+                            visible evidence rather than asking for trust. */}
+                        {finding.garmentIds.length > 0 && (
+                          <div className="wi-strip">
+                            {finding.garmentIds.slice(0, MAX_STRIP).map((id) => (
+                              <Thumb key={id} card={byId.get(id)} size={56} />
+                            ))}
+                          </div>
+                        )}
                       </article>
                     ))}
                   </div>
                 )}
 
                 {needs.couldUseMore.length > 0 && (
-                  <div className="wi-need-group">
-                    <p className="wi-need-tier">You could use more of</p>
+                  <div className="wi-block">
+                    <p className="wi-sublabel">Where you have less range</p>
                     {needs.couldUseMore.map((finding) => (
                       <article key={finding.id} className="wi-finding">
                         <h3 className="wi-finding-title">{finding.title}</h3>
@@ -341,8 +404,47 @@ export default function WardrobeIntelligencePage() {
                   </div>
                 )}
 
-                {/* The conclusion the customer came for, at the weight it
-                    deserves. Previously a 9px eyebrow. */}
+                {recommendations.state === "available" && recommendations.recommendations.length > 0 && (
+                  <div className="wi-block">
+                    <p className="wi-sublabel">What would add the most</p>
+                    {recommendations.recommendations.map((rec) => (
+                      <article key={rec.id} className="wi-rec">
+                        <h3 className="wi-rec-title">{rec.title}</h3>
+                        {rec.attributes.length > 0 && (
+                          <p className="wi-rec-attrs">
+                            {rec.attributes.map((attr, index) => (
+                              <span key={attr.kind}>
+                                {index > 0 && <span className="wi-rec-sep" aria-hidden="true">·</span>}
+                                {attr.label}
+                              </span>
+                            ))}
+                          </p>
+                        )}
+                        <p className="wi-rec-body">{rec.body}</p>
+                        {rec.unlocksIds.length > 0 && (
+                          <div className="wi-strip">
+                            {rec.unlocksIds.map((id) => (
+                              <Thumb key={id} card={byId.get(id)} size={56} />
+                            ))}
+                          </div>
+                        )}
+                      </article>
+                    ))}
+                  </div>
+                )}
+
+                {recommendations.notAPriority.length > 0 && (
+                  <div className="wi-block">
+                    <p className="wi-sublabel wi-sublabel--quiet">Not a priority right now</p>
+                    {recommendations.notAPriority.map((item) => (
+                      <article key={item.id} className="wi-rec wi-rec--quiet">
+                        <h3 className="wi-rec-title">{item.title}</h3>
+                        <p className="wi-rec-body">{item.body}</p>
+                      </article>
+                    ))}
+                  </div>
+                )}
+
                 <div className="wi-verdict">
                   <h3 className="wi-verdict-q">Do you need to buy anything?</h3>
                   {needs.couldUseMore.length === 0 ? (
@@ -357,8 +459,6 @@ export default function WardrobeIntelligencePage() {
                           ? "One part of your wardrobe would genuinely benefit."
                           : "Two parts of your wardrobe would genuinely benefit."}
                       </p>
-                      {/* Names the areas rather than reprinting the findings
-                          sitting directly above it. */}
                       <p className="wi-verdict-why">
                         {needsAreas} {needs.couldUseMore.length === 1 ? "is" : "are"} where it would help.
                         Everything else you own already covers the kinds of dressing you described, so
@@ -370,344 +470,285 @@ export default function WardrobeIntelligencePage() {
               </section>
             )}
 
-            {/* ══ THE EVIDENCE ═════════════════════════════════════════════ */}
+            {/* ══ 3 · WHAT ALREADY WORKS ══════════════════════════════════════
+                Making better use of what she owns: the pieces carrying the
+                wardrobe, the combinations already there, and the ones nAia
+                hasn't reached for. */}
+            {hasWorksChapter && (
+              <section className="wi-chapter" aria-labelledby="wi-works-h">
+                <h2 id="wi-works-h" className="wi-chapter-title">What already works</h2>
 
-            {/* ── Wardrobe DNA ─────────────────────────────────────────── */}
-            <section className="wi-section wi-dna" aria-labelledby="wi-dna-h">
-              <h2 id="wi-dna-h" className="wi-section-title">Your wardrobe DNA</h2>
-              <p className="wi-section-sub">What your Closet is made of.</p>
+                {heroes.state !== "learning" && heroes.heroes.length > 0 && (
+                  <div className="wi-block">
+                    <p className="wi-sublabel">The pieces doing the most work</p>
+                    {heroes.heroes.slice(0, 1).map((hero) => {
+                      const card = byId.get(hero.garmentId);
+                      return (
+                        <article key={hero.garmentId} className="wi-hero-featured">
+                          <div className="wi-hero-featured-img">
+                            {card?.imageUrl ? (
+                              <img src={card.imageUrl} alt={hero.name} loading="lazy" />
+                            ) : (
+                              <span className="wi-thumb-fallback">{hero.category}</span>
+                            )}
+                          </div>
+                          <div className="wi-hero-featured-text">
+                            <p className="wi-hero-label">{heroLabel(hero.label, hero.labelText)}</p>
+                            <h3 className="wi-hero-featured-name">{hero.name}</h3>
+                            <p className="wi-hero-featured-headline">{plainText(hero.headline)}</p>
+                            {hero.reasons[0] && (
+                              <p className="wi-hero-featured-reason">{plainText(hero.reasons[0])}</p>
+                            )}
+                          </div>
+                        </article>
+                      );
+                    })}
 
-              {dna.state === "learning" && <LearningNote>{dna.learningNote}</LearningNote>}
-
-              {dna.palette.length > 0 && (
-                <div className="wi-dna-block">
-                  <p className="wi-microhead">Your main colours</p>
-                  <div className="wi-palette">
-                    {dna.palette.map((colour) => (
-                      <div key={colour.colour} className="wi-palette-row">
-                        <span className="wi-swatch" style={swatchStyle(colour.colour)} aria-hidden="true" />
-                        <span className="wi-palette-name">{colour.colour}</span>
-                        <span className="wi-palette-count">{colour.count}</span>
+                    {heroes.heroes.length > 1 && (
+                      <div className="wi-heroes">
+                        {heroes.heroes.slice(1).map((hero) => {
+                          const card = byId.get(hero.garmentId);
+                          return (
+                            <article key={hero.garmentId} className="wi-hero">
+                              <div className="wi-hero-img">
+                                {card?.imageUrl ? (
+                                  <img src={card.imageUrl} alt={hero.name} loading="lazy" />
+                                ) : (
+                                  <span className="wi-thumb-fallback">{hero.category}</span>
+                                )}
+                              </div>
+                              <p className="wi-hero-label">{heroLabel(hero.label, hero.labelText)}</p>
+                              <h3 className="wi-hero-name">{hero.name}</h3>
+                              {hero.reasons[0] && <p className="wi-hero-reason">{plainText(hero.reasons[0])}</p>}
+                            </article>
+                          );
+                        })}
                       </div>
-                    ))}
+                    )}
                   </div>
-                  {dna.paletteReading && <p className="wi-reading">{dna.paletteReading}</p>}
-                </div>
-              )}
+                )}
 
-              {dna.shapes.length > 0 && (
-                <div className="wi-dna-block">
-                  <p className="wi-microhead">Shapes you come back to</p>
-                  <p className="wi-shapes-line">
-                    {dna.shapes.map((shape, index) => (
-                      <span key={shape.label}>
-                        {index > 0 && <span className="wi-shapes-sep" aria-hidden="true">·</span>}
-                        {shape.label}
-                      </span>
-                    ))}
-                  </p>
-                  {dna.shapesReading && <p className="wi-reading wi-reading--sm">{dna.shapesReading}</p>}
-                </div>
-              )}
-
-              {dna.traits.length > 0 && (
-                <div className="wi-dna-block">
-                  <p className="wi-microhead">Overall character</p>
-                  <div className="wi-traits">
-                    {dna.traits.map((trait) => (
-                      <div key={trait.id} className="wi-trait">
-                        <span className="wi-trait-label">{traitLabel(trait)}</span>
-                        <span className="wi-trait-evidence">{plainText(trait.evidence)}</span>
-                      </div>
-                    ))}
+                {pairings.state !== "learning" && pairings.pairings.length > 0 && (
+                  <div className="wi-block">
+                    <p className="wi-sublabel">What works well together</p>
+                    {pairings.untriedPresentation === "section" && pairings.untriedNote && (
+                      <p className="wi-pairs-note">{pairings.untriedNote}</p>
+                    )}
+                    <ul className="wi-pairs">
+                      {pairings.pairings.map((pair) => (
+                        <li key={pair.id} className="wi-pair">
+                          <div className="wi-pair-pieces">
+                            {pair.garmentIds.map((id, index) => (
+                              <span key={id} className="wi-pair-piece">
+                                {index > 0 && <span className="wi-plus" aria-hidden="true">+</span>}
+                                <Thumb card={byId.get(id)} size={84} />
+                              </span>
+                            ))}
+                          </div>
+                          <div className="wi-pair-text">
+                            {/* The count is passed so the words can never
+                                contradict the number of images shown. */}
+                            <p className="wi-pair-reason">
+                              {plainPairReason(pair.reason, pair.garmentIds.length)}
+                            </p>
+                            {pair.untried && pairings.untriedPresentation === "per-item" && (
+                              <p className="wi-pair-tag">Worth trying</p>
+                            )}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
                   </div>
-                </div>
-              )}
-            </section>
+                )}
 
-            {/* ── Heroes ────────────────────────────────────────────────── */}
-            <section className="wi-section" aria-labelledby="wi-heroes-h">
-              <h2 id="wi-heroes-h" className="wi-section-title">Wardrobe heroes</h2>
-              <p className="wi-section-sub">The pieces doing the most work in your Closet.</p>
-
-              {heroes.state === "learning" ? (
-                <LearningNote>{heroes.learningNote}</LearningNote>
-              ) : (
-                <>
-                  {heroes.heroes.slice(0, 1).map((hero) => {
-                    const card = byId.get(hero.garmentId);
-                    return (
-                      <article key={hero.garmentId} className="wi-hero-featured">
-                        <div className="wi-hero-featured-img">
-                          {card?.imageUrl ? (
-                            <img src={card.imageUrl} alt={hero.name} loading="lazy" />
+                {rediscover.length > 0 && (
+                  <div className="wi-block">
+                    <p className="wi-sublabel">Pieces worth another look</p>
+                    {rediscover.map((piece) => (
+                      <article key={piece.garmentId} className="wi-rediscover">
+                        <div className="wi-rediscover-img">
+                          {piece.imageUrl ? (
+                            <img src={piece.imageUrl} alt={piece.name} loading="lazy" />
                           ) : (
-                            <span className="wi-thumb-fallback">{hero.category}</span>
+                            <span className="wi-thumb-fallback">piece</span>
                           )}
                         </div>
-                        <div className="wi-hero-featured-text">
-                          <p className="wi-hero-label">{heroLabel(hero.label, hero.labelText)}</p>
-                          <h3 className="wi-hero-featured-name">{hero.name}</h3>
-                          <p className="wi-hero-featured-headline">{plainText(hero.headline)}</p>
-                          {hero.reasons[0] && (
-                            <p className="wi-hero-featured-reason">{plainText(hero.reasons[0])}</p>
+                        <div className="wi-rediscover-text">
+                          <h3 className="wi-rediscover-name">{piece.name}</h3>
+                          <p className="wi-opp-body">{plainText(piece.body)}</p>
+                          {piece.worksWithIds.length > 0 && (
+                            <>
+                              <button
+                                type="button"
+                                className="wi-note-action"
+                                aria-expanded={openRediscover === piece.garmentId}
+                                onClick={() =>
+                                  setOpenRediscover(openRediscover === piece.garmentId ? null : piece.garmentId)
+                                }
+                              >
+                                {openRediscover === piece.garmentId ? "Hide possibilities" : "See what it works with"}
+                              </button>
+                              {openRediscover === piece.garmentId && (
+                                <div className="wi-strip">
+                                  {piece.worksWithIds.map((id) => (
+                                    <Thumb key={id} card={byId.get(id)} size={64} />
+                                  ))}
+                                </div>
+                              )}
+                            </>
                           )}
                         </div>
                       </article>
-                    );
-                  })}
-
-                  {heroes.heroes.length > 1 && (
-                    <div className="wi-heroes">
-                      {heroes.heroes.slice(1).map((hero) => {
-                        const card = byId.get(hero.garmentId);
-                        return (
-                          <article key={hero.garmentId} className="wi-hero">
-                            <div className="wi-hero-img">
-                              {card?.imageUrl ? (
-                                <img src={card.imageUrl} alt={hero.name} loading="lazy" />
-                              ) : (
-                                <span className="wi-thumb-fallback">{hero.category}</span>
-                              )}
-                            </div>
-                            <p className="wi-hero-label">{heroLabel(hero.label, hero.labelText)}</p>
-                            <h3 className="wi-hero-name">{hero.name}</h3>
-                            {hero.reasons[0] && <p className="wi-hero-reason">{plainText(hero.reasons[0])}</p>}
-                          </article>
-                        );
-                      })}
-                    </div>
-                  )}
-                </>
-              )}
-            </section>
-
-            {/* ── What works well together ──────────────────────────────── */}
-            <section className="wi-section" aria-labelledby="wi-pairs-h">
-              <h2 id="wi-pairs-h" className="wi-section-title">What works well together</h2>
-              <p className="wi-section-sub">
-                Pieces nAia can already see going together. For a full outfit for a specific
-                moment, StyleMe is still the place to go.
-              </p>
-
-              {pairings.untriedPresentation === "section" && pairings.untriedNote && (
-                <p className="wi-pairs-note">{pairings.untriedNote}</p>
-              )}
-
-              {pairings.state === "learning" ? (
-                <LearningNote>{pairings.learningNote}</LearningNote>
-              ) : (
-                <ul className="wi-pairs">
-                  {pairings.pairings.map((pair) => (
-                    <li key={pair.id} className="wi-pair">
-                      <div className="wi-pair-pieces">
-                        {pair.garmentIds.map((id, index) => (
-                          <span key={id} className="wi-pair-piece">
-                            {index > 0 && <span className="wi-plus" aria-hidden="true">+</span>}
-                            <Thumb card={byId.get(id)} size={84} />
-                          </span>
-                        ))}
-                      </div>
-                      <div className="wi-pair-text">
-                        <p className="wi-pair-reason">{plainPairReason(pair.reason)}</p>
-                        {pair.untried && pairings.untriedPresentation === "per-item" && (
-                          <p className="wi-pair-tag">Worth trying</p>
-                        )}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-
-            {/* ── What nAia is noticing ─────────────────────────────────── */}
-            {observations.length > 0 && (
-              <section className="wi-section" aria-labelledby="wi-notice-h">
-                <h2 id="wi-notice-h" className="wi-section-title">What nAia is noticing</h2>
-                <p className="wi-section-sub">
-                  Patterns you probably can&rsquo;t see by looking at your own wardrobe.
-                </p>
-
-                <ol className="wi-notes">
-                  {observations.map((obs, index) => {
-                    const isDiscovery = obs.tier === "discovery";
-                    const inlinePieces = obs.garmentIds.length > 0 && obs.garmentIds.length <= 3;
-                    const expanded = openObservation === obs.id;
-                    const shown = inlinePieces
-                      ? obs.garmentIds
-                      : expanded
-                        ? obs.garmentIds.slice(0, MAX_STRIP)
-                        : [];
-                    const overflow = expanded ? Math.max(0, obs.garmentIds.length - MAX_STRIP) : 0;
-
-                    return (
-                      <li key={obs.id} className={`wi-note wi-note--${obs.tier}`}>
-                        <span className="wi-note-num" aria-hidden="true">
-                          {String(index + 1).padStart(2, "0")}
-                        </span>
-                        <div className="wi-note-body">
-                          <p className="wi-note-head">{plainText(obs.headline)}</p>
-                          <p className="wi-note-claim">{plainText(obs.observation)}</p>
-                          {obs.explanation && <p className="wi-note-why">{plainText(obs.explanation)}</p>}
-
-                          {!inlinePieces && obs.action && obs.garmentIds.length > 0 && (
-                            <button
-                              type="button"
-                              className="wi-note-action"
-                              aria-expanded={expanded}
-                              onClick={() => setOpenObservation(expanded ? null : obs.id)}
-                            >
-                              {expanded ? "Hide pieces" : obs.action.label}
-                            </button>
-                          )}
-
-                          {shown.length > 0 && (
-                            <div className="wi-strip">
-                              {shown.map((id) => (
-                                <Thumb key={id} card={byId.get(id)} size={isDiscovery ? 78 : 64} />
-                              ))}
-                              {overflow > 0 && <span className="wi-strip-more">+{overflow} more</span>}
-                            </div>
-                          )}
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ol>
-
-                {/* Activity evidence. Two kinds, kept apart on purpose: what
-                    nAia has BUILT for you, and what you told us HAPPENED after.
-                    Only the second is wear behaviour. */}
-                {(needs.styleMe.state === "available" || needs.outcomes.state === "available") && (
-                  <div className="wi-activity">
-                    {needs.styleMe.reachedFor.map((piece) => (
-                      <p key={piece.garmentId} className="wi-activity-line">
-                        {styleMeReachText(piece.appearances)}
-                      </p>
                     ))}
-                    {needs.styleMe.struggles.map((struggle) => (
-                      <p key={struggle.register} className="wi-activity-line">{struggle.note}</p>
-                    ))}
-                    {needs.styleMe.strongIntentions.length > 0 && (
-                      <p className="wi-activity-line">
-                        When you ask to {needs.styleMe.strongIntentions.join(" or ")}, your Closet has
-                        pieces that genuinely answer it.
-                      </p>
-                    )}
-                    {needs.outcomes.keptNote && <p className="wi-activity-line">{needs.outcomes.keptNote}</p>}
-                    {needs.outcomes.changedNote && <p className="wi-activity-line">{needs.outcomes.changedNote}</p>}
                   </div>
                 )}
               </section>
             )}
 
-            {/* ── Wardrobe opportunities ────────────────────────────────────
-                Pieces to act on. The shopping question moved up into "What
-                your wardrobe needs", so this is purely Rediscover now and no
-                longer restates a conclusion the customer has already read. */}
-            {opportunities.rediscover.length > 0 && (
-              <section className="wi-section" aria-labelledby="wi-opp-h">
-                <h2 id="wi-opp-h" className="wi-section-title">Pieces worth another look</h2>
-                <p className="wi-section-sub">
-                  Things you already own that could be doing more for you.
-                </p>
+            {/* ══ 4 · WHAT NAIA IS LEARNING ABOUT YOU ═════════════════════════
+                Patterns nAia can see, plus what your styling history and your
+                feedback show. At most three history insights, each stated once. */}
+            {hasLearningChapter && (
+              <section className="wi-chapter" aria-labelledby="wi-learn-h">
+                <h2 id="wi-learn-h" className="wi-chapter-title">What nAia is learning about you</h2>
 
-                {opportunities.rediscover.map((piece) => (
-                  <article key={piece.garmentId} className="wi-rediscover">
-                    <div className="wi-rediscover-img">
-                      {piece.imageUrl ? (
-                        <img src={piece.imageUrl} alt={piece.name} loading="lazy" />
-                      ) : (
-                        <span className="wi-thumb-fallback">piece</span>
-                      )}
-                    </div>
-                    <div className="wi-rediscover-text">
-                      <h3 className="wi-rediscover-name">{piece.name}</h3>
-                      <p className="wi-opp-body">{plainText(piece.body)}</p>
-                      {piece.worksWithIds.length > 0 && (
-                        <>
-                          <button
-                            type="button"
-                            className="wi-note-action"
-                            aria-expanded={openRediscover === piece.garmentId}
-                            onClick={() =>
-                              setOpenRediscover(openRediscover === piece.garmentId ? null : piece.garmentId)
-                            }
-                          >
-                            {openRediscover === piece.garmentId ? "Hide possibilities" : "See what it works with"}
-                          </button>
-                          {openRediscover === piece.garmentId && (
-                            <div className="wi-strip">
-                              {piece.worksWithIds.map((id) => (
-                                <Thumb key={id} card={byId.get(id)} size={64} />
-                              ))}
+                {observations.length > 0 && (
+                  <div className="wi-block">
+                    <p className="wi-sublabel">What nAia is noticing</p>
+                    <ol className="wi-notes">
+                      {observations.map((obs, index) => {
+                        const isDiscovery = obs.tier === "discovery";
+                        const inlinePieces = obs.garmentIds.length > 0 && obs.garmentIds.length <= 3;
+                        const expanded = openObservation === obs.id;
+                        const shown = inlinePieces
+                          ? obs.garmentIds
+                          : expanded
+                            ? obs.garmentIds.slice(0, MAX_STRIP)
+                            : [];
+                        const overflow = expanded ? Math.max(0, obs.garmentIds.length - MAX_STRIP) : 0;
+
+                        return (
+                          <li key={obs.id} className={`wi-note wi-note--${obs.tier}`}>
+                            <span className="wi-note-num" aria-hidden="true">
+                              {String(index + 1).padStart(2, "0")}
+                            </span>
+                            <div className="wi-note-body">
+                              <p className="wi-note-head">{plainText(obs.headline)}</p>
+                              <p className="wi-note-claim">{plainText(obs.observation)}</p>
+                              {obs.explanation && <p className="wi-note-why">{plainText(obs.explanation)}</p>}
+
+                              {!inlinePieces && obs.action && obs.garmentIds.length > 0 && (
+                                <button
+                                  type="button"
+                                  className="wi-note-action"
+                                  aria-expanded={expanded}
+                                  onClick={() => setOpenObservation(expanded ? null : obs.id)}
+                                >
+                                  {expanded ? "Hide pieces" : obs.action.label}
+                                </button>
+                              )}
+
+                              {shown.length > 0 && (
+                                <div className="wi-strip">
+                                  {shown.map((id) => (
+                                    <Thumb key={id} card={byId.get(id)} size={isDiscovery ? 78 : 64} />
+                                  ))}
+                                  {overflow > 0 && <span className="wi-strip-more">+{overflow} more</span>}
+                                </div>
+                              )}
                             </div>
-                          )}
-                        </>
+                          </li>
+                        );
+                      })}
+                    </ol>
+                  </div>
+                )}
+
+                {(needs.styleMe.state === "available" || needs.outcomes.state === "available") && (
+                  <div className="wi-block">
+                    <p className="wi-sublabel">What your styling history shows</p>
+                    <div className="wi-history">
+                      {needs.styleMe.reachedFor.length > 0 && (
+                        <div className="wi-hist-item">
+                          <p className="wi-hist-head">Pieces nAia relies on</p>
+                          <div className="wi-strip">
+                            {needs.styleMe.reachedFor.map((piece) => (
+                              <Thumb key={piece.garmentId} card={byId.get(piece.garmentId)} size={72} />
+                            ))}
+                          </div>
+                          <p className="wi-hist-body">
+                            {needs.styleMe.reachedFor.length === 1
+                              ? "This is one of the pieces nAia reaches for most when styling you."
+                              : "These are the pieces nAia reaches for most when styling you."}{" "}
+                            That&rsquo;s what nAia has built &mdash; not a record of what you wore.
+                          </p>
+                        </div>
+                      )}
+
+                      {topRequest && (
+                        <div className="wi-hist-item">
+                          <p className="wi-hist-head">What you ask nAia for most</p>
+                          <p className="wi-hist-body">
+                            You&rsquo;ve asked nAia for{" "}
+                            {(registers.find((r) => r.key === topRequest.register)?.heading ?? "").toLowerCase()}{" "}
+                            dressing{" "}
+                            {topRequest.sessions === 1
+                              ? "once"
+                              : topRequest.sessions === 2
+                                ? "twice"
+                                : `${topRequest.sessions} times`}
+                            .
+                          </p>
+                        </div>
+                      )}
+
+                      {(needs.outcomes.keptNote || needs.outcomes.changedNote) && (
+                        <div className="wi-hist-item">
+                          <p className="wi-hist-head">What your feedback is teaching nAia</p>
+                          <p className="wi-hist-body">
+                            {[needs.outcomes.keptNote, needs.outcomes.changedNote].filter(Boolean).join(" ")}
+                          </p>
+                        </div>
                       )}
                     </div>
-                  </article>
-                ))}
+
+                    {needs.outcomes.state === "learning" && needs.outcomes.learningNote && (
+                      <LearningNote>{needs.outcomes.learningNote}</LearningNote>
+                    )}
+                  </div>
+                )}
               </section>
             )}
 
-            {/* ── How your Closet matches you ───────────────────────────────
-                One line per dimension. The full YOU SAID / YOUR CLOSET SHOWS
-                table is kept underneath, collapsed, for anyone who wants the
-                underlying comparison rather than the conclusion. */}
-            {(matches.length > 0 || passportView.state === "learning") && (
-              <section className="wi-section" aria-labelledby="wi-pass-h">
-                <h2 id="wi-pass-h" className="wi-section-title">How your Closet matches you</h2>
-                <p className="wi-section-sub">
+            {/* ══ 5 · HOW YOUR CLOSET REFLECTS YOUR STYLE ═════════════════════
+                One line per dimension. The long YOU SAID / YOUR CLOSET SHOWS
+                table is gone: its conclusions are already stated above. */}
+            {matches.length > 0 && (
+              <section className="wi-chapter" aria-labelledby="wi-pass-h">
+                <h2 id="wi-pass-h" className="wi-chapter-title">How your Closet reflects your style</h2>
+                <p className="wi-chapter-sub">
                   Your Style Passport is what you told nAia. Your Closet is what you own.
                 </p>
 
-                {passportView.state === "learning" && matches.length === 0 ? (
-                  <LearningNote>{passportView.learningNote}</LearningNote>
-                ) : (
-                  <ul className="wi-matches">
-                    {matches.map((m) => (
-                      <li key={m.id} className={`wi-match is-${m.state}`}>
-                        <p className="wi-match-head">
-                          <span className="wi-match-dim">{m.dimension}</span>
-                          <span className="wi-match-sep" aria-hidden="true">—</span>
-                          <span className="wi-match-state">{m.stateText}</span>
-                        </p>
-                        <p className="wi-match-reading">{m.reading}</p>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-
-                {passportView.state !== "learning" && passportView.comparisons.length > 0 && (
-                  <details className="wi-compare-details">
-                    <summary className="wi-compare-summary">See the full comparison</summary>
-                    <dl className="wi-compare">
-                      {passportView.comparisons.map((c) => (
-                        <div key={c.id} className="wi-compare-row">
-                          <div className="wi-compare-col">
-                            <dt className="wi-microhead">You said</dt>
-                            <dd className="wi-compare-text">{c.stated}</dd>
-                          </div>
-                          <div className="wi-compare-col">
-                            <dt className="wi-microhead">Your Closet shows</dt>
-                            <dd className="wi-compare-text">{c.observed}</dd>
-                          </div>
-                          <p className="wi-compare-reading">{plainText(c.reading)}</p>
-                        </div>
-                      ))}
-                    </dl>
-                  </details>
-                )}
+                <ul className="wi-matches">
+                  {matches.map((m) => (
+                    <li key={m.id} className={`wi-match is-${m.state}`}>
+                      <p className="wi-match-head">
+                        <span className="wi-match-dim">{m.dimension}</span>
+                        <span className="wi-match-sep" aria-hidden="true">—</span>
+                        <span className="wi-match-state">{m.stateText}</span>
+                      </p>
+                      <p className="wi-match-reading">{m.reading}</p>
+                    </li>
+                  ))}
+                </ul>
               </section>
             )}
           </>
         )}
 
-        {/* ── What nAia knows so far ────────────────────────────────────
-            Transparency, not a provenance panel. Deliberately the quietest
-            block on the page: it should reassure, not compete. */}
-        <section className="wi-section wi-knows-section" aria-labelledby="wi-wear-h">
+        {/* ── Transparency footer. Quiet by design. ─────────────────────── */}
+        <section className="wi-footnote" aria-labelledby="wi-wear-h">
           <h2 id="wi-wear-h" className="wi-knows-title">What nAia knows so far</h2>
 
           <dl className="wi-knows">
@@ -771,12 +812,10 @@ const css = `
   .wi-notready-text{font-family:var(--naia-ff-body);font-size:1.15rem;font-style:italic;line-height:1.7;color:var(--naia-ink);margin:0 0 20px;max-width:32em}
 
   /* ── Opening: a reading, then a little support ────────────────────────── */
-  .wi-opening{border-top:1px solid var(--naia-ink);padding-top:26px;margin-bottom:64px;max-width:34em}
   /* The generated summary sentence is never reworded to fit. On desktop the
      container is released so it sits on one line where the viewport allows;
      balance only affects how it breaks when it genuinely cannot. */
   @media(min-width:900px){
-    .wi-opening{max-width:none}
     .wi-opening-reading{max-width:62ch;text-wrap:balance}
     .wi-opening-facts{max-width:34em}
   }
@@ -788,12 +827,8 @@ const css = `
   .wi-fact-value{font-family:var(--naia-ff-display);font-size:18px;font-weight:300;letter-spacing:0;color:var(--naia-ink);margin-right:7px}
 
   /* ── Sections ─────────────────────────────────────────────────────────── */
-  .wi-section{margin-bottom:72px}
-  .wi-section-title{font-family:var(--naia-ff-display);font-size:1.25rem;font-weight:200;letter-spacing:0.05em;text-transform:uppercase;color:rgba(40,21,12,0.78);margin:0 0 10px;line-height:1.1}
   /* Evidence headings stay below the lead titles. Before, every section
      shouted at 1.9rem and the page read as ten equal chapters. */
-  @media(min-width:768px){.wi-section-title{font-size:1.375rem}}
-  .wi-section-sub{font-family:var(--naia-ff-body);font-size:15px;font-style:italic;line-height:1.7;color:rgba(40,21,12,0.6);margin:0 0 32px;max-width:36em}
   .wi-microhead{font-family:var(--naia-ff-ui);font-size:8px;letter-spacing:2.5px;text-transform:uppercase;color:rgba(40,21,12,0.5);margin:0 0 14px}
   .wi-learning{font-family:var(--naia-ff-body);font-size:15px;font-style:italic;line-height:1.75;color:rgba(40,21,12,0.6);margin:0;padding-left:16px;border-left:1px solid var(--naia-border);max-width:34em}
 
@@ -871,16 +906,52 @@ const css = `
 
   /* ── Opportunities — three distinct treatments ────────────────────────── */
   .wi-opp-body{font-family:var(--naia-ff-ui);font-size:13px;line-height:1.75;color:rgba(40,21,12,0.65);margin:0;max-width:38em}
-  /* ══ LEAD SECTIONS ═══════════════════════════════════════════════════
-     The three blocks that answer the customer's actual questions. They are
-     deliberately heavier than the evidence sections below: a wider measure,
-     more air, a rule at the top and a larger title. Everything after them is
-     support, and reads as support. */
-  .wi-lead{padding-top:34px;margin-bottom:72px;border-top:2px solid var(--naia-ink)}
-  @media(min-width:900px){.wi-lead{margin-bottom:88px}}
-  .wi-lead-title{font-family:var(--naia-ff-display);font-size:1.75rem;font-weight:200;letter-spacing:0.03em;text-transform:uppercase;color:var(--naia-ink);margin:0 0 10px;line-height:1.04}
-  @media(min-width:900px){.wi-lead-title{font-size:2.125rem}}
-  .wi-lead-sub{font-family:var(--naia-ff-body);font-size:15px;font-style:italic;line-height:1.7;color:rgba(40,21,12,0.6);margin:0 0 34px;max-width:40em}
+  /* ══ CHAPTERS ════════════════════════════════════════════════════════
+     Five chapters, one typographic treatment. Every chapter title shares the
+     same family, size, weight, letter-spacing, rule and spacing — the page
+     previously had four different heading scales and read as a stack of
+     unrelated reports. Subsection labels are smaller by design, but there is
+     exactly one chapter level. */
+  .wi-chapter{padding-top:32px;margin-bottom:80px;border-top:2px solid var(--naia-ink)}
+  @media(min-width:900px){.wi-chapter{padding-top:38px;margin-bottom:104px}}
+  .wi-chapter-title{
+    font-family:var(--naia-ff-display);
+    font-size:1.75rem;
+    font-weight:200;
+    letter-spacing:0.035em;
+    text-transform:uppercase;
+    line-height:1.06;
+    color:var(--naia-ink);
+    /* Generous, equal breathing room under every chapter title. The old
+       "What nAia knows right now" sat 10px off its content. */
+    margin:0 0 36px;
+  }
+  @media(min-width:900px){.wi-chapter-title{font-size:2.125rem;margin:0 0 44px}}
+  .wi-chapter-sub{font-family:var(--naia-ff-body);font-size:15px;font-style:italic;line-height:1.7;color:rgba(40,21,12,0.6);margin:-24px 0 36px;max-width:40em}
+  @media(min-width:900px){.wi-chapter-sub{margin:-30px 0 44px}}
+
+  /* Blocks inside a chapter. Quieter than a chapter, louder than body copy. */
+  .wi-block{margin-bottom:56px}
+  .wi-block:last-child{margin-bottom:0}
+  @media(min-width:900px){.wi-block{margin-bottom:68px}}
+  .wi-sublabel{font-family:var(--naia-ff-ui);font-size:9.5px;letter-spacing:3px;text-transform:uppercase;color:var(--naia-ink);margin:0 0 22px;padding-bottom:10px;border-bottom:1px solid var(--naia-border)}
+  .wi-sublabel--quiet{color:rgba(40,21,12,0.5)}
+
+  /* Opening snapshot — the summary sentence is never reworded to fit, so on
+     desktop its container is released rather than its type reduced. */
+  .wi-opening{margin-bottom:52px}
+  @media(min-width:900px){
+    .wi-opening-reading{max-width:62ch;text-wrap:balance}
+    .wi-opening-facts{max-width:34em}
+  }
+
+  /* Compact Wardrobe DNA, in chapter 1 and nowhere else. */
+  .wi-dna-grid{display:grid;gap:34px}
+  @media(min-width:860px){.wi-dna-grid{grid-template-columns:repeat(3,1fr);gap:44px}}
+  .wi-dna-cell{min-width:0}
+
+  /* Transparency footer — the quietest thing on the page. */
+  .wi-footnote{border-top:1px solid var(--naia-border);padding-top:22px;margin-bottom:48px}
 
   /* ── What nAia knows right now ────────────────────────────────────────
      At most four conclusions, each a headline the customer can act on with
@@ -904,8 +975,6 @@ const css = `
   .wi-register-note{font-family:var(--naia-ff-ui);font-size:13px;line-height:1.75;color:rgba(40,21,12,0.66);margin:0;max-width:30em}
 
   /* ── What your wardrobe needs ─────────────────────────────────────── */
-  .wi-need-group{margin-bottom:40px}
-  .wi-need-tier{font-family:var(--naia-ff-ui);font-size:9.5px;letter-spacing:3px;text-transform:uppercase;color:var(--naia-ink);margin:0 0 20px;padding-bottom:10px;border-bottom:1px solid var(--naia-border)}
   .wi-finding{margin-bottom:26px}
   .wi-finding:last-child{margin-bottom:0}
   .wi-finding-title{font-family:var(--naia-ff-body);font-size:1.1875rem;font-style:italic;font-weight:400;line-height:1.5;color:var(--naia-ink);margin:0 0 8px;max-width:32em}
@@ -919,8 +988,25 @@ const css = `
   .wi-verdict-why{font-family:var(--naia-ff-body);font-size:1rem;font-style:italic;line-height:1.65;color:rgba(40,21,12,0.7);margin:0;max-width:34em}
 
   /* ── Activity evidence (quiet) ────────────────────────────────────── */
-  .wi-activity{border-top:1px solid var(--naia-border);padding-top:22px;margin-top:34px;display:flex;flex-direction:column;gap:12px}
-  .wi-activity-line{font-family:var(--naia-ff-ui);font-size:13px;line-height:1.75;color:rgba(40,21,12,0.62);margin:0;max-width:40em}
+  /* ── What your styling history shows ──────────────────────────────── */
+  .wi-history{display:grid;gap:34px}
+  @media(min-width:860px){.wi-history{grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:44px}}
+  .wi-hist-item{border-top:1px solid var(--naia-border);padding-top:16px}
+  .wi-hist-head{font-family:var(--naia-ff-ui);font-size:9.5px;letter-spacing:2.6px;text-transform:uppercase;color:var(--naia-ink);margin:0 0 14px}
+  .wi-hist-body{font-family:var(--naia-ff-ui);font-size:13px;line-height:1.8;color:rgba(40,21,12,0.66);margin:14px 0 0;max-width:34em}
+  .wi-hist-item .wi-strip{margin:0}
+
+  /* ── What would add the most ──────────────────────────────────────── */
+  .wi-rec{margin-bottom:32px;padding-left:18px;border-left:2px solid var(--naia-accent)}
+  .wi-rec:last-child{margin-bottom:0}
+  .wi-rec--quiet{border-left-color:var(--naia-border)}
+  .wi-rec-title{font-family:var(--naia-ff-display);font-size:1.1875rem;font-weight:200;letter-spacing:0.03em;text-transform:uppercase;line-height:1.2;color:var(--naia-ink);margin:0 0 8px}
+  @media(min-width:900px){.wi-rec-title{font-size:1.375rem}}
+  .wi-rec-attrs{font-family:var(--naia-ff-ui);font-size:11px;letter-spacing:1.8px;text-transform:uppercase;color:var(--naia-accent);margin:0 0 12px}
+  .wi-rec--quiet .wi-rec-attrs{color:rgba(40,21,12,0.5)}
+  .wi-rec-sep{padding:0 9px;color:rgba(40,21,12,0.3)}
+  .wi-rec-body{font-family:var(--naia-ff-ui);font-size:13px;line-height:1.8;color:rgba(40,21,12,0.68);margin:0;max-width:40em}
+  .wi-rec .wi-strip{margin-top:16px}
 
   /* ── How your Closet matches you ──────────────────────────────────── */
   .wi-matches{list-style:none;margin:0 0 28px;padding:0;display:flex;flex-direction:column;gap:26px}
@@ -933,11 +1019,6 @@ const css = `
   .wi-match-state{color:rgba(40,21,12,0.55)}
   .wi-match.is-gap .wi-match-state{color:var(--naia-accent)}
   .wi-match-reading{font-family:var(--naia-ff-body);font-size:1.0625rem;font-style:italic;line-height:1.65;color:var(--naia-ink);margin:0;max-width:36em}
-  .wi-compare-details{border-top:1px solid var(--naia-border);padding-top:16px}
-  .wi-compare-summary{font-family:var(--naia-ff-ui);font-size:10px;letter-spacing:2.2px;text-transform:uppercase;color:rgba(40,21,12,0.55);cursor:pointer;list-style:none}
-  .wi-compare-summary::-webkit-details-marker{display:none}
-  .wi-compare-summary:hover{color:var(--naia-ink)}
-  .wi-compare-details[open] .wi-compare-summary{margin-bottom:24px}
 
   /* ── Register depth ───────────────────────────────────────────────────── */
   .wi-registers{list-style:none;margin:0 0 40px;padding:0;display:grid;gap:22px}
@@ -957,12 +1038,6 @@ const css = `
 
 
   /* ── Passport vs Closet ───────────────────────────────────────────────── */
-  .wi-compare{margin:0;padding:0}
-  .wi-compare-row{display:grid;grid-template-columns:1fr 1fr;gap:28px;padding:24px 0;border-top:1px solid var(--naia-border)}
-  .wi-compare-row:first-child{border-top-color:var(--naia-ink)}
-  .wi-compare-col dt{margin-bottom:10px}
-  .wi-compare-text{font-family:var(--naia-ff-body);font-size:1.02rem;font-style:italic;line-height:1.6;color:var(--naia-ink);margin:0}
-  .wi-compare-reading{grid-column:1/-1;font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.7;color:rgba(40,21,12,0.6);margin:6px 0 0}
 
   /* ── Wear intelligence — quiet, honest ────────────────────────────────── */
 
@@ -978,7 +1053,6 @@ const css = `
   .wi-rediscover-name{font-family:var(--naia-ff-display);font-size:15px;font-weight:300;letter-spacing:0.08em;text-transform:uppercase;color:var(--naia-ink);margin:0 0 10px;line-height:1.2}
 
   /* ── What nAia knows so far: reassurance, not a provenance panel ──────── */
-  .wi-knows-section{border-top:1px solid var(--naia-border);padding-top:28px;margin-bottom:40px}
   .wi-knows-title{font-family:var(--naia-ff-ui);font-size:9px;letter-spacing:3px;text-transform:uppercase;color:rgba(40,21,12,0.5);margin:0 0 18px;font-weight:400}
   .wi-knows{margin:0 0 16px;padding:0}
   .wi-knows-row{display:flex;flex-wrap:wrap;gap:4px 16px;align-items:baseline;padding:7px 0}
@@ -999,7 +1073,6 @@ const css = `
     .wi-hero-featured-img{max-height:380px}
     .wi-heroes{display:flex;gap:14px;overflow-x:auto;scroll-snap-type:x mandatory;margin:0 -20px;padding:0 20px 8px;-webkit-overflow-scrolling:touch}
     .wi-hero{flex:0 0 46%;scroll-snap-align:start}
-    .wi-compare-row{grid-template-columns:1fr;gap:18px}
   }
   @media(max-width:640px){
     .wi-switch{gap:20px}
@@ -1007,7 +1080,6 @@ const css = `
     .wi-opening-reading{font-size:1.35rem}
     .wi-opening-facts{flex-direction:column;gap:8px}
     .wi-fact-sep{display:none}
-    .wi-section{margin-bottom:56px}
     /* Supporting hero cards stay small: image, label, name, one reason. */
     .wi-hero{flex:0 0 58%}
     .wi-hero-featured-headline{font-size:1.2rem}
