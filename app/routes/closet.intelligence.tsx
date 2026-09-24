@@ -17,6 +17,7 @@ import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 import { getCloudinaryConfig, buildPrivateDownloadUrl } from "~/lib/cloudinary-admin.server";
 import { loadWardrobeIntelligence } from "~/lib/ai/wardrobe-intelligence.server";
+import { describeLooks } from "~/lib/ai/wardrobe-needs";
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: naiaStyles }];
 
@@ -56,7 +57,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     derivedIntentionIntelligence: process.env.WARDROBE_V2_INTENTIONS === "true",
   };
 
-  const { intelligence, garments } = await loadWardrobeIntelligence(customer.id, {
+  const { intelligence, needs, garments } = await loadWardrobeIntelligence(customer.id, {
     imageUrlById,
     flags,
     passport: profile
@@ -64,6 +65,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
           lifestyle: profile.lifestyle,
           favoriteColors: profile.favoriteColors,
           avoidColors: profile.avoidColors,
+          // Retired at Rev 7. Passed through because the existing comparison
+          // view still reads it, and because a customer who has not answered the
+          // Rev 7 question has nothing else. The needs layer never treats it as
+          // current truth on its own — see currentStyleDirection().
           stylePersonalities: profile.stylePersonalities,
           silhouette: profile.silhouette,
           structure: profile.structure ?? null,
@@ -71,6 +76,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
           styleStruggles: profile.styleStruggles,
           styleSupport: profile.styleSupport,
           becoming: profile.becoming,
+
+          // Rev 7 — the fields that actually describe the life being dressed for.
+          styleExpression: profile.styleExpression,
+          styleDirections: profile.styleDirections,
+          explorationLevel: profile.explorationLevel ?? null,
+          dressingHabits: profile.dressingHabits,
+          dressingPreferences: profile.dressingPreferences,
+          coveragePreferences: profile.coveragePreferences,
+          preferredCoverage: profile.preferredCoverage ?? null,
+          dressingRequirementsNote: profile.dressingRequirementsNote ?? null,
+          fitConcerns: profile.fitConcerns,
+          dressesFor: profile.dressesFor,
+          neutralVsColour: profile.neutralVsColour ?? null,
+          colourIntensity: profile.colourIntensity ?? null,
+          printAppetite: profile.printAppetite ?? null,
         }
       : null,
   });
@@ -85,7 +105,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     imageUrl: g.imageUrl,
   }));
 
-  return data({ intelligence, garmentCards });
+  return data({ intelligence, needs, garmentCards });
 }
 
 type GarmentCard = {
@@ -148,7 +168,7 @@ function LearningNote({ children }: { children: React.ReactNode }) {
 }
 
 export default function WardrobeIntelligencePage() {
-  const { intelligence, garmentCards } = useLoaderData<typeof loader>();
+  const { intelligence, needs, garmentCards } = useLoaderData<typeof loader>();
   const byId = new Map<string, GarmentCard>(garmentCards.map((c: GarmentCard) => [c.id, c]));
   const [openObservation, setOpenObservation] = useState<string | null>(null);
   const [openRediscover, setOpenRediscover] = useState<string | null>(null);
@@ -199,6 +219,25 @@ export default function WardrobeIntelligencePage() {
             ))}
           </p>
         </section>
+
+        {/* ── What nAia knows right now ─────────────────────────────────────
+            The page's conclusions, stated once at the top. Nothing is derived
+            here: every line is a finding that already passed its own evidence
+            test in a section below, ranked by how much it should change what
+            she does next. */}
+        {intelligence.ready && needs.headlines.length > 0 && (
+          <section className="wi-section wi-knows" aria-labelledby="wi-knows-h">
+            <h2 id="wi-knows-h" className="wi-section-title">What nAia knows right now</h2>
+            <ul className="wi-knows-list">
+              {needs.headlines.map((headline) => (
+                <li key={headline.id} className="wi-knows-item">
+                  <span className="wi-knows-mark" aria-hidden="true" />
+                  <p className="wi-knows-text">{headline.text}</p>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         {intelligence.ready && (
           <>
@@ -411,6 +450,103 @@ export default function WardrobeIntelligencePage() {
               </section>
             )}
 
+            {/* ── What your wardrobe can dress you for ─────────────────────
+                Depth is read in COMPLETE LOOKS, not piece counts, and split
+                into what she owns versus what she can actually wear given her
+                own stated requirements. That split is the whole point: it is
+                what separates "you need more" from "you need different". */}
+            {needs.state === "available" && (
+              <section className="wi-section wi-needs" aria-labelledby="wi-needs-h">
+                <h2 id="wi-needs-h" className="wi-section-title">What your wardrobe can dress you for</h2>
+                <p className="wi-section-sub">
+                  Counted as complete looks you could actually wear — not as pieces owned.
+                </p>
+
+                <ul className="wi-registers">
+                  {needs.registers.filter((r) => r.rawCount > 0 || r.needed).map((r) => (
+                    <li key={r.register} className="wi-register">
+                      <p className="wi-register-name">
+                        {r.label}
+                        {r.needed && <span className="wi-register-flag">you told nAia this matters</span>}
+                      </p>
+                      <p className="wi-register-count">{describeLooks(r.usableLooks)}</p>
+                      {(r.blockedCount > 0 || r.unknownCount > 0) && (
+                        <p className="wi-register-note">
+                          {r.blockedCount > 0 && (
+                            <>{r.blockedCount} {r.blockedCount === 1 ? "piece sits" : "pieces sit"} outside how you&rsquo;ve said you dress</>
+                          )}
+                          {r.blockedCount > 0 && r.unknownCount > 0 && " · "}
+                          {r.unknownCount > 0 && <>{r.unknownCount} not read yet</>}
+                        </p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+
+                {needs.enough.length > 0 && (
+                  <div className="wi-depth">
+                    <p className="wi-opp-tier">You have enough of</p>
+                    {needs.enough.map((finding) => (
+                      <article key={finding.id} className="wi-finding">
+                        <h3 className="wi-finding-title">{finding.title}</h3>
+                        <p className="wi-finding-body">{finding.body}</p>
+                      </article>
+                    ))}
+                  </div>
+                )}
+
+                {needs.couldUseMore.length > 0 && (
+                  <div className="wi-depth">
+                    <p className="wi-opp-tier">You could use more of</p>
+                    {needs.couldUseMore.map((finding) => (
+                      <article key={finding.id} className="wi-finding">
+                        <h3 className="wi-finding-title">{finding.title}</h3>
+                        <p className="wi-finding-body">{finding.body}</p>
+                        {finding.garmentIds.length > 0 && (
+                          <div className="wi-finding-thumbs">
+                            {finding.garmentIds.map((id) => (
+                              <Thumb key={id} card={byId.get(id)} size={56} />
+                            ))}
+                          </div>
+                        )}
+                      </article>
+                    ))}
+                  </div>
+                )}
+
+                {needs.noUrgentNeed && (
+                  <div className="wi-nogap">
+                    <p className="wi-nogap-line">{needs.noUrgentNeed}</p>
+                  </div>
+                )}
+
+                {/* StyleMe and outcome evidence. Kept deliberately separate:
+                    the first is what nAia proposed, the second is what she told
+                    us happened. Only the second is wear behaviour. */}
+                {(needs.styleMe.state === "available" || needs.outcomes.state === "available") && (
+                  <div className="wi-evidence">
+                    {needs.styleMe.reachedFor.map((piece) => (
+                      <p key={piece.garmentId} className="wi-evidence-line">{piece.note}</p>
+                    ))}
+                    {needs.styleMe.struggles.map((struggle) => (
+                      <p key={struggle.register} className="wi-evidence-line">{struggle.note}</p>
+                    ))}
+                    {needs.styleMe.strongIntentions.length > 0 && (
+                      <p className="wi-evidence-line">
+                        When you ask to {needs.styleMe.strongIntentions.join(" or ")}, your Closet has
+                        pieces that genuinely answer it.
+                      </p>
+                    )}
+                    {needs.outcomes.keptNote && <p className="wi-evidence-line">{needs.outcomes.keptNote}</p>}
+                    {needs.outcomes.changedNote && <p className="wi-evidence-line">{needs.outcomes.changedNote}</p>}
+                  </div>
+                )}
+                {needs.outcomes.state === "learning" && needs.outcomes.learningNote && (
+                  <LearningNote>{needs.outcomes.learningNote}</LearningNote>
+                )}
+              </section>
+            )}
+
             {/* ── Opportunities ─────────────────────────────────────────── */}
             <section className="wi-section" aria-labelledby="wi-opp-h">
               <h2 id="wi-opp-h" className="wi-section-title">Wardrobe opportunities</h2>
@@ -504,6 +640,27 @@ export default function WardrobeIntelligencePage() {
                 Your Style Passport is what you told nAia. Your Closet is what you own. This is
                 simply the two side by side.
               </p>
+
+              {/* Synthesis first — where the two agree and where they pull
+                  apart — then the full side-by-side underneath. A line only
+                  appears when BOTH halves are evidenced. */}
+              {needs.synthesis.state === "available" && needs.synthesis.lines.length > 0 && (
+                <ul className="wi-synth">
+                  {needs.synthesis.lines.map((line) => (
+                    <li key={line.id} className={`wi-synth-line is-${line.kind}`}>
+                      <p className="wi-synth-kind">
+                        {line.kind === "alignment" ? "Where they meet" : line.kind === "tension" ? "Where they pull apart" : "Not yet clear"}
+                      </p>
+                      <p className="wi-synth-pair">
+                        <span className="wi-synth-said">{line.passportSays}</span>
+                        <span className="wi-synth-sep" aria-hidden="true">·</span>
+                        <span className="wi-synth-shows">{line.closetShows}</span>
+                      </p>
+                      <p className="wi-synth-reading">{line.reading}</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
 
               {passportView.state === "learning" ? (
                 <LearningNote>{passportView.learningNote}</LearningNote>
@@ -692,6 +849,45 @@ const css = `
   .wi-opp-lead{font-family:var(--naia-ff-body);font-size:1.05rem;font-style:italic;line-height:1.6;color:var(--naia-ink);margin:0 0 20px}
   .wi-opp--quiet{background:rgba(227,212,201,0.32);padding:28px;margin:0 -28px}
   .wi-opp--quiet .wi-opp-tier{border-bottom-color:rgba(40,21,12,0.25)}
+  /* ── What nAia knows right now ────────────────────────────────────────
+     The conclusions, set as an editorial list rather than a card grid: this
+     is meant to be read, not scanned. */
+  .wi-knows{border-top:1px solid var(--naia-ink);padding-top:28px}
+  .wi-knows-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:20px}
+  .wi-knows-item{display:grid;grid-template-columns:auto 1fr;gap:14px;align-items:start}
+  .wi-knows-mark{width:5px;height:5px;margin-top:11px;border-radius:50%;background:var(--naia-accent);flex:none}
+  .wi-knows-text{font-family:var(--naia-ff-body);font-size:1.0625rem;line-height:1.65;color:var(--naia-ink);margin:0;max-width:40em}
+  @media(min-width:640px){.wi-knows-text{font-size:1.1875rem}}
+
+  /* ── Register depth ───────────────────────────────────────────────────── */
+  .wi-registers{list-style:none;margin:0 0 40px;padding:0;display:grid;gap:22px}
+  @media(min-width:640px){.wi-registers{grid-template-columns:repeat(3,1fr);gap:28px}}
+  .wi-register{border-top:1px solid var(--naia-border);padding-top:14px}
+  .wi-register-name{font-family:var(--naia-ff-ui);font-size:9px;letter-spacing:2.5px;text-transform:uppercase;color:rgba(40,21,12,0.55);margin:0 0 10px;display:flex;flex-wrap:wrap;gap:8px;align-items:baseline}
+  .wi-register-flag{font-size:8.5px;letter-spacing:1.6px;color:var(--naia-accent);text-transform:uppercase}
+  .wi-register-count{font-family:var(--naia-ff-body);font-size:1.0625rem;font-style:italic;line-height:1.55;color:var(--naia-ink);margin:0}
+  .wi-register-note{font-family:var(--naia-ff-ui);font-size:11.5px;line-height:1.65;color:rgba(40,21,12,0.55);margin:8px 0 0}
+
+  .wi-depth{margin-bottom:40px}
+  .wi-finding{margin-bottom:28px}
+  .wi-finding:last-child{margin-bottom:0}
+  .wi-finding-title{font-family:var(--naia-ff-body);font-size:1.1875rem;font-style:italic;font-weight:400;line-height:1.5;color:var(--naia-ink);margin:0 0 8px;max-width:32em}
+  .wi-finding-body{font-family:var(--naia-ff-ui);font-size:13px;line-height:1.8;color:rgba(40,21,12,0.68);margin:0;max-width:40em}
+  .wi-finding-thumbs{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+
+  .wi-evidence{border-top:1px solid var(--naia-border);padding-top:20px;margin-top:8px;display:flex;flex-direction:column;gap:12px}
+  .wi-evidence-line{font-family:var(--naia-ff-ui);font-size:13px;line-height:1.75;color:rgba(40,21,12,0.68);margin:0;max-width:40em}
+
+  /* ── Passport synthesis ───────────────────────────────────────────────── */
+  .wi-synth{list-style:none;margin:0 0 40px;padding:0;display:flex;flex-direction:column;gap:28px}
+  .wi-synth-line{padding-left:16px;border-left:1px solid var(--naia-border)}
+  .wi-synth-line.is-tension{border-left-color:var(--naia-accent)}
+  .wi-synth-kind{font-family:var(--naia-ff-ui);font-size:9px;letter-spacing:2.5px;text-transform:uppercase;color:rgba(40,21,12,0.5);margin:0 0 10px}
+  .wi-synth-pair{font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.7;color:rgba(40,21,12,0.6);margin:0 0 8px}
+  .wi-synth-sep{margin:0 8px;opacity:0.5}
+  .wi-synth-shows{color:var(--naia-ink)}
+  .wi-synth-reading{font-family:var(--naia-ff-body);font-size:1.0625rem;font-style:italic;line-height:1.65;color:var(--naia-ink);margin:0;max-width:34em}
+
   .wi-nogap{border-top:1px solid var(--naia-ink);padding-top:16px}
   .wi-nogap-line{font-family:var(--naia-ff-body);font-size:1.3rem;font-style:italic;line-height:1.6;color:var(--naia-ink);margin:0;max-width:30em}
   .wi-opp-foot{font-family:var(--naia-ff-body);font-size:13px;font-style:italic;line-height:1.6;color:rgba(40,21,12,0.55);margin:20px 0 0;max-width:34em}

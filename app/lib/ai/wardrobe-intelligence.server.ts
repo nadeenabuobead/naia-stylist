@@ -39,6 +39,13 @@ import {
   type WardrobeIntelligenceFlags,
 } from "~/lib/ai/wardrobe-intelligence";
 import { DEFAULT_FLAGS } from "~/lib/ai/wardrobe-intelligence";
+import {
+  computeWardrobeNeeds,
+  styleMeSessionRegister,
+  type WardrobeNeeds,
+  type StyleMeSessionFact,
+  type OutcomeFact,
+} from "~/lib/ai/wardrobe-needs";
 
 // db.server is plain JS, so the Prisma client is untyped at this boundary.
 // This row shape is the explicit contract for everything this module reads.
@@ -74,6 +81,8 @@ const CURATED_APPROVED_STATUS = "approved";
 
 export interface WardrobeIntelligenceBundle {
   intelligence: WardrobeIntelligence;
+  /** Synthesis layer: what the wardrobe DOES, on top of what it IS. */
+  needs: WardrobeNeeds;
   /** Garment lookup for the UI — images, names, categories. */
   garments: WardrobeGarment[];
 }
@@ -94,11 +103,27 @@ export async function loadWardrobeIntelligence(
     include: { adminReview: true, styleMeProfile: true },
   });
 
-  const [outfitCounts, savedCounts, seenCombinations] = await Promise.all([
+  const [outfitCounts, savedCounts, seenCombinations, styleMeSessions, outcomes] = await Promise.all([
     countOutfitAppearances(customerId),
     countSavedLookAppearances(customerId),
     loadSeenCombinations(customerId),
+    loadStyleMeSessions(customerId),
+    loadOutcomes(customerId),
   ]);
+
+  // Per-garment outcome tallies. A garment inherits the outcome of every look it
+  // appeared in — that is a fact about the LOOK, so only look-level and
+  // register-level claims are drawn from it downstream.
+  const outcomeTally = new Map<string, { kept: number; changed: number; notWorn: number }>();
+  for (const outcome of outcomes) {
+    for (const garmentId of outcome.garmentIds) {
+      const row = outcomeTally.get(garmentId) ?? { kept: 0, changed: 0, notWorn: 0 };
+      if (outcome.status === "wore-it") row.kept++;
+      else if (outcome.status === "changed-something") row.changed++;
+      else row.notWorn++;
+      outcomeTally.set(garmentId, row);
+    }
+  }
 
   const passportInput = toStylingPassportInput(options.passport);
 
@@ -205,8 +230,22 @@ export async function loadWardrobeIntelligence(
       intentionsSource: hasIntelligence ? intentionsSource : null,
       intelligenceSource: hasIntelligence ? source : "none",
 
+      // Coverage facts, passed through exactly as stored. These drive the
+      // needs layer's usable-vs-blocked split, so a null here must stay null:
+      // it means "not read", never "complies".
+      sleeveLength: effective.sleeveLength ?? null,
+      necklineCoverage: effective.necklineCoverage ?? null,
+      hemLength: effective.hemLength ?? null,
+      topLength: effective.topLength ?? null,
+      midriffExposed: effective.midriffExposed ?? null,
+      shoulderCoverage: effective.shoulderCoverage ?? null,
+
       outfitAppearances: outfitCounts.get(item.id) ?? 0,
       savedLookAppearances: savedCounts.get(item.id) ?? 0,
+
+      outcomeKept: outcomeTally.get(item.id)?.kept ?? 0,
+      outcomeChanged: outcomeTally.get(item.id)?.changed ?? 0,
+      outcomeNotWorn: outcomeTally.get(item.id)?.notWorn ?? 0,
 
       // Reserved for real wear tracking. ClosetItem.timesWorn / lastWorn exist in
       // the schema but nothing writes them, so passing them through would dress up
@@ -222,7 +261,14 @@ export async function loadWardrobeIntelligence(
     flags: options.flags ?? DEFAULT_FLAGS,
   });
 
-  return { intelligence, garments };
+  const needs = computeWardrobeNeeds({
+    items: garments,
+    passport: options.passport,
+    styleMeSessions,
+    outcomes,
+  });
+
+  return { intelligence, needs, garments };
 }
 
 // ── Usage facts (real records only — NOT wear tracking) ───────────────────────
@@ -256,6 +302,102 @@ async function countSavedLookAppearances(customerId: string): Promise<Map<string
     if (row.closetItemId) out.set(row.closetItemId, row._count._all);
   }
   return out;
+}
+
+/**
+ * StyleMe history as GENERATED FACT.
+ *
+ * This records what nAia proposed and what the customer asked for. It is not
+ * evidence that anything was worn — that lives in loadOutcomes() below, and the
+ * two are kept in separate shapes so no downstream caller can confuse them.
+ *
+ * Returns [] (not null) when the customer has simply never used StyleMe; the
+ * needs layer distinguishes "queried, nothing there" from "never queried".
+ */
+async function loadStyleMeSessions(customerId: string): Promise<StyleMeSessionFact[]> {
+  const sessions: Array<{
+    id: string;
+    occasion: string | null;
+    formalityConditional: string | null;
+    intentions: string[];
+    suggestions: Array<{ items: Array<{ closetItemId: string | null }> }>;
+  }> = await prisma.stylingSession.findMany({
+    where: { customerId },
+    select: {
+      id: true,
+      occasion: true,
+      formalityConditional: true,
+      intentions: true,
+      suggestions: { select: { items: { select: { closetItemId: true } } } },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 200,
+  });
+
+  return sessions.map((session) => ({
+    id: session.id,
+    register: styleMeSessionRegister(session.occasion, session.formalityConditional),
+    intentions: session.intentions ?? [],
+    garmentIds: session.suggestions
+      .flatMap((suggestion) => suggestion.items.map((item) => item.closetItemId))
+      .filter((id): id is string => Boolean(id)),
+  }));
+}
+
+/**
+ * Recorded StyleMeOutcome rows — the only wear behaviour nAia actually holds.
+ *
+ * The customer told us what happened after the look: wore it, changed something,
+ * or didn't wear it. Nothing here is inferred from a generated suggestion.
+ *
+ * Prisma is untyped at this boundary (db.server is plain JS) and StyleMeOutcome
+ * is reached the same way outcome-persistence.server.ts reaches it.
+ */
+async function loadOutcomes(customerId: string): Promise<OutcomeFact[]> {
+  const db = prisma as unknown as {
+    styleMeOutcome: {
+      findMany: (args: unknown) => Promise<Array<{
+        suggestionId: string;
+        outcomeStatus: string;
+        suggestion: {
+          items: Array<{ closetItemId: string | null }>;
+          session: { occasion: string | null; formalityConditional: string | null } | null;
+        } | null;
+      }>>;
+    };
+  };
+
+  const rows = await db.styleMeOutcome.findMany({
+    where: { customerId },
+    select: {
+      suggestionId: true,
+      outcomeStatus: true,
+      suggestion: {
+        select: {
+          items: { select: { closetItemId: true } },
+          session: { select: { occasion: true, formalityConditional: true } },
+        },
+      },
+    },
+    orderBy: { submittedAt: "desc" },
+    take: 200,
+  });
+
+  const VALID = new Set(["wore-it", "changed-something", "didnt-wear-it"]);
+
+  return rows
+    .filter((row) => VALID.has(row.outcomeStatus))
+    .map((row) => ({
+      suggestionId: row.suggestionId,
+      status: row.outcomeStatus as OutcomeFact["status"],
+      register: styleMeSessionRegister(
+        row.suggestion?.session?.occasion ?? null,
+        row.suggestion?.session?.formalityConditional ?? null,
+      ),
+      garmentIds: (row.suggestion?.items ?? [])
+        .map((item) => item.closetItemId)
+        .filter((id): id is string => Boolean(id)),
+    }));
 }
 
 /** Combination keys nAia has already produced — used only to mark a pairing untried. */

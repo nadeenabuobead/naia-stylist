@@ -141,9 +141,33 @@ export interface WardrobeGarment {
   intentionsSource: "curated" | "derived" | null;
   intelligenceSource: IntelligenceSource;
 
+  // ── coverage facts (Group 2 dressing vocabulary) ──
+  //
+  // Optional: callers written before the needs layer do not supply them, and a
+  // missing value means "not read yet", never "does not comply". The needs layer
+  // keeps unknown separate from blocked precisely so absent analysis can never
+  // manufacture a gap. "n/a" is a real value meaning the field does not apply to
+  // this garment type (e.g. hemLength on a top).
+  sleeveLength?: string | null;
+  necklineCoverage?: string | null;
+  hemLength?: string | null;
+  topLength?: string | null;
+  midriffExposed?: boolean | null;
+  shoulderCoverage?: boolean | null;
+
   // ── naia-interaction signals ──
   outfitAppearances: number;
   savedLookAppearances: number;
+
+  /**
+   * Outcomes recorded against looks that contained this piece (StyleMeOutcome).
+   * Optional and defaulted to zero: a caller that does not load outcomes must
+   * not look like a customer who gave no feedback. Use `outcomeRecorded` to tell
+   * "no feedback exists" from "feedback was never queried".
+   */
+  outcomeKept?: number;
+  outcomeChanged?: number;
+  outcomeNotWorn?: number;
 
   // ── observed-wear signals — reserved, always null today ──
   observedWear: ObservedWear | null;
@@ -153,6 +177,12 @@ export interface WardrobePassport {
   lifestyle: string[];
   favoriteColors: string[];
   avoidColors: string[];
+  /**
+   * RETIRED at Rev 7. Kept because historical profiles still hold it and the
+   * existing comparison view reads it. Never treat it as current truth on its
+   * own — `styleDirections` is the canonical Rev 7 style field. See
+   * `currentStyleDirection()` in wardrobe-needs.ts for the precedence rule.
+   */
   stylePersonalities: string[];
   silhouette: string[];
   structure: string | null;
@@ -160,6 +190,36 @@ export interface WardrobePassport {
   styleStruggles: string[];
   styleSupport: string[];
   becoming: string[];
+
+  // ── Rev 7 fields ───────────────────────────────────────────────────────────
+  //
+  // All optional: a profile written before Rev 7 simply does not carry them, and
+  // every caller that predates this block keeps compiling. Absence means "not
+  // asked / not answered" and must never be read as a negative answer.
+
+  /** Rev 7 Q3 "Personality" — what the customer wants clothes to communicate. */
+  styleExpression?: string[];
+  /** Rev 7 canonical style field — the aesthetics she is drawn to. */
+  styleDirections?: string[];
+  /** How far nAia should move beyond the familiar. */
+  explorationLevel?: string | null;
+  /** Behavioural context. Never scored, only used to weight register need. */
+  dressingHabits?: string[];
+  /** Hard dressing constraints (Group 2 exclusion vocabulary). */
+  dressingPreferences?: string[];
+  /** Body areas the customer prefers covered. */
+  coveragePreferences?: string[];
+  preferredCoverage?: string | null;
+  /** Free-text cultural/religious requirement. Presence alone is meaningful. */
+  dressingRequirementsNote?: string | null;
+  /** Recurring fit problems. */
+  fitConcerns?: string[];
+  /** Occasions the customer says she dresses for. */
+  dressesFor?: string[];
+  /** Neutral-vs-colour appetite, colour intensity, print appetite. */
+  neutralVsColour?: string | null;
+  colourIntensity?: string | null;
+  printAppetite?: string | null;
 }
 
 // ── Output types ──────────────────────────────────────────────────────────────
@@ -3142,5 +3202,41 @@ export function wardrobeCharacterLine(items: WardrobeGarment[]): string | null {
   return `Your Closet is ${joinList(labels)}.`;
 }
 
-export const WARDROBE_INTELLIGENCE_VERSION = "2.1.0";
+export const WARDROBE_INTELLIGENCE_VERSION = "2.2.0";
 export { INTENTION_LABELS, CATEGORY_PLURAL };
+
+// ── Shared internals ──────────────────────────────────────────────────────────
+//
+// The needs-analysis layer (wardrobe-needs.ts) reads the SAME vocabulary,
+// compatibility rules and evidence helpers this file uses. Re-deriving any of
+// them there would let the two layers drift and disagree on the page, so they
+// are exported rather than copied. Nothing here is part of the public contract
+// of Wardrobe Intelligence; treat it as internal to the two modules.
+export {
+  FORMALITY_BUCKET,
+  FORMALITY_BUCKET_LABEL,
+  FORMALITY_BUCKET_SHORT,
+  LIFESTYLE_REGISTERS,
+  LIFESTYLE_LABELS,
+  lifestyleRegisters,
+  TOP_SLOTS,
+  BOTTOM_SLOTS,
+  ONE_PIECE_SLOTS,
+  STATED_REGULAR,
+  STATED_LOW_USE,
+  STATED_STRUGGLE,
+  STATED_UNSURE,
+  STATED_FRICTION,
+  scorePair,
+  partnersOf,
+  statedAs,
+  norm,
+  ratio,
+  countBy,
+  topEntries,
+  joinList,
+  capitalise,
+  ev,
+  gradeStrength,
+};
+export type { PairScore };
