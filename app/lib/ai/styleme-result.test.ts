@@ -69,6 +69,7 @@ import {
 import type { CandidateOccasionEvidence, OutfitSuitabilityScore } from "./styleme-result.server.ts";
 import type { OutfitCandidate } from "./styleme-result.server.ts";
 import { scoreClosetItemForSession, autoSelectClosetAnchor, scoreBodyNeedForClosetItem } from "./styleme-anchor.server.ts";
+import { computeItemIntentionWeight } from "./styleme-profile-gate.ts";
 import type { AutoSelectItem } from "./styleme-anchor.server.ts";
 import type {
   StyleMeCustomerResult,
@@ -11781,5 +11782,330 @@ describe("§REV2.15 passesCandidateDressingRequirements — neckline coverage (c
     const items = [makeItem("unknown-top", { necklineCoverage: null })];
     const candidate = makeCandidate([{ id: "unknown-top", slot: "top" }]);
     assert.equal(passesCandidateDressingRequirements(candidate, items, PREFS_NECKLINE), true);
+  });
+});
+
+// ── §V2-RG — V2 Systemic Remediation Regression Tests ────────────────────────
+// Covers: feel-softer selection evidence, register differentiation, system-prompt
+// content guards (rules 20-27). Written against the V2 remediation commit.
+// All tests use property-based fixtures — no garment names or IDs are hardcoded.
+
+describe("§V2-RG1 — feel-softer: selection-level intention evidence", () => {
+  function makeIntentionItem(
+    id: string,
+    intentionRating: "Strong" | "Supporting" | "None" | null,
+  ): ClosetAnchorInput {
+    return {
+      id,
+      name: id,
+      category: "TOPS",
+      occasions: ["everyday"],
+      styleTags: ["confident"],
+      colors: ["black"],
+      primaryColor: "black",
+      imageUrl: null,
+      garmentRelationships: [],
+      approvedProfile: {
+        exactSlot: "top",
+        outfitFunction: null,
+        dressRegister: null,
+        fabricBehaviour: [],
+        silhouetteCharacter: [],
+        visualWeight: null,
+        construction: null,
+        stylingEffort: null,
+        layeringBehaviour: null,
+        waistComfort: null,
+        statementLevel: null,
+        occasionFit: null,
+        intentionPotentials: intentionRating !== null ? { "feel-softer": intentionRating } : null,
+        naturalPairings: null,
+        intentionalMix: null,
+        avoidInStyleMe: null,
+      },
+    };
+  }
+
+  const FEEL_SOFTER_SESSION: any = {
+    moods: ["confident"],
+    desiredFeelings: ["more-elevated"],
+    bodyNeeds: [],
+    coverageConditional: null,
+    occasion: "everyday",
+    formalityConditional: null,
+    todayColours: { preferred: [], avoid: [] },
+    practicalIds: [],
+    source: "my-closet",
+    intentions: ["feel-softer"],
+  };
+
+  it("V2-RG1.A — computeItemIntentionWeight: feel-softer=None returns 0", () => {
+    const item = makeIntentionItem("none-item", "None");
+    const weight = computeItemIntentionWeight(item, "feel-softer");
+    assert.equal(weight, 0, "None-rated feel-softer must return weight 0.0");
+  });
+
+  it("V2-RG1.B — computeItemIntentionWeight: feel-softer=Strong returns 1.0", () => {
+    const item = makeIntentionItem("strong-item", "Strong");
+    const weight = computeItemIntentionWeight(item, "feel-softer");
+    assert.equal(weight, 1.0, "Strong-rated feel-softer must return weight 1.0");
+  });
+
+  it("V2-RG1.C — selection: Strong feel-softer item wins over None feel-softer item", () => {
+    const strongItem = makeIntentionItem("strong-top", "Strong");
+    const noneItem = makeIntentionItem("none-top", "None");
+    const result = selectAdditionalClosetGarments(null, null, FEEL_SOFTER_SESSION, [strongItem, noneItem]);
+    const selectedIds = result.map((g) => g.id);
+    assert.ok(
+      selectedIds.includes("strong-top"),
+      `Strong feel-softer item must be selected; got: ${JSON.stringify(selectedIds)}`,
+    );
+    assert.ok(
+      !selectedIds.includes("none-top"),
+      `None feel-softer item must not win when a Strong alternative exists in the same slot; got: ${JSON.stringify(selectedIds)}`,
+    );
+  });
+
+  it("V2-RG1.D — legacy: 'soft' tag no longer gets a boosted feel-softer score after GATE_FLOW_TAGS fix", () => {
+    // Before fix: "soft" in GATE_FLOW_TAGS → legacyPieceIntentionScore returned 0.7 (positive signal).
+    // After fix: "soft" removed from GATE_FLOW_TAGS → falls to the neutral 0.2 baseline.
+    // Physical fabric softness must not masquerade as emotional feel-softer fulfilment.
+    const softTagItem: ClosetAnchorInput = {
+      id: "soft-tag-item",
+      name: "Soft Tee",
+      category: "TOPS",
+      occasions: ["everyday"],
+      styleTags: ["soft"],
+      colors: ["white"],
+      primaryColor: "white",
+      imageUrl: null,
+      garmentRelationships: [],
+      // No approvedProfile → legacy path used
+    };
+    const weight = computeItemIntentionWeight(softTagItem, "feel-softer");
+    assert.ok(
+      weight < 0.5,
+      `Legacy 'soft' tag must not return a boosted feel-softer score (expected <0.5); got: ${weight}`,
+    );
+    // Confirm it returns the neutral 0.2 baseline (not the previous 0.7 tag-match value).
+    assert.equal(weight, 0.2, `Expected neutral 0.2 baseline; got: ${weight}`);
+  });
+});
+
+describe("§V2-RG2 — register differentiation: outfit selection ranks by dressRegister", () => {
+  function makeRegisterItem(
+    id: string,
+    dressRegister: string,
+    occasion: string = "dinner",
+  ): ClosetAnchorInput {
+    return {
+      id,
+      name: id,
+      category: "TOPS",
+      occasions: [occasion],
+      styleTags: ["confident"],
+      colors: ["black"],
+      primaryColor: "black",
+      imageUrl: null,
+      garmentRelationships: [],
+      approvedProfile: {
+        exactSlot: "top",
+        outfitFunction: null,
+        dressRegister,
+        fabricBehaviour: [],
+        silhouetteCharacter: [],
+        visualWeight: null,
+        construction: null,
+        stylingEffort: null,
+        layeringBehaviour: null,
+        waistComfort: null,
+        statementLevel: null,
+        // occasionFit = Acceptable bypasses passesProfileRegisterGate generic check
+        occasionFit: { [occasion]: "Acceptable" },
+        intentionPotentials: null,
+        naturalPairings: null,
+        intentionalMix: null,
+        avoidInStyleMe: null,
+      },
+    };
+  }
+
+  it("V2-RG2.A — dinner/dressy: dressy-register wins over casual-register item (registerBonus)", () => {
+    // formality-occasion ∩ dinner (2-5) → range 4-5 (polished=4, dressy=5)
+    // dressy rank 5 is in range → +0.5; casual rank 1 is out of range → 0
+    const session: any = {
+      moods: ["confident"],
+      desiredFeelings: [],
+      bodyNeeds: [],
+      coverageConditional: null,
+      occasion: "dinner",
+      formalityConditional: "formality-occasion",
+      todayColours: { preferred: [], avoid: [] },
+      practicalIds: [],
+      source: "my-closet",
+    };
+    const result = selectAdditionalClosetGarments(
+      null,
+      null,
+      session,
+      [makeRegisterItem("dressy-top", "dressy"), makeRegisterItem("casual-top", "casual")],
+    );
+    const ids = result.map((g) => g.id);
+    assert.ok(ids.includes("dressy-top"), `dressy item must be selected; got: ${JSON.stringify(ids)}`);
+    assert.ok(!ids.includes("casual-top"), `casual item must not win for dinner/dressy; got: ${JSON.stringify(ids)}`);
+  });
+
+  it("V2-RG2.B — dinner/relaxed: elevated-casual wins over dressy-register item", () => {
+    // formality-relaxed (1-2) ∩ dinner (2-5) → range 2-2 (elevated-casual=2)
+    // elevated-casual rank 2 in range → +0.5; dressy rank 5 out of range → 0
+    const session: any = {
+      moods: ["confident"],
+      desiredFeelings: [],
+      bodyNeeds: [],
+      coverageConditional: null,
+      occasion: "dinner",
+      formalityConditional: "formality-relaxed",
+      todayColours: { preferred: [], avoid: [] },
+      practicalIds: [],
+      source: "my-closet",
+    };
+    const result = selectAdditionalClosetGarments(
+      null,
+      null,
+      session,
+      [makeRegisterItem("elevated-casual-top", "elevated-casual"), makeRegisterItem("dressy-top-b", "dressy")],
+    );
+    const ids = result.map((g) => g.id);
+    assert.ok(ids.includes("elevated-casual-top"), `elevated-casual must be selected for dinner/relaxed; got: ${JSON.stringify(ids)}`);
+    assert.ok(!ids.includes("dressy-top-b"), `dressy item must not win for dinner/relaxed; got: ${JSON.stringify(ids)}`);
+  });
+
+  it("V2-RG2.C — work/polished: polished-register wins over elevated-casual item", () => {
+    // formality-polished (3-4) ∩ work (2-4) → range 3-4 (smart-casual=3, polished=4)
+    // polished rank 4 in range → +0.5; elevated-casual rank 2 out of range → 0
+    const session: any = {
+      moods: ["confident"],
+      desiredFeelings: [],
+      bodyNeeds: [],
+      coverageConditional: null,
+      occasion: "work",
+      formalityConditional: "formality-polished",
+      todayColours: { preferred: [], avoid: [] },
+      practicalIds: [],
+      source: "my-closet",
+    };
+    const result = selectAdditionalClosetGarments(
+      null,
+      null,
+      session,
+      [makeRegisterItem("polished-top", "polished", "work"), makeRegisterItem("elevated-top-c", "elevated-casual", "work")],
+    );
+    const ids = result.map((g) => g.id);
+    assert.ok(ids.includes("polished-top"), `polished item must be selected for work/polished; got: ${JSON.stringify(ids)}`);
+    assert.ok(!ids.includes("elevated-top-c"), `elevated-casual must not win when polished alternative exists; got: ${JSON.stringify(ids)}`);
+  });
+
+  it("V2-RG2.D — work/smart-casual: smart-casual wins over polished item", () => {
+    // formality-smart (2-3) ∩ work (2-4) → range 2-3 (elevated-casual=2, smart-casual=3)
+    // smart-casual rank 3 in range → +0.5; polished rank 4 out of range [2-3] → 0
+    const session: any = {
+      moods: ["confident"],
+      desiredFeelings: [],
+      bodyNeeds: [],
+      coverageConditional: null,
+      occasion: "work",
+      formalityConditional: "formality-smart",
+      todayColours: { preferred: [], avoid: [] },
+      practicalIds: [],
+      source: "my-closet",
+    };
+    const result = selectAdditionalClosetGarments(
+      null,
+      null,
+      session,
+      [makeRegisterItem("smart-casual-top", "smart-casual", "work"), makeRegisterItem("polished-top-d", "polished", "work")],
+    );
+    const ids = result.map((g) => g.id);
+    assert.ok(ids.includes("smart-casual-top"), `smart-casual must win for work/smart-casual; got: ${JSON.stringify(ids)}`);
+    assert.ok(!ids.includes("polished-top-d"), `polished item must not win for work/smart-casual; got: ${JSON.stringify(ids)}`);
+  });
+});
+
+describe("§V2-RG3 — system-prompt rule content verification (rules 20-27)", () => {
+  const serverSrc = readFileSync(
+    new URL("./styleme-result.server.ts", import.meta.url).pathname,
+    "utf8",
+  );
+  const gateSrc = readFileSync(
+    new URL("./styleme-profile-gate.ts", import.meta.url).pathname,
+    "utf8",
+  );
+
+  it("V2-RG3.A — GATE_FLOW_TAGS in styleme-profile-gate.ts does not contain 'soft'", () => {
+    const match = gateSrc.match(/const GATE_FLOW_TAGS\s*=\s*new Set\(\[([^\]]+)\]\)/);
+    assert.ok(match, "GATE_FLOW_TAGS must be defined in styleme-profile-gate.ts");
+    assert.ok(
+      !match![1].includes('"soft"'),
+      `'soft' must not be in GATE_FLOW_TAGS; found: ${match![1]}`,
+    );
+  });
+
+  it("V2-RG3.B — FLOW_TAGS in styleme-result.server.ts does not contain 'soft'", () => {
+    const match = serverSrc.match(/const FLOW_TAGS\s*=\s*new Set\(\[([^\]]+)\]\)/);
+    assert.ok(match, "FLOW_TAGS must be defined in styleme-result.server.ts");
+    assert.ok(
+      !match![1].includes('"soft"'),
+      `'soft' must not be in FLOW_TAGS; found: ${match![1]}`,
+    );
+  });
+
+  it("V2-RG3.C — rule 20 (COVERAGE PRECISION) guards maxi + slit against full-coverage claim", () => {
+    assert.ok(serverSrc.includes("slit"), "rule 20 must mention 'slit'");
+    assert.ok(serverSrc.includes("full leg coverage"), "rule 20 must reference 'full leg coverage'");
+    assert.ok(serverSrc.includes("COVERAGE PRECISION"), "rule 20 must be labelled COVERAGE PRECISION");
+  });
+
+  it("V2-RG3.D — rule 21 (WAIST DEFINITION) guards absent waistShape against waist-definition claim", () => {
+    assert.ok(serverSrc.includes("WAIST DEFINITION"), "rule 21 must be labelled WAIST DEFINITION");
+    assert.ok(serverSrc.includes("waistShape"), "rule 21 must mention 'waistShape'");
+    assert.ok(
+      serverSrc.includes("absent from the metadata") || serverSrc.includes("waistShape is absent"),
+      "rule 21 must guard against absent waistShape",
+    );
+  });
+
+  it("V2-RG3.E — rule 22 explicitly separates physical fabricBehaviour from feel-softer intention", () => {
+    assert.ok(
+      serverSrc.includes("PHYSICAL SOFTNESS vs EMOTIONAL FEEL-SOFTER") ||
+        serverSrc.includes("PHYSICAL SOFTNESS"),
+      "rule 22 must label the physical/emotional distinction",
+    );
+    assert.ok(serverSrc.includes("feel-softer: None"), "rule 22 must reference 'feel-softer: None'");
+  });
+
+  it("V2-RG3.F — rule 25 (REQUIRED COVERAGE LAYERS) guards required layers against optional framing", () => {
+    assert.ok(serverSrc.includes("REQUIRED COVERAGE LAYERS"), "rule 25 must be labelled REQUIRED COVERAGE LAYERS");
+    assert.ok(serverSrc.includes("easy to remove"), "rule 25 must list 'easy to remove' as prohibited");
+    assert.ok(serverSrc.includes("optional"), "rule 25 must list 'optional' as prohibited for required layers");
+  });
+
+  it("V2-RG3.G — rule 26 (INTENTION EVIDENCE REQUIREMENT) guards unrated/None against positive claims", () => {
+    assert.ok(serverSrc.includes("INTENTION EVIDENCE REQUIREMENT"), "rule 26 must be present");
+    assert.ok(serverSrc.includes("treat it as unrated"), "rule 26 must specify unrated treatment");
+    assert.ok(serverSrc.includes("None"), "rule 26 must reference 'None' rating");
+  });
+
+  it("V2-RG3.H — rule 27 (SESSION-TRUTH ATTRIBUTION) covers all prohibited attribution phrases", () => {
+    assert.ok(serverSrc.includes("SESSION-TRUTH ATTRIBUTION"), "rule 27 must be present");
+    assert.ok(serverSrc.includes("aiming for"), "rule 27 must cover 'aiming for'");
+    assert.ok(serverSrc.includes("asked for"), "rule 27 must cover 'asked for'");
+    assert.ok(serverSrc.includes("today's brief"), "rule 27 must cover \"today's brief\"");
+    assert.ok(serverSrc.includes("you're after"), "rule 27 must cover \"you're after\"");
+    assert.ok(serverSrc.includes("you're looking for"), "rule 27 must cover \"you're looking for\"");
+    assert.ok(
+      serverSrc.includes("powerful impression you're aiming for") ||
+        serverSrc.includes("a powerful impression you're aiming for"),
+      "rule 27 must name the 'powerful impression' pattern explicitly",
+    );
   });
 });
