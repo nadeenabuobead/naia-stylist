@@ -65,11 +65,12 @@ import {
   NAIA_FIT_CONCERN_LABELS,
   NAIA_STRUCTURE_LABELS,
   passesAnchorIntegrityGate,
+  sanitizeFactualWordingClaims,
 } from "./styleme-result.server.ts";
 import type { CandidateOccasionEvidence, OutfitSuitabilityScore } from "./styleme-result.server.ts";
 import type { OutfitCandidate } from "./styleme-result.server.ts";
 import { scoreClosetItemForSession, autoSelectClosetAnchor, scoreBodyNeedForClosetItem } from "./styleme-anchor.server.ts";
-import { computeItemIntentionWeight } from "./styleme-profile-gate.ts";
+import { computeItemIntentionWeight, computeRegisterAlignmentScore } from "./styleme-profile-gate.ts";
 import type { AutoSelectItem } from "./styleme-anchor.server.ts";
 import type {
   StyleMeCustomerResult,
@@ -12106,6 +12107,542 @@ describe("§V2-RG3 — system-prompt rule content verification (rules 20-27)", (
       serverSrc.includes("powerful impression you're aiming for") ||
         serverSrc.includes("a powerful impression you're aiming for"),
       "rule 27 must name the 'powerful impression' pattern explicitly",
+    );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §V2-RG4 — Register distance scoring: computeRegisterAlignmentScore
+// Verifies the fix for confirmed failure 1: formality differentiation.
+// The flat +0.5 bonus was replaced with a distance-based model that penalizes
+// out-of-target items. Tests prove the score difference is decisive when
+// alternatives have a realistic base-score gap.
+// ─────────────────────────────────────────────────────────────────────────────
+describe("§V2-RG4 — Register distance scoring (computeRegisterAlignmentScore)", () => {
+  // ── Unit: in-target → positive, out-of-target → penalty ─────────────────
+  it("V2-RG4.A — in-target → +2.5 when formalityConditional set", () => {
+    assert.equal(computeRegisterAlignmentScore(3, { min: 2, max: 3 }, true), 2.5);
+  });
+
+  it("V2-RG4.B — 1 rank outside target → -1.5 when formalityConditional set", () => {
+    assert.equal(computeRegisterAlignmentScore(4, { min: 2, max: 3 }, true), -1.5);
+  });
+
+  it("V2-RG4.C — 2 ranks outside → -3.0 when formalityConditional set", () => {
+    assert.equal(computeRegisterAlignmentScore(5, { min: 2, max: 3 }, true), -3.0);
+  });
+
+  it("V2-RG4.D — 3+ ranks outside → capped at -4.5", () => {
+    assert.equal(computeRegisterAlignmentScore(6, { min: 2, max: 3 }, true), -4.5);
+  });
+
+  it("V2-RG4.E — null rank → 0 always (fail-open, no penalty for un-profiled items)", () => {
+    assert.equal(computeRegisterAlignmentScore(null, { min: 2, max: 4 }, true), 0);
+    assert.equal(computeRegisterAlignmentScore(null, { min: 4, max: 5 }, true), 0);
+  });
+
+  it("V2-RG4.F — no formalityConditional: in-target → +1.0, out-of-target → 0 (no penalty)", () => {
+    assert.equal(computeRegisterAlignmentScore(3, { min: 2, max: 3 }, false), 1.0);
+    assert.equal(computeRegisterAlignmentScore(5, { min: 2, max: 3 }, false), 0);
+  });
+
+  // ── Net swing proves decisive differentiation ────────────────────────────
+  it("V2-RG4.G — score swing between in-target and 1-rank-outside is 4.0 points (decisive vs. 3-pt base gap)", () => {
+    const inTarget = computeRegisterAlignmentScore(3, { min: 2, max: 3 }, true);
+    const oneOut = computeRegisterAlignmentScore(4, { min: 2, max: 3 }, true);
+    assert.equal(inTarget - oneOut, 4.0,
+      "4.0 point swing must overcome a ≤3 point base score lead in a real wardrobe");
+  });
+
+  // ── Slot filling: Smart casual vs Dressy produce different selections ────
+  // Simulates confirmed failure: two bottoms with realistic base scores,
+  // different dressRegister. With the new scoring, Smart casual picks the
+  // smart-casual item and Dressy picks the polished item.
+  it("V2-RG4.H — Smart casual dinner selects smart-casual-register bottom, not polished", () => {
+    // smart-casual bottom: high base score (occasion match + mood), rank=3 (smart-casual)
+    const smartCasualBottom: ClosetAnchorInput = {
+      type: "closet", id: "sc-btm", name: "Navy Everyday Trousers", category: "BOTTOMS",
+      occasions: ["dinner"], styleTags: ["confident", "relaxed"], colors: ["navy"], primaryColor: "navy",
+      imageUrl: null, garmentRelationships: [], formality: null, fitProfile: null, waistShape: null,
+      sleeveLength: null, necklineCoverage: null, hemLength: null, topLength: null,
+      shoulderCoverage: null, midriffExposed: null, silhouette: null, stylePersonality: null,
+      subcategory: null, pattern: null, material: null,
+      approvedProfile: {
+        exactSlot: "bottom", outfitFunction: null, dressRegister: "smart-casual",
+        fabricBehaviour: [], silhouetteCharacter: [], visualWeight: null, construction: null,
+        stylingEffort: null, layeringBehaviour: null, waistComfort: null, statementLevel: null,
+        occasionFit: { dinner: "Acceptable" }, intentionPotentials: null,
+        naturalPairings: null, intentionalMix: null, avoidInStyleMe: null,
+      },
+    };
+    // polished bottom: lower base score (no occasion match), rank=4 (polished)
+    const polishedBottom: ClosetAnchorInput = {
+      type: "closet", id: "pol-btm", name: "Tailored Wide-Leg Trousers", category: "BOTTOMS",
+      occasions: ["work"], styleTags: [], colors: ["black"], primaryColor: "black",
+      imageUrl: null, garmentRelationships: [], formality: null, fitProfile: null, waistShape: null,
+      sleeveLength: null, necklineCoverage: null, hemLength: null, topLength: null,
+      shoulderCoverage: null, midriffExposed: null, silhouette: null, stylePersonality: null,
+      subcategory: null, pattern: null, material: null,
+      approvedProfile: {
+        exactSlot: "bottom", outfitFunction: null, dressRegister: "polished",
+        fabricBehaviour: [], silhouetteCharacter: [], visualWeight: null, construction: null,
+        stylingEffort: null, layeringBehaviour: null, waistComfort: null, statementLevel: null,
+        occasionFit: { dinner: "Acceptable" }, intentionPotentials: null,
+        naturalPairings: null, intentionalMix: null, avoidInStyleMe: null,
+      },
+    };
+    const session = {
+      occasion: "dinner", moods: ["confident"], desiredFeelings: [],
+      formalityConditional: "formality-smart" as const, intentions: [], bodyNeeds: [],
+      state: null, stateOtherText: null, coverageConditional: null,
+      occasionDisplayLabel: null,
+    } as unknown as Parameters<typeof selectAdditionalClosetGarments>[2];
+
+    // Smart casual: smart-casual item has base=13 (dinner match + mood), polished has base=0
+    // Smart casual target {2,3}: smart-casual(3) → +2.5; polished(4) → -1.5
+    // Smart casual totals: smart-casual = 13+2.5=15.5, polished = 0+(-1.5)=-1.5 → smart-casual wins
+    const result = selectAdditionalClosetGarments(null, null, session, [smartCasualBottom, polishedBottom]);
+    const selectedId = result.find((r) => r.slot === "bottom")?.id;
+    assert.equal(selectedId, "sc-btm", "Smart casual session must select the smart-casual-register bottom");
+  });
+
+  it("V2-RG4.I — Dressy dinner selects polished-register bottom over smart-casual when base gap ≤ 4 pts", () => {
+    // Same two bottoms, but now with Dressy = formality-occasion
+    // The smart-casual bottom still has occasion match (base=10), but polished has base=7
+    // Dressy target {4,5}: smart-casual(3) → -1.5; polished(4) → +2.5
+    // Totals: smart-casual = 10+(-1.5)=8.5; polished = 7+2.5=9.5 → polished wins ✓
+    const smartCasualBottom: ClosetAnchorInput = {
+      type: "closet", id: "sc-btm-d", name: "Navy Everyday Trousers", category: "BOTTOMS",
+      occasions: ["dinner"], styleTags: [], colors: ["navy"], primaryColor: "navy",
+      imageUrl: null, garmentRelationships: [], formality: null, fitProfile: null, waistShape: null,
+      sleeveLength: null, necklineCoverage: null, hemLength: null, topLength: null,
+      shoulderCoverage: null, midriffExposed: null, silhouette: null, stylePersonality: null,
+      subcategory: null, pattern: null, material: null,
+      approvedProfile: {
+        exactSlot: "bottom", outfitFunction: null, dressRegister: "smart-casual",
+        fabricBehaviour: [], silhouetteCharacter: [], visualWeight: null, construction: null,
+        stylingEffort: null, layeringBehaviour: null, waistComfort: null, statementLevel: null,
+        occasionFit: { dinner: "Acceptable" }, intentionPotentials: null,
+        naturalPairings: null, intentionalMix: null, avoidInStyleMe: null,
+      },
+    };
+    const polishedBottom: ClosetAnchorInput = {
+      type: "closet", id: "pol-btm-d", name: "Tailored Wide-Leg Trousers", category: "BOTTOMS",
+      occasions: ["dinner", "work"], styleTags: [], colors: ["black"], primaryColor: "black",
+      imageUrl: null, garmentRelationships: [], formality: null, fitProfile: null, waistShape: null,
+      sleeveLength: null, necklineCoverage: null, hemLength: null, topLength: null,
+      shoulderCoverage: null, midriffExposed: null, silhouette: null, stylePersonality: null,
+      subcategory: null, pattern: null, material: null,
+      approvedProfile: {
+        exactSlot: "bottom", outfitFunction: null, dressRegister: "polished",
+        fabricBehaviour: [], silhouetteCharacter: [], visualWeight: null, construction: null,
+        stylingEffort: null, layeringBehaviour: null, waistComfort: null, statementLevel: null,
+        occasionFit: { dinner: "Acceptable" }, intentionPotentials: null,
+        naturalPairings: null, intentionalMix: null, avoidInStyleMe: null,
+      },
+    };
+    const session = {
+      occasion: "dinner", moods: [], desiredFeelings: [],
+      formalityConditional: "formality-occasion" as const, intentions: [], bodyNeeds: [],
+      state: null, stateOtherText: null, coverageConditional: null,
+      occasionDisplayLabel: null,
+    } as unknown as Parameters<typeof selectAdditionalClosetGarments>[2];
+
+    const result = selectAdditionalClosetGarments(null, null, session, [smartCasualBottom, polishedBottom]);
+    const selectedId = result.find((r) => r.slot === "bottom")?.id;
+    assert.equal(selectedId, "pol-btm-d", "Dressy session must select the polished-register bottom when base score gap ≤ 4 pts");
+  });
+
+  it("V2-RG4.J — sole candidate wins even with out-of-target penalty (no empty-outfit from penalty alone)", () => {
+    // Only one bottom in wardrobe: dressy register, but session is Smart casual
+    const dressyOnlyBottom: ClosetAnchorInput = {
+      type: "closet", id: "dressy-only", name: "Strapless Evening Gown", category: "BOTTOMS",
+      occasions: ["dinner"], styleTags: [], colors: ["black"], primaryColor: "black",
+      imageUrl: null, garmentRelationships: [], formality: null, fitProfile: null, waistShape: null,
+      sleeveLength: null, necklineCoverage: null, hemLength: null, topLength: null,
+      shoulderCoverage: null, midriffExposed: null, silhouette: null, stylePersonality: null,
+      subcategory: null, pattern: null, material: null,
+      approvedProfile: {
+        exactSlot: "bottom", outfitFunction: null, dressRegister: "dressy",
+        fabricBehaviour: [], silhouetteCharacter: [], visualWeight: null, construction: null,
+        stylingEffort: null, layeringBehaviour: null, waistComfort: null, statementLevel: null,
+        occasionFit: { dinner: "Acceptable" }, intentionPotentials: null,
+        naturalPairings: null, intentionalMix: null, avoidInStyleMe: null,
+      },
+    };
+    const session = {
+      occasion: "dinner", moods: [], desiredFeelings: [],
+      formalityConditional: "formality-smart" as const, intentions: [], bodyNeeds: [],
+      state: null, stateOtherText: null, coverageConditional: null,
+      occasionDisplayLabel: null,
+    } as unknown as Parameters<typeof selectAdditionalClosetGarments>[2];
+
+    // dressy(5) vs Smart casual target {2,3}: distance=2, penalty=-3.0
+    // base score = 10 (dinner match), final = 10 + (-3.0) = 7.0 > 0 → still selected
+    const result = selectAdditionalClosetGarments(null, null, session, [dressyOnlyBottom]);
+    const selectedId = result.find((r) => r.slot === "bottom")?.id;
+    assert.equal(selectedId, "dressy-only",
+      "Sole candidate must be selected even when out-of-target penalty applies (penalty must not prevent selection entirely)");
+  });
+
+  // ── Source code guard: hemLength unconditional ────────────────────────────
+  it("V2-RG4.K — hemLength is surfaced before the approved-profile guard (unconditional)", () => {
+    const serverSrc = readFileSync(new URL("./styleme-result.server.ts", import.meta.url).pathname, "utf-8");
+    // The hemLength line must appear BEFORE the 'if (!ap)' early return
+    // Simplest proxy: the comment explaining this must be present
+    assert.ok(
+      serverSrc.includes("hemLength is surfaced for ALL pieces regardless of") ||
+        serverSrc.includes("surfaced for ALL pieces"),
+      "hemLength must be surfaced unconditionally (comment guard must be present)",
+    );
+    // Also verify the early-return no longer short-circuits hemLength
+    assert.ok(
+      !serverSrc.includes("if (!ap || !garmentItem) return"),
+      "old guard 'if (!ap || !garmentItem) return' must no longer exist — hemLength moved above it",
+    );
+  });
+
+  it("V2-RG4.L — full rank matrix for all dinner formality options (mechanically proven)", () => {
+    // Formality ranges: OCCASION_FORMALITY_TARGET["dinner"]={2,5} intersected with:
+    //   Relaxed    (formality-relaxed)  : {max(2,1), min(5,2)} = {2,2}
+    //   Smart cas. (formality-smart)    : {max(2,2), min(5,3)} = {2,3}
+    //   Dressy     (formality-occasion) : {max(2,4), min(5,6)} = {4,5}
+    //
+    // Penalty formula: Math.max(-4.5, -1.5 * distance); cap triggers at distance ≥ 3
+    // Ranks: athletic=0, casual=1, elevated-casual=2, smart-casual=3, polished=4, dressy=5, evening=6
+
+    // ── Relaxed dinner: target {2,2} ────────────────────────────────────────
+    const relaxed = { min: 2, max: 2 };
+    assert.strictEqual(computeRegisterAlignmentScore(0, relaxed, true), -3.0, "Relaxed: athletic(0) — 2 below min=2 → -3.0");
+    assert.strictEqual(computeRegisterAlignmentScore(1, relaxed, true), -1.5, "Relaxed: casual(1) — 1 below min=2 → -1.5");
+    assert.strictEqual(computeRegisterAlignmentScore(2, relaxed, true),  2.5, "Relaxed: elevated-casual(2) — in-target → +2.5");
+    assert.strictEqual(computeRegisterAlignmentScore(3, relaxed, true), -1.5, "Relaxed: smart-casual(3) — 1 above max=2 → -1.5");
+    assert.strictEqual(computeRegisterAlignmentScore(4, relaxed, true), -3.0, "Relaxed: polished(4) — 2 above max=2 → -3.0");
+    assert.strictEqual(computeRegisterAlignmentScore(5, relaxed, true), -4.5, "Relaxed: dressy(5) — 3 above max=2 → -4.5 (cap)");
+    assert.strictEqual(computeRegisterAlignmentScore(6, relaxed, true), -4.5, "Relaxed: evening(6) — 4 above max=2 → -4.5 (cap)");
+
+    // ── Smart casual dinner: target {2,3} ───────────────────────────────────
+    const smart = { min: 2, max: 3 };
+    // Key: athletic(0) is 2 ranks below min=2 → distance=2, penalty=-3.0 NOT -4.5
+    // The -4.5 cap only triggers at distance≥3 (i.e. rank 0 or below, or rank 7+)
+    assert.strictEqual(computeRegisterAlignmentScore(0, smart, true), -3.0, "SmartCas: athletic(0) — 2 below min=2 → -3.0 (cap needs distance≥3)");
+    assert.strictEqual(computeRegisterAlignmentScore(1, smart, true), -1.5, "SmartCas: casual(1) — 1 below min=2 → -1.5");
+    assert.strictEqual(computeRegisterAlignmentScore(2, smart, true),  2.5, "SmartCas: elevated-casual(2) — in-target → +2.5");
+    assert.strictEqual(computeRegisterAlignmentScore(3, smart, true),  2.5, "SmartCas: smart-casual(3) — in-target → +2.5");
+    assert.strictEqual(computeRegisterAlignmentScore(4, smart, true), -1.5, "SmartCas: polished(4) — 1 above max=3 → -1.5");
+    assert.strictEqual(computeRegisterAlignmentScore(5, smart, true), -3.0, "SmartCas: dressy(5) — 2 above max=3 → -3.0");
+    assert.strictEqual(computeRegisterAlignmentScore(6, smart, true), -4.5, "SmartCas: evening(6) — 3 above max=3 → -4.5 (cap)");
+
+    // ── Dressy dinner: target {4,5} ─────────────────────────────────────────
+    const dressy = { min: 4, max: 5 };
+    assert.strictEqual(computeRegisterAlignmentScore(0, dressy, true), -4.5, "Dressy: athletic(0) — 4 below min=4 → -4.5 (cap)");
+    assert.strictEqual(computeRegisterAlignmentScore(1, dressy, true), -4.5, "Dressy: casual(1) — 3 below min=4 → -4.5 (cap)");
+    assert.strictEqual(computeRegisterAlignmentScore(2, dressy, true), -3.0, "Dressy: elevated-casual(2) — 2 below min=4 → -3.0");
+    assert.strictEqual(computeRegisterAlignmentScore(3, dressy, true), -1.5, "Dressy: smart-casual(3) — 1 below min=4 → -1.5");
+    assert.strictEqual(computeRegisterAlignmentScore(4, dressy, true),  2.5, "Dressy: polished(4) — in-target → +2.5");
+    assert.strictEqual(computeRegisterAlignmentScore(5, dressy, true),  2.5, "Dressy: dressy(5) — in-target → +2.5");
+    assert.strictEqual(computeRegisterAlignmentScore(6, dressy, true), -1.5, "Dressy: evening(6) — 1 above max=5 → -1.5");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §V2-RG5 — hemLength factual-wording sanitization
+// Verifies the deterministic post-generation guard for confirmed failure 2:
+// midi skirts described as maxi/full-length in model wording.
+// ─────────────────────────────────────────────────────────────────────────────
+describe("§V2-RG5 — hemLength factual-wording guard (sanitizeFactualWordingClaims)", () => {
+  // Minimal outfit candidate with one bottom piece
+  function makeCandidateWithBottom(closetId: string): OutfitCandidate {
+    return {
+      id: "A",
+      pieces: [
+        { slot: "bottom", closetId, label: "Test Skirt", colors: ["burgundy"] },
+      ],
+    } as unknown as OutfitCandidate;
+  }
+
+  function makeItem(id: string, hemLength: string | null): ClosetAnchorInput {
+    return {
+      type: "closet", id, name: `Test Item ${id}`, category: "BOTTOMS",
+      occasions: ["dinner"], styleTags: [], colors: ["burgundy"], primaryColor: "burgundy",
+      imageUrl: null, garmentRelationships: [], formality: null, fitProfile: null,
+      waistShape: null, sleeveLength: null, hemLength, topLength: null,
+      shoulderCoverage: null, midriffExposed: null, silhouette: null, stylePersonality: null,
+      subcategory: null, pattern: null, material: null, approvedProfile: null,
+    };
+  }
+
+  const badWording = {
+    outfitName: "Burgundy Evening Look",
+    whyThisWorks: "The burgundy maxi skirt provides full leg coverage for a formal dinner. The full-length skirt anchors the look.",
+    confidenceBoost: "The full-length skirt is doing the work here.",
+  };
+  const goodWording = {
+    outfitName: "Burgundy Evening Look",
+    whyThisWorks: "The burgundy midi skirt hits mid-calf and anchors the look.",
+    confidenceBoost: "The midi skirt is doing the work here.",
+  };
+
+  it("V2-RG5.A — 'maxi skirt' → 'midi skirt' when outfit contains a midi bottom", () => {
+    const { sanitized } = sanitizeFactualWordingClaims(
+      badWording,
+      new Map(),
+      makeCandidateWithBottom("item1"),
+      [makeItem("item1", "midi")],
+    );
+    assert.ok(!sanitized.whyThisWorks.includes("maxi skirt"),
+      "must not contain 'maxi skirt' after sanitization");
+    assert.ok(sanitized.whyThisWorks.includes("midi skirt"),
+      "must replace with 'midi skirt'");
+  });
+
+  it("V2-RG5.B — 'full-length skirt' → 'midi skirt' when outfit contains a midi bottom", () => {
+    const { sanitized } = sanitizeFactualWordingClaims(
+      badWording,
+      new Map(),
+      makeCandidateWithBottom("item2"),
+      [makeItem("item2", "midi")],
+    );
+    assert.ok(!sanitized.whyThisWorks.includes("full-length skirt"),
+      "must not contain 'full-length skirt' after sanitization");
+    assert.ok(!sanitized.confidenceBoost.includes("full-length skirt"),
+      "confidenceBoost must also be sanitized");
+  });
+
+  it("V2-RG5.C — 'full leg coverage' → 'midi length' when outfit contains a midi bottom", () => {
+    const wording = {
+      outfitName: "Look",
+      whyThisWorks: "Provides full leg coverage for the dinner occasion.",
+      confidenceBoost: "The skirt gives full leg coverage.",
+    };
+    const { sanitized } = sanitizeFactualWordingClaims(
+      wording,
+      new Map(),
+      makeCandidateWithBottom("item3"),
+      [makeItem("item3", "midi")],
+    );
+    assert.ok(!sanitized.whyThisWorks.includes("full leg coverage"),
+      "must not contain 'full leg coverage'");
+    assert.ok(sanitized.whyThisWorks.includes("midi length"),
+      "must replace with 'midi length' (not 'mid-calf coverage' — mid-calf placement not proven by hemLength=midi)");
+    assert.ok(!sanitized.whyThisWorks.includes("mid-calf"),
+      "must NOT use 'mid-calf' — that claims exact placement hemLength alone cannot prove");
+  });
+
+  it("V2-RG5.D — perPieceNotes are also sanitized", () => {
+    const notes = new Map([["item4", "The burgundy maxi skirt brings the look together."]]);
+    const { perPieceNotes } = sanitizeFactualWordingClaims(
+      goodWording,
+      notes,
+      makeCandidateWithBottom("item4"),
+      [makeItem("item4", "midi")],
+    );
+    const note = perPieceNotes.get("item4") ?? "";
+    assert.ok(!note.includes("maxi skirt"), "perPieceNotes must be sanitized");
+    assert.ok(note.includes("midi skirt"), "perPieceNotes must contain 'midi skirt'");
+  });
+
+  it("V2-RG5.E — no sanitization when outfit has no midi bottom (null hemLength = fail-open)", () => {
+    const { sanitized } = sanitizeFactualWordingClaims(
+      badWording,
+      new Map(),
+      makeCandidateWithBottom("item5"),
+      [makeItem("item5", null)], // hemLength unknown
+    );
+    // Must not modify wording when hemLength is unknown
+    assert.ok(sanitized.whyThisWorks.includes("maxi skirt"),
+      "wording must remain unchanged when hemLength is null");
+  });
+
+  it("V2-RG5.F — no sanitization when hemLength is 'maxi' (guard only fires for midi)", () => {
+    const { sanitized } = sanitizeFactualWordingClaims(
+      badWording,
+      new Map(),
+      makeCandidateWithBottom("item6"),
+      [makeItem("item6", "maxi")], // correctly maxi
+    );
+    assert.ok(sanitized.whyThisWorks.includes("maxi skirt"),
+      "wording must remain unchanged when hemLength is maxi");
+  });
+
+  it("V2-RG5.G — source code guard: sanitizeFactualWordingClaims covers all required patterns", () => {
+    const serverSrc = readFileSync(new URL("./styleme-result.server.ts", import.meta.url).pathname, "utf-8");
+    assert.ok(serverSrc.includes("sanitizeFactualWordingClaims"),
+      "sanitizeFactualWordingClaims must exist in styleme-result.server.ts");
+    assert.ok(serverSrc.includes("applyMidiGuard"),
+      "applyMidiGuard inner function must be present");
+    assert.ok(serverSrc.includes("hasMidiBottom"),
+      "hasMidiBottom condition must gate the sanitization");
+    // Replacement must use "midi length" not "mid-calf coverage" for coverage claims
+    // (mid-calf placement is not proven by hemLength=midi alone)
+    assert.ok(serverSrc.includes("midi length"),
+      "coverage claim replacement must use 'midi length' not 'mid-calf coverage'");
+    assert.ok(!serverSrc.includes('"mid-calf coverage"'),
+      "must NOT use 'mid-calf coverage' as replacement — hemLength=midi does not prove mid-calf placement");
+    // full-length coverage pattern must be present (live observed failure)
+    assert.ok(serverSrc.includes("full[- ]length coverage") || serverSrc.includes("full-length coverage"),
+      "guard must cover 'full-length coverage' — observed in live Test 6 wording");
+  });
+
+  // ── Live-phrase regression tests ─────────────────────────────────────────────
+  // Exact wording patterns observed in live Test 6/7 runs. These must be caught
+  // before any future regression reintroduces them.
+
+  it("V2-RG5.H — exact live failure: 'provides the full-length coverage you prefer'", () => {
+    const wording = {
+      outfitName: "Burgundy Dinner Look",
+      whyThisWorks: "The burgundy skirt provides the full-length coverage you prefer for a dinner setting.",
+      confidenceBoost: "This outfit delivers the coverage you asked for.",
+    };
+    const { sanitized } = sanitizeFactualWordingClaims(
+      wording,
+      new Map(),
+      makeCandidateWithBottom("midi-skirt-id"),
+      [makeItem("midi-skirt-id", "midi")],
+    );
+    assert.ok(!sanitized.whyThisWorks.includes("full-length coverage"),
+      "live failure phrase 'full-length coverage' must be removed");
+    assert.ok(sanitized.whyThisWorks.includes("midi length"),
+      "must replace with neutral 'midi length'");
+    // Must not introduce false coverage claims in its place
+    assert.ok(!sanitized.whyThisWorks.includes("full leg coverage"),
+      "replacement must not introduce 'full leg coverage'");
+    assert.ok(!sanitized.whyThisWorks.includes("mid-calf"),
+      "replacement must not introduce 'mid-calf' — placement not proven");
+  });
+
+  it("V2-RG5.I — exact live failure: 'the full-length skirt aligns with your preference for covered legs'", () => {
+    const wording = {
+      outfitName: "Evening Look",
+      whyThisWorks: "The full-length skirt aligns with your preference for covered legs and adds elegance.",
+      confidenceBoost: "Length works here.",
+    };
+    const { sanitized } = sanitizeFactualWordingClaims(
+      wording,
+      new Map(),
+      makeCandidateWithBottom("midi-skirt-2"),
+      [makeItem("midi-skirt-2", "midi")],
+    );
+    assert.ok(!sanitized.whyThisWorks.includes("full-length skirt"),
+      "live failure phrase 'full-length skirt' must be removed");
+    assert.ok(sanitized.whyThisWorks.includes("midi skirt"),
+      "must replace 'full-length skirt' with 'midi skirt'");
+  });
+
+  it("V2-RG5.J — exact live failure: 'Full-length coverage through the maxi skirt'", () => {
+    const wording = {
+      outfitName: "Look",
+      whyThisWorks: "Full-length coverage through the maxi skirt gives a refined silhouette.",
+      confidenceBoost: "Clean and covered.",
+    };
+    const { sanitized } = sanitizeFactualWordingClaims(
+      wording,
+      new Map(),
+      makeCandidateWithBottom("midi-skirt-3"),
+      [makeItem("midi-skirt-3", "midi")],
+    );
+    // Both patterns must fire: "full-length coverage" and "maxi skirt"
+    assert.ok(!sanitized.whyThisWorks.includes("Full-length coverage"),
+      "must remove 'Full-length coverage'");
+    assert.ok(!sanitized.whyThisWorks.includes("maxi skirt"),
+      "must remove 'maxi skirt'");
+    assert.ok(sanitized.whyThisWorks.includes("midi length"),
+      "coverage claim must become 'midi length'");
+    assert.ok(sanitized.whyThisWorks.includes("midi skirt"),
+      "garment name must become 'midi skirt'");
+  });
+
+  it("V2-RG5.K — no-hyphen variant: 'full length coverage' (without hyphen)", () => {
+    const wording = {
+      outfitName: "Look",
+      whyThisWorks: "Offering full length coverage from hip to hem.",
+      confidenceBoost: "Full length coverage suits the occasion.",
+    };
+    const { sanitized } = sanitizeFactualWordingClaims(
+      wording,
+      new Map(),
+      makeCandidateWithBottom("midi-skirt-4"),
+      [makeItem("midi-skirt-4", "midi")],
+    );
+    assert.ok(!sanitized.whyThisWorks.includes("full length coverage"),
+      "must catch 'full length coverage' (no-hyphen variant)");
+    assert.ok(sanitized.whyThisWorks.includes("midi length"),
+      "no-hyphen variant must also produce 'midi length'");
+    assert.ok(!sanitized.confidenceBoost.includes("full length coverage"),
+      "confidenceBoost no-hyphen variant must also be sanitized");
+  });
+
+  it("V2-RG5.L — 'maxi dress' → 'midi dress' when outfit contains a midi dress piece", () => {
+    // Dress slot with hemLength=midi: "maxi dress" is wrong
+    const candidate: OutfitCandidate = {
+      id: "A",
+      pieces: [{ slot: "dress", closetId: "midi-dress-id", label: "Test Dress", colors: ["black"] }],
+    } as unknown as OutfitCandidate;
+    const dressItem = makeItem("midi-dress-id", "midi");
+    // Override category to DRESSES for the dress slot to be realistic
+    const wording = {
+      outfitName: "Maxi Dress Look",
+      whyThisWorks: "The elegant maxi dress creates a fluid silhouette.",
+      confidenceBoost: "This maxi dress style suits the occasion.",
+    };
+    const { sanitized } = sanitizeFactualWordingClaims(wording, new Map(), candidate, [dressItem]);
+    assert.ok(!sanitized.whyThisWorks.includes("maxi dress"),
+      "must replace 'maxi dress' when dress slot has hemLength=midi");
+    assert.ok(sanitized.whyThisWorks.includes("midi dress"),
+      "must replace 'maxi dress' → 'midi dress'");
+    assert.ok(!sanitized.outfitName.includes("Maxi Dress"),
+      "outfitName must also be sanitized");
+  });
+
+  it("V2-RG5.M — negated coverage claim is preserved (blind replacement would be factually wrong)", () => {
+    // "does not provide full-length coverage" is accurate for a midi skirt:
+    // the garment provides MIDI length but not necessarily full-leg coverage.
+    // A blind replace would produce "does not provide midi length" — factually wrong,
+    // because the midi skirt DOES provide midi length.
+    // The 30-char lookback negation guard must detect "not" and leave the phrase untouched.
+    const negatedWording = {
+      outfitName: "Smart Casual Look",
+      whyThisWorks:
+        "The style does not provide full-length coverage but suits the brief perfectly.",
+      confidenceBoost:
+        "It does not aim for full leg coverage, which keeps the look relaxed.",
+    };
+    const { sanitized } = sanitizeFactualWordingClaims(
+      negatedWording,
+      new Map(),
+      makeCandidateWithBottom("midi-neg-id"),
+      [makeItem("midi-neg-id", "midi")],
+    );
+    assert.ok(
+      sanitized.whyThisWorks.includes("does not provide full-length coverage"),
+      "negated 'does not provide full-length coverage' must be preserved — midi skirt DOES provide midi length",
+    );
+    assert.ok(
+      sanitized.confidenceBoost.includes("does not aim for full leg coverage"),
+      "negated 'does not aim for full leg coverage' must be preserved",
+    );
+    // Confirm the guard does NOT suppress positive-form replacements in the same text
+    const mixedWording = {
+      outfitName: "Mixed Look",
+      whyThisWorks:
+        "It provides the full-length coverage you prefer, even though the style does not provide full leg coverage on the other piece.",
+      confidenceBoost: "Good coverage.",
+    };
+    const { sanitized: mixed } = sanitizeFactualWordingClaims(
+      mixedWording,
+      new Map(),
+      makeCandidateWithBottom("midi-mixed-id"),
+      [makeItem("midi-mixed-id", "midi")],
+    );
+    // Positive form → replaced
+    assert.ok(
+      !mixed.whyThisWorks.includes("provides the full-length coverage"),
+      "positive 'provides the full-length coverage' must still be replaced even when a negated form appears later in the same string",
+    );
+    // Negated form → preserved
+    assert.ok(
+      mixed.whyThisWorks.includes("does not provide full leg coverage"),
+      "negated 'does not provide full leg coverage' must be preserved in the same string",
     );
   });
 });

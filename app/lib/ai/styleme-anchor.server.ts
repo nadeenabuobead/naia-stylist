@@ -495,16 +495,19 @@ export async function autoSelectClosetAnchor(
       ? item.styleMeProfile
       : null;
 
-    // Register bonus: items within the preferred formality range get +0.5.
+    // Register alignment score: in-target items get +2.5, out-of-target items receive
+    // a distance-based penalty (-1.5 per rank outside, capped at -4.5).
     // Only fires when a formalityConditional is set and the item has known formality.
-    // Keeps register as a tiebreaker within the occasion pool without overriding occasion.
+    // Items without known formality always get 0 (fail-open).
     const registerBonus = (() => {
       if (!signals.formalityConditional || !item.formality) return 0;
       const rank = _FORMALITY_RANK[item.formality] ?? null;
       if (rank === null) return 0;
       const range = _FORMALITY_CONDITIONAL_TARGET[signals.formalityConditional];
       if (!range) return 0;
-      return rank >= range.min && rank <= range.max ? 0.5 : 0;
+      if (rank >= range.min && rank <= range.max) return 2.5;
+      const distance = rank < range.min ? range.min - rank : rank - range.max;
+      return Math.max(-4.5, -1.5 * distance);
     })();
 
     // Body-need bonus/penalty: applied to anchor-capable categories only.

@@ -69,6 +69,7 @@ import {
   passesOutfitFunctionGate,
   outfitFunctionPriority,
   DRESS_REGISTER_RANK,
+  computeRegisterAlignmentScore,
 } from "./styleme-profile-gate.js";
 
 // ── Passport option label resolver ───────────────────────────────────────────
@@ -2467,6 +2468,101 @@ export const NAIA_STRUCTURE_LABELS: Record<string, string> = {
   "balanced-structure": "A balance of soft and structured",
 };
 
+// ── Deterministic factual-wording guard ──────────────────────────────────────
+//
+// Corrects garment-fact errors that the model can produce even when metadata is
+// surfaced in the wording prompt. Only corrects facts that are definitionally
+// incompatible with the structured garment truth in the DB.
+//
+// Current scope: hemLength="midi" (bottom/dress/set slot).
+//   hemLength proves the garment reaches midi length — not that it provides
+//   full-leg coverage (a slit or cut-out can still expose the leg). Slit metadata
+//   is not currently stored on ClosetItem; if added it should gate coverage claims.
+//
+// Invariants enforced when a midi bottom/dress/set is in the selected outfit:
+//   - Wrong garment-name labels: "maxi skirt", "full-length skirt/dress" → corrected
+//     to use "midi" vocabulary.
+//   - Unsupported full-length/full-leg coverage claims: replaced with the neutral
+//     factual descriptor "midi length". Coverage claims must not exceed what
+//     hemLength alone proves. Mid-calf placement is not guaranteed by hemLength=midi,
+//     so only "midi length" is a safe replacement — not mid-calf or full-coverage terms.
+//
+// Does NOT hardcode garment IDs, names, or colours. Operates on slot+hemLength
+// metadata only. Fail-open: null hemLength → no replacement.
+//
+// Pattern list (all case-insensitive, word-bounded):
+//   maxi skirt              → midi skirt
+//   maxi dress              → midi dress
+//   full-length skirt       → midi skirt
+//   full length skirt       → midi skirt
+//   full-length dress       → midi dress
+//   full length dress       → midi dress
+//   full-length coverage    → midi length
+//   full length coverage    → midi length
+//   full leg coverage       → midi length
+//   full-length coverage    → midi length  (deduplicated — same as above)
+
+export function sanitizeFactualWordingClaims(
+  wording: { outfitName: string; whyThisWorks: string; confidenceBoost: string },
+  perPieceNotes: Map<string, string>,
+  candidate: OutfitCandidate,
+  allItems: ClosetAnchorInput[],
+): {
+  sanitized: { outfitName: string; whyThisWorks: string; confidenceBoost: string };
+  perPieceNotes: Map<string, string>;
+} {
+  const itemMap = new Map(allItems.map((i) => [i.id, i]));
+
+  // Detect midi bottoms in the selected outfit (bottom, dress, or set slot).
+  const hasMidiBottom = candidate.pieces.some((p) => {
+    if (!["bottom", "dress", "set"].includes(p.slot)) return false;
+    const item = itemMap.get(p.closetId);
+    return item?.hemLength === "midi";
+  });
+
+  if (!hasMidiBottom) return { sanitized: wording, perPieceNotes };
+
+  function applyMidiGuard(text: string): string {
+    return text
+      // ── Wrong garment-name labels ───────────────────────────────────────────
+      // "maxi skirt" / "maxi dress" are definitionally wrong for midi hemLength.
+      // Word-bounded: "maxi coat" or "maxi outerwear" are NOT touched.
+      .replace(/\bmaxi skirt\b/gi, "midi skirt")
+      .replace(/\bmaxi dress\b/gi, "midi dress")
+      // "full-length skirt" / "full length skirt" (with or without hyphen)
+      .replace(/\bfull[- ]length skirt\b/gi, "midi skirt")
+      // "full-length dress" / "full length dress"
+      .replace(/\bfull[- ]length dress\b/gi, "midi dress")
+      // ── Unsupported full-coverage claims ────────────────────────────────────
+      // Replace with neutral "midi length" — hemLength=midi proves the garment
+      // reaches midi length, but does NOT prove full-leg coverage (slit unknown).
+      //
+      // Negation guard: "does not provide full-length coverage" is accurate for a
+      // midi skirt (no full-leg guarantee), so we must NOT rewrite it to
+      // "does not provide midi length" (which would be factually wrong — the skirt
+      // DOES provide midi length). A 30-char lookback for negation words preserves
+      // negated forms unchanged.
+      .replace(/\b(full[- ]length coverage|full leg coverage)\b/gi, (match, _p1, offset, str) => {
+        const prefix = (str as string).slice(Math.max(0, offset - 30), offset).toLowerCase();
+        if (/\b(?:not|no|without|lacks?|never)\b/.test(prefix)) return match;
+        return "midi length";
+      });
+  }
+
+  const sanitized = {
+    outfitName: applyMidiGuard(wording.outfitName),
+    whyThisWorks: applyMidiGuard(wording.whyThisWorks),
+    confidenceBoost: applyMidiGuard(wording.confidenceBoost),
+  };
+
+  const sanitizedNotes = new Map<string, string>();
+  for (const [id, note] of perPieceNotes) {
+    sanitizedNotes.set(id, applyMidiGuard(note));
+  }
+
+  return { sanitized, perPieceNotes: sanitizedNotes };
+}
+
 export async function callClaudeForNaiaSelection(
   candidates: OutfitCandidate[],
   session: StyleMeSessionInput,
@@ -2661,12 +2757,18 @@ export async function callClaudeForNaiaSelection(
         const roleTag = pe ? `, ${pe.pieceRole}` : "";
         const profileFields = (() => {
           const garmentItem = allItems?.find((i) => i.id === p.closetId) ?? null;
-          const ap = garmentItem?.approvedProfile;
-          if (!ap || !garmentItem) return "";
+          if (!garmentItem) return "";
+          const parts: string[] = [];
+          // Coverage precision: hemLength is surfaced for ALL pieces regardless of
+          // profile status. This ensures Rule 20 can fire even for un-profiled garments —
+          // the model must receive "hem-length: midi" to know it must not say "maxi".
+          const hl = garmentItem.hemLength ?? null;
+          if (hl && hl !== "n/a") parts.push(`hem-length: ${hl}`);
+          const ap = garmentItem.approvedProfile;
+          if (!ap) return parts.length > 0 ? ` | ${parts.join(", ")}` : "";
           const wantsConstruction = activeIntentions.some((i) => i === "feel-sharper" || i === "give-structure")
             || activeBodyNeeds.some((id) => id === "structured-shape" || id === "still-want-shape");
           const wantsEase = activeIntentions.some((i) => i === "make-it-easy");
-          const parts: string[] = [];
           if (wantsConstruction && ap.construction) parts.push(`construction: ${ap.construction}`);
           if (wantsEase && ap.stylingEffort) parts.push(`styling effort: ${ap.stylingEffort}`);
           // ── Wording evidence guards ─────────────────────────────────────────
@@ -2675,9 +2777,6 @@ export async function callClaudeForNaiaSelection(
           const of_ = ap.outfitFunction ?? null;
           if (sl) parts.push(`statement-level: ${sl}`);
           if (of_) parts.push(`outfit-function: ${of_}`);
-          // Coverage precision: hemLength guards against "full coverage" claims for midi
-          const hl = garmentItem.hemLength ?? null;
-          if (hl && hl !== "n/a") parts.push(`hem-length: ${hl}`);
           // Waist definition: only explicit waistShape evidence is valid
           const wsGarment = garmentItem.waistShape ?? null;
           if (wsGarment) parts.push(`waistShape: ${wsGarment}`);
@@ -2895,18 +2994,18 @@ export async function callClaudeForNaiaSelection(
       return null;
     }
 
-    const outfitName = String(result.outfitName).slice(0, 80);
-    const whyThisWorks = String(result.whyThisWorks);
-    const confidenceBoost = String(result.confidenceBoost);
+    const rawOutfitName = String(result.outfitName).slice(0, 80);
+    const rawWhyThisWorks = String(result.whyThisWorks);
+    const rawConfidenceBoost = String(result.confidenceBoost);
 
-    if (containsBlockedTerms(`${outfitName} ${whyThisWorks} ${confidenceBoost}`)) {
+    if (containsBlockedTerms(`${rawOutfitName} ${rawWhyThisWorks} ${rawConfidenceBoost}`)) {
       diagLog("blocked-terms");
       return null;
     }
 
     // Accept per-piece notes only for IDs in the selected candidate — discard anything else.
     const validIds = new Set(selectedCandidate.pieces.map((p) => p.closetId));
-    const perPieceNotes = new Map<string, string>();
+    const rawPerPieceNotes = new Map<string, string>();
     if (Array.isArray(result.perPieceNotes)) {
       for (const entry of result.perPieceNotes) {
         if (
@@ -2915,17 +3014,27 @@ export async function callClaudeForNaiaSelection(
           typeof entry.note === "string" &&
           validIds.has(entry.id)
         ) {
-          perPieceNotes.set(entry.id, String(entry.note));
+          rawPerPieceNotes.set(entry.id, String(entry.note));
         }
       }
     }
 
+    // ── Deterministic factual-wording guard (post-generation) ─────────────────
+    // Sanitize protected garment facts that the model must not override.
+    // Applied AFTER blocked-term check so it does not interfere with that gate.
+    const { sanitized, perPieceNotes } = sanitizeFactualWordingClaims(
+      { outfitName: rawOutfitName, whyThisWorks: rawWhyThisWorks, confidenceBoost: rawConfidenceBoost },
+      rawPerPieceNotes,
+      selectedCandidate,
+      allItems ?? [],
+    );
+
     return {
       candidate: selectedCandidate,
       wording: {
-        outfitName,
-        whyThisWorks,
-        confidenceBoost,
+        outfitName: sanitized.outfitName,
+        whyThisWorks: sanitized.whyThisWorks,
+        confidenceBoost: sanitized.confidenceBoost,
         perfumeNote: result.perfumeNote ? String(result.perfumeNote) : null,
       },
       perPieceNotes,
@@ -3800,17 +3909,21 @@ export function selectAdditionalClosetGarments(
     const intentionBonus = activeIntentions.length > 0
       ? activeIntentions.reduce((sum, id) => sum + computeItemIntentionWeight(item, id), 0) * 1.5
       : 0;
-    // Register alignment bonus: reward approved-profile items whose dressRegister rank
-    // falls within the session's target formality range. Mirrors the anchor-level
-    // registerBonus so formality preference differentiates candidates beyond the gates.
+    // Register alignment score: approved-profile items whose dressRegister falls
+    // within the session's target formality range receive a +2.5 bonus; items
+    // outside the range receive a distance-based penalty (max -4.5).
+    // When no explicit formalityConditional is set, only a small +1.0 bonus applies
+    // with no penalty, preserving the pre-existing fail-open behaviour for unspecified
+    // formality sessions. Items without an approved register rank always get 0 (fail-open).
     const targetRange = getTargetFormalityRange(session.occasion, session.formalityConditional ?? null);
     const itemRegisterRank = item.approvedProfile?.dressRegister
       ? (DRESS_REGISTER_RANK[item.approvedProfile.dressRegister] ?? null)
       : null;
-    const registerBonus = itemRegisterRank !== null
-      && itemRegisterRank >= targetRange.min
-      && itemRegisterRank <= targetRange.max
-      ? 0.5 : 0;
+    const registerBonus = computeRegisterAlignmentScore(
+      itemRegisterRank,
+      targetRange,
+      !!session.formalityConditional,
+    );
     // Apply outfitFunction priority: anchor pieces boosted, supporting pieces penalised.
     const score = (baseScore + bodyNeedSlotBonus + intentionBonus + registerBonus) * outfitFunctionPriority(item);
 

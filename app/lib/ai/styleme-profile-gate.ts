@@ -496,6 +496,35 @@ export function outfitFunctionPriority(item: ClosetAnchorInput): number {
   }
 }
 
+// ── Register alignment scoring ────────────────────────────────────────────────
+//
+// Replaces the flat +0.5 register bonus in both anchor selection and slot filling.
+//
+// When formalityConditional is absent (hasFormalityConditional=false):
+//   In-target → +1.0 small positive; out-of-target → 0 (no penalty for unspecified formality)
+//
+// When formalityConditional is present (hasFormalityConditional=true):
+//   In-target              → +2.5  (strong preference)
+//   1 rank outside target  → -1.5  (clear penalty)
+//   2 ranks outside        → -3.0
+//   3+ ranks outside       → -4.5  (capped — always preserves sole-candidate fallback)
+//
+// itemRank === null (no approved profile / unknown register) → 0 always (fail-open).
+export function computeRegisterAlignmentScore(
+  itemRank: number | null,
+  targetRange: { min: number; max: number },
+  hasFormalityConditional: boolean,
+): number {
+  if (itemRank === null) return 0;
+  const inTarget = itemRank >= targetRange.min && itemRank <= targetRange.max;
+  if (!hasFormalityConditional) return inTarget ? 1.0 : 0;
+  if (inTarget) return 2.5;
+  const distance = itemRank < targetRange.min
+    ? targetRange.min - itemRank
+    : itemRank - targetRange.max;
+  return Math.max(-4.5, -1.5 * distance);
+}
+
 // ── Statement conflict — extended ─────────────────────────────────────────────
 // Replaces the original hasStatementConflict with extended coverage:
 // counts structural pieces where EITHER statementLevel === "statement" OR
