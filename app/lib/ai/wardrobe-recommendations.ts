@@ -37,6 +37,7 @@
 // Unknown stays unknown.
 
 import {
+  computePaletteCoverage,
   garmentRegister,
   classifyUsability,
   type RegisterId,
@@ -256,8 +257,22 @@ function unlocks(candidate: WardrobeGarment, pool: WardrobeGarment[]): WardrobeG
 
 // ── Evidence gathering ────────────────────────────────────────────────────────
 
-/** Colour families she loves that her Closet can actually carry. */
-function lovedColourFamilies(passport: WardrobePassport | null): string[] {
+/**
+ * Colour families she loves, ordered so the ones she owns least come first.
+ *
+ * A thin loved colour REFINES a recommendation that already exists; it never
+ * creates one. By the time this runs the gap is already proven, so the only
+ * question left is which of her colours would make the piece most useful — and
+ * a colour she loves but barely owns adds an option she does not currently
+ * have, where another black one would not.
+ *
+ * `items` is optional so the ordering degrades to her stated order rather than
+ * failing when coverage cannot be measured.
+ */
+function lovedColourFamilies(
+  passport: WardrobePassport | null,
+  items?: WardrobeGarment[],
+): string[] {
   if (!passport || passport.favoriteColors.length === 0) return [];
   const avoided = new Set<string>();
   for (const token of passport.avoidColors) {
@@ -269,7 +284,17 @@ function lovedColourFamilies(passport: WardrobePassport | null): string[] {
       if (!avoided.has(family) && !families.includes(family)) families.push(family);
     }
   }
-  return families;
+  if (!items) return families;
+
+  // Coverage is measured per Passport CHOICE, and one choice can cover several
+  // Closet families ("white / cream"), so the count is spread back across them.
+  const coverage = computePaletteCoverage(items, passport);
+  const countOf = new Map<string, number>();
+  for (const row of coverage.families) {
+    for (const family of row.families) countOf.set(family, row.count);
+  }
+  // Least-owned first. Stable for equal counts, so her stated order survives.
+  return [...families].sort((a, b) => (countOf.get(a) ?? 0) - (countOf.get(b) ?? 0));
 }
 
 /** The fit family her Closet leans on, when it leans hard enough to matter. */
@@ -434,7 +459,7 @@ function buildRecommendation(
   }
 
   // Colour — only from colours she named, never from what "goes with" things.
-  const loved = lovedColourFamilies(passport);
+  const loved = lovedColourFamilies(passport, items);
   if (loved.length > 0) {
     const withColour = candidateGarment(register, slot, {
       neutral: loved.some((f) => ["black", "grey", "beige", "brown", "white", "cream"].includes(f)),

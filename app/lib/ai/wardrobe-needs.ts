@@ -245,7 +245,14 @@ export interface DepthFinding {
   strength: EvidenceStrength;
 }
 
-export type SynthesisKind = "alignment" | "tension" | "unclear";
+/**
+ * "uneven" is alignment WITHOUT coverage: everything she owns sits inside the
+ * palette she named, but only part of that palette is actually present. It is
+ * deliberately not "alignment", because calling it a strong match would tell
+ * her the palette is served when two of the three colours she chose give her
+ * nothing to wear.
+ */
+export type SynthesisKind = "alignment" | "uneven" | "tension" | "unclear";
 
 export interface SynthesisLine {
   id: string;
@@ -364,7 +371,100 @@ function neededRegisters(
   return out;
 }
 
-// ── Usability ─────────────────────────────────────────────────────────────────
+// ── Palette coverage ──────────────────────────────────────────────────────────
+
+/**
+ * A loved colour needs more than a token presence before it is a real option.
+ * One garment in a colour is a garment, not a choice; below three she cannot
+ * build around it. Kept deliberately blunt — the page says "barely
+ * represented", never a percentage.
+ */
+const MIN_FAMILY_PIECES = 3;
+
+/**
+ * "white/cream" — a Passport choice covering more than one Closet family.
+ * Slashed rather than "or", because these labels are read inside a list:
+ * "grey and white/cream" scans; "grey and white or cream" does not.
+ */
+function joinOr(parts: string[]): string {
+  return parts.join("/");
+}
+
+export interface PaletteFamilyCoverage {
+  /** The Passport token she actually chose: "black", "white-cream"… */
+  token: string;
+  /** Closet colour families that token covers. */
+  families: string[];
+  /** How she sees it: "black", "white or cream". */
+  label: string;
+  count: number;
+  covered: boolean;
+}
+
+export interface PaletteCoverage {
+  /** One row per colour she CHOSE, most-represented first. */
+  families: PaletteFamilyCoverage[];
+  /** Pieces whose colour nAia can actually read. */
+  colourReadable: number;
+  /** Read pieces with no readable colour. Never counted as absence. */
+  unknown: number;
+  /** Readable pieces sitting inside the loved palette. */
+  insidePalette: number;
+}
+
+/**
+ * How well each colour she named is actually represented.
+ *
+ * Two different questions live here and were previously conflated:
+ *   ALIGNMENT — is what she owns inside the palette she likes?
+ *   COVERAGE  — is each colour she likes actually present?
+ * A wardrobe of 36 black pieces against a stated palette of black, grey and
+ * cream scores 100% on the first and fails the second, and reporting only the
+ * first tells her the palette is served when it is not.
+ *
+ * Counted per CHOICE, not per family. "White / Cream" is one option on the
+ * Passport, so five cream pieces satisfy it — scoring "white" and "cream"
+ * separately would report a gap she never expressed.
+ *
+ * Unreadable colour is counted as unknown, never as absence: a colour nAia has
+ * not read is not a colour she does not own.
+ */
+export function computePaletteCoverage(
+  items: WardrobeGarment[],
+  passport: WardrobePassport | null,
+): PaletteCoverage {
+  const read = items.filter((g) => g.analysisStatus === "ready" || g.intelligenceSource === "curated");
+  const readable = read.filter((g) => closetColourFamily(g.primaryColor));
+  const unknown = read.length - readable.length;
+
+  const seen = new Set<string>();
+  const rows: PaletteFamilyCoverage[] = [];
+  const allFamilies = new Set<string>();
+
+  for (const token of passport?.favoriteColors ?? []) {
+    const key = norm(token) ?? "";
+    const families = PASSPORT_COLOUR_FAMILIES[key] ?? [];
+    // An unmappable token is dropped rather than approximated into a family.
+    if (families.length === 0 || seen.has(key)) continue;
+    seen.add(key);
+    for (const f of families) allFamilies.add(f);
+
+    const count = readable.filter((g) => families.includes(closetColourFamily(g.primaryColor)!)).length;
+    rows.push({
+      token: key,
+      families: [...families],
+      label: joinOr([...families]),
+      count,
+      covered: count >= MIN_FAMILY_PIECES,
+    });
+  }
+
+  rows.sort((a, b) => b.count - a.count);
+  const inside = readable.filter((g) => allFamilies.has(closetColourFamily(g.primaryColor)!)).length;
+  return { families: rows, colourReadable: readable.length, unknown, insidePalette: inside };
+}
+
+// ── Usability ───// ── Usability ─────────────────────────────────────────────────────────────────
 
 /**
  * Does this garment contradict something the customer has told nAia?
@@ -864,41 +964,65 @@ function buildSynthesis(
     };
   }
 
-  // 1. Colour — stated palette against the palette she actually owns.
+  // 1. Colour — two separate questions, previously collapsed into one.
+  //
+  //    ALIGNMENT: is what she owns inside the palette she named?
+  //    COVERAGE:  is each colour she named actually there?
+  //
+  //    A Closet of 36 black pieces against "black, grey, cream" passes the
+  //    first perfectly and fails the second completely. Reporting only
+  //    alignment told her the palette was served when two thirds of it gave her
+  //    nothing to wear.
   if (passport.favoriteColors.length > 0) {
-    const withColour = read.filter((g) => closetColourFamily(g.primaryColor));
-    if (withColour.length >= MIN_WARDROBE_SIZE) {
-      const statedFamilies = new Set<string>();
-      for (const token of passport.favoriteColors) {
-        for (const family of PASSPORT_COLOUR_FAMILIES[norm(token) ?? ""] ?? []) statedFamilies.add(family);
-      }
-      const matching = withColour.filter((g) => statedFamilies.has(closetColourFamily(g.primaryColor)!));
-      const share = ratio(matching.length, withColour.length);
-      if (share >= 0.6) {
+    const palette = computePaletteCoverage(items, passport);
+    if (palette.colourReadable >= MIN_WARDROBE_SIZE && palette.families.length > 0) {
+      const share = ratio(palette.insidePalette, palette.colourReadable);
+      const covered = palette.families.filter((f) => f.covered);
+      const thin = palette.families.filter((f) => !f.covered);
+      const namesOf = (rows: PaletteFamilyCoverage[]) => joinList(rows.map((f) => f.label));
+
+      const statedEvidence = ev(
+        "passport-signal", "favoriteColors",
+        `You named ${joinList(passport.favoriteColors.slice(0, 3))}.`, [],
+      );
+      const coverageEvidence = ev(
+        "garment-fact", "primaryColor",
+        palette.families.map((f) => `${f.label}: ${f.count}`).join(", ") +
+          (palette.unknown > 0 ? ` (${palette.unknown} pieces have no colour nAia can read yet)` : ""),
+        [],
+      );
+
+      if (share >= 0.6 && thin.length === 0) {
         lines.push({
           id: "synth-colour",
           kind: "alignment",
           passportSays: "the colours you said you love",
-          closetShows: `${matching.length} of ${withColour.length} pieces sit in those families`,
-          // Names the colours, not a purchasing habit: the Closet proves what she
-          // owns, never how or when she came to own it.
-          reading: "The colours in your Closet closely match the palette you told nAia you love.",
-          evidence: [
-            ev("passport-signal", "favoriteColors", `You named ${joinList(passport.favoriteColors.slice(0, 3))}.`, []),
-            ev("garment-fact", "primaryColor", `${matching.length} of ${withColour.length} pieces fall in those families.`, matching.map((g) => g.id)),
-          ],
+          closetShows: `all of them are represented`,
+          reading: "The colours you told nAia you love are all well represented in your Closet.",
+          evidence: [statedEvidence, coverageEvidence],
+        });
+      } else if (share >= 0.6 && covered.length > 0) {
+        // Inside the palette, but only part of it is actually available.
+        lines.push({
+          id: "synth-colour",
+          kind: "uneven",
+          passportSays: "the colours you said you love",
+          closetShows: `${namesOf(covered)} well covered, ${namesOf(thin)} barely there`,
+          reading: `Your Closet stays closely within the colours you told nAia you like, but some of that palette is barely represented. ${capitaliseFirst(
+            namesOf(covered),
+          )} ${covered.length === 1 ? "is" : "are"} well covered, while ${namesOf(thin)} ${
+            thin.length === 1 ? "appears" : "appear"
+          } much less often.`,
+          evidence: [statedEvidence, coverageEvidence],
         });
       } else if (share <= 0.25) {
         lines.push({
           id: "synth-colour",
           kind: "tension",
           passportSays: "the colours you said you love",
-          closetShows: `only ${matching.length} of ${withColour.length} pieces sit in those families`,
+          closetShows: `only ${palette.insidePalette} of ${palette.colourReadable} pieces sit in those colours`,
           reading: "The palette you described and the one you own are pulling in different directions. That's worth knowing before the next purchase.",
-          evidence: [
-            ev("passport-signal", "favoriteColors", `You named ${joinList(passport.favoriteColors.slice(0, 3))}.`, []),
-            ev("garment-fact", "primaryColor", `${matching.length} of ${withColour.length} pieces fall in those families.`, []),
-          ],
+          evidence: [statedEvidence, coverageEvidence],
         });
       }
     }

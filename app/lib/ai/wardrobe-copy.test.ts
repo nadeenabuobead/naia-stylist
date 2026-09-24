@@ -242,6 +242,13 @@ describe("§WC-6 the same conclusion is not printed twice", () => {
 // ── §WC-7 Passport match dimensions ───────────────────────────────────────────
 
 describe("§WC-7 Closet-to-Passport match", () => {
+  it("7-uneven — alignment without coverage is never reported as a strong match", () => {
+    const m = matchDimension({ id: "synth-colour", kind: "uneven", reading: "Part of it is barely there." });
+    assert.equal(m.dimension, "Colour");
+    assert.equal(m.stateText, "Strong alignment, uneven coverage");
+    assert.notEqual(m.stateText, "Strong match");
+  });
+
   it("7 — each synthesis line becomes a named dimension with a state", () => {
     const m = matchDimension({ id: "synth-colour", kind: "alignment", reading: "The colours match." });
     assert.equal(m.dimension, "Colour");

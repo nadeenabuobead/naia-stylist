@@ -286,10 +286,12 @@ export function plainText(text: string): string {
 
 // ── Passport ↔ Closet dimensions ──────────────────────────────────────────────
 
-export type MatchState = "strong" | "partial" | "gap" | "unclear";
+export type MatchState = "strong" | "uneven" | "partial" | "gap" | "unclear";
 
 const MATCH_STATE_TEXT: Readonly<Record<MatchState, string>> = {
   strong: "Strong match",
+  // Inside the palette, but not all of it is there. Deliberately not "strong".
+  uneven: "Strong alignment, uneven coverage",
   partial: "Partial match",
   gap: "Where there's a gap",
   unclear: "Not yet clear",
@@ -313,10 +315,13 @@ const SYNTH_DIMENSION: Readonly<Record<string, string>> = {
 };
 
 export function matchDimension(
-  line: { id: string; kind: "alignment" | "tension" | "unclear"; reading: string },
+  line: { id: string; kind: "alignment" | "uneven" | "tension" | "unclear"; reading: string },
 ): MatchDimension {
   const state: MatchState =
-    line.kind === "alignment" ? "strong" : line.kind === "tension" ? "gap" : "unclear";
+    line.kind === "alignment" ? "strong"
+      : line.kind === "uneven" ? "uneven"
+      : line.kind === "tension" ? "gap"
+      : "unclear";
   return {
     id: line.id,
     dimension: SYNTH_DIMENSION[line.id] ?? "Style",
@@ -404,7 +409,9 @@ function synthHeadline(line: SynthesisLine): string {
     case "synth-colour":
       return line.kind === "alignment"
         ? "Your colours match your Passport"
-        : "Your colours and your Passport differ";
+        : line.kind === "uneven"
+          ? "Part of your palette is barely there"
+          : "Your colours and your Passport differ";
     case "synth-neutral":
       return line.kind === "alignment"
         ? "Your Closet is as neutral as you said you like"

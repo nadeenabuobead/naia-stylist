@@ -276,6 +276,65 @@ describe("§WR-2g a recommendation is downstream of a proven need", () => {
   });
 });
 
+// ── §WR-2k An underrepresented loved colour refines, never creates ───────────
+
+describe("§WR-2k a thin loved colour refines a need; it never invents one", () => {
+  it("2k — a loved colour she barely owns does NOT create a shopping need", () => {
+    // Everyday and occasion both genuinely covered, so there is no gap at all.
+    // She loves black, grey and cream and owns only black. That is an
+    // observation about her palette, not a reason to buy anything.
+    const items = [...variedLooks("casual", 6), ...variedLooks("evening", 4, { hemLength: "maxi" })];
+    const { needs, recs } = run(items, makePassport({
+      lifestyle: ["everyday-casual", "dinners-going-out"],
+      favoriteColors: ["black", "grey", "white-cream"],
+    }));
+
+    assert.equal(needs.couldUseMore.length, 0, "the wardrobe has no proven gap");
+    assert.equal(recs.recommendations.length, 0, "a thin colour alone must not produce a purchase");
+
+    // The palette observation still surfaces — it just isn't a shopping need.
+    const line = needs.synthesis.lines.find((l) => l.id === "synth-colour");
+    assert.ok(line, "the uneven palette is still worth telling her about");
+    assert.equal(line!.kind, "uneven");
+  });
+
+  it("2l — with a real gap, the thinnest loved colour leads the recommendation", () => {
+    // Work genuinely lacks a bottom half. She loves black, grey and cream and
+    // owns only black — so a grey work bottom adds an option a black one cannot.
+    const items = [
+      ...variedLooks("casual", 6),
+      ...Array.from({ length: 4 }, (_, i) =>
+        makeGarment({ slot: "top", formality: "business-casual", ...TOP_SHAPES[i % TOP_SHAPES.length] })),
+    ];
+    const { needs, recs } = run(items, makePassport({
+      lifestyle: ["everyday-casual", "work-office"],
+      favoriteColors: ["black", "grey", "white-cream"],
+    }));
+
+    assert.ok(needs.couldUseMore.some((f) => f.register === "work"), "the gap is real and comes first");
+    const work = recs.recommendations.find((r) => r.register === "work");
+    assert.ok(work);
+    assert.equal(work!.criteria.slot, "bottom", "the garment need is established independently");
+
+    // Black is what she already owns; the colours she is short of lead.
+    const colours = work!.criteria.colourFamilies;
+    assert.ok(colours.length > 0, "a stated palette should refine the colour");
+    assert.notEqual(colours[0], "black", `black is already well covered, got "${colours[0]}"`);
+  });
+
+  it("2m — with no stated palette, no colour is attached to the recommendation", () => {
+    const items = [
+      ...variedLooks("casual", 6),
+      ...Array.from({ length: 4 }, (_, i) =>
+        makeGarment({ slot: "top", formality: "business-casual", ...TOP_SHAPES[i % TOP_SHAPES.length] })),
+    ];
+    const { recs } = run(items, makePassport({ lifestyle: ["everyday-casual", "work-office"] }));
+    const work = recs.recommendations.find((r) => r.register === "work");
+    assert.ok(work);
+    assert.deepEqual(work!.criteria.colourFamilies, []);
+  });
+});
+
 // ── §WR-3 A recommendation must actually be usable ────────────────────────────
 
 describe("§WR-3 the proposal has to work with what she owns", () => {

@@ -11,6 +11,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   computeWardrobeNeeds,
+  computePaletteCoverage,
   classifyUsability,
   outfitClassKey,
   supportedPair,
@@ -474,7 +475,7 @@ describe("§WN-7 Passport and Closet tension", () => {
     const neutral = needs.synthesis.lines.find((l) => l.id === "synth-neutral");
     assert.ok(colour && neutral, "both palette dimensions should read");
 
-    assert.equal(colour!.reading, "The colours in your Closet closely match the palette you told nAia you love.");
+    assert.equal(colour!.reading, "The colours you told nAia you love are all well represented in your Closet.");
     assert.equal(neutral!.reading, "Your Closet is strongly neutral, matching the balance you said you prefer.");
     assert.notEqual(colour!.reading, neutral!.reading, "two dimensions must not read as one");
 
@@ -507,6 +508,80 @@ describe("§WN-7 Passport and Closet tension", () => {
     assert.ok(line, "a legacy-only profile should be told its style answer is superseded");
     assert.equal(line!.kind, "unclear");
     assert.match(line!.reading, /older style question/);
+  });
+});
+
+// ── §WN-6p Palette alignment vs palette coverage ─────────────────────────────
+
+describe("§WN-6p a palette can be aligned and still not covered", () => {
+  /** n pieces in one colour family, at everyday level. */
+  const inColour = (n: number, colour: string, neutral = true) =>
+    Array.from({ length: n }, () => makeGarment({
+      primaryColor: colour,
+      colourProfile: { hueFamily: null, wardrobeNeutral: neutral, lightDark: "dark", energyTier: "neutral-versatile" },
+    }));
+
+  it("6p-1 — three loved colours but a Closet of one reads as uneven, never strong", () => {
+    // Loves black, grey and cream. Owns 12 black, no grey, no cream.
+    const items = inColour(12, "Black");
+    const needs = run(items, {
+      passport: makePassport({ favoriteColors: ["black", "grey", "white-cream"] }),
+    });
+
+    const line = needs.synthesis.lines.find((l) => l.id === "synth-colour");
+    assert.ok(line, "a colour reading should exist");
+    assert.equal(line!.kind, "uneven", "100% inside the palette is not the same as covering it");
+    assert.notEqual(line!.kind, "alignment");
+    assert.match(line!.reading, /stays closely within the colours you told nAia you like/);
+    assert.match(line!.reading, /barely represented/);
+    assert.match(line!.reading, /grey/);
+    assert.match(line!.reading, /cream|white/);
+  });
+
+  it("6p-2 — every loved colour genuinely present reads as a strong match", () => {
+    const items = [...inColour(5, "Black"), ...inColour(5, "Grey"), ...inColour(5, "Cream")];
+    const needs = run(items, {
+      passport: makePassport({ favoriteColors: ["black", "grey", "white-cream"] }),
+    });
+    const line = needs.synthesis.lines.find((l) => l.id === "synth-colour");
+    assert.ok(line);
+    assert.equal(line!.kind, "alignment");
+    assert.match(line!.reading, /all well represented/);
+  });
+
+  it("6p-3 — a Closet mostly outside the loved palette reads as tension", () => {
+    const items = [...inColour(2, "Black"), ...inColour(12, "Green", false)];
+    const needs = run(items, { passport: makePassport({ favoriteColors: ["black"] }) });
+    const line = needs.synthesis.lines.find((l) => l.id === "synth-colour");
+    assert.ok(line);
+    assert.equal(line!.kind, "tension");
+  });
+
+  it("6p-4 — unreadable colour is unknown, never counted as a missing colour", () => {
+    // Six black, six with no colour nAia can read.
+    const items = [
+      ...inColour(6, "Black"),
+      ...Array.from({ length: 6 }, () => makeGarment({ primaryColor: null, colourProfile: null })),
+    ];
+    const coverage = computePaletteCoverage(items, makePassport({ favoriteColors: ["black", "grey"] }));
+
+    assert.equal(coverage.unknown, 6, "unreadable pieces are counted as unknown");
+    assert.equal(coverage.colourReadable, 6);
+    const black = coverage.families.find((f) => f.token === "black")!;
+    assert.equal(black.count, 6, "unknown pieces neither add to nor subtract from a family");
+    assert.equal(black.covered, true);
+    // grey is genuinely absent — but that is measured on READABLE pieces only.
+    const grey = coverage.families.find((f) => f.token === "grey")!;
+    assert.equal(grey.count, 0);
+  });
+
+  it("6p-5 — coverage counts only families the colour bridge actually supports", () => {
+    const coverage = computePaletteCoverage(
+      Array.from({ length: 6 }, () => makeGarment({ primaryColor: "Black" })),
+      makePassport({ favoriteColors: ["black", "not-a-real-colour-token"] }),
+    );
+    assert.deepEqual(coverage.families.map((f) => f.token), ["black"],
+      "an unmappable token is dropped, never approximated into a family");
   });
 });
 
