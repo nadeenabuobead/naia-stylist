@@ -299,6 +299,29 @@ export interface OutcomeReading {
   changedNote: string | null;
 }
 
+/**
+ * Intentions, kept rigorously in two halves.
+ *
+ * These are different questions and the page conflated them once already:
+ * her strongest Closet capability (feel-put-together, 22 pieces) is only her
+ * sixth most-chosen intention (12 of 156 sessions), and the copy read as
+ * though her wardrobe had been built for it.
+ *
+ *   chosen          what SHE asks for   — counted from her StyleMe selections
+ *   closetStrengths what her CLOSET does — counted from curated garment ratings
+ *
+ * Neither is ever derived from the other. `chosen` never reads a garment and
+ * `closetStrengths` never reads a session.
+ */
+export interface IntentionReading {
+  state: BlockState;
+  learningNote?: string;
+  /** Her own selections, most-chosen first. Customer preference. */
+  chosen: Array<{ intention: string; label: string; sessions: number }>;
+  /** Curated garment ratings, strongest first. Closet capability. */
+  closetStrengths: Array<{ intention: string; label: string; strong: number }>;
+}
+
 export interface Headline {
   id: string;
   text: string;
@@ -317,6 +340,8 @@ export interface WardrobeNeeds {
   synthesis: PassportSynthesis;
   styleMe: StyleMeReading;
   outcomes: OutcomeReading;
+  /** What she asks to feel, and what her Closet can support — kept apart. */
+  intentions: IntentionReading;
   headlines: Headline[];
 }
 
@@ -1183,6 +1208,53 @@ function buildStyleMeReading(
   };
 }
 
+/**
+ * The two halves, built from two different sources and never mixed.
+ *
+ * Derived intention potential is Phase 3C V2 shadow output. Only human-reviewed
+ * (curated) garment ratings are counted here, so the capability half can never
+ * report a number the customer would not stand behind.
+ */
+function buildIntentionReading(
+  items: WardrobeGarment[],
+  sessions: StyleMeSessionFact[] | null,
+): IntentionReading {
+  // ── what she asks for: sessions only ──
+  const chosenCounts = new Map<string, number>();
+  for (const session of sessions ?? []) {
+    for (const intention of session.intentions) {
+      chosenCounts.set(intention, (chosenCounts.get(intention) ?? 0) + 1);
+    }
+  }
+  const chosen = [...chosenCounts.entries()]
+    .filter(([intention]) => INTENTION_LABELS[intention])
+    .map(([intention, count]) => ({ intention, label: INTENTION_LABELS[intention], sessions: count }))
+    .sort((a, b) => b.sessions - a.sessions);
+
+  // ── what her Closet supports: curated garment ratings only ──
+  const strongCounts = new Map<string, number>();
+  for (const garment of items) {
+    if (garment.intentionsSource !== "curated" || !garment.intentions) continue;
+    for (const [intention, strength] of Object.entries(garment.intentions)) {
+      if (strength === "strong") strongCounts.set(intention, (strongCounts.get(intention) ?? 0) + 1);
+    }
+  }
+  const closetStrengths = [...strongCounts.entries()]
+    .filter(([intention]) => INTENTION_LABELS[intention])
+    .map(([intention, count]) => ({ intention, label: INTENTION_LABELS[intention], strong: count }))
+    .sort((a, b) => b.strong - a.strong);
+
+  const anything = chosen.length > 0 || closetStrengths.length > 0;
+  return {
+    state: anything ? "available" : "learning",
+    learningNote: anything
+      ? undefined
+      : "Once you've used StyleMe a few times, nAia can show what you most often want from an outfit.",
+    chosen,
+    closetStrengths,
+  };
+}
+
 // ── Outcome evidence (this IS wear behaviour — she reported it) ───────────────
 
 function buildOutcomeReading(outcomes: OutcomeFact[] | null): OutcomeReading {
@@ -1281,6 +1353,7 @@ export function computeWardrobeNeeds(input: WardrobeNeedsInput): WardrobeNeeds {
     synthesis: { state: "learning", learningNote: "Your Passport and Closet are compared once there's enough of a Closet to compare.", lines: [] },
     styleMe: { state: "learning", learningNote: "StyleMe history appears here once you've used it.", reachedFor: [], requests: [], struggles: [], strongIntentions: [], thinIntentions: [] },
     outcomes: buildOutcomeReading(outcomes),
+    intentions: buildIntentionReading(items, styleMeSessions),
     headlines: [],
   };
   if (items.length < MIN_WARDROBE_SIZE) return empty;
@@ -1305,6 +1378,7 @@ export function computeWardrobeNeeds(input: WardrobeNeedsInput): WardrobeNeeds {
     state: "available",
     registers, enough, couldUseMore, noUrgentNeed,
     synthesis, styleMe, outcomes: outcomeReading,
+    intentions: buildIntentionReading(items, styleMeSessions),
   };
 
   return { ...withoutHeadlines, headlines: buildHeadlines(withoutHeadlines) };

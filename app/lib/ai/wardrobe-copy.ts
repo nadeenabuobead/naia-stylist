@@ -525,9 +525,14 @@ const GARMENT_LED_KINDS: ReadonlySet<string> = new Set([
 export function visibleObservations<T extends { kind: string; garmentIds: string[] }>(
   observations: readonly T[],
   rediscoverIds: ReadonlySet<string>,
+  options: { closetStrengthsShown?: boolean } = {},
 ): T[] {
   return observations.filter((o) => {
     if (SYSTEM_CENTRIC_KINDS.has(o.kind)) return false;
+    // "What your Closet supports best" lists the top three capabilities with
+    // their counts. The intention-concentration observation says the same thing
+    // about one of them and reads as a second, competing claim.
+    if (o.kind === "intention-concentration" && options.closetStrengthsShown) return false;
     if (!GARMENT_LED_KINDS.has(o.kind)) return true;
     const lead = o.garmentIds[0];
     return lead === undefined || !rediscoverIds.has(lead);

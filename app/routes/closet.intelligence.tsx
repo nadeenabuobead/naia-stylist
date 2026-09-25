@@ -176,6 +176,10 @@ function Thumb({ card, size = 72 }: { card: GarmentCard | undefined; size?: numb
   );
 }
 
+function capitaliseFirst(text: string): string {
+  return text.length === 0 ? text : text[0].toUpperCase() + text.slice(1);
+}
+
 function LearningNote({ children }: { children: React.ReactNode }) {
   return <p className="wi-learning">{children}</p>;
 }
@@ -235,9 +239,20 @@ export default function WardrobeIntelligencePage() {
   // up in the chapter about what nAia has learned, which is not its job. The
   // pattern is the one that gives way: Rediscover already names the same pieces
   // and gives the customer something to do about them.
+  // What she asks to FEEL (her selections) and what her Closet SUPPORTS
+  // (curated garment ratings) are different questions with different sources.
+  // They are rendered in different chapters so they cannot be read as one.
+  const chosenIntentions = needs.intentions.chosen.slice(0, 4);
+  const closetStrengths = needs.intentions.closetStrengths.slice(0, 3);
+  // "by far" is only fair when the lead genuinely dominates.
+  const intentionLeadDominates =
+    chosenIntentions.length > 1 && chosenIntentions[0].sessions >= chosenIntentions[1].sessions * 2;
+
   const rediscover = opportunities.rediscover;
   const rediscoverIds = new Set(rediscover.map((p) => p.garmentId));
-  const shownObservations = visibleObservations(observations, rediscoverIds);
+  const shownObservations = visibleObservations(observations, rediscoverIds, {
+    closetStrengthsShown: closetStrengths.length > 0,
+  });
 
   // Chapter 3 is garment intelligence, so the observations live there now.
   const hasWorksChapter =
@@ -251,7 +266,10 @@ export default function WardrobeIntelligencePage() {
   // "available" — otherwise the chapter renders with a heading and nothing
   // under it.
   const hasHistoryLines =
-    Boolean(topRequest) || Boolean(needs.outcomes.keptNote) || Boolean(needs.outcomes.changedNote);
+    Boolean(topRequest) ||
+    chosenIntentions.length > 0 ||
+    Boolean(needs.outcomes.keptNote) ||
+    Boolean(needs.outcomes.changedNote);
   const hasLearningChapter = hasHistoryLines;
 
   return (
@@ -599,7 +617,29 @@ export default function WardrobeIntelligencePage() {
                   </div>
                 )}
 
-                {rediscover.length > 0 && (
+                                {closetStrengths.length > 0 && (
+                  <div className="wi-block">
+                    <p className="wi-sublabel">What your Closet supports best</p>
+                    {/* CAPABILITY, not preference. These count garments whose
+                        ratings a human reviewed — they say what she COULD put
+                        on, never what she asks for. Her choices live in
+                        chapter 4 and are counted from sessions alone. */}
+                    <ul className="wi-caps">
+                      {closetStrengths.map((c) => (
+                        <li key={c.intention} className="wi-cap">
+                          <span className="wi-cap-label">{c.label}</span>
+                          <span className="wi-cap-count">{c.strong} pieces</span>
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="wi-cap-note">
+                      Your Closet has especially strong options for these. Other kinds of look have
+                      fewer pieces behind them &mdash; which is about what you own, not about what you want.
+                    </p>
+                  </div>
+                )}
+
+{rediscover.length > 0 && (
                   <div className="wi-block">
                     <p className="wi-sublabel">Pieces worth another look</p>
                     {rediscover.map((piece) => (
@@ -708,16 +748,35 @@ export default function WardrobeIntelligencePage() {
                     <div className="wi-history">
                       {topRequest && (
                         <div className="wi-hist-item">
-                          <p className="wi-hist-head">What you ask nAia for most</p>
+                          <p className="wi-hist-head">What you ask nAia to dress you for most</p>
+                          {/* This counts LEVEL OF DRESS, not the occasion she
+                              picked. Her raw "everyday" occasion is 93; the 149
+                              also folds in the dinners, family days and travel
+                              she asked to keep relaxed. Saying "everyday" alone
+                              would read as the occasion and overstate it, so the
+                              sentence names the level and gives its denominator. */}
                           <p className="wi-hist-body">
-                            You&rsquo;ve asked nAia for{" "}
-                            {(registers.find((r) => r.key === topRequest.register)?.heading ?? "").toLowerCase()}{" "}
-                            dressing{" "}
-                            {topRequest.sessions === 1
-                              ? "once"
-                              : topRequest.sessions === 2
-                                ? "twice"
-                                : `${topRequest.sessions} times`}
+                            Most of what you ask nAia for is{" "}
+                            {(registers.find((r) => r.key === topRequest.register)?.heading ?? "").toLowerCase()}
+                            -level dressing &mdash; {topRequest.sessions} of the{" "}
+                            {needs.styleMe.requests.reduce((sum, r) => sum + r.sessions, 0)} requests it could read.
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Her own selections. Never derived from garment data. */}
+                      {chosenIntentions.length > 0 && (
+                        <div className="wi-hist-item">
+                          <p className="wi-hist-head">What you most often want to feel</p>
+                          <p className="wi-hist-body">
+                            {capitaliseFirst(chosenIntentions[0].label)} is{" "}
+                            {intentionLeadDominates ? "by far " : ""}what you choose most often
+                            {chosenIntentions.length > 1 && (
+                              <>
+                                , followed by{" "}
+                                {chosenIntentions.slice(1, 4).map((c) => c.label).join(", ")}
+                              </>
+                            )}
                             .
                           </p>
                         </div>
@@ -1024,6 +1083,11 @@ const css = `
   @media(min-width:860px){.wi-history{grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:44px}}
   .wi-hist-item{border-top:1px solid var(--naia-border);padding-top:16px}
   .wi-hist-head{font-family:var(--naia-ff-ui);font-size:9.5px;letter-spacing:2.6px;text-transform:uppercase;color:var(--naia-ink);margin:0 0 14px}
+  .wi-caps{list-style:none;margin:0 0 18px;padding:0;display:flex;flex-direction:column;gap:10px}
+  .wi-cap{display:flex;align-items:baseline;gap:14px;border-bottom:1px solid var(--naia-border);padding-bottom:9px}
+  .wi-cap-label{font-family:var(--naia-ff-body);font-size:1.0625rem;font-style:italic;color:var(--naia-ink);flex:1}
+  .wi-cap-count{font-family:var(--naia-ff-ui);font-size:10px;letter-spacing:2px;text-transform:uppercase;color:rgba(40,21,12,0.5)}
+  .wi-cap-note{font-family:var(--naia-ff-ui);font-size:13px;line-height:1.8;color:rgba(40,21,12,0.66);margin:0;max-width:40em}
   .wi-hist-body{font-family:var(--naia-ff-ui);font-size:13px;line-height:1.8;color:rgba(40,21,12,0.66);margin:14px 0 0;max-width:34em}
   .wi-hist-item .wi-strip{margin:0}
 

@@ -585,6 +585,87 @@ describe("§WN-6p a palette can be aligned and still not covered", () => {
   });
 });
 
+// ── §WN-6i Preference and capability are never the same number ───────────────
+
+describe("§WN-6i what she asks for vs what her Closet supports", () => {
+  const withIntentions = (n: number, intention: string, source: "curated" | "derived") =>
+    Array.from({ length: n }, () => makeGarment({
+      intentions: { [intention]: "strong" as const },
+      intentionsSource: source,
+    }));
+
+  it("6i-1 — `chosen` counts her sessions and never reads a garment", () => {
+    // Every garment rates strong for feel-put-together; she only ever asks to
+    // feel like herself. Preference must not inherit from the Closet.
+    const items = [...makeLook("casual", 4), ...withIntentions(8, "feel-put-together", "curated")];
+    const needs = run(items, {
+      sessions: Array.from({ length: 5 }, (_, i) => ({
+        id: `s${i}`, register: "everyday" as const, intentions: ["feel-like-myself"], garmentIds: [],
+      })),
+    });
+
+    assert.deepEqual(needs.intentions.chosen.map((c) => c.intention), ["feel-like-myself"]);
+    assert.equal(needs.intentions.chosen[0].sessions, 5);
+    assert.ok(
+      !needs.intentions.chosen.some((c) => c.intention === "feel-put-together"),
+      "a garment rating must never appear as something she chose",
+    );
+  });
+
+  it("6i-2 — `closetStrengths` counts garments and never reads a session", () => {
+    const items = [...makeLook("casual", 4), ...withIntentions(8, "feel-put-together", "curated")];
+    const needs = run(items, {
+      sessions: Array.from({ length: 5 }, (_, i) => ({
+        id: `s${i}`, register: "everyday" as const, intentions: ["feel-like-myself"], garmentIds: [],
+      })),
+    });
+
+    assert.equal(needs.intentions.closetStrengths[0].intention, "feel-put-together");
+    assert.equal(needs.intentions.closetStrengths[0].strong, 8);
+    assert.ok(
+      !needs.intentions.closetStrengths.some((c) => c.intention === "feel-like-myself"),
+      "a session must never appear as Closet capability",
+    );
+  });
+
+  it("6i-3 — derived (shadow) garment ratings never count as capability", () => {
+    const items = [...makeLook("casual", 4), ...withIntentions(8, "feel-put-together", "derived")];
+    const needs = run(items, { sessions: [] });
+    assert.deepEqual(needs.intentions.closetStrengths, [], "shadow V2 output stays off the page");
+  });
+
+  it("6i-4 — with no sessions there is no preference claim at all", () => {
+    const items = [...makeLook("casual", 4), ...withIntentions(8, "make-it-easy", "curated")];
+    const needs = run(items, { sessions: [] });
+    assert.deepEqual(needs.intentions.chosen, []);
+    assert.ok(needs.intentions.closetStrengths.length > 0, "capability is still measurable");
+  });
+
+  it("6i-5 — occasion requests and intention choices are separate counts", () => {
+    // 6 sessions at the everyday register, each choosing one intention.
+    const needs = run(makeLook("casual", 5), {
+      sessions: Array.from({ length: 6 }, (_, i) => ({
+        id: `s${i}`, register: "everyday" as const, intentions: ["make-it-easy"], garmentIds: [],
+      })),
+    });
+    const requests = needs.styleMe.requests.find((r) => r.register === "everyday")!;
+    assert.equal(requests.sessions, 6, "requests count sessions by level of dress");
+    assert.equal(needs.intentions.chosen[0].sessions, 6, "choices count sessions by intention");
+    // They coincide here only because each session carried exactly one
+    // intention. The two must stay independently sourced.
+    const twoEach = run(makeLook("casual", 5), {
+      sessions: Array.from({ length: 6 }, (_, i) => ({
+        id: `t${i}`, register: "everyday" as const, intentions: ["make-it-easy", "confidence"], garmentIds: [],
+      })),
+    });
+    assert.equal(twoEach.styleMe.requests.find((r) => r.register === "everyday")!.sessions, 6);
+    assert.equal(
+      twoEach.intentions.chosen.reduce((sum, c) => sum + c.sessions, 0), 12,
+      "two intentions per session means twelve choices across six requests — never conflated",
+    );
+  });
+});
+
 // ── §WN-8 Generated is not worn ───────────────────────────────────────────────
 
 describe("§WN-8 StyleMe history never becomes wear behaviour", () => {

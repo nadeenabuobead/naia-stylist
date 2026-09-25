@@ -371,6 +371,15 @@ describe("§WC-6d one garment story, told once", () => {
     assert.equal(shown.length, kinds.length, "these are about the wardrobe, not one piece");
   });
 
+  it("6d-7 — the single-intention observation gives way to the capability list", () => {
+    const o = [obs("intention-concentration", ["a"])];
+    assert.equal(visibleObservations(o, new Set(), { closetStrengthsShown: true }).length, 0,
+      "the list already names the top three with counts");
+    assert.equal(visibleObservations(o, new Set(), { closetStrengthsShown: false }).length, 1,
+      "without the list it is still the only capability signal");
+    assert.equal(visibleObservations(o, new Set()).length, 1, "defaults to showing it");
+  });
+
   it("6d-6 — an observation with no garments is never suppressed", () => {
     assert.equal(visibleObservations([obs("untapped-potential", [])], new Set(["a"])).length, 1);
   });
