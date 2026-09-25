@@ -298,16 +298,27 @@ const PHRASE_REWRITES: ReadonlyArray<[RegExp, string]> = [
   [rx("\\bThat usually means you're wearing it the same way each time\\b"),
    "Fewer partners means fewer different outfits nAia can build around it"],
 
+  // ── capability is not preference ──
+  //
+  // This observation counts garments whose intentionPotentials rate "strong".
+  // That measures what her Closet CAN do, and the wording turned it into what
+  // she WANTS. Audited against her real sessions: feel-put-together is her
+  // strongest Closet capability (22 pieces) but only her 6th most-selected
+  // intention (12 sessions) — she asks to feel like herself 69 times. The
+  // sentence now says capability and nothing more.
+  [rx("\\bYour wardrobe is built, above all, to help you (.+)\\."),
+   "Your Closet is strongest at helping you $1."],
+
   // ── "pull the same way" means nothing to a customer ──
   //
   // The claim is that a lot of her wardrobe is strong at ONE feeling, leaving
   // others thinner. The count and the evidence are unchanged; only the words.
   [rx("\\bYour strongest pieces pull the same way\\b"),
-   "A lot of your wardrobe supports the same feeling"],
+   "What your Closet is strongest at"],
   [rx("\\b(\\d+) of your pieces read strongest for that\\. It's a clear strength — and it means other moods have fewer pieces behind them\\."),
-   "$1 pieces are especially strong at that, while other moods have fewer options behind them."],
+   "$1 pieces strongly support that, while some other kinds of look have fewer options behind them."],
   [rx("\\b(\\d+) of your pieces read strongest for that\\b"),
-   "$1 pieces are especially strong at that"],
+   "$1 pieces strongly support that"],
 
   // "reads as" — accurate internally, opaque to a customer.
   [rx("\\bpieces nAia has assessed read\\b"), "pieces nAia has looked at are"],
@@ -481,30 +492,46 @@ export function coverageMatch(
 }
 
 /**
- * Which observations chapter 4 may show.
+ * Observations that still have something to say once chapter 3 has spoken.
  *
- * "Pieces worth another look" (chapter 3) and the "untapped potential"
- * observation are the same idea: pieces that are better connected than their
- * use suggests. Chapter 3 gives the customer something to DO about them, so it
- * keeps them; the observation is the one that gives way.
+ * THE SPLIT. Chapter 3 is garment intelligence — versatile pieces, pairings,
+ * pieces worth reconsidering. Chapter 4 is what nAia has learned about the
+ * CUSTOMER — what she asks for, what she reports back. Observations are
+ * garment intelligence, so they belong in chapter 3; this decides which of them
+ * chapter 3 should still bother showing.
  *
- * ANY shared garment is enough to suppress it. An earlier version required
- * every garment to match, so a four-piece observation that shared two pieces
- * with Rediscover still printed and the customer read the same idea twice.
+ * Two rules:
  *
- * Only `untapped-potential` is affected — every other pattern chapter 4 finds
- * is genuinely different work and survives untouched.
+ * 1. A garment-led observation whose LEAD piece already appears in "Pieces
+ *    worth another look" is dropped. garmentIds[0] is the piece the headline
+ *    names — the rest are its partners — so matching on the lead is exact.
+ *    Matching on any garment would drop a six-piece observation because one
+ *    supporting thumbnail happened to overlap.
+ *
+ * 2. `contradiction-alignment-unused` is dropped outright. Its entire content
+ *    is "this suits you and works with your Closet, but nAia has not generated
+ *    it yet" — a fact about nAia's own past output, not about the wardrobe.
+ *    There is no advice underneath it to keep.
  */
+const SYSTEM_CENTRIC_KINDS: ReadonlySet<string> = new Set(["contradiction-alignment-unused"]);
+
+/** Kinds whose headline is about one specific piece, named by garmentIds[0]. */
+const GARMENT_LED_KINDS: ReadonlySet<string> = new Set([
+  "contradiction-potential-struggle",
+  "contradiction-favourite-isolated",
+  "untapped-potential",
+]);
+
 export function visibleObservations<T extends { kind: string; garmentIds: string[] }>(
   observations: readonly T[],
   rediscoverIds: ReadonlySet<string>,
 ): T[] {
-  return observations.filter(
-    (o) =>
-      o.kind !== "untapped-potential" ||
-      o.garmentIds.length === 0 ||
-      !o.garmentIds.some((id) => rediscoverIds.has(id)),
-  );
+  return observations.filter((o) => {
+    if (SYSTEM_CENTRIC_KINDS.has(o.kind)) return false;
+    if (!GARMENT_LED_KINDS.has(o.kind)) return true;
+    const lead = o.garmentIds[0];
+    return lead === undefined || !rediscoverIds.has(lead);
+  });
 }
 
 // ── Summary selection ─────────────────────────────────────────────────────────

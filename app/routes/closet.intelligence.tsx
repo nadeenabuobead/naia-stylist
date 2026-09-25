@@ -239,12 +239,20 @@ export default function WardrobeIntelligencePage() {
   const rediscoverIds = new Set(rediscover.map((p) => p.garmentId));
   const shownObservations = visibleObservations(observations, rediscoverIds);
 
+  // Chapter 3 is garment intelligence, so the observations live there now.
   const hasWorksChapter =
-    heroes.state !== "learning" || pairings.state !== "learning" || rediscover.length > 0;
-  const hasLearningChapter =
-    shownObservations.length > 0 ||
-    needs.styleMe.state === "available" ||
-    needs.outcomes.state === "available";
+    heroes.state !== "learning" ||
+    pairings.state !== "learning" ||
+    rediscover.length > 0 ||
+    shownObservations.length > 0;
+
+  // Chapter 4 is behaviour only: what she asks for, and what she reports back.
+  // Gated on the actual lines it can print rather than on a signal being
+  // "available" — otherwise the chapter renders with a heading and nothing
+  // under it.
+  const hasHistoryLines =
+    Boolean(topRequest) || Boolean(needs.outcomes.keptNote) || Boolean(needs.outcomes.changedNote);
+  const hasLearningChapter = hasHistoryLines;
 
   return (
     <MyNaiaLayout compact>
@@ -632,16 +640,6 @@ export default function WardrobeIntelligencePage() {
                     ))}
                   </div>
                 )}
-              </section>
-            )}
-
-            {/* ══ 4 · WHAT NAIA IS LEARNING ABOUT YOU ═════════════════════════
-                Patterns nAia can see, plus what your styling history and your
-                feedback show. At most three history insights, each stated once. */}
-            {hasLearningChapter && (
-              <section className="wi-chapter" aria-labelledby="wi-learn-h">
-                <h2 id="wi-learn-h" className="wi-chapter-title">What nAia is learning about you</h2>
-
                 {shownObservations.length > 0 && (
                   <div className="wi-block">
                     <p className="wi-sublabel">What nAia is noticing</p>
@@ -694,27 +692,20 @@ export default function WardrobeIntelligencePage() {
                   </div>
                 )}
 
-                {(needs.styleMe.state === "available" || needs.outcomes.state === "available") && (
+              </section>
+            )}
+
+            {/* ══ 4 · WHAT NAIA IS LEARNING ABOUT YOU ═════════════════════════
+                Patterns nAia can see, plus what your styling history and your
+                feedback show. At most three history insights, each stated once. */}
+            {hasLearningChapter && (
+              <section className="wi-chapter" aria-labelledby="wi-learn-h">
+                <h2 id="wi-learn-h" className="wi-chapter-title">What nAia is learning about you</h2>
+
+                {hasHistoryLines && (
                   <div className="wi-block">
                     <p className="wi-sublabel">What your styling history shows</p>
                     <div className="wi-history">
-                      {needs.styleMe.reachedFor.length > 0 && (
-                        <div className="wi-hist-item">
-                          <p className="wi-hist-head">Pieces nAia relies on</p>
-                          <div className="wi-strip">
-                            {needs.styleMe.reachedFor.map((piece) => (
-                              <Thumb key={piece.garmentId} card={byId.get(piece.garmentId)} size={72} />
-                            ))}
-                          </div>
-                          <p className="wi-hist-body">
-                            {needs.styleMe.reachedFor.length === 1
-                              ? "This is one of the pieces nAia reaches for most when styling you."
-                              : "These are the pieces nAia reaches for most when styling you."}{" "}
-                            That&rsquo;s what nAia has built &mdash; not a record of what you wore.
-                          </p>
-                        </div>
-                      )}
-
                       {topRequest && (
                         <div className="wi-hist-item">
                           <p className="wi-hist-head">What you ask nAia for most</p>

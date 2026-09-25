@@ -215,15 +215,23 @@ describe("§WC-2 pairing reasons lose the jargon, not the meaning", () => {
     }
   });
 
-  it("2h — the intention-concentration copy loses the jargon, keeps the count", () => {
-    assert.equal(
-      plainText("Your strongest pieces pull the same way"),
-      "A lot of your wardrobe supports the same feeling",
-    );
+  it("2h — the intention claim describes CAPABILITY, never preference", () => {
+    // The underlying evidence counts garments rated "strong" for an intention.
+    // That is what her Closet CAN do. Audited against her real sessions,
+    // feel-put-together is her strongest Closet capability (22 pieces) and only
+    // her 6th most-selected intention (12 of 156) — she asks to feel like
+    // herself 69 times. The sentence must not claim her wardrobe was built for
+    // a feeling she did not mostly ask for.
+    assert.equal(plainText("Your strongest pieces pull the same way"), "What your Closet is strongest at");
+
+    const claim = plainText("Your wardrobe is built, above all, to help you feel put together.");
+    assert.equal(claim, "Your Closet is strongest at helping you feel put together.");
+    assert.doesNotMatch(claim, /built, above all/, "capability stated as intent");
+    assert.doesNotMatch(claim, /your wardrobe is built/i);
+
     const out = plainText("22 of your pieces read strongest for that. It\u2019s a clear strength — and it means other moods have fewer pieces behind them.");
-    assert.equal(out, "22 pieces are especially strong at that, while other moods have fewer options behind them.");
-    // The count is evidence and must survive verbatim.
-    assert.match(out, /\b22\b/);
+    assert.equal(out, "22 pieces strongly support that, while some other kinds of look have fewer options behind them.");
+    assert.match(out, /\b22\b/, "the count is evidence and survives verbatim");
     assert.doesNotMatch(out, /read strongest|pull the same way/);
   });
 
@@ -317,45 +325,54 @@ describe("§WC-6 the same conclusion is not printed twice", () => {
 
 // ── §WC-6d One idea, one place ───────────────────────────────────────────────
 
-describe("§WC-6d underused pieces are never shown twice", () => {
+describe("§WC-6d one garment story, told once", () => {
   const obs = (kind: string, garmentIds: string[]) => ({ kind, garmentIds });
 
-  it("6d-1 — PARTIAL overlap is enough to suppress the duplicate observation", () => {
-    // The live case: Rediscover shows 3 pieces, the observation names 4, and
-    // 2 are shared. Requiring every garment to match let this print twice.
-    const rediscoverIds = new Set(["a", "b", "c"]);
+  it("6d-1 — a garment-led observation whose LEAD piece is in Rediscover is dropped", () => {
+    // The live case: "Hard to style, but unusually well connected" leads with
+    // the Cream Ribbed Knit Tank Top, which Rediscover already shows. The
+    // remaining ids are its partners, not the subject.
     const shown = visibleObservations(
-      [obs("untapped-potential", ["a", "b", "x", "y"]), obs("repetition", ["m", "n"])],
-      rediscoverIds,
+      [obs("contradiction-potential-struggle", ["cream", "p1", "p2", "p3"]), obs("repetition", ["m"])],
+      new Set(["cream", "blazer-a", "blazer-b"]),
     );
-    assert.equal(shown.length, 1);
-    assert.equal(shown[0].kind, "repetition", "only the genuinely different pattern survives");
+    assert.deepEqual(shown.map((o) => o.kind), ["repetition"]);
   });
 
-  it("6d-2 — a single shared garment is enough", () => {
-    const shown = visibleObservations([obs("untapped-potential", ["a", "x", "y", "z"])], new Set(["a"]));
-    assert.deepEqual(shown, []);
+  it("6d-2 — a supporting garment overlapping is NOT enough to drop it", () => {
+    // Matching on any garment would delete a six-piece observation because one
+    // thumbnail happened to appear in Rediscover. Only the subject counts.
+    const shown = visibleObservations(
+      [obs("contradiction-potential-struggle", ["lead", "cream", "p2"])],
+      new Set(["cream"]),
+    );
+    assert.equal(shown.length, 1, "the story is about `lead`, which Rediscover does not show");
   });
 
-  it("6d-3 — an untapped observation about entirely different pieces still shows", () => {
-    const shown = visibleObservations([obs("untapped-potential", ["x", "y"])], new Set(["a", "b"]));
-    assert.equal(shown.length, 1, "no overlap means no duplication");
+  it("6d-3 — untapped-potential follows the same lead rule", () => {
+    assert.equal(visibleObservations([obs("untapped-potential", ["a", "x"])], new Set(["a"])).length, 0);
+    assert.equal(visibleObservations([obs("untapped-potential", ["x", "a"])], new Set(["a"])).length, 1);
   });
 
-  it("6d-4 — no other observation kind is ever suppressed by Rediscover", () => {
+  it("6d-4 — a system-centric observation is dropped outright", () => {
+    // "This suits you and works with your Closet, but nAia hasn't generated it
+    // yet" is a fact about nAia's own output. There is no advice underneath.
+    const shown = visibleObservations([obs("contradiction-alignment-unused", ["z"])], new Set());
+    assert.deepEqual(shown, [], "no Rediscover overlap needed — it goes regardless");
+  });
+
+  it("6d-5 — wardrobe-pattern observations are never touched", () => {
     const kinds = [
-      "repetition", "contradiction-potential-struggle", "contradiction-alignment-unused",
-      "contradiction-favourite-isolated", "struggle-pattern", "colour-pattern",
-      "passport-alignment", "wardrobe-imbalance", "self-reported-reach",
-      "connection-density", "intention-concentration",
+      "repetition", "struggle-pattern", "colour-pattern", "passport-alignment",
+      "wardrobe-imbalance", "self-reported-reach", "connection-density",
+      "intention-concentration",
     ];
     const shown = visibleObservations(kinds.map((k) => obs(k, ["a"])), new Set(["a"]));
-    assert.equal(shown.length, kinds.length, "chapter 4 keeps every genuinely different pattern");
+    assert.equal(shown.length, kinds.length, "these are about the wardrobe, not one piece");
   });
 
-  it("6d-5 — an observation with no garments is never suppressed", () => {
-    const shown = visibleObservations([obs("untapped-potential", [])], new Set(["a", "b"]));
-    assert.equal(shown.length, 1);
+  it("6d-6 — an observation with no garments is never suppressed", () => {
+    assert.equal(visibleObservations([obs("untapped-potential", [])], new Set(["a"])).length, 1);
   });
 });
 
