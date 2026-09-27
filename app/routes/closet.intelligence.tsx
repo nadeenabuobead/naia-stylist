@@ -176,6 +176,24 @@ function Thumb({ card, size = 72 }: { card: GarmentCard | undefined; size?: numb
   );
 }
 
+/**
+ * How dressed-up she asks to be, in her words. Register-aware: the everyday
+ * phrasing would be plainly wrong for a customer whose requests lead at a work
+ * or occasion level.
+ */
+const DRESS_LEVEL_PHRASE: Readonly<Record<string, string>> = {
+  everyday: "on the more everyday, relaxed side",
+  work: "on the more polished, work-ready side",
+  occasion: "on the dressier, occasion side",
+};
+
+/** "a, b and c" — the last item joined with "and", not a bare comma. */
+function joinWithAnd(parts: string[]): string {
+  if (parts.length <= 1) return parts[0] ?? "";
+  if (parts.length === 2) return `${parts[0]} and ${parts[1]}`;
+  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+}
+
 function capitaliseFirst(text: string): string {
   return text.length === 0 ? text : text[0].toUpperCase() + text.slice(1);
 }
@@ -748,18 +766,17 @@ export default function WardrobeIntelligencePage() {
                     <div className="wi-history">
                       {topRequest && (
                         <div className="wi-hist-item">
-                          <p className="wi-hist-head">What you ask nAia to dress you for most</p>
+                          <p className="wi-hist-head">How you usually want your looks to feel</p>
                           {/* This counts LEVEL OF DRESS, not the occasion she
                               picked. Her raw "everyday" occasion is 93; the 149
                               also folds in the dinners, family days and travel
-                              she asked to keep relaxed. Saying "everyday" alone
-                              would read as the occasion and overstate it, so the
-                              sentence names the level and gives its denominator. */}
+                              she asked to keep relaxed. The heading and the
+                              sentence therefore describe how dressed-up she
+                              wants to be, and carry the denominator. */}
                           <p className="wi-hist-body">
-                            Most of what you ask nAia for is{" "}
-                            {(registers.find((r) => r.key === topRequest.register)?.heading ?? "").toLowerCase()}
-                            -level dressing &mdash; {topRequest.sessions} of the{" "}
-                            {needs.styleMe.requests.reduce((sum, r) => sum + r.sessions, 0)} requests it could read.
+                            Most of the looks you ask nAia for are{" "}
+                            {DRESS_LEVEL_PHRASE[topRequest.register]} &mdash; {topRequest.sessions} of the{" "}
+                            {needs.styleMe.requests.reduce((sum, r) => sum + r.sessions, 0)} requests nAia could read.
                           </p>
                         </div>
                       )}
@@ -774,7 +791,7 @@ export default function WardrobeIntelligencePage() {
                             {chosenIntentions.length > 1 && (
                               <>
                                 , followed by{" "}
-                                {chosenIntentions.slice(1, 4).map((c) => c.label).join(", ")}
+                                {joinWithAnd(chosenIntentions.slice(1, 4).map((c) => c.label))}
                               </>
                             )}
                             .
