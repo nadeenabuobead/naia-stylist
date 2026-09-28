@@ -145,3 +145,41 @@ describe("§WS-3 what it reports", () => {
     assert.match(text, /added 1 piece/);
   });
 });
+
+describe("§WS-4 attribution", () => {
+  const takenAt = "2026-09-01T00:00:00.000Z";
+
+  it("§WS-4a depth moving without a Closet change is not attributed to a garment", () => {
+    // A Passport edit, an admin correction, or an engine change can all move
+    // depth. None of them is something she added.
+    const change = diffSnapshots({
+      before: summary(),
+      after: summary({
+        registers: [
+          { register: "everyday", distinctLooks: 9, usableCount: 18 },
+          { register: "work", distinctLooks: 8, usableCount: 10 },
+        ],
+        openGaps: [],
+        recommendations: [],
+      }),
+      takenAt,
+      added: [],
+    });
+    assert.ok(change);
+    assert.equal(change!.piecesAdded, 0);
+    const text = changeLines(change!).join(" ");
+    assert.match(text, /Your Closet hasn't changed, but nAia's reading of it has\./);
+    assert.doesNotMatch(text, /works with \d+ piece|You've added/);
+  });
+
+  it("§WS-4b a real addition is not prefixed with the no-change line", () => {
+    const change = diffSnapshots({
+      before: summary(),
+      after: summary({ closetCount: 47 }),
+      takenAt,
+      added: [{ garmentId: "g1", name: "Grey Trousers", worksWithIds: ["a", "b"] }],
+    });
+    assert.ok(change);
+    assert.doesNotMatch(changeLines(change!).join(" "), /Closet hasn't changed/);
+  });
+});

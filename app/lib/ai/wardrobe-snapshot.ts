@@ -151,6 +151,16 @@ const REGISTER_WORD: Readonly<Record<string, string>> = {
 export function changeLines(change: WardrobeChange): string[] {
   const lines: string[] = [];
 
+  // Depth and gaps can move without the Closet moving: a Passport edit, an
+  // admin correction to a garment's profile, or a change to how the engine
+  // reads pieces will all do it. Reporting that alongside "what changed" would
+  // let the customer read it as the effect of something she added, so when
+  // nothing was added or removed the cause is named as what it is.
+  const closetUnchanged = change.piecesAdded === 0 && change.piecesRemoved === 0;
+  if (closetUnchanged) {
+    lines.push("Your Closet hasn't changed, but nAia's reading of it has.");
+  }
+
   let namedAPiece = false;
   for (const piece of change.added.slice(0, 2)) {
     if (piece.worksWithIds.length === 0) continue;
