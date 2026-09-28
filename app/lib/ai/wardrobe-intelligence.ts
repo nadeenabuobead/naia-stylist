@@ -782,6 +782,77 @@ const FUNCTIONAL_CATEGORIES: ReadonlySet<string> = new Set([
   "ACTIVEWEAR", "SWIMWEAR", "LOUNGEWEAR",
 ]);
 
+// ── Functional-wardrobe crossover ────────────────────────────────────────────
+// Sportswear stays sportswear by default.
+//
+// Activewear, swimwear and loungewear form their own wardrobe. They pair freely
+// WITH EACH OTHER — leggings and a sports bra are a real outfit — but they do
+// not silently become styling options for ordinary clothes.
+//
+// Nothing generic bridges the two wardrobes. A shared occasion tag, a neutral
+// colour, adjacent levels of dress, balanced visual weight and contrasting
+// silhouette are all true of a sports bra next to a tailored blazer, and not one
+// of them makes that a pairing nAia should put in front of someone.
+//
+// The single crossover is a piece genuinely worn OVER ordinary clothes — a
+// zip-up hoodie, a track jacket, a sweatshirt — and only into casual company.
+// The rule is keyed on the garment taxonomy, never on individual item IDs.
+const CROSSOVER_ELIGIBLE_SUBCATEGORIES: ReadonlySet<string> = new Set([
+  "track jacket", "athletic jacket", "varsity jacket", "bomber jacket",
+  "zip-up jacket", "zip up jacket", "windbreaker", "anorak",
+  "hoodie", "zip-up hoodie", "zip up hoodie",
+  "sweatshirt", "pullover", "fleece",
+]);
+
+/**
+ * Levels of dress a functional layer can join. Anything dressier than
+ * smart-casual is not casual company, whatever the layer.
+ */
+const CROSSOVER_CONTEXT_FORMALITY: ReadonlySet<string> = new Set([
+  "casual", "smart-casual",
+]);
+
+function isFunctionalGarment(g: WardrobeGarment): boolean {
+  return FUNCTIONAL_CATEGORIES.has(g.category);
+}
+
+/** Is this specific piece one of the layers that crosses over? */
+function isCrossoverLayer(g: WardrobeGarment): boolean {
+  // Swimwear and loungewear never cross over, whatever they are called.
+  if (g.category !== "ACTIVEWEAR") return false;
+  // It has to be worn OVER something. A performance tee is still sportswear.
+  if (g.slot !== "outerwear") return false;
+  const sub = norm(g.subcategory);
+  if (sub === null) return false;
+  for (const token of CROSSOVER_ELIGIBLE_SUBCATEGORIES) {
+    if (sub === token || sub.includes(token)) return true;
+  }
+  return false;
+}
+
+/**
+ * May these two pieces meet at all?
+ *
+ * Within one wardrobe — both functional, or neither — yes, and the ordinary
+ * gates decide. Across the two, only when the functional piece is an eligible
+ * outer layer AND the ordinary piece is casual enough to receive it. Unknown
+ * formality reads as "not established", so the pairing is refused: the default
+ * has to be that sportswear stays sportswear.
+ */
+function functionCompatible(a: WardrobeGarment, b: WardrobeGarment): boolean {
+  const fa = isFunctionalGarment(a);
+  const fb = isFunctionalGarment(b);
+  if (fa === fb) return true;
+
+  const functional = fa ? a : b;
+  const core = fa ? b : a;
+
+  if (!isCrossoverLayer(functional)) return false;
+
+  const coreFormality = norm(core.formality);
+  return coreFormality !== null && CROSSOVER_CONTEXT_FORMALITY.has(coreFormality);
+}
+
 // Finishing slots. A black tote is compatible with almost everything by
 // construction, so connectivity says nothing about it — but a favourite pair of
 // boots is a real wardrobe hero. The rule is therefore about WHICH KIND of
@@ -1074,6 +1145,9 @@ const CLOSE_SILHOUETTES = new Set(["fitted", "column", "straight", "tapered"]);
  * thing it can say about each pair, rather than repeating the same sentence.
  */
 function scorePair(a: WardrobeGarment, b: WardrobeGarment): PairScore {
+  // Runs first: the two wardrobes must be allowed to meet before anything about
+  // colour or level of dress is worth asking.
+  if (!functionCompatible(a, b)) return { compatible: false, reasons: [] };
   if (!weightBalanced(a, b)) return { compatible: false, reasons: [] };
 
   const fd = formalityDistance(norm(a.formality), norm(b.formality));
@@ -3229,6 +3303,8 @@ export {
   STATED_FRICTION,
   scorePair,
   partnersOf,
+  functionCompatible,
+  isCrossoverLayer,
   STRUCTURED_FITS,
   SOFT_FITS,
   statedAs,
