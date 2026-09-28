@@ -388,10 +388,10 @@ describe("§WC-6d one garment story, told once", () => {
 // ── §WC-7 Passport match dimensions ───────────────────────────────────────────
 
 describe("§WC-7 Closet-to-Passport match", () => {
-  it("7-uneven — alignment without coverage is never reported as a strong match", () => {
+  it("7-uneven — alignment without representation is never reported as a strong match", () => {
     const m = matchDimension({ id: "synth-colour", kind: "uneven", reading: "Part of it is barely there." });
     assert.equal(m.dimension, "Colour");
-    assert.equal(m.stateText, "Strong alignment, uneven coverage");
+    assert.equal(m.stateText, "Strong alignment, uneven representation");
     assert.notEqual(m.stateText, "Strong match");
   });
 
@@ -420,5 +420,17 @@ describe("§WC-7 Closet-to-Passport match", () => {
     assert.equal(lifestyleMatch([strong("Everyday"), strong("Work")])!.stateText, "Strong match");
     assert.equal(lifestyleMatch([strong("Everyday"), weak("Work")])!.stateText, "Partial match");
     assert.match(lifestyleMatch([strong("Everyday"), weak("Work")])!.reading, /Everyday is well covered/);
+  });
+});
+
+// The colour reading sat directly above COVERAGE — PARTIAL MATCH, where
+// "coverage" means how much of the body she wants covered. Two meanings, one
+// word, one line apart.
+describe("§WC-8 colour language", () => {
+  it("§WC-8a the palette reading never borrows the word \"coverage\"", () => {
+    for (const kind of ["alignment", "uneven", "tension", "unclear"] as const) {
+      const m = matchDimension({ id: "synth-colour", kind, reading: "x" });
+      assert.doesNotMatch(m.stateText, /coverage/i);
+    }
   });
 });

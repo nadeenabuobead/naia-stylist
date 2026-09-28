@@ -348,7 +348,9 @@ export type MatchState = "strong" | "uneven" | "partial" | "gap" | "unclear";
 const MATCH_STATE_TEXT: Readonly<Record<MatchState, string>> = {
   strong: "Strong match",
   // Inside the palette, but not all of it is there. Deliberately not "strong".
-  uneven: "Strong alignment, uneven coverage",
+  // "Representation", never "coverage": one line below, COVERAGE means how much
+  // of the body she wants covered, and the two readings sat next to each other.
+  uneven: "Strong alignment, uneven representation",
   partial: "Partial match",
   gap: "Where there's a gap",
   unclear: "Not yet clear",
@@ -659,10 +661,18 @@ export interface EnoughGroup {
   title: string;
   body: string;
   garmentIds: string[];
+  /**
+   * The register the group speaks for. Carried through because the page model
+   * keys the "you have enough of this" claim on it, so the matching "another
+   * one is not a priority" entry can be recognised as the same finding.
+   * Members of a group always share a register — they are two halves of one
+   * outfit ("tops and bottoms"), never two different kinds of dressing.
+   */
+  register: string;
 }
 
 export function groupEnough(
-  findings: ReadonlyArray<{ id: string; title: string; body: string; garmentIds: string[] }>,
+  findings: ReadonlyArray<{ id: string; title: string; body: string; garmentIds: string[]; register?: string }>,
 ): EnoughGroup[] {
   const byBody = new Map<string, typeof findings[number][]>();
   for (const f of findings) {
@@ -672,7 +682,13 @@ export function groupEnough(
 
   return [...byBody.entries()].map(([body, group]) => {
     if (group.length === 1) {
-      return { id: group[0].id, title: group[0].title, body, garmentIds: group[0].garmentIds };
+      return {
+        id: group[0].id,
+        title: group[0].title,
+        body,
+        garmentIds: group[0].garmentIds,
+        register: group[0].register ?? "",
+      };
     }
     // "You already have enough everyday neutral tops" + "…bottoms"
     //   → "You already have enough everyday neutral tops and bottoms"
@@ -682,6 +698,7 @@ export function groupEnough(
       title: `You already have enough ${joinPlain(subjects)}`,
       body,
       garmentIds: group.flatMap((f) => f.garmentIds),
+      register: group[0].register ?? "",
     };
   });
 }
