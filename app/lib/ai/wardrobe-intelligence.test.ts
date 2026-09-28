@@ -20,6 +20,7 @@ import {
   scorePair,
   functionCompatible,
   isCrossoverLayer,
+  wornBeyondSport,
   DEFAULT_FLAGS,
   MIN_WARDROBE_SIZE,
   wardrobeCharacterLine,
@@ -1107,7 +1108,7 @@ describe("§WI-13 hero eligibility by category", () => {
       makeGarment({ id: "b1", category: "BOTTOMS", slot: "bottom" }),
       makeGarment({ id: "b2", category: "BOTTOMS", slot: "bottom" }),
       makeGarment({ id: "b3", category: "BOTTOMS", slot: "bottom" }),
-      makeGarment({ id: "track", name: "Track Jacket", subcategory: "track jacket", category: "ACTIVEWEAR", slot: "outerwear", formality: "casual" }),
+      makeGarment({ id: "track", name: "Track Jacket", subcategory: "track jacket", category: "ACTIVEWEAR", slot: "outerwear", formality: "casual", occasions: ["casual", "weekend", "gym"] }),
     ];
     const versatile = run(items).heroes.heroes.find((h) => h.label === "most-versatile");
     assert.ok(versatile);
@@ -1119,9 +1120,21 @@ describe("§WI-13 hero eligibility by category", () => {
     // activewear is a footnote rather than a way of life.
     const items = [
       ...richWardrobe(),
-      makeGarment({ id: "track", name: "Track Jacket", subcategory: "track jacket", category: "ACTIVEWEAR", slot: "outerwear", formality: "casual" }),
+      makeGarment({ id: "track", name: "Track Jacket", subcategory: "track jacket", category: "ACTIVEWEAR", slot: "outerwear", formality: "casual", occasions: ["casual", "weekend", "gym"] }),
     ];
     const versatile = run(items).heroes.heroes.find((h) => h.label === "most-versatile");
+    assert.notEqual(versatile?.garmentId, "track");
+  });
+
+  it("an activewear layer she only wears to the gym does not cross over", () => {
+    // Same slot, same subcategory, same level of dress as the crossover case
+    // below. The only difference is that nothing says she wears it as clothing.
+    const items = [
+      ...richWardrobe().filter((g) => g.id !== "o1"),
+      makeGarment({ id: "track", name: "Track Jacket", subcategory: "track jacket", category: "ACTIVEWEAR", slot: "outerwear", formality: "casual", occasions: ["travel", "gym"] }),
+    ];
+    const active: WardrobePassport = { ...PASSPORT, lifestyle: ["active-busy-days"] };
+    const versatile = run(items, { passport: active }).heroes.heroes.find((h) => h.label === "most-versatile");
     assert.notEqual(versatile?.garmentId, "track");
   });
 
@@ -1144,7 +1157,7 @@ describe("§WI-13 hero eligibility by category", () => {
     // the wardrobe. Whether it may say so depends entirely on relevance.
     const items = [
       ...richWardrobe().filter((g) => g.id !== "o1"),
-      makeGarment({ id: "track", name: "Track Jacket", subcategory: "track jacket", category: "ACTIVEWEAR", slot: "outerwear", formality: "casual" }),
+      makeGarment({ id: "track", name: "Track Jacket", subcategory: "track jacket", category: "ACTIVEWEAR", slot: "outerwear", formality: "casual", occasions: ["casual", "weekend", "gym"] }),
     ];
     const withoutLifestyle = run(items).heroes.heroes.find((h) => h.label === "most-versatile");
     assert.notEqual(withoutLifestyle?.garmentId, "track");
@@ -1472,14 +1485,73 @@ describe("§WI-19 display discipline", () => {
 // weight — must never be enough to bridge the two.
 
 const activewear = (sub: string, slot: string, over: Partial<WardrobeGarment> = {}) =>
-  makeGarment({ category: "ACTIVEWEAR", subcategory: sub, slot, formality: "casual", ...over });
+  makeGarment({ category: "ACTIVEWEAR", subcategory: sub, slot, formality: "casual", occasions: ["gym"], ...over });
+
+/** A layer she has tagged for ordinary life, not only for sport. */
+const crossoverLayer = (sub: string, over: Partial<WardrobeGarment> = {}) =>
+  activewear(sub, "outerwear", { occasions: ["casual", "weekend", "gym"], ...over });
 
 describe("§WI-20 functional-wardrobe crossover", () => {
-  it("§WI-20a activewear pairs freely within its own wardrobe", () => {
+  it("§WI-20a activewear pairs within its OWN category", () => {
     const leggings = activewear("leggings", "bottom");
     const hoodie = activewear("hoodie", "outerwear");
     assert.equal(functionCompatible(leggings, hoodie), true);
     assert.equal(scorePair(leggings, hoodie).compatible, true);
+  });
+
+  it("§WI-20j the three functional wardrobes are not interchangeable", () => {
+    // "Not ordinary clothing" is not a wardrobe. A sports bra and a swim
+    // cover-up have nothing to do with each other, and membership in
+    // FUNCTIONAL_CATEGORIES must never be what establishes compatibility.
+    const active = activewear("leggings", "bottom");
+    const swim = makeGarment({ category: "SWIMWEAR", subcategory: "cover-up", slot: "outerwear", formality: "casual" });
+    const lounge = makeGarment({ category: "LOUNGEWEAR", subcategory: "hoodie", slot: "outerwear", formality: "casual" });
+
+    assert.equal(functionCompatible(active, swim), false);
+    assert.equal(functionCompatible(active, lounge), false);
+    assert.equal(functionCompatible(swim, lounge), false);
+    assert.equal(scorePair(active, swim).compatible, false);
+
+    // …but each still pairs inside its own category.
+    const swimBottom = makeGarment({ category: "SWIMWEAR", subcategory: "bikini bottom", slot: "bottom", formality: "casual" });
+    const loungeBottom = makeGarment({ category: "LOUNGEWEAR", subcategory: "joggers", slot: "bottom", formality: "casual" });
+    assert.equal(functionCompatible(swim, swimBottom), true);
+    assert.equal(functionCompatible(lounge, loungeBottom), true);
+  });
+
+  it("§WI-20k crossover needs evidence the piece is worn beyond sport", () => {
+    const jeans = makeGarment({ category: "BOTTOMS", subcategory: "jeans", slot: "bottom", formality: "casual" });
+
+    // Both are eligible layers in the outerwear slot. Only one has evidence.
+    const hoodie = crossoverLayer("hoodie");                                  // casual, weekend, gym
+    const trackJacket = activewear("track jacket", "outerwear", { occasions: ["travel", "gym"] });
+
+    assert.equal(wornBeyondSport(hoodie), true);
+    assert.equal(wornBeyondSport(trackJacket), false);
+    assert.equal(functionCompatible(jeans, hoodie), true);
+    assert.equal(functionCompatible(jeans, trackJacket), false,
+      "a track jacket tagged only for travel and the gym has no evidence behind it");
+  });
+
+  it("§WI-20l travel and loungewear are not evidence of ordinary wear", () => {
+    // Activewear is tagged for travel because it is comfortable to sit in, and
+    // for loungewear because it is comfortable at home. Neither says it reads
+    // as clothing in a put-together outfit.
+    for (const occasions of [["travel"], ["loungewear"], ["gym"], ["travel", "loungewear", "gym"]]) {
+      assert.equal(wornBeyondSport(activewear("hoodie", "outerwear", { occasions })), false, occasions.join("+"));
+    }
+    assert.equal(wornBeyondSport(activewear("hoodie", "outerwear", { occasions: ["weekend"] })), true);
+  });
+
+  it("§WI-20m an everyday tag alone still does not bridge the wardrobes", () => {
+    // The tag is necessary, never sufficient: it qualifies a piece that is
+    // ALREADY a crossover layer. Leggings tagged "weekend" are still leggings.
+    const jeans = makeGarment({ category: "BOTTOMS", subcategory: "jeans", slot: "bottom", formality: "casual" });
+    for (const [sub, slot] of [["leggings", "bottom"], ["sports bra", "top"], ["performance t-shirt", "top"]] as const) {
+      const piece = activewear(sub, slot, { occasions: ["casual", "weekend"] });
+      assert.equal(wornBeyondSport(piece), true, "it has the tag");
+      assert.equal(functionCompatible(jeans, piece), false, `${sub} is not a layer worn over anything`);
+    }
   });
 
   it("§WI-20b an activewear BOTTOM never reaches ordinary clothes", () => {
@@ -1499,15 +1571,17 @@ describe("§WI-20 functional-wardrobe crossover", () => {
     }
   });
 
-  it("§WI-20d an eligible layer crosses into casual company", () => {
+  it("§WI-20d an eligible layer with evidence crosses into casual company", () => {
     const jeans = makeGarment({ category: "BOTTOMS", subcategory: "jeans", slot: "bottom", formality: "casual" });
     for (const sub of ["track jacket", "hoodie", "zip-up hoodie", "sweatshirt", "windbreaker"]) {
-      assert.equal(functionCompatible(jeans, activewear(sub, "outerwear")), true, sub);
+      assert.equal(functionCompatible(jeans, crossoverLayer(sub)), true, sub);
+      // …and the same garment without the evidence does not.
+      assert.equal(functionCompatible(jeans, activewear(sub, "outerwear")), false, `${sub} without evidence`);
     }
   });
 
   it("§WI-20e an eligible layer stops at business dressing and above", () => {
-    const hoodie = activewear("hoodie", "outerwear");
+    const hoodie = crossoverLayer("hoodie");
     for (const formality of ["business-casual", "business-formal", "occasion", "evening"]) {
       const piece = makeGarment({ category: "BOTTOMS", subcategory: "trousers", slot: "bottom", formality });
       assert.equal(functionCompatible(piece, hoodie), false, formality);
@@ -1534,7 +1608,7 @@ describe("§WI-20 functional-wardrobe crossover", () => {
 
   it("§WI-20h unknown formality refuses the crossover rather than guessing", () => {
     const unknown = makeGarment({ category: "BOTTOMS", subcategory: "jeans", slot: "bottom", formality: null });
-    assert.equal(functionCompatible(unknown, activewear("hoodie", "outerwear")), false);
+    assert.equal(functionCompatible(unknown, crossoverLayer("hoodie")), false);
   });
 
   it("§WI-20i ordinary clothes are completely unaffected by the gate", () => {

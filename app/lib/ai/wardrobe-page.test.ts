@@ -448,3 +448,81 @@ describe("§WP-7 repeated sentences", () => {
     }
   });
 });
+
+// ── §WP-8 — the numbers must reconcile ────────────────────────────────────────
+//
+// The page showed a piece "pairs easily with 9 other pieces" and then revealed
+// six of them, with nothing saying the six were a subset. Three different
+// measures were in play and none was labelled.
+
+describe("§WP-8 partner counts reconcile", () => {
+  it("§WP-8a the reveal names its own count, and shows exactly that many", () => {
+    const input = baseInput();
+    (input.intelligence as unknown as { opportunities: unknown }).opportunities = {
+      rediscover: [{
+        garmentId: "g1", name: "Cream Ribbed Knit Tank Top", imageUrl: null,
+        body: "Worth another look.",
+        worksWithIds: ["a", "b", "c", "d", "e", "f", "g", "h", "i"],
+      }],
+    };
+    const page = buildWardrobePage(input);
+    const entry = page.sections.flatMap((s) => s.blocks).flatMap((b) => b.entries)
+      .find((e) => e.claim === claims.garment("g1"))!;
+    assert.equal(entry.action?.kind, "reveal");
+    assert.match(entry.action!.label, /See the 9 pieces it works with/);
+    // The body did not state the count, so the button carries it.
+    assert.equal((entry.action as { garmentIds: string[] }).garmentIds.length, 9);
+    assert.deepEqual(entry.garmentIds, (entry.action as { garmentIds: string[] }).garmentIds);
+  });
+
+  it("§WP-8e the count is not repeated when the entry already gave it", () => {
+    const input = baseInput();
+    (input.intelligence as unknown as { opportunities: unknown }).opportunities = {
+      rediscover: [{
+        garmentId: "g1", name: "Tank", imageUrl: null,
+        body: "The connections are already there — 9 pieces you own work with it.",
+        worksWithIds: ["a", "b", "c", "d", "e", "f", "g", "h", "i"],
+      }],
+    };
+    const page = buildWardrobePage(input);
+    const entry = page.sections.flatMap((s) => s.blocks).flatMap((b) => b.entries)
+      .find((e) => e.claim === claims.garment("g1"))!;
+    assert.equal(entry.action!.label, "See them");
+    assert.equal((entry.action as { garmentIds: string[] }).garmentIds.length, 9);
+  });
+
+  it("§WP-8f the opening summary says it is a preview", () => {
+    const page = buildWardrobePage(baseInput());
+    const takeaways = page.sections.find((s) => s.id === "now")!.blocks.find((b) => b.kind === "takeaways")!;
+    assert.match(takeaways.note ?? "", /explained below/i);
+  });
+
+  it("§WP-8b singular is not pluralised", () => {
+    const input = baseInput();
+    (input.intelligence as unknown as { opportunities: unknown }).opportunities = {
+      rediscover: [{ garmentId: "g1", name: "Tank", imageUrl: null, body: "x", worksWithIds: ["a"] }],
+    };
+    const page = buildWardrobePage(input);
+    const entry = page.sections.flatMap((s) => s.blocks).flatMap((b) => b.entries)
+      .find((e) => e.claim === claims.garment("g1"))!;
+    assert.match(entry.action!.label, /See the 1 piece it works with/);
+  });
+
+  it("§WP-8c the shopping verdict never lists something that is not a priority", () => {
+    const page = buildWardrobePage(baseInput());
+    const verdict = page.sections.find((s) => s.id === "do")!.blocks.find((b) => b.kind === "verdict")!;
+    assert.equal(verdict.entries.length, 1, "the verdict answers the question and nothing else");
+    assert.equal(verdict.entries[0].claim, "buy-verdict");
+    // The advice itself still exists, in full, where it belongs.
+    const enough = page.sections.find((s) => s.id === "works")!
+      .blocks.flatMap((b) => b.entries).find((e) => e.claim === claims.enough("everyday"))!;
+    assert.match(enough.body!, /strong depth here|unlikely to materially expand/);
+  });
+
+  it("§WP-8d capability is attributed to garment profiles, not to a personal stylist", () => {
+    const page = buildWardrobePage(baseInput());
+    const copy = visibleCopy(page).join(" ");
+    assert.doesNotMatch(copy, /a stylist has reviewed|stylist personally|reviewed by a stylist/i);
+    assert.match(copy, /approved style profile held against each of your pieces/i);
+  });
+});

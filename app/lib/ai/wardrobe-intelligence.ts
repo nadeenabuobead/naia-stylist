@@ -785,18 +785,30 @@ const FUNCTIONAL_CATEGORIES: ReadonlySet<string> = new Set([
 // ── Functional-wardrobe crossover ────────────────────────────────────────────
 // Sportswear stays sportswear by default.
 //
-// Activewear, swimwear and loungewear form their own wardrobe. They pair freely
-// WITH EACH OTHER — leggings and a sports bra are a real outfit — but they do
-// not silently become styling options for ordinary clothes.
+// Activewear, swimwear and loungewear are not one wardrobe — they are three,
+// and they are not interchangeable with each other either. Sharing the property
+// "not ordinary clothing" says nothing about whether a sports bra belongs with
+// a swim cover-up. Membership in FUNCTIONAL_CATEGORIES therefore establishes
+// nothing on its own; pieces pair within their OWN category.
 //
-// Nothing generic bridges the two wardrobes. A shared occasion tag, a neutral
-// colour, adjacent levels of dress, balanced visual weight and contrasting
-// silhouette are all true of a sports bra next to a tailored blazer, and not one
-// of them makes that a pairing nAia should put in front of someone.
+// Crossing into ordinary clothes has to be earned, and earned from evidence
+// about the specific garment rather than from the kind of thing it is. Three
+// conditions, all required:
 //
-// The single crossover is a piece genuinely worn OVER ordinary clothes — a
-// zip-up hoodie, a track jacket, a sweatshirt — and only into casual company.
-// The rule is keyed on the garment taxonomy, never on individual item IDs.
+//   1. it is a layer worn OVER something — outerwear slot, on an explicit
+//      crossover subcategory list;
+//   2. SHE has tagged it for a context outside sport and transit;
+//   3. the ordinary piece is casual enough to receive it.
+//
+// Condition 2 is necessary, never sufficient. A shared occasion tag on its own
+// does not bridge the two wardrobes — leggings tagged "weekend" are still
+// leggings. It only says that a garment which already qualifies as a crossover
+// layer is genuinely worn as clothing rather than only as kit.
+//
+// Worked example from a real Closet: a zip-up hoodie tagged casual, weekend,
+// travel, gym and loungewear crosses over. A track jacket tagged only travel
+// and gym does not — same slot, both on the subcategory list, and the second
+// has no evidence behind it.
 const CROSSOVER_ELIGIBLE_SUBCATEGORIES: ReadonlySet<string> = new Set([
   "track jacket", "athletic jacket", "varsity jacket", "bomber jacket",
   "zip-up jacket", "zip up jacket", "windbreaker", "anorak",
@@ -805,9 +817,20 @@ const CROSSOVER_ELIGIBLE_SUBCATEGORIES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Levels of dress a functional layer can join. Anything dressier than
- * smart-casual is not casual company, whatever the layer.
+ * Contexts that are ordinary dressing rather than sport or transit.
+ *
+ * "travel" is deliberately absent. Activewear is tagged for travel constantly
+ * because it is comfortable to sit in, which is not evidence that it reads as
+ * clothing in a put-together outfit. "loungewear" is absent for the same
+ * reason: at home is not an outfit.
  */
+const EVERYDAY_OCCASIONS: ReadonlySet<string> = new Set([
+  "casual", "weekend", "everyday", "errands", "shopping", "brunch",
+  "school run", "school-run", "date", "date night", "date-night",
+  "work", "smart casual", "smart-casual", "dinner", "drinks",
+]);
+
+/** Levels of dress a functional layer can join. */
 const CROSSOVER_CONTEXT_FORMALITY: ReadonlySet<string> = new Set([
   "casual", "smart-casual",
 ]);
@@ -816,7 +839,7 @@ function isFunctionalGarment(g: WardrobeGarment): boolean {
   return FUNCTIONAL_CATEGORIES.has(g.category);
 }
 
-/** Is this specific piece one of the layers that crosses over? */
+/** Is this the kind of piece worn over ordinary clothes? */
 function isCrossoverLayer(g: WardrobeGarment): boolean {
   // Swimwear and loungewear never cross over, whatever they are called.
   if (g.category !== "ACTIVEWEAR") return false;
@@ -831,23 +854,41 @@ function isCrossoverLayer(g: WardrobeGarment): boolean {
 }
 
 /**
+ * Has she actually worn this outside sport?
+ *
+ * Read from her own occasion tags. Necessary for crossover, never sufficient on
+ * its own — see the note above.
+ */
+function wornBeyondSport(g: WardrobeGarment): boolean {
+  for (const occasion of g.occasions ?? []) {
+    const o = norm(occasion);
+    if (o !== null && EVERYDAY_OCCASIONS.has(o)) return true;
+  }
+  return false;
+}
+
+/**
  * May these two pieces meet at all?
  *
- * Within one wardrobe — both functional, or neither — yes, and the ordinary
- * gates decide. Across the two, only when the functional piece is an eligible
- * outer layer AND the ordinary piece is casual enough to receive it. Unknown
- * formality reads as "not established", so the pairing is refused: the default
- * has to be that sportswear stays sportswear.
+ * Ordinary clothes: yes, the usual gates decide. Two functional pieces: only
+ * within the same functional category. Across the divide: only an eligible
+ * layer, with evidence it is worn beyond sport, into casual company. Unknown
+ * formality reads as "not established" and refuses — the default has to be
+ * that sportswear stays sportswear.
  */
 function functionCompatible(a: WardrobeGarment, b: WardrobeGarment): boolean {
   const fa = isFunctionalGarment(a);
   const fb = isFunctionalGarment(b);
-  if (fa === fb) return true;
+
+  if (!fa && !fb) return true;
+  // Activewear with swimwear, or swimwear with loungewear, is not a wardrobe.
+  if (fa && fb) return a.category === b.category;
 
   const functional = fa ? a : b;
   const core = fa ? b : a;
 
   if (!isCrossoverLayer(functional)) return false;
+  if (!wornBeyondSport(functional)) return false;
 
   const coreFormality = norm(core.formality);
   return coreFormality !== null && CROSSOVER_CONTEXT_FORMALITY.has(coreFormality);
@@ -2833,7 +2874,11 @@ function buildRediscover(items: WardrobeGarment[], passport: WardrobePassport | 
         count,
         passportClause,
         body: "",
-        worksWithIds: partners.slice(0, 6).map((p) => p.id),
+        // The FULL partner list, not a sample. It used to be capped at six
+        // while the headline claimed a different, larger number, so the two
+        // could not be reconciled by anyone reading the page. Presentation
+        // decides how many to show at once; the data carries all of them.
+        worksWithIds: partners.map((p) => p.id),
         evidence,
         strength: gradeStrength(evidence, partners.length),
         score,
@@ -3305,6 +3350,7 @@ export {
   partnersOf,
   functionCompatible,
   isCrossoverLayer,
+  wornBeyondSport,
   STRUCTURED_FITS,
   SOFT_FITS,
   statedAs,

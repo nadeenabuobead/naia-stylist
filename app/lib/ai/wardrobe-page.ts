@@ -304,7 +304,16 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
         };
       });
     if (takeaways.length > 0) {
-      nowBlocks.push({ id: "takeaways", label: "What stands out", kind: "takeaways", entries: takeaways });
+      nowBlocks.push({
+        id: "takeaways",
+        label: "Three things that stand out",
+        kind: "takeaways",
+        // Framed as a preview, because each headline is repeated verbatim as
+        // the title of the entry that explains it further down. Unlabelled,
+        // the reader meets the same sentence twice and it reads as padding.
+        note: "Each of these is explained below.",
+        entries: takeaways,
+      });
     }
   }
   // What the Closet is made of. Descriptive only — the CONCLUSIONS about the
@@ -391,9 +400,14 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
             id: "closet-capability",
             claim: "closet-capability",
             role: "full",
+            // Says where the numbers come from without implying a person sat
+            // down with this particular wardrobe. They are approved garment
+            // profiles — a reviewed rating held against each piece — and
+            // claiming a personal styling review would describe a service that
+            // is not being delivered.
             body:
-              "These come from the pieces a stylist has reviewed one by one. They describe what your " +
-              "Closet can put together, not what you ask for.",
+              "Counted from the approved style profile held against each of your pieces. They describe " +
+              "what your Closet can put together, not what you ask for.",
             garmentIds: [],
             meta: { strengths },
           },
@@ -592,9 +606,16 @@ function buildGarmentBlock(input: WardrobePageInput): PageBlock | null {
     e.meta = { ...e.meta, rediscover: plainText(piece.body) };
     if (piece.worksWithIds.length > 0) {
       e.garmentIds = piece.worksWithIds;
+      // The count belongs in the label only when the entry has not already
+      // given it. Stated twice in adjacent lines it reads as filler; stated
+      // nowhere, the button looks like it might be showing a sample.
+      const n = piece.worksWithIds.length;
+      const alreadyStated = new RegExp(`\\b${n}\\b`).test(plainText(piece.body));
       e.action = {
         kind: "reveal",
-        label: "See what it works with",
+        label: alreadyStated
+          ? (n === 1 ? "See it" : "See them")
+          : `See the ${n} ${n === 1 ? "piece" : "pieces"} it works with`,
         hideLabel: "Hide",
         garmentIds: piece.worksWithIds,
       };
@@ -683,17 +704,11 @@ function buildVerdictBlock(
     });
   }
 
-  for (const item of recommendations.notAPriority) {
-    entries.push({
-      id: item.id,
-      claim: claims.enough(item.id.replace(/^not-priority-/, "") as RegisterId),
-      role: "full",
-      title: item.title,
-      body: plainText(item.body),
-      garmentIds: [],
-      variant: "quiet",
-    });
-  }
+  // "Another of your everyday neutral tops" is deliberately NOT repeated here.
+  // Reduced to a bare title under a shopping verdict it read like something to
+  // buy, which is the opposite of what it means, and the advice already has a
+  // complete home in "You have plenty of" — fact, evidence and the
+  // don't-buy-another guidance together.
 
   return { id: "verdict", label: "Do you need to buy anything?", kind: "verdict", entries };
 }

@@ -264,9 +264,11 @@ function Thumb({ card, size = 72 }: { card: GarmentCard | undefined; size?: numb
   );
 }
 
-function Strip({ ids, byId, size = 56 }: { ids: string[]; byId: Map<string, GarmentCard>; size?: number }) {
+function Strip({
+  ids, byId, size = 56, showAll = false,
+}: { ids: string[]; byId: Map<string, GarmentCard>; size?: number; showAll?: boolean }) {
   if (ids.length === 0) return null;
-  const shown = ids.slice(0, MAX_STRIP);
+  const shown = showAll ? ids : ids.slice(0, MAX_STRIP);
   const overflow = ids.length - shown.length;
   return (
     <div className="wi-strip">
@@ -300,7 +302,8 @@ function EntryAction({
       <button type="button" className="wi-note-action" aria-expanded={open} onClick={onToggle}>
         {open ? action.hideLabel : action.label}
       </button>
-      {open && <Strip ids={action.garmentIds} byId={byId} size={64} />}
+      {/* Every piece, not a sample — the button names the count. */}
+      {open && <Strip ids={action.garmentIds} byId={byId} size={64} showAll />}
     </>
   );
 }
@@ -322,6 +325,7 @@ function Block({
       return (
         <div className="wi-block">
           {label}
+          {block.note && <p className="wi-block-note">{block.note}</p>}
           <ul className="wi-knows-list">
             {block.entries.map((e) => (
               <li key={e.id} className="wi-knows-item">
@@ -728,6 +732,8 @@ const css = `
   .wi-block--change{border-left:2px solid var(--naia-accent);padding-left:18px}
   .wi-changes{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
   .wi-change{font-size:.9375rem;line-height:1.55;color:var(--naia-ink)}
+
+  .wi-block-note{font-size:.8125rem;line-height:1.55;color:rgba(40,21,12,0.6);margin:-6px 0 16px}
 
   /* A pointer names a finding explained in the section that owns it. */
   .wi-finding--pointer .wi-finding-title{font-size:.9375rem;opacity:.85}
