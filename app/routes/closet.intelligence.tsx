@@ -27,6 +27,43 @@ import {
   type ClosetConfidence,
 } from "~/lib/ai/wardrobe-page";
 
+/**
+ * Exactly the Passport fields the intelligence reads. Listed rather than
+ * selected wholesale so a schema change cannot silently break this route.
+ */
+const PASSPORT_SELECT = {
+  lifestyle: true, favoriteColors: true, avoidColors: true, stylePersonalities: true,
+  silhouette: true, structure: true, fitPreferences: true, styleStruggles: true,
+  styleSupport: true, becoming: true, styleExpression: true, styleDirections: true,
+  explorationLevel: true, dressingHabits: true, dressingPreferences: true,
+  coveragePreferences: true, preferredCoverage: true, dressingRequirementsNote: true,
+  fitConcerns: true, dressesFor: true, neutralVsColour: true, colourIntensity: true,
+  printAppetite: true,
+} as const;
+
+/**
+ * Closet completeness, read separately and defensively.
+ *
+ * The column arrives with this revision's migration. Reading it in its own
+ * guarded query means the page degrades to "not answered yet" if the migration
+ * has not run, rather than failing outright — and "not answered yet" is a state
+ * the page already handles honestly.
+ */
+async function readClosetCompleteness(customerId: string): Promise<ClosetConfidence> {
+  try {
+    const row = await (prisma as unknown as {
+      onboardingProfile: { findUnique(args: unknown): Promise<{ closetCompleteness: string | null } | null> };
+    }).onboardingProfile.findUnique({
+      where: { customerId },
+      select: { closetCompleteness: true },
+    });
+    const value = row?.closetCompleteness;
+    return value === "mostly" || value === "still-adding" ? value : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: naiaStyles }];
 
 export function meta() {
@@ -58,9 +95,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const naiaCustomer = await requireCurrentNaiaCustomer(request);
   const customer = await prisma.customer.findUnique({
     where: { id: naiaCustomer.id },
-    include: {
+    select: {
+      id: true,
       closetItems: { orderBy: { createdAt: "desc" } },
-      onboardingProfile: true,
+      // An explicit select, not `true`. A default select asks for every column,
+      // including ones added by a migration that may not have run yet, and the
+      // page would 500 for everyone in the window between deploy and migrate.
+      // Naming the fields means this code runs correctly on either schema.
+      onboardingProfile: { select: PASSPORT_SELECT },
     },
   });
   if (!customer) return redirect("/auth/shopify/login");
@@ -142,7 +184,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     needs,
     recommendations,
     closetCount: customer.closetItems.length,
-    confidence: (profile?.closetCompleteness as ClosetConfidence | null) ?? "unknown",
+    confidence: await readClosetCompleteness(customer.id),
     garmentName: (id) => garments.find((g) => g.id === id)?.name ?? null,
     change,
   });
