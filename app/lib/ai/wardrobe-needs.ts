@@ -64,6 +64,13 @@ export type RegisterId = "everyday" | "work" | "occasion";
 export const REGISTER_IDS: readonly RegisterId[] = ["everyday", "work", "occasion"];
 
 /** Short noun the copy uses: "your everyday dressing". */
+/** The register as a bare adjective: "work", not "work dressing". */
+const REGISTER_BARE: Readonly<Record<RegisterId, string>> = {
+  everyday: "everyday",
+  work: "work",
+  occasion: "occasion",
+};
+
 const REGISTER_NOUN: Readonly<Record<RegisterId, string>> = {
   everyday: "everyday dressing",
   work: "work dressing",
@@ -945,7 +952,7 @@ function buildFindings(
         id: `need-${r.register}-repetition`,
         kind: "repetition",
         register: r.register,
-        title: `Your ${REGISTER_NOUN[r.register]} pieces offer limited outfit variety`,
+        title: `Your ${REGISTER_BARE[r.register]} pieces offer limited outfit variety`,
         body: `You own ${r.usableCount} pieces that work for ${REGISTER_NOUN[r.register]}, but they're close enough to each other that they mostly make the same outfit. Buying more like them wouldn't widen what you can wear — a piece that contrasts with what you already own would.`,
         garmentIds: items
           .filter((g) => garmentRegister(g) === r.register && classifyUsability(g, passport).usability === "usable")
