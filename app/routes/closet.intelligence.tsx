@@ -480,7 +480,7 @@ function Block({
 
     case "pairings":
       return (
-        <div className="wi-block">
+        <div className="wi-block" id="wi-pairings">
           {label}
           <ul className="wi-pairs">
             {block.entries.map((e) => (
@@ -540,12 +540,51 @@ function Block({
                     <span className="wi-match-state">{meta.stateText}</span>
                   </p>
                   <p className="wi-match-reading">{e.body}</p>
-                  <EntryAction
-                    entry={e}
-                    byId={byId}
-                    open={openId === e.id}
-                    onToggle={() => setOpenId(openId === e.id ? null : e.id)}
-                  />
+                  {e.action?.kind === "reveal" && (
+                    <>
+                      <button
+                        type="button"
+                        className="wi-note-action"
+                        aria-expanded={openId === e.id}
+                        onClick={() => setOpenId(openId === e.id ? null : e.id)}
+                      >
+                        {openId === e.id ? e.action.hideLabel : e.action.label}
+                      </button>
+                      {/* Thumbnails alone told her nothing. Each piece names the
+                          requirement it may not meet on its own, and either the
+                          layer she owns that helps or the plain fact that nAia
+                          has not found one. Never "this cannot work". */}
+                      {openId === e.id && (
+                        <ul className="wi-coverage-list">
+                          {((e.meta?.blockedDetail ?? []) as Array<{
+                            garmentId: string; name: string; reason: string; layers: string[]; layerIds: string[];
+                          }>).map((b) => (
+                            <li key={b.garmentId} className="wi-coverage-item">
+                              <Thumb card={byId.get(b.garmentId)} size={56} />
+                              <div className="wi-coverage-text">
+                                <p className="wi-coverage-name">{b.name}</p>
+                                <p className="wi-coverage-reason">
+                                  On its own, this may not meet your preference for {b.reason.replace(/^keeping your /, "").replace(/^avoiding /, "avoiding ")}.
+                                </p>
+                                {b.layers.length > 0 ? (
+                                  <>
+                                    <p className="wi-coverage-layer">
+                                      Worn with your {b.layers[0]}, it could still work.
+                                    </p>
+                                    <Strip ids={[b.garmentId, ...b.layerIds.slice(0, 1)]} byId={byId} size={48} showAll />
+                                  </>
+                                ) : (
+                                  <p className="wi-coverage-layer wi-coverage-layer--none">
+                                    nAia hasn&rsquo;t found a suitable layering option among the pieces you&rsquo;ve added.
+                                  </p>
+                                )}
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </>
+                  )}
                 </li>
               );
             })}
@@ -696,7 +735,15 @@ export default function WardrobeIntelligencePage() {
               </dd>
             </div>
           </dl>
-          <p className="wi-knows-note">{footer.wearNote}</p>
+          {/* The page reports looks she marked "Wore it", so an absolute "nAia
+              doesn't track what you wear" contradicted it two lines later. The
+              distinction that matters is kept: suggested is not worn, and a
+              self-report is not tracking. */}
+          <p className="wi-knows-note">
+            These insights are based on the pieces you&rsquo;ve added, your Style Passport and the
+            feedback you share &mdash; including looks you mark as &ldquo;Wore it.&rdquo; nAia does
+            not automatically track what you wear or assume that a suggested outfit was worn.
+          </p>
         </section>
 
         <div className="wi-foot">
@@ -729,6 +776,15 @@ const css = `
   .wi-piece-name{font-family:var(--naia-ff-display);font-size:1.0625rem;line-height:1.25;margin:6px 0 8px;text-wrap:balance}
   .wi-piece-headline{margin:0 0 8px;font-size:.9375rem;line-height:1.55;color:var(--naia-ink)}
   .wi-piece-reason,.wi-piece-note{margin:0 0 8px;font-size:.875rem;line-height:1.6;color:rgba(40,21,12,0.72)}
+
+  /* Coverage detail: one row per piece, with its own reason and layer evidence. */
+  .wi-coverage-list{list-style:none;margin:14px 0 0;padding:0;display:flex;flex-direction:column;gap:16px}
+  .wi-coverage-item{display:grid;grid-template-columns:56px minmax(0,1fr);gap:14px;align-items:start}
+  .wi-coverage-text{min-width:0}
+  .wi-coverage-name{font-family:var(--naia-ff-display);font-size:.9375rem;margin:0 0 4px}
+  .wi-coverage-reason{font-size:.8125rem;line-height:1.6;color:rgba(40,21,12,0.72);margin:0 0 4px}
+  .wi-coverage-layer{font-size:.8125rem;line-height:1.6;color:var(--naia-ink);margin:0}
+  .wi-coverage-layer--none{color:rgba(40,21,12,0.55);font-style:italic}
 
   /* Once answered, a compact editable status instead of the first-visit card. */
   .wi-basis-status{font-family:var(--naia-ff-ui);font-size:11px;letter-spacing:.06em;color:rgba(40,21,12,0.6);margin:0 0 36px;display:flex;flex-wrap:wrap;align-items:center;gap:8px}

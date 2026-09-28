@@ -31,6 +31,7 @@ import {
   comparisonDimension,
   coverageMatch,
   heroLabel,
+  capabilityLabel,
   plainPairReason,
   plainText,
   groupEnough,
@@ -159,6 +160,7 @@ const CLAIM_OWNER: Readonly<Record<string, SectionId>> = {
   "what-changed": "now",
   explore: "do",
   coverage: "learning",
+  "worth-trying": "possibilities",
 };
 
 /** The family of a claim — everything before the first colon. */
@@ -405,7 +407,7 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
     if (strengths.length > 0) {
       add("works", {
         id: "capability",
-        label: "What your Closet has the most options for",
+        label: "What your pieces can support",
         kind: "capability",
         entries: [
           {
@@ -417,11 +419,19 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
             // profiles — a reviewed rating held against each piece — and
             // claiming a personal styling review would describe a service that
             // is not being delivered.
+            // These counts come from an approved rating held against each
+            // GARMENT. Nothing in them is matched against this customer's
+            // Passport, so they cannot say she will feel anything — only what
+            // her pieces are rated as able to support.
+            // No internal vocabulary: say what was actually looked at. And no
+            // claim about how she will feel — these ratings are held against
+            // the GARMENT and never compared to her Passport.
             body:
-              "Based on the approved style profile for each piece. This shows what your Closet can " +
-              "support, not what you usually ask nAia for.",
+              "Counted from what each piece is — its shape, fit, fabric and level of dress — and " +
+              "what those make it useful for. This is what your Closet could support, not a match " +
+              "against your Passport and not what you usually ask nAia for.",
             garmentIds: [],
-            meta: { strengths },
+            meta: { strengths: strengths.map((c) => ({ ...c, label: capabilityLabel(c.intention, c.label) })) },
           },
         ],
       });
@@ -454,7 +464,7 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
 
     add("range", {
       id: "gaps",
-      label: "Where there is less range",
+      // No label: it duplicated the section title directly above it.
       kind: "findings",
       entries: needs.couldUseMore.map((finding) => ({
         id: finding.id,
@@ -484,7 +494,13 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
           title: `Explore ${REGISTER_WORD[r] ?? r} combinations you already own`,
           body: "Combinations nAia can support from your Closet are further down the page.",
           garmentIds: [],
-          action: { kind: "jump", label: "Go to Possibilities to try", to: "#wi-possibilities-h" },
+          // Anchored to the combinations themselves, not the top of the
+          // section — the pieces worth another look sit above them.
+          action: {
+            kind: "jump",
+            label: `See ${REGISTER_WORD[r] ?? r} combinations`,
+            to: "#wi-pairings",
+          },
         })),
       });
     }
@@ -628,7 +644,13 @@ function buildGarmentBlock(input: WardrobePageInput): PageBlock | null {
       const e = touch(hero.garmentId);
       e.title = hero.name;
       e.meta = { ...e.meta, label: heroLabel(hero.label, hero.labelText), heroLabel: hero.label };
-      e.body = plainText(hero.headline);
+      // The engine already computes WHICH Passport dimensions matched. Its
+      // headline is the vague version of the same claim, and the specific one
+      // was being pruned as a repeat — so the reader got "closest to what you
+      // told nAia you want" with nothing behind it. Lead with the evidence.
+      e.body = hero.label === "passport-match" && hero.reasons[0]
+        ? plainText(hero.reasons[0])
+        : plainText(hero.headline);
       if (hero.reasons[0]) e.meta = { ...e.meta, reason: plainText(hero.reasons[0]) };
     }
   }
@@ -714,7 +736,15 @@ function splitGarmentEntries(block: PageBlock | null): { works: PageBlock | null
   return {
     works: works.length > 0 ? { ...block, entries: works } : null,
     possibilities: rest.length > 0
-      ? { id: "worth-trying", label: "Pieces worth another look", kind: "garments", entries: rest }
+      ? {
+          id: "worth-trying",
+          label: "Pieces worth another look",
+          kind: "garments",
+          // Re-keyed to the family owned by THIS section. Left on the `garment`
+          // family they were demoted to pointers — which stripped the garment
+          // ids and the reveal action, and left the cards with nothing to open.
+          entries: rest.map((e) => ({ ...e, claim: e.claim.replace(/^garment:/, "worth-trying:") })),
+        }
       : null,
   };
 }
@@ -813,10 +843,20 @@ function buildPassportBlock(input: WardrobePageInput): PageBlock | null {
     ...(coverageMatch(registers) ? [coverageMatch(registers)!] : []),
   ];
 
-  // Every piece that does not meet a stated preference, with the reason, and
-  // whether something she owns genuinely resolves it.
+  // Every piece that does not meet a stated preference, named, with the reason
+  // and whether something she owns genuinely resolves it.
   const blocked = registers.flatMap((r) => r.blockedPieces ?? []);
-  const rescued = blocked.filter((b) => b.rescuedBy.length > 0);
+  const seenBlocked = new Set<string>();
+  const blockedDetail = blocked
+    .filter((b) => (seenBlocked.has(b.garmentId) ? false : (seenBlocked.add(b.garmentId), true)))
+    .map((b) => ({
+      garmentId: b.garmentId,
+      name: input.garmentName?.(b.garmentId) ?? "This piece",
+      reason: b.reason,
+      layers: b.rescuedBy.map((id) => input.garmentName?.(id) ?? "a layer you own"),
+      layerIds: b.rescuedBy,
+    }));
+  const rescued = blockedDetail.filter((b) => b.layers.length > 0);
 
   const seen = new Set<string>();
   const entries: PageEntry[] = [];
@@ -829,26 +869,27 @@ function buildPassportBlock(input: WardrobePageInput): PageBlock | null {
       claim: isCoverage ? "coverage" : passportClaim(m.dimension),
       role: "full",
       title: m.dimension,
-      body: isCoverage && blocked.length > 0
-        ? `${m.reading} ${
+      // Says what it means for HER: on their own, and what she owns that helps.
+      body: isCoverage && blockedDetail.length > 0
+        ? `${capitalise(numberWord(blockedDetail.length))} ${blockedDetail.length === 1 ? "piece" : "pieces"} may not meet your coverage preferences when worn alone.${
             rescued.length > 0
-              ? `${rescued.length} of ${blocked.length === 1 ? "them" : `the ${blocked.length}`} can still work with a layer you own; the ${blocked.length - rescued.length === 1 ? "other" : "others"} would not meet it on their own.`
-              : `That is about the pieces on their own — nothing you own changes it, because a layer cannot lengthen a hem.`
+              ? ` nAia found a potential layering option in your Closet for ${rescued.length === 1 ? "one of them" : `${numberWord(rescued.length)} of them`}.`
+              : ""
           }`
         : m.reading,
-      garmentIds: isCoverage ? blocked.map((b) => b.garmentId) : [],
-      action: isCoverage && blocked.length > 0
+      garmentIds: isCoverage ? blockedDetail.map((b) => b.garmentId) : [],
+      action: isCoverage && blockedDetail.length > 0
         ? {
             kind: "reveal" as const,
-            label: `See ${blocked.length === 1 ? "the piece" : `all ${blocked.length} pieces`}`,
+            label: `See ${blockedDetail.length === 1 ? "the piece" : `all ${blockedDetail.length} pieces`}`,
             hideLabel: "Hide",
-            garmentIds: blocked.map((b) => b.garmentId),
+            garmentIds: blockedDetail.map((b) => b.garmentId),
           }
         : undefined,
       meta: {
         state: m.state,
         stateText: m.stateText,
-        ...(isCoverage ? { blocked } : {}),
+        ...(isCoverage ? { blockedDetail } : {}),
       },
     });
   }
@@ -1050,6 +1091,11 @@ function joinWithAnd(parts: string[]): string {
   if (parts.length <= 1) return parts[0] ?? "";
   if (parts.length === 2) return `${parts[0]} and ${parts[1]}`;
   return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+}
+
+/** Small numbers read better as words in a sentence. */
+function numberWord(n: number): string {
+  return ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"][n] ?? String(n);
 }
 
 function capitalise(text: string): string {

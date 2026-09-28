@@ -523,6 +523,10 @@ describe("§WP-8 partner counts reconcile", () => {
     const page = buildWardrobePage(baseInput());
     const copy = visibleCopy(page).join(" ");
     assert.doesNotMatch(copy, /a stylist has reviewed|stylist personally|reviewed by a stylist/i);
-    assert.match(copy, /Based on the approved style profile for each piece/i);
+    // Internal vocabulary must not reach the customer either.
+    assert.doesNotMatch(copy, /approved style profile|intention potential|curated rating/i);
+    // And a garment rating may never be stated as how she will feel.
+    assert.doesNotMatch(copy, /will (make you )?feel like yourself/i);
+    assert.match(copy, /its shape, fit, fabric and level of dress/i);
   });
 });

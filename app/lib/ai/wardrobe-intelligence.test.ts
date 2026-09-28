@@ -351,7 +351,9 @@ describe("§WI-4 self-reported wardrobe signals", () => {
 
   it("attributes every low-use statement to the customer's own marking", () => {
     // Both apostrophe forms — nAia's copy uses the typographic one.
-    const provenance = /you['\u2019]ve (marked|said|told)|pieces you['\u2019]ve|ones you/i;
+    // Accepts both "You've marked" and the plainer "You marked" — the point is
+    // that the statement names HER as the source, not which tense it uses.
+    const provenance = /you['\u2019]?(ve)? ?(marked|said|told)|pieces you['\u2019]ve|ones you/i;
     // Use language only — "rarely limits what it goes with" is about colour.
     const lowUse = /rarely (wear|worn|reach)|rarely reached|reach for|difficult to style|struggle to style/i;
     const items = neutralWardrobe().map((g, i) => (i < 2 ? { ...g, garmentRelationships: ["rarely-wear"] } : g));
@@ -881,14 +883,30 @@ describe("§WI-9 wardrobe opportunities", () => {
     assert.equal(new Set(bodies.map((b) => b.slice(0, 40))).size, bodies.length, "each reason should reflect its own signal");
   });
 
-  it("does not repeat the same preamble when pieces share one signal", () => {
+  it("every card stands on its own, with no reference to another card", () => {
+    // These openers used to vary by position — "Another…", "A third you've
+    // marked as hard to style" — which reads well in a list and falls apart the
+    // moment a card is read alone or moved to another section. Identical,
+    // self-contained wording is the requirement now; each card carries its own
+    // evidence and its own count.
     const items = richWardrobe().map((g, i) =>
       i < 3 ? { ...g, garmentRelationships: ["love-style-struggle"] } : g,
     );
     const bodies = run(items, { passport: FIT_PASSPORT }).opportunities.rediscover.map((r) => r.body);
     assert.ok(bodies.length >= 2);
-    const openers = bodies.map((b) => b.split(".")[0]);
-    assert.equal(new Set(openers).size, openers.length, `repeated opener: ${openers.join(" | ")}`);
+
+    for (const body of bodies) {
+      // Only cross-card references are forbidden. "It also matches your
+      // Passport" adds a second fact WITHIN the card and is fine.
+      assert.doesNotMatch(body, /\b(another|a third|a second|as well)\b/i,
+        `a card must not depend on a neighbour: "${body}"`);
+      assert.doesNotMatch(body, /^\s*(also|and)\b/i,
+        `a card must not open as a continuation: "${body}"`);
+      assert.match(body, /You marked this as difficult to style\./,
+        "each card states its own evidence");
+      assert.match(body, /nAia found \d+ potential matching (piece|pieces)/,
+        "each card states its own count");
+    }
   });
 
   it("never phrases an opportunity as a shopping instruction", () => {

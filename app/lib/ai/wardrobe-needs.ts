@@ -827,7 +827,7 @@ function readRegisters(
       depthLabel = `Limited usable ${shortNoun} depth`;
       depthNote =
         usable.length >= REDUNDANT_PIECES
-          ? `You own a lot that reads this way, but the pieces are close enough to each other that they mostly make the same outfit.`
+          ? `You own a lot that reads this way, but their combinations tend to repeat the same formula.`
           : `You currently have limited depth for ${DEPTH_PHRASE[register]} dressing.`;
     } else {
       depthLabel = `Workable ${shortNoun} depth`;
@@ -953,7 +953,7 @@ function buildFindings(
         kind: "repetition",
         register: r.register,
         title: `Your ${REGISTER_BARE[r.register]} pieces offer limited outfit variety`,
-        body: `You own ${r.usableCount} pieces that work for ${REGISTER_NOUN[r.register]}, but they're close enough to each other that they mostly make the same outfit. Buying more like them wouldn't widen what you can wear — a piece that contrasts with what you already own would.`,
+        body: `You own ${r.usableCount} pieces that work for ${REGISTER_NOUN[r.register]}, but their combinations tend to repeat the same formula. Buying more like them wouldn't widen what you can wear — a piece that contrasts with what you already own would.`,
         garmentIds: items
           .filter((g) => garmentRegister(g) === r.register && classifyUsability(g, passport).usability === "usable")
           .slice(0, 6)

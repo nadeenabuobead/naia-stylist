@@ -221,7 +221,7 @@ describe("§WN-1c depth is not a cross product", () => {
     const finding = needs.couldUseMore.find((f) => f.register === "everyday");
     assert.ok(finding, "26 near-identical pieces serving a stated life is a real finding");
     assert.equal(finding!.kind, "repetition");
-    assert.match(finding!.body, /same outfit/);
+    assert.match(finding!.body, /repeat the same formula/);
     assert.match(finding!.body, /wouldn't widen what you can wear/);
     // The one thing it must never do is recommend more of the same.
     assert.doesNotMatch(finding!.body, /you could use more of|buy more like/i);

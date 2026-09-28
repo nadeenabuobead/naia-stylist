@@ -245,7 +245,7 @@ describe("§WC-2 pairing reasons lose the jargon, not the meaning", () => {
 
 describe("§WC-3 labels describe what a thing does", () => {
   it("3 — hero labels say what the piece does for her", () => {
-    assert.equal(heroLabel("closet-connector", "Closet connector"), "Closet connector");
+    assert.equal(heroLabel("closet-connector", "Works across relaxed and polished looks"), "Works across relaxed and polished looks");
     assert.equal(heroLabel("passport-match", "Passport match"), "Matches your style");
     assert.equal(heroLabel("your-favourite", "Your favourite"), "Your favourite");
     assert.equal(heroLabel("most-versatile", "Most versatile"), "Most versatile");

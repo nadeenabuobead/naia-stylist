@@ -2804,29 +2804,20 @@ function buildRediscover(items: WardrobeGarment[], passport: WardrobePassport | 
 
   // When several pieces qualify on the same signal, only the first states it in
   // full. Repeating the preamble three times makes one finding look like three.
-  const signalUses = new Map<string, number>();
-  const REDISCOVER_COPY: Readonly<Record<string, ReadonlyArray<(count: string) => string>>> = {
-    rarely: [
-      (c) => `You've said you rarely reach for this piece. nAia can see ${c} in your Closet it sits with comfortably.`,
-      (c) => `Another you've said you rarely reach for — ${c} you own work with it.`,
-      (c) => `Also rarely reached for, and also better connected than it looks: ${c} sit with it.`,
-    ],
-    struggle: [
-      (c) => `You've marked this as one you love but struggle to style. The connections are already there — ${c} you own work with it.`,
-      (c) => `Also marked difficult to style, though ${c} in your Closet meet it comfortably.`,
-      (c) => `A third you've marked as hard to style. ${capitalise(c)} work with it.`,
-    ],
-    unstyled: [
-      (c) => `This hasn't appeared in one of your nAia looks yet, though it works with ${c} you already own.`,
-      (c) => `Another that hasn't reached one of your nAia looks — ${c} you own work with it.`,
-      (c) => `Also absent from your nAia looks so far, despite ${c} that work with it.`,
-    ],
+  // One self-contained sentence per signal.
+  //
+  // These used to vary by position — "Another…", "A third you've marked as hard
+  // to style" — so a card only made sense after the ones above it. Read on its
+  // own, or moved to another section, it referred to nothing. Each card now
+  // states its own evidence and its own count.
+  const REDISCOVER_COPY: Readonly<Record<string, (count: string) => string>> = {
+    rarely: (c) => `You said you rarely reach for this piece. nAia found ${c}.`,
+    struggle: (c) => `You marked this as difficult to style. nAia found ${c}.`,
+    unstyled: (c) => `This hasn't appeared in one of your nAia looks yet. nAia found ${c}.`,
   };
   const rediscoverBody = (lead: string, count: string, passportClause: string): string => {
-    const seen = signalUses.get(lead) ?? 0;
-    signalUses.set(lead, seen + 1);
-    const variants = REDISCOVER_COPY[lead] ?? REDISCOVER_COPY.unstyled;
-    return `${variants[Math.min(seen, variants.length - 1)](count)}${passportClause}`;
+    const line = REDISCOVER_COPY[lead] ?? REDISCOVER_COPY.unstyled;
+    return `${line(count)}${passportClause}`;
   };
 
   const scored = items
@@ -2879,7 +2870,7 @@ function buildRediscover(items: WardrobeGarment[], passport: WardrobePassport | 
       // rediscoveries do not read as three copies of one template. The provenance
       // wording is load-bearing: a self-report says "you've said", nAia history
       // says "hasn't appeared in one of your nAia looks" — never "not worn".
-      const count = `${partners.length} ${partners.length === 1 ? "piece" : "pieces"}`;
+      const count = `${partners.length} potential matching ${partners.length === 1 ? "piece" : "pieces"}`;
       const passportClause = matches.length > 0
         ? ` It also matches your Passport on ${joinList(matches)}.`
         : "";

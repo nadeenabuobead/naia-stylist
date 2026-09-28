@@ -99,11 +99,38 @@ export function registerDisplay(r: RegisterReading): RegisterDisplay {
 /** Hero labels as a description of what the piece DOES, not what we call it. */
 const HERO_LABEL_PLAIN: Readonly<Record<HeroLabel, string>> = {
   "most-versatile": "Most versatile",
-  "closet-connector": "Closet connector",
+  "closet-connector": "Works across relaxed and polished looks",
   "passport-match": "Matches your style",
   "your-favourite": "Your favourite",
   "untapped-hero": "Underused",
 };
+
+/**
+ * Intention labels re-voiced as GARMENT capability.
+ *
+ * INTENTION_LABELS is written for the customer's own choice — "feel like
+ * yourself" — which is right when she picked it. These same keys are also used
+ * to count approved garment ratings, where nothing has been matched to her, so
+ * the second-person feeling would be a claim the data cannot make.
+ */
+const CAPABILITY_LABELS: Readonly<Record<string, string>> = {
+  "feel-like-myself":  "looking like yourself",
+  "confidence":        "confidence",
+  "ground-me":         "feeling grounded",
+  "give-structure":    "structure",
+  "make-it-easy":      "easy dressing",
+  "feel-put-together": "put-together looks",
+  "feel-attractive":   "feeling attractive",
+  "give-energy":       "energy",
+  "feel-softer":       "softer looks",
+  "feel-sharper":      "sharper looks",
+  "feel-less-exposed": "more coverage",
+  "express-myself":    "self-expression",
+};
+
+export function capabilityLabel(intention: string, fallback: string): string {
+  return CAPABILITY_LABELS[intention] ?? fallback;
+}
 
 export function heroLabel(label: HeroLabel, fallback: string): string {
   return HERO_LABEL_PLAIN[label] ?? fallback;
