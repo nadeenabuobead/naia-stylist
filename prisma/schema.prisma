@@ -72,6 +72,48 @@ model Customer {
   styleMemoryOutcomes     StyleMeOutcome[]
   tasteEvidence           TasteEvidence[]
   styleTendencies         StyleTendency[]
+  wardrobeSnapshots       WardrobeSnapshot[]
+
+  // ── Secondary use of this customer's data for NADINE design research ──────
+  //
+  // Opt-in only, and the default is no. Declining changes nothing about the
+  // styling service. Aggregation filters on this at the QUERY layer, never by
+  // hiding rows in a dashboard — see design-signal.server.ts.
+  designResearchConsent        Boolean   @default(false)
+  designResearchConsentAt      DateTime?
+  /// Which wording was agreed to. A new version requires asking again.
+  designResearchConsentVersion String?
+
+  // ── Account type ──────────────────────────────────────────────────────────
+  //
+  // Our own test and demo accounts must never reach customer insight. Marked
+  // on the record rather than filtered by email pattern, which silently breaks.
+  accountType AccountType @default(CUSTOMER)
+}
+
+/// Real customers are the only accounts eligible for aggregated insight.
+enum AccountType {
+  CUSTOMER
+  TEST
+  DEMO
+  QA
+}
+
+/// A point-in-time reading of the wardrobe, so "what changed?" has a before.
+/// Without this there is nothing honest to compare a new piece against.
+model WardrobeSnapshot {
+  id          String   @id @default(cuid())
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  takenAt     DateTime @default(now())
+  /// Pieces in the Closet when this was taken — the denominator.
+  closetCount Int
+  /// Register states, effective depth and open gaps. Shape owned by
+  /// wardrobe-snapshot.server.ts; read only by the diff that produces
+  /// "what changed", never re-interpreted as fresh analysis.
+  summary     Json
+
+  @@index([customerId, takenAt])
 }
 
 // ============================================
@@ -169,6 +211,14 @@ model OnboardingProfile {
   ageRange              String?
   gender                String?
   genderSelfDescription String?
+
+  // Closet completeness. nAia analyses what has been UPLOADED, which is not
+  // necessarily everything owned. Until this is answered, advice about what to
+  // buy stays hedged — see wardrobe-page.ts.
+  //   mostly       — this is most of what I wear
+  //   still-adding — I'm still adding pieces
+  closetCompleteness   String?
+  closetCompletenessAt DateTime?
 }
 
 // ============================================
@@ -811,6 +861,11 @@ model RecommendationFeedback {
   // What was rated: complete-suggestion | closet-item | nadine-product | vto-preview
   target           String
   shopifyProductId String?  // set when target=nadine-product
+  /// Variant and size, when the flow genuinely knows them. Never inferred:
+  /// without these, a complaint cannot be separated into a design objection
+  /// versus a fit problem, and it stays unattributed rather than guessed.
+  shopifyVariantId String?
+  sizeLabel        String?
 
   // Rating: love | okay | not-for-me
   rating String

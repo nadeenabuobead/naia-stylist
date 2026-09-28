@@ -9,14 +9,15 @@
 // It does not generate outfits (StyleMe) and does not restate the Style Passport.
 
 import { useState } from "react";
-import { Link, useLoaderData } from "react-router";
-import { data, redirect, type LoaderFunctionArgs, type LinksFunction } from "react-router";
+import { Link, useLoaderData, Form, useNavigation } from "react-router";
+import { data, redirect, type LoaderFunctionArgs, type ActionFunctionArgs, type LinksFunction } from "react-router";
 import prisma from "../db.server";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 import { getCloudinaryConfig, buildPrivateDownloadUrl } from "~/lib/cloudinary-admin.server";
 import { loadWardrobeIntelligence } from "~/lib/ai/wardrobe-intelligence.server";
+import { readAndRecordChange } from "~/lib/ai/wardrobe-snapshot.server";
 import { traitLabel } from "~/lib/ai/wardrobe-copy";
 import {
   buildWardrobePage,
@@ -30,6 +31,27 @@ export const links: LinksFunction = () => [{ rel: "stylesheet", href: naiaStyles
 
 export function meta() {
   return [{ title: "Wardrobe Intelligence | nAia" }];
+}
+
+/**
+ * The one thing nAia cannot work out for itself: whether the Closet is most of
+ * what she actually wears. Everything the page says about buying depends on it,
+ * so it is asked plainly and stored with the time it was answered.
+ */
+export async function action({ request }: ActionFunctionArgs) {
+  const naiaCustomer = await requireCurrentNaiaCustomer(request);
+  const form = await request.formData();
+  const answer = String(form.get("closetCompleteness") ?? "");
+  if (answer !== "mostly" && answer !== "still-adding") {
+    return data({ ok: false, error: "Pick one of the two answers." }, { status: 400 });
+  }
+
+  await prisma.onboardingProfile.updateMany({
+    where: { customerId: naiaCustomer.id },
+    data: { closetCompleteness: answer, closetCompletenessAt: new Date() },
+  });
+
+  return data({ ok: true });
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -102,6 +124,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
       : null,
   });
 
+  // What moved since the last reading, recorded as we go so the analysis keeps
+  // up with the Closet rather than starting fresh each visit.
+  const change = await readAndRecordChange({
+    customerId: customer.id,
+    needs,
+    recommendations,
+    garments,
+    closetCount: customer.closetItems.length,
+    createdAtById: new Map(customer.closetItems.map((i: { id: string; createdAt: Date }) => [i.id, i.createdAt])),
+  });
+
   // The page model decides where every conclusion lives. Built here so the
   // rendered page and the audited model can never drift apart.
   const page = buildWardrobePage({
@@ -111,6 +144,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     closetCount: customer.closetItems.length,
     confidence: (profile?.closetCompleteness as ClosetConfidence | null) ?? "unknown",
     garmentName: (id) => garments.find((g) => g.id === id)?.name ?? null,
+    change,
   });
 
   // Only the fields the view needs — keeps the loader payload small.
@@ -489,6 +523,16 @@ function Block({
         </div>
       );
 
+    case "change":
+      return (
+        <div className="wi-block wi-block--change">
+          {label}
+          <ul className="wi-changes">
+            {block.entries.map((e) => <li key={e.id} className="wi-change">{e.body}</li>)}
+          </ul>
+        </div>
+      );
+
     case "history":
       return (
         <div className="wi-block">
@@ -513,6 +557,8 @@ export default function WardrobeIntelligencePage() {
   const { page, garmentCards, footer } = useLoaderData<typeof loader>();
   const byId = new Map<string, GarmentCard>(garmentCards.map((c: GarmentCard) => [c.id, c]));
   const [openId, setOpenId] = useState<string | null>(null);
+  const navigation = useNavigation();
+  const saving = navigation.state !== "idle";
   const model = page as WardrobePage;
 
   return (
@@ -541,6 +587,26 @@ export default function WardrobeIntelligencePage() {
           <section className="wi-notready">
             <p className="wi-notready-text">{model.readyNote}</p>
             <Link to="/closet" className="wi-cta">Add pieces to your Closet</Link>
+          </section>
+        )}
+
+        {model.confidence === "unknown" && model.ready && (
+          <section className="wi-completeness">
+            <p className="wi-completeness-q">Is this most of the wardrobe you currently wear?</p>
+            <p className="wi-completeness-why">
+              nAia can only read what you've added. Knowing this changes how confidently it talks
+              about what you might be missing.
+            </p>
+            <Form method="post" className="wi-completeness-answers">
+              <button type="submit" name="closetCompleteness" value="mostly"
+                      className="wi-completeness-btn" disabled={saving}>
+                Yes, mostly
+              </button>
+              <button type="submit" name="closetCompleteness" value="still-adding"
+                      className="wi-completeness-btn" disabled={saving}>
+                I'm still adding pieces
+              </button>
+            </Form>
           </section>
         )}
 
@@ -604,6 +670,22 @@ const css = `
   .wi-piece-name{font-family:var(--naia-ff-display);font-size:1.0625rem;line-height:1.25;margin:6px 0 8px;text-wrap:balance}
   .wi-piece-headline{margin:0 0 8px;font-size:.9375rem;line-height:1.55;color:var(--naia-ink)}
   .wi-piece-reason,.wi-piece-note{margin:0 0 8px;font-size:.875rem;line-height:1.6;color:rgba(40,21,12,0.72)}
+
+  /* The completeness question. Asked once, plainly, and never again once
+     answered. */
+  .wi-completeness{border:1px solid var(--naia-border);padding:22px 24px;margin:0 0 44px}
+  .wi-completeness-q{font-family:var(--naia-ff-display);font-size:1.0625rem;margin:0 0 8px}
+  .wi-completeness-why{font-size:.875rem;line-height:1.6;color:rgba(40,21,12,0.7);margin:0 0 16px}
+  .wi-completeness-answers{display:flex;flex-wrap:wrap;gap:10px}
+  .wi-completeness-btn{font-family:var(--naia-ff-ui);font-size:10px;letter-spacing:2px;text-transform:uppercase;padding:11px 18px;border:1px solid var(--naia-ink);background:transparent;color:var(--naia-ink);cursor:pointer}
+  .wi-completeness-btn:hover:not(:disabled){background:var(--naia-ink);color:#fff}
+  .wi-completeness-btn:disabled{opacity:.5;cursor:default}
+
+  /* What moved since last time. Sits above everything because it is the reason
+     to come back. */
+  .wi-block--change{border-left:2px solid var(--naia-accent);padding-left:18px}
+  .wi-changes{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+  .wi-change{font-size:.9375rem;line-height:1.55;color:var(--naia-ink)}
 
   /* A pointer names a finding explained in the section that owns it. */
   .wi-finding--pointer .wi-finding-title{font-size:.9375rem;opacity:.85}

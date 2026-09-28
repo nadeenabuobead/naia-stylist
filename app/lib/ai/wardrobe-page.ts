@@ -22,6 +22,7 @@
 import type { WardrobeIntelligence, WardrobeObservation } from "~/lib/ai/wardrobe-intelligence";
 import type { WardrobeNeeds, DepthFinding, RegisterId } from "~/lib/ai/wardrobe-needs";
 import type { WardrobeRecommendations } from "~/lib/ai/wardrobe-recommendations";
+import { changeLines, type WardrobeChange } from "~/lib/ai/wardrobe-snapshot";
 import {
   registerDisplay,
   summaryEntries,
@@ -151,6 +152,7 @@ const CLAIM_OWNER: Readonly<Record<string, SectionId>> = {
   "styleme-dress-level": "learning",
   "outcome-feedback": "learning",
   dna: "now",
+  "what-changed": "now",
 };
 
 /** The family of a claim — everything before the first colon. */
@@ -225,6 +227,8 @@ export interface WardrobePageInput {
   confidence?: ClosetConfidence;
   /** Set when StyleMe can genuinely receive a preselected garment. */
   styleMeGarmentHref?: (garmentId: string) => string;
+  /** What moved since nAia last read the wardrobe. Null when nothing did. */
+  change?: WardrobeChange | null;
   /**
    * Display name for a garment the page knows only by id. Without it, a piece
    * that appears solely in an observation has no title and would be dropped —
@@ -254,6 +258,28 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
   );
 
   const nowBlocks: PageBlock[] = [];
+
+  // What moved since last time. First thing in the page when it exists, and
+  // absent entirely when it does not — an empty "nothing changed" block teaches
+  // the customer to skip this section.
+  if (ready && input.change) {
+    const lines = changeLines(input.change);
+    if (lines.length > 0) {
+      nowBlocks.push({
+        id: "what-changed",
+        label: "What changed since you last looked",
+        kind: "change",
+        entries: lines.map((text, i) => ({
+          id: `change-${i}`,
+          claim: `what-changed:${i}`,
+          role: "full" as EntryRole,
+          body: text,
+          garmentIds: [],
+        })),
+      });
+    }
+  }
+
   if (ready) {
     const takeaways: PageEntry[] = summaryEntries(needs)
       .slice(0, 3)
