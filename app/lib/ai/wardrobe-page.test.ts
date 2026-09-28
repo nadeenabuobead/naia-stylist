@@ -13,6 +13,7 @@ import {
   duplicateClaims,
   auditClaims,
   visibleCopy,
+  mergeEnough,
   ownerOf,
   claims,
   SECTION_ORDER,
@@ -137,12 +138,31 @@ describe("§WP-1 one home per claim", () => {
     const page = buildWardrobePage(baseInput());
     const now = page.sections.find((s) => s.id === "now");
     assert.ok(now);
-    for (const block of now!.blocks) {
-      for (const entry of block.entries) {
-        assert.equal(entry.role, "pointer");
-        assert.equal(entry.body, undefined, "a takeaway must not carry an explanation");
-      }
+    const takeaways = now!.blocks.find((b) => b.kind === "takeaways");
+    assert.ok(takeaways, "the opening summary exists");
+    assert.ok(takeaways!.entries.length > 0);
+    for (const entry of takeaways!.entries) {
+      assert.equal(entry.role, "pointer");
+      assert.equal(entry.body, undefined, "a takeaway must not carry an explanation");
     }
+  });
+
+  it("§WP-1e the Closet description is descriptive, and draws no conclusion", () => {
+    const input = baseInput();
+    (input.intelligence as unknown as { dna: unknown }).dna = {
+      palette: [{ colour: "black", count: 19 }],
+      shapes: [{ label: "straight" }],
+      traits: [{ id: "t1", label: "neutral", evidence: "most of what you own" }],
+      shapesReading: null,
+    };
+    const page = buildWardrobePage(input);
+    const dna = page.sections.find((s) => s.id === "now")!.blocks.find((b) => b.kind === "dna");
+    assert.ok(dna, "the description lives in the opening section");
+    const shapes = dna!.entries.find((e) => e.id === "dna-shapes")!;
+    // Wear behaviour is not captured, so nothing may claim she returns to a shape.
+    assert.equal(shapes.title, "Silhouettes that appear most in your Closet");
+    const copy = visibleCopy(page).join(" ");
+    assert.doesNotMatch(copy, /shapes you come back to|you (keep|often) wear|you reach for most/i);
   });
 
   it("§WP-1d the work-variety finding is explained once, in the range section", () => {
@@ -171,7 +191,7 @@ describe("§WP-2 merges", () => {
     assert.ok(entry!.garmentIds.length > 0, "the pieces that prove it are kept");
   });
 
-  it("§WP-2b a garment is featured once, carrying every note about it", () => {
+  it("§WP-2b a garment is featured once, carrying its label and its note", () => {
     const page = buildWardrobePage(baseInput());
     const fulls = auditClaims(page).filter((l) => l.claim === claims.garment("g1") && l.role === "full");
     assert.equal(fulls.length, 1);
@@ -181,8 +201,9 @@ describe("§WP-2 merges", () => {
       .find((e) => e.claim === claims.garment("g1"))!;
     const meta = entry.meta as Record<string, unknown>;
     assert.ok(meta.label, "hero label kept");
-    assert.ok(meta.rediscover, "rediscovery note kept");
-    assert.ok(meta.note, "the difficult-to-style observation kept");
+    // The rediscovery text and the contradiction observation make the same
+    // claim; §WP-6b pins which of the two survives.
+    assert.ok(meta.rediscover ?? meta.note, "the piece still carries its note");
   });
 
   it("§WP-2c the difficult-to-style note never tells her she is wrong", () => {
@@ -304,5 +325,126 @@ describe("§WP-5 actions", () => {
     const page = buildWardrobePage(baseInput());
     const copy = visibleCopy(page).join(" ");
     assert.doesNotMatch(copy, /\b(three|3|two|2) (ways|outfits|looks) to wear/i);
+  });
+});
+
+// ── §WP-6 — merging must not delete findings ──────────────────────────────────
+//
+// The first version of the garment merge dropped a real observation: a piece
+// known only from a contradiction had no title, and the entry was filtered out.
+// Deduplication removes repetition; it never removes information.
+
+describe("§WP-6 merging preserves findings", () => {
+  it("§WP-6a a garment known only from an observation still appears", () => {
+    const input = baseInput({ garmentName: (id) => (id === "g9" ? "Burgundy Cowl Neck Evening Gown" : null) });
+    (input.intelligence as unknown as { observations: unknown[] }).observations = [
+      { id: "o3", kind: "contradiction-favourite-isolated", tier: "pattern",
+        headline: "A favourite with fewer ways to wear it",
+        observation: "You've marked this as one you reach for, but it has fewer natural partners.",
+        explanation: null, action: null, garmentIds: ["g9"] },
+    ];
+    const page = buildWardrobePage(input);
+    const copy = visibleCopy(page).join(" ");
+    assert.match(copy, /Burgundy Cowl Neck Evening Gown/);
+    assert.match(copy, /fewer natural partners/);
+  });
+
+  it("§WP-6b one garment entry never states the same claim twice", () => {
+    const page = buildWardrobePage(baseInput());
+    const entry = page.sections.flatMap((s) => s.blocks).flatMap((b) => b.entries)
+      .find((e) => e.claim === claims.garment("g1"))!;
+    const meta = (entry.meta ?? {}) as Record<string, unknown>;
+    // The rediscovery note carries the partner count, so it is the one kept.
+    assert.ok(meta.rediscover, "the specific statement survives");
+    assert.equal(meta.note, undefined, "the duplicate statement is dropped");
+  });
+
+  it("§WP-6c the buy verdict names the area and closes the rest", () => {
+    const page = buildWardrobePage(baseInput());
+    const verdict = page.sections.find((s) => s.id === "do")!
+      .blocks.flatMap((b) => b.entries).find((e) => e.claim === "buy-verdict")!;
+    assert.match(verdict.body!, /Work is where it would help/);
+    assert.match(verdict.body!, /Everything else you own already covers/);
+    // …but it points at the gap rather than re-explaining it.
+    assert.doesNotMatch(verdict.body!, /repeats one formula|mostly make the same outfit/);
+  });
+});
+
+// ── §WP-7 — sentence-level repetition ─────────────────────────────────────────
+
+describe("§WP-7 repeated sentences", () => {
+  it("§WP-7a the Passport-match sentence appears at most once on the page", () => {
+    const input = baseInput();
+    (input.intelligence as unknown as { heroes: unknown }).heroes = {
+      state: "available",
+      heroes: [
+        { garmentId: "g1", name: "Trench", category: "OUTERWEAR", label: "passport-match", labelText: null,
+          headline: "This is the piece closest to what you told nAia you want.",
+          reasons: ["Matches the style and colours you described in your Passport."] },
+        { garmentId: "g2", name: "Blazer", category: "OUTERWEAR", label: "most-versatile", labelText: null,
+          headline: "One of your most versatile pieces.",
+          reasons: ["Matches the style and colours you described in your Passport."] },
+      ],
+    };
+    const page = buildWardrobePage(input);
+    const copy = visibleCopy(page).join(" ");
+    const hits = copy.match(/matches the style and colours you described in your Passport/gi) ?? [];
+    assert.ok(hits.length <= 1, `Passport-match printed ${hits.length} times`);
+  });
+
+  it("§WP-7b one entry never states the same partner count twice", () => {
+    const input = baseInput();
+    (input.intelligence as unknown as { heroes: unknown }).heroes = {
+      state: "available",
+      heroes: [{ garmentId: "g1", name: "Tank", category: "TOPS", label: "most-versatile", labelText: null,
+        headline: "One of your most versatile pieces.",
+        reasons: ["Pairs easily with 9 other pieces in your Closet."] }],
+    };
+    (input.intelligence as unknown as { opportunities: unknown }).opportunities = {
+      rediscover: [{ garmentId: "g1", name: "Tank", imageUrl: null,
+        body: "The connections are already there — 9 pieces you own work with it.",
+        worksWithIds: ["g3"] }],
+    };
+    const page = buildWardrobePage(input);
+    const copy = visibleCopy(page).join(" ");
+    assert.equal((copy.match(/\b9 (?:other )?pieces/gi) ?? []).length, 1);
+  });
+
+  it("§WP-7c a register with its own gap finding does not restate it", () => {
+    const page = buildWardrobePage(baseInput());
+    const range = page.sections.find((s) => s.id === "range")!;
+    const register = range.blocks.find((b) => b.kind === "registers")!
+      .entries.find((e) => e.claim === claims.register("work"))!;
+    assert.equal(register.body, undefined, "the finding below carries the explanation");
+    assert.ok((register.meta as Record<string, unknown>).stateText, "the verdict is still shown");
+  });
+
+  it("§WP-7d the shopping advice is given once, not twice", () => {
+    // The live finding already ends with the guidance, so appending the
+    // "not a priority" sentence printed the conclusion twice.
+    const withAdvice =
+      "You own 8 of these. Another similar piece is unlikely to materially expand what you can wear; " +
+      "strengthening your work options would add more.";
+    assert.equal(
+      mergeEnough(withAdvice, "You already have strong depth here. A similar piece would add very little."),
+      withAdvice,
+      "the second statement of the same advice is dropped",
+    );
+
+    // A finding that only states depth still gets the guidance.
+    const bare = "You own 8 of these that work with the rest of your Closet.";
+    const merged = mergeEnough(bare, "You already have strong depth here.");
+    assert.match(merged, /You own 8 of these/);
+    assert.match(merged, /strong depth here/);
+  });
+
+  it("§WP-7e an entry is never left with no words at all", () => {
+    const page = buildWardrobePage(baseInput());
+    for (const entry of page.sections.flatMap((s) => s.blocks).flatMap((b) => b.entries)) {
+      const meta = (entry.meta ?? {}) as Record<string, unknown>;
+      const hasText = Boolean(entry.title || entry.body || meta.label || meta.note || meta.rediscover
+        || meta.palette || meta.shapes || meta.traits || meta.strengths || meta.stateText);
+      assert.ok(hasText, `entry ${entry.id} rendered with nothing to say`);
+    }
   });
 });

@@ -17,20 +17,14 @@ import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 import { getCloudinaryConfig, buildPrivateDownloadUrl } from "~/lib/cloudinary-admin.server";
 import { loadWardrobeIntelligence } from "~/lib/ai/wardrobe-intelligence.server";
+import { traitLabel } from "~/lib/ai/wardrobe-copy";
 import {
-  registerDisplay,
-  summaryEntries,
-  lifestyleMatch,
-  matchDimension,
-  comparisonDimension,
-  coverageMatch,
-  visibleObservations,
-  heroLabel,
-  traitLabel,
-  plainPairReason,
-  plainText,
-  groupEnough,
-} from "~/lib/ai/wardrobe-copy";
+  buildWardrobePage,
+  type WardrobePage,
+  type PageBlock,
+  type PageEntry,
+  type ClosetConfidence,
+} from "~/lib/ai/wardrobe-page";
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: naiaStyles }];
 
@@ -108,6 +102,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
       : null,
   });
 
+  // The page model decides where every conclusion lives. Built here so the
+  // rendered page and the audited model can never drift apart.
+  const page = buildWardrobePage({
+    intelligence,
+    needs,
+    recommendations,
+    closetCount: customer.closetItems.length,
+    confidence: (profile?.closetCompleteness as ClosetConfidence | null) ?? "unknown",
+    garmentName: (id) => garments.find((g) => g.id === id)?.name ?? null,
+  });
+
   // Only the fields the view needs — keeps the loader payload small.
   const garmentCards = garments.map((g) => ({
     id: g.id,
@@ -118,7 +123,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     imageUrl: g.imageUrl,
   }));
 
-  return data({ intelligence, needs, recommendations, garmentCards });
+  return data({
+    page,
+    garmentCards,
+    footer: {
+      signalAvailability: intelligence.signalAvailability,
+      wearNote: intelligence.wear.learningNote,
+    },
+  });
 }
 
 type GarmentCard = {
@@ -176,119 +188,332 @@ function Thumb({ card, size = 72 }: { card: GarmentCard | undefined; size?: numb
   );
 }
 
+function Strip({ ids, byId, size = 56 }: { ids: string[]; byId: Map<string, GarmentCard>; size?: number }) {
+  if (ids.length === 0) return null;
+  const shown = ids.slice(0, MAX_STRIP);
+  const overflow = ids.length - shown.length;
+  return (
+    <div className="wi-strip">
+      {shown.map((id) => <Thumb key={id} card={byId.get(id)} size={size} />)}
+      {overflow > 0 && <span className="wi-strip-more">+{overflow} more</span>}
+    </div>
+  );
+}
+
 /**
- * How dressed-up she asks to be, in her words. Register-aware: the everyday
- * phrasing would be plainly wrong for a customer whose requests lead at a work
- * or occasion level.
+ * The one action a garment entry can carry. `reveal` shows pieces already in
+ * the payload; `link` goes somewhere that keeps this piece selected. Anything
+ * that would drop the garment is not offered at all, so there is no case here
+ * for a button that leads nowhere useful.
  */
-const DRESS_LEVEL_PHRASE: Readonly<Record<string, string>> = {
-  everyday: "on the more everyday, relaxed side",
-  work: "on the more polished, work-ready side",
-  occasion: "on the dressier, occasion side",
-};
-
-/** "a, b and c" — the last item joined with "and", not a bare comma. */
-function joinWithAnd(parts: string[]): string {
-  if (parts.length <= 1) return parts[0] ?? "";
-  if (parts.length === 2) return `${parts[0]} and ${parts[1]}`;
-  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+function EntryAction({
+  entry, byId, open, onToggle,
+}: {
+  entry: PageEntry;
+  byId: Map<string, GarmentCard>;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const action = entry.action;
+  if (!action) return null;
+  if (action.kind === "link") {
+    return <Link to={action.to} className="wi-note-action">{action.label}</Link>;
+  }
+  return (
+    <>
+      <button type="button" className="wi-note-action" aria-expanded={open} onClick={onToggle}>
+        {open ? action.hideLabel : action.label}
+      </button>
+      {open && <Strip ids={action.garmentIds} byId={byId} size={64} />}
+    </>
+  );
 }
 
-function capitaliseFirst(text: string): string {
-  return text.length === 0 ? text : text[0].toUpperCase() + text.slice(1);
-}
+function Block({
+  block, byId, openId, setOpenId,
+}: {
+  block: PageBlock;
+  byId: Map<string, GarmentCard>;
+  openId: string | null;
+  setOpenId: (id: string | null) => void;
+}) {
+  const label = block.label ? <p className="wi-sublabel">{block.label}</p> : null;
 
-function LearningNote({ children }: { children: React.ReactNode }) {
-  return <p className="wi-learning">{children}</p>;
+  switch (block.kind) {
+    // ── Opening takeaways. Pointers only: each names a finding that is
+    //    explained in the section that owns it.
+    case "takeaways":
+      return (
+        <div className="wi-block">
+          {label}
+          <ul className="wi-knows-list">
+            {block.entries.map((e) => (
+              <li key={e.id} className="wi-knows-item">
+                <h3 className="wi-knows-head">{e.title}</h3>
+              </li>
+            ))}
+          </ul>
+        </div>
+      );
+
+    case "dna":
+      return (
+        <div className="wi-block">
+          {label}
+          <div className="wi-dna-grid">
+            {block.entries.map((e) => {
+              const meta = (e.meta ?? {}) as Record<string, never>;
+              return (
+                <div key={e.id} className="wi-dna-cell">
+                  <p className="wi-microhead">{e.title}</p>
+                  {e.id === "dna-palette" && (
+                    <div className="wi-palette">
+                      {(meta.palette as unknown as Array<{ colour: string; count: number }>).map((c) => (
+                        <div key={c.colour} className="wi-palette-row">
+                          <span className="wi-swatch" style={swatchStyle(c.colour)} aria-hidden="true" />
+                          <span className="wi-palette-name">{c.colour}</span>
+                          <span className="wi-palette-count">{c.count}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {e.id === "dna-shapes" && (
+                    <>
+                      <p className="wi-shapes-line">
+                        {(meta.shapes as unknown as Array<{ label: string }>).map((sh, i) => (
+                          <span key={sh.label}>
+                            {i > 0 && <span className="wi-shapes-sep" aria-hidden="true">·</span>}
+                            {sh.label}
+                          </span>
+                        ))}
+                      </p>
+                      {meta.reading && <p className="wi-reading wi-reading--sm">{meta.reading as unknown as string}</p>}
+                    </>
+                  )}
+                  {e.id === "dna-traits" && (
+                    <div className="wi-traits">
+                      {(meta.traits as unknown as Array<{ id: string; label: string; evidence: string }>).map((t) => (
+                        <div key={t.id} className="wi-trait">
+                          <span className="wi-trait-label">{traitLabel(t)}</span>
+                          <span className="wi-trait-evidence">{t.evidence}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      );
+
+    // ── One entry per garment, carrying everything the page knows about it.
+    case "garments":
+      return (
+        <div className="wi-block">
+          {label}
+          <div className="wi-pieces">
+            {block.entries.map((e) => {
+              const meta = (e.meta ?? {}) as Record<string, string | undefined>;
+              const card = byId.get(String(meta.garmentId));
+              return (
+                <article key={e.id} className="wi-piece">
+                  <div className="wi-piece-img">
+                    {card?.imageUrl
+                      ? <img src={card.imageUrl} alt={e.title ?? ""} loading="lazy" />
+                      : <span className="wi-thumb-fallback">{card?.category.slice(0, 2) ?? "—"}</span>}
+                  </div>
+                  <div className="wi-piece-text">
+                    {meta.label && <p className="wi-hero-label">{meta.label}</p>}
+                    <h3 className="wi-piece-name">{e.title}</h3>
+                    {e.body && <p className="wi-piece-headline">{e.body}</p>}
+                    {meta.reason && <p className="wi-piece-reason">{meta.reason}</p>}
+                    {meta.note && <p className="wi-piece-note">{meta.note}</p>}
+                    {meta.rediscover && <p className="wi-piece-note">{meta.rediscover}</p>}
+                    <EntryAction
+                      entry={e}
+                      byId={byId}
+                      open={openId === e.id}
+                      onToggle={() => setOpenId(openId === e.id ? null : e.id)}
+                    />
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </div>
+      );
+
+    case "findings":
+      return (
+        <div className="wi-block">
+          {label}
+          {block.entries.map((e) => (
+            <article key={e.id} className={`wi-finding${e.role === "pointer" ? " wi-finding--pointer" : ""}`}>
+              <h3 className="wi-finding-title">{e.title}</h3>
+              {e.body && <p className="wi-finding-body">{e.body}</p>}
+              <Strip ids={e.garmentIds} byId={byId} />
+            </article>
+          ))}
+        </div>
+      );
+
+    case "registers":
+      return (
+        <div className="wi-block">
+          {label}
+          <ul className="wi-registers">
+            {block.entries.map((e) => {
+              const meta = (e.meta ?? {}) as Record<string, string | boolean | undefined>;
+              return (
+                <li key={e.id} className={`wi-register is-${String(meta.state)}`}>
+                  <p className="wi-register-name">
+                    {e.title}
+                    {meta.needed && <span className="wi-register-flag">you told nAia this matters</span>}
+                  </p>
+                  <p className="wi-register-verdict">{String(meta.stateText)}</p>
+                  <p className="wi-register-note">{e.body}</p>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      );
+
+    case "verdict":
+      return (
+        <div className="wi-verdict">
+          {block.label && <h3 className="wi-verdict-q">{block.label}</h3>}
+          {block.entries.map((e) => (
+            <div key={e.id} className={e.variant === "quiet" ? "wi-rec wi-rec--quiet" : undefined}>
+              <p className={e.variant === "quiet" ? "wi-rec-title" : "wi-verdict-a"}>{e.title}</p>
+              {e.body && <p className={e.variant === "quiet" ? "wi-rec-body" : "wi-verdict-why"}>{e.body}</p>}
+            </div>
+          ))}
+        </div>
+      );
+
+    case "recommendations":
+      return (
+        <div className="wi-block">
+          {label}
+          {block.entries.map((e) => {
+            const attrs = ((e.meta ?? {}).attributes ?? []) as Array<{ kind: string; label: string }>;
+            return (
+              <article key={e.id} className="wi-rec">
+                <h4 className="wi-rec-title">{e.title}</h4>
+                {attrs.length > 0 && (
+                  <p className="wi-rec-attrs">
+                    {attrs.map((a, i) => (
+                      <span key={a.kind}>
+                        {i > 0 && <span className="wi-rec-sep" aria-hidden="true">·</span>}
+                        {a.label}
+                      </span>
+                    ))}
+                  </p>
+                )}
+                {e.body && <p className="wi-rec-body">{e.body}</p>}
+                <Strip ids={e.garmentIds} byId={byId} />
+              </article>
+            );
+          })}
+        </div>
+      );
+
+    case "pairings":
+      return (
+        <div className="wi-block">
+          {label}
+          <ul className="wi-pairs">
+            {block.entries.map((e) => (
+              <li key={e.id} className="wi-pair">
+                <div className="wi-pair-pieces">
+                  {e.garmentIds.map((id, i) => (
+                    <span key={id} className="wi-pair-piece">
+                      {i > 0 && <span className="wi-plus" aria-hidden="true">+</span>}
+                      <Thumb card={byId.get(id)} size={84} />
+                    </span>
+                  ))}
+                </div>
+                <div className="wi-pair-text"><p className="wi-pair-reason">{e.body}</p></div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      );
+
+    // ── Closet CAPABILITY, from reviewed garment ratings. Never her preference:
+    //    what she asks to feel is a different question, answered in section 6.
+    case "capability":
+      return (
+        <div className="wi-block">
+          {label}
+          {block.entries.map((e) => {
+            const strengths = ((e.meta ?? {}).strengths ?? []) as Array<{ intention: string; label: string; strong: number }>;
+            return (
+              <div key={e.id}>
+                <ul className="wi-caps">
+                  {strengths.map((c) => (
+                    <li key={c.intention} className="wi-cap">
+                      <span className="wi-cap-label">{c.label}</span>
+                      <span className="wi-cap-count">{c.strong} pieces</span>
+                    </li>
+                  ))}
+                </ul>
+                {e.body && <p className="wi-cap-note">{e.body}</p>}
+              </div>
+            );
+          })}
+        </div>
+      );
+
+    case "matches":
+      return (
+        <div className="wi-block">
+          {label}
+          <ul className="wi-matches">
+            {block.entries.map((e) => {
+              const meta = (e.meta ?? {}) as Record<string, string | undefined>;
+              return (
+                <li key={e.id} className={`wi-match is-${String(meta.state)}`}>
+                  <p className="wi-match-head">
+                    <span className="wi-match-dim">{e.title}</span>
+                    <span className="wi-match-sep" aria-hidden="true">—</span>
+                    <span className="wi-match-state">{meta.stateText}</span>
+                  </p>
+                  <p className="wi-match-reading">{e.body}</p>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      );
+
+    case "history":
+      return (
+        <div className="wi-block">
+          {label}
+          <div className="wi-history">
+            {block.entries.map((e) => (
+              <div key={e.id} className="wi-hist-item">
+                <p className="wi-hist-head">{e.title}</p>
+                <p className="wi-hist-body">{e.body}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+
+    default:
+      return null;
+  }
 }
 
 export default function WardrobeIntelligencePage() {
-  const { intelligence, needs, recommendations, garmentCards } = useLoaderData<typeof loader>();
+  const { page, garmentCards, footer } = useLoaderData<typeof loader>();
   const byId = new Map<string, GarmentCard>(garmentCards.map((c: GarmentCard) => [c.id, c]));
-  const [openObservation, setOpenObservation] = useState<string | null>(null);
-  const [openRediscover, setOpenRediscover] = useState<string | null>(null);
-
-  const { dna, heroes, pairings, observations, opportunities, passportView, wear } = intelligence;
-
-  // ── Presentation-only derivations ─────────────────────────────────────────
-  const registers = needs.registers
-    .filter((r) => r.rawCount > 0 || r.needed)
-    // blockedCount / usableCount ride along for the coverage reading in
-    // chapter 5; they are never rendered as numbers on their own.
-    .map((r) => ({ key: r.register, blockedCount: r.blockedCount, usableCount: r.usableCount, ...registerDisplay(r) }));
-  const summary = needs.state === "available" ? summaryEntries(needs).slice(0, 3) : [];
-  // Chapter 5 draws on every dimension that is genuinely evidenced: lifestyle
-  // from the register readings, colour and colour balance from the palette
-  // synthesis, shape from the engine's own Passport comparison, and coverage
-  // from her stated dressing requirements. Duplicates are dropped by dimension
-  // name so the same comparison never appears twice under two labels.
-  const rawMatches = [
-    ...(lifestyleMatch(registers) ? [lifestyleMatch(registers)!] : []),
-    ...(needs.synthesis.state === "available" ? needs.synthesis.lines.map(matchDimension) : []),
-    ...(passportView.state !== "learning"
-      ? passportView.comparisons
-          .map(comparisonDimension)
-          .filter((m): m is NonNullable<typeof m> => m !== null)
-      : []),
-    ...(coverageMatch(registers) ? [coverageMatch(registers)!] : []),
-  ];
-  const seenDimensions = new Set<string>();
-  const matches = rawMatches.filter((m) =>
-    seenDimensions.has(m.dimension) ? false : (seenDimensions.add(m.dimension), true),
-  );
-  const topRequest = needs.styleMe.requests[0] ?? null;
-  const enoughGroups = needs.state === "available" ? groupEnough(needs.enough) : [];
-  const hasNeedsChapter =
-    registers.length > 0 ||
-    enoughGroups.length > 0 ||
-    needs.couldUseMore.length > 0 ||
-    recommendations.recommendations.length > 0;
-
-  const needsAreaNames = needs.couldUseMore
-    .map((f) => registers.find((r) => r.key === f.register)?.heading.toLowerCase() ?? f.register)
-    .join(" and ");
-  const needsAreas = needsAreaNames.charAt(0).toUpperCase() + needsAreaNames.slice(1);
-
-  // Rediscover is the ACTION and lives in chapter 3; the "untapped potential"
-  // observation is the same finding stated as a PATTERN in chapter 4.
-  //
-  // Suppressing the Rediscover entry (the earlier approach) deleted the action
-  // and left only the pattern — so the actionable, garment-level content ended
-  // up in the chapter about what nAia has learned, which is not its job. The
-  // pattern is the one that gives way: Rediscover already names the same pieces
-  // and gives the customer something to do about them.
-  // What she asks to FEEL (her selections) and what her Closet SUPPORTS
-  // (curated garment ratings) are different questions with different sources.
-  // They are rendered in different chapters so they cannot be read as one.
-  const chosenIntentions = needs.intentions.chosen.slice(0, 4);
-  const closetStrengths = needs.intentions.closetStrengths.slice(0, 3);
-  // "by far" is only fair when the lead genuinely dominates.
-  const intentionLeadDominates =
-    chosenIntentions.length > 1 && chosenIntentions[0].sessions >= chosenIntentions[1].sessions * 2;
-
-  const rediscover = opportunities.rediscover;
-  const rediscoverIds = new Set(rediscover.map((p) => p.garmentId));
-  const shownObservations = visibleObservations(observations, rediscoverIds, {
-    closetStrengthsShown: closetStrengths.length > 0,
-  });
-
-  // Chapter 3 is garment intelligence, so the observations live there now.
-  const hasWorksChapter =
-    heroes.state !== "learning" ||
-    pairings.state !== "learning" ||
-    rediscover.length > 0 ||
-    shownObservations.length > 0;
-
-  // Chapter 4 is behaviour only: what she asks for, and what she reports back.
-  // Gated on the actual lines it can print rather than on a signal being
-  // "available" — otherwise the chapter renders with a heading and nothing
-  // under it.
-  const hasHistoryLines =
-    Boolean(topRequest) ||
-    chosenIntentions.length > 0 ||
-    Boolean(needs.outcomes.keptNote) ||
-    Boolean(needs.outcomes.changedNote);
-  const hasLearningChapter = hasHistoryLines;
+  const [openId, setOpenId] = useState<string | null>(null);
+  const model = page as WardrobePage;
 
   return (
     <MyNaiaLayout compact>
@@ -307,569 +532,46 @@ export default function WardrobeIntelligencePage() {
         <header className="wi-masthead">
           <p className="wi-eyebrow">Wardrobe Intelligence</p>
           <h1 className="wi-title">Your wardrobe, <span className="sp-shell-accent">understood.</span></h1>
-          <p className="wi-sub">Patterns, possibilities and insights based on what you own.</p>
+          {model.reading && <p className="wi-sub">{model.reading}</p>}
+          {/* Conclusions about spending have to show what they are based on. */}
+          <p className="wi-basis">{model.basis}</p>
         </header>
 
-        {!intelligence.ready && (
+        {!model.ready && (
           <section className="wi-notready">
-            <p className="wi-notready-text">{intelligence.readyNote}</p>
+            <p className="wi-notready-text">{model.readyNote}</p>
             <Link to="/closet" className="wi-cta">Add pieces to your Closet</Link>
           </section>
         )}
 
-        {/* ══ 1 · YOUR WARDROBE RIGHT NOW ═══════════════════════════════════
-            Everything a customer needs to understand her wardrobe in seconds:
-            what it is, the three strongest conclusions, and what it's made of.
-            Wardrobe DNA lives here and nowhere else. */}
-        <section className="wi-chapter" aria-labelledby="wi-now-h">
-          <h2 id="wi-now-h" className="wi-chapter-title">Your wardrobe right now</h2>
-
-          <div className="wi-opening">
-            {intelligence.snapshotReading && (
-              <p className="wi-opening-reading">{intelligence.snapshotReading}</p>
-            )}
-            <p className="wi-opening-facts">
-              {intelligence.snapshot.map((metric, index) => (
-                <span key={metric.id} className="wi-fact">
-                  {index > 0 && <span className="wi-fact-sep" aria-hidden="true">·</span>}
-                  <span className="wi-fact-value">{metric.value}</span> {metric.label}
-                </span>
-              ))}
-            </p>
-          </div>
-
-          {intelligence.ready && summary.length > 0 && (
-            <div className="wi-block">
-              <p className="wi-sublabel">What nAia knows right now</p>
-              <ul className="wi-knows-list">
-                {summary.map((entry) => (
-                  <li key={entry.id} className="wi-knows-item">
-                    <h3 className="wi-knows-head">{entry.headline}</h3>
-                    {entry.explain && <p className="wi-knows-text">{entry.explain}</p>}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {/* Compact DNA. Descriptive only — the conclusion about the palette
-              lives once, in chapter 5, so the two never restate each other. */}
-          {intelligence.ready && (dna.palette.length > 0 || dna.shapes.length > 0 || dna.traits.length > 0) && (
-            <div className="wi-block">
-              <p className="wi-sublabel">What your Closet is made of</p>
-              <div className="wi-dna-grid">
-                {dna.palette.length > 0 && (
-                  <div className="wi-dna-cell">
-                    <p className="wi-microhead">Your main colours</p>
-                    <div className="wi-palette">
-                      {dna.palette.slice(0, 5).map((colour) => (
-                        <div key={colour.colour} className="wi-palette-row">
-                          <span className="wi-swatch" style={swatchStyle(colour.colour)} aria-hidden="true" />
-                          <span className="wi-palette-name">{colour.colour}</span>
-                          <span className="wi-palette-count">{colour.count}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {dna.shapes.length > 0 && (
-                  <div className="wi-dna-cell">
-                    <p className="wi-microhead">Shapes you come back to</p>
-                    <p className="wi-shapes-line">
-                      {dna.shapes.map((shape, index) => (
-                        <span key={shape.label}>
-                          {index > 0 && <span className="wi-shapes-sep" aria-hidden="true">·</span>}
-                          {shape.label}
-                        </span>
-                      ))}
-                    </p>
-                    {dna.shapesReading && <p className="wi-reading wi-reading--sm">{dna.shapesReading}</p>}
-                  </div>
-                )}
-
-                {dna.traits.length > 0 && (
-                  <div className="wi-dna-cell">
-                    <p className="wi-microhead">Overall character</p>
-                    <div className="wi-traits">
-                      {dna.traits.map((trait) => (
-                        <div key={trait.id} className="wi-trait">
-                          <span className="wi-trait-label">{traitLabel(trait)}</span>
-                          <span className="wi-trait-evidence">{plainText(trait.evidence)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </section>
-
-        {intelligence.ready && (
-          <>
-            {/* ══ 2 · WHAT YOUR WARDROBE NEEDS ═══════════════════════════════
-                One story: what you're covered for, what you have plenty of,
-                where there's less range, what would add something new, and
-                whether anything actually needs buying. */}
-            {hasNeedsChapter && (
-              <section className="wi-chapter" aria-labelledby="wi-needs-h">
-                <h2 id="wi-needs-h" className="wi-chapter-title">What your wardrobe needs</h2>
-
-                {registers.length > 0 && (
-                  <div className="wi-block">
-                    <p className="wi-sublabel">What you can dress for</p>
-                    <ul className="wi-registers">
-                      {registers.map((r) => (
-                        <li key={r.key} className={`wi-register is-${r.state}`}>
-                          <p className="wi-register-name">
-                            {r.heading}
-                            {r.needed && <span className="wi-register-flag">you told nAia this matters</span>}
-                          </p>
-                          <p className="wi-register-verdict">{r.stateText}</p>
-                          <p className="wi-register-note">{r.plain}</p>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-
-                {enoughGroups.length > 0 && (
-                  <div className="wi-block">
-                    <p className="wi-sublabel">You have enough of</p>
-                    {enoughGroups.map((finding) => (
-                      <article key={finding.id} className="wi-finding">
-                        <h3 className="wi-finding-title">{finding.title}</h3>
-                        <p className="wi-finding-body">{finding.body}</p>
-                        {/* The pieces the claim is about, so the conclusion has
-                            visible evidence rather than asking for trust. */}
-                        {finding.garmentIds.length > 0 && (
-                          <div className="wi-strip">
-                            {finding.garmentIds.slice(0, MAX_STRIP).map((id) => (
-                              <Thumb key={id} card={byId.get(id)} size={56} />
-                            ))}
-                          </div>
-                        )}
-                      </article>
-                    ))}
-                  </div>
-                )}
-
-                {needs.couldUseMore.length > 0 && (
-                  <div className="wi-block">
-                    <p className="wi-sublabel">Where you have less range</p>
-                    {needs.couldUseMore.map((finding) => (
-                      <article key={finding.id} className="wi-finding">
-                        <h3 className="wi-finding-title">{finding.title}</h3>
-                        <p className="wi-finding-body">{plainText(finding.body)}</p>
-                        {finding.garmentIds.length > 0 && (
-                          <div className="wi-strip">
-                            {finding.garmentIds.slice(0, MAX_STRIP).map((id) => (
-                              <Thumb key={id} card={byId.get(id)} size={56} />
-                            ))}
-                          </div>
-                        )}
-                      </article>
-                    ))}
-                  </div>
-                )}
-
-                <div className="wi-verdict">
-                  <h3 className="wi-verdict-q">Do you need to buy anything?</h3>
-                  {needs.couldUseMore.length === 0 ? (
-                    <>
-                      <p className="wi-verdict-a">Nothing obvious is missing right now.</p>
-                      {needs.noUrgentNeed && <p className="wi-verdict-why">{plainText(needs.noUrgentNeed)}</p>}
-                    </>
-                  ) : (
-                    <>
-                      <p className="wi-verdict-a">
-                        {needs.couldUseMore.length === 1
-                          ? "Yes — one part of your wardrobe would benefit."
-                          : "Yes — two parts of your wardrobe would benefit."}
-                      </p>
-                      <p className="wi-verdict-why">
-                        {needsAreas} {needs.couldUseMore.length === 1 ? "is" : "are"} where it would help.
-                        Everything else you own already covers the kinds of dressing you described, so
-                        nothing else needs buying right now.
-                      </p>
-                    </>
-                  )}
-
-                  {/* The next question a customer actually asks — "what should
-                      I look for?" — answered in the same place as the verdict.
-                      These sat in a separate block above it, so the buy-or-not
-                      answer and the thing to buy were read apart. */}
-                  {recommendations.state === "available" && recommendations.recommendations.length > 0 && (
-                    <div className="wi-verdict-next">
-                      <p className="wi-sublabel">What to look for</p>
-                      {recommendations.recommendations.map((rec) => (
-                        <article key={rec.id} className="wi-rec">
-                          <h4 className="wi-rec-title">{rec.title}</h4>
-                          {rec.attributes.length > 0 && (
-                            <p className="wi-rec-attrs">
-                              {rec.attributes.map((attr, index) => (
-                                <span key={attr.kind}>
-                                  {index > 0 && <span className="wi-rec-sep" aria-hidden="true">·</span>}
-                                  {attr.label}
-                                </span>
-                              ))}
-                            </p>
-                          )}
-                          <p className="wi-rec-body">{rec.body}</p>
-                          {rec.unlocksIds.length > 0 && (
-                            <div className="wi-strip">
-                              {rec.unlocksIds.map((id) => (
-                                <Thumb key={id} card={byId.get(id)} size={56} />
-                              ))}
-                            </div>
-                          )}
-                        </article>
-                      ))}
-                    </div>
-                  )}
-
-                  {recommendations.notAPriority.length > 0 && (
-                    <div className="wi-verdict-next">
-                      <p className="wi-sublabel wi-sublabel--quiet">Not a priority</p>
-                      {recommendations.notAPriority.map((item) => (
-                        <article key={item.id} className="wi-rec wi-rec--quiet">
-                          <h4 className="wi-rec-title">{item.title}</h4>
-                          <p className="wi-rec-body">{item.body}</p>
-                        </article>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </section>
-            )}
-
-            {/* ══ 3 · WHAT ALREADY WORKS ══════════════════════════════════════
-                Making better use of what she owns: the pieces carrying the
-                wardrobe, the combinations already there, and the ones nAia
-                hasn't reached for. */}
-            {hasWorksChapter && (
-              <section className="wi-chapter" aria-labelledby="wi-works-h">
-                <h2 id="wi-works-h" className="wi-chapter-title">What already works</h2>
-
-                {heroes.state !== "learning" && heroes.heroes.length > 0 && (
-                  <div className="wi-block">
-                    <p className="wi-sublabel">The pieces doing the most work</p>
-                    {heroes.heroes.slice(0, 1).map((hero) => {
-                      const card = byId.get(hero.garmentId);
-                      return (
-                        <article key={hero.garmentId} className="wi-hero-featured">
-                          <div className="wi-hero-featured-img">
-                            {card?.imageUrl ? (
-                              <img src={card.imageUrl} alt={hero.name} loading="lazy" />
-                            ) : (
-                              <span className="wi-thumb-fallback">{hero.category}</span>
-                            )}
-                          </div>
-                          <div className="wi-hero-featured-text">
-                            <p className="wi-hero-label">{heroLabel(hero.label, hero.labelText)}</p>
-                            <h3 className="wi-hero-featured-name">{hero.name}</h3>
-                            <p className="wi-hero-featured-headline">{plainText(hero.headline)}</p>
-                            {hero.reasons[0] && (
-                              <p className="wi-hero-featured-reason">{plainText(hero.reasons[0])}</p>
-                            )}
-                          </div>
-                        </article>
-                      );
-                    })}
-
-                    {heroes.heroes.length > 1 && (
-                      <div className="wi-heroes">
-                        {heroes.heroes.slice(1).map((hero) => {
-                          const card = byId.get(hero.garmentId);
-                          return (
-                            <article key={hero.garmentId} className="wi-hero">
-                              <div className="wi-hero-img">
-                                {card?.imageUrl ? (
-                                  <img src={card.imageUrl} alt={hero.name} loading="lazy" />
-                                ) : (
-                                  <span className="wi-thumb-fallback">{hero.category}</span>
-                                )}
-                              </div>
-                              <p className="wi-hero-label">{heroLabel(hero.label, hero.labelText)}</p>
-                              <h3 className="wi-hero-name">{hero.name}</h3>
-                              {hero.reasons[0] && <p className="wi-hero-reason">{plainText(hero.reasons[0])}</p>}
-                            </article>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {pairings.state !== "learning" && pairings.pairings.length > 0 && (
-                  <div className="wi-block">
-                    <p className="wi-sublabel">What works well together</p>
-                    {pairings.untriedPresentation === "section" && pairings.untriedNote && (
-                      <p className="wi-pairs-note">{pairings.untriedNote}</p>
-                    )}
-                    <ul className="wi-pairs">
-                      {pairings.pairings.map((pair) => (
-                        <li key={pair.id} className="wi-pair">
-                          <div className="wi-pair-pieces">
-                            {pair.garmentIds.map((id, index) => (
-                              <span key={id} className="wi-pair-piece">
-                                {index > 0 && <span className="wi-plus" aria-hidden="true">+</span>}
-                                <Thumb card={byId.get(id)} size={84} />
-                              </span>
-                            ))}
-                          </div>
-                          <div className="wi-pair-text">
-                            {/* The count is passed so the words can never
-                                contradict the number of images shown. */}
-                            <p className="wi-pair-reason">
-                              {plainPairReason(pair.reason, pair.garmentIds.length)}
-                            </p>
-                            {pair.untried && pairings.untriedPresentation === "per-item" && (
-                              <p className="wi-pair-tag">Worth trying</p>
-                            )}
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-
-                                {closetStrengths.length > 0 && (
-                  <div className="wi-block">
-                    <p className="wi-sublabel">What your Closet supports best</p>
-                    {/* CAPABILITY, not preference. These count garments whose
-                        ratings a human reviewed — they say what she COULD put
-                        on, never what she asks for. Her choices live in
-                        chapter 4 and are counted from sessions alone. */}
-                    <ul className="wi-caps">
-                      {closetStrengths.map((c) => (
-                        <li key={c.intention} className="wi-cap">
-                          <span className="wi-cap-label">{c.label}</span>
-                          <span className="wi-cap-count">{c.strong} pieces</span>
-                        </li>
-                      ))}
-                    </ul>
-                    <p className="wi-cap-note">
-                      Your Closet has especially strong options for these. Other kinds of look have
-                      fewer pieces behind them &mdash; which is about what you own, not about what you want.
-                    </p>
-                  </div>
-                )}
-
-{rediscover.length > 0 && (
-                  <div className="wi-block">
-                    <p className="wi-sublabel">Pieces worth another look</p>
-                    {rediscover.map((piece) => (
-                      <article key={piece.garmentId} className="wi-rediscover">
-                        <div className="wi-rediscover-img">
-                          {piece.imageUrl ? (
-                            <img src={piece.imageUrl} alt={piece.name} loading="lazy" />
-                          ) : (
-                            <span className="wi-thumb-fallback">piece</span>
-                          )}
-                        </div>
-                        <div className="wi-rediscover-text">
-                          <h3 className="wi-rediscover-name">{piece.name}</h3>
-                          <p className="wi-opp-body">{plainText(piece.body)}</p>
-                          {piece.worksWithIds.length > 0 && (
-                            <>
-                              <button
-                                type="button"
-                                className="wi-note-action"
-                                aria-expanded={openRediscover === piece.garmentId}
-                                onClick={() =>
-                                  setOpenRediscover(openRediscover === piece.garmentId ? null : piece.garmentId)
-                                }
-                              >
-                                {openRediscover === piece.garmentId ? "Hide possibilities" : "See what it works with"}
-                              </button>
-                              {openRediscover === piece.garmentId && (
-                                <div className="wi-strip">
-                                  {piece.worksWithIds.map((id) => (
-                                    <Thumb key={id} card={byId.get(id)} size={64} />
-                                  ))}
-                                </div>
-                              )}
-                            </>
-                          )}
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                )}
-                {shownObservations.length > 0 && (
-                  <div className="wi-block">
-                    <p className="wi-sublabel">What nAia is noticing</p>
-                    <ol className="wi-notes">
-                      {shownObservations.map((obs, index) => {
-                        const isDiscovery = obs.tier === "discovery";
-                        const inlinePieces = obs.garmentIds.length > 0 && obs.garmentIds.length <= 3;
-                        const expanded = openObservation === obs.id;
-                        const shown = inlinePieces
-                          ? obs.garmentIds
-                          : expanded
-                            ? obs.garmentIds.slice(0, MAX_STRIP)
-                            : [];
-                        const overflow = expanded ? Math.max(0, obs.garmentIds.length - MAX_STRIP) : 0;
-
-                        return (
-                          <li key={obs.id} className={`wi-note wi-note--${obs.tier}`}>
-                            <span className="wi-note-num" aria-hidden="true">
-                              {String(index + 1).padStart(2, "0")}
-                            </span>
-                            <div className="wi-note-body">
-                              <p className="wi-note-head">{plainText(obs.headline)}</p>
-                              <p className="wi-note-claim">{plainText(obs.observation)}</p>
-                              {obs.explanation && <p className="wi-note-why">{plainText(obs.explanation)}</p>}
-
-                              {!inlinePieces && obs.action && obs.garmentIds.length > 0 && (
-                                <button
-                                  type="button"
-                                  className="wi-note-action"
-                                  aria-expanded={expanded}
-                                  onClick={() => setOpenObservation(expanded ? null : obs.id)}
-                                >
-                                  {expanded ? "Hide pieces" : obs.action.label}
-                                </button>
-                              )}
-
-                              {shown.length > 0 && (
-                                <div className="wi-strip">
-                                  {shown.map((id) => (
-                                    <Thumb key={id} card={byId.get(id)} size={isDiscovery ? 78 : 64} />
-                                  ))}
-                                  {overflow > 0 && <span className="wi-strip-more">+{overflow} more</span>}
-                                </div>
-                              )}
-                            </div>
-                          </li>
-                        );
-                      })}
-                    </ol>
-                  </div>
-                )}
-
-              </section>
-            )}
-
-            {/* ══ 4 · WHAT NAIA IS LEARNING ABOUT YOU ═════════════════════════
-                Patterns nAia can see, plus what your styling history and your
-                feedback show. At most three history insights, each stated once. */}
-            {hasLearningChapter && (
-              <section className="wi-chapter" aria-labelledby="wi-learn-h">
-                <h2 id="wi-learn-h" className="wi-chapter-title">What nAia is learning about you</h2>
-
-                {hasHistoryLines && (
-                  <div className="wi-block">
-                    <p className="wi-sublabel">What your styling history shows</p>
-                    <div className="wi-history">
-                      {topRequest && (
-                        <div className="wi-hist-item">
-                          <p className="wi-hist-head">How you usually want your looks to feel</p>
-                          {/* This counts LEVEL OF DRESS, not the occasion she
-                              picked. Her raw "everyday" occasion is 93; the 149
-                              also folds in the dinners, family days and travel
-                              she asked to keep relaxed. The heading and the
-                              sentence therefore describe how dressed-up she
-                              wants to be, and carry the denominator. */}
-                          <p className="wi-hist-body">
-                            Most of the looks you ask nAia for are{" "}
-                            {DRESS_LEVEL_PHRASE[topRequest.register]} &mdash; {topRequest.sessions} of the{" "}
-                            {needs.styleMe.requests.reduce((sum, r) => sum + r.sessions, 0)} requests nAia could read.
-                          </p>
-                        </div>
-                      )}
-
-                      {/* Her own selections. Never derived from garment data. */}
-                      {chosenIntentions.length > 0 && (
-                        <div className="wi-hist-item">
-                          <p className="wi-hist-head">What you most often want to feel</p>
-                          <p className="wi-hist-body">
-                            {capitaliseFirst(chosenIntentions[0].label)} is{" "}
-                            {intentionLeadDominates ? "by far " : ""}what you choose most often
-                            {chosenIntentions.length > 1 && (
-                              <>
-                                , followed by{" "}
-                                {joinWithAnd(chosenIntentions.slice(1, 4).map((c) => c.label))}
-                              </>
-                            )}
-                            .
-                          </p>
-                        </div>
-                      )}
-
-                      {(needs.outcomes.keptNote || needs.outcomes.changedNote) && (
-                        <div className="wi-hist-item">
-                          <p className="wi-hist-head">What your feedback is teaching nAia</p>
-                          <p className="wi-hist-body">
-                            {[needs.outcomes.keptNote, needs.outcomes.changedNote].filter(Boolean).join(" ")}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-
-                    {needs.outcomes.state === "learning" && needs.outcomes.learningNote && (
-                      <LearningNote>{needs.outcomes.learningNote}</LearningNote>
-                    )}
-                  </div>
-                )}
-              </section>
-            )}
-
-            {/* ══ 5 · HOW YOUR CLOSET REFLECTS YOUR STYLE ═════════════════════
-                One line per dimension. The long YOU SAID / YOUR CLOSET SHOWS
-                table is gone: its conclusions are already stated above. */}
-            {matches.length > 0 && (
-              <section className="wi-chapter" aria-labelledby="wi-pass-h">
-                <h2 id="wi-pass-h" className="wi-chapter-title">How your Closet reflects your style</h2>
-                <p className="wi-chapter-sub">
-                  Your Style Passport is what you told nAia. Your Closet is what you own.
-                </p>
-
-                <ul className="wi-matches">
-                  {matches.map((m) => (
-                    <li key={m.id} className={`wi-match is-${m.state}`}>
-                      <p className="wi-match-head">
-                        <span className="wi-match-dim">{m.dimension}</span>
-                        <span className="wi-match-sep" aria-hidden="true">—</span>
-                        <span className="wi-match-state">{m.stateText}</span>
-                      </p>
-                      <p className="wi-match-reading">{m.reading}</p>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            )}
-          </>
-        )}
+        {model.sections.map((section) => (
+          <section key={section.id} className="wi-chapter" aria-labelledby={`wi-${section.id}-h`}>
+            <h2 id={`wi-${section.id}-h`} className="wi-chapter-title">{section.title}</h2>
+            {section.sub && <p className="wi-chapter-sub">{section.sub}</p>}
+            {section.blocks.map((block) => (
+              <Block key={block.id} block={block} byId={byId} openId={openId} setOpenId={setOpenId} />
+            ))}
+          </section>
+        ))}
 
         {/* ── Transparency footer. Quiet by design. ─────────────────────── */}
         <section className="wi-footnote" aria-labelledby="wi-wear-h">
           <h2 id="wi-wear-h" className="wi-knows-title">What nAia knows so far</h2>
-
           <dl className="wi-knows">
             <div className="wi-knows-row">
               <dt className="wi-knows-key">Reading</dt>
               <dd className="wi-knows-val">
-                {intelligence.signalAvailability
-                  .filter((signal) => signal.state !== "unavailable")
-                  .map((signal) => signal.title)
-                  .join(" · ") || "Your Closet"}
+                {footer.signalAvailability.filter((s) => s.state !== "unavailable").map((s) => s.title).join(" · ") || "Your Closet"}
               </dd>
             </div>
             <div className="wi-knows-row">
               <dt className="wi-knows-key">Still learning</dt>
               <dd className="wi-knows-val wi-knows-val--muted">
-                {intelligence.signalAvailability
-                  .filter((signal) => signal.state === "unavailable")
-                  .map((signal) => signal.title)
-                  .join(" · ")}
+                {footer.signalAvailability.filter((s) => s.state === "unavailable").map((s) => s.title).join(" · ")}
               </dd>
             </div>
           </dl>
-
-          <p className="wi-knows-note">{wear.learningNote}</p>
+          <p className="wi-knows-note">{footer.wearNote}</p>
         </section>
 
         <div className="wi-foot">
@@ -887,6 +589,25 @@ export default function WardrobeIntelligencePage() {
 // Tokens come from naia-design-system.css — no new design system is introduced.
 
 const css = `
+  /* Basis line. Always visible: a conclusion about spending has to show what
+     it is based on. */
+  .wi-basis{font-family:var(--naia-ff-ui);font-size:11px;letter-spacing:.06em;color:rgba(40,21,12,0.55);margin:14px 0 0}
+
+  /* One entry per garment. The cream tank was a hero AND a separate note, so it
+     was featured twice; everything known about a piece now sits in one place. */
+  .wi-pieces{display:flex;flex-direction:column;gap:28px}
+  .wi-piece{display:grid;grid-template-columns:96px minmax(0,1fr);gap:20px;align-items:start}
+  @media(min-width:700px){.wi-piece{grid-template-columns:132px minmax(0,1fr);gap:26px}}
+  .wi-piece-img{aspect-ratio:3/4;background:rgba(40,21,12,0.04);overflow:hidden;display:flex;align-items:center;justify-content:center}
+  .wi-piece-img img{width:100%;height:100%;object-fit:cover}
+  .wi-piece-text{min-width:0}
+  .wi-piece-name{font-family:var(--naia-ff-display);font-size:1.0625rem;line-height:1.25;margin:6px 0 8px;text-wrap:balance}
+  .wi-piece-headline{margin:0 0 8px;font-size:.9375rem;line-height:1.55;color:var(--naia-ink)}
+  .wi-piece-reason,.wi-piece-note{margin:0 0 8px;font-size:.875rem;line-height:1.6;color:rgba(40,21,12,0.72)}
+
+  /* A pointer names a finding explained in the section that owns it. */
+  .wi-finding--pointer .wi-finding-title{font-size:.9375rem;opacity:.85}
+
   .mn-page-sections{gap:0}
   .mn-page-sections>.mn-back-link{display:block;margin-bottom:1.5rem}
 

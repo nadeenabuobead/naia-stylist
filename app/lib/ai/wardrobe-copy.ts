@@ -156,7 +156,7 @@ const PAIR_REWRITES: ReadonlyArray<[RegExp, (m: RegExpExecArray) => string]> = [
     /^You've tagged these for (.+)\.$/,
     // "both" is filled in by plainPairReason once it knows how many pieces the
     // row actually shows — saying "both" over three images contradicts them.
-    (m) => `You've tagged ${PIECE_SUBJECT} for ${m[1]}, so they're meant for the same kind of day.`,
+    (m) => `You've tagged ${PIECE_SUBJECT} for ${m[1]}.`,
   ],
   [
     /^One is tailored and the other relaxed — the structure is what makes it read deliberate\.$/,

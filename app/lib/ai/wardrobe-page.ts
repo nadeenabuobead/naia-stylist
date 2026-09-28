@@ -104,6 +104,12 @@ export interface PageSection {
 }
 
 export interface WardrobePage {
+  /** The one-sentence read of the wardrobe. Null until nAia can see enough. */
+  reading: string | null;
+  /** Whether there is enough in the Closet to say anything at all. */
+  ready: boolean;
+  /** Shown when there is not. */
+  readyNote?: string;
   /**
    * Stated near the top, always. Conclusions about spending have to show what
    * they are based on.
@@ -144,6 +150,7 @@ const CLAIM_OWNER: Readonly<Record<string, SectionId>> = {
   "intentions-chosen": "learning",
   "styleme-dress-level": "learning",
   "outcome-feedback": "learning",
+  dna: "now",
 };
 
 /** The family of a claim — everything before the first colon. */
@@ -218,6 +225,12 @@ export interface WardrobePageInput {
   confidence?: ClosetConfidence;
   /** Set when StyleMe can genuinely receive a preselected garment. */
   styleMeGarmentHref?: (garmentId: string) => string;
+  /**
+   * Display name for a garment the page knows only by id. Without it, a piece
+   * that appears solely in an observation has no title and would be dropped —
+   * which is deleting a finding, not deduplicating one.
+   */
+  garmentName?: (garmentId: string) => string | null;
 }
 
 // ── Builder ───────────────────────────────────────────────────────────────────
@@ -268,6 +281,45 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
       nowBlocks.push({ id: "takeaways", label: "What stands out", kind: "takeaways", entries: takeaways });
     }
   }
+  // What the Closet is made of. Descriptive only — the CONCLUSIONS about the
+  // palette live in the learning section, so the two never restate each other.
+  if (ready) {
+    const { dna } = intelligence;
+    const cells: PageEntry[] = [];
+    if (dna.palette.length > 0) {
+      cells.push({
+        id: "dna-palette", claim: "dna:palette", role: "full",
+        title: "Your main colours", garmentIds: [],
+        meta: { palette: dna.palette.slice(0, 5) },
+      });
+    }
+    if (dna.shapes.length > 0) {
+      cells.push({
+        id: "dna-shapes", claim: "dna:shapes", role: "full",
+        // Not "shapes you come back to": nAia knows what she OWNS, and says so
+        // in its own footer. Coming back to something is wear behaviour, and
+        // wear behaviour is not captured.
+        title: "Silhouettes that appear most in your Closet", garmentIds: [],
+        meta: { shapes: dna.shapes, reading: dna.shapesReading ?? undefined },
+      });
+    }
+    // The three traits — mostly neutral, built for everyday, black-anchored —
+    // are the opening read broken into three labelled statistics. Printed under
+    // it they say the same thing a second time, in the register the feedback
+    // asked us to move away from. The sentence is the better version, so the
+    // traits are shown only when there is no reading to carry them.
+    if (dna.traits.length > 0 && !intelligence.snapshotReading) {
+      cells.push({
+        id: "dna-traits", claim: "dna:traits", role: "full",
+        title: "Overall character", garmentIds: [],
+        meta: { traits: dna.traits },
+      });
+    }
+    if (cells.length > 0) {
+      nowBlocks.push({ id: "dna", label: "What your Closet is made of", kind: "dna", entries: cells });
+    }
+  }
+
   for (const b of nowBlocks) add("now", b);
 
   // ── 2 · What already works ─────────────────────────────────────────────────
@@ -290,9 +342,7 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
         claim: claims.enough(finding.register as RegisterId),
         role: "full" as EntryRole,
         title: finding.title,
-        body: consequence
-          ? `${plainText(finding.body)} ${plainText(consequence.body)}`
-          : plainText(finding.body),
+        body: mergeEnough(plainText(finding.body), consequence ? plainText(consequence.body) : null),
         garmentIds: finding.garmentIds,
       };
     });
@@ -331,6 +381,10 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
     const registers = needs.registers
       .filter((r) => r.rawCount > 0 || r.needed)
       .map((r) => ({ key: r.register, ...registerDisplay(r) }));
+    // A register with its own gap finding keeps its verdict but loses its note:
+    // the finding directly below says the same thing in more detail, and the
+    // two sat one block apart saying "they mostly make the same outfit" twice.
+    const explainedByGap = new Set(needs.couldUseMore.map((f) => f.register));
     add("range", {
       id: "registers",
       label: "What you can dress for",
@@ -340,7 +394,7 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
         claim: claims.register(r.key as RegisterId),
         role: "full" as EntryRole,
         title: r.heading,
-        body: r.plain,
+        body: explainedByGap.has(r.key as RegisterId) ? undefined : r.plain,
         garmentIds: [],
         meta: { state: r.state, stateText: r.stateText, needed: r.needed },
       })),
@@ -373,7 +427,10 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
         claim: claims.recommendation(rec.register),
         role: "full" as EntryRole,
         title: rec.title,
-        body: rec.body,
+        // The proposal opens by restating the gap ("your work pieces repeat
+        // similar combinations"), which the section above has just explained
+        // in full. What to BUY is the new information; keep that.
+        body: dropGapRestatement(rec.body),
         garmentIds: rec.unlocksIds,
         meta: { attributes: rec.attributes },
       })),
@@ -409,16 +466,19 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
   const resolved = resolveClaims(sections);
 
   return {
+    reading: intelligence.snapshotReading ?? null,
+    ready,
+    readyNote: intelligence.ready ? undefined : (intelligence.readyNote ?? undefined),
     basis: basisLine(closetCount, confidence),
     confidence,
-    sections: SECTION_ORDER.map((id) => ({
+    sections: pruneRepetition(SECTION_ORDER.map((id) => ({
       id,
       title: SECTION_TITLES[id],
       sub: id === "learning"
         ? "Your Style Passport is what you told nAia. Your Closet is what you own."
         : undefined,
       blocks: resolved.get(id) ?? [],
-    })).filter((s) => s.blocks.length > 0),
+    })).filter((s) => s.blocks.length > 0)),
   };
 }
 
@@ -520,7 +580,29 @@ function buildGarmentBlock(input: WardrobePageInput): PageBlock | null {
     if (claim === null || !claim.startsWith("garment:")) continue;
     const id = claim.slice("garment:".length);
     const e = touch(id);
-    e.meta = { ...e.meta, note: plainText(o.observation), noteHead: plainText(o.headline) };
+    e.title = e.title ?? input.garmentName?.(id) ?? undefined;
+    e.meta = {
+      ...e.meta,
+      note: plainText(o.observation),
+      // The headline labels the entry the way a hero label does. Printed as a
+      // second sentence it simply restated the observation underneath it.
+      label: (e.meta?.label as string | undefined) ?? plainText(o.headline),
+    };
+  }
+
+  // (b) Within one entry, the rediscovery note and the contradiction
+  // observation make the SAME claim — "you find this hard, and here is how much
+  // of your Closet works with it" — in two paragraphs. Merging the entry is not
+  // enough on its own; the duplicate has to go too. The rediscovery text wins
+  // because it carries the partner count, so the more specific statement is the
+  // one kept.
+  for (const id of order) {
+    const e = entries.get(id)!;
+    const meta = e.meta ?? {};
+    if (typeof meta.rediscover === "string" && typeof meta.note === "string") {
+      const { note, noteHead, ...rest } = meta as Record<string, unknown>;
+      e.meta = rest;
+    }
   }
 
   // A link is only offered when it genuinely carries the piece through.
@@ -554,6 +636,10 @@ function buildVerdictBlock(
       garmentIds: [],
     });
   } else {
+    // Names the area and closes the question for everything else. It points at
+    // the gap rather than re-explaining it — that explanation lives in the
+    // section about range.
+    const areas = joinWithAnd(gaps.map((g) => REGISTER_WORD[g.register] ?? g.register));
     entries.push({
       id: "verdict",
       claim: "buy-verdict",
@@ -562,7 +648,11 @@ function buildVerdictBlock(
         gaps.length === 1
           ? "Yes — one part of your wardrobe would benefit."
           : `Yes — ${gaps.length === 2 ? "two" : String(gaps.length)} parts of your wardrobe would benefit.`,
-      body: hedge(undefined, confidence),
+      body: hedge(
+        `${capitalise(areas)} ${gaps.length === 1 ? "is" : "are"} where it would help. ` +
+        "Everything else you own already covers the kinds of dressing you described.",
+        confidence,
+      ),
       garmentIds: [],
     });
   }
@@ -639,6 +729,13 @@ function buildPassportBlock(input: WardrobePageInput): PageBlock | null {
   return { id: "passport", label: "What you told nAia, next to what you own", kind: "matches", entries };
 }
 
+/** How each register is named inside a sentence. */
+const REGISTER_WORD: Readonly<Record<string, string>> = {
+  everyday: "everyday dressing",
+  work: "work",
+  occasion: "occasion dressing",
+};
+
 const DRESS_LEVEL_PHRASE: Readonly<Record<string, string>> = {
   everyday: "on the more everyday, relaxed side",
   work: "on the more polished, work-ready side",
@@ -692,7 +789,128 @@ function buildBehaviourBlock(needs: WardrobeNeeds): PageBlock | null {
   return { id: "behaviour", label: "What your choices show", kind: "history", entries };
 }
 
+// ── Repetition control ────────────────────────────────────────────────────────
+//
+// Merging blocks is not enough on its own. Inside a single garment entry the
+// hero reason and the rediscovery note routinely state the same fact in two
+// sentences — "Pairs easily with 9 other pieces" and "9 pieces you own work
+// with it" — and the Passport-match sentence was printed against four separate
+// garments. So sentences carry FACT SIGNATURES, and a sentence whose facts have
+// all been stated already is dropped.
+//
+// Scope matters. A partner count is only a repeat within the same entry, since
+// two different pieces may each work with six things. Boilerplate like the
+// Passport-match sentence is a repeat across the whole page.
+
+const ENTRY_FACTS: ReadonlyArray<{ re: RegExp; sig: (m: RegExpMatchArray) => string }> = [
+  { re: /\b(\d+)\s+(?:other\s+)?pieces?\b/i, sig: (m) => `partners:${m[1]}` },
+  { re: /one of your favourites|marked this as one of your favourites/i, sig: () => "favourite" },
+  { re: /difficult to style|struggle to style|hard to style/i, sig: () => "difficulty" },
+  { re: /fewer (?:natural )?partners|fewer ways to wear/i, sig: () => "isolated" },
+];
+
+const PAGE_FACTS: ReadonlyArray<{ re: RegExp; sig: () => string }> = [
+  { re: /matches the style and colours you described in your Passport/i, sig: () => "passport-match" },
+];
+
+function splitSentences(text: string): string[] {
+  return text.match(/[^.!?]+[.!?]+(?:\s|$)|[^.!?]+$/g)?.map((t) => t.trim()).filter(Boolean) ?? [];
+}
+
+function signaturesOf(sentence: string, patterns: ReadonlyArray<{ re: RegExp; sig: (m: never) => string }>): string[] {
+  const out: string[] = [];
+  for (const p of patterns) {
+    const m = sentence.match(p.re);
+    if (m) out.push(p.sig(m as never));
+  }
+  return out;
+}
+
+/**
+ * Drops sentences whose facts are already on the record. Returns "" when every
+ * sentence was a repeat; the caller decides what that means, because the answer
+ * differs by field. A supporting line that says nothing new should disappear
+ * entirely — that is the whole point — while an entry's main body has to keep
+ * something, since an entry with no words is worse than one that echoes.
+ */
+function pruneSentences(text: string, entryLedger: Set<string>, pageLedger: Set<string>): string {
+  const sentences = splitSentences(text);
+  if (sentences.length === 0) return text;
+
+  const kept: string[] = [];
+  for (const sentence of sentences) {
+    const entrySigs = signaturesOf(sentence, ENTRY_FACTS);
+    const pageSigs = signaturesOf(sentence, PAGE_FACTS);
+    const sigs = [...entrySigs, ...pageSigs];
+    const repeat = sigs.length > 0 && sigs.every((s) => entryLedger.has(s) || pageLedger.has(s));
+    if (repeat) continue;
+    for (const s of entrySigs) entryLedger.add(s);
+    for (const s of pageSigs) pageLedger.add(s);
+    kept.push(sentence);
+  }
+  return kept.join(" ");
+}
+
+/** Reading-order pass. Runs last, so it sees the page exactly as printed. */
+function pruneRepetition(sections: PageSection[]): PageSection[] {
+  const pageLedger = new Set<string>();
+  const META_TEXT_KEYS = ["reason", "rediscover", "note"] as const;
+
+  for (const section of sections) {
+    for (const block of section.blocks) {
+      for (const entry of block.entries) {
+        const entryLedger = new Set<string>();
+        if (entry.body) {
+          const pruned = pruneSentences(entry.body, entryLedger, pageLedger);
+          // The body is the entry's voice — it keeps its first sentence even
+          // when that sentence is a repeat, rather than leaving a silent entry.
+          entry.body = pruned === "" ? splitSentences(entry.body)[0] ?? entry.body : pruned;
+        }
+        const meta = entry.meta as Record<string, unknown> | undefined;
+        if (!meta) continue;
+        for (const key of META_TEXT_KEYS) {
+          const value = meta[key];
+          if (typeof value !== "string" || value === "") continue;
+          const pruned = pruneSentences(value, entryLedger, pageLedger);
+          // A supporting line with nothing new to say is removed outright.
+          if (pruned === "") delete meta[key];
+          else meta[key] = pruned;
+        }
+      }
+    }
+  }
+  return sections;
+}
+
 // ── Small helpers ─────────────────────────────────────────────────────────────
+
+/**
+ * "You have enough of this" and "another one is not a priority" are the same
+ * claim, and the engine words the advice in both. Appended verbatim they read
+ * as the conclusion stated twice, so the second is only added when the first
+ * does not already say don't-buy-another.
+ */
+const ALREADY_ADVISES = /unlikely to materially expand|would add very little|another similar piece|strengthening your/i;
+
+/**
+ * Removes a leading sentence that only repeats the gap. Never removes the whole
+ * body — if the proposal is nothing but a restatement, it is left alone and the
+ * repetition is visible rather than the entry being silently emptied.
+ */
+const GAP_RESTATEMENT = /repeats? (?:one formula|similar combinations)|mostly make the same outfit|repeat similar combinations/i;
+
+export function dropGapRestatement(body: string): string {
+  const sentences = body.match(/[^.!?]+[.!?]+(?:\s|$)|[^.!?]+$/g)?.map((t) => t.trim()).filter(Boolean) ?? [];
+  if (sentences.length <= 1) return body;
+  if (!GAP_RESTATEMENT.test(sentences[0])) return body;
+  return sentences.slice(1).join(" ");
+}
+
+export function mergeEnough(findingBody: string, consequenceBody: string | null): string {
+  if (consequenceBody === null) return findingBody;
+  if (ALREADY_ADVISES.test(findingBody)) return findingBody;
+  return `${findingBody} ${consequenceBody}`;
+}
 
 function basisLine(count: number, confidence: ClosetConfidence): string {
   const base = `Based on the ${count} ${count === 1 ? "piece" : "pieces"} you've added to your Closet.`;
@@ -756,6 +974,8 @@ export function duplicateClaims(page: WardrobePage): ClaimKey[] {
 /** Visible copy, for the before/after reduction measurement. */
 export function visibleCopy(page: WardrobePage): string[] {
   const out: string[] = [page.basis];
+  if (page.reading) out.push(page.reading);
+  if (page.readyNote) out.push(page.readyNote);
   for (const section of page.sections) {
     out.push(section.title);
     if (section.sub) out.push(section.sub);

@@ -129,7 +129,7 @@ describe("§WC-2 pairing reasons lose the jargon, not the meaning", () => {
     const engine = "You've tagged these for weekend. One is tailored and the other relaxed — the structure is what makes it read deliberate.";
     const out = plainPairReason(engine);
 
-    assert.match(out, /tagged both of these for weekend, so they're meant for the same kind of day\./);
+    assert.match(out, /tagged both of these for weekend\./);
     assert.match(out, /The structured piece balances the softer one, so the outfit still feels put together\./);
     // The bug this test exists for: the occasion clause swallowing the second
     // reason and inventing "…deliberate, so they're meant for the same day".
