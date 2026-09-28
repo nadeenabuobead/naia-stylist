@@ -18,6 +18,7 @@ import naiaStyles from "~/styles/naia-design-system.css?url";
 import { getCloudinaryConfig, buildPrivateDownloadUrl } from "~/lib/cloudinary-admin.server";
 import { loadWardrobeIntelligence } from "~/lib/ai/wardrobe-intelligence.server";
 import { readAndRecordChange } from "~/lib/ai/wardrobe-snapshot.server";
+import { readClosetConfidence, recordClosetConfidence } from "~/lib/ai/wardrobe-confidence.server";
 import { traitLabel } from "~/lib/ai/wardrobe-copy";
 import {
   buildWardrobePage,
@@ -41,29 +42,6 @@ const PASSPORT_SELECT = {
   printAppetite: true,
 } as const;
 
-/**
- * Closet completeness, read separately and defensively.
- *
- * The column arrives with this revision's migration. Reading it in its own
- * guarded query means the page degrades to "not answered yet" if the migration
- * has not run, rather than failing outright — and "not answered yet" is a state
- * the page already handles honestly.
- */
-async function readClosetCompleteness(customerId: string): Promise<ClosetConfidence> {
-  try {
-    const row = await (prisma as unknown as {
-      onboardingProfile: { findUnique(args: unknown): Promise<{ closetCompleteness: string | null } | null> };
-    }).onboardingProfile.findUnique({
-      where: { customerId },
-      select: { closetCompleteness: true },
-    });
-    const value = row?.closetCompleteness;
-    return value === "mostly" || value === "still-adding" ? value : "unknown";
-  } catch {
-    return "unknown";
-  }
-}
-
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: naiaStyles }];
 
 export function meta() {
@@ -78,16 +56,11 @@ export function meta() {
 export async function action({ request }: ActionFunctionArgs) {
   const naiaCustomer = await requireCurrentNaiaCustomer(request);
   const form = await request.formData();
-  const answer = String(form.get("closetCompleteness") ?? "");
-  if (answer !== "mostly" && answer !== "still-adding") {
-    return data({ ok: false, error: "Pick one of the two answers." }, { status: 400 });
-  }
-
-  await prisma.onboardingProfile.updateMany({
-    where: { customerId: naiaCustomer.id },
-    data: { closetCompleteness: answer, closetCompletenessAt: new Date() },
+  const saved = await recordClosetConfidence({
+    customerId: naiaCustomer.id,
+    answer: form.get("closetCompleteness"),
   });
-
+  if (!saved) return data({ ok: false, error: "Pick one of the two answers." }, { status: 400 });
   return data({ ok: true });
 }
 
@@ -184,7 +157,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     needs,
     recommendations,
     closetCount: customer.closetItems.length,
-    confidence: await readClosetCompleteness(customer.id),
+    confidence: await readClosetConfidence(customer.id),
     garmentName: (id) => garments.find((g) => g.id === id)?.name ?? null,
     change,
   });
