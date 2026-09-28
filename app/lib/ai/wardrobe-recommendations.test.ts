@@ -882,4 +882,43 @@ describe("§WR-9 emitted attributes resolve the tested outcome", () => {
       );
     }
   });
+
+  it("§WR-9f a wardrobe where nothing resolves the gap gets no shape claim", () => {
+    // The ORIGINAL fixture, kept deliberately. Every piece — tops AND bottoms —
+    // is one class, so a second bottom class still yields only 2 combinations
+    // and cannot clear the threshold. The engine must say nothing about shape
+    // rather than name one that would not help.
+    const uniform: WardrobeGarment[] = [];
+    for (let i = 0; i < 6; i++) {
+      uniform.push(makeGarment({
+        slot: "top", category: "TOPS", formality: "business-casual",
+        topLength: "hip-length", hemLength: "n/a", fitProfile: "tailored", silhouette: "straight",
+      }));
+    }
+    for (let i = 0; i < 5; i++) {
+      uniform.push(makeGarment({
+        slot: "bottom", category: "BOTTOMS", formality: "business-casual",
+        topLength: "n/a", hemLength: "full", fitProfile: "tailored", silhouette: "straight",
+      }));
+    }
+    const { recs } = run(uniform, makePassport({ lifestyle: ["work-office"], dressingPreferences: ["legs-covered"] }));
+    const rec = recs.recommendations.find((r) => r.register === "work");
+    if (rec) {
+      assert.deepEqual(
+        rec.criteria.resolvingSilhouettes,
+        [],
+        "no shape is claimed when no shape would clear the threshold",
+      );
+    }
+  });
+
+  it("§WR-9g crossing the threshold is never described as a complete wardrobe", () => {
+    const { recs } = run(repetitiveWork(), passport());
+    const rec = recs.recommendations.find((r) => r.register === "work")!;
+    const text = [rec.title, rec.body, ...rec.evidence.map((e) => e.detail)].join(" ");
+    assert.doesNotMatch(text, /complete (outfit|look|wardrobe)|fully covered|nothing more you need/i);
+    // Distinct looks are supported COMBINATIONS between representatives, not
+    // finished outfits — the evidence line has to say so.
+    assert.doesNotMatch(text, /\b\d+ outfits?\b/i);
+  });
 });

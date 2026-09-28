@@ -427,9 +427,9 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
             // claim about how she will feel — these ratings are held against
             // the GARMENT and never compared to her Passport.
             body:
-              "Counted from what each piece is — its shape, fit, fabric and level of dress — and " +
-              "what those make it useful for. This is what your Closet could support, not a match " +
-              "against your Passport and not what you usually ask nAia for.",
+              "Each piece has been assessed for what it can support, from its shape, fit, fabric " +
+              "and level of dress. These are counts of those assessments — not a comparison with " +
+              "your Passport, and not what you usually ask nAia for.",
             garmentIds: [],
             meta: { strengths: strengths.map((c) => ({ ...c, label: capabilityLabel(c.intention, c.label) })) },
           },

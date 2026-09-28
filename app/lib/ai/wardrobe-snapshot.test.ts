@@ -97,7 +97,7 @@ describe("§WS-3 what it reports", () => {
 
     const lines = changeLines(change!);
     assert.match(lines.join(" "), /Grey Tailored Trousers works with 4 pieces you already own\./);
-    assert.match(lines.join(" "), /work dressing has more range/);
+    assert.match(lines.join(" "), /work dressing has more variety/);
     assert.match(lines.join(" "), /closes a gap/);
   });
 
@@ -129,7 +129,7 @@ describe("§WS-3 what it reports", () => {
     });
     assert.ok(change);
     assert.deepEqual(change!.improved, []);
-    assert.doesNotMatch(changeLines(change!).join(" "), /more range/);
+    assert.doesNotMatch(changeLines(change!).join(" "), /more variety/);
   });
 
   it("§WS-3d a piece that combines with nothing makes no claim about combinations", () => {
@@ -181,5 +181,29 @@ describe("§WS-4 attribution", () => {
     });
     assert.ok(change);
     assert.doesNotMatch(changeLines(change!).join(" "), /Closet hasn't changed/);
+  });
+});
+
+describe("§WS-5 evidence boundaries in the change copy", () => {
+  it("§WS-5a more variety is never reported as complete outfits", () => {
+    const change = diffSnapshots({
+      before: summary(),
+      after: summary({
+        registers: [
+          { register: "everyday", distinctLooks: 9, usableCount: 18 },
+          { register: "work", distinctLooks: 7, usableCount: 11 },
+        ],
+      }),
+      takenAt: "2026-09-01T00:00:00.000Z",
+      added: [],
+    });
+    assert.ok(change);
+    const text = changeLines(change!).join(" ");
+    // Distinct looks counts SUPPORTED COMBINATIONS between class
+    // representatives. They are not finished, wearable outfits, and crossing
+    // the threshold does not make a wardrobe complete.
+    assert.match(text, /supported combinations/);
+    assert.doesNotMatch(text, /\boutfits?\b/i);
+    assert.doesNotMatch(text, /complete|fully covered|everything you need/i);
   });
 });

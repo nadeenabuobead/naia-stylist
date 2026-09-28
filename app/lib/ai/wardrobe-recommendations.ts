@@ -570,7 +570,7 @@ function buildRecommendation(
         ev(
           "garment-fact",
           "distinct-looks simulation",
-          `A ${leadFamily === "soft" ? "looser" : "more structured"} ${SLOT_NOUN[slot] ?? slot} in ${joinOr(silhouettes)} would take ${REGISTER_WORD[register]} from ${reading.distinctLooks} distinct looks to ${resolving[0].distinctLooks}.`,
+          `A ${leadFamily === "soft" ? "looser" : "more structured"} ${SLOT_NOUN[slot] ?? slot} in ${joinOr(silhouettes)} would take ${REGISTER_WORD[register]} from ${reading.distinctLooks} to ${resolving[0].distinctLooks} supported combinations.`,
           [],
         ),
       );

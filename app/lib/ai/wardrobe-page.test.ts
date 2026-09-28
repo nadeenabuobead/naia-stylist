@@ -530,3 +530,28 @@ describe("§WP-8 partner counts reconcile", () => {
     assert.match(copy, /its shape, fit, fabric and level of dress/i);
   });
 });
+
+describe("§WP-9 curated assessments are not a Passport comparison", () => {
+  it("§WP-9a the capability block says what it is, and what it is not", () => {
+    const page = buildWardrobePage(baseInput());
+    const copy = visibleCopy(page).join(" ");
+    assert.match(copy, /assessed for what it can support/i);
+    assert.match(copy, /not a comparison with your Passport/i);
+  });
+
+  it("§WP-9b no capability row reads as meeting her stated requirements", () => {
+    // The same page carries a Coverage row reporting whether pieces meet the
+    // coverage preferences she actually stated. A curated assessment must never
+    // be mistaken for that comparison — "more coverage" did exactly that.
+    const page = buildWardrobePage(baseInput());
+    const rows = page.sections
+      .flatMap((s) => s.blocks)
+      .flatMap((b) => b.entries)
+      .filter((e) => e.claim === "closet-capability")
+      .flatMap((e) => ((e.meta?.strengths ?? []) as Array<{ label: string }>).map((c) => c.label));
+    for (const label of rows) {
+      assert.doesNotMatch(label, /^more coverage$/i, `"${label}" collides with the Coverage comparison`);
+      assert.doesNotMatch(label, /meets? your|your requirement|your preference/i);
+    }
+  });
+});

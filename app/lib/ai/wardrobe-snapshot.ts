@@ -183,7 +183,10 @@ export function changeLines(change: WardrobeChange): string[] {
 
   for (const r of change.improved) {
     lines.push(
-      `Your ${REGISTER_WORD[r.register] ?? r.register} dressing has more range than it did — ${r.from} combinations nAia could support, now ${r.to}.`,
+      // "supported combinations", never "outfits". Crossing the threshold
+      // means more variety is available, not that the wardrobe is now complete
+      // or that these are finished, wearable looks.
+      `Your ${REGISTER_WORD[r.register] ?? r.register} dressing has more variety than it did — ${r.from} supported combinations, now ${r.to}.`,
     );
   }
 

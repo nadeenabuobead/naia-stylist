@@ -124,7 +124,10 @@ const CAPABILITY_LABELS: Readonly<Record<string, string>> = {
   "give-energy":       "energy",
   "feel-softer":       "softer looks",
   "feel-sharper":      "sharper looks",
-  "feel-less-exposed": "more coverage",
+  // NOT "more coverage": the same page carries a Coverage row that reports
+  // whether pieces meet the coverage preferences she actually stated. A curated
+  // assessment of a garment must not be mistaken for that comparison.
+  "feel-less-exposed": "covered-up looks",
   "express-myself":    "self-expression",
 };
 
