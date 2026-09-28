@@ -13,7 +13,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { computeWardrobeRecommendations } from "./wardrobe-recommendations.ts";
-import { computeWardrobeNeeds } from "./wardrobe-needs.ts";
+import { computeWardrobeNeeds, classifyUsability } from "./wardrobe-needs.ts";
 import type { WardrobeGarment, WardrobePassport } from "./wardrobe-intelligence.ts";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -754,6 +754,132 @@ describe("§WR-6 nAia does not invent reasons", () => {
     const { recs } = run(items, makePassport({ lifestyle: ["everyday-casual", "work-office"] }));
     for (const rec of recs.recommendations.filter((r) => r.specificity !== "direction")) {
       assert.match(rec.body, /adds ways to dress rather than another version of something you have/);
+    }
+  });
+});
+
+// ── §WR-9 — the recommendation must actually resolve the gap it cites ─────────
+//
+// An integration assertion, not a copy check. The attributes the engine emits
+// are instantiated as a real garment, put back through the SAME pipeline, and
+// the gap has to close. If the proposal cannot do that, it is not a proposal.
+
+describe("§WR-9 emitted attributes resolve the tested outcome", () => {
+  /**
+   * A work wardrobe whose BOTTOMS are near-copies: plenty of pieces, few looks.
+   *
+   * Two distinct top classes and one bottom class gives exactly 2 distinct
+   * looks — at the threshold, so the gap is open — and a second bottom class
+   * would take it to 4. That is the shape of the real Closet this came from.
+   */
+  const repetitiveWork = () => {
+    const out: WardrobeGarment[] = [];
+    const topShapes = [
+      { silhouette: "straight", fitProfile: "tailored" },
+      { silhouette: "fitted", fitProfile: "relaxed" },
+    ];
+    for (let i = 0; i < 6; i++) {
+      out.push(makeGarment({
+        slot: "top", category: "TOPS", formality: "business-casual",
+        topLength: "hip-length", hemLength: "n/a", ...topShapes[i % topShapes.length],
+      }));
+    }
+    for (let i = 0; i < 5; i++) {
+      out.push(makeGarment({
+        slot: "bottom", category: "BOTTOMS", formality: "business-casual",
+        topLength: "n/a", hemLength: "full", fitProfile: "tailored", silhouette: "straight",
+      }));
+    }
+    return out;
+  };
+  const passport = () => makePassport({
+    lifestyle: ["work-office"],
+    dressingPreferences: ["legs-covered"],
+  });
+
+  it("§WR-9a the gap exists, and the proposal names attributes derived from it", () => {
+    const { needs, recs } = run(repetitiveWork(), passport());
+    const work = needs.registers.find((r) => r.register === "work")!;
+    assert.ok(needs.couldUseMore.some((f) => f.register === "work"), "the gap is open");
+    assert.ok(work.distinctLooks <= 2, `distinct looks ${work.distinctLooks} is at or under the threshold`);
+
+    const rec = recs.recommendations.find((r) => r.register === "work");
+    assert.ok(rec, "a recommendation is made");
+    assert.ok(
+      rec!.criteria.resolvingSilhouettes.length > 0,
+      "it names the shapes that would resolve the gap, not just a slot and a colour",
+    );
+  });
+
+  it("§WR-9b instantiating those attributes CLOSES the gap", () => {
+    const base = repetitiveWork();
+    const p = passport();
+    const rec = run(base, p).recs.recommendations.find((r) => r.register === "work")!;
+
+    const proposed = makeGarment({
+      slot: rec.criteria.slot ?? "bottom",
+      category: "BOTTOMS",
+      formality: "business-casual",
+      topLength: "n/a",
+      hemLength: "full",
+      fitProfile: rec.criteria.structure === "soft" ? "relaxed" : "tailored",
+      silhouette: rec.criteria.resolvingSilhouettes[0],
+    });
+
+    const after = run([...base, proposed], p);
+    assert.ok(
+      !after.needs.couldUseMore.some((f) => f.register === "work"),
+      "the piece the engine described actually resolves the gap it described",
+    );
+  });
+
+  it("§WR-9c another near-copy does NOT close it", () => {
+    // The counterpart assertion. Without it, §WR-9b could pass for a
+    // recommendation that named nothing useful.
+    const base = repetitiveWork();
+    const p = passport();
+    const nearCopy = makeGarment({
+      slot: "bottom", category: "BOTTOMS", formality: "business-casual",
+      topLength: "n/a", hemLength: "full", fitProfile: "tailored", silhouette: "straight",
+    });
+    const after = run([...base, nearCopy], p);
+    assert.ok(
+      after.needs.couldUseMore.some((f) => f.register === "work"),
+      "more of the same must not satisfy a repetition finding",
+    );
+  });
+
+  it("§WR-9d no proposal contradicts a stated dressing preference", () => {
+    // "legs-covered" is stated, so a mini is never among the resolving shapes
+    // however many looks it would unlock.
+    const { recs } = run(repetitiveWork(), passport());
+    const rec = recs.recommendations.find((r) => r.register === "work")!;
+    for (const silhouette of rec.criteria.resolvingSilhouettes) {
+      const candidate = makeGarment({
+        slot: "bottom", category: "BOTTOMS", formality: "business-casual",
+        topLength: "n/a", hemLength: "full", silhouette,
+        fitProfile: rec.criteria.structure === "soft" ? "relaxed" : "tailored",
+      });
+      assert.notEqual(
+        classifyUsability(candidate, passport()).usability,
+        "blocked",
+        `${silhouette} would contradict a preference she stated`,
+      );
+    }
+  });
+
+  it("§WR-9e the resolving shapes are this Closet's, not a fixed answer", () => {
+    // A wardrobe already full of flared bottoms must not be told to buy flared.
+    const flared = repetitiveWork().map((g) =>
+      g.slot === "bottom" ? { ...g, silhouette: "flared", fitProfile: "relaxed" } : g,
+    );
+    const { recs } = run(flared, passport());
+    const rec = recs.recommendations.find((r) => r.register === "work");
+    if (rec && rec.criteria.resolvingSilhouettes.length > 0) {
+      assert.ok(
+        !rec.criteria.resolvingSilhouettes.every((s) => s === "flared"),
+        "the proposal must differ from what she already owns",
+      );
     }
   });
 });

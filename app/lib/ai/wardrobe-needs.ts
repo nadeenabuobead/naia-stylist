@@ -150,7 +150,7 @@ export function styleMeSessionRegister(
 // unwearable-together items read as thin.
 
 /** At or below this many DISTINCT looks a needed register is under-served. */
-const THIN_LOOKS = 2;
+export const THIN_LOOKS = 2;
 /** At or above this many DISTINCT looks, a register has real working depth. */
 const DEEP_LOOKS = 4;
 /** Usable pieces that make a register redundant rather than simply deep. */
@@ -341,6 +341,17 @@ export interface OutcomeReading {
  * Neither is ever derived from the other. `chosen` never reads a garment and
  * `closetStrengths` never reads a session.
  */
+/**
+ * Intentions that assert something about the customer rather than about a
+ * garment. A curated garment rating cannot evidence any of these.
+ */
+export const IDENTITY_INTENTIONS: ReadonlySet<string> = new Set([
+  "feel-like-myself",
+  "express-myself",
+  "feel-attractive",
+  "confidence",
+]);
+
 export interface IntentionReading {
   state: BlockState;
   learningNote?: string;
@@ -767,6 +778,75 @@ function countDistinctLooks(pool: WardrobeGarment[]): number {
  * Raw supported combinations across instances. Kept for diagnostics and tests
  * only — it is never a customer-facing number and never decides a conclusion.
  */
+/**
+ * DISTINCT LOOKS — the measure a gap is judged on.
+ *
+ * Not a count of garments, and not every pairing. The pool is first reduced to
+ * one representative per interchangeability class, where a class is
+ * `slot | register | colour band | fit family | silhouette` (outfitClassKey).
+ * Two tailored straight grey work trousers are one class: owning both does not
+ * give you two looks. Distinct looks is then the number of SUPPORTED top-bottom
+ * pairs between those representatives, plus one class per one-piece garment.
+ *
+ * GAP-CLOSURE RULE: a register is reported as needing something only while
+ * `needed && distinctLooks <= THIN_LOOKS` (2). So a gap closes when a new piece
+ * introduces a class that is not already represented AND that class pairs with
+ * what she owns. Another near-copy changes nothing, which is exactly what the
+ * repetition finding says.
+ */
+export interface GapResolvingClass {
+  /** "structured" | "soft" — the fit family that adds a new class. */
+  fitFamily: string;
+  /** A silhouette that, with that fit, lifts distinct looks past the threshold. */
+  silhouette: string;
+  /** Distinct looks this candidate would produce. */
+  distinctLooks: number;
+}
+
+/** Silhouettes worth proposing. Drawn from the engine's own vocabulary. */
+const CANDIDATE_SILHOUETTES = ["straight", "flared", "a-line", "wide-leg", "fitted", "oversized"] as const;
+const CANDIDATE_FITS: Readonly<Record<string, string>> = { structured: "tailored", soft: "relaxed" };
+
+/**
+ * Which garment attributes would actually close this register's gap.
+ *
+ * Derived by SIMULATION against the same rule the finding uses, rather than
+ * asserted: a hypothetical piece is added to the usable pool and distinct looks
+ * is recomputed. Only candidates that clear THIN_LOOKS are returned, and only
+ * those that satisfy her stated dressing preferences — a proposal that
+ * contradicts her Passport is not a solution, however many looks it unlocks.
+ */
+export function gapResolvingClasses(input: {
+  pool: WardrobeGarment[];
+  passport: WardrobePassport | null;
+  slot: string;
+  register: RegisterId;
+}): GapResolvingClass[] {
+  const { pool, passport, slot, register } = input;
+  const template = pool.find((g) => g.slot === slot) ?? pool[0];
+  if (!template) return [];
+
+  const out: GapResolvingClass[] = [];
+  for (const [fitFamily, fitProfile] of Object.entries(CANDIDATE_FITS)) {
+    for (const silhouette of CANDIDATE_SILHOUETTES) {
+      const candidate: WardrobeGarment = {
+        ...template,
+        id: `__candidate__${fitFamily}__${silhouette}`,
+        name: "candidate",
+        slot,
+        fitProfile,
+        silhouette,
+        garmentRelationships: [],
+      };
+      // A candidate that contradicts a stated preference is not an answer.
+      if (classifyUsability(candidate, passport).usability === "blocked") continue;
+      const looks = countDistinctLooks([...pool, candidate]);
+      if (looks > THIN_LOOKS) out.push({ fitFamily, silhouette, distinctLooks: looks });
+    }
+  }
+  return out.sort((a, b) => b.distinctLooks - a.distinctLooks || a.silhouette.localeCompare(b.silhouette));
+}
+
 function countCombinations(pool: WardrobeGarment[]): number {
   const tops = pool.filter((g) => TOP_SLOTS.has(g.slot));
   const bottoms = pool.filter((g) => BOTTOM_SLOTS.has(g.slot));
@@ -1287,6 +1367,11 @@ function buildIntentionReading(
   items: WardrobeGarment[],
   sessions: StyleMeSessionFact[] | null,
 ): IntentionReading {
+  // No Passport comparison exists for garment intention ratings in this
+  // version, so identity claims have no evidence to stand on. Kept as a named
+  // flag rather than an inline `false` so that adding one later is a single,
+  // visible change — and so the test can state the requirement, not the wording.
+  const hasIdentityEvidence = false;
   // ── what she asks for: sessions only ──
   const chosenCounts = new Map<string, number>();
   for (const session of sessions ?? []) {
@@ -1309,6 +1394,19 @@ function buildIntentionReading(
   }
   const closetStrengths = [...strongCounts.entries()]
     .filter(([intention]) => INTENTION_LABELS[intention])
+    // Identity claims need identity evidence.
+    //
+    // These counts come from a rating held against each GARMENT; nothing in
+    // them is compared to this customer. For a capability — "put-together
+    // looks", "easy dressing" — that is a complete and honest statement about
+    // her Closet. For an intention that asserts something about HER, like
+    // looking or feeling like herself, a garment rating is the wrong kind of
+    // evidence entirely, and no amount of rewording fixes that. Until a
+    // Passport comparison exists to support it, the row is suppressed.
+    //
+    // The underlying StyleMe intention is untouched: she may still CHOOSE it,
+    // and her own choices are reported separately in `chosen`.
+    .filter(([intention]) => !IDENTITY_INTENTIONS.has(intention) || hasIdentityEvidence)
     .map(([intention, count]) => ({ intention, label: INTENTION_LABELS[intention], strong: count }))
     .sort((a, b) => b.strong - a.strong);
 

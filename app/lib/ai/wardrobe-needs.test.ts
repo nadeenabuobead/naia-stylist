@@ -21,6 +21,7 @@ import {
   type OutcomeFact,
   type StyleMeSessionFact,
   type WardrobeNeeds,
+  IDENTITY_INTENTIONS,
 } from "./wardrobe-needs.ts";
 import type { WardrobeGarment, WardrobePassport } from "./wardrobe-intelligence.ts";
 
@@ -864,5 +865,55 @@ describe("§WN-11 structural guards", () => {
         assert.ok(e.signal && e.field && e.detail, `${finding.id} has a hollow evidence row`);
       }
     }
+  });
+});
+
+// ── §WN-9 — identity claims need identity evidence ────────────────────────────
+//
+// Stated as an EVIDENCE requirement, not as a forbidden phrase. Renaming the
+// row would satisfy a wording test and change nothing about the claim.
+
+describe("§WN-9 identity intentions", () => {
+  const rated = (intention: string, n: number) =>
+    Array.from({ length: n }, (_u, i) =>
+      makeGarment({
+        id: `g-${intention}-${i}`,
+        intentionsSource: "curated",
+        intentions: { [intention]: "strong" } as never,
+      }),
+    );
+
+  it("§WN-9a a garment rating never evidences a claim about the customer", () => {
+    // Every identity intention, rated strongly on many garments, and none of
+    // them may reach the page — because nothing here was compared to HER.
+    for (const intention of IDENTITY_INTENTIONS) {
+      const needs = run(rated(intention, 12), { passport: makePassport() });
+      const shown = needs.intentions.closetStrengths.map((c) => c.intention);
+      assert.ok(
+        !shown.includes(intention),
+        `${intention} is a claim about the customer and has only garment ratings behind it`,
+      );
+    }
+  });
+
+  it("§WN-9b capability intentions are still reported, with their counts", () => {
+    const needs = run(rated("feel-put-together", 9), { passport: makePassport() });
+    const row = needs.intentions.closetStrengths.find((c) => c.intention === "feel-put-together");
+    assert.ok(row, "what a garment can support is a fact about the garment");
+    assert.equal(row!.strong, 9, "the count is the number of pieces rated, nothing else");
+  });
+
+  it("§WN-9c suppression does not touch what SHE chose", () => {
+    // Her own StyleMe selections are her evidence about herself, and are
+    // counted from sessions alone — never from a garment rating.
+    const sessions = Array.from({ length: 5 }, (_u, i) => ({
+      id: `s${i}`, register: "everyday", garmentIds: [], intentions: ["feel-like-myself"],
+    }));
+    const needs = run(rated("feel-like-myself", 12), { passport: makePassport(), sessions: sessions as never });
+    assert.ok(
+      needs.intentions.chosen.some((c) => c.intention === "feel-like-myself"),
+      "her own choice survives; only the garment-rated claim is suppressed",
+    );
+    assert.ok(!needs.intentions.closetStrengths.some((c) => c.intention === "feel-like-myself"));
   });
 });

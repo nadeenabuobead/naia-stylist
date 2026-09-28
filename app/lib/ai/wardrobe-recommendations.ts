@@ -40,6 +40,7 @@ import {
   computePaletteCoverage,
   garmentRegister,
   classifyUsability,
+  gapResolvingClasses,
   outfitClassKey,
   type RegisterId,
   type RegisterReading,
@@ -48,6 +49,8 @@ import {
 } from "~/lib/ai/wardrobe-needs";
 import {
   scorePair,
+  STRUCTURED_FITS,
+  SOFT_FITS,
   PASSPORT_COLOUR_FAMILIES,
   norm,
   ev,
@@ -93,6 +96,14 @@ export interface RecommendationCriteria {
   colourFamilies: string[];
   /** "structured" | "soft" | null — the fit family that would add contrast. */
   structure: string | null;
+  /**
+   * Silhouettes that, with that fit, actually lift this register past the
+   * distinct-looks threshold. Derived by simulating a candidate against the
+   * same rule the finding uses — never asserted, and never a universal answer:
+   * these are the classes THIS Closet is missing, filtered by HER stated
+   * dressing preferences.
+   */
+  resolvingSilhouettes: string[];
   /** Coverage tokens from her stated dressing preferences that must be met. */
   coverage: string[];
 }
@@ -457,7 +468,7 @@ function buildRecommendation(
   ];
 
   // ── Rung 1: direction ────────────────────────────────────────────────────
-  const slot = constrainedSlot(registerPool, items, register, finding.kind, passport);
+  let slot = constrainedSlot(registerPool, items, register, finding.kind, passport);
   if (!slot) {
     return {
       id: `rec-${register}`,
@@ -467,13 +478,27 @@ function buildRecommendation(
       attributes: [],
       body: `nAia can see that ${REGISTER_WORD[register]} dressing is the thinner side of your wardrobe, but not yet which kind of piece would fix it. A few more pieces read, or a little more StyleMe history, and it will be able to say.`,
       unlocksIds: [],
-      criteria: { register, slot: null, colourFamilies: [], structure: null, coverage: [] },
+      criteria: { register, slot: null, colourFamilies: [], structure: null, resolvingSilhouettes: [], coverage: [] },
       evidence,
       strength: "emerging",
     };
   }
 
   // ── Rung 2: slot ─────────────────────────────────────────────────────────
+  //
+  // For a REPETITION gap the slot has to be one that can actually close it.
+  // Distinct looks are top-bottom pairs between classes, so a layer — however
+  // useful — cannot lift the number. If the chosen slot has no class that
+  // resolves the gap and a structural slot does, prefer the one that works.
+  if (finding.kind === "repetition" && gapResolvingClasses({ pool: registerPool, passport, slot, register }).length === 0) {
+    const better = ["bottom", "top"].find(
+      (candidate) =>
+        candidate !== slot &&
+        gapResolvingClasses({ pool: registerPool, passport, slot: candidate, register }).length > 0,
+    );
+    if (better) slot = better;
+  }
+
   // The broad candidate is the baseline every attribute is measured against.
   const broad = candidateGarment(register, slot);
   const broadUnlocks = unlocks(broad, partnerPool.length > 0 ? partnerPool : items);
@@ -496,8 +521,61 @@ function buildRecommendation(
   const attributes: RecommendationAttribute[] = [];
   let colourLead: string | null = null;
   let colourAlternatives: string[] = [];
-  const criteria: RecommendationCriteria = { register, slot, colourFamilies: [], structure: null, coverage: [] };
+  const criteria: RecommendationCriteria = {
+    register, slot, colourFamilies: [], structure: null, resolvingSilhouettes: [], coverage: [],
+  };
   let best = broadUnlocks;
+
+  // ── What would actually CLOSE this gap ───────────────────────────────────
+  //
+  // A repetition finding is judged on distinct looks, not on partner count, so
+  // the attributes proposed for it have to be derived from that same measure.
+  // gapResolvingClasses simulates a candidate against the real rule and returns
+  // only the classes that lift the register past the threshold — and only those
+  // that satisfy her stated dressing preferences.
+  //
+  // Nothing here is a universal answer. These are the classes THIS Closet is
+  // missing; another customer with the same gap can need the opposite.
+  if (finding.kind === "repetition") {
+    const resolving = gapResolvingClasses({ pool: registerPool, passport, slot, register });
+    const leadFamily = resolving[0]?.fitFamily ?? null;
+    if (leadFamily) {
+      const silhouettes = [...new Set(
+        resolving.filter((r) => r.fitFamily === leadFamily).map((r) => r.silhouette),
+      )].slice(0, 3);
+
+      // Name only what actually DIFFERS from what she owns. Her work bottoms
+      // are already tailored, so "more structured" would describe the problem
+      // rather than the answer — the class she is missing is a different
+      // SHAPE. The fit family is mentioned only when it is itself the change.
+      const ownFits = new Set(
+        registerPool.filter((g) => g.slot === slot).map((g) => {
+          const f = norm(g.fitProfile);
+          return f && STRUCTURED_FITS.has(f) ? "structured" : f && SOFT_FITS.has(f) ? "soft" : "unknown";
+        }),
+      );
+      const fitIsTheChange = !ownFits.has(leadFamily as "structured" | "soft" | "unknown");
+
+      criteria.structure = fitIsTheChange ? leadFamily : null;
+      criteria.resolvingSilhouettes = silhouettes;
+      attributes.push({
+        kind: "structure",
+        values: fitIsTheChange ? [leadFamily, ...silhouettes] : silhouettes,
+        label: fitIsTheChange
+          ? `${STRUCTURE_LABEL[leadFamily] ?? leadFamily}, in ${joinOr(silhouettes)}`
+          : `a different shape — ${joinOr(silhouettes)}`,
+        source: "closet",
+      });
+      evidence.push(
+        ev(
+          "garment-fact",
+          "distinct-looks simulation",
+          `A ${leadFamily === "soft" ? "looser" : "more structured"} ${SLOT_NOUN[slot] ?? slot} in ${joinOr(silhouettes)} would take ${REGISTER_WORD[register]} from ${reading.distinctLooks} distinct looks to ${resolving[0].distinctLooks}.`,
+          [],
+        ),
+      );
+    }
+  }
 
   // Structure — proposed only when contrast demonstrably BUYS something.
   //
