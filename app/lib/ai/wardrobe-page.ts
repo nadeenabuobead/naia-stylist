@@ -53,7 +53,7 @@ export const SECTION_TITLES: Readonly<Record<SectionId, string>> = {
   // Deliberately not "what you haven't tried": nAia knows what it has
   // generated, never what she has worn outside the product.
   possibilities: "Possibilities to try",
-  learning: "How nAia is learning you",
+  learning: "How nAia understands your style",
 };
 
 /**
@@ -72,7 +72,9 @@ export type EntryRole = "full" | "pointer";
  */
 export type PageAction =
   | { kind: "reveal"; label: string; hideLabel: string; garmentIds: string[] }
-  | { kind: "link"; label: string; to: string };
+  | { kind: "link"; label: string; to: string }
+  /** Moves to evidence already on this page. Cannot lose context. */
+  | { kind: "jump"; label: string; to: string };
 
 export interface PageEntry {
   id: string;
@@ -105,6 +107,8 @@ export interface PageSection {
 }
 
 export interface WardrobePage {
+  /** Pieces in the Closet — the denominator, shown in the status line. */
+  closetCount: number;
   /** The one-sentence read of the wardrobe. Null until nAia can see enough. */
   reading: string | null;
   /** Whether there is enough in the Closet to say anything at all. */
@@ -153,6 +157,8 @@ const CLAIM_OWNER: Readonly<Record<string, SectionId>> = {
   "outcome-feedback": "learning",
   dna: "now",
   "what-changed": "now",
+  explore: "do",
+  coverage: "learning",
 };
 
 /** The family of a claim — everything before the first colon. */
@@ -256,6 +262,10 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
   const findingById = new Map<string, DepthFinding>(
     [...needs.couldUseMore, ...needs.enough].map((f) => [f.id, f]),
   );
+
+  // Built once in section 2 and read again in section 5, so a piece cannot be
+  // recomputed into both.
+  const garmentSplitRef: { value: { works: PageBlock | null; possibilities: PageBlock | null } | null } = { value: null };
 
   const nowBlocks: PageBlock[] = [];
 
@@ -362,7 +372,9 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
     // Per-garment entries. A piece gets ONE entry carrying everything known
     // about it — its hero label, its rediscovery note, and any contradiction
     // observation about it — so no garment is featured twice.
-    add("works", buildGarmentBlock(input));
+    const garmentSplit = splitGarmentEntries(buildGarmentBlock(input));
+    garmentSplitRef.value = garmentSplit;
+    add("works", garmentSplit.works);
 
     // "You have enough of X" and "another X is not a priority" are the same
     // claim. They are merged here, with the shopping consequence kept.
@@ -406,8 +418,8 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
             // claiming a personal styling review would describe a service that
             // is not being delivered.
             body:
-              "Counted from the approved style profile held against each of your pieces. They describe " +
-              "what your Closet can put together, not what you ask for.",
+              "Based on the approved style profile for each piece. This shows what your Closet can " +
+              "support, not what you usually ask nAia for.",
             garmentIds: [],
             meta: { strengths },
           },
@@ -457,6 +469,25 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
 
   // ── 4 · What to do about it ────────────────────────────────────────────────
   if (ready) {
+    // Using what she owns comes FIRST. The purchase is secondary, and stays
+    // secondary in the reading order, not just in tone.
+    const gapRegisters = needs.couldUseMore.map((f) => f.register);
+    if (gapRegisters.length > 0) {
+      add("do", {
+        id: "use-what-you-own",
+        label: "Start with what you already own",
+        kind: "pointer-action",
+        entries: gapRegisters.map((r) => ({
+          id: `explore-${r}`,
+          claim: `explore:${r}`,
+          role: "full" as EntryRole,
+          title: `Explore ${REGISTER_WORD[r] ?? r} combinations you already own`,
+          body: "Combinations nAia can support from your Closet are further down the page.",
+          garmentIds: [],
+          action: { kind: "jump", label: "Go to Possibilities to try", to: "#wi-possibilities-h" },
+        })),
+      });
+    }
     add("do", buildVerdictBlock(needs, recommendations, confidence));
     add("do", {
       id: "recommendations",
@@ -479,6 +510,7 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
 
   // ── 5 · Possibilities to try ───────────────────────────────────────────────
   if (ready) {
+    add("possibilities", garmentSplitRef.value?.possibilities ?? null);
     const { pairings } = intelligence;
     if (pairings.state !== "learning" && pairings.pairings.length > 0) {
       add("possibilities", {
@@ -506,6 +538,7 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
   const resolved = resolveClaims(sections);
 
   return {
+    closetCount,
     reading: intelligence.snapshotReading ?? null,
     ready,
     readyNote: intelligence.ready ? undefined : (intelligence.readyNote ?? undefined),
@@ -614,8 +647,8 @@ function buildGarmentBlock(input: WardrobePageInput): PageBlock | null {
       e.action = {
         kind: "reveal",
         label: alreadyStated
-          ? (n === 1 ? "See it" : "See them")
-          : `See the ${n} ${n === 1 ? "piece" : "pieces"} it works with`,
+          ? "See matching pieces"
+          : `See ${n} matching ${n === 1 ? "piece" : "pieces"}`,
         hideLabel: "Hide",
         garmentIds: piece.worksWithIds,
       };
@@ -665,6 +698,27 @@ function buildGarmentBlock(input: WardrobePageInput): PageBlock | null {
   return { id: "garments", label: "The pieces doing the most work", kind: "garments", entries: list };
 }
 
+/**
+ * "What already works" should read as a list of strengths.
+ *
+ * A piece that is only here because she finds it difficult is not a strength —
+ * it is something to try, so it belongs in "Possibilities to try". A piece with
+ * a hero label stays: the label IS the positive finding, and its difficulty is
+ * then useful context rather than the headline.
+ */
+function splitGarmentEntries(block: PageBlock | null): { works: PageBlock | null; possibilities: PageBlock | null } {
+  if (block === null) return { works: null, possibilities: null };
+  const hasLabel = (e: PageEntry) => typeof (e.meta as Record<string, unknown> | undefined)?.heroLabel === "string";
+  const works = block.entries.filter(hasLabel);
+  const rest = block.entries.filter((e) => !hasLabel(e));
+  return {
+    works: works.length > 0 ? { ...block, entries: works } : null,
+    possibilities: rest.length > 0
+      ? { id: "worth-trying", label: "Pieces worth another look", kind: "garments", entries: rest }
+      : null,
+  };
+}
+
 function buildVerdictBlock(
   needs: WardrobeNeeds,
   recommendations: WardrobeRecommendations,
@@ -691,10 +745,17 @@ function buildVerdictBlock(
       id: "verdict",
       claim: "buy-verdict",
       role: "full",
+      // Buying language is earned. Until she has said the Closet is most of
+      // what she wears, nAia is looking at an unknown fraction of a wardrobe
+      // and a confident "yes, buy" is not supported by that.
       title:
-        gaps.length === 1
-          ? "Yes — one part of your wardrobe would benefit."
-          : `Yes — ${gaps.length === 2 ? "two" : String(gaps.length)} parts of your wardrobe would benefit.`,
+        confidence === "mostly"
+          ? (gaps.length === 1
+              ? "Yes — one part of your wardrobe would benefit."
+              : `Yes — ${gaps.length === 2 ? "two" : String(gaps.length)} parts of your wardrobe would benefit.`)
+          : (gaps.length === 1
+              ? `${capitalise(REGISTER_WORD[gaps[0].register] ?? gaps[0].register)} is the main area worth exploring.`
+              : "A couple of areas are worth exploring."),
       body: hedge(
         `${capitalise(areas)} ${gaps.length === 1 ? "is" : "are"} where it would help. ` +
         "Everything else you own already covers the kinds of dressing you described.",
@@ -739,6 +800,7 @@ function buildPassportBlock(input: WardrobePageInput): PageBlock | null {
       key: r.register,
       blockedCount: r.blockedCount,
       usableCount: r.usableCount,
+      blockedPieces: r.blockedPieces ?? [],
       ...registerDisplay(r),
     }));
 
@@ -751,19 +813,43 @@ function buildPassportBlock(input: WardrobePageInput): PageBlock | null {
     ...(coverageMatch(registers) ? [coverageMatch(registers)!] : []),
   ];
 
+  // Every piece that does not meet a stated preference, with the reason, and
+  // whether something she owns genuinely resolves it.
+  const blocked = registers.flatMap((r) => r.blockedPieces ?? []);
+  const rescued = blocked.filter((b) => b.rescuedBy.length > 0);
+
   const seen = new Set<string>();
   const entries: PageEntry[] = [];
   for (const m of raw) {
     if (seen.has(m.dimension)) continue;
     seen.add(m.dimension);
+    const isCoverage = m.dimension.toLowerCase() === "coverage";
     entries.push({
       id: m.id,
-      claim: passportClaim(m.dimension),
+      claim: isCoverage ? "coverage" : passportClaim(m.dimension),
       role: "full",
       title: m.dimension,
-      body: m.reading,
-      garmentIds: [],
-      meta: { state: m.state, stateText: m.stateText },
+      body: isCoverage && blocked.length > 0
+        ? `${m.reading} ${
+            rescued.length > 0
+              ? `${rescued.length} of ${blocked.length === 1 ? "them" : `the ${blocked.length}`} can still work with a layer you own; the ${blocked.length - rescued.length === 1 ? "other" : "others"} would not meet it on their own.`
+              : `That is about the pieces on their own — nothing you own changes it, because a layer cannot lengthen a hem.`
+          }`
+        : m.reading,
+      garmentIds: isCoverage ? blocked.map((b) => b.garmentId) : [],
+      action: isCoverage && blocked.length > 0
+        ? {
+            kind: "reveal" as const,
+            label: `See ${blocked.length === 1 ? "the piece" : `all ${blocked.length} pieces`}`,
+            hideLabel: "Hide",
+            garmentIds: blocked.map((b) => b.garmentId),
+          }
+        : undefined,
+      meta: {
+        state: m.state,
+        stateText: m.stateText,
+        ...(isCoverage ? { blocked } : {}),
+      },
     });
   }
 
@@ -794,7 +880,7 @@ function buildBehaviourBlock(needs: WardrobeNeeds): PageBlock | null {
       claim: "styleme-dress-level",
       role: "full",
       title: "How you usually want your looks to feel",
-      body: `Most of the looks you ask nAia for are ${DRESS_LEVEL_PHRASE[top.register]} — ${top.sessions} of the ${total} requests nAia could read.`,
+      body: `${top.sessions} of the ${total} StyleMe requests nAia could classify were ${DRESS_LEVEL_PHRASE[top.register]}.`,
       garmentIds: [],
     });
   }

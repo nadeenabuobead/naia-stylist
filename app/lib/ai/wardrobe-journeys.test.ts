@@ -219,7 +219,7 @@ describe("§J-3 snapshot journey", { skip }, () => {
     });
 
     await db.closetItem.create({
-      data: closetRow(ids.customer, { name: "Grey Tailored Trousers", category: "BOTTOMS", subcategory: "trousers", primaryColor: "Grey", formality: "business-casual" }),
+      data: closetRow(ids.customer, { name: "Grey Tailored Trousers", category: "BOTTOMS", subcategory: "trousers", primaryColor: "Grey", formality: "business-casual" }) as never,
     });
 
     const after = summariseWardrobe({

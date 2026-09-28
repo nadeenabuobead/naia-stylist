@@ -199,6 +199,21 @@ export interface WardrobeNeedsInput {
 
 export type Usability = "usable" | "blocked" | "unknown";
 
+/**
+ * A piece that does not meet a stated preference on its own.
+ *
+ * `rescuedBy` is only populated where the evidence genuinely supports it: a
+ * layer she owns, compatible with this piece, that passes the very check this
+ * piece fails. Leg coverage can never be rescued this way — a jacket does not
+ * lengthen a skirt — so those stay unrescued rather than being given a
+ * hopeful-sounding caveat.
+ */
+export interface BlockedPiece {
+  garmentId: string;
+  reason: string;
+  rescuedBy: string[];
+}
+
 export interface RegisterReading {
   register: RegisterId;
   /** Customer-facing register name: "everyday and casual". */
@@ -218,6 +233,12 @@ export interface RegisterReading {
   usableCount: number;
   /** Read, and contradicts something she has told nAia. */
   blockedCount: number;
+  /**
+   * The pieces that contradict a stated dressing preference, each with the
+   * reason and whether something she owns can genuinely resolve it. Carried so
+   * the page can SHOW them rather than asking her to take a count on trust.
+   */
+  blockedPieces: BlockedPiece[];
   /** Not analysed yet — counted separately, never treated as blocked. */
   unknownCount: number;
   /** Supported pairs between interchangeability classes. Decides thinness. */
@@ -530,6 +551,12 @@ export function classifyUsability(
 
   const prefs = new Set(passport.dressingPreferences ?? []);
   const isTopLike = TOP_SLOTS.has(garment.slot) || garment.slot === "set";
+  // What actually covers her legs is what she wears ON them. A coat is worn
+  // OVER an outfit and cannot uncover anything, so judging its hem against a
+  // leg-coverage preference is a false negative — it was marking a full-length
+  // trench coat unusable, and inflating the customer-facing count of pieces
+  // that "don't meet" her preferences.
+  const coversLegs = BOTTOM_SLOTS.has(garment.slot) || ONE_PIECE_SLOTS.has(garment.slot);
 
   // Each check: "n/a" means the field does not apply to this garment type and is
   // exempt. A null value on an otherwise-read garment is unknown, not blocked.
@@ -565,7 +592,7 @@ export function classifyUsability(
       "keeping your neckline covered",
     ),
     check(
-      prefs.has("legs-covered"),
+      prefs.has("legs-covered") && coversLegs,
       garment.hemLength,
       (v) => v === "full" || v === "maxi",
       "keeping your legs covered",
@@ -595,6 +622,35 @@ export function classifyUsability(
   const unknown = checks.find((c) => c.usability === "unknown");
   if (unknown) return unknown;
   return { usability: "usable", reason: null };
+}
+
+/**
+ * Layers she owns that genuinely resolve why a piece is blocked.
+ *
+ * Deliberately narrow. A layer can cover a cropped top, a bare neckline or bare
+ * arms, because it is worn over them. It cannot make a short hem long: legs are
+ * covered by what is worn ON them, so a leg-coverage failure is never rescued.
+ * The layer must also be compatible with the piece and pass the same check
+ * itself — otherwise the suggestion just moves the problem.
+ */
+const LAYER_RESOLVABLE = /arms covered|sleeveless|neckline|cropped tops|longer tops/i;
+
+export function layersThatResolve(
+  garment: WardrobeGarment,
+  items: readonly WardrobeGarment[],
+  passport: WardrobePassport | null,
+): WardrobeGarment[] {
+  const own = classifyUsability(garment, passport);
+  if (own.usability !== "blocked" || own.reason === null) return [];
+  if (!LAYER_RESOLVABLE.test(own.reason)) return [];
+
+  return items.filter(
+    (layer) =>
+      layer.id !== garment.id &&
+      layer.slot === "outerwear" &&
+      classifyUsability(layer, passport).usability === "usable" &&
+      scorePair(garment, layer).compatible,
+  );
 }
 
 // ── Register depth ────────────────────────────────────────────────────────────
@@ -779,6 +835,11 @@ function readRegisters(
       rawCount: pool.length,
       usableCount: usable.length,
       blockedCount: blocked.length,
+      blockedPieces: blocked.map((g) => ({
+        garmentId: g.id,
+        reason: classifyUsability(g, passport).reason ?? "does not meet a stated preference",
+        rescuedBy: layersThatResolve(g, items, passport).map((l) => l.id),
+      })),
       unknownCount: unknown.length,
       distinctLooks,
       combinations: countCombinations(usable),
@@ -884,7 +945,7 @@ function buildFindings(
         id: `need-${r.register}-repetition`,
         kind: "repetition",
         register: r.register,
-        title: `Your ${REGISTER_NOUN[r.register]} repeats one formula`,
+        title: `Your ${REGISTER_NOUN[r.register]} pieces offer limited outfit variety`,
         body: `You own ${r.usableCount} pieces that work for ${REGISTER_NOUN[r.register]}, but they're close enough to each other that they mostly make the same outfit. Buying more like them wouldn't widen what you can wear — a piece that contrasts with what you already own would.`,
         garmentIds: items
           .filter((g) => garmentRegister(g) === r.register && classifyUsability(g, passport).usability === "usable")

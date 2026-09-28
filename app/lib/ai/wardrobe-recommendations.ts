@@ -597,7 +597,9 @@ function buildRecommendation(
       : "";
   const coveragePrefix = coverageAdjective ? `${coverageAdjective} ` : "";
   const phrase = `${coveragePrefix}${structureWord}${REGISTER_WORD[register]} ${noun}${coverageSuffix}`;
-  const title = `${/^[aeiou]/i.test(phrase) ? "An" : "A"} ${phrase}`;
+  // "One option to explore" rather than a directive. The engine has evidence
+  // for a gap; it does not have evidence that buying is the only answer.
+  const title = `One option to explore: ${/^[aeiou]/i.test(phrase) ? "an" : "a"} ${phrase}`;
 
   // The body explains what it would DO, not what it is. The reason to buy is
   // the combinations it creates, and that number is measured, not asserted.
@@ -608,13 +610,16 @@ function buildRecommendation(
         ? `You own ${REGISTER_WORD[register]} pieces, but fewer of them meet the way you've told nAia you prefer to dress.`
         : `Your ${REGISTER_WORD[register]} dressing is the thinner side of your wardrobe.`;
 
-  // Colour is a ranked suggestion, not a specification. The lead is the colour
-  // she named that she owns least of, so it adds an option she does not have;
-  // the others are simply also inside her palette.
+  // Colour is a preference, never a reason.
+  //
+  // This used to say a colour "would add the most" because it was the named
+  // colour she owned least of. That is an overclaim: underrepresentation can
+  // refine a need that already exists, but it cannot create one or prove one.
+  // The wardrobe gap is the reason; colour only narrows what to look for.
   const colourNote = colourLead
-    ? ` ${capitaliseFirst(colourLead)} would add the most — it's the colour you named that your Closet has least of.${
+    ? ` ${capitaliseFirst(colourLead)} is a colour you said you like.${
         colourAlternatives.length > 0
-          ? ` ${capitaliseFirst(joinOr(colourAlternatives))} would also sit within the palette you told nAia you like.`
+          ? ` ${capitaliseFirst(joinOr(colourAlternatives))} are also within the palette you described.`
           : ""
       }`
     : "";
@@ -627,7 +632,7 @@ function buildRecommendation(
     attributes,
     body: selfSufficient
       ? `${reasonForGap} A piece like this is a complete look on its own, so it adds an option you can wear without needing anything else to work with it.${colourNote}`
-      : `${reasonForGap} A piece like this would work with ${best.length} of the pieces you already own, so it adds new ways to dress rather than another version of something you have.${colourNote}`,
+      : `${reasonForGap} A piece like this could pair with ${best.length} ${best.length === 1 ? "piece" : "pieces"} already in your Closet, so it adds ways to dress rather than another version of something you have.${colourNote}`,
     unlocksIds: best.slice(0, 6).map((g) => g.id),
     criteria,
     evidence,

@@ -2265,12 +2265,31 @@ function buildObservations(
   }
 
   // 3. FAVOURITE + ISOLATED.
+  //
+  // One-piece garments are excluded, and the exclusion is the whole point of
+  // this block being correct. A dress pairs only with outerwear; a top pairs
+  // with bottoms AND outerwear. In a real 46-piece Closet that is a structural
+  // ceiling of 6 partners for a dress against 17 for a top — so measuring a
+  // gown against a median drawn from tops and bottoms says nothing about the
+  // gown. It reports the shape of the slot graph as if it were a finding.
+  //
+  // An occasion dress with few partners is behaving exactly as an occasion
+  // dress should. If there is a genuine insight about such a piece it has to
+  // come from its role — occasion coverage, or the layers and shoes that
+  // finish it — not from a partner count it can never win.
   const favourites = coreGarments
+    .filter((g) => !ONE_PIECE_SLOTS.has(g.slot))
     .filter((g) => g.id !== contradictionStruggle?.id)
     .filter((g) => statedAs(g, STATED_REGULAR));
-  if (favourites.length >= 3 && medianPartners >= 3) {
+  const comparableCounts = coreGarments
+    .filter((g) => !ONE_PIECE_SLOTS.has(g.slot))
+    .map((g) => partnerCounts.get(g.id) ?? 0)
+    .sort((a, b) => a - b);
+  const medianComparable =
+    comparableCounts.length > 0 ? comparableCounts[Math.floor(comparableCounts.length / 2)] : 0;
+  if (favourites.length >= 3 && medianComparable >= 3) {
     const isolated = favourites
-      .filter((g) => (partnerCounts.get(g.id) ?? 0) <= Math.max(1, Math.floor(medianPartners / 3)))
+      .filter((g) => (partnerCounts.get(g.id) ?? 0) <= Math.max(1, Math.floor(medianComparable / 3)))
       .sort((a, b) => (partnerCounts.get(a.id) ?? 0) - (partnerCounts.get(b.id) ?? 0) || a.id.localeCompare(b.id))[0];
     if (isolated) {
       const count = partnerCounts.get(isolated.id) ?? 0;
@@ -2283,7 +2302,7 @@ function buildObservations(
         garmentIds: [isolated.id],
         evidence: [
           ev("self-reported-wardrobe", "garmentRelationships", `Marked as ${describeRelationships(isolated.garmentRelationships)}.`, [isolated.id]),
-          ev("garment-fact", "compatibility graph", `${count} compatible ${count === 1 ? "partner" : "partners"} against a wardrobe median of ${medianPartners}.`, [isolated.id]),
+          ev("garment-fact", "compatibility graph", `${count} compatible ${count === 1 ? "partner" : "partners"} against a median of ${medianComparable} for pieces of the same kind.`, [isolated.id]),
         ],
         action: { label: "See pieces", kind: "see-pieces" },
         gated: false,

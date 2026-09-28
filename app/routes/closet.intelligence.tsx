@@ -270,6 +270,11 @@ function EntryAction({
   if (action.kind === "link") {
     return <Link to={action.to} className="wi-note-action">{action.label}</Link>;
   }
+  // Moves to evidence already on this page. It cannot lose the garment context
+  // because it never leaves the page.
+  if (action.kind === "jump") {
+    return <a href={action.to} className="wi-note-action">{action.label}</a>;
+  }
   return (
     <>
       <button type="button" className="wi-note-action" aria-expanded={open} onClick={onToggle}>
@@ -535,10 +540,30 @@ function Block({
                     <span className="wi-match-state">{meta.stateText}</span>
                   </p>
                   <p className="wi-match-reading">{e.body}</p>
+                  <EntryAction
+                    entry={e}
+                    byId={byId}
+                    open={openId === e.id}
+                    onToggle={() => setOpenId(openId === e.id ? null : e.id)}
+                  />
                 </li>
               );
             })}
           </ul>
+        </div>
+      );
+
+    case "pointer-action":
+      return (
+        <div className="wi-block">
+          {label}
+          {block.entries.map((e) => (
+            <article key={e.id} className="wi-finding">
+              <h3 className="wi-finding-title">{e.title}</h3>
+              {e.body && <p className="wi-finding-body">{e.body}</p>}
+              <EntryAction entry={e} byId={byId} open={false} onToggle={() => {}} />
+            </article>
+          ))}
         </div>
       );
 
@@ -576,6 +601,9 @@ export default function WardrobeIntelligencePage() {
   const { page, garmentCards, footer } = useLoaderData<typeof loader>();
   const byId = new Map<string, GarmentCard>(garmentCards.map((c: GarmentCard) => [c.id, c]));
   const [openId, setOpenId] = useState<string | null>(null);
+  // The full question is a first-visit card. Once answered it collapses to a
+  // status line, reopening only if she chooses to change the answer.
+  const [editingCompleteness, setEditingCompleteness] = useState(false);
   const navigation = useNavigation();
   const saving = navigation.state !== "idle";
   const model = page as WardrobePage;
@@ -609,12 +637,24 @@ export default function WardrobeIntelligencePage() {
           </section>
         )}
 
-        {model.confidence === "unknown" && model.ready && (
+        {model.confidence !== "unknown" && model.ready && (
+          <p className="wi-basis-status">
+            Based on {model.closetCount} pieces
+            <span className="wi-basis-sep" aria-hidden="true">·</span>
+            {model.confidence === "mostly" ? "Most of your wardrobe added" : "You're still adding items"}
+            <span className="wi-basis-sep" aria-hidden="true">·</span>
+            <button type="button" className="wi-basis-change" onClick={() => setEditingCompleteness(true)}>
+              {model.confidence === "mostly" ? "Change" : "Update"}
+            </button>
+          </p>
+        )}
+
+        {(model.confidence === "unknown" || editingCompleteness) && model.ready && (
           <section className="wi-completeness">
             <p className="wi-completeness-q">Is this most of the wardrobe you currently wear?</p>
             <p className="wi-completeness-why">
-              nAia can only read what you've added. Knowing this changes how confidently it talks
-              about what you might be missing.
+              This helps nAia tell the difference between pieces you're missing and pieces you
+              haven't added yet.
             </p>
             <Form method="post" className="wi-completeness-answers">
               <button type="submit" name="closetCompleteness" value="mostly"
@@ -689,6 +729,11 @@ const css = `
   .wi-piece-name{font-family:var(--naia-ff-display);font-size:1.0625rem;line-height:1.25;margin:6px 0 8px;text-wrap:balance}
   .wi-piece-headline{margin:0 0 8px;font-size:.9375rem;line-height:1.55;color:var(--naia-ink)}
   .wi-piece-reason,.wi-piece-note{margin:0 0 8px;font-size:.875rem;line-height:1.6;color:rgba(40,21,12,0.72)}
+
+  /* Once answered, a compact editable status instead of the first-visit card. */
+  .wi-basis-status{font-family:var(--naia-ff-ui);font-size:11px;letter-spacing:.06em;color:rgba(40,21,12,0.6);margin:0 0 36px;display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+  .wi-basis-sep{opacity:.4}
+  .wi-basis-change{font:inherit;letter-spacing:inherit;color:var(--naia-ink);background:none;border:0;border-bottom:1px solid var(--naia-accent);padding:0;cursor:pointer}
 
   /* The completeness question. Asked once, plainly, and never again once
      answered. */

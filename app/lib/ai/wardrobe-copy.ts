@@ -99,7 +99,7 @@ export function registerDisplay(r: RegisterReading): RegisterDisplay {
 /** Hero labels as a description of what the piece DOES, not what we call it. */
 const HERO_LABEL_PLAIN: Readonly<Record<HeroLabel, string>> = {
   "most-versatile": "Most versatile",
-  "closet-connector": "Works with the most",
+  "closet-connector": "Closet connector",
   "passport-match": "Matches your style",
   "your-favourite": "Your favourite",
   "untapped-hero": "Underused",
@@ -168,15 +168,16 @@ const PAIR_REWRITES: ReadonlyArray<[RegExp, (m: RegExpExecArray) => string]> = [
   ],
   [
     /^The (.+) anchors the (.+)\.$/,
-    (m) => `The ${m[1]} is the calmer colour and balances the ${m[2]}, so the two are easy to wear together.`,
+    (m) => `The ${m[1]} is the calmer colour and balances the ${m[2]}.`,
   ],
   [
     /^One of them is a wardrobe neutral, so the pairing stays easy\.$/,
-    () => "One of them is a plain colour that goes with almost anything, which makes this an easy pairing.",
+    () => "One of these is an easy colour, which keeps the combination simple.",
   ],
   [
     /^Both are wardrobe neutrals, so nothing competes\.$/,
-    () => "Both are plain colours that go with almost anything, so neither one fights the other.",
+    // Kept count-agnostic: this can land on a three-piece row.
+    () => `The colours here are all easy ones, so nothing competes.`,
   ],
   [
     /^A (.+) shape against an? (.+) one keeps the proportions clear\.$/,
@@ -214,14 +215,28 @@ function rewriteOneReason(sentence: string): string {
  * @param pieceCount how many garments the row shows. The copy must never
  *   contradict the images beside it: "both" over three thumbnails is wrong.
  */
+/**
+ * Sentences that say nothing specific about THESE pieces.
+ *
+ * "The colours here are all easy ones" is true of half a neutral wardrobe. Next
+ * to a real observation about structure or proportion it is padding, and the
+ * feedback asked for it to go wherever structured evidence exists. It survives
+ * only when it is the only thing the engine could say.
+ */
+const GENERIC_PAIR_SENTENCE = /colours here are all easy ones|an easy colour, which keeps/i;
+
 export function plainPairReason(reason: string, pieceCount = 2): string {
   const subject =
     pieceCount <= 2 ? "both of these" : pieceCount === 3 ? "all three of these" : "these pieces";
   const sentences = reason.match(/[^.]+\./g);
   const rewritten = sentences
-    ? sentences.map((sentence) => rewriteOneReason(sentence.trim())).join(" ")
-    : rewriteOneReason(reason.trim());
-  return rewritten.split(PIECE_SUBJECT).join(subject);
+    ? sentences.map((sentence) => rewriteOneReason(sentence.trim()))
+    : [rewriteOneReason(reason.trim())];
+
+  const specific = rewritten.filter((t) => !GENERIC_PAIR_SENTENCE.test(t));
+  const kept = specific.length > 0 ? specific : rewritten;
+
+  return kept.join(" ").split(PIECE_SUBJECT).join(subject);
 }
 
 // ── Sentence-level rewrites used across several sections ──────────────────────

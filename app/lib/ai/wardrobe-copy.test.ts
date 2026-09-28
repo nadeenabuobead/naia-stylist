@@ -36,7 +36,7 @@ function makeRegister(overrides: Partial<RegisterReading> = {}): RegisterReading
     label: "everyday and casual",
     depthLabel: "Strong everyday depth",
     depthNote: "You already have plenty of usable combinations here.",
-    rawCount: 12, usableCount: 12, blockedCount: 0, unknownCount: 0,
+    rawCount: 12, usableCount: 12, blockedCount: 0, blockedPieces: [], unknownCount: 0,
     distinctLooks: 9, combinations: 144,
     needed: true, needSource: "lifestyle", needPhrase: "everyday dressing",
     ...overrides,
@@ -106,8 +106,8 @@ describe("§WC-2 pairing reasons lose the jargon, not the meaning", () => {
        /structured piece balances the softer one/],
       ["Both sit in the same purple family.", /Both are purple tones/],
       ["The charcoal anchors the mauve.", /charcoal is the calmer colour and balances the mauve/],
-      ["One of them is a wardrobe neutral, so the pairing stays easy.", /goes with almost anything/],
-      ["Both are wardrobe neutrals, so nothing competes.", /plain colours that go with almost anything/],
+      ["One of them is a wardrobe neutral, so the pairing stays easy.", /an easy colour, which keeps the combination simple/],
+      ["Both are wardrobe neutrals, so nothing competes.", /colours here are all easy ones/],
       ["A fitted shape against an oversized one keeps the proportions clear.",
        /fitted piece balances the fuller oversized one/],
       ["One carries more visual weight than the other, which stops the pairing flattening.",
@@ -245,7 +245,7 @@ describe("§WC-2 pairing reasons lose the jargon, not the meaning", () => {
 
 describe("§WC-3 labels describe what a thing does", () => {
   it("3 — hero labels say what the piece does for her", () => {
-    assert.equal(heroLabel("closet-connector", "Closet connector"), "Works with the most");
+    assert.equal(heroLabel("closet-connector", "Closet connector"), "Closet connector");
     assert.equal(heroLabel("passport-match", "Passport match"), "Matches your style");
     assert.equal(heroLabel("your-favourite", "Your favourite"), "Your favourite");
     assert.equal(heroLabel("most-versatile", "Most versatile"), "Most versatile");

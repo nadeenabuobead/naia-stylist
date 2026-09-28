@@ -418,7 +418,7 @@ describe("§WR-2n the ladder uses every signal it already has", () => {
       dressingPreferences: ["arms-covered"],
     }));
     for (const rec of recs.recommendations) {
-      assert.doesNotMatch(rec.title, /^A [aeiou]/i, `article disagrees: "${rec.title}"`);
+      assert.doesNotMatch(rec.title, /^One option to explore: a [aeiou]/i, `article disagrees: "${rec.title}"`);
     }
   });
 });
@@ -525,8 +525,10 @@ describe("§WR-2q colour reads as a choice, not a requirement", () => {
     }));
     const work = recs.recommendations.find((r) => r.register === "work");
     assert.ok(work);
-    assert.match(work!.body, /would add the most — it's the colour you named that your Closet has least of/);
-    assert.match(work!.body, /would also sit within the palette you told nAia you like/);
+    assert.match(work!.body, /is a colour you said you like\./);
+    // Underrepresentation may refine a need; it never creates or proves one.
+    assert.doesNotMatch(work!.body, /would add the most|colour you named that your Closet has least of/);
+    assert.match(work!.body, /are also within the palette you described/);
     // Alternatives are offered with "or", and only the sentence start is capitalised.
     assert.doesNotMatch(work!.body, /\bor [A-Z]/, "mid-sentence capital in the alternatives");
   });
@@ -563,7 +565,7 @@ describe("§WR-2r coverage belongs in the name, not beside it", () => {
     }));
     const work = recs.recommendations.find((r) => r.register === "work");
     assert.ok(work);
-    assert.match(work!.title, /^A full-length work bottom$/);
+    assert.match(work!.title, /^One option to explore: a full-length work bottom$/);
     // The attributes line carries the colour alone — the name already says the
     // rest, and "grey · full length" read as two equal tags for one garment.
     assert.ok(!work!.attributes.some((a) => a.kind === "coverage"), "coverage should not be repeated beside the name");
@@ -630,7 +632,7 @@ describe("§WR-3 the proposal has to work with what she owns", () => {
     const work = recs.recommendations.find((r) => r.register === "work");
     assert.ok(work);
     assert.ok(work!.unlocksIds.length > 0, "a recommendation must show what it unlocks");
-    assert.match(work!.body, /would work with \d+ of the pieces you already own/);
+    assert.match(work!.body, /could pair with \d+ pieces? already in your Closet/);
   });
 
   it("3b — nothing is recommended that would barely combine with anything", () => {
@@ -751,7 +753,7 @@ describe("§WR-6 nAia does not invent reasons", () => {
     ];
     const { recs } = run(items, makePassport({ lifestyle: ["everyday-casual", "work-office"] }));
     for (const rec of recs.recommendations.filter((r) => r.specificity !== "direction")) {
-      assert.match(rec.body, /adds new ways to dress rather than another version of something you have/);
+      assert.match(rec.body, /adds ways to dress rather than another version of something you have/);
     }
   });
 });

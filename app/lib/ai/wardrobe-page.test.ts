@@ -469,7 +469,7 @@ describe("§WP-8 partner counts reconcile", () => {
     const entry = page.sections.flatMap((s) => s.blocks).flatMap((b) => b.entries)
       .find((e) => e.claim === claims.garment("g1"))!;
     assert.equal(entry.action?.kind, "reveal");
-    assert.match(entry.action!.label, /See the 9 pieces it works with/);
+    assert.match(entry.action!.label, /See 9 matching pieces/);
     // The body did not state the count, so the button carries it.
     assert.equal((entry.action as { garmentIds: string[] }).garmentIds.length, 9);
     assert.deepEqual(entry.garmentIds, (entry.action as { garmentIds: string[] }).garmentIds);
@@ -487,7 +487,7 @@ describe("§WP-8 partner counts reconcile", () => {
     const page = buildWardrobePage(input);
     const entry = page.sections.flatMap((s) => s.blocks).flatMap((b) => b.entries)
       .find((e) => e.claim === claims.garment("g1"))!;
-    assert.equal(entry.action!.label, "See them");
+    assert.equal(entry.action!.label, "See matching pieces");
     assert.equal((entry.action as { garmentIds: string[] }).garmentIds.length, 9);
   });
 
@@ -505,7 +505,7 @@ describe("§WP-8 partner counts reconcile", () => {
     const page = buildWardrobePage(input);
     const entry = page.sections.flatMap((s) => s.blocks).flatMap((b) => b.entries)
       .find((e) => e.claim === claims.garment("g1"))!;
-    assert.match(entry.action!.label, /See the 1 piece it works with/);
+    assert.match(entry.action!.label, /See 1 matching piece/);
   });
 
   it("§WP-8c the shopping verdict never lists something that is not a priority", () => {
@@ -523,6 +523,6 @@ describe("§WP-8 partner counts reconcile", () => {
     const page = buildWardrobePage(baseInput());
     const copy = visibleCopy(page).join(" ");
     assert.doesNotMatch(copy, /a stylist has reviewed|stylist personally|reviewed by a stylist/i);
-    assert.match(copy, /approved style profile held against each of your pieces/i);
+    assert.match(copy, /Based on the approved style profile for each piece/i);
   });
 });

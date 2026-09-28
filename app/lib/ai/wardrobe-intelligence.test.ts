@@ -1211,6 +1211,28 @@ describe("§WI-14 contradiction insights", () => {
   });
 
   it("surfaces a favourite with unusually few partners", () => {
+    // A TOP with almost nothing to wear it with — a fair comparison, because
+    // tops and bottoms share the same structural ceiling.
+    const items = [
+      ...richWardrobe().map((g) =>
+        ["t1", "b1", "o1"].includes(g.id) ? { ...g, garmentRelationships: ["favourite"] } : g,
+      ),
+      makeGarment({
+        id: "lonely", name: "Burgundy Evening Blouse", category: "TOPS", slot: "top",
+        formality: "evening", garmentRelationships: ["favourite"],
+        colourProfile: { hueFamily: "red", wardrobeNeutral: false, lightDark: "dark", energyTier: "high-energy" },
+      }),
+    ];
+    const contradiction = run(items).observations.find((o) => o.kind === "contradiction-favourite-isolated");
+    assert.ok(contradiction);
+    assert.equal(contradiction!.garmentIds[0], "lonely");
+  });
+
+  it("never ranks a one-piece garment down for having fewer structural partners", () => {
+    // A dress pairs ONLY with outerwear; a top pairs with bottoms AND
+    // outerwear. On the real 46-piece Closet that is a ceiling of 6 against 17,
+    // so measuring a gown against a median drawn from tops and bottoms reports
+    // the shape of the slot graph as if it were a finding about the garment.
     const items = [
       ...richWardrobe().map((g) =>
         ["t1", "b1", "o1"].includes(g.id) ? { ...g, garmentRelationships: ["favourite"] } : g,
@@ -1222,8 +1244,26 @@ describe("§WI-14 contradiction insights", () => {
       }),
     ];
     const contradiction = run(items).observations.find((o) => o.kind === "contradiction-favourite-isolated");
-    assert.ok(contradiction);
-    assert.equal(contradiction!.garmentIds[0], "gown");
+    assert.notEqual(contradiction?.garmentIds[0], "gown",
+      "an occasion dress with few partners is behaving as an occasion dress should");
+  });
+
+  it("a one-piece garment does not drag the comparison median down either", () => {
+    // Excluding dresses from the candidate pool is not enough — they must also
+    // be out of the median, or every other piece is measured against a number
+    // the slot graph deflated.
+    const withDresses = [
+      ...richWardrobe().map((g) => (["t1", "b1", "o1"].includes(g.id) ? { ...g, garmentRelationships: ["favourite"] } : g)),
+      makeGarment({ id: "d2", category: "DRESSES", slot: "dress", formality: "smart-casual" }),
+      makeGarment({ id: "d3", category: "DRESSES", slot: "dress", formality: "smart-casual" }),
+      makeGarment({
+        id: "lonely", name: "Burgundy Evening Blouse", category: "TOPS", slot: "top",
+        formality: "evening", garmentRelationships: ["favourite"],
+        colourProfile: { hueFamily: "red", wardrobeNeutral: false, lightDark: "dark", energyTier: "high-energy" },
+      }),
+    ];
+    const found = run(withDresses).observations.find((o) => o.kind === "contradiction-favourite-isolated");
+    assert.equal(found?.garmentIds[0], "lonely", "the top is still the finding, not a dress");
   });
 
   it("does not force a contradiction when nothing contradicts", () => {
