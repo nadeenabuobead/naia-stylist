@@ -10,8 +10,9 @@
 //
 // Auth: requireAdminSession.
 
-import { Link, useLoaderData } from "react-router";
-import type { LoaderFunctionArgs } from "react-router";
+import { Link, useLoaderData, useFetcher } from "react-router";
+import { data, type LoaderFunctionArgs, type ActionFunctionArgs } from "react-router";
+import prisma from "~/db.server";
 import { requireAdminSession } from "~/lib/internal-auth.server";
 import { splitStyleExpression } from "~/lib/passport/rev7-vocabulary";
 import {
@@ -26,7 +27,54 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   if (!customerId) throw new Response("Not found", { status: 404 });
   const customer = await getAdminCustomerDetail(customerId);
   if (!customer) throw new Response("Customer not found", { status: 404 });
-  return Response.json({ customer });
+
+  // Read separately and defensively: the column arrives with the Wardrobe
+  // Intelligence migration, and this page must not break before it runs.
+  let accountType = "CUSTOMER";
+  try {
+    const row = await (prisma as unknown as {
+      customer: { findUnique(a: unknown): Promise<{ accountType: string } | null> };
+    }).customer.findUnique({ where: { id: customerId }, select: { accountType: true } });
+    accountType = row?.accountType ?? "CUSTOMER";
+  } catch {
+    accountType = "CUSTOMER";
+  }
+
+  return Response.json({ customer, accountType });
+}
+
+/** The account types an operator may set. */
+const ACCOUNT_TYPES = ["CUSTOMER", "TEST", "DEMO", "QA"] as const;
+
+/**
+ * Marking an account as ours.
+ *
+ * Deliberately a written column rather than an email-pattern rule: patterns
+ * drift, and the day one stops matching is the day test activity starts
+ * counting as customer demand. Owner-only, because misclassifying a real
+ * customer silently removes them from every aggregate.
+ */
+export async function action({ request, params }: ActionFunctionArgs) {
+  const session = await requireAdminSession(request);
+  if (session.identity.role !== "owner") {
+    return data({ ok: false, error: "Only an owner can change an account type." }, { status: 403 });
+  }
+
+  const { customerId } = params;
+  if (!customerId) return data({ ok: false, error: "Missing customer." }, { status: 400 });
+
+  const form = await request.formData();
+  const next = String(form.get("accountType") ?? "");
+  if (!ACCOUNT_TYPES.includes(next as (typeof ACCOUNT_TYPES)[number])) {
+    return data({ ok: false, error: "Unknown account type." }, { status: 400 });
+  }
+
+  await (prisma as unknown as { customer: { update(a: unknown): Promise<unknown> } }).customer.update({
+    where: { id: customerId },
+    data: { accountType: next },
+  });
+
+  return data({ ok: true, accountType: next });
 }
 
 // ── Label maps (same as closet detail page) ────────────────────────────────
@@ -364,7 +412,9 @@ function ClosetSummarySection({
 // ── Page ───────────────────────────────────────────────────────────────────
 
 export default function AdminCustomerDetailPage() {
-  const { customer } = useLoaderData() as { customer: AdminCustomerDetail };
+  const { customer, accountType } = useLoaderData() as { customer: AdminCustomerDetail; accountType: string };
+  const typeFetcher = useFetcher<{ ok: boolean; error?: string; accountType?: string }>();
+  const currentType = typeFetcher.data?.accountType ?? accountType;
 
   return (
     <div className="na-page">
@@ -381,6 +431,35 @@ export default function AdminCustomerDetailPage() {
       <p style={{ fontSize: "0.8rem", color: "#6b7280", marginBottom: "1.5rem" }}>
         What does nAia think it knows about this person?
       </p>
+
+      {/* ── Account type ───────────────────────────────────────────────────
+          Ours or theirs. Written deliberately rather than inferred from an
+          email pattern, because the day a pattern stops matching is the day
+          test activity starts counting as customer demand. Only accounts
+          marked CUSTOMER are eligible for aggregated design research. */}
+      <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap",
+                    border: "1px solid #e5e7eb", borderRadius: "6px", padding: "0.75rem 1rem", marginBottom: "1.5rem" }}>
+        <span style={{ fontSize: "0.72rem", letterSpacing: "0.08em", textTransform: "uppercase", color: "#6b7280" }}>
+          Account type
+        </span>
+        <strong style={{ fontSize: "0.85rem" }}>{currentType}</strong>
+        <span style={{ fontSize: "0.75rem", color: "#9ca3af" }}>
+          {currentType === "CUSTOMER"
+            ? "Counts towards aggregated design research when they have opted in."
+            : "Excluded from every aggregate, whatever their consent says."}
+        </span>
+        <typeFetcher.Form method="post" style={{ marginLeft: "auto", display: "flex", gap: "0.5rem" }}>
+          <select name="accountType" defaultValue={currentType} style={{ fontSize: "0.8rem", padding: "0.3rem 0.5rem" }}>
+            {["CUSTOMER", "TEST", "DEMO", "QA"].map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+          <button type="submit" className="na-btn" disabled={typeFetcher.state !== "idle"}>
+            {typeFetcher.state !== "idle" ? "Saving…" : "Set"}
+          </button>
+        </typeFetcher.Form>
+        {typeFetcher.data?.error && (
+          <span style={{ fontSize: "0.75rem", color: "#b91c1c", width: "100%" }}>{typeFetcher.data.error}</span>
+        )}
+      </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: "1.25rem", alignItems: "start" }}>
 
