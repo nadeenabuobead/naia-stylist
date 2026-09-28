@@ -73,6 +73,16 @@ export interface RecommendationFeedbackRecord {
   suggestionId: string | null;
   target: FeedbackTarget;
   shopifyProductId: string | null;
+  /**
+   * Variant and size, only where the capturing flow genuinely knew them.
+   *
+   * These are what let a later analysis separate a design objection from a fit
+   * problem. Nothing infers them — a missing size stays missing, and the
+   * complaint stays unattributed rather than being assigned a cause it does not
+   * have evidence for.
+   */
+  shopifyVariantId?: string | null;
+  sizeLabel?: string | null;
   closetItemId: string | null;
   rating: FeedbackRating;
   reasonCodes: FeedbackReason[];

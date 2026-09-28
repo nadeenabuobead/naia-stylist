@@ -198,6 +198,12 @@ function _toRecord(r: any): RecommendationFeedbackRecord {
     suggestionId:    r.suggestionId ?? null,
     target:          r.target,
     shopifyProductId: r.shopifyProductId ?? null,
+    // Present only where the flow genuinely knew them. Never back-filled or
+    // guessed: without a variant and size, a complaint cannot honestly be split
+    // into "the design is wrong for me" versus "this one didn't fit", and it is
+    // better to leave that unanswered than to invent an answer.
+    shopifyVariantId: r.shopifyVariantId ?? null,
+    sizeLabel:        r.sizeLabel ?? null,
     closetItemId:    r.closetItemId  ?? null,
     rating:          r.rating,
     reasonCodes:     Array.isArray(r.reasonCodes)  ? r.reasonCodes  : [],
