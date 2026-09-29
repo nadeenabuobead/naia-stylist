@@ -485,13 +485,16 @@ export function lifestyleMatch(displays: RegisterDisplay[]): MatchDimension | nu
     .filter((d) => d.state === "needs-range" || d.state === "less-than-it-looks" || d.state === "empty")
     .map((d) => d.heading.toLowerCase());
 
+  // "Covered" is avoided throughout: WI also uses coverage for a stated
+  // dressing/coverage preference, and the same word meaning two different
+  // things one screen apart is exactly the ambiguity that got flagged.
   if (strong.length > 0 && weak.length > 0) {
     return {
       id: "match-lifestyle",
       dimension: "Lifestyle",
       state: "partial",
       stateText: MATCH_STATE_TEXT.partial,
-      reading: `${sentenceCase(joinPlain(strong))} ${strong.length === 1 ? "is" : "are"} well covered. ${sentenceCase(joinPlain(weak))} ${weak.length === 1 ? "has" : "have"} less variety.`,
+      reading: `You have plenty of ${joinPlain(strong)} options. Your ${joinPlain(weak)} wardrobe ${weak.length === 1 ? "has" : "have"} fewer ways to combine.`,
     };
   }
   if (weak.length === 0) {
@@ -500,7 +503,7 @@ export function lifestyleMatch(displays: RegisterDisplay[]): MatchDimension | nu
       dimension: "Lifestyle",
       state: "strong",
       stateText: MATCH_STATE_TEXT.strong,
-      reading: "Every kind of dressing you told nAia about is covered by what you own.",
+      reading: "You have what you need for every kind of dressing you told nAia about.",
     };
   }
   return {
@@ -508,7 +511,7 @@ export function lifestyleMatch(displays: RegisterDisplay[]): MatchDimension | nu
     dimension: "Lifestyle",
     state: "gap",
     stateText: MATCH_STATE_TEXT.gap,
-    reading: `${sentenceCase(joinPlain(weak))} ${weak.length === 1 ? "has" : "have"} less variety than the life you described.`,
+    reading: `Your ${joinPlain(weak)} wardrobe ${weak.length === 1 ? "has" : "have"} fewer ways to combine than the life you described.`,
   };
 }
 

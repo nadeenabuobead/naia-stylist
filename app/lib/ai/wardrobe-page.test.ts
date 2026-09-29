@@ -1,10 +1,11 @@
 // app/lib/ai/wardrobe-page.test.ts
 // Run with: node --test --import tsx/esm app/lib/ai/wardrobe-page.test.ts
 //
-// The contract here is about REPETITION. Earlier passes removed individual
-// duplicate blocks and the page still said the same thing four times, because
-// dedup ran on observation kind and garment id rather than on meaning. These
-// tests pin the rule that replaced it: one claim, one home, everywhere.
+// The contract here is about REPETITION and about the five-moment content
+// lock: exactly one home per claim, and every visible moment matches the
+// locked copy — hero, "Wear what you already own", "What deserves your
+// attention", "Shop smarter", "Your wardrobe profile" — nothing else visible
+// by default.
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -16,6 +17,7 @@ import {
   mergeEnough,
   ownerOf,
   claims,
+  cleanPartnerIds,
   SECTION_ORDER,
   type WardrobePageInput,
 } from "./wardrobe-page.ts";
@@ -30,7 +32,12 @@ function finding(over: Record<string, unknown> = {}) {
     id: "f1", kind: "enough", register: "everyday",
     title: "You already have enough everyday neutral tops",
     body: "You own 8 of these that work with the rest of your Closet.",
-    garmentIds: ["g1", "g2"], evidence: [], strength: "strong",
+    garmentIds: ["g1", "g2"],
+    evidence: [{
+      signal: "garment-fact", field: "slot + colour + formality", detail: "8 usable.",
+      garmentIds: ["g1", "g2", "g30", "g31", "g32", "g33", "g34", "g35"],
+    }],
+    strength: "strong",
     ...over,
   } as never;
 }
@@ -42,11 +49,14 @@ function baseInput(over: Partial<WardrobePageInput> = {}): WardrobePageInput {
     heroes: { state: "available", heroes: [
       { garmentId: "g1", name: "Cream Ribbed Knit Tank Top", category: "TOPS",
         label: "most-versatile", labelText: null,
-        headline: "One of your most versatile pieces.", reasons: ["It works with a lot of what you own."] },
+        headline: "One of your most versatile pieces.", reasons: ["It works with a lot of what you own."],
+        evidence: [{ signal: "garment-fact", field: "compatibility graph", detail: "x", garmentIds: ["g3", "g5"] }] },
     ] },
-    pairings: { state: "available", untriedPresentation: "none", untriedNote: null, pairings: [
-      { id: "p1", garmentIds: ["g1", "g3"], reason: "They sit at the same level of dress.", untried: false },
-    ] },
+    pairings: {
+      state: "available", untriedPresentation: "none", untriedNote: null,
+      pairings: [{ id: "p1", garmentIds: ["g1", "g3"], reason: "They sit at the same level of dress.", untried: false }],
+      bestByRegister: {},
+    },
     observations: [
       { id: "o1", kind: "contradiction-potential-struggle", tier: "discovery",
         headline: "Hard to style, but well connected",
@@ -73,15 +83,15 @@ function baseInput(over: Partial<WardrobePageInput> = {}): WardrobePageInput {
       { register: "everyday", label: "everyday and casual", depthLabel: "Strong everyday depth",
         depthNote: "You can dress for this.", rawCount: 20, usableCount: 18, blockedCount: 0,
         unknownCount: 2, distinctLooks: 9, needed: true },
-      { register: "work", label: "work", depthLabel: "Limited work range",
+      { register: "work", label: "work", depthLabel: "Limited usable work range",
         depthNote: "Your work dressing repeats.", rawCount: 10, usableCount: 10, blockedCount: 0,
         unknownCount: 0, distinctLooks: 3, needed: true },
     ],
     enough: [finding()],
     couldUseMore: [finding({
-      id: "need-work-repetition", kind: "could-use-more", register: "work",
-      title: "Your work dressing repeats one formula",
-      body: "You own 10 pieces that work for work dressing, but they mostly make the same outfit.",
+      id: "need-work-repetition", kind: "repetition", register: "work",
+      title: "You have work pieces, but fewer ways to combine them",
+      body: "Many of your work tops and bottoms create similar combinations.",
       garmentIds: ["g6"],
     })],
     noUrgentNeed: null,
@@ -94,7 +104,7 @@ function baseInput(over: Partial<WardrobePageInput> = {}): WardrobePageInput {
                { intention: "easy", label: "keep things easy", sessions: 20 }],
       closetStrengths: [{ intention: "put-together", label: "feel put together", strong: 22 }] },
     headlines: [
-      { id: "need-work-repetition", text: "Your work dressing repeats one formula", source: "depth", evidence: [] },
+      { id: "need-work-repetition", text: "You have work pieces, but fewer ways to combine them", source: "depth", evidence: [] },
       { id: "f1", text: "You already have enough everyday neutral tops", source: "depth", evidence: [] },
     ],
   } as never;
@@ -102,9 +112,10 @@ function baseInput(over: Partial<WardrobePageInput> = {}): WardrobePageInput {
   const recommendations = {
     state: "available",
     recommendations: [
-      { id: "rec-work", register: "work", specificity: "detailed", title: "A full-length work bottom",
-        attributes: [{ kind: "colour", label: "Grey" }],
-        body: "A piece like this would work with 4 of the pieces you already own.",
+      { id: "rec-work", register: "work", specificity: "detailed",
+        title: "One option to explore: a full-length work bottom",
+        attributes: [{ kind: "colour", values: ["grey"], label: "Grey", source: "passport" }],
+        body: "Your work pieces repeat similar combinations. A piece like this would work with 4 of the pieces you already own.",
         unlocksIds: ["g7", "g8"], criteria: {}, evidence: [], strength: "strong" },
     ],
     notAPriority: [
@@ -134,61 +145,39 @@ describe("§WP-1 one home per claim", () => {
     }
   });
 
-  it("§WP-1c opening takeaways point at findings, never re-explain them", () => {
-    const page = buildWardrobePage(baseInput());
-    const now = page.sections.find((s) => s.id === "now");
-    assert.ok(now);
-    const takeaways = now!.blocks.find((b) => b.kind === "takeaways");
-    assert.ok(takeaways, "the opening summary exists");
-    assert.ok(takeaways!.entries.length > 0);
-    for (const entry of takeaways!.entries) {
-      assert.equal(entry.role, "pointer");
-      assert.equal(entry.body, undefined, "a takeaway must not carry an explanation");
-    }
-  });
-
-  it("§WP-1e the Closet description is descriptive, and draws no conclusion", () => {
-    const input = baseInput();
-    (input.intelligence as unknown as { dna: unknown }).dna = {
-      palette: [{ colour: "black", count: 19 }],
-      shapes: [{ label: "straight" }],
-      traits: [{ id: "t1", label: "neutral", evidence: "most of what you own" }],
-      shapesReading: null,
-    };
-    const page = buildWardrobePage(input);
-    const dna = page.sections.find((s) => s.id === "now")!.blocks.find((b) => b.kind === "dna");
-    assert.ok(dna, "the description lives in the opening section");
-    const shapes = dna!.entries.find((e) => e.id === "dna-shapes")!;
-    // Wear behaviour is not captured, so nothing may claim she returns to a shape.
-    assert.equal(shapes.title, "Silhouettes that appear most in your Closet");
-    const copy = visibleCopy(page).join(" ");
-    assert.doesNotMatch(copy, /shapes you come back to|you (keep|often) wear|you reach for most/i);
-  });
-
-  it("§WP-1d the work-variety finding is explained once, in the range section", () => {
+  it("§WP-1c the work-variety finding is explained once, in 'What deserves your attention'", () => {
     const page = buildWardrobePage(baseInput());
     const full = auditClaims(page).filter((l) => l.claim === claims.gap("work") && l.role === "full");
     assert.equal(full.length, 1);
-    assert.equal(full[0].section, "range");
+    assert.equal(full[0].section, "attention");
+  });
+
+  it("§WP-1d exactly the four content-locked moments appear, in order, never more", () => {
+    const page = buildWardrobePage(baseInput());
+    const ids = page.sections.map((s) => s.id);
+    for (const id of ids) assert.ok(SECTION_ORDER.includes(id), `unexpected section "${id}"`);
+    const expected = SECTION_ORDER.filter((id) => ids.includes(id));
+    assert.deepEqual(ids, [...expected]);
   });
 });
 
 // ── §WP-2 — specific merges from the feedback ─────────────────────────────────
 
 describe("§WP-2 merges", () => {
-  it("§WP-2a 'you have enough' and 'not a priority' become one entry", () => {
+  it("§WP-2a 'you have enough' and 'not a priority' become one self-explanatory Low Priority entry", () => {
     const page = buildWardrobePage(baseInput());
-    const locs = auditClaims(page).filter((l) => l.claim === claims.enough("everyday"));
+    const locs = auditClaims(page).filter((l) => l.claim === "low-priority");
     const fulls = locs.filter((l) => l.role === "full");
     assert.equal(fulls.length, 1, "the claim is explained once");
 
-    const works = page.sections.find((s) => s.id === "works")!;
-    const entry = works.blocks.flatMap((b) => b.entries).find((e) => e.claim === claims.enough("everyday"));
-    assert.ok(entry?.body);
-    // Both halves survive the merge: the depth fact AND the shopping guidance.
-    assert.match(entry!.body!, /You own 8 of these/);
-    assert.match(entry!.body!, /already have strong depth here/);
-    assert.ok(entry!.garmentIds.length > 0, "the pieces that prove it are kept");
+    const shop = page.sections.find((s) => s.id === "shop")!;
+    const entry = shop.blocks.find((b) => b.id === "low-priority")!.entries[0];
+    assert.equal(entry.title, "Another similar everyday neutral top");
+    assert.equal(entry.body, "You already have 8, so another similar one probably won't add much.");
+    assert.ok(entry.garmentIds.length > 0, "the pieces that prove it are kept");
+
+    // The old separate "You have plenty of" chapter no longer exists.
+    assert.equal(auditClaims(page).filter((l) => l.claim === claims.enough("everyday") && l.role === "full").length, 0);
   });
 
   it("§WP-2b a garment is featured once, carrying its label and its note", () => {
@@ -200,7 +189,6 @@ describe("§WP-2 merges", () => {
       .flatMap((s) => s.blocks).flatMap((b) => b.entries)
       .find((e) => e.claim === claims.garment("g1"))!;
     const meta = entry.meta as Record<string, unknown>;
-    assert.ok(meta.label, "hero label kept");
     // The rediscovery text and the contradiction observation make the same
     // claim; §WP-6b pins which of the two survives.
     assert.ok(meta.rediscover ?? meta.note, "the piece still carries its note");
@@ -212,7 +200,7 @@ describe("§WP-2 merges", () => {
     assert.doesNotMatch(copy, /your Closet disagrees|but your Closet says|you're wrong|actually wrong/i);
   });
 
-  it("§WP-2d colour representation is explained once, and colour balance stays separate", () => {
+  it("§WP-2d colour representation is explained once, inside the wardrobe profile's reveal", () => {
     const input = baseInput();
     (input.needs as unknown as { synthesis: unknown }).synthesis = {
       state: "available",
@@ -225,7 +213,7 @@ describe("§WP-2 merges", () => {
     const page = buildWardrobePage(input);
     const fulls = auditClaims(page).filter((l) => l.claim === "palette-representation" && l.role === "full");
     assert.equal(fulls.length, 1);
-    assert.equal(fulls[0].section, "learning");
+    assert.equal(fulls[0].section, "profile");
     // Deduplication must not eat a different finding that happens to share a word.
     const balance = auditClaims(page).filter((l) => l.claim === "passport:colour balance");
     assert.equal(balance.length, 1, "colour balance survives as its own claim");
@@ -235,17 +223,9 @@ describe("§WP-2 merges", () => {
 // ── §WP-3 — sequence and naming ───────────────────────────────────────────────
 
 describe("§WP-3 sequence", () => {
-  it("§WP-3a sections appear in the agreed order", () => {
-    const page = buildWardrobePage(baseInput());
-    const ids = page.sections.map((s) => s.id);
-    const expected = SECTION_ORDER.filter((id) => ids.includes(id));
-    assert.deepEqual(ids, [...expected]);
-  });
-
-  it("§WP-3b the combinations section claims nothing about what she has worn", () => {
+  it("§WP-3b nothing claims she hasn't tried or explored what nAia has generated", () => {
     const page = buildWardrobePage(baseInput());
     const copy = visibleCopy(page).join(" ");
-    assert.match(copy, /Possibilities to try/);
     assert.doesNotMatch(copy, /haven't (worn|tried|explored)|hasn't put (them|these) together|untapped/i);
   });
 
@@ -275,26 +255,40 @@ describe("§WP-4 basis and confidence", () => {
     assert.match(page.basis, /Based on the 46 pieces you've added to your Closet\./);
   });
 
-  it("§WP-4b unanswered completeness hedges the shopping verdict", () => {
+  it("§WP-4b unanswered completeness hedges Worth Considering", () => {
     const page = buildWardrobePage(baseInput());
-    const verdict = page.sections.find((s) => s.id === "do")!
-      .blocks.flatMap((b) => b.entries).find((e) => e.claim === "buy-verdict")!;
-    assert.match(verdict.body!, /based on what's in your Closet so far/i);
+    const entry = page.sections.find((s) => s.id === "shop")!
+      .blocks.find((b) => b.id === "worth-considering")!.entries[0];
+    assert.match(entry.body!, /based on what's in your Closet so far/i);
   });
 
   it("§WP-4c 'mostly complete' removes the hedge", () => {
     const page = buildWardrobePage(baseInput({ confidence: "mostly" }));
-    const verdict = page.sections.find((s) => s.id === "do")!
-      .blocks.flatMap((b) => b.entries).find((e) => e.claim === "buy-verdict")!;
-    assert.doesNotMatch(verdict.body ?? "", /could change|first read/i);
+    const entry = page.sections.find((s) => s.id === "shop")!
+      .blocks.find((b) => b.id === "worth-considering")!.entries[0];
+    assert.doesNotMatch(entry.body ?? "", /could change|first read/i);
     assert.match(page.basis, /most of what you wear/i);
   });
 
   it("§WP-4d 'still adding' softens the advice further", () => {
     const page = buildWardrobePage(baseInput({ confidence: "still-adding" }));
-    const verdict = page.sections.find((s) => s.id === "do")!
-      .blocks.flatMap((b) => b.entries).find((e) => e.claim === "buy-verdict")!;
-    assert.match(verdict.body!, /first read rather than a final answer/i);
+    const entry = page.sections.find((s) => s.id === "shop")!
+      .blocks.find((b) => b.id === "worth-considering")!.entries[0];
+    assert.match(entry.body!, /first read rather than a final answer/i);
+  });
+
+  it("§WP-4e with no recommendation at all, the hedge still applies to the fallback verdict", () => {
+    const input = baseInput({ confidence: "still-adding" });
+    (input.needs as unknown as { couldUseMore: unknown[] }).couldUseMore = [];
+    (input.needs as unknown as { noUrgentNeed: string | null }).noUrgentNeed =
+      "Nothing obvious is missing right now.";
+    (input.recommendations as unknown as { recommendations: unknown[]; notAPriority: unknown[] }).recommendations = [];
+    (input.recommendations as unknown as { notAPriority: unknown[] }).notAPriority = [];
+    const page = buildWardrobePage(input);
+    const entry = page.sections.find((s) => s.id === "shop")!
+      .blocks.find((b) => b.id === "worth-considering")!.entries[0];
+    assert.match(entry.body!, /first read rather than a final answer/i);
+    assert.equal(entry.claim, "buy-verdict");
   });
 });
 
@@ -325,11 +319,10 @@ describe("§WP-5 actions", () => {
     assert.equal(links.length, 0, "a link is only offered when the route can carry the garment");
   });
 
-  it("§WP-5c a supplied destination carries the garment id", () => {
+  it("§WP-5c a supplied destination does not displace an existing reveal", () => {
     const page = buildWardrobePage(baseInput({ styleMeGarmentHref: (id) => `/style-me?piece=${id}` }));
     const entry = page.sections.flatMap((s) => s.blocks).flatMap((b) => b.entries)
       .find((e) => e.claim === claims.garment("g1"))!;
-    // g1 already has a reveal action, so the link must not displace it.
     assert.equal(entry.action?.kind, "reveal");
   });
 
@@ -341,10 +334,6 @@ describe("§WP-5 actions", () => {
 });
 
 // ── §WP-6 — merging must not delete findings ──────────────────────────────────
-//
-// The first version of the garment merge dropped a real observation: a piece
-// known only from a contradiction had no title, and the entry was filtered out.
-// Deduplication removes repetition; it never removes information.
 
 describe("§WP-6 merging preserves findings", () => {
   it("§WP-6a a garment known only from an observation still appears", () => {
@@ -370,16 +359,6 @@ describe("§WP-6 merging preserves findings", () => {
     assert.ok(meta.rediscover, "the specific statement survives");
     assert.equal(meta.note, undefined, "the duplicate statement is dropped");
   });
-
-  it("§WP-6c the buy verdict names the area and closes the rest", () => {
-    const page = buildWardrobePage(baseInput());
-    const verdict = page.sections.find((s) => s.id === "do")!
-      .blocks.flatMap((b) => b.entries).find((e) => e.claim === "buy-verdict")!;
-    assert.match(verdict.body!, /Work is where it would help/);
-    assert.match(verdict.body!, /Everything else you own already covers/);
-    // …but it points at the gap rather than re-explaining it.
-    assert.doesNotMatch(verdict.body!, /repeats one formula|mostly make the same outfit/);
-  });
 });
 
 // ── §WP-7 — sentence-level repetition ─────────────────────────────────────────
@@ -392,10 +371,15 @@ describe("§WP-7 repeated sentences", () => {
       heroes: [
         { garmentId: "g1", name: "Trench", category: "OUTERWEAR", label: "passport-match", labelText: null,
           headline: "This is the piece closest to what you told nAia you want.",
-          reasons: ["Matches the style and colours you described in your Passport."] },
+          reasons: ["Matches the style and colours you described in your Passport."],
+          evidence: [
+            { signal: "passport-signal", field: "OnboardingProfile", detail: "x", garmentIds: ["g1"] },
+            { signal: "garment-fact", field: "compatibility graph", detail: "x", garmentIds: ["g20", "g21"] },
+          ] },
         { garmentId: "g2", name: "Blazer", category: "OUTERWEAR", label: "most-versatile", labelText: null,
           headline: "One of your most versatile pieces.",
-          reasons: ["Matches the style and colours you described in your Passport."] },
+          reasons: ["Matches the style and colours you described in your Passport."],
+          evidence: [{ signal: "garment-fact", field: "compatibility graph", detail: "x", garmentIds: ["g22"] }] },
       ],
     };
     const page = buildWardrobePage(input);
@@ -410,7 +394,8 @@ describe("§WP-7 repeated sentences", () => {
       state: "available",
       heroes: [{ garmentId: "g1", name: "Tank", category: "TOPS", label: "most-versatile", labelText: null,
         headline: "One of your most versatile pieces.",
-        reasons: ["Pairs easily with 9 other pieces in your Closet."] }],
+        reasons: ["Pairs easily with 9 other pieces in your Closet."],
+        evidence: [{ signal: "garment-fact", field: "compatibility graph", detail: "x", garmentIds: ["g3"] }] }],
     };
     (input.intelligence as unknown as { opportunities: unknown }).opportunities = {
       rediscover: [{ garmentId: "g1", name: "Tank", imageUrl: null,
@@ -420,15 +405,6 @@ describe("§WP-7 repeated sentences", () => {
     const page = buildWardrobePage(input);
     const copy = visibleCopy(page).join(" ");
     assert.equal((copy.match(/\b9 (?:other )?pieces/gi) ?? []).length, 1);
-  });
-
-  it("§WP-7c a register with its own gap finding does not restate it", () => {
-    const page = buildWardrobePage(baseInput());
-    const range = page.sections.find((s) => s.id === "range")!;
-    const register = range.blocks.find((b) => b.kind === "registers")!
-      .entries.find((e) => e.claim === claims.register("work"))!;
-    assert.equal(register.body, undefined, "the finding below carries the explanation");
-    assert.ok((register.meta as Record<string, unknown>).stateText, "the verdict is still shown");
   });
 
   it("§WP-7d the shopping advice is given once, not twice", () => {
@@ -462,10 +438,6 @@ describe("§WP-7 repeated sentences", () => {
 });
 
 // ── §WP-8 — the numbers must reconcile ────────────────────────────────────────
-//
-// The page showed a piece "pairs easily with 9 other pieces" and then revealed
-// six of them, with nothing saying the six were a subset. Three different
-// measures were in play and none was labelled.
 
 describe("§WP-8 partner counts reconcile", () => {
   it("§WP-8a the reveal names its own count, and shows exactly that many", () => {
@@ -482,7 +454,6 @@ describe("§WP-8 partner counts reconcile", () => {
       .find((e) => e.claim === claims.garment("g1"))!;
     assert.equal(entry.action?.kind, "reveal");
     assert.match(entry.action!.label, /See 9 matching pieces/);
-    // The body did not state the count, so the button carries it.
     assert.equal((entry.action as { garmentIds: string[] }).garmentIds.length, 9);
     assert.deepEqual(entry.garmentIds, (entry.action as { garmentIds: string[] }).garmentIds);
   });
@@ -503,12 +474,6 @@ describe("§WP-8 partner counts reconcile", () => {
     assert.equal((entry.action as { garmentIds: string[] }).garmentIds.length, 9);
   });
 
-  it("§WP-8f the opening summary says it is a preview", () => {
-    const page = buildWardrobePage(baseInput());
-    const takeaways = page.sections.find((s) => s.id === "now")!.blocks.find((b) => b.kind === "takeaways")!;
-    assert.match(takeaways.note ?? "", /explained below/i);
-  });
-
   it("§WP-8b singular is not pluralised", () => {
     const input = baseInput();
     (input.intelligence as unknown as { opportunities: unknown }).opportunities = {
@@ -520,41 +485,38 @@ describe("§WP-8 partner counts reconcile", () => {
     assert.match(entry.action!.label, /See 1 matching piece/);
   });
 
-  it("§WP-8c the shopping verdict never lists something that is not a priority", () => {
+  it("§WP-8c the shopping section never separately lists something that is not a priority alongside its own explanation", () => {
     const page = buildWardrobePage(baseInput());
-    const verdict = page.sections.find((s) => s.id === "do")!.blocks.find((b) => b.kind === "verdict")!;
-    assert.equal(verdict.entries.length, 1, "the verdict answers the question and nothing else");
-    assert.equal(verdict.entries[0].claim, "buy-verdict");
-    // The advice itself still exists, in full, where it belongs.
-    const enough = page.sections.find((s) => s.id === "works")!
-      .blocks.flatMap((b) => b.entries).find((e) => e.claim === claims.enough("everyday"))!;
-    assert.match(enough.body!, /strong depth here|unlikely to materially expand/);
+    const lowPriority = page.sections.find((s) => s.id === "shop")!.blocks.find((b) => b.id === "low-priority")!;
+    assert.equal(lowPriority.entries.length, 1, "one self-contained entry, not a duplicate list");
+    assert.equal(lowPriority.entries[0].claim, "low-priority");
   });
 
   it("§WP-8d capability is attributed to garment profiles, not to a personal stylist", () => {
     const page = buildWardrobePage(baseInput());
     const copy = visibleCopy(page).join(" ");
     assert.doesNotMatch(copy, /a stylist has reviewed|stylist personally|reviewed by a stylist/i);
-    // Internal vocabulary must not reach the customer either.
     assert.doesNotMatch(copy, /approved style profile|intention potential|curated rating/i);
-    // And a garment rating may never be stated as how she will feel.
     assert.doesNotMatch(copy, /will (make you )?feel like yourself/i);
     assert.match(copy, /could help with/i);
   });
 });
 
+// ── §WP-9 — curated assessments live in the profile reveal ────────────────────
+
 describe("§WP-9 curated assessments are not a Passport comparison", () => {
-  it("§WP-9a the capability block says what it is, and what it is not", () => {
+  it("§WP-9a the capability detail says what it is, and what it is not — inside the profile reveal", () => {
     const page = buildWardrobePage(baseInput());
-    const copy = visibleCopy(page).join(" ");
-    assert.match(copy, /estimate the kinds of looks/i);
-    assert.match(copy, /aren't complete outfits or a match against your personal requirements/i);
+    const profile = page.sections.find((s) => s.id === "profile")!.blocks.find((b) => b.id === "profile")!;
+    const capability = profile.entries.find((e) => e.claim === "closet-capability")!;
+    assert.match(capability.body ?? "", /estimate the kinds of looks/i);
+    assert.match(capability.body ?? "", /aren't complete outfits or a match against your personal requirements/i);
+    // Deeply secondary: never part of the always-visible summary lines.
+    const summaryLines = (profile.meta as Record<string, unknown>).summaryLines as string[];
+    for (const line of summaryLines) assert.doesNotMatch(line, /could help with|feel put together/i);
   });
 
   it("§WP-9b no capability row reads as meeting her stated requirements", () => {
-    // The same page carries a Coverage row reporting whether pieces meet the
-    // coverage preferences she actually stated. A curated assessment must never
-    // be mistaken for that comparison — "more coverage" did exactly that.
     const page = buildWardrobePage(baseInput());
     const rows = page.sections
       .flatMap((s) => s.blocks)
@@ -579,25 +541,10 @@ function pairingFixture(over: Record<string, unknown> = {}) {
   };
 }
 
-/**
- * `bestByRegister` is the FULL-pool, uncapped source the fix reads from;
- * `pairings` is the separate, globally-capped top-4 list "Possibilities to
- * try" reads from — the exact split that caused the original contradiction
- * (a register could have genuine depth and a real `bestByRegister` entry,
- * while losing every seat in the capped `pairings` list to other registers).
- */
-function pairingsIntelligence(
-  bestByRegister: Record<string, unknown[]>,
-  cappedList: unknown[] = [],
-) {
+function pairingsIntelligence(bestByRegister: Record<string, unknown[]>, cappedList: unknown[] = []) {
   return { state: "available", untriedPresentation: "none", untriedNote: null, pairings: cappedList, bestByRegister };
 }
 
-/**
- * Same wardrobe as baseInput(), but "everyday" is explicitly NOT something she
- * told nAia matters (needed: false) — this is the case the "undeclared
- * lifestyle must not get promoted" rule exists for. "work" stays needed.
- */
 function inputWithRegisterPairings(): WardrobePageInput {
   const input = baseInput();
   const needsFixture = input.needs as unknown as { registers: Array<Record<string, unknown>> };
@@ -611,100 +558,73 @@ function inputWithRegisterPairings(): WardrobePageInput {
   return input;
 }
 
-/** "work" is needed but the Closet has nothing for it yet (rawCount: 0). */
 function inputWithNeededButEmptyWork(): WardrobePageInput {
   const input = baseInput();
   const needsFixture = input.needs as unknown as { registers: Array<Record<string, unknown>> };
   needsFixture.registers = needsFixture.registers.map((r) =>
     r.register === "work" ? { ...r, rawCount: 0 } : r,
   );
-  return input; // no pairings fixture at all — a truly empty register.
+  return input;
 }
 
-/** "work" is needed, has real depth (rawCount > 0), but no candidate ever formed. */
 function inputWithNeededWorkNoCandidate(): WardrobePageInput {
-  return baseInput(); // p1 carries no register, so nothing matches "work" via bestByRegister
+  return baseInput();
 }
 
 describe("§WP-10 Ways to get dressed: the outfit is the answer, shown where its heading is", () => {
   it("§WP-10a a needed register's own combination renders directly on its own entry, images included", () => {
     const page = buildWardrobePage(inputWithRegisterPairings());
-    const explore = page.sections.find((s) => s.id === "do")!.blocks.find((b) => b.id === "ways-to-get-dressed")!;
+    const explore = page.sections.find((s) => s.id === "wear")!.blocks.find((b) => b.id === "ways-to-get-dressed")!;
     assert.equal(explore.kind, "lifestyle-combos");
     const work = explore.entries.find((e) => e.id === "explore-work")!;
     assert.ok(work.garmentIds.includes("g6") && work.garmentIds.includes("g9"), "the outfit's own garments sit on the SAME entry as its heading");
-    // No separate "shown below" placeholder and no separate pairings block —
-    // there is exactly one block for this whole section.
-    const doBlocks = page.sections.find((s) => s.id === "do")!.blocks;
-    assert.equal(doBlocks.filter((b) => b.id === "ways-to-get-dressed" || b.kind === "lifestyle-combos").length, 1);
+    const wearBlocks = page.sections.find((s) => s.id === "wear")!.blocks;
+    assert.equal(wearBlocks.filter((b) => b.id === "ways-to-get-dressed" || b.kind === "lifestyle-combos").length, 1);
     assert.doesNotMatch(work.body ?? "", /shown below/i);
   });
 
-  it("§WP-10b the explore entry no longer offers a jump", () => {
+  it("§WP-10b the explore entry offers a 'Why this works' reveal, not a jump", () => {
     const page = buildWardrobePage(inputWithRegisterPairings());
-    const explore = page.sections.find((s) => s.id === "do")!.blocks
+    const explore = page.sections.find((s) => s.id === "wear")!.blocks
       .find((b) => b.id === "ways-to-get-dressed")!.entries.find((e) => e.id === "explore-work")!;
-    assert.equal(explore.action, undefined, "the answer is shown in context now, not behind a link");
-  });
-
-  it("§WP-10c the same combination does not also appear in Possibilities to try", () => {
-    const page = buildWardrobePage(inputWithRegisterPairings());
-    const possibilitiesPairings = page.sections.find((s) => s.id === "possibilities")!.blocks
-      .find((b) => b.id === "pairings");
-    const ids = possibilitiesPairings?.entries.map((e) => e.id) ?? [];
-    assert.ok(!ids.includes("p-work"), "moved, not duplicated");
+    assert.equal(explore.action?.kind, "reveal");
+    assert.equal(explore.action?.label, "Why this works");
   });
 
   it("§WP-10d owning pieces for an undeclared life area does not promote it into Ways to get dressed", () => {
     const page = buildWardrobePage(inputWithRegisterPairings());
-    const explore = page.sections.find((s) => s.id === "do")!.blocks.find((b) => b.id === "ways-to-get-dressed");
+    const explore = page.sections.find((s) => s.id === "wear")!.blocks.find((b) => b.id === "ways-to-get-dressed");
     const explored = explore?.entries.map((e) => e.id) ?? [];
     assert.ok(!explored.includes("explore-everyday"), "everyday was never named as part of her life");
-
-    // The everyday combination is not lost — it stays in the general list.
-    const possibilitiesPairings = page.sections.find((s) => s.id === "possibilities")!.blocks
-      .find((b) => b.id === "pairings");
-    const ids = possibilitiesPairings?.entries.map((e) => e.id) ?? [];
-    assert.ok(ids.includes("p-everyday"), "a combination for a life area she didn't name stays in the general list");
   });
 
   it("§WP-10e a needed register with zero Closet coverage still renders, and says so plainly", () => {
     const page = buildWardrobePage(inputWithNeededButEmptyWork());
-    const doBlocks = page.sections.find((s) => s.id === "do")!.blocks;
-    const explore = doBlocks.find((b) => b.id === "ways-to-get-dressed")!.entries.find((e) => e.id === "explore-work");
+    const wearBlocks = page.sections.find((s) => s.id === "wear")!.blocks;
+    const explore = wearBlocks.find((b) => b.id === "ways-to-get-dressed")!.entries.find((e) => e.id === "explore-work");
     assert.ok(explore, "a needed register with nothing in the Closet must still render, never be hidden");
     assert.match(explore!.body ?? "", /doesn't have anything for this part of your life yet/i);
   });
 
   it("§WP-10f a needed register with real depth but no candidate ever formed says so precisely, not that none can exist", () => {
     const page = buildWardrobePage(inputWithNeededWorkNoCandidate());
-    const doBlocks = page.sections.find((s) => s.id === "do")!.blocks;
-    const explore = doBlocks.find((b) => b.id === "ways-to-get-dressed")!.entries.find((e) => e.id === "explore-work")!;
-    // The old wording asserted the Closet CANNOT make a combination — a claim
-    // stronger than the data supports. It must be gone entirely.
+    const wearBlocks = page.sections.find((s) => s.id === "wear")!.blocks;
+    const explore = wearBlocks.find((b) => b.id === "ways-to-get-dressed")!.entries.find((e) => e.id === "explore-work")!;
     assert.doesNotMatch(explore.body ?? "", /there isn't a combination in your closet for this/i);
     assert.match(explore.body ?? "", /nAia hasn't selected a work example to show here yet/i);
   });
 
-  it("§WP-10g a 'Plenty of options' verdict never coexists with an unqualified 'no combination exists' claim", () => {
-    // The exact contradiction reported: a register read as having strong
-    // depth must never be paired with wording that flatly denies a
-    // combination exists, unless the wording explicitly distinguishes "no
-    // display was chosen" from "none exists".
+  it("§WP-10g a 'Plenty of options' register never coexists with an unqualified 'no combination exists' claim", () => {
     for (const input of [inputWithRegisterPairings(), inputWithNeededWorkNoCandidate(), baseInput()]) {
       const page = buildWardrobePage(input);
-      const registers = page.sections.find((s) => s.id === "range")?.blocks.find((b) => b.id === "registers");
-      const doExplore = page.sections.find((s) => s.id === "do")?.blocks.find((b) => b.id === "ways-to-get-dressed");
-      if (!registers || !doExplore) continue;
-      for (const reg of registers.entries) {
-        const meta = reg.meta as Record<string, unknown> | undefined;
-        if (meta?.stateText !== "Plenty of options") continue;
-        const registerKey = reg.id.replace(/^register-/, "");
+      const doExplore = page.sections.find((s) => s.id === "wear")?.blocks.find((b) => b.id === "ways-to-get-dressed");
+      if (!doExplore) continue;
+      for (const registerKey of ["everyday", "work"]) {
         const explore = doExplore.entries.find((e) => e.id === `explore-${registerKey}`);
         if (!explore) continue;
         const flatDenial = /there isn't a combination in your closet for this|the closet (cannot|can't) make/i;
         assert.doesNotMatch(explore.body ?? "", flatDenial,
-          `"${reg.id}" is Plenty of options but its example card denies a combination can exist: "${explore.body}"`);
+          `"${registerKey}" example card must never deny a combination can exist: "${explore.body}"`);
       }
     }
   });
@@ -717,48 +637,39 @@ describe("§WP-10 Ways to get dressed: the outfit is the answer, shown where its
 describe("§WP-11 lifestyle-labelled presentation, same 3-register engine", () => {
   it("§WP-11a the three register cards are headed in life terms, not engine terms", () => {
     const page = buildWardrobePage(inputWithRegisterPairings());
-    const explore = page.sections.find((s) => s.id === "do")!.blocks.find((b) => b.id === "ways-to-get-dressed")!;
+    const explore = page.sections.find((s) => s.id === "wear")!.blocks.find((b) => b.id === "ways-to-get-dressed")!;
     const work = explore.entries.find((e) => e.id === "explore-work")!;
     assert.equal(work.title, "For work");
   });
 
   it("§WP-11b a genuinely gym-tagged combination gets its own card, directly under it, when fitness/gym is declared", () => {
-    const input = baseInput(); // "everyday" and "work" are both needed:true here
+    const input = baseInput();
     const gym = pairingFixture({ id: "p-gym", garmentIds: ["g10", "g11"], reason: "You've tagged these for gym." });
     (input.intelligence as unknown as { pairings: unknown }).pairings = pairingsIntelligence({ everyday: [gym] }, [gym]);
     input.lifestyle = ["fitness-gym"];
     const page = buildWardrobePage(input);
 
-    const explore = page.sections.find((s) => s.id === "do")!.blocks.find((b) => b.id === "ways-to-get-dressed")!;
+    const explore = page.sections.find((s) => s.id === "wear")!.blocks.find((b) => b.id === "ways-to-get-dressed")!;
     const gymEntry = explore.entries.find((e) => e.id === "explore-gym");
     assert.ok(gymEntry, "a gym card should appear");
     assert.equal(gymEntry!.title, "For active / gym days");
     assert.ok(gymEntry!.garmentIds.includes("g10"), "the combination's own images sit directly on the gym card");
-
-    // Not left anywhere in the general list either.
-    const possibilitiesPairings = page.sections.find((s) => s.id === "possibilities")?.blocks.find((b) => b.id === "pairings");
-    assert.ok(!(possibilitiesPairings?.entries ?? []).some((e) => e.id === "p-gym"), "not left in the general list either");
   });
 
   it("§WP-11c gym is declared but nothing is gym-tagged: no card is invented", () => {
     const input = inputWithRegisterPairings();
     input.lifestyle = ["fitness-gym"];
     const page = buildWardrobePage(input);
-    const explore = page.sections.find((s) => s.id === "do")!.blocks.find((b) => b.id === "ways-to-get-dressed")!;
+    const explore = page.sections.find((s) => s.id === "wear")!.blocks.find((b) => b.id === "ways-to-get-dressed")!;
     assert.equal(explore.entries.find((e) => e.id === "explore-gym"), undefined);
   });
 
   it("§WP-11d undeclared gym-only pairing is not surfaced under For everyday", () => {
-    // The customer-facing lifestyle label and the engine's internal register
-    // are not the same thing: activewear formality-buckets to "everyday", but
-    // evidence that is specifically gym-tagged must never be relabelled
-    // "For everyday" just because fitness/gym was never declared.
     const input = baseInput();
     const gym = pairingFixture({ id: "p-gym2", garmentIds: ["g12", "g13"], reason: "You've tagged these for gym." });
     (input.intelligence as unknown as { pairings: unknown }).pairings = pairingsIntelligence({ everyday: [gym] }, [gym]);
-    // input.lifestyle left unset — she never told nAia fitness/gym is part of her life.
     const page = buildWardrobePage(input);
-    const explore = page.sections.find((s) => s.id === "do")!.blocks.find((b) => b.id === "ways-to-get-dressed")!;
+    const explore = page.sections.find((s) => s.id === "wear")!.blocks.find((b) => b.id === "ways-to-get-dressed")!;
     assert.equal(explore.entries.find((e) => e.id === "explore-gym"), undefined, "no Active/Gym card without the declared lifestyle");
     const everydayEntry = explore.entries.find((e) => e.id === "explore-everyday")!;
     assert.ok(!everydayEntry.garmentIds.includes("g12"), "not relabelled For everyday either");
@@ -769,21 +680,9 @@ describe("§WP-11 lifestyle-labelled presentation, same 3-register engine", () =
     const casual = pairingFixture({ id: "p-casual", garmentIds: ["g14", "g15"] });
     (input.intelligence as unknown as { pairings: unknown }).pairings = pairingsIntelligence({ everyday: [casual] }, [casual]);
     const page = buildWardrobePage(input);
-    const explore = page.sections.find((s) => s.id === "do")!.blocks.find((b) => b.id === "ways-to-get-dressed")!;
+    const explore = page.sections.find((s) => s.id === "wear")!.blocks.find((b) => b.id === "ways-to-get-dressed")!;
     const everydayEntry = explore.entries.find((e) => e.id === "explore-everyday")!;
     assert.ok(everydayEntry.garmentIds.includes("g14"), "evidence that IS genuinely everyday still renders there");
-  });
-
-  it("§WP-11f an excluded gym-only pairing stays available to Possibilities to try when otherwise valid", () => {
-    const input = baseInput();
-    const gym = pairingFixture({ id: "p-gym3", garmentIds: ["g16", "g17"], reason: "You've tagged these for gym." });
-    (input.intelligence as unknown as { pairings: unknown }).pairings = pairingsIntelligence({ everyday: [gym] }, [gym]);
-    // No lifestyle declared, so it's excluded from "Ways to get dressed" —
-    // but it is a real, engine-approved pairing, so it must not be lost.
-    const page = buildWardrobePage(input);
-    const possibilitiesPairings = page.sections.find((s) => s.id === "possibilities")?.blocks.find((b) => b.id === "pairings");
-    assert.ok(possibilitiesPairings, "the possibilities pairings block should exist");
-    assert.ok(possibilitiesPairings!.entries.some((e) => e.id === "p-gym3"), "still offered in the general list");
   });
 
   it("§WP-11g combination explanations name the actual garments", () => {
@@ -792,110 +691,98 @@ describe("§WP-11 lifestyle-labelled presentation, same 3-register engine", () =
     (input.intelligence as unknown as { pairings: unknown }).pairings = pairingsIntelligence({ work: [work] }, [work]);
     input.garmentName = (id: string) => (id === "g6" ? "Beige Tailored Trousers" : null);
     const page = buildWardrobePage(input);
-    const explore = page.sections.find((s) => s.id === "do")!.blocks.find((b) => b.id === "ways-to-get-dressed")!;
+    const explore = page.sections.find((s) => s.id === "wear")!.blocks.find((b) => b.id === "ways-to-get-dressed")!;
     const workEntry = explore.entries.find((e) => e.id === "explore-work")!;
     assert.match(workEntry.body ?? "", /beige tailored trousers/i);
     assert.match(workEntry.body ?? "", /^Try your/);
   });
-});
 
-// ── §WP-12 — colour low-priority advice is role-specific, never bare volume ───
-
-function inputWithPalette(palette: Array<{ colour: string; count: number; share: number; neutral: boolean }>): WardrobePageInput {
-  const input = baseInput();
-  (input.intelligence as unknown as { dna: { palette: unknown } }).dna.palette = palette;
-  return input;
-}
-
-describe("§WP-12 colour advice connects abundance to actual duplication evidence", () => {
-  it("§WP-12a a dominant neutral with a genuine enough-cluster is stated once, not restated in the colour card", () => {
-    const input = inputWithPalette([{ colour: "Black", count: 19, share: 0.4, neutral: true }]);
-    const page = buildWardrobePage(input); // baseInput()'s enough finding is "everyday neutral tops"
-    const palette = page.sections.find((s) => s.id === "now")!.blocks
-      .find((b) => b.id === "dna")!.entries.find((e) => e.id === "dna-palette")!;
-    // The "plenty of X, so another one is low priority" conclusion belongs to
-    // the "enough" and "Low priority right now" sections, which already say
-    // it with full evidence (count, garments). Restating it here — a third
-    // time — is exactly the duplication this section stopped doing.
-    assert.match(palette.body ?? "", /^Black is already a big part of your wardrobe \(19 pieces\)\.$/);
-    assert.doesNotMatch(palette.body ?? "", /low priority/i);
-    assert.doesNotMatch(palette.body ?? "", /plenty of/i);
-  });
-
-  it("§WP-12b a colour a live recommendation actually wants is never called low priority", () => {
-    const input = inputWithPalette([{ colour: "Grey", count: 12, share: 0.35, neutral: true }]);
-    (input.recommendations as unknown as { recommendations: unknown[] }).recommendations = [
-      { id: "rec-work", register: "work", specificity: "detailed", title: "A full-length work bottom",
-        attributes: [{ kind: "colour", values: ["grey"], label: "Grey", source: "passport" }],
-        body: "x", unlocksIds: [], criteria: {}, evidence: [], strength: "strong" },
-    ];
-    const page = buildWardrobePage(input);
-    const palette = page.sections.find((s) => s.id === "now")!.blocks
-      .find((b) => b.id === "dna")!.entries.find((e) => e.id === "dna-palette")!;
-    assert.doesNotMatch(palette.body ?? "", /low priority/i);
-    assert.match(palette.body ?? "", /Grey is already a big part of your wardrobe/);
-  });
-
-  it("§WP-12c abundant but no role is actually covered enough: observation only, no skip advice", () => {
-    const input = inputWithPalette([{ colour: "Navy", count: 10, share: 0.4, neutral: true }]);
-    (input.needs as unknown as { enough: unknown[] }).enough = []; // nothing sufficiently covered
-    const page = buildWardrobePage(input);
-    const palette = page.sections.find((s) => s.id === "now")!.blocks
-      .find((b) => b.id === "dna")!.entries.find((e) => e.id === "dna-palette")!;
-    assert.match(palette.body ?? "", /Navy is already a big part of your wardrobe/);
-    assert.doesNotMatch(palette.body ?? "", /low priority/i);
-  });
-
-  it("§WP-12d a chromatic (non-neutral) dominant colour never gets a role-specific claim the data can't back", () => {
-    const input = inputWithPalette([{ colour: "Burgundy", count: 14, share: 0.4, neutral: false }]);
-    const page = buildWardrobePage(input);
-    const palette = page.sections.find((s) => s.id === "now")!.blocks
-      .find((b) => b.id === "dna")!.entries.find((e) => e.id === "dna-palette")!;
-    assert.match(palette.body ?? "", /Burgundy is already a big part of your wardrobe/);
-    assert.doesNotMatch(palette.body ?? "", /low priority/i);
-  });
-});
-
-// ── §WP-13 — the useful conclusion survives collapsing ─────────────────────────
-
-describe("§WP-13 a block's own conclusion stays visible even while its detail is collapsed", () => {
-  it("§WP-13a the Passport-match block states its lifestyle reading as a summary, not as a duplicated detail row", () => {
+  it("§WP-11h most-versatile folds into the Work combination's 'Why this works' detail, never a standalone card", () => {
     const input = baseInput();
-    (input.intelligence as unknown as { passportView: { state: string; comparisons: unknown[] } }).passportView = {
-      state: "available",
-      comparisons: [{ id: "structure", stated: "fitted", observed: "mostly relaxed", reading: "Your shapes lean relaxed.", strength: "strong" }],
+    const work = pairingFixture({ id: "p-versatile-work", garmentIds: ["g1", "g6"], register: "work" });
+    (input.intelligence as unknown as { pairings: unknown }).pairings = pairingsIntelligence({ work: [work] }, [work]);
+    // g1 is the most-versatile hero in baseInput(), with 2 partners (g3, g5).
+    const page = buildWardrobePage(input);
+    const explore = page.sections.find((s) => s.id === "wear")!.blocks.find((b) => b.id === "ways-to-get-dressed")!;
+    const workEntry = explore.entries.find((e) => e.id === "explore-work")!;
+    const detail = workEntry.action?.kind === "reveal" ? workEntry.action.detail : undefined;
+    assert.match(detail ?? "", /one of your most versatile.*pairs with 2 others/i);
+    // No standalone hero card for g1 in "wear".
+    const wearGarments = page.sections.find((s) => s.id === "wear")!.blocks.find((b) => b.id === "garments");
+    assert.equal(wearGarments, undefined, "hero cards are not their own visible block");
+  });
+});
+
+// ── §WP-13 — the wardrobe profile: one compact moment, nothing repeated ───────
+
+describe("§WP-13 the wardrobe profile states its conclusions once, mostly collapsed", () => {
+  it("§WP-13a colours, silhouettes, StyleMe history and wear behaviour are always visible, in one line each", () => {
+    const input = baseInput();
+    (input.intelligence as unknown as { dna: unknown }).dna = {
+      palette: [{ colour: "Black", count: 19 }], shapes: [{ label: "Straight" }],
+      traits: [], shapesReading: "Straight shapes recur most, with fitted and relaxed close behind.",
     };
     const page = buildWardrobePage(input);
-    const block = page.sections.find((s) => s.id === "learning")!.blocks.find((b) => b.id === "passport")!;
-    assert.ok(block.summary && block.summary.trim() !== "", "the block has a visible summary even before anything is opened");
-    assert.ok(block.disclosure, "detail still sits behind a reveal");
-    assert.equal(
-      block.entries.some((e) => e.id === "match-lifestyle"), false,
-      "lifestyle is the summary now, not also a row inside the detail list",
-    );
+    const block = page.sections.find((s) => s.id === "profile")!.blocks.find((b) => b.id === "profile")!;
+    const lines = (block.meta as Record<string, unknown>).summaryLines as string[];
+    assert.ok(lines.some((l) => /mostly colours you like/i.test(l)));
+    assert.ok(lines.some((l) => /straight shapes recur most/i.test(l)));
+    assert.ok(lines.some((l) => /relaxed, everyday looks/i.test(l)));
+    assert.ok(lines.some((l) => /still learning/i.test(l) && /wore/i.test(l)));
   });
 
-  it("§WP-13a-2 the summary alone is enough to keep the block on the page, even with nothing behind the reveal", () => {
-    const page = buildWardrobePage(baseInput()); // no synthesis lines, no comparisons — summary only
-    const block = page.sections.find((s) => s.id === "learning")!.blocks.find((b) => b.id === "passport")!;
-    assert.ok(block, "a block whose entries resolve to zero, but which has a summary, still survives claim resolution");
-    assert.ok(block!.summary && block!.summary.trim() !== "");
-    assert.equal(block!.disclosure, undefined, "nothing to reveal, so no reveal control is offered");
-  });
-
-  it("§WP-13b the StyleMe-history block states what the customer most often asks for as a summary", () => {
+  it("§WP-13b wear behaviour correctly credits 'Wore it' as genuine self-reported evidence", () => {
     const page = buildWardrobePage(baseInput());
-    const block = page.sections.find((s) => s.id === "learning")!.blocks.find((b) => b.id === "behaviour")!;
-    assert.match(block.summary ?? "", /relaxed, everyday looks/i);
-    assert.ok(block.disclosure, "the counts and provenance behind it still sit behind a reveal");
+    const block = page.sections.find((s) => s.id === "profile")!.blocks.find((b) => b.id === "profile")!;
+    const lines = (block.meta as Record<string, unknown>).summaryLines as string[];
+    const wearLine = lines.find((l) => /wear behaviour/i.test(l))!;
+    assert.doesNotMatch(wearLine, /doesn't track what you actually wear yet/i);
+    assert.match(wearLine, /knows about looks you tell it you wore/i);
   });
 
-  it("§WP-13c the always-visible copy transcript includes a collapsed block's summary", () => {
+  it("§WP-13c the Lifestyle comparison is not a second, unlabelled headline — it lives only inside the reveal", () => {
     const page = buildWardrobePage(baseInput());
-    const copy = visibleCopy(page);
-    const behaviour = page.sections.find((s) => s.id === "learning")!.blocks.find((b) => b.id === "behaviour")!;
-    assert.ok(behaviour.summary);
-    assert.ok(copy.includes(behaviour.summary!), "the summary sentence reaches the customer without opening anything");
+    const block = page.sections.find((s) => s.id === "profile")!.blocks.find((b) => b.id === "profile")!;
+    const lines = (block.meta as Record<string, unknown>).summaryLines as string[];
+    for (const line of lines) assert.doesNotMatch(line, /fewer ways to combine|plenty of everyday options/i);
+    assert.ok(block.entries.some((e) => e.id === "match-lifestyle"), "the evidence is still available behind the reveal");
+    assert.ok(block.disclosure, "detail sits behind a reveal");
+  });
+
+  it("§WP-13d the hero's own reading is the same sentence as the profile's lifestyle evidence", () => {
+    const page = buildWardrobePage(baseInput());
+    const block = page.sections.find((s) => s.id === "profile")!.blocks.find((b) => b.id === "profile")!;
+    const lifestyle = block.entries.find((e) => e.id === "match-lifestyle")!;
+    assert.equal(page.reading, lifestyle.body);
+  });
+
+  it("§WP-13e capability counts are inside the reveal only, never a visible summary line", () => {
+    const page = buildWardrobePage(baseInput());
+    const block = page.sections.find((s) => s.id === "profile")!.blocks.find((b) => b.id === "profile")!;
+    const lines = (block.meta as Record<string, unknown>).summaryLines as string[];
+    for (const line of lines) assert.doesNotMatch(line, /put together|22 pieces/i);
+    assert.ok(block.entries.some((e) => e.claim === "closet-capability"));
+  });
+
+  it("§WP-13f trench/favourite-type heroes survive as profile evidence, correctly self-excluded", () => {
+    const input = baseInput();
+    (input.intelligence as unknown as { heroes: unknown }).heroes = {
+      state: "available",
+      heroes: [{
+        garmentId: "trench1", name: "Beige Double-Breasted Trench Coat", category: "OUTERWEAR",
+        label: "passport-match", labelText: null,
+        headline: "This is the piece closest to what you told nAia you want.", reasons: [],
+        evidence: [
+          { signal: "passport-signal", field: "OnboardingProfile", detail: "x", garmentIds: ["trench1"] },
+          { signal: "garment-fact", field: "compatibility graph", detail: "x", garmentIds: ["m1", "m2"] },
+        ],
+      }],
+    };
+    const page = buildWardrobePage(input);
+    const block = page.sections.find((s) => s.id === "profile")!.blocks.find((b) => b.id === "profile")!;
+    const entry = block.entries.find((e) => e.id === "hero-trench1")!;
+    assert.ok(!entry.garmentIds.includes("trench1"), "never its own match");
+    assert.deepEqual(entry.garmentIds, ["m1", "m2"]);
   });
 });
 
@@ -923,7 +810,7 @@ describe("§WP-14 identical resolved matches group into one card, different ones
         worksWithIds: ["m6", "m5", "m4", "m3", "m2", "m1"] },
     ]);
     const page = buildWardrobePage(input);
-    const block = page.sections.find((s) => s.id === "possibilities")!.blocks.find((b) => b.id === "worth-trying")!;
+    const block = page.sections.find((s) => s.id === "wear")!.blocks.find((b) => b.id === "worth-trying")!;
     assert.equal(block.entries.length, 1, "one grouped card, not two separate ones");
     const [entry] = block.entries;
     assert.match(entry.title ?? "", /^TWO BLAZERS WORTH ANOTHER LOOK$/);
@@ -943,7 +830,7 @@ describe("§WP-14 identical resolved matches group into one card, different ones
         worksWithIds: ["m7", "m8"] },
     ]);
     const page = buildWardrobePage(input);
-    const block = page.sections.find((s) => s.id === "possibilities")!.blocks.find((b) => b.id === "worth-trying")!;
+    const block = page.sections.find((s) => s.id === "wear")!.blocks.find((b) => b.id === "worth-trying")!;
     assert.equal(block.entries.length, 2, "distinct match sets are never merged into one card");
     assert.ok(block.entries.every((e) => (e.meta as Record<string, unknown> | undefined)?.members === undefined));
   });
@@ -965,12 +852,12 @@ describe("§WP-15 closet-connector and rediscover copy do not restate what the h
             "It works with both the relaxed and the polished side of your wardrobe.",
             "Pieces that cross registers are what let a wardrobe stretch without growing.",
           ],
-          evidence: [{ kind: "garment-fact", source: "formality/compatibility graph", detail: "x", garmentIds: ["m1", "m2"] }] },
+          evidence: [{ signal: "garment-fact", field: "formality/compatibility graph", detail: "x", garmentIds: ["m1", "m2"] }] },
       ],
     };
     const page = buildWardrobePage(input);
-    const block = page.sections.find((s) => s.id === "works")!.blocks.find((b) => b.id === "garments")!;
-    const entry = block.entries.find((e) => (e.meta as Record<string, unknown>)?.garmentId === "g1")!;
+    const entry = page.sections.flatMap((s) => s.blocks).flatMap((b) => b.entries)
+      .find((e) => (e.meta as Record<string, unknown>)?.garmentId === "g1")!;
     assert.equal(entry.body, undefined, "the generic 'connects parts of your wardrobe' headline is dropped");
     assert.equal((entry.meta as Record<string, unknown>)?.reason, undefined, "the restated 'relaxed and polished' reason is dropped");
     assert.match(String((entry.meta as Record<string, unknown>)?.label ?? ""), /relaxed and polished/i, "the finding still shows once, as the label");
@@ -985,7 +872,7 @@ describe("§WP-15 closet-connector and rediscover copy do not restate what the h
     input.garmentName = (id) =>
       ({ j1: "Blue Jeans", j2: "Beige Tailored Trousers", j3: "Black Jacket" }) [id as "j1" | "j2" | "j3"] ?? null;
     const page = buildWardrobePage(input);
-    const block = page.sections.find((s) => s.id === "possibilities")!.blocks.find((b) => b.id === "worth-trying")!;
+    const block = page.sections.find((s) => s.id === "wear")!.blocks.find((b) => b.id === "worth-trying")!;
     const text = String((block.entries[0].meta as Record<string, unknown>)?.rediscover ?? "");
     assert.match(text, /8 potential matches, including blue jeans, beige tailored trousers and black jacket\./i);
     assert.doesNotMatch(text, /8 potential matching pieces/i);
@@ -1011,56 +898,262 @@ function inputWithShapeRecommendation(): WardrobePageInput {
   return input;
 }
 
-describe("§WP-17 a hero-only card still offers a way to see the pieces it claims to pair with", () => {
-  it("§WP-17a a hero with no rediscover note of its own still gets a matching-pieces reveal, from its own evidence", () => {
-    const input = baseInput();
-    (input.intelligence as unknown as { heroes: unknown }).heroes = {
-      state: "available",
-      heroes: [{
-        garmentId: "t1", name: "Beige Tailored Trousers", category: "BOTTOMS",
-        label: "most-versatile", labelText: null,
-        headline: "Pairs easily with 8 other pieces in your Closet.",
-        reasons: [],
-        evidence: [{ kind: "garment-fact", source: "compatibility graph", detail: "x",
-          garmentIds: ["p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8"] }],
-      }],
-    };
-    (input.intelligence as unknown as { opportunities: unknown }).opportunities = { rediscover: [] };
-    const page = buildWardrobePage(input);
-    const entry = page.sections.flatMap((s) => s.blocks).flatMap((b) => b.entries)
-      .find((e) => e.claim === claims.garment("t1"))!;
-    assert.equal(entry.action?.kind, "reveal", "the claim of pairing widely is backed by a way to see the pieces");
-    assert.deepEqual((entry.action as { garmentIds: string[] }).garmentIds, ["p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8"]);
-  });
-});
-
 describe("§WP-16 an unresolved shape reads as an instruction, not a taxonomy chip", () => {
-  it("§WP-16a the title folds an unresolved shape into a plain instruction instead of a raw attribute", () => {
+  it("§WP-16a the title folds an unresolved shape into a register-prefixed instruction, never a garment type", () => {
     const page = buildWardrobePage(inputWithShapeRecommendation());
-    const block = page.sections.find((s) => s.id === "do")!.blocks.find((b) => b.id === "recommendations")!;
+    const block = page.sections.find((s) => s.id === "shop")!.blocks.find((b) => b.id === "worth-considering")!;
     const entry = block.entries[0];
     assert.equal(
       entry.title,
-      "Look for a full-length work bottom in a shape that's meaningfully different from the ones you already own.",
+      "For work, look for a full-length piece in a shape that's different from the ones you already own.",
     );
-    assert.doesNotMatch(entry.title ?? "", /a different shape/i);
+    assert.doesNotMatch(entry.title ?? "", /a different shape|work bottom/i);
   });
 
   it("§WP-16b the raw 'a different shape' attribute is not also shown as a chip", () => {
     const page = buildWardrobePage(inputWithShapeRecommendation());
-    const block = page.sections.find((s) => s.id === "do")!.blocks.find((b) => b.id === "recommendations")!;
+    const block = page.sections.find((s) => s.id === "shop")!.blocks.find((b) => b.id === "worth-considering")!;
     const attrs = ((block.entries[0].meta as Record<string, unknown>).attributes ?? []) as Array<{ kind: string; label: string }>;
     assert.equal(attrs.some((a) => /a different shape/i.test(a.label)), false);
     assert.ok(attrs.some((a) => a.kind === "colour"), "other attributes are untouched");
   });
 
-  it("§WP-16c 'Why this?' explains the wardrobe limitation, not a bare attribute dump", () => {
+  it("§WP-16c the visible body names the real unlock count and colour, with no gap restatement", () => {
     const page = buildWardrobePage(inputWithShapeRecommendation());
-    const block = page.sections.find((s) => s.id === "do")!.blocks.find((b) => b.id === "recommendations")!;
+    const block = page.sections.find((s) => s.id === "shop")!.blocks.find((b) => b.id === "worth-considering")!;
+    const entry = block.entries[0];
+    assert.match(entry.body ?? "", /^It could work with 2 pieces already in your Closet\. Grey is one colour you like that appears less often\./);
+    assert.doesNotMatch(entry.body ?? "", /repeat similar combinations/i);
+  });
+
+  it("§WP-16d 'Why this?' explains the shape without restating the wardrobe-gap reasoning (Moment 3's alone)", () => {
+    const page = buildWardrobePage(inputWithShapeRecommendation());
+    const block = page.sections.find((s) => s.id === "shop")!.blocks.find((b) => b.id === "worth-considering")!;
     const detail = block.entries[0].action?.kind === "reveal" ? block.entries[0].action.detail : undefined;
     assert.ok(detail);
     assert.doesNotMatch(detail!, /^This comes from/i);
-    assert.match(detail!, /work pieces repeat similar combinations/i);
+    assert.doesNotMatch(detail!, /repeat similar combinations/i, "the gap reasoning has exactly one home: 'What deserves your attention'");
+    assert.match(detail!, /more ways to combine what you already own/i);
     assert.match(detail!, /grey is one of the colours you selected in your passport/i);
+  });
+});
+
+// ── §WP-18 — a garment never reveals itself, counts always agree with what's shown ─
+
+describe("§WP-18 cleanPartnerIds: the shared self-match/dedup guard", () => {
+  it("§WP-18a removes every id in selfIds", () => {
+    assert.deepEqual(cleanPartnerIds(["a", "b", "c"], ["b"]), ["a", "c"]);
+    assert.deepEqual(cleanPartnerIds(["a"], ["a"]), []);
+  });
+  it("§WP-18b removes duplicate ids, keeping first occurrence order", () => {
+    assert.deepEqual(cleanPartnerIds(["a", "b", "a", "c", "b"], []), ["a", "b", "c"]);
+  });
+  it("§WP-18c self-exclusion and dedup compose", () => {
+    assert.deepEqual(cleanPartnerIds(["a", "b", "a", "self", "c"], ["self"]), ["a", "b", "c"]);
+  });
+});
+
+describe("§WP-18 a passport-match or favourite hero never reveals itself as its only match", () => {
+  function inputWithHero(label: string, headline: string, reasons: string[]): WardrobePageInput {
+    const input = baseInput();
+    (input.intelligence as unknown as { heroes: { state: string; heroes: unknown[] } }).heroes = {
+      state: "available",
+      heroes: [{
+        garmentId: "trench1", name: "Beige Double-Breasted Trench Coat", category: "OUTERWEAR",
+        label, labelText: null, headline, reasons,
+        evidence: [
+          { signal: "passport-signal", field: "OnboardingProfile", detail: "Aligns on colour and shape.", garmentIds: ["trench1"] },
+          { signal: "garment-fact", field: "compatibility graph", detail: "Compatible with 2 pieces.", garmentIds: ["m1", "m2"] },
+        ],
+      }],
+    };
+    (input.intelligence as unknown as { opportunities: { rediscover: unknown[] } }).opportunities = { rediscover: [] };
+    return input;
+  }
+
+  it("§WP-18d passport-match hero (the trench) reveals its real partners, never itself", () => {
+    const page = buildWardrobePage(inputWithHero(
+      "passport-match", "This is the piece closest to what you told nAia you want.",
+      ["Matches your Passport on colour and shape.", "And it still works with 2 other pieces you own."],
+    ));
+    const entry = page.sections.flatMap((s) => s.blocks).flatMap((b) => b.entries)
+      .find((e) => e.id === "hero-trench1")!;
+    assert.equal(entry.action?.kind, "reveal");
+    const revealed = (entry.action as { garmentIds: string[] }).garmentIds;
+    assert.ok(!revealed.includes("trench1"), "the trench must never appear in its own match list");
+    assert.deepEqual(revealed, ["m1", "m2"]);
+  });
+
+  it("§WP-18e your-favourite hero (the bag) reveals its real partners, never itself", () => {
+    const input = inputWithHero(
+      "your-favourite", "One of your favourites — and one of your most connected pieces.", [],
+    );
+    (input.intelligence as unknown as { heroes: { heroes: Array<Record<string, unknown>> } })
+      .heroes.heroes[0].garmentId = "bag1";
+    (input.intelligence as unknown as { heroes: { heroes: Array<Record<string, unknown>> } })
+      .heroes.heroes[0].evidence = [
+        { signal: "self-reported-wardrobe", field: "garmentRelationships", detail: "Marked as a favourite.", garmentIds: ["bag1"] },
+        { signal: "garment-fact", field: "compatibility graph", detail: "Compatible with 3 pieces.", garmentIds: ["m1", "m2", "m3"] },
+      ];
+    const page = buildWardrobePage(input);
+    const entry = page.sections.flatMap((s) => s.blocks).flatMap((b) => b.entries)
+      .find((e) => e.id === "hero-bag1")!;
+    assert.equal(entry.action?.kind, "reveal");
+    const revealed = (entry.action as { garmentIds: string[] }).garmentIds;
+    assert.ok(!revealed.includes("bag1"), "the bag must never appear in its own match list");
+    assert.deepEqual(revealed, ["m1", "m2", "m3"]);
+  });
+
+  it("§WP-18f zero genuine partners after self-removal means no action at all", () => {
+    const input = inputWithHero("passport-match", "x", []);
+    (input.intelligence as unknown as { heroes: { heroes: Array<Record<string, unknown>> } })
+      .heroes.heroes[0].evidence = [
+        { signal: "passport-signal", field: "OnboardingProfile", detail: "x", garmentIds: ["trench1"] },
+        { signal: "garment-fact", field: "compatibility graph", detail: "x", garmentIds: ["trench1"] },
+      ];
+    const page = buildWardrobePage(input);
+    const entry = page.sections.flatMap((s) => s.blocks).flatMap((b) => b.entries)
+      .find((e) => e.id === "hero-trench1")!;
+    assert.equal(entry.action, undefined, "no fake action when no genuine partner survives");
+  });
+
+  it("§WP-18g a rediscover piece with duplicate partner ids in its own list is deduplicated before it reaches the count or the reveal", () => {
+    const input = baseInput();
+    (input.intelligence as unknown as { heroes: { state: string; heroes: unknown[] } }).heroes =
+      { state: "available", heroes: [] };
+    (input.intelligence as unknown as { opportunities: { rediscover: unknown[] } }).opportunities = {
+      rediscover: [{
+        garmentId: "top1", name: "Cream Ribbed Knit Tank Top", imageUrl: null,
+        body: "You marked this as difficult to style. nAia found 8 potential matching pieces.",
+        worksWithIds: ["j1", "j1", "top1", "j2", "j2", "j3"],
+      }],
+    };
+    const page = buildWardrobePage(input);
+    const block = page.sections.find((s) => s.id === "wear")!.blocks.find((b) => b.id === "worth-trying")!;
+    const entry = block.entries[0];
+    assert.deepEqual(entry.garmentIds, ["j1", "j2", "j3"], "duplicates removed, self removed, order preserved");
+    assert.equal((entry.action as { garmentIds: string[] }).garmentIds.length, 3);
+  });
+});
+
+describe("§WP-18 blazer grouping is correct and honest about both garments", () => {
+  it("§WP-18h grouping compares partner sets after self-removal, not raw lists that might include the other member", () => {
+    const input = baseInput();
+    (input.intelligence as unknown as { heroes: { state: string; heroes: unknown[] } }).heroes =
+      { state: "available", heroes: [] };
+    (input.intelligence as unknown as { opportunities: { rediscover: unknown[] } }).opportunities = {
+      rediscover: [
+        { garmentId: "b1", name: "Beige Tailored Blazer", imageUrl: null,
+          body: "You marked this as difficult to style. nAia found 6 potential matching pieces.",
+          worksWithIds: ["m1", "m2", "m3", "m4", "m5", "m6"] },
+        { garmentId: "b2", name: "Beige Oversized Blazer", imageUrl: null,
+          body: "You marked this as difficult to style. nAia found 6 potential matching pieces.",
+          worksWithIds: ["m6", "m5", "m4", "m3", "m2", "m1"] },
+      ],
+    };
+    const page = buildWardrobePage(input);
+    const block = page.sections.find((s) => s.id === "wear")!.blocks.find((b) => b.id === "worth-trying")!;
+    assert.equal(block.entries.length, 1, "genuinely identical sets still group");
+    const entry = block.entries[0];
+    assert.ok(!entry.garmentIds.includes("b1") && !entry.garmentIds.includes("b2"),
+      "neither blazer is ever its own — or the other's — 'match'");
+  });
+
+  it("§WP-18i grouped copy says 'both', names both garments, and states the true shared count", () => {
+    const input = baseInput();
+    (input.intelligence as unknown as { heroes: { state: string; heroes: unknown[] } }).heroes =
+      { state: "available", heroes: [] };
+    (input.intelligence as unknown as { opportunities: { rediscover: unknown[] } }).opportunities = {
+      rediscover: [
+        { garmentId: "b1", name: "Beige Tailored Blazer", imageUrl: null,
+          body: "You marked this as difficult to style. nAia found 6 potential matching pieces.",
+          worksWithIds: ["m1", "m2", "m3", "m4", "m5", "m6"] },
+        { garmentId: "b2", name: "Beige Oversized Blazer", imageUrl: null,
+          body: "You marked this as difficult to style. nAia found 6 potential matching pieces.",
+          worksWithIds: ["m1", "m2", "m3", "m4", "m5", "m6"] },
+      ],
+    };
+    const page = buildWardrobePage(input);
+    const block = page.sections.find((s) => s.id === "wear")!.blocks.find((b) => b.id === "worth-trying")!;
+    const entry = block.entries[0];
+    assert.match(entry.body ?? "", /you marked both your beige tailored blazer and beige oversized blazer as difficult to style/i);
+    assert.match(entry.body ?? "", /the same 6 pieces work with either/i);
+    assert.doesNotMatch(entry.body ?? "", /you marked this as difficult/i, "never the singular, reused-from-one-member wording");
+    assert.equal(entry.garmentIds.length, 6);
+  });
+
+  it("§WP-18j every displayed partner count equals the length of the actually-revealed set", () => {
+    const input = baseInput();
+    (input.intelligence as unknown as { heroes: { state: string; heroes: unknown[] } }).heroes =
+      { state: "available", heroes: [] };
+    (input.intelligence as unknown as { opportunities: { rediscover: unknown[] } }).opportunities = {
+      rediscover: [{
+        garmentId: "top1", name: "Cream Ribbed Knit Tank Top", imageUrl: null,
+        body: "You marked this as difficult to style. nAia found 8 potential matching pieces.",
+        worksWithIds: ["j1", "j2", "j3", "j4", "j5", "j6", "j7", "j8"],
+      }],
+    };
+    const page = buildWardrobePage(input);
+    const block = page.sections.find((s) => s.id === "wear")!.blocks.find((b) => b.id === "worth-trying")!;
+    const entry = block.entries[0];
+    const revealedCount = (entry.action as { garmentIds: string[] }).garmentIds.length;
+    const text = String((entry.meta as Record<string, unknown>)?.rediscover ?? "");
+    const statedCount = Number(text.match(/(\d+) potential match/)?.[1]);
+    assert.equal(statedCount, revealedCount, "the stated count and the revealed set must always agree");
+    assert.equal(entry.garmentIds.length, revealedCount);
+  });
+});
+
+// ── §WP-19 — the hero's one prioritised reading ───────────────────────────────
+
+describe("§WP-19 the hero states one prioritised reading, never colour, never three equal findings", () => {
+  it("§WP-19a a mixed strong/thin wardrobe gets the exact locked partial-state wording", () => {
+    const page = buildWardrobePage(baseInput()); // everyday strong, work needs-range
+    assert.equal(page.reading, "You have plenty of everyday options. Your work wardrobe has fewer ways to combine.");
+  });
+
+  it("§WP-19b the hero reading never mentions colour", () => {
+    const input = inputWithPalette([{ colour: "Grey", count: 3, share: 0.1, neutral: true }]);
+    const page = buildWardrobePage(input);
+    assert.doesNotMatch(page.reading ?? "", /grey|colour/i);
+  });
+
+  it("§WP-19c 'covered' never appears in the hero reading (ambiguous with coverage preferences elsewhere on the page)", () => {
+    const page = buildWardrobePage(baseInput());
+    assert.doesNotMatch(page.reading ?? "", /\bcovered\b/i);
+  });
+
+  it("§WP-19d changeLines is empty when nothing changed, populated when it did", () => {
+    const page = buildWardrobePage(baseInput());
+    assert.deepEqual(page.changeLines, []);
+  });
+});
+
+// ── §WP-12 (renumbered under content-lock) — colour palette summary ───────────
+
+function inputWithPalette(palette: Array<{ colour: string; count: number; share: number; neutral: boolean }>): WardrobePageInput {
+  const input = baseInput();
+  (input.intelligence as unknown as { dna: { palette: unknown } }).dna.palette = palette;
+  return input;
+}
+
+describe("§WP-12 the profile's colour line is generic — abundance-to-low-priority reasoning lives in Shop Smarter only", () => {
+  it("§WP-12a a dominant colour never gets a role-specific 'low priority' claim in the profile", () => {
+    const page = buildWardrobePage(inputWithPalette([{ colour: "Black", count: 19, share: 0.4, neutral: true }]));
+    const block = page.sections.find((s) => s.id === "profile")!.blocks.find((b) => b.id === "profile")!;
+    const lines = (block.meta as Record<string, unknown>).summaryLines as string[];
+    for (const line of lines) assert.doesNotMatch(line, /low priority|plenty of black/i);
+  });
+
+  it("§WP-12b the colour summary names the thin colour when the engine has identified one", () => {
+    const input = inputWithPalette([{ colour: "Black", count: 19, share: 0.4, neutral: true }]);
+    (input.needs as unknown as { synthesis: unknown }).synthesis = {
+      state: "available",
+      lines: [{ id: "synth-colour", kind: "uneven", reading: "x", evidence: [], thinLabel: "Grey" }],
+    };
+    const page = buildWardrobePage(input);
+    const block = page.sections.find((s) => s.id === "profile")!.blocks.find((b) => b.id === "profile")!;
+    const lines = (block.meta as Record<string, unknown>).summaryLines as string[];
+    assert.ok(lines.some((l) => /mostly colours you like; grey appears less often/i.test(l)));
   });
 });

@@ -428,7 +428,11 @@ describe("§WC-7 Closet-to-Passport match", () => {
     );
     assert.equal(lifestyleMatch([strong("Everyday"), strong("Work")])!.stateText, "Strong match");
     assert.equal(lifestyleMatch([strong("Everyday"), weak("Work")])!.stateText, "Partial match");
-    assert.match(lifestyleMatch([strong("Everyday"), weak("Work")])!.reading, /Everyday is well covered/);
+    // "Covered" is avoided deliberately — WI also uses coverage for a stated
+    // dressing/coverage preference, and the ambiguity was flagged.
+    const reading = lifestyleMatch([strong("Everyday"), weak("Work")])!.reading;
+    assert.match(reading, /plenty of everyday options/i);
+    assert.doesNotMatch(reading, /\bcovered\b/i);
   });
 });
 

@@ -20,17 +20,15 @@
 // a number, and never decides something is missing.
 
 import type { WardrobeIntelligence, WardrobeObservation, WardrobePairing } from "~/lib/ai/wardrobe-intelligence";
-import type { WardrobeNeeds, DepthFinding, RegisterId, RegisterReading } from "~/lib/ai/wardrobe-needs";
+import type { WardrobeNeeds, RegisterId, RegisterReading } from "~/lib/ai/wardrobe-needs";
 import type { WardrobeRecommendations, RecommendationAttribute } from "~/lib/ai/wardrobe-recommendations";
 import { changeLines, type WardrobeChange } from "~/lib/ai/wardrobe-snapshot";
 import {
   registerDisplay,
-  summaryEntries,
   lifestyleMatch,
   matchDimension,
   comparisonDimension,
   heroLabel,
-  heroReading,
   capabilityLabel,
   plainPairReason,
   plainText,
@@ -39,22 +37,22 @@ import {
 
 // ── Contract ──────────────────────────────────────────────────────────────────
 
-/** The six homes, in reading order. */
-export type SectionId = "now" | "works" | "range" | "do" | "possibilities" | "learning";
+/**
+ * The four moments after the hero (which renders separately, outside this
+ * list — see `WardrobePage.reading`/`basis`). Content-locked: nothing is
+ * added here without reopening that lock.
+ */
+export type SectionId = "wear" | "attention" | "shop" | "profile";
 
 export const SECTION_ORDER: readonly SectionId[] = [
-  "now", "works", "range", "do", "possibilities", "learning",
+  "wear", "attention", "shop", "profile",
 ];
 
 export const SECTION_TITLES: Readonly<Record<SectionId, string>> = {
-  now: "Your wardrobe right now",
-  works: "What already works",
-  range: "Where your wardrobe has less range",
-  do: "What to do about it",
-  // Deliberately not "what you haven't tried": nAia knows what it has
-  // generated, never what she has worn outside the product.
-  possibilities: "Possibilities to try",
-  learning: "How nAia understands your style",
+  wear: "Wear what you already own",
+  attention: "What deserves your attention",
+  shop: "Shop smarter",
+  profile: "Your wardrobe profile",
 };
 
 /**
@@ -115,6 +113,8 @@ export interface PageBlock {
    * provenance/counts/breakdown behind it.
    */
   summary?: string;
+  /** Renderer hints for block-level layout data. Never rendered as text. */
+  meta?: Record<string, unknown>;
 }
 
 export interface PageSection {
@@ -129,6 +129,8 @@ export interface WardrobePage {
   closetCount: number;
   /** The one-sentence read of the wardrobe. Null until nAia can see enough. */
   reading: string | null;
+  /** What moved since last time. Empty when nothing did. */
+  changeLines: string[];
   /** Whether there is enough in the Closet to say anything at all. */
   ready: boolean;
   /** Shown when there is not. */
@@ -158,30 +160,30 @@ export type ClosetConfidence = "mostly" | "still-adding" | "unknown";
 // owner moves the full explanation and everything else follows.
 
 const CLAIM_OWNER: Readonly<Record<string, SectionId>> = {
-  "depth-enough": "works",
-  "closet-capability": "works",
-  garment: "works",
-  "depth-gap": "range",
-  register: "range",
-  recommendation: "do",
-  "not-a-priority": "do",
-  "buy-verdict": "do",
-  pairings: "possibilities",
-  untapped: "possibilities",
-  "palette-representation": "learning",
-  passport: "learning",
-  "intentions-chosen": "learning",
-  "styleme-dress-level": "learning",
-  "outcome-feedback": "learning",
-  dna: "now",
-  "what-changed": "now",
-  explore: "do",
-  "do-pairing": "do",
-  // Coverage moved out of "learning" into "do": it's an actionable limitation
-  // ("N pieces may not meet your preferences"), not background provenance.
-  coverage: "do",
-  "low-priority": "do",
-  "worth-trying": "possibilities",
+  garment: "wear",
+  explore: "wear",
+  "do-pairing": "wear",
+  pairings: "wear",
+  untapped: "wear",
+  "worth-trying": "wear",
+  "depth-gap": "attention",
+  // Coverage is an actionable limitation ("N pieces may not meet your
+  // preferences"), not background provenance — it sits with the work-variety
+  // finding, not in the profile.
+  coverage: "attention",
+  recommendation: "shop",
+  "not-a-priority": "shop",
+  "low-priority": "shop",
+  "buy-verdict": "shop",
+  "depth-enough": "shop",
+  "closet-capability": "profile",
+  "hero-note": "profile",
+  "palette-representation": "profile",
+  passport: "profile",
+  "intentions-chosen": "profile",
+  "styleme-dress-level": "profile",
+  "outcome-feedback": "profile",
+  dna: "profile",
 };
 
 /** The family of a claim — everything before the first colon. */
@@ -285,233 +287,60 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
   const sections = new Map<SectionId, PageBlock[]>();
   for (const id of SECTION_ORDER) sections.set(id, []);
   const add = (id: SectionId, block: PageBlock | null) => {
-    if (block && (block.entries.length > 0 || block.summary)) sections.get(id)!.push(block);
+    if (block && hasVisibleContent(block)) sections.get(id)!.push(block);
   };
 
-  // ── 1 · Your wardrobe right now ────────────────────────────────────────────
-  // The read, and at most three takeaways. Takeaways are POINTERS by
-  // construction — their full explanation lives in the section that owns them.
-  const findingById = new Map<string, DepthFinding>(
-    [...needs.couldUseMore, ...needs.enough].map((f) => [f.id, f]),
-  );
-
-  // Built once in section 2 and read again in section 5, so a piece cannot be
-  // recomputed into both.
+  // Built once, below, and read again for the "profile" section, so a piece
+  // cannot be recomputed into both.
   const garmentSplitRef: { value: { works: PageBlock | null; possibilities: PageBlock | null } | null } = { value: null };
 
-  const nowBlocks: PageBlock[] = [];
+  // What moved since last time. Rendered by the route directly above the five
+  // moments (see WardrobePage.changeLines) — content-locked, so it is a fact
+  // stated once, not a section of its own. Absent entirely when nothing moved.
+  const changeLinesOut: string[] = ready && input.change ? changeLines(input.change) : [];
 
-  // What moved since last time. First thing in the page when it exists, and
-  // absent entirely when it does not — an empty "nothing changed" block teaches
-  // the customer to skip this section.
-  if (ready && input.change) {
-    const lines = changeLines(input.change);
-    if (lines.length > 0) {
-      nowBlocks.push({
-        id: "what-changed",
-        label: "What changed since you last looked",
-        kind: "change",
-        entries: lines.map((text, i) => ({
-          id: `change-${i}`,
-          claim: `what-changed:${i}`,
-          role: "full" as EntryRole,
-          body: text,
-          garmentIds: [],
-        })),
-      });
-    }
-  }
+  // "You have enough of X" and "another X is not a priority" are the same
+  // claim, and content-lock puts the merged result exclusively in Shop
+  // Smarter's "Low priority right now" — never as its own "works" chapter.
+  // Computed here, at top level, because both the enough-cluster's true
+  // membership and the register it names are needed again below.
+  const enoughGroups = groupEnough(
+    needs.enough.map((f) => {
+      // Not evidence[0] — a blind index made "See all N" show whatever
+      // evidence happened to be first, not the true full membership. The
+      // full list lives under this specific field name; find it by name.
+      const membership = f.evidence.find((ev) => ev.field === "slot + colour + formality");
+      return { ...f, fullGarmentIds: cleanPartnerIds(membership?.garmentIds ?? f.garmentIds, []) };
+    }),
+  );
+  const notAPriorityByRegister = new Map(
+    recommendations.notAPriority.map((n) => [n.id.replace(/^not-priority-/, ""), n]),
+  );
 
-  if (ready) {
-    const takeaways: PageEntry[] = summaryEntries(needs)
-      .slice(0, 3)
-      .map((entry, i) => {
-        const finding = findingById.get(entry.id);
-        const claim = finding
-          ? needs.enough.some((f) => f.id === finding.id)
-            ? claims.enough(finding.register)
-            : claims.gap(finding.register)
-          : entry.id === "no-urgent-need"
-            ? "buy-verdict"
-            : `summary:${entry.id}`;
-        return {
-          id: `takeaway-${i}`,
-          claim,
-          // Always a pointer: the takeaway names the finding, the owning
-          // section explains it. This is what stops the opening summary
-          // reproducing three full explanations.
-          role: "pointer" as EntryRole,
-          title: entry.headline,
-          garmentIds: [],
-        };
-      });
-    if (takeaways.length > 0) {
-      nowBlocks.push({
-        id: "takeaways",
-        label: "Three things that stand out",
-        kind: "takeaways",
-        // Framed as a preview, because each headline is repeated verbatim as
-        // the title of the entry that explains it further down. Unlabelled,
-        // the reader meets the same sentence twice and it reads as padding.
-        note: "Each of these is explained below.",
-        entries: takeaways,
-      });
-    }
-  }
-  // What the Closet is made of. Descriptive only — the CONCLUSIONS about the
-  // palette live in the learning section, so the two never restate each other.
-  if (ready) {
-    const { dna } = intelligence;
-    const cells: PageEntry[] = [];
-    if (dna.palette.length > 0) {
-      const top = dna.palette[0];
-      // Whether this colour is also a covered "enough" role, and whether that
-      // makes another one low priority, is decided once — in the "enough" and
-      // "Low priority right now" sections. Saying it a third time here, after
-      // the opening findings have already said it too, is repetition, not
-      // confirmation.
-      const body = `${top.colour} is already a big part of your wardrobe (${top.count} ${top.count === 1 ? "piece" : "pieces"}).`;
-
-      cells.push({
-        id: "dna-palette", claim: "dna:palette", role: "full",
-        title: "Your main colours", garmentIds: [],
-        body,
-        meta: { palette: dna.palette.slice(0, 5) },
-      });
-    }
-    if (dna.shapes.length > 0) {
-      cells.push({
-        id: "dna-shapes", claim: "dna:shapes", role: "full",
-        // Not "shapes you come back to": nAia knows what she OWNS, and says so
-        // in its own footer. Coming back to something is wear behaviour, and
-        // wear behaviour is not captured. No methodology sentence underneath —
-        // the chips are the point.
-        title: "Silhouettes that appear most in your Closet", garmentIds: [],
-        meta: { shapes: dna.shapes },
-      });
-    }
-    // The three traits — mostly neutral, built for everyday, black-anchored —
-    // are the opening read broken into three labelled statistics. Printed under
-    // it they say the same thing a second time, in the register the feedback
-    // asked us to move away from. The sentence is the better version, so the
-    // traits are shown only when there is no reading to carry them.
-    if (dna.traits.length > 0 && !intelligence.snapshotReading) {
-      cells.push({
-        id: "dna-traits", claim: "dna:traits", role: "full",
-        title: "Overall character", garmentIds: [],
-        meta: { traits: dna.traits },
-      });
-    }
-    if (cells.length > 0) {
-      nowBlocks.push({ id: "dna", label: "What your Closet is made of", kind: "dna", entries: cells });
-    }
-  }
-
-  for (const b of nowBlocks) add("now", b);
-
-  // ── 2 · What already works ─────────────────────────────────────────────────
+  // ── Wear what you already own ──────────────────────────────────────────────
   if (ready) {
     // Per-garment entries. A piece gets ONE entry carrying everything known
     // about it — its hero label, its rediscovery note, and any contradiction
-    // observation about it — so no garment is featured twice.
+    // observation about it — so no garment is featured twice. The hero-only
+    // cards (most-versatile, closet-connector, passport-match, your-favourite)
+    // are not shown as a standalone block in the five-moment page — content
+    // lock names no such section. Most-versatile's own evidence is folded
+    // into the Work combination below instead; the rest stay computed (for
+    // possibilities/rediscover) but their standalone cards are not rendered.
     const garmentSplit = splitGarmentEntries(buildGarmentBlock(input));
     garmentSplitRef.value = garmentSplit;
-    add("works", garmentSplit.works);
-
-    // "You have enough of X" and "another X is not a priority" are the same
-    // claim. They are merged here, with the shopping consequence kept.
-    const enoughGroups = groupEnough(
-      needs.enough.map((f) => ({ ...f, fullGarmentIds: f.evidence[0]?.garmentIds ?? f.garmentIds })),
-    );
-    const notAPriorityByRegister = new Map(
-      recommendations.notAPriority.map((n) => [n.id.replace(/^not-priority-/, ""), n]),
-    );
-    const enoughEntries: PageEntry[] = enoughGroups.map((finding) => {
-      const consequence = notAPriorityByRegister.get(finding.register);
-      const shown = finding.garmentIds.length;
-      const total = finding.fullGarmentIds.length;
-      return {
-        id: finding.id,
-        claim: claims.enough(finding.register as RegisterId),
-        role: "full" as EntryRole,
-        title: finding.title,
-        body: mergeEnough(plainText(finding.body), consequence ? plainText(consequence.body) : null),
-        garmentIds: finding.garmentIds,
-        // The visible strip is capped; the count in the body sentence is the
-        // true total. When there's more than is shown, say so honestly rather
-        // than let the sentence and the images disagree.
-        action: total > shown
-          ? { kind: "reveal", label: `See all ${total} pieces`, hideLabel: "Show less", garmentIds: finding.fullGarmentIds }
-          : undefined,
-      };
-    });
-    add("works", {
-      id: "enough",
-      label: "You have plenty of",
-      kind: "findings",
-      entries: enoughEntries,
-    });
-
-    // Closet capability — reviewed garment ratings, named as such. Collapsed:
-    // real evidence, but background relative to what to wear/buy/skip, so it
-    // does not compete for attention with those.
-    const strengths = needs.intentions.closetStrengths.slice(0, 3);
-    if (strengths.length > 0) {
-      add("works", {
-        id: "capability",
-        label: "What your Closet can help with",
-        kind: "capability",
-        disclosure: { label: "More about your wardrobe", hideLabel: "Show less" },
-        entries: [
-          {
-            id: "closet-capability",
-            claim: "closet-capability",
-            role: "full",
-            // Says where the numbers come from without implying a person sat
-            // down with this particular wardrobe. They are approved garment
-            // profiles — a reviewed rating held against each piece — and
-            // claiming a personal styling review would describe a service that
-            // is not being delivered. Never a comparison with her Passport or
-            // a claim about how she will feel, and never presented as a
-            // complete or finished outfit.
-            body:
-              "These counts estimate the kinds of looks your pieces could help with. " +
-              "They aren't complete outfits or a match against your personal requirements.",
-            garmentIds: [],
-            meta: { strengths: strengths.map((c) => ({ ...c, label: capabilityLabel(c.intention, c.label) })) },
-          },
-        ],
-      });
-    }
   }
 
-  // ── 3 · Where your wardrobe has less range ─────────────────────────────────
+  // ── What deserves your attention ───────────────────────────────────────────
+  // The register-state list ("What you can dress for": Strong / Needs more
+  // range / Covered) is content-locked away as its own chapter — which
+  // register is thin is shown by the work-variety finding itself, and by
+  // which combinations exist in "Wear what you already own". The work-variety
+  // finding is this page's ONE home for that reasoning; nothing else restates
+  // it, including the shopping section below.
   if (ready) {
-    const registers = needs.registers
-      .filter((r) => r.rawCount > 0 || r.needed)
-      .map((r) => ({ key: r.register, ...registerDisplay(r) }));
-    // A register with its own gap finding keeps its verdict but loses its note:
-    // the finding directly below says the same thing in more detail, and the
-    // two sat one block apart saying "they mostly make the same outfit" twice.
-    const explainedByGap = new Set(needs.couldUseMore.map((f) => f.register));
-    add("range", {
-      id: "registers",
-      label: "What you can dress for",
-      kind: "registers",
-      entries: registers.map((r) => ({
-        id: `register-${r.key}`,
-        claim: claims.register(r.key as RegisterId),
-        role: "full" as EntryRole,
-        title: r.heading,
-        body: explainedByGap.has(r.key as RegisterId) ? undefined : r.plain,
-        garmentIds: [],
-        meta: { state: r.state, stateText: r.stateText, needed: r.needed },
-      })),
-    });
-
-    add("range", {
+    add("attention", {
       id: "gaps",
-      // No label: it duplicated the section title directly above it.
       kind: "findings",
       entries: needs.couldUseMore.map((finding) => ({
         id: finding.id,
@@ -522,9 +351,12 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
         garmentIds: finding.garmentIds,
       })),
     });
+    // Coverage: an actionable limitation, so it sits beside the other thing
+    // that deserves attention, not in the profile as background provenance.
+    add("attention", buildCoverageBlock(input));
   }
 
-  // ── 4 · What to do about it ────────────────────────────────────────────────
+  // ── Wear what you already own (combinations) ───────────────────────────────
   // Ways to get dressed lives here, driven by what she told nAia is part of
   // her life (Passport lifestyle -> register need), never by what she happens
   // to own. A life area she named still appears with nothing in it, saying so
@@ -578,6 +410,33 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
     // "Possibilities to try" instead, where no life-area claim is made about it.
     const gymPairing = gymDeclared ? anyGymPairing : undefined;
 
+    // Most-versatile is real, useful evidence ("pairs easily with 8 other
+    // pieces") that content-lock does not give its own card — it folds into
+    // whichever combination already features that garment, as a line inside
+    // that combination's own "Why this works" detail.
+    const mostVersatile = intelligence.heroes.state !== "learning"
+      ? intelligence.heroes.heroes.find((h) => h.label === "most-versatile")
+      : undefined;
+    const mostVersatileCount = mostVersatile
+      ? cleanPartnerIds(
+          mostVersatile.evidence?.find((ev) => ev.field.includes("compatibility graph"))?.garmentIds ?? [],
+          [mostVersatile.garmentId],
+        ).length
+      : 0;
+    const mostVersatileNote = (garmentIds: readonly string[]): string | null =>
+      mostVersatile && mostVersatileCount > 0 && garmentIds.includes(mostVersatile.garmentId)
+        ? `This piece is also one of your most versatile — it pairs with ${mostVersatileCount} others in your Closet.`
+        : null;
+    const whyThisWorks = (pair: WardrobePairing): PageAction => ({
+      kind: "reveal",
+      label: "Why this works",
+      hideLabel: "Show less",
+      garmentIds: [],
+      detail: [plainPairReason(pair.reason, pair.garmentIds.length), mostVersatileNote(pair.garmentIds)]
+        .filter((s): s is string => s !== null)
+        .join(" "),
+    });
+
     if (relevantRegisters.length > 0 || gymPairing) {
       const registerEntries: PageEntry[] = relevantRegisters.map((r) => {
         const best = bestGenericFor(r.register);
@@ -607,6 +466,12 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
           title,
           body: combinationExplanation(best, COMBO_LIFE_PHRASE[r.register] ?? REGISTER_WORD[r.register] ?? r.register, input.garmentName),
           garmentIds: best.garmentIds,
+          action: whyThisWorks(best),
+          // Presentation-only pointer to the SAME garment the "Why this
+          // works" sentence already names — no new claim, count or logic;
+          // it just lets the visual layer anchor its mark to the right photo
+          // instead of restating the fact in a fresh sentence.
+          meta: mostVersatileNote(best.garmentIds) ? { mostVersatileGarmentId: mostVersatile!.garmentId } : undefined,
         };
       });
       // Only ever added alongside a real pairing — never a bare "nothing
@@ -620,10 +485,11 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
           title: LIFESTYLE_PRESENTATION.gym.heading,
           body: combinationExplanation(gymPairing, "the gym", input.garmentName),
           garmentIds: gymPairing.garmentIds,
+          action: whyThisWorks(gymPairing),
         });
       }
 
-      add("do", {
+      add("wear", {
         id: "ways-to-get-dressed",
         label: "Ways to get dressed with what you own",
         // Own kind: the outfit itself — images and the styling explanation —
@@ -633,110 +499,137 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
       });
     }
 
-    add("do", buildVerdictBlock(needs, recommendations, confidence));
+  }
 
-    add("do", {
-      id: "recommendations",
-      label: "What to look for",
-      kind: "recommendations",
-      entries: recommendations.recommendations.map((rec) => {
-        // A structure attribute of "a different shape — A-line, fitted or
-        // flared" names shapes the engine has not narrowed to one specific
-        // garment — showing it as its own chip reads as exposed
-        // classification. There is nothing more specific to name (the engine
-        // itself is undecided between those shapes), so the honest version is
-        // plain language folded into the sentence, not a label claiming a
-        // precision that is not there.
-        const shapeOnly = rec.attributes.find(
-          (a) => a.kind === "structure" && /^a different shape/i.test(a.label),
-        );
-        const title = shapeOnly ? naturalShapeTitle(rec.title) : rec.title;
-        const visibleAttributes = shapeOnly ? rec.attributes.filter((a) => a !== shapeOnly) : rec.attributes;
-        const why = whyThisDetail(rec, shapeOnly);
-        return {
-          id: rec.id,
-          claim: claims.recommendation(rec.register),
+  // ── Shop smarter ────────────────────────────────────────────────────────────
+  if (ready) {
+    // "Do you need to buy anything?" is gone as its own verdict — when there
+    // IS something to consider, "Worth considering" says it with specifics,
+    // which makes a separate yes/no verdict redundant. When there is
+    // nothing, that conclusion is still worth stating, hedged exactly as the
+    // old verdict was by how much of the Closet she's told nAia she's added.
+    if (recommendations.recommendations.length === 0) {
+      add("shop", {
+        id: "worth-considering",
+        label: "Worth considering",
+        kind: "recommendations",
+        entries: [{
+          id: "nothing-to-add",
+          claim: "buy-verdict",
           role: "full" as EntryRole,
-          title,
-          // The proposal opens by restating the gap ("your work pieces repeat
-          // similar combinations"), which the section above has just explained
-          // in full. What to BUY is the new information; keep that.
-          body: dropGapRestatement(rec.body),
-          garmentIds: rec.unlocksIds,
-          action: why
-            ? { kind: "reveal" as const, label: "Why this?", hideLabel: "Show less", garmentIds: [], detail: why }
-            : undefined,
-          meta: { attributes: visibleAttributes },
-        };
-      }),
-    });
+          title: "Nothing obvious is missing right now.",
+          body: hedge(needs.noUrgentNeed ? plainText(needs.noUrgentNeed) : undefined, confidence),
+          garmentIds: [],
+        }],
+      });
+    } else {
+      add("shop", {
+        id: "worth-considering",
+        label: "Worth considering",
+        kind: "recommendations",
+        entries: recommendations.recommendations.map((rec) => {
+          // A structure attribute of "a different shape — A-line, fitted or
+          // flared" names shapes the engine has not narrowed to one specific
+          // garment — showing it as its own chip reads as exposed
+          // classification. There is nothing more specific to name (the
+          // engine itself is undecided between those shapes), so the honest
+          // version is a plain instruction, never a garment type ("bottom",
+          // "trousers") the evidence hasn't actually resolved.
+          const shapeOnly = rec.attributes.find(
+            (a) => a.kind === "structure" && /^a different shape/i.test(a.label),
+          );
+          const title = shapeOnly ? naturalShapeTitle(rec) : rec.title;
+          const visibleAttributes = shapeOnly ? rec.attributes.filter((a) => a !== shapeOnly) : rec.attributes;
+          const why = whyThisDetail(rec, shapeOnly);
+          const colour = rec.attributes.find((a) => a.kind === "colour");
+          // Content-locked: "It could work with N pieces already in your
+          // Closet. Grey is one colour you like that appears less often." —
+          // no gap restatement (that stays exclusively in "What deserves your
+          // attention"), no attribute dump.
+          const body = [
+            `It could work with ${rec.unlocksIds.length} ${rec.unlocksIds.length === 1 ? "piece" : "pieces"} already in your Closet.`,
+            colour ? `${capitalise(colour.label)} is one colour you like that appears less often.` : null,
+          ].filter((s): s is string => s !== null).join(" ");
+          return {
+            id: rec.id,
+            claim: claims.recommendation(rec.register),
+            role: "full" as EntryRole,
+            title,
+            body: hedge(body, confidence),
+            garmentIds: rec.unlocksIds,
+            action: why
+              ? { kind: "reveal" as const, label: "Why this?", hideLabel: "Show less", garmentIds: [], detail: why }
+              : undefined,
+            meta: { attributes: visibleAttributes },
+          };
+        }),
+      });
+    }
 
-    // What to skip / deprioritise — the SAME notAPriority evidence "You have
-    // plenty of" already merges in, surfaced again as an explicit, standalone
-    // answer to "what should I stop buying?" It can never name a register a
-    // live recommendation above also names: buildNotAPriority only ever
-    // speaks for a register couldUseMore has NOT flagged.
+    // Low priority — self-explanatory: names the piece, then the reason
+    // (the real count) in the same breath, so it never needs its own
+    // paragraph to make sense. The same 8 tops that justify this are shown
+    // once, here — never also as a separate "You have plenty of" chapter.
     if (recommendations.notAPriority.length > 0) {
-      add("do", {
+      add("shop", {
         id: "low-priority",
         label: "Low priority right now",
         kind: "findings",
-        entries: recommendations.notAPriority.map((n) => ({
-          id: n.id,
-          claim: "low-priority",
-          role: "full" as EntryRole,
-          title: n.title,
-          body: n.body,
-          garmentIds: [],
-        })),
-      });
-    }
-
-    // Coverage — moved out of "How nAia understands your style": an
-    // actionable limitation, not background provenance. Collapsed by default.
-    add("do", buildCoverageBlock(input));
-  }
-
-  // ── 5 · Possibilities to try ───────────────────────────────────────────────
-  if (ready) {
-    add("possibilities", garmentSplitRef.value?.possibilities ?? null);
-    const { pairings } = intelligence;
-    // A combination already shown under "Ways to get dressed" is not repeated
-    // here — this section is for the other, exploratory ones.
-    const remainingPairings = pairings.state !== "learning"
-      ? pairings.pairings.filter((p) => !waysToGetDressedPairingIds.has(p.id))
-      : [];
-    if (remainingPairings.length > 0) {
-      add("possibilities", {
-        id: "pairings",
-        label: "Combinations to try with pieces in your Closet",
-        kind: "pairings",
-        entries: remainingPairings.map((pair) => ({
-          id: pair.id,
-          claim: `pairings:${pair.id}`,
-          role: "full" as EntryRole,
-          body: plainPairReason(pair.reason, pair.garmentIds.length),
-          garmentIds: pair.garmentIds,
-        })),
+        entries: recommendations.notAPriority.map((n) => {
+          const enoughFinding = enoughGroups.find((f) => `not-priority-${f.register}` === n.id);
+          const count = enoughFinding ? cleanPartnerIds(enoughFinding.fullGarmentIds, []).length : null;
+          const subject = singularizeLast(n.title.replace(/^Another of your /, ""));
+          return {
+            id: n.id,
+            claim: "low-priority",
+            role: "full" as EntryRole,
+            title: `Another similar ${subject}`,
+            body: count !== null
+              ? `You already have ${count}, so another similar one probably won't add much.`
+              : n.body,
+            garmentIds: enoughFinding ? cleanPartnerIds(enoughFinding.garmentIds, []).slice(0, 6) : [],
+          };
+        }),
       });
     }
   }
 
-  // ── 6 · How nAia is learning you ───────────────────────────────────────────
+  // ── Piece worth rediscovering + grouped blazers (feeds "wear") ─────────────
+  // Content-locked: the generic "Combinations to try" list of leftover
+  // pairings is gone as its own chapter, absorbed into "Wear what you
+  // already own" above — `waysToGetDressedPairingIds` is what keeps a
+  // combination already shown there from ever being suggested twice.
   if (ready) {
-    add("learning", buildPassportBlock(input));
-    add("learning", buildBehaviourBlock(needs));
+    add("wear", garmentSplitRef.value?.possibilities ?? null);
+  }
+
+  // ── Your wardrobe profile ───────────────────────────────────────────────────
+  // One compact, mostly-collapsed moment: colours, silhouettes, StyleMe
+  // history, wear behaviour, all always visible in one line each; the
+  // Passport comparison, capability counts and any remaining provenance sit
+  // behind a single "See how nAia knows this" reveal. Content-locked:
+  // replaces four separate chapters ("What your Closet is made of", "How
+  // nAia is learning you", "What your Closet can help with") with one.
+  if (ready) {
+    add("profile", buildProfileBlock(input));
   }
 
   // ── Resolve ────────────────────────────────────────────────────────────────
   const resolved = resolveClaims(sections);
 
+  // The hero reading is content-locked to the lifestyle conclusion — the
+  // same sentence the Passport comparison already computes — not the old
+  // trait-based sentence, and it never mentions colour (grey belongs to the
+  // profile, not the hero).
+  const registerDisplays = needs.state === "available"
+    ? needs.registers.filter((r) => r.rawCount > 0 || r.needed).map((r) => registerDisplay(r))
+    : [];
+  const heroLifestyle = lifestyleMatch(registerDisplays);
+
   return {
     closetCount,
-    // Plain-language read built from the same trait/palette data as the
-    // engine's own sentence; falls back to it when there isn't enough for
-    // either half of the plain version.
-    reading: heroReading(intelligence.dna.traits, intelligence.dna.palette) ?? intelligence.snapshotReading ?? null,
+    reading: heroLifestyle?.reading ?? intelligence.snapshotReading ?? null,
+    changeLines: changeLinesOut,
     ready,
     readyNote: intelligence.ready ? undefined : (intelligence.readyNote ?? undefined),
     basis: basisLine(closetCount, confidence),
@@ -744,9 +637,6 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
     sections: pruneRepetition(SECTION_ORDER.map((id) => ({
       id,
       title: SECTION_TITLES[id],
-      sub: id === "learning"
-        ? "Your Style Passport is what you told nAia. Your Closet is what you own."
-        : undefined,
       blocks: resolved.get(id) ?? [],
     })).filter((s) => s.blocks.length > 0)),
   };
@@ -790,11 +680,24 @@ function resolveClaims(sections: Map<SectionId, PageBlock[]>): Map<SectionId, Pa
       // A block whose only content is its always-visible `summary` (detail
       // collapsed to nothing, or never had any) still belongs on the page —
       // this mirrors the same allowance in `add()` above.
-      if (entries.length > 0 || block.summary) keptBlocks.push({ ...block, entries });
+      if (entries.length > 0 || hasVisibleContent({ ...block, entries: [] })) keptBlocks.push({ ...block, entries });
     }
     out.set(sectionId, keptBlocks);
   }
   return out;
+}
+
+/**
+ * Whether a block has anything to show even with zero (or fully-collapsed)
+ * `entries` — a `summary` sentence, or the profile's always-visible
+ * `summaryLines`. The single place that decides a block survives on content
+ * alone, so a new always-visible field never needs its own bespoke check at
+ * every call site.
+ */
+function hasVisibleContent(block: PageBlock): boolean {
+  if (block.entries.length > 0 || block.summary) return true;
+  const lines = (block.meta as Record<string, unknown> | undefined)?.summaryLines;
+  return Array.isArray(lines) && lines.length > 0;
 }
 
 // ── Blocks ────────────────────────────────────────────────────────────────────
@@ -853,7 +756,15 @@ function buildGarmentBlock(input: WardrobePageInput): PageBlock | null {
       // them. Only rediscover pieces got this before; a hero with no
       // rediscover note had a claim and no visible proof of it. Left in place
       // for the rediscover loop below to overwrite when a piece is both.
-      const partnerIds = hero.evidence?.[0]?.garmentIds ?? [];
+      //
+      // NOT evidence[0] — passport-match and your-favourite heroes lead with
+      // self-referential evidence (garmentIds: [this garment's own id], e.g.
+      // "Aligns on colour and shape") and carry the actual partner list
+      // second. Reading [0] blindly made the trench and the bag each reveal
+      // themselves as their own only match. The compatibility-graph entry is
+      // the one true partner list for every hero type; find it by name.
+      const partnerEvidence = hero.evidence?.find((ev) => ev.field.includes("compatibility graph"));
+      const partnerIds = cleanPartnerIds(partnerEvidence?.garmentIds ?? [], [hero.garmentId]);
       if (partnerIds.length > 0) {
         e.garmentIds = partnerIds;
         e.action = {
@@ -869,16 +780,21 @@ function buildGarmentBlock(input: WardrobePageInput): PageBlock | null {
   for (const piece of opportunities.rediscover) {
     const e = touch(piece.garmentId);
     e.title = e.title ?? piece.name;
+    // Self-excluded and deduplicated before anything downstream counts or
+    // renders it — the engine's own list is already clean, but the count in
+    // the sentence and the count on the button must always agree with
+    // whatever is actually revealed, not with a number computed earlier.
+    const cleanIds = cleanPartnerIds(piece.worksWithIds, [piece.garmentId]);
     e.meta = {
       ...e.meta,
-      rediscover: namedMatchExamples(plainText(piece.body), piece.worksWithIds, input.garmentName),
+      rediscover: namedMatchExamples(plainText(piece.body), cleanIds, input.garmentName),
     };
-    if (piece.worksWithIds.length > 0) {
-      e.garmentIds = piece.worksWithIds;
+    if (cleanIds.length > 0) {
+      e.garmentIds = cleanIds;
       // The count belongs in the label only when the entry has not already
       // given it. Stated twice in adjacent lines it reads as filler; stated
       // nowhere, the button looks like it might be showing a sample.
-      const n = piece.worksWithIds.length;
+      const n = cleanIds.length;
       const alreadyStated = new RegExp(`\\b${n}\\b`).test(plainText(piece.body));
       e.action = {
         kind: "reveal",
@@ -886,9 +802,10 @@ function buildGarmentBlock(input: WardrobePageInput): PageBlock | null {
           ? "See matching pieces"
           : `See ${n} matching ${n === 1 ? "piece" : "pieces"}`,
         hideLabel: "Show less",
-        garmentIds: piece.worksWithIds,
+        garmentIds: cleanIds,
       };
     }
+    // cleanIds.length === 0: no genuine partners survive — no action, ever.
   }
 
   for (const o of observations) {
@@ -945,22 +862,23 @@ function buildGarmentBlock(input: WardrobePageInput): PageBlock | null {
 function splitGarmentEntries(block: PageBlock | null): { works: PageBlock | null; possibilities: PageBlock | null } {
   if (block === null) return { works: null, possibilities: null };
   const hasLabel = (e: PageEntry) => typeof (e.meta as Record<string, unknown> | undefined)?.heroLabel === "string";
-  const works = block.entries.filter(hasLabel);
-  const rest = block.entries.filter((e) => !hasLabel(e));
+  const hasRediscover = (e: PageEntry) => typeof (e.meta as Record<string, unknown> | undefined)?.rediscover === "string";
+  // A garment can be both a hero AND the dynamic rediscover pick (Cream Tank
+  // is exactly this: closet-connector AND the top rediscover candidate) —
+  // its rediscover content is what "Wear what you already own" actually
+  // shows, so a hero label alone must never send it to the dropped "works"
+  // list. Only a hero with NO rediscover content of its own (most-versatile,
+  // typically) belongs there.
+  const works = block.entries.filter((e) => hasLabel(e) && !hasRediscover(e));
+  const rest = block.entries.filter((e) => !hasLabel(e) || hasRediscover(e));
   return {
     works: works.length > 0 ? { ...block, entries: works } : null,
+    // `garment:*` and this block both resolve to "wear" now, so the claim
+    // never needs re-keying to be owned correctly here — keeping it as
+    // `garment:<id>` is also what lets every other lookup on the page find
+    // this SAME entry by the SAME claim, wherever it ends up rendering.
     possibilities: rest.length > 0
-      ? {
-          id: "worth-trying",
-          label: "Pieces worth another look",
-          kind: "garments",
-          // Re-keyed to the family owned by THIS section. Left on the `garment`
-          // family they were demoted to pointers — which stripped the garment
-          // ids and the reveal action, and left the cards with nothing to open.
-          entries: groupIdenticalMatches(
-            rest.map((e) => ({ ...e, claim: e.claim.replace(/^garment:/, "worth-trying:") })),
-          ),
-        }
+      ? { id: "worth-trying", label: "Pieces worth another look", kind: "garments", entries: groupIdenticalMatches(rest) }
       : null,
   };
 }
@@ -974,8 +892,15 @@ function splitGarmentEntries(block: PageBlock | null): { works: PageBlock | null
  * matches keeps two separate cards, unchanged.
  */
 function groupIdenticalMatches(entries: PageEntry[]): PageEntry[] {
-  const matchKey = (e: PageEntry): string | null =>
-    e.garmentIds.length > 0 ? [...e.garmentIds].sort().join(",") : null;
+  const ownId = (e: PageEntry): string => String((e.meta as Record<string, unknown> | undefined)?.garmentId ?? "");
+  // Each entry's own id is stripped from its own set before the sets are
+  // compared — grouping must reflect what the two garments actually share,
+  // never an artifact of one accidentally listing itself or a duplicate id.
+  const cleanedIds = (e: PageEntry): string[] => cleanPartnerIds(e.garmentIds, [ownId(e)]);
+  const matchKey = (e: PageEntry): string | null => {
+    const ids = cleanedIds(e);
+    return ids.length > 0 ? [...ids].sort().join(",") : null;
+  };
 
   const order: string[] = [];
   const buckets = new Map<string, PageEntry[]>();
@@ -990,11 +915,17 @@ function groupIdenticalMatches(entries: PageEntry[]): PageEntry[] {
     if (group.length < 2) return group;
 
     const members = group.map((e) => ({
-      garmentId: String((e.meta as Record<string, unknown> | undefined)?.garmentId ?? ""),
+      garmentId: ownId(e),
       title: e.title ?? "",
     }));
-    const shared = group.find((e) => typeof (e.meta as Record<string, unknown> | undefined)?.rediscover === "string");
-    const body = shared ? ((shared.meta as Record<string, unknown>).rediscover as string) : group[0].body;
+    // The shared set excludes every member's own id, so neither blazer can
+    // ever appear as a "match" for the group they're both in.
+    const memberIds = new Set(members.map((m) => m.garmentId));
+    const sharedIds = cleanPartnerIds(cleanedIds(group[0]), [...memberIds]);
+    // "You marked THIS as difficult to style" was true of only one garment
+    // when reused verbatim for the group — the copy has to say what's
+    // actually true of both.
+    const body = groupedRediscoverBody(members.map((m) => m.title), sharedIds.length);
 
     return [{
       id: `group-${group.map((e) => e.id).join("-")}`,
@@ -1002,8 +933,10 @@ function groupIdenticalMatches(entries: PageEntry[]): PageEntry[] {
       role: "full" as EntryRole,
       title: groupHeading(members.map((m) => m.title)),
       body,
-      garmentIds: group[0].garmentIds,
-      action: group[0].action,
+      garmentIds: sharedIds,
+      action: sharedIds.length > 0
+        ? { kind: "reveal", label: "See matching pieces", hideLabel: "Show less", garmentIds: sharedIds }
+        : undefined,
       meta: { members },
     }];
   });
@@ -1041,6 +974,39 @@ function namedMatchExamples(
  * names don't agree on a shared word, falls back to a plain count so nothing
  * is invented.
  */
+/**
+ * "You marked both your Beige Tailored Blazer and Beige Oversized Blazer as
+ * difficult to style — the same 6 pieces work with either." The locked
+ * grouped wording — never the singular "You marked this..." reused from one
+ * member, which was true of only one of the two garments.
+ */
+function groupedRediscoverBody(titles: string[], sharedCount: number): string {
+  const both = titles.length === 2 ? "both" : "all";
+  const either = titles.length === 2 ? "either" : "any of them";
+  return `You marked ${both} your ${joinWithAnd(titles)} as difficult to style — the same ${sharedCount} ${
+    sharedCount === 1 ? "piece works" : "pieces work"
+  } with ${either}.`;
+}
+
+/**
+ * Excludes every id in `selfIds` and removes duplicates, preserving order.
+ * The single place every partner/membership list passes through before it
+ * reaches a count, a sentence, or a reveal action — so a garment can never
+ * appear as its own match, and a count can never disagree with what's
+ * actually shown.
+ */
+export function cleanPartnerIds(ids: readonly string[], selfIds: readonly string[]): string[] {
+  const exclude = new Set(selfIds);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const id of ids) {
+    if (exclude.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
 function groupHeading(titles: string[]): string {
   const lastWords = titles.map((t) => t.trim().split(/\s+/).pop()?.toLowerCase() ?? "");
   const shared = lastWords.every((w) => w && w === lastWords[0]) ? lastWords[0] : null;
@@ -1124,56 +1090,175 @@ function hedge(base: string | undefined, confidence: ClosetConfidence): string {
   return `${base ?? ""}${suffix}`.trim();
 }
 
-function buildPassportBlock(input: WardrobePageInput): PageBlock | null {
-  const { intelligence, needs } = input;
-  const { passportView } = intelligence;
+/**
+ * Removes a leading article and a trailing plural "s"/"es" from the last
+ * word — enough for the clothing vocabulary this copy actually uses
+ * ("tops"→"top", "dresses"→"dress", "sets"→"set"). Never applied to a
+ * garment's real name, only to a category description already written by
+ * this codebase.
+ */
+function singularizeLast(phrase: string): string {
+  const words = phrase.trim().split(/\s+/);
+  const last = words.pop() ?? "";
+  const singular = last.endsWith("es") ? last.slice(0, -2) : last.endsWith("s") ? last.slice(0, -1) : last;
+  return [...words, singular].join(" ");
+}
 
+/**
+ * The wardrobe profile: colours, silhouettes, StyleMe history and wear
+ * behaviour, always visible at one line each; the Passport comparison,
+ * capability counts and remaining provenance behind one reveal. Replaces
+ * four separate chapters — content-locked to never repeat a conclusion the
+ * hero or another moment already made (the Lifestyle/Passport comparison in
+ * particular: Moment 1 already states it, so it appears here only inside the
+ * reveal, as the evidence behind that reading, never as a second headline).
+ */
+function buildProfileBlock(input: WardrobePageInput): PageBlock | null {
+  const { intelligence, needs } = input;
+  const { passportView, dna } = intelligence;
+
+  const summaryLines: string[] = [];
+
+  if (dna.palette.length > 0) {
+    const thin = needs.synthesis.state === "available"
+      ? needs.synthesis.lines.find((l) => l.id === "synth-colour" && l.kind === "uneven")
+      : undefined;
+    summaryLines.push(
+      thin?.thinLabel
+        ? `Mostly colours you like; ${thin.thinLabel.toLowerCase()} appears less often.`
+        : "Mostly colours you like.",
+    );
+  }
+  if (dna.shapes.length > 0) {
+    summaryLines.push(dna.shapesReading ?? "Straight shapes recur most in your Closet.");
+  }
+  const topRequest = needs.styleMe.state === "available" ? needs.styleMe.requests[0] : undefined;
+  if (topRequest) {
+    summaryLines.push(
+      `You most often ask for ${DRESS_LEVEL_SHORT[topRequest.register] ?? DRESS_LEVEL_PHRASE[topRequest.register]} looks.`,
+    );
+  }
+  // "Wore it" is genuine self-reported wear evidence, not nothing — the
+  // wording says what nAia does know, not only what it does not.
+  summaryLines.push(
+    "Wear behaviour: still learning. nAia knows about looks you tell it you wore, but it doesn't automatically track everything you wear.",
+  );
+
+  // ── Everything else: behind one reveal ────────────────────────────────────
   const registers = needs.registers
     .filter((r) => r.rawCount > 0 || r.needed)
-    .map((r) => ({
-      key: r.register,
-      blockedCount: r.blockedCount,
-      usableCount: r.usableCount,
-      ...registerDisplay(r),
-    }));
-
-  // The lifestyle reading IS the useful conclusion — "your everyday options
-  // are well covered, your work wardrobe has less variety" — so it stays
-  // visible even collapsed, and is not repeated inside the detail reveal.
-  // Coverage lives in its own block now (see buildCoverageBlock) — an
-  // actionable limitation, not background provenance.
+    .map((r) => registerDisplay(r));
   const lifestyle = lifestyleMatch(registers);
+
   const raw = [
     ...(needs.synthesis.state === "available" ? needs.synthesis.lines.map(matchDimension) : []),
     ...(passportView.state !== "learning"
       ? passportView.comparisons.map(comparisonDimension).filter((m): m is NonNullable<typeof m> => m !== null)
       : []),
   ];
-
   const seen = new Set<string>();
   const entries: PageEntry[] = [];
+  // The Lifestyle reading is the hero's own sentence — shown here as the
+  // evidence behind it, never as a second, unlabelled headline.
+  if (lifestyle) {
+    entries.push({
+      id: "match-lifestyle", claim: passportClaim("lifestyle"), role: "full",
+      title: "Lifestyle", body: lifestyle.reading, garmentIds: [],
+      meta: { state: lifestyle.state, stateText: lifestyle.stateText },
+    });
+  }
   for (const m of raw) {
     if (seen.has(m.dimension)) continue;
     seen.add(m.dimension);
     entries.push({
-      id: m.id,
-      claim: passportClaim(m.dimension),
-      role: "full",
-      title: m.dimension,
-      body: m.reading,
-      garmentIds: [],
+      id: m.id, claim: passportClaim(m.dimension), role: "full",
+      title: m.dimension, body: m.reading, garmentIds: [],
       meta: { state: m.state, stateText: m.stateText },
     });
   }
 
-  if (!lifestyle && entries.length === 0) return null;
+  if (needs.styleMe.state === "available") {
+    if (topRequest) {
+      const total = needs.styleMe.requests.reduce((sum, r) => sum + r.sessions, 0);
+      entries.push({
+        id: "dress-level", claim: "styleme-dress-level", role: "full",
+        title: "How you usually want your looks to feel",
+        body: `${topRequest.sessions} of the ${total} StyleMe requests nAia could classify were ${DRESS_LEVEL_PHRASE[topRequest.register]}.`,
+        garmentIds: [],
+      });
+    }
+    const chosen = needs.intentions.chosen.slice(0, 4);
+    if (chosen.length > 0) {
+      const dominates = chosen.length > 1 && chosen[0].sessions >= chosen[1].sessions * 2;
+      const rest = chosen.slice(1, 4).map((c) => c.label);
+      entries.push({
+        id: "intentions-chosen", claim: "intentions-chosen", role: "full",
+        title: "What you most often ask to feel",
+        body: `${capitalise(chosen[0].label)} is ${dominates ? "by far " : ""}what you choose most often` +
+          (rest.length > 0 ? `, followed by ${joinWithAnd(rest)}` : "") + ".",
+        garmentIds: [],
+      });
+    }
+    const feedback = [needs.outcomes.keptNote, needs.outcomes.changedNote].filter(Boolean).join(" ");
+    if (feedback !== "") {
+      entries.push({
+        id: "outcome-feedback", claim: "outcome-feedback", role: "full",
+        title: "What your feedback is teaching nAia", body: feedback, garmentIds: [],
+      });
+    }
+  }
+
+  // Capability — reviewed garment ratings, named as such. Deeply secondary:
+  // available only inside this reveal, never its own visible summary line.
+  const strengths = needs.intentions.closetStrengths.slice(0, 3);
+  if (strengths.length > 0) {
+    entries.push({
+      id: "closet-capability", claim: "closet-capability", role: "full",
+      body: "These counts estimate the kinds of looks your pieces could help with. " +
+        "They aren't complete outfits or a match against your personal requirements.",
+      garmentIds: [],
+      meta: { strengths: strengths.map((c) => ({ ...c, label: capabilityLabel(c.intention, c.label) })) },
+    });
+  }
+
+  // Passport-match and your-favourite heroes (the trench, the bag) have no
+  // named slot in "Wear what you already own" — most-versatile is the only
+  // hero content-lock folds in there — but the evidence is real, so it
+  // survives here rather than disappearing. A distinct claim family (not
+  // `garment:*`, which "Wear what you already own" owns) because the SAME
+  // family cannot have two different owning sections.
+  if (intelligence.heroes.state !== "learning") {
+    for (const hero of intelligence.heroes.heroes) {
+      if (hero.label !== "passport-match" && hero.label !== "your-favourite") continue;
+      const partnerEvidence = hero.evidence?.find((ev) => ev.field.includes("compatibility graph"));
+      const partnerIds = cleanPartnerIds(partnerEvidence?.garmentIds ?? [], [hero.garmentId]);
+      entries.push({
+        id: `hero-${hero.garmentId}`,
+        claim: `hero-note:${hero.garmentId}`,
+        role: "full",
+        title: hero.name,
+        body: plainText(hero.headline),
+        garmentIds: partnerIds,
+        action: partnerIds.length > 0
+          ? { kind: "reveal", label: "See matching pieces", hideLabel: "Show less", garmentIds: partnerIds }
+          : undefined,
+        meta: { garmentId: hero.garmentId },
+      });
+    }
+  }
+
+  if (summaryLines.length === 0 && entries.length === 0) return null;
 
   return {
-    id: "passport",
-    label: "How your wardrobe matches your Passport",
-    kind: "matches",
-    summary: lifestyle?.reading,
-    disclosure: entries.length > 0 ? { label: "See the comparison", hideLabel: "Show less" } : undefined,
+    id: "profile",
+    label: "Your wardrobe profile",
+    kind: "profile",
+    meta: {
+      summaryLines,
+      palette: dna.palette.slice(0, 5),
+      shapes: dna.shapes,
+    },
+    disclosure: entries.length > 0 ? { label: "See how nAia knows this", hideLabel: "Show less" } : undefined,
     entries,
   };
 }
@@ -1197,14 +1282,13 @@ function whyThisDetail(
   if (rec.attributes.length === 0) return undefined;
   if (shapeOnly) {
     // "This comes from a different shape — A-line, fitted or flared" just
-    // repeated the (now-hidden) attribute label. The actual reason to buy is
-    // the wardrobe limitation the engine found — the same sentence the main
-    // card deliberately drops (the section above already states it), which
-    // makes this exactly the right place for it.
+    // repeated the (now-hidden) attribute label. The wardrobe-limitation
+    // reasoning ("your work pieces repeat similar combinations") has exactly
+    // one home — "What deserves your attention" — and is never restated
+    // here, however tempting a lead-in it would make.
     const colour = rec.attributes.find((a) => a.kind === "colour");
     const parts = [
-      gapRestatementSentence(rec.body) ?? "Your current pieces here are very similar in shape.",
-      "A different cut could give the tops and bottoms you already own another way to work together.",
+      "A different cut could give you more ways to combine what you already own.",
       colour ? `${capitalise(colour.label)} is one of the colours you selected in your Passport.` : null,
     ].filter((p): p is string => p !== null);
     return parts.join(" ");
@@ -1216,19 +1300,21 @@ function whyThisDetail(
 /**
  * The engine resolves a slot and a register, never a specific garment noun
  * (a full-length "bottom" might be trousers or a skirt) — so the honest,
- * non-invented title folds the ambiguous shape into a plain instruction
- * instead of naming one.
+ * non-invented title folds the ambiguous shape into a plain instruction,
+ * register-prefixed, instead of naming a garment type nothing has resolved.
+ * "full-length work bottom" becomes "For work, look for a full-length piece
+ * in a shape that's different from the ones you already own."
  */
-function naturalShapeTitle(title: string): string {
-  const bare = title.replace(/^One option to explore:\s*/i, "");
-  return `Look for ${bare} in a shape that's meaningfully different from the ones you already own.`;
-}
-
-/** The sentence `dropGapRestatement` strips from the main card, if there is one. */
-function gapRestatementSentence(body: string): string | null {
-  const sentences = body.match(/[^.!?]+[.!?]+(?:\s|$)|[^.!?]+$/g)?.map((t) => t.trim()).filter(Boolean) ?? [];
-  if (sentences.length <= 1 || !GAP_RESTATEMENT.test(sentences[0])) return null;
-  return sentences[0];
+function naturalShapeTitle(rec: { title: string; register: string }): string {
+  const bare = rec.title.replace(/^One option to explore:\s*/i, "").replace(/^(a|an)\s+/i, "");
+  const registerWord = REGISTER_WORD[rec.register] ?? rec.register;
+  // `bare` is "{coverage adjective? }{register} {noun}" — the adjective, if
+  // any, is everything before the register word; the noun after it names a
+  // garment type nothing has actually resolved, so it's dropped for "piece".
+  const [beforeRegister] = bare.split(new RegExp(`\\b${registerWord}\\b`, "i"));
+  const adjective = beforeRegister?.trim();
+  const prefix = adjective ? `${adjective} ` : "";
+  return `For ${registerWord}, look for a ${prefix}piece in a shape that's different from the ones you already own.`;
 }
 
 /**
@@ -1376,63 +1462,6 @@ const DRESS_LEVEL_SHORT: Readonly<Record<string, string>> = {
   work: "polished, work-ready",
   occasion: "dressier, occasion",
 };
-
-function buildBehaviourBlock(needs: WardrobeNeeds): PageBlock | null {
-  const entries: PageEntry[] = [];
-  const top = needs.styleMe.requests[0] ?? null;
-
-  if (top) {
-    const total = needs.styleMe.requests.reduce((sum, r) => sum + r.sessions, 0);
-    entries.push({
-      id: "dress-level",
-      claim: "styleme-dress-level",
-      role: "full",
-      title: "How you usually want your looks to feel",
-      body: `${top.sessions} of the ${total} StyleMe requests nAia could classify were ${DRESS_LEVEL_PHRASE[top.register]}.`,
-      garmentIds: [],
-    });
-  }
-
-  const chosen = needs.intentions.chosen.slice(0, 4);
-  if (chosen.length > 0) {
-    const dominates = chosen.length > 1 && chosen[0].sessions >= chosen[1].sessions * 2;
-    const rest = chosen.slice(1, 4).map((c) => c.label);
-    entries.push({
-      id: "intentions-chosen",
-      claim: "intentions-chosen",
-      role: "full",
-      title: "What you most often ask to feel",
-      body:
-        `${capitalise(chosen[0].label)} is ${dominates ? "by far " : ""}what you choose most often` +
-        (rest.length > 0 ? `, followed by ${joinWithAnd(rest)}` : "") + ".",
-      garmentIds: [],
-    });
-  }
-
-  const feedback = [needs.outcomes.keptNote, needs.outcomes.changedNote].filter(Boolean).join(" ");
-  if (feedback !== "") {
-    entries.push({
-      id: "outcome-feedback",
-      claim: "outcome-feedback",
-      role: "full",
-      title: "What your feedback is teaching nAia",
-      body: feedback,
-      garmentIds: [],
-    });
-  }
-
-  return {
-    id: "behaviour",
-    label: "What your StyleMe history shows",
-    kind: "history",
-    // Short, always-visible version of the SAME dress-level fact the detailed
-    // "dress-level" entry below states with its counts — one conclusion, said
-    // once plainly and once with its evidence, never invented twice over.
-    summary: top ? `You most often ask for ${DRESS_LEVEL_SHORT[top.register] ?? DRESS_LEVEL_PHRASE[top.register]} looks.` : undefined,
-    disclosure: entries.length > 0 ? { label: "See your styling history", hideLabel: "Show less" } : undefined,
-    entries,
-  };
-}
 
 // ── Repetition control ────────────────────────────────────────────────────────
 //

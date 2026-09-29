@@ -897,7 +897,10 @@ function buildFindings(
         kind: "repetition",
         register: r.register,
         title: `You have ${REGISTER_BARE[r.register]} pieces, but fewer ways to combine them`,
-        body: `You own ${r.usableCount} pieces that work for ${REGISTER_NOUN[r.register]}, but their combinations tend to repeat the same formula. Buying more like them wouldn't widen what you can wear — a piece that contrasts with what you already own would.`,
+        // States the wardrobe fact only. What to do about it — buy, or don't
+        // — belongs exclusively to the shopping section; saying it here too
+        // turned a description of the Closet into a sales pitch.
+        body: `Many of your ${REGISTER_BARE[r.register]} tops and bottoms create similar combinations.`,
         // A top-bottom repetition finding is demonstrated by tops, bottoms and
         // one-pieces — not by an outerwear layer, bag or shoes that happen to
         // register-match. Those don't show the thing being claimed.

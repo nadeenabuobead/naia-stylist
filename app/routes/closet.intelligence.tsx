@@ -19,7 +19,6 @@ import { getCloudinaryConfig, buildPrivateDownloadUrl } from "~/lib/cloudinary-a
 import { loadWardrobeIntelligence } from "~/lib/ai/wardrobe-intelligence.server";
 import { readAndRecordChange } from "~/lib/ai/wardrobe-snapshot.server";
 import { readClosetConfidence, recordClosetConfidence } from "~/lib/ai/wardrobe-confidence.server";
-import { traitLabel } from "~/lib/ai/wardrobe-copy";
 import {
   buildWardrobePage,
   type WardrobePage,
@@ -222,6 +221,72 @@ function cardLabel(card: GarmentCard): string {
   return parts.join(" ");
 }
 
+// ── Stylist marks ───────────────────────────────────────────────────────────
+//
+// One small, reusable set — arrow, curve, underline, circle, bracket — reused
+// everywhere an annotation is needed, never a bespoke scribble per section.
+// Restrained hand-drawn quality comes from a slight, deliberate wobble in the
+// path, not from randomness (a straight arrow read as a diagram; a fully
+// random one read as messy). Colour is always currentColor, so a mark takes
+// on `--lipstick` from its `.wi-annot` wrapper.
+
+type MarkKind = "arrow" | "curve" | "underline" | "circle" | "bracket";
+
+function Mark({ kind, className }: { kind: MarkKind; className?: string }) {
+  const common = { fill: "none", stroke: "currentColor", strokeWidth: 1.6, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
+  switch (kind) {
+    case "arrow":
+      return (
+        <svg className={className} viewBox="0 0 64 40" aria-hidden="true" focusable="false">
+          <path {...common} d="M4 8 C 24 6, 40 20, 54 28" />
+          <path {...common} d="M44 24 L55 29 L50 17" />
+        </svg>
+      );
+    case "curve":
+      return (
+        <svg className={className} viewBox="0 0 64 56" aria-hidden="true" focusable="false">
+          <path {...common} d="M6 6 C 4 30, 20 46, 50 40" />
+          <path {...common} d="M40 32 L51 41 L38 45" />
+        </svg>
+      );
+    case "underline":
+      return (
+        <svg className={className} viewBox="0 0 120 12" aria-hidden="true" focusable="false" preserveAspectRatio="none">
+          <path {...common} d="M2 6 C 30 10, 60 2, 90 7 S 115 5, 118 6" />
+        </svg>
+      );
+    case "circle":
+      return (
+        <svg className={className} viewBox="0 0 80 44" aria-hidden="true" focusable="false" preserveAspectRatio="none">
+          <path {...common} d="M40 3 C 62 2, 77 12, 76 22 C 75 34, 55 42, 38 41 C 18 40, 3 32, 4 20 C 5 9, 20 3, 40 4" />
+        </svg>
+      );
+    case "bracket":
+      return (
+        <svg className={className} viewBox="0 0 200 26" aria-hidden="true" focusable="false" preserveAspectRatio="none">
+          <path {...common} d="M2 4 C 2 18, 6 22, 16 22 L 92 22 C 98 22, 98 24, 100 25 C 102 24, 102 22, 108 22 L 184 22 C 194 22, 198 18, 198 4" />
+        </svg>
+      );
+  }
+}
+
+/**
+ * A stylist note: `.sp-shell-accent`'s exact italic serif in `--lipstick`,
+ * scaled down and set looser than the hero's own use of it, paired with one
+ * mark. Never a new typeface — the hand-drawn feeling comes entirely from
+ * the mark plus this existing accent treatment, per the approved direction.
+ */
+function Annotation({
+  text, mark, className,
+}: { text: string; mark?: MarkKind; className?: string }) {
+  return (
+    <span className={`wi-annot${className ? ` ${className}` : ""}`}>
+      {mark && <Mark kind={mark} className={`wi-annot-mark wi-annot-mark--${mark}`} />}
+      <em className="wi-annot-text sp-shell-accent">{text}</em>
+    </span>
+  );
+}
+
 /** Never render a wall of thumbnails; the point is a glance, not an inventory. */
 const MAX_STRIP = 8;
 
@@ -329,100 +394,79 @@ function Block({
   const label = block.label ? <p className="wi-sublabel">{block.label}</p> : null;
 
   switch (block.kind) {
-    // ── Opening takeaways. Pointers only: each names a finding that is
-    //    explained in the section that owns it.
-    case "takeaways":
-      return (
-        <div className="wi-block">
-          {label}
-          {block.note && <p className="wi-block-note">{block.note}</p>}
-          <ul className="wi-knows-list">
-            {block.entries.map((e) => (
-              <li key={e.id} className="wi-knows-item">
-                <h3 className="wi-knows-head">{e.title}</h3>
-              </li>
-            ))}
-          </ul>
-        </div>
-      );
-
-    case "dna":
-      return (
-        <div className="wi-block">
-          {label}
-          <div className="wi-dna-grid">
-            {block.entries.map((e) => {
-              const meta = (e.meta ?? {}) as Record<string, never>;
-              return (
-                <div key={e.id} className="wi-dna-cell">
-                  <p className="wi-microhead">{e.title}</p>
-                  {e.id === "dna-palette" && (
-                    <>
-                      <div className="wi-palette">
-                        {(meta.palette as unknown as Array<{ colour: string; count: number }>).map((c) => (
-                          <div key={c.colour} className="wi-palette-row">
-                            <span className="wi-swatch" style={swatchStyle(c.colour)} aria-hidden="true" />
-                            <span className="wi-palette-name">{c.colour}</span>
-                            <span className="wi-palette-count">{c.count}</span>
-                          </div>
-                        ))}
-                      </div>
-                      {e.body && <p className="wi-reading wi-reading--sm">{e.body}</p>}
-                    </>
-                  )}
-                  {e.id === "dna-shapes" && (
-                    <>
-                      <p className="wi-shapes-line">
-                        {(meta.shapes as unknown as Array<{ label: string }>).map((sh, i) => (
-                          <span key={sh.label}>
-                            {i > 0 && <span className="wi-shapes-sep" aria-hidden="true">·</span>}
-                            {sh.label}
-                          </span>
-                        ))}
-                      </p>
-                      {meta.reading && <p className="wi-reading wi-reading--sm">{meta.reading as unknown as string}</p>}
-                    </>
-                  )}
-                  {e.id === "dna-traits" && (
-                    <div className="wi-traits">
-                      {(meta.traits as unknown as Array<{ id: string; label: string; evidence: string }>).map((t) => (
-                        <div key={t.id} className="wi-trait">
-                          <span className="wi-trait-label">{traitLabel(t)}</span>
-                          <span className="wi-trait-evidence">{t.evidence}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      );
-
     // ── One entry per garment, carrying everything the page knows about it.
-    case "garments":
+    // ── Piece worth rediscovering (dynamic — whichever entry ranks first)
+    //    is the major visual "aha" moment; any grouped entry (identical
+    //    partner sets, e.g. two blazers) stays secondary and smaller.
+    case "garments": {
+      const [primary, ...secondary] = block.entries;
       return (
         <div className="wi-block">
           {label}
           <div className="wi-pieces">
-            {block.entries.map((e) => {
+            {primary && (() => {
+              const meta = (primary.meta ?? {}) as Record<string, unknown>;
+              const members = meta.members as Array<{ garmentId: string; title: string }> | undefined;
+              const isOpen = openId === primary.id;
+              const revealIds = primary.action?.kind === "reveal" ? primary.action.garmentIds : [];
+              // "Try this with denim" only when a genuine denim/jeans match
+              // exists among the real, already-resolved partners — never
+              // invented for a customer whose matches don't include one.
+              const denimId = revealIds.find((id) => {
+                const c = byId.get(id);
+                return c && /denim|jean/i.test(`${c.name ?? ""} ${c.subcategory ?? ""}`);
+              });
+              const card = members ? undefined : byId.get(String(meta.garmentId));
+              return (
+                <article className="wi-piece wi-piece--rediscover">
+                  <div className="wi-rediscover-source">
+                    {card ? <Thumb card={card} size={220} /> : <Strip ids={members?.map((m) => m.garmentId) ?? []} byId={byId} size={148} showAll />}
+                    {!members && card && <p className="wi-wear-name">{cardLabel(card)}</p>}
+                  </div>
+                  <div className="wi-piece-text">
+                    {typeof meta.label === "string" && <p className="wi-hero-label">{meta.label}</p>}
+                    <h3 className="wi-piece-name">{primary.title}</h3>
+                    {primary.body && <p className="wi-piece-headline">{primary.body}</p>}
+                    {typeof meta.rediscover === "string" && <p className="wi-piece-note">{meta.rediscover}</p>}
+                    <EntryAction
+                      entry={primary}
+                      byId={byId}
+                      open={isOpen}
+                      onToggle={() => setOpenId(isOpen ? null : primary.id)}
+                    />
+                    {isOpen && (
+                      <div className="wi-rediscover-matches">
+                        <Mark kind="curve" className="wi-annot-mark wi-annot-mark--curve wi-rediscover-connector" />
+                        <div className="wi-rediscover-matches-strip">
+                          {revealIds.map((id) => (
+                            <div key={id} className="wi-rediscover-match">
+                              <Thumb card={byId.get(id)} size={72} />
+                              {id === denimId && (
+                                <Annotation className="wi-annot--rediscover-denim" mark="arrow" text="try this with denim" />
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </article>
+              );
+            })()}
+
+            {secondary.map((e) => {
               const meta = (e.meta ?? {}) as Record<string, unknown>;
               const members = meta.members as Array<{ garmentId: string; title: string }> | undefined;
               if (members && members.length > 1) {
                 return (
                   <article key={e.id} className="wi-piece wi-piece--group">
                     <div className="wi-piece-group-imgs">
-                      {members.map((m) => {
-                        const card = byId.get(m.garmentId);
-                        return (
-                          <div key={m.garmentId} className="wi-piece-img">
-                            {card?.imageUrl
-                              ? <img src={card.imageUrl} alt={m.title} loading="lazy" />
-                              : <span className="wi-thumb-fallback">{card?.category.slice(0, 2) ?? "—"}</span>}
-                          </div>
-                        );
-                      })}
+                      {members.map((m) => (
+                        <div key={m.garmentId} className="wi-piece-img">
+                          <Thumb card={byId.get(m.garmentId)} size={112} />
+                        </div>
+                      ))}
+                      <Mark kind="bracket" className="wi-annot-mark wi-annot-mark--bracket wi-piece-group-bracket" />
                     </div>
                     <div className="wi-piece-text">
                       <h3 className="wi-piece-name">{e.title}</h3>
@@ -466,8 +510,13 @@ function Block({
           </div>
         </div>
       );
+    }
 
-    case "findings":
+    case "findings": {
+      // "You already have plenty of these" groups the neutral tops visually
+      // — the one annotated moment this block ever carries, and only for
+      // Low Priority (the work-variety finding above gets none).
+      const isLowPriority = block.id === "low-priority";
       return (
         <div className="wi-block">
           {label}
@@ -475,7 +524,15 @@ function Block({
             <article key={e.id} className={`wi-finding${e.role === "pointer" ? " wi-finding--pointer" : ""}`}>
               <h3 className="wi-finding-title">{e.title}</h3>
               {e.body && <p className="wi-finding-body">{e.body}</p>}
-              <Strip ids={e.garmentIds} byId={byId} />
+              {e.garmentIds.length > 0 && isLowPriority ? (
+                <div className="wi-bracket-group">
+                  <Strip ids={e.garmentIds} byId={byId} />
+                  <Mark kind="bracket" className="wi-annot-mark wi-annot-mark--bracket wi-bracket-group-mark" />
+                  <Annotation className="wi-annot--low-priority" text="you already have plenty of these" />
+                </div>
+              ) : (
+                <Strip ids={e.garmentIds} byId={byId} />
+              )}
               <EntryAction
                 entry={e}
                 byId={byId}
@@ -486,41 +543,7 @@ function Block({
           ))}
         </div>
       );
-
-    case "registers":
-      return (
-        <div className="wi-block">
-          {label}
-          <ul className="wi-registers">
-            {block.entries.map((e) => {
-              const meta = (e.meta ?? {}) as Record<string, string | boolean | undefined>;
-              return (
-                <li key={e.id} className={`wi-register is-${String(meta.state)}`}>
-                  <p className="wi-register-name">
-                    {e.title}
-                    {meta.needed && <span className="wi-register-flag">you told nAia this matters</span>}
-                  </p>
-                  <p className="wi-register-verdict">{String(meta.stateText)}</p>
-                  <p className="wi-register-note">{e.body}</p>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      );
-
-    case "verdict":
-      return (
-        <div className="wi-verdict">
-          {block.label && <h3 className="wi-verdict-q">{block.label}</h3>}
-          {block.entries.map((e) => (
-            <div key={e.id} className={e.variant === "quiet" ? "wi-rec wi-rec--quiet" : undefined}>
-              <p className={e.variant === "quiet" ? "wi-rec-title" : "wi-verdict-a"}>{e.title}</p>
-              {e.body && <p className={e.variant === "quiet" ? "wi-rec-body" : "wi-verdict-why"}>{e.body}</p>}
-            </div>
-          ))}
-        </div>
-      );
+    }
 
     case "recommendations":
       return (
@@ -543,7 +566,18 @@ function Block({
                   </p>
                 )}
                 {e.body && <p className="wi-rec-body">{e.body}</p>}
-                <Strip ids={e.garmentIds} byId={byId} />
+                {/* "Different shape = more options" groups the real pieces
+                    this addition would pair with — never a garment image for
+                    the addition itself, since the shape is unresolved. */}
+                {e.garmentIds.length > 0 ? (
+                  <div className="wi-bracket-group">
+                    <Strip ids={e.garmentIds} byId={byId} />
+                    <Mark kind="bracket" className="wi-annot-mark wi-annot-mark--bracket wi-bracket-group-mark" />
+                    <Annotation className="wi-annot--worth-considering" text="different shape = more options" />
+                  </div>
+                ) : (
+                  <Strip ids={e.garmentIds} byId={byId} />
+                )}
                 {e.action?.kind === "reveal" && e.action.detail && (
                   <>
                     <button
@@ -676,75 +710,127 @@ function Block({
         </div>
       );
 
-    case "matches":
-      return (
-        <div className="wi-block">
-          {label}
-          {block.summary && <p className="wi-reading">{block.summary}</p>}
-          <Disclosure block={block} openId={openId} setOpenId={setOpenId}>
-            <ul className="wi-matches">
-              {block.entries.map((e) => {
-                const meta = (e.meta ?? {}) as Record<string, string | undefined>;
-                return (
-                  <li key={e.id} className={`wi-match is-${String(meta.state)}`}>
-                    <p className="wi-match-head">
-                      <span className="wi-match-dim">{e.title}</span>
-                      <span className="wi-match-sep" aria-hidden="true">—</span>
-                      <span className="wi-match-state">{meta.stateText}</span>
-                    </p>
-                    <p className="wi-match-reading">{e.body}</p>
-                  </li>
-                );
-              })}
-            </ul>
-          </Disclosure>
-        </div>
-      );
-
     // ── "Ways to get dressed": the outfit is the answer, shown directly
     //    under its own life-area heading — never a heading, a "shown below"
-    //    sentence, and the images somewhere else.
+    //    sentence, and the images somewhere else. Tag/provenance evidence
+    //    (and most-versatile's folded-in note) sit behind "Why this works".
+    // ── The visual centre of the page. Large photography, one panel per
+    //    life area, offset rather than identical — the outfit itself is the
+    //    answer, and the tag/provenance text sits behind "Why this works".
     case "lifestyle-combos":
       return (
-        <div className="wi-block">
+        <div className="wi-block wi-wear">
           {label}
-          {block.entries.map((e) => (
-            <article key={e.id} className="wi-finding">
-              <h3 className="wi-finding-title">{e.title}</h3>
-              <Strip ids={e.garmentIds} byId={byId} />
-              {e.body && <p className="wi-finding-body">{e.body}</p>}
-            </article>
-          ))}
+          <div className="wi-wear-grid">
+            {block.entries.map((e, i) => {
+              const emeta = (e.meta ?? {}) as Record<string, unknown>;
+              const versatileId = emeta.mostVersatileGarmentId as string | undefined;
+              // "Adds structure" names the outer/structured layer in a
+              // combination — the one outerwear piece present, when there is
+              // exactly one, real evidence rather than a guess.
+              const outerwearIds = e.garmentIds.filter((id) => byId.get(id)?.category === "OUTERWEAR");
+              const structureId = e.title === "For work" && outerwearIds.length === 1 ? outerwearIds[0] : undefined;
+              return (
+                <article key={e.id} className={`wi-wear-panel wi-wear-panel--${i % 3}`}>
+                  <p className="wi-wear-label">{e.title}</p>
+                  <div className="wi-wear-images">
+                    {e.garmentIds.map((id) => {
+                      const card = byId.get(id);
+                      if (!card) return null;
+                      return (
+                        <div key={id} className="wi-wear-imgwrap">
+                          <Thumb card={card} size={148} />
+                          <p className="wi-wear-name">{cardLabel(card)}</p>
+                          {id === structureId && (
+                            <Annotation className="wi-annot--work-structure" mark="curve" text="adds structure" />
+                          )}
+                          {id === versatileId && (
+                            <Annotation className="wi-annot--work-versatile" mark="underline" text="one of your most versatile pieces" />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {e.body && <p className="wi-finding-body">{e.body}</p>}
+                  <EntryAction
+                    entry={e}
+                    byId={byId}
+                    open={openId === e.id}
+                    onToggle={() => setOpenId(openId === e.id ? null : e.id)}
+                  />
+                </article>
+              );
+            })}
+          </div>
         </div>
       );
 
-    case "change":
-      return (
-        <div className="wi-block wi-block--change">
-          {label}
-          <ul className="wi-changes">
-            {block.entries.map((e) => <li key={e.id} className="wi-change">{e.body}</li>)}
-          </ul>
-        </div>
-      );
-
-    case "history":
+    // ── Your wardrobe profile: colours, silhouettes, StyleMe history and wear
+    //    behaviour always visible at one line each; the Passport comparison,
+    //    capability counts and hero evidence behind one reveal.
+    case "profile": {
+      const meta = (block.meta ?? {}) as Record<string, unknown>;
+      const summaryLines = (meta.summaryLines ?? []) as string[];
+      const palette = (meta.palette ?? []) as Array<{ colour: string; count: number }>;
+      const shapes = (meta.shapes ?? []) as Array<{ label: string }>;
       return (
         <div className="wi-block">
           {label}
-          {block.summary && <p className="wi-reading">{block.summary}</p>}
-          <Disclosure block={block} openId={openId} setOpenId={setOpenId}>
-            <div className="wi-history">
-              {block.entries.map((e) => (
-                <div key={e.id} className="wi-hist-item">
-                  <p className="wi-hist-head">{e.title}</p>
-                  <p className="wi-hist-body">{e.body}</p>
+          {palette.length > 0 && (
+            <div className="wi-palette">
+              {palette.map((c) => (
+                <div key={c.colour} className="wi-palette-row">
+                  <span className="wi-swatch" style={swatchStyle(c.colour)} aria-hidden="true" />
+                  <span className="wi-palette-name">{c.colour}</span>
+                  <span className="wi-palette-count">{c.count}</span>
                 </div>
               ))}
+            </div>
+          )}
+          {shapes.length > 0 && (
+            <p className="wi-shapes-line">
+              {shapes.map((sh, i) => (
+                <span key={sh.label}>
+                  {i > 0 && <span className="wi-shapes-sep" aria-hidden="true">·</span>}
+                  {sh.label}
+                </span>
+              ))}
+            </p>
+          )}
+          {summaryLines.map((line, i) => <p key={i} className="wi-reading wi-reading--sm">{line}</p>)}
+          <Disclosure block={block} openId={openId} setOpenId={setOpenId}>
+            <div className="wi-history">
+              {block.entries.map((e) => {
+                const emeta = (e.meta ?? {}) as Record<string, unknown>;
+                const strengths = emeta.strengths as Array<{ intention: string; label: string; strong: number }> | undefined;
+                return (
+                  <div key={e.id} className="wi-hist-item">
+                    {e.title && <p className="wi-hist-head">{e.title}</p>}
+                    {e.body && <p className="wi-hist-body">{e.body}</p>}
+                    {strengths && (
+                      <ul className="wi-caps">
+                        {strengths.map((c) => (
+                          <li key={c.intention} className="wi-cap">
+                            <span className="wi-cap-label">{c.label}</span>
+                            <span className="wi-cap-count">{c.strong} pieces</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    <EntryAction
+                      entry={e}
+                      byId={byId}
+                      open={openId === e.id}
+                      onToggle={() => setOpenId(openId === e.id ? null : e.id)}
+                    />
+                  </div>
+                );
+              })}
             </div>
           </Disclosure>
         </div>
       );
+    }
 
     default:
       return null;
@@ -752,7 +838,7 @@ function Block({
 }
 
 export default function WardrobeIntelligencePage() {
-  const { page, garmentCards, footer } = useLoaderData<typeof loader>();
+  const { page, garmentCards } = useLoaderData<typeof loader>();
   const byId = new Map<string, GarmentCard>(garmentCards.map((c: GarmentCard) => [c.id, c]));
   const [openId, setOpenId] = useState<string | null>(null);
   // The full question is a first-visit card. Once answered it collapses to a
@@ -779,9 +865,23 @@ export default function WardrobeIntelligencePage() {
         <header className="wi-masthead">
           <p className="wi-eyebrow">Wardrobe Intelligence</p>
           <h1 className="wi-title">Your wardrobe, <span className="sp-shell-accent">understood.</span></h1>
-          {model.reading && <p className="wi-sub">{model.reading}</p>}
+          {model.reading && (
+            <div className="wi-sub-wrap">
+              <p className="wi-sub">{model.reading}</p>
+              {/* Only when the reading actually names a thinner area — never
+                  invented when the wardrobe reads as fully strong. */}
+              {/fewer ways to combine/i.test(model.reading) && (
+                <Annotation className="wi-annot--hero-focus" mark="arrow" text="this is where I'd focus" />
+              )}
+            </div>
+          )}
           {/* Conclusions about spending have to show what they are based on. */}
           <p className="wi-basis">{model.basis}</p>
+          {model.changeLines.length > 0 && (
+            <ul className="wi-changes wi-changes--hero">
+              {model.changeLines.map((line, i) => <li key={i} className="wi-change">{line}</li>)}
+            </ul>
+          )}
         </header>
 
         {!model.ready && (
@@ -823,8 +923,15 @@ export default function WardrobeIntelligencePage() {
           </section>
         )}
 
+        {/* One horizontal rule on the whole page — before "Your wardrobe
+            profile", marking the shift from decisions to background. The
+            other moments flow into each other on spacing alone. */}
         {model.sections.map((section) => (
-          <section key={section.id} className="wi-chapter" aria-labelledby={`wi-${section.id}-h`}>
+          <section
+            key={section.id}
+            className={section.id === "profile" ? "wi-chapter wi-chapter--rule" : "wi-chapter"}
+            aria-labelledby={`wi-${section.id}-h`}
+          >
             <h2 id={`wi-${section.id}-h`} className="wi-chapter-title">{section.title}</h2>
             {section.sub && <p className="wi-chapter-sub">{section.sub}</p>}
             {section.blocks.map((block) => (
@@ -832,34 +939,6 @@ export default function WardrobeIntelligencePage() {
             ))}
           </section>
         ))}
-
-        {/* ── Transparency footer. Quiet by design. ─────────────────────── */}
-        <section className="wi-footnote" aria-labelledby="wi-wear-h">
-          <h2 id="wi-wear-h" className="wi-knows-title">What nAia knows so far</h2>
-          <dl className="wi-knows">
-            <div className="wi-knows-row">
-              <dt className="wi-knows-key">Reading</dt>
-              <dd className="wi-knows-val">
-                {footer.signalAvailability.filter((s) => s.state !== "unavailable").map((s) => s.title).join(" · ") || "Your Closet"}
-              </dd>
-            </div>
-            <div className="wi-knows-row">
-              <dt className="wi-knows-key">Still learning</dt>
-              <dd className="wi-knows-val wi-knows-val--muted">
-                {footer.signalAvailability.filter((s) => s.state === "unavailable").map((s) => s.title).join(" · ")}
-              </dd>
-            </div>
-          </dl>
-          {/* The page reports looks she marked "Wore it", so an absolute "nAia
-              doesn't track what you wear" contradicted it two lines later. The
-              distinction that matters is kept: suggested is not worn, and a
-              self-report is not tracking. */}
-          <p className="wi-knows-note">
-            These insights are based on the pieces you&rsquo;ve added, your Style Passport and the
-            feedback you share &mdash; including looks you mark as &ldquo;Wore it.&rdquo; nAia does
-            not automatically track what you wear or assume that a suggested outfit was worn.
-          </p>
-        </section>
 
         <div className="wi-foot">
           <Link to="/closet" className="wi-cta">Back to My Closet</Link>
@@ -891,10 +970,101 @@ const css = `
   .wi-piece-name{font-family:var(--naia-ff-display);font-size:1.0625rem;line-height:1.25;margin:6px 0 8px;text-wrap:balance}
   .wi-piece-headline{margin:0 0 8px;font-size:.9375rem;line-height:1.55;color:var(--naia-ink)}
   .wi-piece-reason,.wi-piece-note{margin:0 0 8px;font-size:.875rem;line-height:1.6;color:rgba(40,21,12,0.72)}
-  .wi-piece--group{grid-template-columns:96px 96px minmax(0,1fr)}
-  @media(min-width:700px){.wi-piece--group{grid-template-columns:132px 132px minmax(0,1fr)}}
-  .wi-piece-group-imgs{display:contents}
+  .wi-piece--group{grid-template-columns:240px minmax(0,1fr)}
+  @media(min-width:700px){.wi-piece--group{grid-template-columns:300px minmax(0,1fr)}}
+  .wi-piece-group-imgs{position:relative;display:flex;gap:16px;padding-bottom:20px}
   .wi-piece-group-names{margin:0 0 8px;font-size:.8125rem;letter-spacing:.02em;color:rgba(40,21,12,0.6)}
+  .wi-piece-group-bracket{position:absolute;left:6px;right:6px;bottom:0;width:calc(100% - 12px);height:18px}
+
+  /* ── Stylist marks and notes ─────────────────────────────────────────────
+     One small reusable set (arrow, curve, underline, circle, bracket), the
+     existing burgundy italic serif for every note — restrained, attached to
+     the specific garment or group it refers to, never a floating caption. */
+  .wi-annot{position:absolute;display:inline-flex;align-items:flex-start;gap:6px;pointer-events:none;z-index:2;max-width:200px}
+  .wi-annot-text{font-size:.9375rem;line-height:1.25;white-space:normal}
+  .wi-annot-mark{color:var(--lipstick);opacity:.82;flex-shrink:0}
+  .wi-annot-mark--arrow,.wi-annot-mark--curve{width:44px;height:36px}
+  .wi-annot-mark--underline{width:100%;height:8px}
+  .wi-annot-mark--circle{width:56px;height:32px}
+  .wi-annot-mark--bracket{width:100%;height:18px}
+
+  /* Hero: points toward the thinner half of the reading, never invented when
+     the wardrobe reads as fully strong. */
+  .wi-sub-wrap{position:relative;padding-bottom:34px}
+  .wi-annot--hero-focus{top:100%;right:0;flex-direction:row-reverse;text-align:right}
+  .wi-annot--hero-focus .wi-annot-mark{transform:scaleX(-1)}
+
+  /* Work: "adds structure" and "one of your most versatile pieces" attach to
+     the specific photo they describe, not the panel as a whole. Both sit in
+     the margin to the RIGHT of their own image — never above/below, which is
+     the gap the next image in the same stacked column also needs. */
+  .wi-wear-imgwrap{position:relative}
+  /* Both sit BELOW their own image, in flow order (trousers, then its note,
+     then the blazer, then its note) — never to the side, which a 3-column
+     grid does not reliably have room for; never above, which collides with
+     whatever the previous image in the same stacked column left behind. */
+  /* The annotation sits OUTSIDE its image wrapper (top:100%), so it is the
+     styling sentence below — not the wrapper's own padding — that has to
+     leave room for it: two lines of the small italic note plus its mark.
+     Scoped to panels that actually carry one, so Everyday/Dinners keep
+     their normal spacing. */
+  .wi-wear-panel:has(.wi-annot) .wi-finding-body{margin-top:80px}
+  .wi-annot--work-structure,.wi-annot--work-versatile{top:100%;left:0;width:100%;margin-top:4px;flex-direction:column;align-items:flex-start}
+  .wi-annot--work-structure .wi-annot-mark{transform:rotate(160deg)}
+  .wi-annot--work-versatile .wi-annot-text{font-size:.8125rem}
+
+  /* Rediscovery: a plain connector from the source photo to its matches, and
+     one conditional micro-note on the actual denim match, when one exists. */
+  .wi-rediscover-source{position:relative}
+  .wi-rediscover-matches{position:relative;margin-top:18px;padding-top:22px}
+  .wi-rediscover-connector{position:absolute;top:-10px;left:8px;width:60px;height:40px;color:var(--lipstick);opacity:.75;transform:rotate(90deg) scaleX(-1)}
+  .wi-rediscover-matches-strip{display:flex;flex-wrap:wrap;gap:14px}
+  .wi-rediscover-match{position:relative}
+  .wi-annot--rediscover-denim{top:100%;left:0;margin-top:6px;width:150px;flex-direction:column;align-items:flex-start}
+
+  /* Grouped blazers / Low Priority / Worth Considering: a bracket collecting
+     a row of real pieces, with one note attached to the group as a whole. */
+  .wi-bracket-group{position:relative;padding-bottom:26px}
+  .wi-bracket-group-mark{position:absolute;left:4px;right:4px;bottom:6px;width:calc(100% - 8px)}
+  .wi-annot--low-priority,.wi-annot--worth-considering{position:static;display:block;margin-top:8px;max-width:none}
+  .wi-annot--low-priority .wi-annot-mark,.wi-annot--worth-considering .wi-annot-mark{display:none}
+
+  @media(max-width:699px){
+    /* Mobile: notes sit immediately above/below their garment, short vertical
+       connectors only, nothing overlaps, no horizontal scroll. */
+    .wi-annot{position:static;display:flex;margin-top:6px;max-width:none}
+    .wi-annot-mark--arrow,.wi-annot-mark--curve{width:26px;height:20px;transform:rotate(90deg)!important}
+    .wi-annot--hero-focus{flex-direction:row;text-align:left}
+    .wi-annot--work-structure,.wi-annot--work-versatile{width:auto}
+    .wi-annot--work-structure .wi-annot-mark{transform:rotate(90deg)}
+    .wi-annot--work-versatile .wi-annot-mark{transform:none}
+    .wi-rediscover-connector{display:none}
+    .wi-annot--rediscover-denim{position:static;margin-top:4px;width:auto}
+  }
+
+  /* ── Wear what you already own — the visual centre ───────────────────────
+     Three panels, gently offset rather than identical bordered cards; large
+     recognisable photography carries the weight, not the panel chrome. Kept
+     close in scale between Work/Everyday/Dinners — the gap gets its emphasis
+     later, in "What deserves your attention" and "Shop smarter", not here. */
+  .wi-wear-grid{display:flex;flex-direction:column;gap:56px}
+  @media(min-width:900px){
+    .wi-wear-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:40px;align-items:start}
+    .wi-wear-panel--1{margin-top:34px}
+    .wi-wear-panel--2{margin-top:14px}
+  }
+  .wi-wear-label{font-family:var(--naia-ff-ui);font-size:9.5px;letter-spacing:3px;text-transform:uppercase;color:rgba(40,21,12,0.55);margin:0 0 16px}
+  .wi-wear-images{display:flex;flex-wrap:wrap;gap:18px;margin-bottom:16px}
+  .wi-wear-imgwrap{flex:1 1 40%;min-width:110px;max-width:200px}
+  .wi-wear-imgwrap:nth-child(2){margin-top:16px}
+  .wi-wear-imgwrap:nth-child(3){margin-top:-10px}
+  .wi-wear-imgwrap figure.wi-thumb{width:100%!important;height:auto!important;aspect-ratio:3/4}
+  .wi-wear-name{font-family:var(--naia-ff-ui);font-size:10px;letter-spacing:.04em;color:rgba(40,21,12,0.6);margin:8px 0 0}
+
+  /* Rediscovery source photo: the largest image on the page. */
+  .wi-piece--rediscover{grid-template-columns:220px minmax(0,1fr)}
+  @media(min-width:700px){.wi-piece--rediscover{grid-template-columns:260px minmax(0,1fr)}}
+  .wi-piece--rediscover .wi-rediscover-source figure.wi-thumb{width:100%!important;height:auto!important;aspect-ratio:3/4}
 
   /* Coverage detail: one row per piece, with its own reason and layer evidence. */
   .wi-coverage-list{list-style:none;margin:14px 0 0;padding:0;display:flex;flex-direction:column;gap:16px}
@@ -925,6 +1095,7 @@ const css = `
   .wi-block--change{border-left:2px solid var(--naia-accent);padding-left:18px}
   .wi-changes{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
   .wi-change{font-size:.9375rem;line-height:1.55;color:var(--naia-ink)}
+  .wi-changes--hero{margin:14px 0 0;padding-left:16px;border-left:2px solid var(--naia-accent)}
 
   .wi-block-note{font-size:.8125rem;line-height:1.55;color:rgba(40,21,12,0.6);margin:-6px 0 16px}
 
@@ -1063,8 +1234,9 @@ const css = `
      previously had four different heading scales and read as a stack of
      unrelated reports. Subsection labels are smaller by design, but there is
      exactly one chapter level. */
-  .wi-chapter{padding-top:32px;margin-bottom:80px;border-top:2px solid var(--naia-ink)}
-  @media(min-width:900px){.wi-chapter{padding-top:38px;margin-bottom:104px}}
+  .wi-chapter{padding-top:0;margin-bottom:80px}
+  .wi-chapter--rule{padding-top:32px;border-top:2px solid var(--naia-ink)}
+  @media(min-width:900px){.wi-chapter{margin-bottom:104px}.wi-chapter--rule{padding-top:38px}}
   .wi-chapter-title{
     font-family:var(--naia-ff-display);
     font-size:1.75rem;
