@@ -19,6 +19,7 @@
 import type {
   HeroLabel,
   WardrobeTrait,
+  PaletteColour,
 } from "~/lib/ai/wardrobe-intelligence";
 import type { RegisterId, RegisterReading, WardrobeNeeds, SynthesisLine } from "~/lib/ai/wardrobe-needs";
 
@@ -54,9 +55,9 @@ function depthStateOf(depthLabel: string): DepthState {
 }
 
 const DEPTH_STATE_TEXT: Readonly<Record<DepthState, string>> = {
-  strong: "Strong",
-  "limited-variety": "Covered, with limited variety",
-  "needs-range": "Needs more range",
+  strong: "Plenty of options",
+  "limited-variety": "Covered, but less variety",
+  "needs-range": "Fewer combinations",
   "less-than-it-looks": "Smaller than it looks",
   empty: "Nothing here yet",
   learning: "Still learning",
@@ -76,11 +77,12 @@ export function registerDisplay(r: RegisterReading): RegisterDisplay {
 
   // The engine's depthNote is already written for the customer in four of the
   // six states, so it is used as-is rather than paraphrased into something
-  // less precise. Only "strong" and "limited-variety" are restated, because
-  // their engine wording leans on "usable combinations" and "range".
+  // less precise. "Strong" needs no separate sentence — the badge already says
+  // it — and "limited-variety" is restated because the engine wording leans on
+  // "usable combinations" and "range".
   const plain =
     state === "strong"
-      ? "Plenty of useful options."
+      ? ""
       : state === "limited-variety"
         ? "You can dress for this, but there's less room to vary the look."
         : r.depthNote;
@@ -165,6 +167,35 @@ export function traitLabel(trait: WardrobeTrait): string {
   const anchor = /^(.+)-anchored$/i.exec(trait.label);
   if (anchor) return `${anchor[1]} is your main base colour`;
   return trait.label;
+}
+
+const REGISTER_LIFE: Readonly<Record<string, string>> = {
+  "register-everyday": "everyday",
+  "register-work": "work",
+  "register-occasion": "occasion",
+};
+
+/**
+ * The one-sentence hero read, in plain language — "Mostly everyday pieces in
+ * neutral colours, especially black." Built from the same trait/palette data
+ * the engine's own `snapshotReading` sentence uses, not a new computation.
+ *
+ * Returns null when there isn't enough to say either half of the sentence
+ * confidently — the caller falls back to the engine's own reading rather than
+ * printing a half-sentence.
+ */
+export function heroReading(traits: readonly WardrobeTrait[], palette: readonly PaletteColour[]): string | null {
+  const registerTrait = traits.find((t) => t.id in REGISTER_LIFE);
+  const topColour = palette[0];
+  if (!registerTrait || !topColour) return null;
+
+  const life = REGISTER_LIFE[registerTrait.id];
+  const colourTrait = traits.find((t) => t.id === "neutral-led" || t.id === "colour-led");
+  const colourPhrase = colourTrait?.id === "neutral-led" ? "neutral colours" : colourTrait?.id === "colour-led" ? "colour" : null;
+
+  return colourPhrase
+    ? `Mostly ${life} pieces in ${colourPhrase}, especially ${topColour.colour.toLowerCase()}.`
+    : `Mostly ${life} pieces, especially in ${topColour.colour.toLowerCase()}.`;
 }
 
 // ── Pairing explanations ──────────────────────────────────────────────────────
@@ -393,9 +424,9 @@ export type MatchState = "strong" | "uneven" | "partial" | "gap" | "unclear";
 const MATCH_STATE_TEXT: Readonly<Record<MatchState, string>> = {
   strong: "Strong match",
   // Inside the palette, but not all of it is there. Deliberately not "strong".
-  // "Representation", never "coverage": one line below, COVERAGE means how much
-  // of the body she wants covered, and the two readings sat next to each other.
-  uneven: "Strong alignment, uneven representation",
+  // Never "coverage" here: one line below, COVERAGE means how much of the body
+  // she wants covered, and the two readings sat next to each other.
+  uneven: "Some of it, not all of it",
   partial: "Partial match",
   gap: "Where there's a gap",
   unclear: "Not yet clear",
@@ -707,6 +738,12 @@ export interface EnoughGroup {
   body: string;
   garmentIds: string[];
   /**
+   * The full cluster membership, untruncated. `garmentIds` is capped for the
+   * always-visible strip; this is what a "see all N" reveal shows. Equal to
+   * `garmentIds` when the finding carried no fuller list.
+   */
+  fullGarmentIds: string[];
+  /**
    * The register the group speaks for. Carried through because the page model
    * keys the "you have enough of this" claim on it, so the matching "another
    * one is not a priority" entry can be recognised as the same finding.
@@ -717,7 +754,10 @@ export interface EnoughGroup {
 }
 
 export function groupEnough(
-  findings: ReadonlyArray<{ id: string; title: string; body: string; garmentIds: string[]; register?: string }>,
+  findings: ReadonlyArray<{
+    id: string; title: string; body: string; garmentIds: string[];
+    fullGarmentIds?: string[]; register?: string;
+  }>,
 ): EnoughGroup[] {
   const byBody = new Map<string, typeof findings[number][]>();
   for (const f of findings) {
@@ -732,6 +772,7 @@ export function groupEnough(
         title: group[0].title,
         body,
         garmentIds: group[0].garmentIds,
+        fullGarmentIds: group[0].fullGarmentIds ?? group[0].garmentIds,
         register: group[0].register ?? "",
       };
     }
@@ -743,6 +784,7 @@ export function groupEnough(
       title: `You already have enough ${joinPlain(subjects)}`,
       body,
       garmentIds: group.flatMap((f) => f.garmentIds),
+      fullGarmentIds: group.flatMap((f) => f.fullGarmentIds ?? f.garmentIds),
       register: group[0].register ?? "",
     };
   });

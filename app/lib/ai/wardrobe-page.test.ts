@@ -297,11 +297,19 @@ describe("§WP-4 basis and confidence", () => {
 // ── §WP-5 — actions ───────────────────────────────────────────────────────────
 
 describe("§WP-5 actions", () => {
-  it("§WP-5a a reveal action shows exactly the pieces it names", () => {
+  it("§WP-5a a reveal action shows what it names, or an honest superset of it", () => {
     const page = buildWardrobePage(baseInput());
     for (const entry of page.sections.flatMap((s) => s.blocks).flatMap((b) => b.entries)) {
       if (entry.action?.kind !== "reveal") continue;
-      assert.deepEqual(entry.action.garmentIds, entry.garmentIds);
+      if (entry.action.detail) {
+        // A text-only reveal ("Why this?") carries no garments of its own.
+        assert.equal(entry.action.garmentIds.length, 0);
+        continue;
+      }
+      // Otherwise the reveal can only ADD pieces already implied (e.g. "see
+      // all 8" on top of the 6 shown) — never substitute a different set.
+      const revealed = new Set(entry.action.garmentIds);
+      for (const id of entry.garmentIds) assert.ok(revealed.has(id), `${id} shown but not in the reveal`);
       assert.ok(entry.action.garmentIds.length > 0);
     }
   });
@@ -527,7 +535,7 @@ describe("§WP-8 partner counts reconcile", () => {
     assert.doesNotMatch(copy, /approved style profile|intention potential|curated rating/i);
     // And a garment rating may never be stated as how she will feel.
     assert.doesNotMatch(copy, /will (make you )?feel like yourself/i);
-    assert.match(copy, /could help with each type of look/i);
+    assert.match(copy, /could help with/i);
   });
 });
 
@@ -535,8 +543,8 @@ describe("§WP-9 curated assessments are not a Passport comparison", () => {
   it("§WP-9a the capability block says what it is, and what it is not", () => {
     const page = buildWardrobePage(baseInput());
     const copy = visibleCopy(page).join(" ");
-    assert.match(copy, /based on the pieces themselves/i);
-    assert.match(copy, /not your Style Passport/i);
+    assert.match(copy, /estimate the kinds of looks/i);
+    assert.match(copy, /aren't complete outfits or a match against your personal requirements/i);
   });
 
   it("§WP-9b no capability row reads as meeting her stated requirements", () => {
@@ -556,15 +564,22 @@ describe("§WP-9 curated assessments are not a Passport comparison", () => {
   });
 });
 
-// ── §WP-10 — a gap's own combination is shown in context, not behind a jump ───
+// ── §WP-10 — Ways to get dressed: Passport need gates it, inventory only
+//    describes what's said about it ─────────────────────────────────────────
 
 /**
- * Same wardrobe as baseInput(), but with two pairings: one that reads at the
- * "work" register (the same register baseInput() already flags as a gap via
- * couldUseMore), and one that reads at "everyday" (not a gap here).
+ * Same wardrobe as baseInput(), but "everyday" is explicitly NOT something she
+ * told nAia matters (needed: false) even though she owns everyday pieces and
+ * a valid everyday combination exists for it — this is the case the
+ * "undeclared lifestyle must not get promoted" rule exists for. "work" stays
+ * needed, as in baseInput().
  */
 function inputWithRegisterPairings(): WardrobePageInput {
   const input = baseInput();
+  const needsFixture = input.needs as unknown as { registers: Array<Record<string, unknown>> };
+  needsFixture.registers = needsFixture.registers.map((r) =>
+    r.register === "everyday" ? { ...r, needed: false } : r,
+  );
   (input.intelligence as unknown as { pairings: unknown }).pairings = {
     state: "available", untriedPresentation: "none", untriedNote: null,
     pairings: [
@@ -577,8 +592,18 @@ function inputWithRegisterPairings(): WardrobePageInput {
   return input;
 }
 
-describe("§WP-10 a gap's own combination lives under its own gap", () => {
-  it("§WP-10a the work-register combination renders inside What to do about it", () => {
+/** "work" is needed but the Closet has nothing for it yet (rawCount: 0). */
+function inputWithNeededButEmptyWork(): WardrobePageInput {
+  const input = baseInput();
+  const needsFixture = input.needs as unknown as { registers: Array<Record<string, unknown>> };
+  needsFixture.registers = needsFixture.registers.map((r) =>
+    r.register === "work" ? { ...r, rawCount: 0 } : r,
+  );
+  return input; // p1 in baseInput() carries no register, so no pairing matches regardless
+}
+
+describe("§WP-10 Ways to get dressed: Passport need gates it, inventory only describes it", () => {
+  it("§WP-10a a needed register's own combination renders inside What to do about it", () => {
     const page = buildWardrobePage(inputWithRegisterPairings());
     const doBlocks = page.sections.find((s) => s.id === "do")!.blocks;
     const pairingBlock = doBlocks.find((b) => b.kind === "pairings");
@@ -590,7 +615,7 @@ describe("§WP-10 a gap's own combination lives under its own gap", () => {
   it("§WP-10b the explore entry no longer offers a jump", () => {
     const page = buildWardrobePage(inputWithRegisterPairings());
     const explore = page.sections.find((s) => s.id === "do")!.blocks
-      .find((b) => b.id === "use-what-you-own")!.entries.find((e) => e.id === "explore-work")!;
+      .find((b) => b.id === "ways-to-get-dressed")!.entries.find((e) => e.id === "explore-work")!;
     assert.equal(explore.action, undefined, "the answer is shown in context now, not behind a link");
   });
 
@@ -602,20 +627,33 @@ describe("§WP-10 a gap's own combination lives under its own gap", () => {
     assert.ok(!ids.includes("p-work"), "moved, not duplicated");
   });
 
-  it("§WP-10d an unrelated combination still appears in Possibilities to try", () => {
+  it("§WP-10d owning pieces for an undeclared life area does not promote it into Ways to get dressed", () => {
     const page = buildWardrobePage(inputWithRegisterPairings());
+    const explore = page.sections.find((s) => s.id === "do")!.blocks.find((b) => b.id === "ways-to-get-dressed");
+    const explored = explore?.entries.map((e) => e.id) ?? [];
+    assert.ok(!explored.includes("explore-everyday"), "everyday was never named as part of her life");
+
+    // The everyday combination is not lost — it stays in the general list.
     const possibilitiesPairings = page.sections.find((s) => s.id === "possibilities")!.blocks
       .find((b) => b.id === "pairings");
     const ids = possibilitiesPairings?.entries.map((e) => e.id) ?? [];
-    assert.ok(ids.includes("p-everyday"), "a combination for a register that is not a gap stays where it was");
+    assert.ok(ids.includes("p-everyday"), "a combination for a life area she didn't name stays in the general list");
   });
 
-  it("§WP-10e with no matching combination, nothing is attributed to nAia's own failure", () => {
-    const input = baseInput(); // p1 carries no register, so nothing matches the "work" gap
-    const page = buildWardrobePage(input);
+  it("§WP-10e a needed register with zero Closet coverage still renders, and says so plainly", () => {
+    const page = buildWardrobePage(inputWithNeededButEmptyWork());
+    const doBlocks = page.sections.find((s) => s.id === "do")!.blocks;
+    const explore = doBlocks.find((b) => b.id === "ways-to-get-dressed")!.entries.find((e) => e.id === "explore-work");
+    assert.ok(explore, "a needed register with nothing in the Closet must still render, never be hidden");
+    assert.match(explore!.body ?? "", /doesn't have anything for this part of your life yet/i);
+    assert.doesNotMatch(explore!.body ?? "", /nAia hasn't|nAia has not/i);
+  });
+
+  it("§WP-10f with no matching combination at all, nothing is attributed to nAia's own failure", () => {
+    const page = buildWardrobePage(baseInput()); // p1 carries no register, so nothing matches "work"
     const doBlocks = page.sections.find((s) => s.id === "do")!.blocks;
     assert.equal(doBlocks.find((b) => b.kind === "pairings"), undefined);
-    const explore = doBlocks.find((b) => b.id === "use-what-you-own")!.entries.find((e) => e.id === "explore-work")!;
+    const explore = doBlocks.find((b) => b.id === "ways-to-get-dressed")!.entries.find((e) => e.id === "explore-work")!;
     assert.doesNotMatch(explore.body ?? "", /nAia hasn't|nAia has not/i);
   });
 });

@@ -528,6 +528,7 @@ const SILHOUETTE_LABELS: Readonly<Record<string, string>> = {
   relaxed: "Relaxed", flared: "Flared", tapered: "Tapered", wrap: "Wrap",
   balloon: "Balloon", asymmetric: "Asymmetric", column: "Column", boxy: "Boxy",
   cropped: "Cropped", empire: "Empire", shift: "Shift", bodycon: "Body-skimming",
+  "wide-leg": "Wide-leg",
 };
 
 const FIT_LABELS: Readonly<Record<string, string>> = {
@@ -3605,5 +3606,7 @@ export {
   classifyUsability,
   layersThatResolve,
   pairingEligibility,
+  SILHOUETTE_LABELS,
+  isActiveRelevant,
 };
 export type { PairScore, Usability };

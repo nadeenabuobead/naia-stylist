@@ -48,9 +48,9 @@ function makeRegister(overrides: Partial<RegisterReading> = {}): RegisterReading
 describe("§WC-1 register depth becomes plain language", () => {
   it("1 — each engine depth state maps to a customer-facing state", () => {
     const cases: Array<[string, string]> = [
-      ["Strong everyday depth", "Strong"],
-      ["Workable work depth", "Covered, with limited variety"],
-      ["Limited usable work depth", "Needs more range"],
+      ["Strong everyday depth", "Plenty of options"],
+      ["Workable work depth", "Covered, but less variety"],
+      ["Limited usable work depth", "Fewer combinations"],
       ["Your occasion wardrobe looks bigger than it really is", "Smaller than it looks"],
       ["Nothing here yet", "Nothing here yet"],
       ["Not enough evidence yet", "Still learning"],
@@ -391,7 +391,7 @@ describe("§WC-7 Closet-to-Passport match", () => {
   it("7-uneven — alignment without representation is never reported as a strong match", () => {
     const m = matchDimension({ id: "synth-colour", kind: "uneven", reading: "Part of it is barely there." });
     assert.equal(m.dimension, "Colour");
-    assert.equal(m.stateText, "Strong alignment, uneven representation");
+    assert.equal(m.stateText, "Some of it, not all of it");
     assert.notEqual(m.stateText, "Strong match");
   });
 

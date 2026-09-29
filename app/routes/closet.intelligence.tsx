@@ -286,6 +286,37 @@ function EntryAction({
   );
 }
 
+/**
+ * Wraps background/provenance content behind a single toggle, keyed on the
+ * block's own id in the SAME shared openId state entry-level reveals use — at
+ * most one thing open anywhere on the page at a time, by the same rule.
+ * Renders children directly when the block carries no disclosure at all.
+ */
+function Disclosure({
+  block, openId, setOpenId, children,
+}: {
+  block: PageBlock;
+  openId: string | null;
+  setOpenId: (id: string | null) => void;
+  children: React.ReactNode;
+}) {
+  if (!block.disclosure) return <>{children}</>;
+  const isOpen = openId === block.id;
+  return (
+    <>
+      <button
+        type="button"
+        className="wi-disclosure-toggle"
+        aria-expanded={isOpen}
+        onClick={() => setOpenId(isOpen ? null : block.id)}
+      >
+        {isOpen ? block.disclosure.hideLabel : block.disclosure.label}
+      </button>
+      {isOpen && children}
+    </>
+  );
+}
+
 function Block({
   block, byId, openId, setOpenId,
 }: {
@@ -325,15 +356,18 @@ function Block({
                 <div key={e.id} className="wi-dna-cell">
                   <p className="wi-microhead">{e.title}</p>
                   {e.id === "dna-palette" && (
-                    <div className="wi-palette">
-                      {(meta.palette as unknown as Array<{ colour: string; count: number }>).map((c) => (
-                        <div key={c.colour} className="wi-palette-row">
-                          <span className="wi-swatch" style={swatchStyle(c.colour)} aria-hidden="true" />
-                          <span className="wi-palette-name">{c.colour}</span>
-                          <span className="wi-palette-count">{c.count}</span>
-                        </div>
-                      ))}
-                    </div>
+                    <>
+                      <div className="wi-palette">
+                        {(meta.palette as unknown as Array<{ colour: string; count: number }>).map((c) => (
+                          <div key={c.colour} className="wi-palette-row">
+                            <span className="wi-swatch" style={swatchStyle(c.colour)} aria-hidden="true" />
+                            <span className="wi-palette-name">{c.colour}</span>
+                            <span className="wi-palette-count">{c.count}</span>
+                          </div>
+                        ))}
+                      </div>
+                      {e.body && <p className="wi-reading wi-reading--sm">{e.body}</p>}
+                    </>
                   )}
                   {e.id === "dna-shapes" && (
                     <>
@@ -411,6 +445,12 @@ function Block({
               <h3 className="wi-finding-title">{e.title}</h3>
               {e.body && <p className="wi-finding-body">{e.body}</p>}
               <Strip ids={e.garmentIds} byId={byId} />
+              <EntryAction
+                entry={e}
+                byId={byId}
+                open={openId === e.id}
+                onToggle={() => setOpenId(openId === e.id ? null : e.id)}
+              />
             </article>
           ))}
         </div>
@@ -457,6 +497,7 @@ function Block({
           {label}
           {block.entries.map((e) => {
             const attrs = ((e.meta ?? {}).attributes ?? []) as Array<{ kind: string; label: string }>;
+            const isOpen = openId === e.id;
             return (
               <article key={e.id} className="wi-rec">
                 <h4 className="wi-rec-title">{e.title}</h4>
@@ -472,6 +513,19 @@ function Block({
                 )}
                 {e.body && <p className="wi-rec-body">{e.body}</p>}
                 <Strip ids={e.garmentIds} byId={byId} />
+                {e.action?.kind === "reveal" && e.action.detail && (
+                  <>
+                    <button
+                      type="button"
+                      className="wi-note-action"
+                      aria-expanded={isOpen}
+                      onClick={() => setOpenId(isOpen ? null : e.id)}
+                    >
+                      {isOpen ? e.action.hideLabel : e.action.label}
+                    </button>
+                    {isOpen && <p className="wi-rec-why">{e.action.detail}</p>}
+                  </>
+                )}
               </article>
             );
           })}
@@ -502,23 +556,89 @@ function Block({
 
     // ── Closet CAPABILITY, from reviewed garment ratings. Never her preference:
     //    what she asks to feel is a different question, answered in section 6.
+    //    Background relative to what to wear/buy/skip, so it stays collapsed.
     case "capability":
       return (
         <div className="wi-block">
           {label}
+          <Disclosure block={block} openId={openId} setOpenId={setOpenId}>
+            {block.entries.map((e) => {
+              const strengths = ((e.meta ?? {}).strengths ?? []) as Array<{ intention: string; label: string; strong: number }>;
+              return (
+                <div key={e.id}>
+                  <ul className="wi-caps">
+                    {strengths.map((c) => (
+                      <li key={c.intention} className="wi-cap">
+                        <span className="wi-cap-label">{c.label}</span>
+                        <span className="wi-cap-count">{c.strong} pieces</span>
+                      </li>
+                    ))}
+                  </ul>
+                  {e.body && <p className="wi-cap-note">{e.body}</p>}
+                </div>
+              );
+            })}
+          </Disclosure>
+        </div>
+      );
+
+    // ── COVERAGE, moved out of the Passport-comparison list: an actionable
+    //    limitation, not provenance. The summary sentence is always visible;
+    //    the per-piece breakdown is the customer's choice to open.
+    case "coverage":
+      return (
+        <div className="wi-block">
+          {label}
           {block.entries.map((e) => {
-            const strengths = ((e.meta ?? {}).strengths ?? []) as Array<{ intention: string; label: string; strong: number }>;
+            const isOpen = openId === e.id;
             return (
-              <div key={e.id}>
-                <ul className="wi-caps">
-                  {strengths.map((c) => (
-                    <li key={c.intention} className="wi-cap">
-                      <span className="wi-cap-label">{c.label}</span>
-                      <span className="wi-cap-count">{c.strong} pieces</span>
-                    </li>
-                  ))}
-                </ul>
-                {e.body && <p className="wi-cap-note">{e.body}</p>}
+              <div key={e.id} className="wi-coverage-summary">
+                <p className="wi-match-reading">{e.body}</p>
+                {e.action?.kind === "reveal" && (
+                  <>
+                    <button
+                      type="button"
+                      className="wi-note-action"
+                      aria-expanded={isOpen}
+                      onClick={() => setOpenId(isOpen ? null : e.id)}
+                    >
+                      {isOpen ? e.action.hideLabel : e.action.label}
+                    </button>
+                    {/* Thumbnails alone told her nothing. Each piece names the
+                        requirement it may not meet on its own, and either the
+                        layer she owns that helps or the plain fact that nAia
+                        has not found one. Never "this cannot work". */}
+                    {isOpen && (
+                      <ul className="wi-coverage-list">
+                        {((e.meta?.blockedDetail ?? []) as Array<{
+                          garmentId: string; name: string; reason: string; layers: string[]; layerIds: string[];
+                        }>).map((b) => (
+                          <li key={b.garmentId} className="wi-coverage-item">
+                            <Thumb card={byId.get(b.garmentId)} size={56} />
+                            <div className="wi-coverage-text">
+                              <p className="wi-coverage-name">{b.name}</p>
+                              <p className="wi-coverage-reason">
+                                On its own, this may not meet your preference for {b.reason.replace(/^keeping your /, "").replace(/^avoiding /, "avoiding ")}.
+                              </p>
+                              {b.layers.length > 0 ? (
+                                <>
+                                  <p className="wi-coverage-layer">
+                                    Worn with your {b.layers[0]}, it could still work.
+                                  </p>
+                                  <Strip ids={[b.garmentId, ...b.layerIds.slice(0, 1)]} byId={byId} size={48} showAll />
+                                </>
+                              ) : (
+                                <p className="wi-coverage-layer wi-coverage-layer--none">
+                                  nAia hasn&rsquo;t found a suitable layering option among the pieces you&rsquo;ve added.
+                                </p>
+                              )}
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </>
+                )}
               </div>
             );
           })}
@@ -529,66 +649,23 @@ function Block({
       return (
         <div className="wi-block">
           {label}
-          <ul className="wi-matches">
-            {block.entries.map((e) => {
-              const meta = (e.meta ?? {}) as Record<string, string | undefined>;
-              return (
-                <li key={e.id} className={`wi-match is-${String(meta.state)}`}>
-                  <p className="wi-match-head">
-                    <span className="wi-match-dim">{e.title}</span>
-                    <span className="wi-match-sep" aria-hidden="true">—</span>
-                    <span className="wi-match-state">{meta.stateText}</span>
-                  </p>
-                  <p className="wi-match-reading">{e.body}</p>
-                  {e.action?.kind === "reveal" && (
-                    <>
-                      <button
-                        type="button"
-                        className="wi-note-action"
-                        aria-expanded={openId === e.id}
-                        onClick={() => setOpenId(openId === e.id ? null : e.id)}
-                      >
-                        {openId === e.id ? e.action.hideLabel : e.action.label}
-                      </button>
-                      {/* Thumbnails alone told her nothing. Each piece names the
-                          requirement it may not meet on its own, and either the
-                          layer she owns that helps or the plain fact that nAia
-                          has not found one. Never "this cannot work". */}
-                      {openId === e.id && (
-                        <ul className="wi-coverage-list">
-                          {((e.meta?.blockedDetail ?? []) as Array<{
-                            garmentId: string; name: string; reason: string; layers: string[]; layerIds: string[];
-                          }>).map((b) => (
-                            <li key={b.garmentId} className="wi-coverage-item">
-                              <Thumb card={byId.get(b.garmentId)} size={56} />
-                              <div className="wi-coverage-text">
-                                <p className="wi-coverage-name">{b.name}</p>
-                                <p className="wi-coverage-reason">
-                                  On its own, this may not meet your preference for {b.reason.replace(/^keeping your /, "").replace(/^avoiding /, "avoiding ")}.
-                                </p>
-                                {b.layers.length > 0 ? (
-                                  <>
-                                    <p className="wi-coverage-layer">
-                                      Worn with your {b.layers[0]}, it could still work.
-                                    </p>
-                                    <Strip ids={[b.garmentId, ...b.layerIds.slice(0, 1)]} byId={byId} size={48} showAll />
-                                  </>
-                                ) : (
-                                  <p className="wi-coverage-layer wi-coverage-layer--none">
-                                    nAia hasn&rsquo;t found a suitable layering option among the pieces you&rsquo;ve added.
-                                  </p>
-                                )}
-                              </div>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
+          <Disclosure block={block} openId={openId} setOpenId={setOpenId}>
+            <ul className="wi-matches">
+              {block.entries.map((e) => {
+                const meta = (e.meta ?? {}) as Record<string, string | undefined>;
+                return (
+                  <li key={e.id} className={`wi-match is-${String(meta.state)}`}>
+                    <p className="wi-match-head">
+                      <span className="wi-match-dim">{e.title}</span>
+                      <span className="wi-match-sep" aria-hidden="true">—</span>
+                      <span className="wi-match-state">{meta.stateText}</span>
+                    </p>
+                    <p className="wi-match-reading">{e.body}</p>
+                  </li>
+                );
+              })}
+            </ul>
+          </Disclosure>
         </div>
       );
 
@@ -620,14 +697,16 @@ function Block({
       return (
         <div className="wi-block">
           {label}
-          <div className="wi-history">
-            {block.entries.map((e) => (
-              <div key={e.id} className="wi-hist-item">
-                <p className="wi-hist-head">{e.title}</p>
-                <p className="wi-hist-body">{e.body}</p>
-              </div>
-            ))}
-          </div>
+          <Disclosure block={block} openId={openId} setOpenId={setOpenId}>
+            <div className="wi-history">
+              {block.entries.map((e) => (
+                <div key={e.id} className="wi-hist-item">
+                  <p className="wi-hist-head">{e.title}</p>
+                  <p className="wi-hist-body">{e.body}</p>
+                </div>
+              ))}
+            </div>
+          </Disclosure>
         </div>
       );
 

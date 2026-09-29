@@ -59,6 +59,7 @@ import {
   BOTTOM_SLOTS,
   ONE_PIECE_SLOTS,
   MIN_WARDROBE_SIZE,
+  SILHOUETTE_LABELS,
   type WardrobeGarment,
   type WardrobePassport,
   type Evidence,
@@ -543,6 +544,10 @@ function buildRecommendation(
       const silhouettes = [...new Set(
         resolving.filter((r) => r.fitFamily === leadFamily).map((r) => r.silhouette),
       )].slice(0, 3);
+      // silhouettes stays the raw vocabulary (CANDIDATE_SILHOUETTES tokens) — it
+      // feeds criteria.resolvingSilhouettes, which real garments are matched
+      // against. Customer-facing text uses the plain-language label instead.
+      const plainSilhouettes = silhouettes.map((s) => SILHOUETTE_LABELS[s] ?? s);
 
       // Name only what actually DIFFERS from what she owns. Her work bottoms
       // are already tailored, so "more structured" would describe the problem
@@ -562,15 +567,15 @@ function buildRecommendation(
         kind: "structure",
         values: fitIsTheChange ? [leadFamily, ...silhouettes] : silhouettes,
         label: fitIsTheChange
-          ? `${STRUCTURE_LABEL[leadFamily] ?? leadFamily}, in ${joinOr(silhouettes)}`
-          : `a different shape — ${joinOr(silhouettes)}`,
+          ? `${STRUCTURE_LABEL[leadFamily] ?? leadFamily}, in ${joinOr(plainSilhouettes)}`
+          : `a different shape — ${joinOr(plainSilhouettes)}`,
         source: "closet",
       });
       evidence.push(
         ev(
           "garment-fact",
           "distinct-looks simulation",
-          `A ${leadFamily === "soft" ? "looser" : "more structured"} ${SLOT_NOUN[slot] ?? slot} in ${joinOr(silhouettes)} would take ${REGISTER_WORD[register]} from ${reading.distinctLooks} to ${resolving[0].distinctLooks} supported combinations.`,
+          `A ${leadFamily === "soft" ? "looser" : "more structured"} ${SLOT_NOUN[slot] ?? slot} in ${joinOr(plainSilhouettes)} would give you more ways to put ${REGISTER_WORD[register]} looks together.`,
           [],
         ),
       );

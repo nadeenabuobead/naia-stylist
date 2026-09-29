@@ -811,6 +811,19 @@ describe("§WR-9 emitted attributes resolve the tested outcome", () => {
     );
   });
 
+  it("§WR-9h the structure attribute's label is plain language, never a raw classification token", () => {
+    const { recs } = run(repetitiveWork(), passport());
+    const rec = recs.recommendations.find((r) => r.register === "work")!;
+    const structure = rec.attributes.find((a) => a.kind === "structure");
+    assert.ok(structure, "a structure attribute is proposed");
+    // criteria.resolvingSilhouettes stays the raw vocabulary — real garments
+    // are matched against it — but the customer-facing label must not leak
+    // that vocabulary verbatim (e.g. "a-line", "wide-leg" unexplained).
+    for (const raw of rec.criteria.resolvingSilhouettes) {
+      assert.doesNotMatch(structure!.label, new RegExp(`\\b${raw}\\b`), `raw token "${raw}" leaked into the label`);
+    }
+  });
+
   it("§WR-9b instantiating those attributes CLOSES the gap", () => {
     const base = repetitiveWork();
     const p = passport();
