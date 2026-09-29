@@ -703,15 +703,47 @@ describe("§WP-11 lifestyle-labelled presentation, same 3-register engine", () =
     assert.equal(explore.entries.find((e) => e.id === "explore-gym"), undefined);
   });
 
-  it("§WP-11d a gym-tagged combination without the declared lifestyle stays a plain combination", () => {
-    const input = inputWithRegisterPairings();
-    (input.intelligence as unknown as { pairings: { pairings: unknown[] } }).pairings.pairings.push(
+  it("§WP-11d undeclared gym-only pairing is not surfaced under For everyday", () => {
+    // The customer-facing lifestyle label and the engine's internal register
+    // are not the same thing: activewear formality-buckets to "everyday", but
+    // evidence that is specifically gym-tagged must never be relabelled
+    // "For everyday" just because fitness/gym was never declared.
+    const input = baseInput();
+    (input.intelligence as unknown as { pairings: { pairings: unknown[] } }).pairings.pairings = [
       { id: "p-gym2", garmentIds: ["g12", "g13"], reason: "You've tagged these for gym.", untried: true, register: "everyday" },
-    );
+    ];
     // input.lifestyle left unset — she never told nAia fitness/gym is part of her life.
     const page = buildWardrobePage(input);
     const doBlocks = page.sections.find((s) => s.id === "do")!.blocks;
-    assert.equal(doBlocks.find((b) => b.id === "ways-to-get-dressed")!.entries.find((e) => e.id === "explore-gym"), undefined);
+    assert.equal(doBlocks.find((b) => b.id === "ways-to-get-dressed")!.entries.find((e) => e.id === "explore-gym"), undefined,
+      "no Active/Gym card without the declared lifestyle");
+    const everydayBlock = doBlocks.find((b) => b.id === "do-pairings-everyday");
+    assert.ok(!(everydayBlock?.entries ?? []).some((e) => e.id === "p-gym2"), "not relabelled For everyday either");
+  });
+
+  it("§WP-11e a genuinely everyday-compatible pairing still renders under For everyday", () => {
+    const input = baseInput();
+    (input.intelligence as unknown as { pairings: { pairings: unknown[] } }).pairings.pairings = [
+      { id: "p-casual", garmentIds: ["g14", "g15"], reason: "They sit at the same level of dress.", untried: true, register: "everyday" },
+    ];
+    const page = buildWardrobePage(input);
+    const doBlocks = page.sections.find((s) => s.id === "do")!.blocks;
+    const everydayBlock = doBlocks.find((b) => b.id === "do-pairings-everyday");
+    assert.ok(everydayBlock, "an everyday block should exist");
+    assert.ok(everydayBlock!.entries.some((e) => e.id === "p-casual"), "evidence that IS genuinely everyday still renders there");
+  });
+
+  it("§WP-11f an excluded gym-only pairing stays available to Possibilities to try when otherwise valid", () => {
+    const input = baseInput();
+    (input.intelligence as unknown as { pairings: { pairings: unknown[] } }).pairings.pairings = [
+      { id: "p-gym3", garmentIds: ["g16", "g17"], reason: "You've tagged these for gym.", untried: true, register: "everyday" },
+    ];
+    // No lifestyle declared, so it's excluded from "Ways to get dressed" —
+    // but it is a real, engine-approved pairing, so it must not be lost.
+    const page = buildWardrobePage(input);
+    const possibilitiesPairings = page.sections.find((s) => s.id === "possibilities")?.blocks.find((b) => b.id === "pairings");
+    assert.ok(possibilitiesPairings, "the possibilities pairings block should exist");
+    assert.ok(possibilitiesPairings!.entries.some((e) => e.id === "p-gym3"), "still offered in the general list");
   });
 });
 

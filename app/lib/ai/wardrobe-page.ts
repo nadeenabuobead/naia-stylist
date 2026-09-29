@@ -570,16 +570,24 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
     // activity, or evidence from outside Passport.lifestyle entirely) extends
     // this table without touching anything below it.
     const gymDeclared = lifestyle.some((id) => LIFESTYLE_PRESENTATION.gym.tokens.has(id));
-    const gymPairing = gymDeclared && intelligence.pairings.state !== "learning"
+    const anyGymPairing = intelligence.pairings.state !== "learning"
       ? intelligence.pairings.pairings.find((p) => LIFESTYLE_PRESENTATION.gym.matchesPairing(p))
       : undefined;
+    // The customer-facing lifestyle label and the engine's internal register
+    // are not the same thing. A pairing whose own evidence is specifically
+    // gym-tagged is never shown as a generic register combination — not even
+    // "For everyday" — regardless of whether fitness/gym happens to be
+    // declared. Declaration only decides whether it gets its OWN labelled
+    // card (below); left undeclared, it is excluded here and falls through to
+    // "Possibilities to try" instead, where no life-area claim is made about it.
+    const gymPairing = gymDeclared ? anyGymPairing : undefined;
 
     if (relevantRegisters.length > 0 || gymPairing) {
       const byRegister = new Map<RegisterId, WardrobePairing[]>();
       if (intelligence.pairings.state !== "learning") {
         for (const p of intelligence.pairings.pairings) {
           if (p.register === null) continue;
-          if (gymPairing && p.id === gymPairing.id) continue; // presented separately, not twice
+          if (LIFESTYLE_PRESENTATION.gym.matchesPairing(p)) continue;
           if (!relevantRegisters.some((r) => r.register === p.register)) continue;
           const list = byRegister.get(p.register) ?? [];
           list.push(p);
