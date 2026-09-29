@@ -426,7 +426,7 @@ const MATCH_STATE_TEXT: Readonly<Record<MatchState, string>> = {
   // Inside the palette, but not all of it is there. Deliberately not "strong".
   // Never "coverage" here: one line below, COVERAGE means how much of the body
   // she wants covered, and the two readings sat next to each other.
-  uneven: "Some of it, not all of it",
+  uneven: "Mostly in the colours you like",
   partial: "Partial match",
   gap: "Where there's a gap",
   unclear: "Not yet clear",
@@ -450,18 +450,23 @@ const SYNTH_DIMENSION: Readonly<Record<string, string>> = {
 };
 
 export function matchDimension(
-  line: { id: string; kind: "alignment" | "uneven" | "tension" | "unclear"; reading: string },
+  line: { id: string; kind: "alignment" | "uneven" | "tension" | "unclear"; reading: string; thinLabel?: string },
 ): MatchDimension {
   const state: MatchState =
     line.kind === "alignment" ? "strong"
       : line.kind === "uneven" ? "uneven"
       : line.kind === "tension" ? "gap"
       : "unclear";
+  // The generic "some of it, not all of it" left Grey unnamed even though the
+  // engine already knows exactly which colour is thin — name it instead.
+  const stateText = state === "uneven" && line.thinLabel
+    ? `Mostly in the colours you like; ${line.thinLabel.toLowerCase()} ${/ and /.test(line.thinLabel) ? "appear" : "appears"} less often`
+    : MATCH_STATE_TEXT[state];
   return {
     id: line.id,
     dimension: SYNTH_DIMENSION[line.id] ?? "Style",
     state,
-    stateText: MATCH_STATE_TEXT[state],
+    stateText,
     reading: plainText(line.reading),
   };
 }
@@ -655,7 +660,9 @@ function synthHeadline(line: SynthesisLine): string {
       return line.kind === "alignment"
         ? "Your colours match your Passport"
         : line.kind === "uneven"
-          ? "Part of your palette is barely there"
+          ? line.thinLabel
+            ? `${line.thinLabel} ${/ and /.test(line.thinLabel) ? "appear" : "appears"} less often in your wardrobe`
+            : "Part of your palette appears less often in your wardrobe"
           : "Your colours and your Passport differ";
     case "synth-neutral":
       return line.kind === "alignment"

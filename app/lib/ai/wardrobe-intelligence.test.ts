@@ -534,6 +534,34 @@ describe("§WI-6 what works well together", () => {
     assert.equal(work?.register, "work");
     assert.equal(everyday?.register, "everyday");
   });
+
+  it("bestByRegister surfaces a register's own best candidate even when it loses every seat in the capped top-4", () => {
+    // Three occasion-tagged work pairs (weight-8 bonus each) crowd out the
+    // capped pairings.pairings list entirely; a plain everyday pair with only
+    // generic reasons (weight 2-3) never wins a seat there, despite being a
+    // real, valid, eligible candidate — reproducing the exact contradiction
+    // this field exists to fix: strong depth, zero shown combination.
+    const items = [
+      makeGarment({ id: "wt1", slot: "top", formality: "business-casual", occasions: ["Work"] }),
+      makeGarment({ id: "wb1", category: "BOTTOMS", slot: "bottom", formality: "business-casual", occasions: ["Work"] }),
+      makeGarment({ id: "wt2", slot: "top", formality: "business-casual", occasions: ["Work"] }),
+      makeGarment({ id: "wb2", category: "BOTTOMS", slot: "bottom", formality: "business-casual", occasions: ["Work"] }),
+      makeGarment({ id: "wt3", slot: "top", formality: "business-casual", occasions: ["Work"] }),
+      makeGarment({ id: "wb3", category: "BOTTOMS", slot: "bottom", formality: "business-casual", occasions: ["Work"] }),
+      makeGarment({ id: "wt4", slot: "top", formality: "business-casual", occasions: ["Work"] }),
+      makeGarment({ id: "wb4", category: "BOTTOMS", slot: "bottom", formality: "business-casual", occasions: ["Work"] }),
+      makeGarment({ id: "et", slot: "top", formality: "casual" }),
+      makeGarment({ id: "eb", category: "BOTTOMS", slot: "bottom", formality: "casual" }),
+    ];
+    const result = run(items);
+
+    const shownEveryday = result.pairings.pairings.filter((p) => p.register === "everyday");
+    assert.equal(shownEveryday.length, 0, "the plain everyday pair genuinely loses the capped ranking");
+
+    const bestEveryday = result.pairings.bestByRegister.everyday ?? [];
+    assert.ok(bestEveryday.length > 0, "but it is not simply absent from the data — bestByRegister still has it");
+    assert.ok(bestEveryday[0].garmentIds.includes("et") && bestEveryday[0].garmentIds.includes("eb"));
+  });
 });
 
 // ── §WI-7 — Heroes and their labels ───────────────────────────────────────────

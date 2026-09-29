@@ -344,6 +344,20 @@ export interface WardrobePairings {
   untriedPresentation: UntriedPresentation;
   /** Section-level wording. Non-null only when presentation is "section". */
   untriedNote: string | null;
+  /**
+   * The strongest valid candidates for each register (ranked, a handful
+   * each), independent of the global top-N cap and cross-register "no
+   * garment twice" dedup that `pairings` above is subject to. A register with
+   * genuine depth can still lose every seat in that competition to
+   * occasion-tagged pairs elsewhere — this is the same scored, eligible
+   * candidate pool, read a second way, so a per-register presentation always
+   * has its own real example(s) to choose from when any exist. A caller that
+   * needs to skip a candidate for a presentation-level reason (e.g. one whose
+   * evidence is specifically for a declared activity, not this generic
+   * register) can fall to the next one rather than have none at all. Empty
+   * ({}) whenever no candidates exist at all.
+   */
+  bestByRegister: Partial<Record<"everyday" | "work" | "occasion", WardrobePairing[]>>;
 }
 
 export type ObservationKind =
@@ -1785,6 +1799,7 @@ function buildPairings(
       totalFound: 0,
       untriedPresentation: "none",
       untriedNote: null,
+      bestByRegister: {},
     };
   }
 
@@ -1850,6 +1865,7 @@ function buildPairings(
       totalFound: 0,
       untriedPresentation: "none",
       untriedNote: null,
+      bestByRegister: {},
     };
   }
 
@@ -1925,6 +1941,46 @@ function buildPairings(
   const presentation: UntriedPresentation =
     novel === 0 ? "none" : novel === pairings.length ? "section" : "per-item";
 
+  // The register with the most raw depth is not always the register that wins
+  // the global top-4: an occasion-tag bonus (weight 8) routinely outscores a
+  // plain everyday pair with only generic reasons, so a register with genuine
+  // depth can still get zero seats above. A per-register presentation needs
+  // its OWN strongest valid example, not whatever survived that competition —
+  // this is the exact same `ranked` list, just read a second way, with its own
+  // reason ledger so it never competes with (or repeats) the top-4's wording.
+  const perRegisterLedger = new Set<string>();
+  const toPairingWithLedger = (candidate: (typeof ranked)[number], ledger: Set<string>): WardrobePairing => {
+    const lead = candidate.reasons.find((r) => !ledger.has(r.text)) ?? candidate.reasons[0];
+    ledger.add(lead.text);
+    const second = candidate.reasons.find((r) => r.text !== lead.text && !ledger.has(r.text));
+    if (second) ledger.add(second.text);
+    return {
+      id: combinationKey(candidate.ids),
+      garmentIds: candidate.ids,
+      reason: second ? `${lead.text} ${second.text}` : lead.text,
+      untried: candidate.untried,
+      register: pairingRegister(candidate.ids),
+      evidence: [
+        ev("garment-fact", "formality/colourProfile/visualWeight/silhouette/occasions",
+           candidate.reasons.map((r) => r.text).join(" "), candidate.ids),
+        ...(candidate.untried
+          ? [ev("naia-interaction", "OutfitItem", "This combination has not appeared in a look nAia generated.", candidate.ids)]
+          : []),
+      ],
+    };
+  };
+  // Top few, not just one: a presentation-level exclusion (e.g. a pairing
+  // whose evidence is specifically for a declared activity, not a generic
+  // register) may need to skip past the single best to the next genuinely
+  // valid one for that register — this stays an engine-neutral list either
+  // way, ranked purely by the same score used everywhere else on this page.
+  const BEST_PER_REGISTER = 5;
+  const bestByRegister: Partial<Record<"everyday" | "work" | "occasion", WardrobePairing[]>> = {};
+  for (const register of ["everyday", "work", "occasion"] as const) {
+    const top = ranked.filter((c) => pairingRegister(c.ids) === register).slice(0, BEST_PER_REGISTER);
+    if (top.length > 0) bestByRegister[register] = top.map((c) => toPairingWithLedger(c, perRegisterLedger));
+  }
+
   return {
     state: "available",
     pairings,
@@ -1934,6 +1990,7 @@ function buildPairings(
       presentation === "section"
         ? "These are strong connections nAia hasn't put together in one of your looks yet."
         : null,
+    bestByRegister,
   };
 }
 
@@ -3499,7 +3556,7 @@ export function computeWardrobeIntelligence(input: WardrobeIntelligenceInput): W
         palette: [], paletteReading: "", shapes: [], shapesReading: "", traits: [],
       },
       heroes: { state: "learning", learningNote: "Heroes appear once nAia can see how your pieces connect.", heroes: [] },
-      pairings: { state: "learning", learningNote: "Add a few more pieces and nAia can start showing how they connect.", pairings: [], totalFound: 0, untriedPresentation: "none", untriedNote: null },
+      pairings: { state: "learning", learningNote: "Add a few more pieces and nAia can start showing how they connect.", pairings: [], totalFound: 0, untriedPresentation: "none", untriedNote: null, bestByRegister: {} },
       observations: [],
       opportunities: {
         state: "learning",

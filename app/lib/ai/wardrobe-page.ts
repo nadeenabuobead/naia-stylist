@@ -102,11 +102,19 @@ export interface PageBlock {
   entries: PageEntry[];
   note?: string;
   /**
-   * When set, the whole block's content is collapsed behind a toggle keyed on
-   * the block's own id, closed by default. For background/provenance material
-   * that a customer can open, not something the main journey depends on.
+   * When set, `entries` is collapsed behind a toggle keyed on the block's own
+   * id, closed by default — for background/provenance detail (counts,
+   * per-dimension breakdown) that a customer can open, not something the main
+   * journey depends on.
    */
   disclosure?: { label: string; hideLabel: string };
+  /**
+   * The useful conclusion, shown even while `entries` is collapsed — under
+   * the block's own `label` as its heading. Collapsing detail must never hide
+   * the one sentence a customer actually came for, only the
+   * provenance/counts/breakdown behind it.
+   */
+  summary?: string;
 }
 
 export interface PageSection {
@@ -277,7 +285,7 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
   const sections = new Map<SectionId, PageBlock[]>();
   for (const id of SECTION_ORDER) sections.set(id, []);
   const add = (id: SectionId, block: PageBlock | null) => {
-    if (block && block.entries.length > 0) sections.get(id)!.push(block);
+    if (block && (block.entries.length > 0 || block.summary)) sections.get(id)!.push(block);
   };
 
   // ── 1 · Your wardrobe right now ────────────────────────────────────────────
@@ -357,36 +365,12 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
     const cells: PageEntry[] = [];
     if (dna.palette.length > 0) {
       const top = dna.palette[0];
-      // Abundance alone is never "never buy this colour". A live
-      // recommendation naming this exact colour always outranks it — that's
-      // a real gap this colour would fill, the opposite of low priority.
-      const recommendedColours = new Set(
-        recommendations.recommendations
-          .flatMap((r) => r.attributes)
-          .filter((a) => a.kind === "colour")
-          .map((a) => a.label.toLowerCase()),
-      );
-      const colourIsLiveGap = recommendedColours.has(top.colour.toLowerCase());
-
-      // The "enough" evidence distinguishes a role/category only by
-      // neutral-vs-colour band, not by the specific colour name — a
-      // chromatic-band cluster's own title never says which colour it is
-      // (describeCluster in wardrobe-needs.ts encodes no word for it). So a
-      // specific "you have enough of this role" connection is only honest
-      // when the dominant colour IS the neutral band, and a genuine "enough"
-      // cluster exists for it. Otherwise this stays a plain observation, with
-      // no skip advice attached — abundance without a named, covered role is
-      // not evidence of duplication.
-      const enoughNeutralCluster = top.neutral
-        ? needs.enough.find((f) => /\bneutral\b/i.test(f.title))
-        : undefined;
-
-      let body = `${top.colour} is already a big part of your wardrobe (${top.count} ${top.count === 1 ? "piece" : "pieces"}).`;
-      if (!colourIsLiveGap && top.share >= 0.3 && enoughNeutralCluster) {
-        const role = enoughNeutralCluster.title.replace(/^You already have enough /, "");
-        body = `${top.colour} is already your most common colour. You also have plenty of ${role}, ` +
-          `so another similar ${top.colour.toLowerCase()} one is low priority right now.`;
-      }
+      // Whether this colour is also a covered "enough" role, and whether that
+      // makes another one low priority, is decided once — in the "enough" and
+      // "Low priority right now" sections. Saying it a third time here, after
+      // the opening findings have already said it too, is repetition, not
+      // confirmation.
+      const body = `${top.colour} is already a big part of your wardrobe (${top.count} ${top.count === 1 ? "piece" : "pieces"}).`;
 
       cells.push({
         id: "dna-palette", claim: "dna:palette", role: "full",
@@ -457,7 +441,7 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
         // true total. When there's more than is shown, say so honestly rather
         // than let the sentence and the images disagree.
         action: total > shown
-          ? { kind: "reveal", label: `See all ${total} pieces`, hideLabel: "Hide", garmentIds: finding.fullGarmentIds }
+          ? { kind: "reveal", label: `See all ${total} pieces`, hideLabel: "Show less", garmentIds: finding.fullGarmentIds }
           : undefined,
       };
     });
@@ -477,7 +461,7 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
         id: "capability",
         label: "What your Closet can help with",
         kind: "capability",
-        disclosure: { label: "More about your wardrobe", hideLabel: "Hide" },
+        disclosure: { label: "More about your wardrobe", hideLabel: "Show less" },
         entries: [
           {
             id: "closet-capability",
@@ -570,100 +554,83 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
     // activity, or evidence from outside Passport.lifestyle entirely) extends
     // this table without touching anything below it.
     const gymDeclared = lifestyle.some((id) => LIFESTYLE_PRESENTATION.gym.tokens.has(id));
-    const anyGymPairing = intelligence.pairings.state !== "learning"
-      ? intelligence.pairings.pairings.find((p) => LIFESTYLE_PRESENTATION.gym.matchesPairing(p))
-      : undefined;
+    const bestByRegister = intelligence.pairings.state !== "learning" ? (intelligence.pairings.bestByRegister ?? {}) : {};
+
+    // The best EVERYDAY-bucketed candidate can itself be gym-tagged (activewear
+    // formality-buckets to "everyday"), so picking "the top candidate" for a
+    // generic register card is not enough on its own — a presentation-level
+    // exclusion has to be able to skip past it to the next genuinely generic
+    // one. `bestByRegister` carries a short ranked list for exactly this.
+    const bestGenericFor = (register: RegisterId): WardrobePairing | undefined =>
+      (bestByRegister[register as "everyday" | "work" | "occasion"] ?? [])
+        .find((p) => !LIFESTYLE_PRESENTATION.gym.matchesPairing(p));
+
+    const anyGymPairing = (["everyday", "work", "occasion"] as const)
+      .flatMap((r) => bestByRegister[r] ?? [])
+      .find((p) => LIFESTYLE_PRESENTATION.gym.matchesPairing(p));
     // The customer-facing lifestyle label and the engine's internal register
     // are not the same thing. A pairing whose own evidence is specifically
     // gym-tagged is never shown as a generic register combination — not even
     // "For everyday" — regardless of whether fitness/gym happens to be
-    // declared. Declaration only decides whether it gets its OWN labelled
-    // card (below); left undeclared, it is excluded here and falls through to
+    // declared (bestGenericFor already skips it above). Declaration only
+    // decides whether it ALSO gets its own labelled card here; left
+    // undeclared, it is simply absent from this section and falls through to
     // "Possibilities to try" instead, where no life-area claim is made about it.
     const gymPairing = gymDeclared ? anyGymPairing : undefined;
 
     if (relevantRegisters.length > 0 || gymPairing) {
-      const byRegister = new Map<RegisterId, WardrobePairing[]>();
-      if (intelligence.pairings.state !== "learning") {
-        for (const p of intelligence.pairings.pairings) {
-          if (p.register === null) continue;
-          if (LIFESTYLE_PRESENTATION.gym.matchesPairing(p)) continue;
-          if (!relevantRegisters.some((r) => r.register === p.register)) continue;
-          const list = byRegister.get(p.register) ?? [];
-          list.push(p);
-          byRegister.set(p.register, list);
-        }
-      }
-      for (const list of byRegister.values()) for (const p of list) waysToGetDressedPairingIds.add(p.id);
-      if (gymPairing) waysToGetDressedPairingIds.add(gymPairing.id);
-
       const registerEntries: PageEntry[] = relevantRegisters.map((r) => {
-        const matches = byRegister.get(r.register) ?? [];
+        const best = bestGenericFor(r.register);
+        const title = REGISTER_LIFE_HEADING[r.register] ?? `For ${REGISTER_WORD[r.register] ?? r.register}`;
+        // Passport need is why this is shown at all; the Closet fact decides
+        // what's said. Zero pieces is not hidden — it's named. A register
+        // with real depth but no selected example says exactly that, never
+        // that the Closet cannot make one — that would be a claim the data
+        // doesn't support.
+        if (r.rawCount === 0) {
+          return {
+            id: `explore-${r.register}`, claim: `explore:${r.register}`, role: "full" as EntryRole,
+            title, body: "Your Closet doesn't have anything for this part of your life yet.", garmentIds: [],
+          };
+        }
+        if (!best) {
+          return {
+            id: `explore-${r.register}`, claim: `explore:${r.register}`, role: "full" as EntryRole,
+            title, body: NO_EXAMPLE_SELECTED[r.register] ?? "nAia hasn't selected an example to show here yet.", garmentIds: [],
+          };
+        }
+        waysToGetDressedPairingIds.add(best.id);
         return {
           id: `explore-${r.register}`,
           claim: `explore:${r.register}`,
           role: "full" as EntryRole,
-          title: REGISTER_LIFE_HEADING[r.register] ?? `For ${REGISTER_WORD[r.register] ?? r.register}`,
-          // Passport need is why this is shown at all; the Closet fact
-          // decides what's said. Zero pieces is not hidden — it's named.
-          body: r.rawCount === 0
-            ? "Your Closet doesn't have anything for this part of your life yet."
-            : matches.length > 0
-              ? "A combination nAia can support from your Closet is shown below."
-              : "There isn't a combination in your Closet for this yet.",
-          garmentIds: [],
+          title,
+          body: combinationExplanation(best, COMBO_LIFE_PHRASE[r.register] ?? REGISTER_WORD[r.register] ?? r.register, input.garmentName),
+          garmentIds: best.garmentIds,
         };
       });
       // Only ever added alongside a real pairing — never a bare "nothing
       // found" card, unlike the three registers above.
       if (gymPairing) {
+        waysToGetDressedPairingIds.add(gymPairing.id);
         registerEntries.push({
           id: "explore-gym",
           claim: "explore:gym",
           role: "full" as EntryRole,
           title: LIFESTYLE_PRESENTATION.gym.heading,
-          body: "A combination nAia can support from your Closet is shown below.",
-          garmentIds: [],
+          body: combinationExplanation(gymPairing, "the gym", input.garmentName),
+          garmentIds: gymPairing.garmentIds,
         });
       }
 
       add("do", {
         id: "ways-to-get-dressed",
         label: "Ways to get dressed with what you own",
-        kind: "pointer-action",
+        // Own kind: the outfit itself — images and the styling explanation —
+        // lives directly on each entry, not in a separate block underneath.
+        kind: "lifestyle-combos",
         entries: registerEntries,
       });
-
-      for (const r of relevantRegisters) {
-        const matches = (byRegister.get(r.register) ?? []).slice(0, 2);
-        if (matches.length === 0) continue;
-        add("do", {
-          id: `do-pairings-${r.register}`,
-          // No label: it would repeat the "For ..." entry above it.
-          kind: "pairings",
-          entries: matches.map((pair) => ({
-            id: pair.id,
-            claim: `do-pairing:${pair.id}`,
-            role: "full" as EntryRole,
-            body: plainPairReason(pair.reason, pair.garmentIds.length),
-            garmentIds: pair.garmentIds,
-          })),
-        });
-      }
-
-      if (gymPairing) {
-        add("do", {
-          id: "do-pairings-gym",
-          kind: "pairings",
-          entries: [{
-            id: gymPairing.id,
-            claim: `do-pairing:${gymPairing.id}`,
-            role: "full" as EntryRole,
-            body: plainPairReason(gymPairing.reason, gymPairing.garmentIds.length),
-            garmentIds: gymPairing.garmentIds,
-          }],
-        });
-      }
     }
 
     add("do", buildVerdictBlock(needs, recommendations, confidence));
@@ -673,21 +640,33 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
       label: "What to look for",
       kind: "recommendations",
       entries: recommendations.recommendations.map((rec) => {
-        const why = whyThisDetail(rec.attributes);
+        // A structure attribute of "a different shape — A-line, fitted or
+        // flared" names shapes the engine has not narrowed to one specific
+        // garment — showing it as its own chip reads as exposed
+        // classification. There is nothing more specific to name (the engine
+        // itself is undecided between those shapes), so the honest version is
+        // plain language folded into the sentence, not a label claiming a
+        // precision that is not there.
+        const shapeOnly = rec.attributes.find(
+          (a) => a.kind === "structure" && /^a different shape/i.test(a.label),
+        );
+        const title = shapeOnly ? naturalShapeTitle(rec.title) : rec.title;
+        const visibleAttributes = shapeOnly ? rec.attributes.filter((a) => a !== shapeOnly) : rec.attributes;
+        const why = whyThisDetail(rec, shapeOnly);
         return {
           id: rec.id,
           claim: claims.recommendation(rec.register),
           role: "full" as EntryRole,
-          title: rec.title,
+          title,
           // The proposal opens by restating the gap ("your work pieces repeat
           // similar combinations"), which the section above has just explained
           // in full. What to BUY is the new information; keep that.
           body: dropGapRestatement(rec.body),
           garmentIds: rec.unlocksIds,
           action: why
-            ? { kind: "reveal" as const, label: "Why this?", hideLabel: "Hide", garmentIds: [], detail: why }
+            ? { kind: "reveal" as const, label: "Why this?", hideLabel: "Show less", garmentIds: [], detail: why }
             : undefined,
-          meta: { attributes: rec.attributes },
+          meta: { attributes: visibleAttributes },
         };
       }),
     });
@@ -808,7 +787,10 @@ function resolveClaims(sections: Map<SectionId, PageBlock[]>): Map<SectionId, Pa
           entries.push({ ...entry, role: "pointer", body: undefined, garmentIds: [], action: undefined });
         }
       }
-      if (entries.length > 0) keptBlocks.push({ ...block, entries });
+      // A block whose only content is its always-visible `summary` (detail
+      // collapsed to nothing, or never had any) still belongs on the page —
+      // this mirrors the same allowance in `add()` above.
+      if (entries.length > 0 || block.summary) keptBlocks.push({ ...block, entries });
     }
     out.set(sectionId, keptBlocks);
   }
@@ -850,17 +832,47 @@ function buildGarmentBlock(input: WardrobePageInput): PageBlock | null {
       // headline is the vague version of the same claim, and the specific one
       // was being pruned as a repeat — so the reader got "closest to what you
       // told nAia you want" with nothing behind it. Lead with the evidence.
+      //
+      // "Closet connector" already states its finding in its own hero label
+      // ("Works across relaxed and polished looks" — see HERO_LABELS). Both
+      // its generic headline ("It connects parts of your wardrobe that don't
+      // otherwise meet.") and its first reason ("It works with both the
+      // relaxed and the polished side of your wardrobe.") just restate that
+      // same label in different words — the rediscover text below carries the
+      // actual evidence (the match count and Passport alignment).
+      const isConnector = hero.label === "closet-connector";
       e.body = hero.label === "passport-match" && hero.reasons[0]
         ? plainText(hero.reasons[0])
-        : plainText(hero.headline);
-      if (hero.reasons[0]) e.meta = { ...e.meta, reason: plainText(hero.reasons[0]) };
+        : isConnector
+          ? undefined
+          : plainText(hero.headline);
+      if (hero.reasons[0] && !isConnector) e.meta = { ...e.meta, reason: plainText(hero.reasons[0]) };
+      // The hero's own evidence already names its partners (e.g. "most
+      // versatile" cites the exact compatibility-graph ids) — a card that
+      // SAYS "pairs easily with 8 other pieces" needs a way to actually see
+      // them. Only rediscover pieces got this before; a hero with no
+      // rediscover note had a claim and no visible proof of it. Left in place
+      // for the rediscover loop below to overwrite when a piece is both.
+      const partnerIds = hero.evidence?.[0]?.garmentIds ?? [];
+      if (partnerIds.length > 0) {
+        e.garmentIds = partnerIds;
+        e.action = {
+          kind: "reveal",
+          label: "See matching pieces",
+          hideLabel: "Show less",
+          garmentIds: partnerIds,
+        };
+      }
     }
   }
 
   for (const piece of opportunities.rediscover) {
     const e = touch(piece.garmentId);
     e.title = e.title ?? piece.name;
-    e.meta = { ...e.meta, rediscover: plainText(piece.body) };
+    e.meta = {
+      ...e.meta,
+      rediscover: namedMatchExamples(plainText(piece.body), piece.worksWithIds, input.garmentName),
+    };
     if (piece.worksWithIds.length > 0) {
       e.garmentIds = piece.worksWithIds;
       // The count belongs in the label only when the entry has not already
@@ -873,7 +885,7 @@ function buildGarmentBlock(input: WardrobePageInput): PageBlock | null {
         label: alreadyStated
           ? "See matching pieces"
           : `See ${n} matching ${n === 1 ? "piece" : "pieces"}`,
-        hideLabel: "Hide",
+        hideLabel: "Show less",
         garmentIds: piece.worksWithIds,
       };
     }
@@ -945,10 +957,100 @@ function splitGarmentEntries(block: PageBlock | null): { works: PageBlock | null
           // Re-keyed to the family owned by THIS section. Left on the `garment`
           // family they were demoted to pointers — which stripped the garment
           // ids and the reveal action, and left the cards with nothing to open.
-          entries: rest.map((e) => ({ ...e, claim: e.claim.replace(/^garment:/, "worth-trying:") })),
+          entries: groupIdenticalMatches(
+            rest.map((e) => ({ ...e, claim: e.claim.replace(/^garment:/, "worth-trying:") })),
+          ),
         }
       : null,
   };
+}
+
+/**
+ * Two "difficult to style" pieces that resolve to the exact same matching
+ * garments are not two findings — they are one finding shown twice. Grouping
+ * is keyed ONLY on the already-resolved `garmentIds` set (sorted, compared as
+ * a set), so it can never diverge from — and never touches — the matching
+ * logic that produced it. A customer whose two pieces resolve to different
+ * matches keeps two separate cards, unchanged.
+ */
+function groupIdenticalMatches(entries: PageEntry[]): PageEntry[] {
+  const matchKey = (e: PageEntry): string | null =>
+    e.garmentIds.length > 0 ? [...e.garmentIds].sort().join(",") : null;
+
+  const order: string[] = [];
+  const buckets = new Map<string, PageEntry[]>();
+  entries.forEach((e, i) => {
+    const key = matchKey(e) ?? `solo:${i}`;
+    if (!buckets.has(key)) { buckets.set(key, []); order.push(key); }
+    buckets.get(key)!.push(e);
+  });
+
+  return order.flatMap((key) => {
+    const group = buckets.get(key)!;
+    if (group.length < 2) return group;
+
+    const members = group.map((e) => ({
+      garmentId: String((e.meta as Record<string, unknown> | undefined)?.garmentId ?? ""),
+      title: e.title ?? "",
+    }));
+    const shared = group.find((e) => typeof (e.meta as Record<string, unknown> | undefined)?.rediscover === "string");
+    const body = shared ? ((shared.meta as Record<string, unknown>).rediscover as string) : group[0].body;
+
+    return [{
+      id: `group-${group.map((e) => e.id).join("-")}`,
+      claim: group[0].claim,
+      role: "full" as EntryRole,
+      title: groupHeading(members.map((m) => m.title)),
+      body,
+      garmentIds: group[0].garmentIds,
+      action: group[0].action,
+      meta: { members },
+    }];
+  });
+}
+
+/**
+ * "nAia found 8 potential matching pieces" names a count with nothing behind
+ * it. The engine already resolved exactly which pieces those are — naming a
+ * few of them (real garment names, already on the page) turns the count into
+ * evidence the customer can recognise, without inventing anything: it is the
+ * same partner list the "See matching pieces" reveal already shows.
+ */
+function namedMatchExamples(
+  body: string,
+  partnerIds: readonly string[],
+  garmentName: ((id: string) => string | null) | undefined,
+): string {
+  if (!garmentName) return body;
+  const names = partnerIds
+    .slice(0, 3)
+    .map((id) => garmentName(id))
+    .filter((n): n is string => typeof n === "string" && n.trim() !== "");
+  if (names.length === 0) return body;
+  const list = joinWithAnd(names.map((n) => n.toLowerCase()));
+  return body.replace(/\b\d+ potential matching pieces?\b\.?/i, (m) => {
+    const count = m.match(/\d+/)?.[0] ?? "";
+    return `${count} potential matches, including ${list}.`;
+  });
+}
+
+/**
+ * Deterministic, from the garment names already on the page — never a new
+ * category claim. When every title ends in the same word (e.g. two
+ * "... Blazer" pieces), names it: "TWO BLAZERS WORTH ANOTHER LOOK". When the
+ * names don't agree on a shared word, falls back to a plain count so nothing
+ * is invented.
+ */
+function groupHeading(titles: string[]): string {
+  const lastWords = titles.map((t) => t.trim().split(/\s+/).pop()?.toLowerCase() ?? "");
+  const shared = lastWords.every((w) => w && w === lastWords[0]) ? lastWords[0] : null;
+  const count = titles.length;
+  const countWord = count === 2 ? "TWO" : String(count);
+  if (shared) {
+    const plural = shared.endsWith("s") ? shared : `${shared}s`;
+    return `${countWord} ${plural.toUpperCase()} WORTH ANOTHER LOOK`;
+  }
+  return `${countWord} PIECES WORTH ANOTHER LOOK`;
 }
 
 function buildVerdictBlock(
@@ -1035,11 +1137,13 @@ function buildPassportBlock(input: WardrobePageInput): PageBlock | null {
       ...registerDisplay(r),
     }));
 
+  // The lifestyle reading IS the useful conclusion — "your everyday options
+  // are well covered, your work wardrobe has less variety" — so it stays
+  // visible even collapsed, and is not repeated inside the detail reveal.
   // Coverage lives in its own block now (see buildCoverageBlock) — an
-  // actionable limitation, not background provenance. This list stays what
-  // it's for: what nAia is keeping in mind about her, next to what she owns.
+  // actionable limitation, not background provenance.
+  const lifestyle = lifestyleMatch(registers);
   const raw = [
-    ...(lifestyleMatch(registers) ? [lifestyleMatch(registers)!] : []),
     ...(needs.synthesis.state === "available" ? needs.synthesis.lines.map(matchDimension) : []),
     ...(passportView.state !== "learning"
       ? passportView.comparisons.map(comparisonDimension).filter((m): m is NonNullable<typeof m> => m !== null)
@@ -1062,11 +1166,14 @@ function buildPassportBlock(input: WardrobePageInput): PageBlock | null {
     });
   }
 
+  if (!lifestyle && entries.length === 0) return null;
+
   return {
     id: "passport",
-    label: "What nAia is keeping in mind",
+    label: "How your wardrobe matches your Passport",
     kind: "matches",
-    disclosure: { label: "How nAia knows this", hideLabel: "Hide" },
+    summary: lifestyle?.reading,
+    disclosure: entries.length > 0 ? { label: "See the comparison", hideLabel: "Show less" } : undefined,
     entries,
   };
 }
@@ -1083,10 +1190,45 @@ const ATTRIBUTE_SOURCE_WORD: Readonly<Record<string, string>> = {
  * `evidence[].detail` strings (which are written for audit, not for a
  * customer, and keep their own internal vocabulary deliberately).
  */
-function whyThisDetail(attributes: readonly RecommendationAttribute[]): string | undefined {
-  if (attributes.length === 0) return undefined;
-  const sources = [...new Set(attributes.map((a) => ATTRIBUTE_SOURCE_WORD[a.source] ?? a.source))];
-  return `This comes from ${joinWithAnd(attributes.map((a) => a.label))} — drawn from ${joinWithAnd(sources)}.`;
+function whyThisDetail(
+  rec: { body: string; attributes: readonly RecommendationAttribute[] },
+  shapeOnly: RecommendationAttribute | undefined,
+): string | undefined {
+  if (rec.attributes.length === 0) return undefined;
+  if (shapeOnly) {
+    // "This comes from a different shape — A-line, fitted or flared" just
+    // repeated the (now-hidden) attribute label. The actual reason to buy is
+    // the wardrobe limitation the engine found — the same sentence the main
+    // card deliberately drops (the section above already states it), which
+    // makes this exactly the right place for it.
+    const colour = rec.attributes.find((a) => a.kind === "colour");
+    const parts = [
+      gapRestatementSentence(rec.body) ?? "Your current pieces here are very similar in shape.",
+      "A different cut could give the tops and bottoms you already own another way to work together.",
+      colour ? `${capitalise(colour.label)} is one of the colours you selected in your Passport.` : null,
+    ].filter((p): p is string => p !== null);
+    return parts.join(" ");
+  }
+  const sources = [...new Set(rec.attributes.map((a) => ATTRIBUTE_SOURCE_WORD[a.source] ?? a.source))];
+  return `This comes from ${joinWithAnd(rec.attributes.map((a) => a.label))} — drawn from ${joinWithAnd(sources)}.`;
+}
+
+/**
+ * The engine resolves a slot and a register, never a specific garment noun
+ * (a full-length "bottom" might be trousers or a skirt) — so the honest,
+ * non-invented title folds the ambiguous shape into a plain instruction
+ * instead of naming one.
+ */
+function naturalShapeTitle(title: string): string {
+  const bare = title.replace(/^One option to explore:\s*/i, "");
+  return `Look for ${bare} in a shape that's meaningfully different from the ones you already own.`;
+}
+
+/** The sentence `dropGapRestatement` strips from the main card, if there is one. */
+function gapRestatementSentence(body: string): string | null {
+  const sentences = body.match(/[^.!?]+[.!?]+(?:\s|$)|[^.!?]+$/g)?.map((t) => t.trim()).filter(Boolean) ?? [];
+  if (sentences.length <= 1 || !GAP_RESTATEMENT.test(sentences[0])) return null;
+  return sentences[0];
 }
 
 /**
@@ -1132,7 +1274,7 @@ function buildCoverageBlock(input: WardrobePageInput): PageBlock | null {
         action: {
           kind: "reveal",
           label: `See ${blockedDetail.length === 1 ? "the piece" : `all ${blockedDetail.length} pieces`}`,
-          hideLabel: "Hide",
+          hideLabel: "Show less",
           garmentIds: blockedDetail.map((b) => b.garmentId),
         },
         meta: { blockedDetail },
@@ -1179,10 +1321,60 @@ const LIFESTYLE_PRESENTATION: Readonly<Record<string, {
   },
 };
 
+/** How a register is named inside "Try your X for {phrase}." */
+const COMBO_LIFE_PHRASE: Readonly<Record<string, string>> = {
+  everyday: "everyday",
+  work: "work",
+  occasion: "dinners and events",
+};
+
+/**
+ * A register with genuine depth (a "Plenty of options" verdict) but no
+ * selected example is never the same claim as "the Closet cannot make one" —
+ * that would assert something the data does not support. Register-specific
+ * only so the wording never reads as though it applies to a different card.
+ */
+const NO_EXAMPLE_SELECTED: Readonly<Record<string, string>> = {
+  everyday: "nAia hasn't selected an everyday example to show here yet.",
+  work: "nAia hasn't selected a work example to show here yet.",
+  occasion: "nAia hasn't selected an occasion example to show here yet.",
+};
+
+/**
+ * The outfit named in her own words — real garment names, the engine's own
+ * evidence, nothing invented. "Try your {first} with {rest} for {phrase}."
+ * followed by the engine's own plain-language reason for why they work
+ * (structure contrast, colour, shared occasion — whichever it actually found).
+ */
+function combinationExplanation(
+  pair: WardrobePairing,
+  lifePhrase: string,
+  garmentName: ((id: string) => string | null) | undefined,
+): string {
+  const names = pair.garmentIds
+    .map((id) => garmentName?.(id))
+    .filter((n): n is string => typeof n === "string" && n.trim() !== "");
+  const reason = plainPairReason(pair.reason, pair.garmentIds.length);
+  if (names.length === 0) return reason;
+
+  const [first, ...rest] = names;
+  const lead = rest.length > 0
+    ? `Try your ${first.toLowerCase()} with ${joinWithAnd(rest.map((n) => n.toLowerCase()))} for ${lifePhrase}.`
+    : `Try your ${first.toLowerCase()} for ${lifePhrase}.`;
+  return `${lead} ${reason}`;
+}
+
 const DRESS_LEVEL_PHRASE: Readonly<Record<string, string>> = {
   everyday: "on the more everyday, relaxed side",
   work: "on the more polished, work-ready side",
   occasion: "on the dressier, occasion side",
+};
+
+/** Short form of the same fact, for the always-visible summary line. */
+const DRESS_LEVEL_SHORT: Readonly<Record<string, string>> = {
+  everyday: "relaxed, everyday",
+  work: "polished, work-ready",
+  occasion: "dressier, occasion",
 };
 
 function buildBehaviourBlock(needs: WardrobeNeeds): PageBlock | null {
@@ -1231,9 +1423,13 @@ function buildBehaviourBlock(needs: WardrobeNeeds): PageBlock | null {
 
   return {
     id: "behaviour",
-    label: "What your choices show",
+    label: "What your StyleMe history shows",
     kind: "history",
-    disclosure: { label: "How nAia knows this", hideLabel: "Hide" },
+    // Short, always-visible version of the SAME dress-level fact the detailed
+    // "dress-level" entry below states with its counts — one conclusion, said
+    // once plainly and once with its evidence, never invented twice over.
+    summary: top ? `You most often ask for ${DRESS_LEVEL_SHORT[top.register] ?? DRESS_LEVEL_PHRASE[top.register]} looks.` : undefined,
+    disclosure: entries.length > 0 ? { label: "See your styling history", hideLabel: "Show less" } : undefined,
     entries,
   };
 }
@@ -1435,6 +1631,7 @@ export function visibleCopy(page: WardrobePage): string[] {
     if (section.sub) out.push(section.sub);
     for (const block of section.blocks) {
       if (block.label) out.push(block.label);
+      if (block.summary) out.push(block.summary);
       if (block.note) out.push(block.note);
       if (block.disclosure) out.push(block.disclosure.label);
       for (const entry of block.entries) {

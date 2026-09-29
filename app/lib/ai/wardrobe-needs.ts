@@ -292,6 +292,13 @@ export interface SynthesisLine {
   /** The single sentence nAia is willing to stand behind. */
   reading: string;
   evidence: Evidence[];
+  /**
+   * Plain name of the specific colour(s) this line is actually about — e.g.
+   * "Grey" — when the finding is specific enough to name one. Lets a headline
+   * say "Grey appears less often" instead of the vaguer "part of your
+   * palette", without changing what was measured.
+   */
+  thinLabel?: string;
 }
 
 export interface PassportSynthesis {
@@ -889,10 +896,16 @@ function buildFindings(
         id: `need-${r.register}-repetition`,
         kind: "repetition",
         register: r.register,
-        title: `Your ${REGISTER_BARE[r.register]} pieces offer limited outfit variety`,
+        title: `You have ${REGISTER_BARE[r.register]} pieces, but fewer ways to combine them`,
         body: `You own ${r.usableCount} pieces that work for ${REGISTER_NOUN[r.register]}, but their combinations tend to repeat the same formula. Buying more like them wouldn't widen what you can wear — a piece that contrasts with what you already own would.`,
+        // A top-bottom repetition finding is demonstrated by tops, bottoms and
+        // one-pieces — not by an outerwear layer, bag or shoes that happen to
+        // register-match. Those don't show the thing being claimed.
         garmentIds: items
-          .filter((g) => garmentRegister(g) === r.register && classifyUsability(g, passport).usability === "usable")
+          .filter((g) =>
+            garmentRegister(g) === r.register &&
+            classifyUsability(g, passport).usability === "usable" &&
+            (TOP_SLOTS.has(g.slot) || BOTTOM_SLOTS.has(g.slot) || ONE_PIECE_SLOTS.has(g.slot)))
           .slice(0, 6)
           .map((g) => g.id),
         evidence: [
@@ -1041,6 +1054,7 @@ function buildSynthesis(
             thin.length === 1 ? "appears" : "appear"
           } much less often.`,
           evidence: [statedEvidence, coverageEvidence],
+          thinLabel: namesOf(thin),
         });
       } else if (share <= 0.25) {
         lines.push({

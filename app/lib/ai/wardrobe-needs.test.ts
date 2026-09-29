@@ -921,3 +921,54 @@ describe("§WN-9 identity intentions", () => {
     assert.ok(!needs.intentions.closetStrengths.some((c) => c.intention === "feel-like-myself"));
   });
 });
+
+// ── §WN-12 Repetition evidence shows the actual repeated pieces ────────────────
+
+describe("§WN-12 a repetition finding's evidence is the tops and bottoms, not accessories", () => {
+  const repetitiveWork = () => {
+    const out: WardrobeGarment[] = [];
+    const topShapes = [
+      { silhouette: "straight", fitProfile: "tailored" },
+      { silhouette: "fitted", fitProfile: "relaxed" },
+    ];
+    for (let i = 0; i < 6; i++) {
+      out.push(makeGarment({
+        slot: "top", category: "TOPS", formality: "business-casual",
+        topLength: "hip-length", hemLength: "n/a", ...topShapes[i % topShapes.length],
+      }));
+    }
+    for (let i = 0; i < 5; i++) {
+      out.push(makeGarment({
+        slot: "bottom", category: "BOTTOMS", formality: "business-casual",
+        topLength: "n/a", hemLength: "full", fitProfile: "tailored", silhouette: "straight",
+      }));
+    }
+    // Same register, but neither an accessory nor a shoe demonstrates "these
+    // combinations repeat the same formula" — only the tops and bottoms do.
+    out.push(makeGarment({ slot: "bag", category: "ACCESSORIES", formality: "business-casual" }));
+    out.push(makeGarment({ slot: "shoes", category: "SHOES", formality: "business-casual" }));
+    out.push(makeGarment({ slot: "outerwear", category: "OUTERWEAR", formality: "business-casual" }));
+    return out;
+  };
+
+  it("§WN-12a the finding names the wardrobe fact, not the internal register word", () => {
+    const needs = run(repetitiveWork(), { passport: makePassport({ lifestyle: ["work-office"] }) });
+    const finding = needs.couldUseMore.find((f) => f.kind === "repetition" && f.register === "work")!;
+    assert.ok(finding, "the repetition gap is open");
+    assert.match(finding.title, /you have work pieces, but fewer ways to combine them/i);
+    assert.doesNotMatch(finding.title, /offer limited outfit variety/i);
+  });
+
+  it("§WN-12b the finding's garmentIds are drawn only from tops, bottoms and one-pieces", () => {
+    const items = repetitiveWork();
+    const needs = run(items, { passport: makePassport({ lifestyle: ["work-office"] }) });
+    const finding = needs.couldUseMore.find((f) => f.kind === "repetition" && f.register === "work")!;
+    assert.ok(finding.garmentIds.length > 0);
+    const bySlot = new Map(items.map((g) => [g.id, g.slot]));
+    for (const id of finding.garmentIds) {
+      assert.ok(["top", "bottom", "dress", "set"].includes(bySlot.get(id)!), `unexpected slot for ${id}: ${bySlot.get(id)}`);
+    }
+    const accessoryIds = items.filter((g) => ["bag", "shoes", "outerwear"].includes(g.slot)).map((g) => g.id);
+    for (const id of accessoryIds) assert.ok(!finding.garmentIds.includes(id), `${id} should never be repetition evidence`);
+  });
+});

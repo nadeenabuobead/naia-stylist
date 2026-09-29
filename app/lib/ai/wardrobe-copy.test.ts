@@ -24,6 +24,7 @@ import {
   matchDimension,
   lifestyleMatch,
   visibleObservations,
+  summaryEntries,
   type RegisterDisplay,
 } from "./wardrobe-copy.ts";
 import type { RegisterReading } from "./wardrobe-needs.ts";
@@ -391,8 +392,16 @@ describe("§WC-7 Closet-to-Passport match", () => {
   it("7-uneven — alignment without representation is never reported as a strong match", () => {
     const m = matchDimension({ id: "synth-colour", kind: "uneven", reading: "Part of it is barely there." });
     assert.equal(m.dimension, "Colour");
-    assert.equal(m.stateText, "Some of it, not all of it");
+    assert.equal(m.stateText, "Mostly in the colours you like");
     assert.notEqual(m.stateText, "Strong match");
+  });
+
+  it("7-uneven-2 — a thin colour is named, not left as a vague 'some of it'", () => {
+    const m = matchDimension({
+      id: "synth-colour", kind: "uneven", reading: "Part of it is barely there.", thinLabel: "Grey",
+    });
+    assert.match(m.stateText, /^Mostly in the colours you like; grey appears less often$/);
+    assert.doesNotMatch(m.stateText, /some of it, not all of it/i);
   });
 
   it("7 — each synthesis line becomes a named dimension with a state", () => {
@@ -420,6 +429,34 @@ describe("§WC-7 Closet-to-Passport match", () => {
     assert.equal(lifestyleMatch([strong("Everyday"), strong("Work")])!.stateText, "Strong match");
     assert.equal(lifestyleMatch([strong("Everyday"), weak("Work")])!.stateText, "Partial match");
     assert.match(lifestyleMatch([strong("Everyday"), weak("Work")])!.reading, /Everyday is well covered/);
+  });
+});
+
+// ── §WC-7b the opening summary names the actual thin colour ───────────────────
+
+describe("§WC-7b the palette headline names the actual colour, not a vague fraction", () => {
+  it("names Grey directly instead of 'part of your palette is barely there'", () => {
+    const needs = {
+      couldUseMore: [],
+      enough: [],
+      synthesis: {
+        lines: [
+          {
+            id: "synth-colour", kind: "uneven",
+            passportSays: "the colours you said you love", closetShows: "x",
+            reading: "Your Closet stays closely within the colours you told nAia you like, but Grey appears much less often.",
+            evidence: [], thinLabel: "Grey",
+          },
+        ],
+      },
+      headlines: [{ id: "synth-colour", text: "x", source: "synthesis", evidence: [] }],
+    } as never;
+    const entries = summaryEntries(needs);
+    const colour = entries.find((e) => e.id === "synth-colour")!;
+    assert.ok(colour, "the synthesis headline is surfaced in the opening summary");
+    assert.equal(colour.headline, "Grey appears less often in your wardrobe");
+    assert.doesNotMatch(colour.headline, /barely there/i);
+    assert.doesNotMatch(colour.headline, /part of your palette/i);
   });
 });
 

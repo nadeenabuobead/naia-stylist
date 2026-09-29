@@ -307,7 +307,7 @@ function Disclosure({
     <>
       <button
         type="button"
-        className="wi-disclosure-toggle"
+        className="wi-note-action"
         aria-expanded={isOpen}
         onClick={() => setOpenId(isOpen ? null : block.id)}
       >
@@ -407,7 +407,37 @@ function Block({
           {label}
           <div className="wi-pieces">
             {block.entries.map((e) => {
-              const meta = (e.meta ?? {}) as Record<string, string | undefined>;
+              const meta = (e.meta ?? {}) as Record<string, unknown>;
+              const members = meta.members as Array<{ garmentId: string; title: string }> | undefined;
+              if (members && members.length > 1) {
+                return (
+                  <article key={e.id} className="wi-piece wi-piece--group">
+                    <div className="wi-piece-group-imgs">
+                      {members.map((m) => {
+                        const card = byId.get(m.garmentId);
+                        return (
+                          <div key={m.garmentId} className="wi-piece-img">
+                            {card?.imageUrl
+                              ? <img src={card.imageUrl} alt={m.title} loading="lazy" />
+                              : <span className="wi-thumb-fallback">{card?.category.slice(0, 2) ?? "—"}</span>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="wi-piece-text">
+                      <h3 className="wi-piece-name">{e.title}</h3>
+                      <p className="wi-piece-group-names">{members.map((m) => m.title).join(" · ")}</p>
+                      {e.body && <p className="wi-piece-headline">{e.body}</p>}
+                      <EntryAction
+                        entry={e}
+                        byId={byId}
+                        open={openId === e.id}
+                        onToggle={() => setOpenId(openId === e.id ? null : e.id)}
+                      />
+                    </div>
+                  </article>
+                );
+              }
               const card = byId.get(String(meta.garmentId));
               return (
                 <article key={e.id} className="wi-piece">
@@ -417,12 +447,12 @@ function Block({
                       : <span className="wi-thumb-fallback">{card?.category.slice(0, 2) ?? "—"}</span>}
                   </div>
                   <div className="wi-piece-text">
-                    {meta.label && <p className="wi-hero-label">{meta.label}</p>}
+                    {typeof meta.label === "string" && <p className="wi-hero-label">{meta.label}</p>}
                     <h3 className="wi-piece-name">{e.title}</h3>
                     {e.body && <p className="wi-piece-headline">{e.body}</p>}
-                    {meta.reason && <p className="wi-piece-reason">{meta.reason}</p>}
-                    {meta.note && <p className="wi-piece-note">{meta.note}</p>}
-                    {meta.rediscover && <p className="wi-piece-note">{meta.rediscover}</p>}
+                    {typeof meta.reason === "string" && <p className="wi-piece-reason">{meta.reason}</p>}
+                    {typeof meta.note === "string" && <p className="wi-piece-note">{meta.note}</p>}
+                    {typeof meta.rediscover === "string" && <p className="wi-piece-note">{meta.rediscover}</p>}
                     <EntryAction
                       entry={e}
                       byId={byId}
@@ -650,6 +680,7 @@ function Block({
       return (
         <div className="wi-block">
           {label}
+          {block.summary && <p className="wi-reading">{block.summary}</p>}
           <Disclosure block={block} openId={openId} setOpenId={setOpenId}>
             <ul className="wi-matches">
               {block.entries.map((e) => {
@@ -670,15 +701,18 @@ function Block({
         </div>
       );
 
-    case "pointer-action":
+    // ── "Ways to get dressed": the outfit is the answer, shown directly
+    //    under its own life-area heading — never a heading, a "shown below"
+    //    sentence, and the images somewhere else.
+    case "lifestyle-combos":
       return (
         <div className="wi-block">
           {label}
           {block.entries.map((e) => (
             <article key={e.id} className="wi-finding">
               <h3 className="wi-finding-title">{e.title}</h3>
+              <Strip ids={e.garmentIds} byId={byId} />
               {e.body && <p className="wi-finding-body">{e.body}</p>}
-              <EntryAction entry={e} byId={byId} open={false} onToggle={() => {}} />
             </article>
           ))}
         </div>
@@ -698,6 +732,7 @@ function Block({
       return (
         <div className="wi-block">
           {label}
+          {block.summary && <p className="wi-reading">{block.summary}</p>}
           <Disclosure block={block} openId={openId} setOpenId={setOpenId}>
             <div className="wi-history">
               {block.entries.map((e) => (
@@ -856,6 +891,10 @@ const css = `
   .wi-piece-name{font-family:var(--naia-ff-display);font-size:1.0625rem;line-height:1.25;margin:6px 0 8px;text-wrap:balance}
   .wi-piece-headline{margin:0 0 8px;font-size:.9375rem;line-height:1.55;color:var(--naia-ink)}
   .wi-piece-reason,.wi-piece-note{margin:0 0 8px;font-size:.875rem;line-height:1.6;color:rgba(40,21,12,0.72)}
+  .wi-piece--group{grid-template-columns:96px 96px minmax(0,1fr)}
+  @media(min-width:700px){.wi-piece--group{grid-template-columns:132px 132px minmax(0,1fr)}}
+  .wi-piece-group-imgs{display:contents}
+  .wi-piece-group-names{margin:0 0 8px;font-size:.8125rem;letter-spacing:.02em;color:rgba(40,21,12,0.6)}
 
   /* Coverage detail: one row per piece, with its own reason and layer evidence. */
   .wi-coverage-list{list-style:none;margin:14px 0 0;padding:0;display:flex;flex-direction:column;gap:16px}
