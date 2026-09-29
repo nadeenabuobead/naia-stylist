@@ -1573,16 +1573,199 @@ function formalityBuckets(items: WardrobeGarment[]): Map<string, number> {
   });
 }
 
+// ── Usability ─────────────────────────────────────────────────────────────────
+//
+// Lives here, not in the needs layer above, because buildPairings() below needs
+// it too and this file may not depend upward on wardrobe-needs.ts. The needs
+// layer imports and re-exports these so every existing consumer is unaffected.
+
+type Usability = "usable" | "blocked" | "unknown";
+
+/**
+ * Does this garment contradict something the customer has told nAia?
+ *
+ * The coverage rules mirror the shipped StyleMe exclusion semantics exactly
+ * (see the dressing-preference block in styleme-recommendation.ts) so a piece
+ * StyleMe will refuse to use is never counted here as usable depth.
+ *
+ * ONE DELIBERATE DIFFERENCE. StyleMe fails CLOSED on absent metadata: it would
+ * rather drop a garment than risk dressing her wrongly. Doing that here would
+ * turn an unanalysed closet into a wardrobe of "blocked" pieces and report a gap
+ * that does not exist. So absent metadata resolves to "unknown", which is
+ * counted and shown but never used as evidence of a gap.
+ */
+// Blocked reasons are written as gerund phrases ("keeping your arms covered")
+// because they are consumed inside a sentence: "…only 2 currently meet your
+// stated coverage preferences — including keeping your arms covered."
+function classifyUsability(
+  garment: WardrobeGarment,
+  passport: WardrobePassport | null,
+): { usability: Usability; reason: string | null } {
+  const read = garment.analysisStatus === "ready" || garment.intelligenceSource === "curated";
+  if (!read) return { usability: "unknown", reason: "not read yet" };
+  if (!passport) return { usability: "usable", reason: null };
+
+  // Colours she asked nAia to avoid.
+  if (passport.avoidColors.length > 0) {
+    const family = closetColourFamily(garment.primaryColor);
+    if (family) {
+      for (const token of passport.avoidColors) {
+        const families = PASSPORT_COLOUR_FAMILIES[norm(token) ?? ""] ?? [];
+        if (families.includes(family)) {
+          return { usability: "blocked", reason: `avoiding colours you asked nAia to leave out` };
+        }
+      }
+    }
+  }
+
+  const prefs = new Set(passport.dressingPreferences ?? []);
+  const isTopLike = TOP_SLOTS.has(garment.slot) || garment.slot === "set";
+  // What actually covers her legs is what she wears ON them. A coat is worn
+  // OVER an outfit and cannot uncover anything, so judging its hem against a
+  // leg-coverage preference is a false negative — it was marking a full-length
+  // trench coat unusable, and inflating the customer-facing count of pieces
+  // that "don't meet" her preferences.
+  const coversLegs = BOTTOM_SLOTS.has(garment.slot) || ONE_PIECE_SLOTS.has(garment.slot);
+
+  // Each check: "n/a" means the field does not apply to this garment type and is
+  // exempt. A null value on an otherwise-read garment is unknown, not blocked.
+  const check = (
+    active: boolean,
+    value: string | null | undefined,
+    safe: (v: string) => boolean,
+    reason: string,
+  ): { usability: Usability; reason: string | null } | null => {
+    if (!active) return null;
+    if (value === undefined || value === null) return { usability: "unknown", reason: "coverage not read yet" };
+    if (value === "n/a") return null;
+    return safe(value) ? null : { usability: "blocked", reason };
+  };
+
+  const checks = [
+    check(
+      prefs.has("arms-covered"),
+      garment.sleeveLength,
+      (v) => v === "full" || v === "three-quarter",
+      "keeping your arms covered",
+    ),
+    check(
+      prefs.has("avoid-sleeveless") && !prefs.has("arms-covered"),
+      garment.sleeveLength,
+      (v) => v !== "sleeveless",
+      "avoiding sleeveless styles",
+    ),
+    check(
+      prefs.has("chest-neckline-covered") || prefs.has("prefer-higher-necklines"),
+      garment.necklineCoverage,
+      (v) => v === "high" || v === "crew" || v === "mock" || v === "cowl-high",
+      "keeping your neckline covered",
+    ),
+    check(
+      prefs.has("legs-covered") && coversLegs,
+      garment.hemLength,
+      (v) => v === "full" || v === "maxi",
+      "keeping your legs covered",
+    ),
+    check(
+      prefs.has("longer-tops") && isTopLike,
+      garment.topLength,
+      (v) => v === "hip-length" || v === "longline" || v === "tunic",
+      "preferring longer tops",
+    ),
+    check(
+      prefs.has("no-cropped-tops") && isTopLike,
+      garment.topLength,
+      (v) => v !== "cropped",
+      "avoiding cropped tops",
+    ),
+    check(
+      prefs.has("looser-fitting"),
+      garment.fitProfile,
+      (v) => v === "relaxed" || v === "loose" || v === "oversized" || v === "flowy",
+      "preferring looser-fitting clothes",
+    ),
+  ].filter(Boolean) as Array<{ usability: Usability; reason: string | null }>;
+
+  const blocked = checks.find((c) => c.usability === "blocked");
+  if (blocked) return blocked;
+  const unknown = checks.find((c) => c.usability === "unknown");
+  if (unknown) return unknown;
+  return { usability: "usable", reason: null };
+}
+
+/**
+ * Layers she owns that genuinely resolve why a piece is blocked.
+ *
+ * Deliberately narrow. A layer can cover a cropped top, a bare neckline or bare
+ * arms, because it is worn over them. It cannot make a short hem long: legs are
+ * covered by what is worn ON them, so a leg-coverage failure is never rescued.
+ * The layer must also be compatible with the piece and pass the same check
+ * itself — otherwise the suggestion just moves the problem.
+ */
+const LAYER_RESOLVABLE = /arms covered|sleeveless|neckline|cropped tops|longer tops/i;
+
+function layersThatResolve(
+  garment: WardrobeGarment,
+  items: readonly WardrobeGarment[],
+  passport: WardrobePassport | null,
+): WardrobeGarment[] {
+  const own = classifyUsability(garment, passport);
+  if (own.usability !== "blocked" || own.reason === null) return [];
+  if (!LAYER_RESOLVABLE.test(own.reason)) return [];
+
+  return items.filter(
+    (layer) =>
+      layer.id !== garment.id &&
+      layer.slot === "outerwear" &&
+      classifyUsability(layer, passport).usability === "usable" &&
+      scorePair(garment, layer).compatible,
+  );
+}
+
+/**
+ * Whether a garment may appear in a proposed combination at all, and — if it
+ * only clears its stated requirements with help — which specific layers in
+ * THIS Closet would genuinely do that.
+ *
+ * A blocked garment with no resolving layer must never be proposed, in any
+ * combination, full stop. A blocked garment WITH a resolving layer may only be
+ * proposed alongside one of those exact layers — never alone, and never with a
+ * different layer that happens to be handy. This is the same rule the Coverage
+ * section already applies per-garment; combinations must not relax it.
+ */
+function pairingEligibility(
+  garment: WardrobeGarment,
+  items: readonly WardrobeGarment[],
+  passport: WardrobePassport | null,
+): { eligible: boolean; requiresLayerFrom: ReadonlySet<string> | null } {
+  const { usability } = classifyUsability(garment, passport);
+  if (usability !== "blocked") return { eligible: true, requiresLayerFrom: null };
+  const rescuers = layersThatResolve(garment, items, passport);
+  if (rescuers.length === 0) return { eligible: false, requiresLayerFrom: null };
+  return { eligible: true, requiresLayerFrom: new Set(rescuers.map((r) => r.id)) };
+}
+
 // ── Pairings ──────────────────────────────────────────────────────────────────
 
 function buildPairings(
   items: WardrobeGarment[],
   seenCombinations: ReadonlySet<string>,
+  passport: WardrobePassport | null,
 ): WardrobePairings {
-  const tops = items.filter((i) => TOP_SLOTS.has(i.slot));
-  const bottoms = items.filter((i) => BOTTOM_SLOTS.has(i.slot));
-  const onePieces = items.filter((i) => ONE_PIECE_SLOTS.has(i.slot));
-  const outer = items.filter((i) => i.slot === "outerwear");
+  // The same per-garment rule the Coverage section applies: a garment that
+  // fails a stated requirement with no genuine rescue never appears here, full
+  // stop. One that only clears it with help may appear only alongside the
+  // specific layer that actually does that — never alone, never with a
+  // different layer that merely happens to be free.
+  const eligibility = new Map(items.map((i) => [i.id, pairingEligibility(i, items, passport)]));
+  const eligible = (i: WardrobeGarment) => eligibility.get(i.id)!.eligible;
+
+  const tops = items.filter((i) => TOP_SLOTS.has(i.slot) && eligible(i));
+  const bottoms = items.filter((i) => BOTTOM_SLOTS.has(i.slot) && eligible(i));
+  const onePieces = items.filter((i) => ONE_PIECE_SLOTS.has(i.slot) && eligible(i));
+  // A layer that itself fails a stated requirement is not a valid layer —
+  // nothing in this combination-building step lets a second layer rescue it.
+  const outer = items.filter((i) => i.slot === "outerwear" && classifyUsability(i, passport).usability !== "blocked");
 
   const hasCore = (tops.length > 0 && bottoms.length > 0) || onePieces.length > 0;
   if (!hasCore) {
@@ -1602,13 +1785,28 @@ function buildPairings(
     for (const bottom of bottoms) {
       const pair = scorePair(top, bottom);
       if (!pair.compatible) continue;
-      let ids = [top.id, bottom.id];
-      const reasons = [...pair.reasons];
+
+      // Neither garment is unconditionally usable — a resolving layer is
+      // required, not optional, and it must be one of the layers that
+      // genuinely resolves whichever of the two needs it.
+      const requiredSets = [top, bottom]
+        .map((g) => eligibility.get(g.id)!.requiresLayerFrom)
+        .filter((s): s is ReadonlySet<string> => s !== null);
+      const layerRequired = requiredSets.length > 0;
 
       const layer = outer.find((o) => {
         if (o.id === top.id || o.id === bottom.id) return false;
-        return scorePair(o, top).compatible && scorePair(o, bottom).compatible;
+        if (!scorePair(o, top).compatible || !scorePair(o, bottom).compatible) return false;
+        return layerRequired ? requiredSets.every((set) => set.has(o.id)) : true;
       });
+
+      // A resolving layer was required but none of the ones that would
+      // genuinely resolve it also works stylistically with both halves —
+      // this pair cannot be honestly proposed at all, layer or no layer.
+      if (layerRequired && !layer) continue;
+
+      let ids = [top.id, bottom.id];
+      const reasons = [...pair.reasons];
       if (layer) {
         ids = [layer.id, top.id, bottom.id];
         reasons.push({ text: "The layer works over both halves, so it holds as one outfit.", weight: 6 });
@@ -1619,7 +1817,11 @@ function buildPairings(
   }
 
   for (const piece of onePieces) {
-    const layer = outer.find((o) => scorePair(o, piece).compatible);
+    const requiresLayerFrom = eligibility.get(piece.id)!.requiresLayerFrom;
+    const layer = outer.find((o) => {
+      if (!scorePair(o, piece).compatible) return false;
+      return requiresLayerFrom ? requiresLayerFrom.has(o.id) : true;
+    });
     if (layer) {
       const pair = scorePair(layer, piece);
       const reasons = [
@@ -3284,7 +3486,7 @@ export function computeWardrobeIntelligence(input: WardrobeIntelligenceInput): W
     };
   }
 
-  const pairings = buildPairings(items, seenCombinations);
+  const pairings = buildPairings(items, seenCombinations, passport);
   const dna = buildDna(items, coverage);
   const passportView = buildPassportView(items, coverage, passport);
   const passportDimensionsShown = new Set(passportView.comparisons.map((c) => c.id));
@@ -3372,5 +3574,8 @@ export {
   capitalise,
   ev,
   gradeStrength,
+  classifyUsability,
+  layersThatResolve,
+  pairingEligibility,
 };
-export type { PairScore };
+export type { PairScore, Usability };

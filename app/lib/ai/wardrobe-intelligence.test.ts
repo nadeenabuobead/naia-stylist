@@ -1676,3 +1676,102 @@ describe("§WI-20 functional-wardrobe crossover", () => {
     assert.equal(scorePair(tank, blazer).compatible, true);
   });
 });
+
+// ── §WI-21 ────────────────────────────────────────────────────────────────────
+// Combinations must obey the same Coverage-section usability rule, per garment.
+// A garment that fails a stated requirement with no genuine rescue must never
+// appear in "Combinations to try" — not alone, and not carried in on someone
+// else's layer. A garment that only clears its requirement WITH a layer may
+// appear only alongside that exact layer.
+
+describe("§WI-21 combination eligibility matches the Coverage section", () => {
+  // computeWardrobeIntelligence goes quiet below MIN_WARDROBE_SIZE regardless of
+  // pairing logic, so every fixture below pads with inert one-piece filler —
+  // no outerwear exists alongside it, so it can never form a candidate itself.
+  const filler = (n: number) =>
+    Array.from({ length: n }, (_, i) => makeGarment({ id: `filler-${i}`, name: `Filler ${i}`, category: "DRESSES", slot: "dress" }));
+
+  it("§WI-21a a Black A-Line Mini Skirt never enters a combination for a legs-covered customer", () => {
+    const passport: WardrobePassport = { ...PASSPORT, dressingPreferences: ["legs-covered"] };
+    const shirt = makeGarment({ id: "shirt", name: "Black Tailored Shirt", category: "TOPS", slot: "top", formality: "smart-casual" });
+    const skirt = makeGarment({
+      id: "mini-skirt", name: "Black A-Line Mini Skirt", category: "BOTTOMS", slot: "bottom",
+      formality: "smart-casual", hemLength: "mini",
+    });
+    const trousers = makeGarment({
+      id: "trousers", name: "Black Tailored Trousers", category: "BOTTOMS", slot: "bottom",
+      formality: "smart-casual", hemLength: "full",
+    });
+
+    const result = run([shirt, skirt, trousers, ...filler(2)], { passport });
+
+    // A hem that does not cover legs has no rescue — a layer cannot lengthen it —
+    // so the skirt must be absent from every combination, not just unranked.
+    const allIds = new Set(result.pairings.pairings.flatMap((p) => p.garmentIds));
+    assert.equal(allIds.has(skirt.id), false);
+    // The gate removes the one invalid bottom; it does not silence the section —
+    // a genuinely valid combination still forms from what is left.
+    assert.equal(allIds.has(trousers.id), true);
+  });
+
+  it("§WI-21b a Black Bubble Hem Skirt never enters a combination for a legs-covered customer", () => {
+    const passport: WardrobePassport = { ...PASSPORT, dressingPreferences: ["legs-covered"] };
+    const shirt = makeGarment({ id: "shirt", name: "Black Tailored Shirt", category: "TOPS", slot: "top", formality: "smart-casual" });
+    const skirt = makeGarment({
+      id: "bubble-skirt", name: "Black Bubble Hem Skirt", category: "BOTTOMS", slot: "bottom",
+      formality: "smart-casual", hemLength: "bubble",
+    });
+
+    const result = run([shirt, skirt, ...filler(3)], { passport });
+
+    // No usable bottom is left at all — the section must go quiet, never propose
+    // the blocked skirt as the only way to fill it.
+    const allIds = new Set(result.pairings.pairings.flatMap((p) => p.garmentIds));
+    assert.equal(allIds.has(skirt.id), false);
+    assert.equal(result.pairings.pairings.length, 0);
+  });
+
+  it("§WI-21c a Mauve Sports Bra enters only alongside the Black Nike Zip-Up Hoodie that resolves it", () => {
+    const passport: WardrobePassport = { ...PASSPORT, dressingPreferences: ["no-cropped-tops"] };
+    const sportsBra = makeGarment({
+      id: "sports-bra", name: "Mauve Lululemon Sports Bra", category: "ACTIVEWEAR", slot: "top",
+      primaryColor: "Mauve", formality: "casual", occasions: ["gym"], topLength: "cropped",
+    });
+    const leggings = makeGarment({
+      id: "leggings", name: "Black Leggings", category: "ACTIVEWEAR", slot: "bottom",
+      formality: "casual", occasions: ["gym"],
+    });
+    const hoodie = makeGarment({
+      id: "hoodie", name: "Black Nike Zip-Up Hoodie", category: "ACTIVEWEAR", slot: "outerwear",
+      formality: "casual", occasions: ["gym"],
+    });
+
+    const result = run([sportsBra, leggings, hoodie, ...filler(2)], { passport });
+
+    const withBra = result.pairings.pairings.find((p) => p.garmentIds.includes(sportsBra.id));
+    assert.ok(withBra, "a combination with the sports bra should exist once its resolving layer is present");
+    assert.ok(
+      withBra!.garmentIds.includes(hoodie.id),
+      "the sports bra may only appear alongside the layer that actually resolves the cropped-top preference",
+    );
+  });
+
+  it("§WI-21d removing the resolving hoodie makes the sports-bra combination invalid, not layer-free", () => {
+    const passport: WardrobePassport = { ...PASSPORT, dressingPreferences: ["no-cropped-tops"] };
+    const sportsBra = makeGarment({
+      id: "sports-bra", name: "Mauve Lululemon Sports Bra", category: "ACTIVEWEAR", slot: "top",
+      primaryColor: "Mauve", formality: "casual", occasions: ["gym"], topLength: "cropped",
+    });
+    const leggings = makeGarment({
+      id: "leggings", name: "Black Leggings", category: "ACTIVEWEAR", slot: "bottom",
+      formality: "casual", occasions: ["gym"],
+    });
+
+    // Same two pieces, no hoodie in the Closet at all.
+    const result = run([sportsBra, leggings, ...filler(3)], { passport });
+
+    const allIds = new Set(result.pairings.pairings.flatMap((p) => p.garmentIds));
+    assert.equal(allIds.has(sportsBra.id), false);
+    assert.equal(result.pairings.pairings.length, 0);
+  });
+});

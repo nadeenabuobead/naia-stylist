@@ -50,12 +50,21 @@ import {
   gradeStrength,
   MIN_WARDROBE_SIZE,
   INTENTION_LABELS,
+  classifyUsability,
+  layersThatResolve,
   type WardrobeGarment,
   type WardrobePassport,
   type Evidence,
   type EvidenceStrength,
   type BlockState,
+  type Usability,
 } from "~/lib/ai/wardrobe-intelligence";
+
+// classifyUsability/layersThatResolve/Usability now live in wardrobe-intelligence.ts
+// so buildPairings can gate combinations with the same rule — re-exported here so
+// every existing consumer of this module is unaffected.
+export { classifyUsability, layersThatResolve };
+export type { Usability };
 
 // ── Registers ─────────────────────────────────────────────────────────────────
 
@@ -203,8 +212,6 @@ export interface WardrobeNeedsInput {
 }
 
 // ── Outputs ───────────────────────────────────────────────────────────────────
-
-export type Usability = "usable" | "blocked" | "unknown";
 
 /**
  * A piece that does not meet a stated preference on its own.
@@ -526,149 +533,6 @@ export function computePaletteCoverage(
   rows.sort((a, b) => b.count - a.count);
   const inside = readable.filter((g) => allFamilies.has(closetColourFamily(g.primaryColor)!)).length;
   return { families: rows, colourReadable: readable.length, unknown, insidePalette: inside };
-}
-
-// ── Usability ───// ── Usability ─────────────────────────────────────────────────────────────────
-
-/**
- * Does this garment contradict something the customer has told nAia?
- *
- * The coverage rules mirror the shipped StyleMe exclusion semantics exactly
- * (see the dressing-preference block in styleme-recommendation.ts) so a piece
- * StyleMe will refuse to use is never counted here as usable depth.
- *
- * ONE DELIBERATE DIFFERENCE. StyleMe fails CLOSED on absent metadata: it would
- * rather drop a garment than risk dressing her wrongly. Doing that here would
- * turn an unanalysed closet into a wardrobe of "blocked" pieces and report a gap
- * that does not exist. So absent metadata resolves to "unknown", which is
- * counted and shown but never used as evidence of a gap.
- */
-// Blocked reasons are written as gerund phrases ("keeping your arms covered")
-// because they are consumed inside a sentence: "…only 2 currently meet your
-// stated coverage preferences — including keeping your arms covered."
-export function classifyUsability(
-  garment: WardrobeGarment,
-  passport: WardrobePassport | null,
-): { usability: Usability; reason: string | null } {
-  const read = garment.analysisStatus === "ready" || garment.intelligenceSource === "curated";
-  if (!read) return { usability: "unknown", reason: "not read yet" };
-  if (!passport) return { usability: "usable", reason: null };
-
-  // Colours she asked nAia to avoid.
-  if (passport.avoidColors.length > 0) {
-    const family = closetColourFamily(garment.primaryColor);
-    if (family) {
-      for (const token of passport.avoidColors) {
-        const families = PASSPORT_COLOUR_FAMILIES[norm(token) ?? ""] ?? [];
-        if (families.includes(family)) {
-          return { usability: "blocked", reason: `avoiding colours you asked nAia to leave out` };
-        }
-      }
-    }
-  }
-
-  const prefs = new Set(passport.dressingPreferences ?? []);
-  const isTopLike = TOP_SLOTS.has(garment.slot) || garment.slot === "set";
-  // What actually covers her legs is what she wears ON them. A coat is worn
-  // OVER an outfit and cannot uncover anything, so judging its hem against a
-  // leg-coverage preference is a false negative — it was marking a full-length
-  // trench coat unusable, and inflating the customer-facing count of pieces
-  // that "don't meet" her preferences.
-  const coversLegs = BOTTOM_SLOTS.has(garment.slot) || ONE_PIECE_SLOTS.has(garment.slot);
-
-  // Each check: "n/a" means the field does not apply to this garment type and is
-  // exempt. A null value on an otherwise-read garment is unknown, not blocked.
-  const check = (
-    active: boolean,
-    value: string | null | undefined,
-    safe: (v: string) => boolean,
-    reason: string,
-  ): { usability: Usability; reason: string | null } | null => {
-    if (!active) return null;
-    if (value === undefined || value === null) return { usability: "unknown", reason: "coverage not read yet" };
-    if (value === "n/a") return null;
-    return safe(value) ? null : { usability: "blocked", reason };
-  };
-
-  const checks = [
-    check(
-      prefs.has("arms-covered"),
-      garment.sleeveLength,
-      (v) => v === "full" || v === "three-quarter",
-      "keeping your arms covered",
-    ),
-    check(
-      prefs.has("avoid-sleeveless") && !prefs.has("arms-covered"),
-      garment.sleeveLength,
-      (v) => v !== "sleeveless",
-      "avoiding sleeveless styles",
-    ),
-    check(
-      prefs.has("chest-neckline-covered") || prefs.has("prefer-higher-necklines"),
-      garment.necklineCoverage,
-      (v) => v === "high" || v === "crew" || v === "mock" || v === "cowl-high",
-      "keeping your neckline covered",
-    ),
-    check(
-      prefs.has("legs-covered") && coversLegs,
-      garment.hemLength,
-      (v) => v === "full" || v === "maxi",
-      "keeping your legs covered",
-    ),
-    check(
-      prefs.has("longer-tops") && isTopLike,
-      garment.topLength,
-      (v) => v === "hip-length" || v === "longline" || v === "tunic",
-      "preferring longer tops",
-    ),
-    check(
-      prefs.has("no-cropped-tops") && isTopLike,
-      garment.topLength,
-      (v) => v !== "cropped",
-      "avoiding cropped tops",
-    ),
-    check(
-      prefs.has("looser-fitting"),
-      garment.fitProfile,
-      (v) => v === "relaxed" || v === "loose" || v === "oversized" || v === "flowy",
-      "preferring looser-fitting clothes",
-    ),
-  ].filter(Boolean) as Array<{ usability: Usability; reason: string | null }>;
-
-  const blocked = checks.find((c) => c.usability === "blocked");
-  if (blocked) return blocked;
-  const unknown = checks.find((c) => c.usability === "unknown");
-  if (unknown) return unknown;
-  return { usability: "usable", reason: null };
-}
-
-/**
- * Layers she owns that genuinely resolve why a piece is blocked.
- *
- * Deliberately narrow. A layer can cover a cropped top, a bare neckline or bare
- * arms, because it is worn over them. It cannot make a short hem long: legs are
- * covered by what is worn ON them, so a leg-coverage failure is never rescued.
- * The layer must also be compatible with the piece and pass the same check
- * itself — otherwise the suggestion just moves the problem.
- */
-const LAYER_RESOLVABLE = /arms covered|sleeveless|neckline|cropped tops|longer tops/i;
-
-export function layersThatResolve(
-  garment: WardrobeGarment,
-  items: readonly WardrobeGarment[],
-  passport: WardrobePassport | null,
-): WardrobeGarment[] {
-  const own = classifyUsability(garment, passport);
-  if (own.usability !== "blocked" || own.reason === null) return [];
-  if (!LAYER_RESOLVABLE.test(own.reason)) return [];
-
-  return items.filter(
-    (layer) =>
-      layer.id !== garment.id &&
-      layer.slot === "outerwear" &&
-      classifyUsability(layer, passport).usability === "usable" &&
-      scorePair(garment, layer).compatible,
-  );
 }
 
 // ── Register depth ────────────────────────────────────────────────────────────
