@@ -159,6 +159,7 @@ const CLAIM_OWNER: Readonly<Record<string, SectionId>> = {
   dna: "now",
   "what-changed": "now",
   explore: "do",
+  "do-pairing": "do",
   coverage: "learning",
   "worth-trying": "possibilities",
 };
@@ -407,7 +408,7 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
     if (strengths.length > 0) {
       add("works", {
         id: "capability",
-        label: "What your pieces can support",
+        label: "What your Closet can help with",
         kind: "capability",
         entries: [
           {
@@ -427,9 +428,9 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
             // claim about how she will feel — these ratings are held against
             // the GARMENT and never compared to her Passport.
             body:
-              "Each piece has been assessed for what it can support, from its shape, fit, fabric " +
-              "and level of dress. These are counts of those assessments — not a comparison with " +
-              "your Passport, and not what you usually ask nAia for.",
+              "These counts show how many of your pieces could help with each type of look. " +
+              "They're based on the pieces themselves — not your Style Passport or what you " +
+              "usually ask nAia for.",
             garmentIds: [],
             meta: { strengths: strengths.map((c) => ({ ...c, label: capabilityLabel(c.intention, c.label) })) },
           },
@@ -478,31 +479,54 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
   }
 
   // ── 4 · What to do about it ────────────────────────────────────────────────
+  // Pairings whose register matches a gap live here, right under the register
+  // they answer, instead of behind a jump to a general list further down —
+  // the answer to "explore X combinations" should be visible in context.
+  const gapRegisterPairings = new Set<string>();
   if (ready) {
     // Using what she owns comes FIRST. The purchase is secondary, and stays
     // secondary in the reading order, not just in tone.
     const gapRegisters = needs.couldUseMore.map((f) => f.register);
     if (gapRegisters.length > 0) {
+      const gapRegisterSet = new Set(gapRegisters);
+      const matchingPairings = intelligence.pairings.state !== "learning"
+        ? intelligence.pairings.pairings.filter((p) => p.register !== null && gapRegisterSet.has(p.register as RegisterId))
+        : [];
+      matchingPairings.forEach((p) => gapRegisterPairings.add(p.id));
+
       add("do", {
         id: "use-what-you-own",
         label: "Start with what you already own",
         kind: "pointer-action",
-        entries: gapRegisters.map((r) => ({
-          id: `explore-${r}`,
-          claim: `explore:${r}`,
-          role: "full" as EntryRole,
-          title: `Explore ${REGISTER_WORD[r] ?? r} combinations you already own`,
-          body: "Combinations nAia can support from your Closet are further down the page.",
-          garmentIds: [],
-          // Anchored to the combinations themselves, not the top of the
-          // section — the pieces worth another look sit above them.
-          action: {
-            kind: "jump",
-            label: `See ${REGISTER_WORD[r] ?? r} combinations`,
-            to: "#wi-pairings",
-          },
-        })),
+        entries: gapRegisters.map((r) => {
+          const found = matchingPairings.some((p) => p.register === r);
+          return {
+            id: `explore-${r}`,
+            claim: `explore:${r}`,
+            role: "full" as EntryRole,
+            title: `Explore ${REGISTER_WORD[r] ?? r} combinations you already own`,
+            body: found
+              ? "A combination nAia can support from your Closet is shown below."
+              : "There isn't a combination in your Closet for this yet.",
+            garmentIds: [],
+          };
+        }),
       });
+
+      if (matchingPairings.length > 0) {
+        add("do", {
+          id: "do-pairings",
+          // No label: it would repeat "Start with what you already own" above.
+          kind: "pairings",
+          entries: matchingPairings.map((pair) => ({
+            id: pair.id,
+            claim: `do-pairing:${pair.id}`,
+            role: "full" as EntryRole,
+            body: plainPairReason(pair.reason, pair.garmentIds.length),
+            garmentIds: pair.garmentIds,
+          })),
+        });
+      }
     }
     add("do", buildVerdictBlock(needs, recommendations, confidence));
     add("do", {
@@ -528,12 +552,17 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
   if (ready) {
     add("possibilities", garmentSplitRef.value?.possibilities ?? null);
     const { pairings } = intelligence;
-    if (pairings.state !== "learning" && pairings.pairings.length > 0) {
+    // A combination already shown under "Start with what you already own"
+    // is not repeated here — this section is for the other, exploratory ones.
+    const remainingPairings = pairings.state !== "learning"
+      ? pairings.pairings.filter((p) => !gapRegisterPairings.has(p.id))
+      : [];
+    if (remainingPairings.length > 0) {
       add("possibilities", {
         id: "pairings",
         label: "Combinations to try with pieces in your Closet",
         kind: "pairings",
-        entries: pairings.pairings.map((pair) => ({
+        entries: remainingPairings.map((pair) => ({
           id: pair.id,
           claim: `pairings:${pair.id}`,
           role: "full" as EntryRole,

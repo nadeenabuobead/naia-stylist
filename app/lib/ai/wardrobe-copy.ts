@@ -118,8 +118,8 @@ const CAPABILITY_LABELS: Readonly<Record<string, string>> = {
   "confidence":        "confidence",
   "ground-me":         "feeling grounded",
   "give-structure":    "structure",
-  "make-it-easy":      "easy dressing",
-  "feel-put-together": "put-together looks",
+  "make-it-easy":      "Easy everyday outfits",
+  "feel-put-together": "Looking put-together",
   "feel-attractive":   "feeling attractive",
   "give-energy":       "energy",
   "feel-softer":       "softer looks",
@@ -127,7 +127,7 @@ const CAPABILITY_LABELS: Readonly<Record<string, string>> = {
   // NOT "more coverage": the same page carries a Coverage row that reports
   // whether pieces meet the coverage preferences she actually stated. A curated
   // assessment of a garment must not be mistaken for that comparison.
-  "feel-less-exposed": "covered-up looks",
+  "feel-less-exposed": "More covered-up looks",
   "express-myself":    "self-expression",
 };
 

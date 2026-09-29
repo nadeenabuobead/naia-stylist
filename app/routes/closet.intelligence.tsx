@@ -480,7 +480,7 @@ function Block({
 
     case "pairings":
       return (
-        <div className="wi-block" id="wi-pairings">
+        <div className="wi-block" id={block.id}>
           {label}
           <ul className="wi-pairs">
             {block.entries.map((e) => (

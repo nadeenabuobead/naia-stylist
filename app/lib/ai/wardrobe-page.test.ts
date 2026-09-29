@@ -527,7 +527,7 @@ describe("§WP-8 partner counts reconcile", () => {
     assert.doesNotMatch(copy, /approved style profile|intention potential|curated rating/i);
     // And a garment rating may never be stated as how she will feel.
     assert.doesNotMatch(copy, /will (make you )?feel like yourself/i);
-    assert.match(copy, /its shape, fit, fabric and level of dress/i);
+    assert.match(copy, /could help with each type of look/i);
   });
 });
 
@@ -535,8 +535,8 @@ describe("§WP-9 curated assessments are not a Passport comparison", () => {
   it("§WP-9a the capability block says what it is, and what it is not", () => {
     const page = buildWardrobePage(baseInput());
     const copy = visibleCopy(page).join(" ");
-    assert.match(copy, /assessed for what it can support/i);
-    assert.match(copy, /not a comparison with your Passport/i);
+    assert.match(copy, /based on the pieces themselves/i);
+    assert.match(copy, /not your Style Passport/i);
   });
 
   it("§WP-9b no capability row reads as meeting her stated requirements", () => {
@@ -553,5 +553,69 @@ describe("§WP-9 curated assessments are not a Passport comparison", () => {
       assert.doesNotMatch(label, /^more coverage$/i, `"${label}" collides with the Coverage comparison`);
       assert.doesNotMatch(label, /meets? your|your requirement|your preference/i);
     }
+  });
+});
+
+// ── §WP-10 — a gap's own combination is shown in context, not behind a jump ───
+
+/**
+ * Same wardrobe as baseInput(), but with two pairings: one that reads at the
+ * "work" register (the same register baseInput() already flags as a gap via
+ * couldUseMore), and one that reads at "everyday" (not a gap here).
+ */
+function inputWithRegisterPairings(): WardrobePageInput {
+  const input = baseInput();
+  (input.intelligence as unknown as { pairings: unknown }).pairings = {
+    state: "available", untriedPresentation: "none", untriedNote: null,
+    pairings: [
+      { id: "p-work", garmentIds: ["g6", "g9"], reason: "They sit at the same level of dress.",
+        untried: true, register: "work" },
+      { id: "p-everyday", garmentIds: ["g1", "g3"], reason: "Both are wardrobe neutrals.",
+        untried: false, register: "everyday" },
+    ],
+  };
+  return input;
+}
+
+describe("§WP-10 a gap's own combination lives under its own gap", () => {
+  it("§WP-10a the work-register combination renders inside What to do about it", () => {
+    const page = buildWardrobePage(inputWithRegisterPairings());
+    const doBlocks = page.sections.find((s) => s.id === "do")!.blocks;
+    const pairingBlock = doBlocks.find((b) => b.kind === "pairings");
+    assert.ok(pairingBlock, "the matching combination should be placed inside What to do about it");
+    const entry = pairingBlock!.entries.find((e) => e.garmentIds.includes("g6") && e.garmentIds.includes("g9"));
+    assert.ok(entry, "the work pairing's own garments and evidence should be intact");
+  });
+
+  it("§WP-10b the explore entry no longer offers a jump", () => {
+    const page = buildWardrobePage(inputWithRegisterPairings());
+    const explore = page.sections.find((s) => s.id === "do")!.blocks
+      .find((b) => b.id === "use-what-you-own")!.entries.find((e) => e.id === "explore-work")!;
+    assert.equal(explore.action, undefined, "the answer is shown in context now, not behind a link");
+  });
+
+  it("§WP-10c the same combination does not also appear in Possibilities to try", () => {
+    const page = buildWardrobePage(inputWithRegisterPairings());
+    const possibilitiesPairings = page.sections.find((s) => s.id === "possibilities")!.blocks
+      .find((b) => b.id === "pairings");
+    const ids = possibilitiesPairings?.entries.map((e) => e.id) ?? [];
+    assert.ok(!ids.includes("p-work"), "moved, not duplicated");
+  });
+
+  it("§WP-10d an unrelated combination still appears in Possibilities to try", () => {
+    const page = buildWardrobePage(inputWithRegisterPairings());
+    const possibilitiesPairings = page.sections.find((s) => s.id === "possibilities")!.blocks
+      .find((b) => b.id === "pairings");
+    const ids = possibilitiesPairings?.entries.map((e) => e.id) ?? [];
+    assert.ok(ids.includes("p-everyday"), "a combination for a register that is not a gap stays where it was");
+  });
+
+  it("§WP-10e with no matching combination, nothing is attributed to nAia's own failure", () => {
+    const input = baseInput(); // p1 carries no register, so nothing matches the "work" gap
+    const page = buildWardrobePage(input);
+    const doBlocks = page.sections.find((s) => s.id === "do")!.blocks;
+    assert.equal(doBlocks.find((b) => b.kind === "pairings"), undefined);
+    const explore = doBlocks.find((b) => b.id === "use-what-you-own")!.entries.find((e) => e.id === "explore-work")!;
+    assert.doesNotMatch(explore.body ?? "", /nAia hasn't|nAia has not/i);
   });
 });

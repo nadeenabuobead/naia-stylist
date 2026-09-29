@@ -309,6 +309,13 @@ export interface WardrobePairing {
   reason: string;
   untried: boolean;
   evidence: Evidence[];
+  /**
+   * The register most of this combination's pieces read at, by formality —
+   * majority vote, not a new judgement. Lets the page place a register's own
+   * combination alongside that register's gap, instead of it only ever
+   * living in a general list. Null when nothing resolves to a register.
+   */
+  register: "everyday" | "work" | "occasion" | null;
 }
 
 /**
@@ -1759,6 +1766,7 @@ function buildPairings(
   // different layer that merely happens to be free.
   const eligibility = new Map(items.map((i) => [i.id, pairingEligibility(i, items, passport)]));
   const eligible = (i: WardrobeGarment) => eligibility.get(i.id)!.eligible;
+  const byId = new Map(items.map((i) => [i.id, i]));
 
   const tops = items.filter((i) => TOP_SLOTS.has(i.slot) && eligible(i));
   const bottoms = items.filter((i) => BOTTOM_SLOTS.has(i.slot) && eligible(i));
@@ -1853,6 +1861,25 @@ function buildPairings(
   const usedReasons = new Set<string>();
   const used = new Set<string>();
 
+  // Majority vote over formality, not a new judgement — the same bucket
+  // classifyUsability's caller already relies on elsewhere. Ties/absence
+  // resolve to null rather than guessing a register.
+  const pairingRegister = (ids: string[]): "everyday" | "work" | "occasion" | null => {
+    const counts = new Map<"everyday" | "work" | "occasion", number>();
+    for (const id of ids) {
+      const g = byId.get(id);
+      const f = g && norm(g.formality);
+      const bucket = f ? FORMALITY_BUCKET[f] : undefined;
+      if (bucket) counts.set(bucket, (counts.get(bucket) ?? 0) + 1);
+    }
+    let best: "everyday" | "work" | "occasion" | null = null;
+    let bestCount = 0;
+    for (const [bucket, count] of counts) {
+      if (count > bestCount) { best = bucket; bestCount = count; }
+    }
+    return best;
+  };
+
   const toPairing = (candidate: (typeof ranked)[number]): WardrobePairing => {
     const lead = candidate.reasons.find((r) => !usedReasons.has(r.text)) ?? candidate.reasons[0];
     usedReasons.add(lead.text);
@@ -1863,6 +1890,7 @@ function buildPairings(
       garmentIds: candidate.ids,
       reason: second ? `${lead.text} ${second.text}` : lead.text,
       untried: candidate.untried,
+      register: pairingRegister(candidate.ids),
       evidence: [
         ev("garment-fact", "formality/colourProfile/visualWeight/silhouette/occasions",
            candidate.reasons.map((r) => r.text).join(" "), candidate.ids),

@@ -520,6 +520,20 @@ describe("§WI-6 what works well together", () => {
       }
     }
   });
+
+  it("tags a pairing with the register its formality reads at", () => {
+    const workTop = makeGarment({ id: "wt", slot: "top", formality: "business-casual" });
+    const workBottom = makeGarment({ id: "wb", category: "BOTTOMS", slot: "bottom", formality: "business-casual" });
+    const everydayTop = makeGarment({ id: "et", slot: "top", formality: "casual" });
+    const everydayBottom = makeGarment({ id: "eb", category: "BOTTOMS", slot: "bottom", formality: "casual" });
+    const filler = makeGarment({ id: "filler", category: "DRESSES", slot: "dress" }); // padding past MIN_WARDROBE_SIZE only
+    const result = run([workTop, workBottom, everydayTop, everydayBottom, filler]);
+
+    const work = result.pairings.pairings.find((p) => p.garmentIds.includes("wt"));
+    const everyday = result.pairings.pairings.find((p) => p.garmentIds.includes("et"));
+    assert.equal(work?.register, "work");
+    assert.equal(everyday?.register, "everyday");
+  });
 });
 
 // ── §WI-7 — Heroes and their labels ───────────────────────────────────────────

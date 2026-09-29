@@ -665,7 +665,7 @@ describe("§WR-4 the counter-recommendation", () => {
 
     if (needs.enough.length > 0 && needs.couldUseMore.length > 0) {
       assert.equal(recs.notAPriority.length, 1);
-      assert.match(recs.notAPriority[0].body, /add very little compared with strengthening your/);
+      assert.match(recs.notAPriority[0].body, /is where more variety would help/);
     }
   });
 

@@ -737,7 +737,7 @@ function buildNotAPriority(needs: WardrobeNeeds): NotAPriority[] {
     {
       id: `not-priority-${enough.register}`,
       title: `Another of your ${subject}`,
-      body: `You already have strong depth here. A similar piece would add very little compared with strengthening your ${thinWord} wardrobe.`,
+      body: `Your ${thinWord} wardrobe is where more variety would help.`,
     },
   ];
 }

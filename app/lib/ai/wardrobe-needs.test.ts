@@ -173,13 +173,16 @@ describe("§WN-1 depth that is already sufficient", () => {
     assert.ok(everyday.distinctLooks >= 6, `expected deep everyday coverage, got ${everyday.distinctLooks}`);
     assert.ok(!moreIds(needs).includes("everyday"), "a well-covered everyday register must never be a gap");
     assert.ok(needs.enough.length > 0, "deep neutral everyday depth should register as enough");
-    assert.match(enoughText(needs), /Another similar piece is unlikely to materially expand what you can wear/);
+    assert.match(enoughText(needs), /Another similar one probably wouldn't give you many new options/);
     // Where a thinner register exists, the alternative is offered positively
     // rather than as a comparison the customer has to unpack.
     assert.doesNotMatch(enoughText(needs), /, where .* would\./);
   });
 
-  it("1a-2 — a thinner register is named as something to strengthen, not as a comparison", () => {
+  it("1a-2 — the enough claim stays scoped to its own cluster, even with a thinner register elsewhere", () => {
+    // Naming the thinner register as something worth strengthening is the
+    // recommendations layer's job (see §WR-4) — the needs layer's own "enough"
+    // claim never mentions another register at all.
     const items = [
       ...variedLooks("casual", 5),
       makeGarment({ slot: "top", formality: "business-casual" }),
@@ -187,7 +190,8 @@ describe("§WN-1 depth that is already sufficient", () => {
     ];
     const needs = run(items, { passport: makePassport({ lifestyle: ["everyday-casual", "work-office"] }) });
     assert.ok(needs.enough.length > 0, "everyday should still read as enough");
-    assert.match(enoughText(needs), /strengthening your work options would add more\./);
+    assert.match(enoughText(needs), /Another similar one probably wouldn't give you many new options/);
+    assert.doesNotMatch(enoughText(needs), /your work (options|wardrobe)/i, "the needs layer's own claim must not name another register");
   });
 
   it("1b — the enough claim names the cluster, not the whole wardrobe", () => {

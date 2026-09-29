@@ -93,13 +93,6 @@ const DEPTH_PHRASE: Readonly<Record<RegisterId, string>> = {
   occasion: "occasion and evening",
 };
 
-/** Bare register word for possessive copy: "your work options". */
-const DEPTH_SHORT: Readonly<Record<RegisterId, string>> = {
-  everyday: "everyday",
-  work: "work",
-  occasion: "occasion",
-};
-
 /** Closet `occasions` tags → register. Only used when formality is unreadable. */
 const OCCASION_REGISTER: Readonly<Record<string, RegisterId>> = {
   work: "work", office: "work", business: "work", professional: "work",
@@ -946,7 +939,6 @@ function buildFindings(
     const r = byId.get(c.register);
     if (!r || r.distinctLooks < DEEP_LOOKS) continue;
 
-    const thinnerAlternative = thinNeeded.find((t) => t.register !== c.register);
     const description = describeCluster(c);
 
     enough.push({
@@ -954,9 +946,7 @@ function buildFindings(
       kind: "enough",
       register: c.register,
       title: `You already have enough ${description}`,
-      body: `You own ${c.items.length} of these that work with the rest of your Closet, and your ${REGISTER_NOUN[c.register]} already has real range. Another similar piece is unlikely to materially expand what you can wear${
-        thinnerAlternative ? `; strengthening your ${DEPTH_SHORT[thinnerAlternative.register]} options would add more` : ""
-      }.`,
+      body: `You already have ${c.items.length} ${description} that work well with the rest of your Closet. Another similar one probably wouldn't give you many new options.`,
       garmentIds: c.items.slice(0, 6).map((g) => g.id),
       evidence: [
         ev("garment-fact", "slot + colour + formality", `${c.items.length} usable ${description}.`, c.items.map((g) => g.id)),
