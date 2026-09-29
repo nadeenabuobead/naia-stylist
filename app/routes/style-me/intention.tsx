@@ -11,7 +11,7 @@ import { useState } from "react";
 import { getSession, commitSession } from "~/lib/session.server.js";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { SESSION_QUESTIONS, SESSION_QUESTION_IDS as SQ } from "~/lib/ai/signal-contract.js";
-import { STYLEME_INTENTION_OPTIONS } from "~/lib/styleme/session-vocabulary";
+import { STYLEME_ACTIVE_INTENTION_OPTIONS } from "~/lib/styleme/session-vocabulary";
 import { SmPage } from "~/components/style-me/SmPage";
 import { SmContinue } from "~/components/style-me/SmContinue";
 import naiaStyles from "~/styles/naia-design-system.css?url";
@@ -23,7 +23,10 @@ export const links: LinksFunction = () => [
 const INTENTION_QUESTION = SESSION_QUESTIONS.find((q) => q.id === SQ.INTENTIONS)!;
 const MAX_SELECTIONS = INTENTION_QUESTION.maxSelections ?? 2;
 
-const INTENTION_OPTIONS = STYLEME_INTENTION_OPTIONS;
+// The ACTIVE set, not the full taxonomy: the four 2026-09 intentions stay defined
+// but unoffered until the Wardrobe Intelligence consumer fix lands. See the
+// STYLEME_TAXONOMY_16_ACTIVE note in session-vocabulary.ts.
+const INTENTION_OPTIONS = STYLEME_ACTIVE_INTENTION_OPTIONS;
 
 const VALID_INTENTION_IDS = new Set(INTENTION_OPTIONS.map((o) => o.id));
 

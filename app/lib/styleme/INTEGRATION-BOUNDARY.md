@@ -256,3 +256,58 @@ A future "style this before you buy" path needs a third member carrying the fiel
 above plus a provenance discriminator — and one rule: a hypothetical garment may
 anchor a look but must never count as owned inventory for WI or Taste. Out of scope
 for this branch; recorded so the contract is designed with it in mind.
+
+---
+
+## 6. Intention taxonomy — 16 defined, 12 live
+
+The taxonomy expansion is **recovered and contracted, but not activated.**
+`STYLEME_TAXONOMY_16_ACTIVE` in `session-vocabulary.ts` is `false`, so the Step 2
+questionnaire offers the original twelve. Everything else — the sixteen IDs, the
+labels, `GarmentStyleMeProfile.intentionPotentials`, the admin review surfacing —
+is in place and unchanged.
+
+**Why it is gated.** `wardrobe-intelligence.server.ts` sets
+`intentionsSource = "curated"` only when *every* intention in its list is
+human-reviewed, and three sites gate on that (`wardrobe-intelligence.ts:915`,
+`wardrobe-needs.ts:1180` and `:1237`). Every profile approved before the expansion
+was reviewed against twelve intentions and carries no key for the four new ones.
+The moment WI's list becomes sixteen, those profiles demote to `"derived"` and
+"What your Closet supports best" empties — for wardrobes that genuinely *were*
+reviewed. Curated evidence lost silently.
+
+This has not fired yet only because WI reads a **separate** twelve-item
+`ALL_INTENTIONS` in `app/lib/admin/garment-intelligence-v1.server.ts`. The two
+lists are duplicates, and the obvious tidy-up — point one at the other — is exactly
+the change that fires the bug.
+
+**Semantics StyleMe must consume, not reimplement.** Garment Intelligence commit
+`9a1c31e` holds them: key absence means "not reviewed", a stored `"none"` means a
+human looked and decided none, and a legacy profile is *complete for the taxonomy
+it was authored under* rather than partial. It exposes `intentionIsReviewed()`,
+`intentionStrength()` (null ≠ "none") and `hasReviewedIntentionEvidence()` — the
+gate WI should use in place of `intentionsFullyReviewed`. StyleMe does not copy
+any of this.
+
+### Intended integration order
+
+| # | Step | Owner | Gate |
+|---|---|---|---|
+| 1 | `9a1c31e` review-semantics contract lands on trunk | Garment Intelligence | already committed on their branch |
+| 2 | **D6** — WI stops gating on all-or-nothing review and calls `hasReviewedIntentionEvidence()`; `ALL_INTENTIONS` is retired in favour of the shared vocabulary | Wardrobe Intelligence | must land **at or before** step 4 |
+| 3 | Reviewers rate the four new intentions on the Closet (the admin filter from `d76edd9` exists for exactly this) | product | not a code gate, but an empty taxonomy helps nobody |
+| 4 | Flip `STYLEME_TAXONOMY_16_ACTIVE` to `true` | StyleMe | one constant, no other change |
+
+Steps 1–2 may land together. Step 4 must not precede step 2.
+
+### Two Garment Intelligence integration patches are NOT yet takeable
+
+`8eb7158` (occasion matching) and `444660c` (coverage by value, not presence) are
+labelled for StyleMe cherry-picking and both were attempted here. Both were backed
+out: `8eb7158` imports `~/lib/garment/vocabulary` and `444660c` imports
+`~/lib/garment/coverage`, and `app/lib/garment/` does not exist outside the Garment
+Intelligence worktree. They are correct patches with a hard dependency on the
+foundation module — take them in the same merge as `app/lib/garment/`, not before.
+
+`444660c` is the fix for the coverage defect described in §2.2; that deferral is
+now tracked upstream rather than open-ended.

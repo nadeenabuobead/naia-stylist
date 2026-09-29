@@ -1413,7 +1413,15 @@ describe("R3.22 — Intention UI: exact 16 approved IDs and labels", () => {
   });
 
   it("intention screen renders options from the shared vocabulary", () => {
-    assert.ok(intentionSrc.includes("STYLEME_INTENTION_OPTIONS"));
+    // What this protects is that the screen owns no vocabulary of its own. It may
+    // render either the full taxonomy or the ACTIVE subset — the four 2026-09
+    // intentions are defined but not offered until the Wardrobe Intelligence
+    // consumer fix lands (see STYLEME_TAXONOMY_16_ACTIVE in session-vocabulary.ts).
+    assert.ok(
+      intentionSrc.includes("STYLEME_INTENTION_OPTIONS") ||
+        intentionSrc.includes("STYLEME_ACTIVE_INTENTION_OPTIONS"),
+      "intention.tsx must render from the shared vocabulary",
+    );
     assert.ok(!/id: "/.test(intentionSrc), "intention.tsx must not declare its own option IDs");
   });
 

@@ -179,6 +179,53 @@ export const STYLEME_INTENTION_IDS   = STYLEME_INTENTION_OPTIONS.map((o) => o.id
 export const STYLEME_FIT_COMFORT_IDS = STYLEME_FIT_COMFORT_OPTIONS.map((o) => o.id);
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Taxonomy activation gate — 12 live, 16 defined
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// STYLEME_INTENTION_OPTIONS above is the full sixteen: the contract, the garment
+// review vocabulary, and the label set. It is NOT what the questionnaire offers.
+//
+// WHY. Wardrobe Intelligence decides whether a garment's curated intention
+// evidence is trustworthy with an all-or-nothing test — wardrobe-intelligence.server.ts
+// sets intentionsSource = "curated" only when EVERY intention in its list is
+// human-reviewed, and three call sites gate on that (wardrobe-intelligence.ts,
+// wardrobe-needs.ts × 2). Every profile approved before the 2026-09 expansion was
+// reviewed against twelve intentions and carries no key for the four new ones.
+// The moment WI's list becomes sixteen, every one of those profiles silently
+// demotes to "derived" and "What your Closet supports best" empties — for
+// wardrobes that genuinely WERE reviewed.
+//
+// That has not happened yet only because WI reads its own separate twelve-item
+// ALL_INTENTIONS in app/lib/admin/garment-intelligence-v1.server.ts. The two lists
+// are duplicates, and the obvious tidy-up — point one at the other — is exactly
+// the change that fires the bug. Hence this gate, and this comment next to it.
+//
+// The Garment Intelligence foundation has the correct semantics in commit 9a1c31e:
+// key absence means "not reviewed", a stored "none" means "a human decided none",
+// and a legacy profile is COMPLETE for the taxonomy it was authored under rather
+// than partial. StyleMe must consume those, not reimplement them.
+//
+// TO ACTIVATE: the WI consumer fix (D6) must land at the same time or earlier.
+// Then flip this one constant. Nothing else changes.
+export const STYLEME_TAXONOMY_16_ACTIVE = false;
+
+/**
+ * What the Step 2 questionnaire actually offers today.
+ *
+ * Asking a customer for an intention no garment has been rated against cannot
+ * produce a better outfit: getProfileIntentionScore returns null for an unrated
+ * dimension, formCharacterScore has no branch for these four, and T4 settles on
+ * the neutral default. She would be answering a question that changes nothing.
+ */
+export const STYLEME_ACTIVE_INTENTION_OPTIONS: readonly StyleMeOption[] =
+  STYLEME_TAXONOMY_16_ACTIVE
+    ? STYLEME_INTENTION_OPTIONS
+    : STYLEME_INTENTION_OPTIONS.filter((o) => STYLEME_ORIGINAL_INTENTION_IDS.includes(o.id));
+
+/** IDs the questionnaire will accept on submit. Server-side validation uses this. */
+export const STYLEME_ACTIVE_INTENTION_IDS = STYLEME_ACTIVE_INTENTION_OPTIONS.map((o) => o.id);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Intention → engine signal translation
 // ─────────────────────────────────────────────────────────────────────────────
 //
