@@ -260,10 +260,16 @@ describe("Phase 4B3 recovery — route contract", () => {
 
   it("regenerate recovers bodyNeeds from DB session (not hardcoded [])", () => {
     const text = src("result.tsx");
-    // Must use session.bodyNeeds, not a literal empty array, so comfort signals survive regenerate.
+    // Comfort signals must survive regenerate. They now arrive via regenBodyNeeds, which
+    // is session.bodyNeeds PLUS the SMCM tokens recomputed from session.intentions — the
+    // second half used to be lost, because the translation only ran in the generate branch.
     assert.ok(
-      text.includes("bodyNeeds: session.bodyNeeds ?? []"),
-      "regenerate reads bodyNeeds from DB session",
+      text.includes("...(session.bodyNeeds ?? []), ...regenTranslated.bodyNeeds"),
+      "regenerate reads bodyNeeds from DB session and re-applies the intention translation",
+    );
+    assert.ok(
+      text.includes("bodyNeeds: regenBodyNeeds"),
+      "regenerate passes the recovered body needs to the engine",
     );
     assert.ok(
       !text.includes("bodyNeeds: [],"),
@@ -321,9 +327,17 @@ describe("Phase 4B3 recovery — route contract", () => {
   it("Practical Today tokens are still carried by the session contract", () => {
     // styleMePractical is written by the Rev 3 intention translation
     // (make-it-easy → quick-to-style), not by a dedicated screen.
+    // The mapping now lives in session-vocabulary.ts so regenerate can apply it too.
     const resultText = src("result.tsx");
-    assert.ok(resultText.includes("INTENTION_PRACTICAL_MAP"), "practical tokens come from intentions now");
-    assert.ok(resultText.includes('"quick-to-style"'), "make-it-easy still maps to quick-to-style");
+    const vocabText = readFileSync(
+      join(dir, "../../lib/styleme/session-vocabulary.ts"), "utf8",
+    );
+    assert.ok(vocabText.includes("INTENTION_PRACTICAL_MAP"), "practical tokens come from intentions now");
+    assert.ok(vocabText.includes('"quick-to-style"'), "make-it-easy still maps to quick-to-style");
+    assert.ok(
+      resultText.includes("translateIntentionsToEngineSignals"),
+      "result.tsx reaches the practical mapping through the shared translator",
+    );
   });
 
   it("Fit/Comfort exclusivity is enforced on the canonical step", () => {
@@ -399,8 +413,12 @@ describe("Phase 4B3 recovery — route contract", () => {
       "regenerate reads formalityConditional from DB session",
     );
     assert.ok(
-      text.includes("practicalIds: session.practicalIds ?? []"),
-      "regenerate reads practicalIds from DB session",
+      text.includes("...(session.practicalIds ?? []), ...regenTranslated.practicalIds"),
+      "regenerate reads practicalIds from DB session and re-applies the intention translation",
+    );
+    assert.ok(
+      text.includes("practicalIds: regenPracticalIds"),
+      "regenerate passes the recovered practical IDs to the engine",
     );
   });
 

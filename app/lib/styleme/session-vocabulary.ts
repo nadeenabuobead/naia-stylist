@@ -177,3 +177,96 @@ export const STYLEME_FIT_COMFORT_LABELS = toLabelMap(STYLEME_FIT_COMFORT_OPTIONS
 export const STYLEME_STATE_IDS       = STYLEME_STATE_OPTIONS.map((o) => o.id);
 export const STYLEME_INTENTION_IDS   = STYLEME_INTENTION_OPTIONS.map((o) => o.id);
 export const STYLEME_FIT_COMFORT_IDS = STYLEME_FIT_COMFORT_OPTIONS.map((o) => o.id);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Intention → engine signal translation
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// The engine never sees a raw intention ID. Six of the sixteen intentions carry a
+// canonical DFM / SMCM / PSM analogue; the rest reach the engine only through the
+// T4 comparator, which reads approved intentionPotentials directly.
+//
+// This lived inline in app/routes/style-me/result.tsx, inside the "generate" branch,
+// as four object literals no other caller could reach. "New Look, Same Vibe" rebuilds
+// its engine input from the StylingSession row in a different branch of the same
+// action — and the row never stored the translation. In a Rev 3 session currentMood
+// and desiredFeeling are written as null (there is no mood or feeling step), so
+// regeneration read [] for both and dropped every intention-derived signal. The
+// request that came back was not the request the customer made.
+//
+// Lifting it here makes both paths call one function. Nothing is persisted: the
+// translation is pure and derives entirely from StylingSession.intentions, which IS
+// stored, so it can be recomputed identically for the life of the session.
+//
+// DELIBERATELY UNMAPPED — do not "complete" these tables:
+//   ground-me, give-energy      — no approved engine analogue; wording context only.
+//   feel-elevated, stand-out,
+//   feel-fun, feel-powerful     — the 2026-09 expansion. A human reviewer decides
+//                                 these per garment. No heuristic may derive them;
+//                                 inventing a DFM/SMCM mapping here would do exactly
+//                                 that. They reach ranking only via intentionPotentials.
+
+/** Intention → Desired Feeling Match token. */
+const INTENTION_DFM_MAP: Readonly<Record<string, string>> = {
+  confidence: "more-confident",
+  "feel-put-together": "more-put-together",
+  "feel-attractive": "more-attractive",
+  "feel-softer": "softer",
+};
+
+/** Intention → Style Me Comfort Match token (merged into session bodyNeeds). */
+const INTENTION_SMCM_MAP: Readonly<Record<string, string>> = {
+  "give-structure": "structured",
+  "feel-less-exposed": "more-coverage",
+};
+
+/** Intention → Practical Support Match token. */
+const INTENTION_PRACTICAL_MAP: Readonly<Record<string, string>> = {
+  "make-it-easy": "quick-to-style",
+};
+
+/** Intentions that amplify the Passport rather than adding a signal of their own. */
+const PROFILE_AMPLIFY_IDS: ReadonlySet<string> = new Set([
+  "feel-like-myself",
+  "express-myself",
+]);
+
+export interface EngineSignalTranslation {
+  /** Mood tokens (PROFILE_AMPLIFY). */
+  moods: string[];
+  /** Desired Feeling Match tokens. */
+  desiredFeelings: string[];
+  /** SMCM tokens to merge into the session's body needs. */
+  bodyNeeds: string[];
+  /** Practical Support Match tokens to merge into the session's practical IDs. */
+  practicalIds: string[];
+}
+
+/**
+ * Translates session intention IDs into the canonical engine signals.
+ *
+ * Pure and order-preserving. The first matching table wins, exactly as the original
+ * inline chain did — an intention appears in at most one table, so the precedence
+ * is not load-bearing, but it is preserved so this is a lift and not a rewrite.
+ *
+ * Duplicates are NOT collapsed: two PROFILE_AMPLIFY intentions still yield
+ * ["like-myself", "like-myself"]. That doubling is the shipped scoring behaviour and
+ * changing it here would silently reweight every two-intention session.
+ */
+export function translateIntentionsToEngineSignals(
+  intentionIds: readonly string[] | null | undefined,
+): EngineSignalTranslation {
+  const out: EngineSignalTranslation = {
+    moods: [], desiredFeelings: [], bodyNeeds: [], practicalIds: [],
+  };
+  if (!intentionIds?.length) return out;
+
+  for (const id of intentionIds) {
+    if (PROFILE_AMPLIFY_IDS.has(id)) out.moods.push("like-myself");
+    else if (INTENTION_DFM_MAP[id]) out.desiredFeelings.push(INTENTION_DFM_MAP[id]);
+    else if (INTENTION_SMCM_MAP[id]) out.bodyNeeds.push(INTENTION_SMCM_MAP[id]);
+    else if (INTENTION_PRACTICAL_MAP[id]) out.practicalIds.push(INTENTION_PRACTICAL_MAP[id]);
+    // everything else contributes no engine signal — see the header note
+  }
+  return out;
+}

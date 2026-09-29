@@ -3,7 +3,11 @@ import { Form, Link, useLoaderData, useFetcher } from "react-router";
 import { data, redirect, type LoaderFunctionArgs, type ActionFunctionArgs, type ShouldRevalidateFunctionArgs, type LinksFunction } from "react-router";
 import { useState, useEffect, type Dispatch, type SetStateAction, type CSSProperties } from "react";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
-import { STYLEME_STATE_LABELS, STYLEME_INTENTION_LABELS } from "~/lib/styleme/session-vocabulary";
+import {
+  STYLEME_STATE_LABELS,
+  STYLEME_INTENTION_LABELS,
+  translateIntentionsToEngineSignals,
+} from "~/lib/styleme/session-vocabulary";
 import {
   getCloudinaryConfig,
   validatePublicIdOwnership,
@@ -452,42 +456,16 @@ export async function action({ request }: ActionFunctionArgs) {
         ? (() => { try { return JSON.parse(rev3IntentionsRawAction); } catch { return []; } })()
         : (session.intentions ?? []);
 
-      // Translate Rev 3 intention IDs to canonical engine signals.
-      // The engine never sees raw Rev 3 intention IDs — only canonical DFM/SMCM/PSM IDs.
-      // feel-like-myself / express-myself → PROFILE_AMPLIFY via "like-myself" mood.
-      // ground-me / give-energy → NO_RECOMMENDATION_EFFECT (wording context only).
-      const INTENTION_DFM_MAP: Record<string, string> = {
-        confidence: "more-confident",
-        "feel-put-together": "more-put-together",
-        "feel-attractive": "more-attractive",
-        "feel-softer": "softer",
-      };
-      const INTENTION_SMCM_MAP: Record<string, string> = {
-        "give-structure": "structured",
-        "feel-less-exposed": "more-coverage",
-      };
-      const INTENTION_PRACTICAL_MAP: Record<string, string> = {
-        "make-it-easy": "quick-to-style",
-      };
-      const PROFILE_AMPLIFY_IDS = new Set(["feel-like-myself", "express-myself"]);
-
-      const translatedDesiredFeelings: string[] = [];
-      const translatedSmcmIds: string[] = [];
-      const translatedPracticalIds: string[] = [];
-      const translatedMoods: string[] = [];
-
-      for (const intentionId of rev3IntentionsAction) {
-        if (PROFILE_AMPLIFY_IDS.has(intentionId)) {
-          translatedMoods.push("like-myself");
-        } else if (INTENTION_DFM_MAP[intentionId]) {
-          translatedDesiredFeelings.push(INTENTION_DFM_MAP[intentionId]);
-        } else if (INTENTION_SMCM_MAP[intentionId]) {
-          translatedSmcmIds.push(INTENTION_SMCM_MAP[intentionId]);
-        } else if (INTENTION_PRACTICAL_MAP[intentionId]) {
-          translatedPracticalIds.push(INTENTION_PRACTICAL_MAP[intentionId]);
-        }
-        // ground-me, give-energy → no engine signal
-      }
+      // Translate intention IDs to canonical engine signals.
+      // The engine never sees a raw intention ID — only canonical DFM/SMCM/PSM tokens.
+      // The mapping itself lives in app/lib/styleme/session-vocabulary.ts so that
+      // "New Look, Same Vibe" can apply the identical translation; see the regenerate
+      // branch below. It used to be inline here and regeneration silently lost it.
+      const translated = translateIntentionsToEngineSignals(rev3IntentionsAction);
+      const translatedDesiredFeelings = translated.desiredFeelings;
+      const translatedSmcmIds = translated.bodyNeeds;
+      const translatedPracticalIds = translated.practicalIds;
+      const translatedMoods = translated.moods;
 
       const isRev3Generate = !!(rev3StateAction ?? session.state);
 
@@ -714,16 +692,43 @@ export async function action({ request }: ActionFunctionArgs) {
       // Includes the anchor; used by computeStyleMeResult to detect duplicate New Look results.
       const prevOutfitClosetIds = recentlyShownClosetIds.length > 0 ? recentlyShownClosetIds : undefined;
 
+      // ── Same Vibe means the same request ──────────────────────────────────
+      // Regeneration rebuilds engine input from the StylingSession row. In a Rev 3
+      // session currentMood and desiredFeeling are stored as null — there is no mood
+      // or feeling step — and the intention translation was never persisted, so this
+      // branch used to pass moods: [] and desiredFeelings: [] and drop the SMCM and
+      // practical tokens too. The customer pressed "New Look, Same Vibe" and received
+      // a look built from a materially different brief.
+      //
+      // The translation is pure, and StylingSession.intentions IS stored, so it is
+      // recomputed here through the same function the generate branch uses. Occasion,
+      // formality, body needs, practical IDs and the anchor already came from the row.
+      const regenTranslated = translateIntentionsToEngineSignals(session.intentions ?? []);
+      const regenIsRev3 = !!session.state;
+
+      const regenMoods = regenIsRev3
+        ? regenTranslated.moods
+        : (session.currentMood ? [session.currentMood] : []);
+      const regenDesiredFeelings = regenIsRev3
+        ? regenTranslated.desiredFeelings
+        : (session.desiredFeeling ? [session.desiredFeeling] : []);
+      const regenBodyNeeds = regenIsRev3
+        ? [...(session.bodyNeeds ?? []), ...regenTranslated.bodyNeeds]
+        : (session.bodyNeeds ?? []);
+      const regenPracticalIds = regenIsRev3
+        ? [...(session.practicalIds ?? []), ...regenTranslated.practicalIds]
+        : (session.practicalIds ?? []);
+
       const engineInput = buildEngineInput({
-        moods: session.currentMood ? [session.currentMood] : [],
-        desiredFeelings: session.desiredFeeling ? [session.desiredFeeling] : [],
-        bodyNeeds: session.bodyNeeds ?? [],
+        moods: regenMoods,
+        desiredFeelings: regenDesiredFeelings,
+        bodyNeeds: regenBodyNeeds,
         coverageConditional: null,
         occasion: session.occasion ?? "everyday",
         occasionDisplayLabel: regenOccasionDisplayLabel,
         formalityConditional: session.formalityConditional,
         todayColours: { preferred: [], avoid: [] },
-        practicalIds: session.practicalIds ?? [],
+        practicalIds: regenPracticalIds,
         source: sessionSource,
         profile: buildEphemeralContextSignals(buildProfileSignals(naiaCustomer?.onboardingProfile), journeyCtx),
         mode: regenMode,

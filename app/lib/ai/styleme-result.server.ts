@@ -75,6 +75,8 @@ import {
   outfitFunctionPriority,
   DRESS_REGISTER_RANK,
   computeRegisterAlignmentScore,
+  passesDressingRequirements,
+  evaluateAnchorEligibility,
 } from "./styleme-profile-gate.js";
 
 // ── Passport option label resolver ───────────────────────────────────────────
@@ -1517,11 +1519,35 @@ export function buildNaiaOutfitCandidates(
   const profile_ = profile as ClosetScoringProfile | undefined;
   const signals = { occasion: session.occasion, moods: session.moods, desiredFeelings: session.desiredFeelings };
 
+  // ── Anchor eligibility (defence in depth) ─────────────────────────────────
+  // The anchor is normally rejected at selection time, where the customer can be
+  // told why (autoSelectClosetAnchor filters; the manual picker refuses with a
+  // message). This is the backstop for an anchor that became ineligible AFTER it
+  // was chosen — a stale session cookie, an Adjust Vibe continuation, or a Passport
+  // edited between choosing the piece and generating the look.
+  //
+  // Returning all-nulls empties filteredCandidates at the call site, which surfaces
+  // as sameCombination: no outfit is built on an anchor that violates a hard
+  // requirement. Previously the anchor was exempt here (`item.id === anchor.id ||`)
+  // and a violating anchor produced a full, confident, non-compliant outfit.
+  const anchorItemForEligibility = allItems.find((i) => i.id === anchor.id);
+  if (
+    anchorItemForEligibility &&
+    !evaluateAnchorEligibility(
+      anchorItemForEligibility,
+      session.occasion,
+      profile_?.dressingPreferences,
+    ).eligible
+  ) {
+    return [null, null, null, null, null] as unknown as [OutfitCandidate, OutfitCandidate | null, OutfitCandidate | null, OutfitCandidate | null, OutfitCandidate | null];
+  }
+
   // Pre-filter allItems by dressing requirements for the Candidate E exploration.
   // selectAdditionalClosetGarments has its own gate; this ensures Candidate E's
   // slot-swap exploration also respects persistent dressing constraints.
+  // The anchor is no longer exempted — it has already passed the same gate above.
   const dressingEligibleItems = profile_?.dressingPreferences?.length
-    ? allItems.filter((item) => item.id === anchor.id || passesDressingRequirements(item, profile_.dressingPreferences))
+    ? allItems.filter((item) => passesDressingRequirements(item, profile_.dressingPreferences))
     : allItems;
 
   const fullSelection = selectAdditionalClosetGarments(
@@ -2044,16 +2070,27 @@ export const FORMALITY_RANK: Record<string, number> = {
 
 // Per-occasion expected base+shoe formality range (inclusive ordinal bounds).
 // "everyday" covers ranks 1–2 (casual → smart-casual); "work" covers 2–4; etc.
+// Keys MUST be canonical session occasion IDs — the values StylingSession.occasion
+// actually holds, after REV3_OCCASION_MAP has normalised the UI answer. Three keys
+// were previously spelled in the UI vocabulary ("date", "event", "night-out"), which
+// no session ever carries, so those three occasions silently fell through to the
+// {1,4} default below. For Event that was visible: the default intersected with
+// Dressy ({4,6}) collapsed the target to {4,4}, and a genuine evening piece was
+// scored as overdressed for a dressy event.
+//
+// _OCCASION_MAX_RANK in styleme-anchor.server.ts was corrected the same way in the
+// systemic QA pass; this table and OCCASION_REGISTER_RANGE were missed. The register
+// table is NOT corrected here — see the deferral note on passesProfileRegisterGate.
 const OCCASION_FORMALITY_TARGET: Record<string, { min: number; max: number }> = {
-  "everyday":  { min: 1, max: 2 },
-  "work":      { min: 2, max: 4 },
-  "dinner":    { min: 2, max: 5 },
-  "date":      { min: 2, max: 3 },
-  "event":     { min: 3, max: 6 },
-  "night-out": { min: 2, max: 6 },
-  "family":    { min: 1, max: 2 },
-  "travel":    { min: 1, max: 2 },
-  "active":    { min: 1, max: 1 },
+  "everyday":      { min: 1, max: 2 },
+  "work":          { min: 2, max: 4 },
+  "dinner":        { min: 2, max: 5 },
+  "date-night":    { min: 2, max: 3 },
+  "special-event": { min: 3, max: 6 },
+  "girls-night":   { min: 2, max: 6 },
+  "family":        { min: 1, max: 2 },
+  "travel":        { min: 1, max: 2 },
+  "active":        { min: 1, max: 1 },
 };
 
 // Maps each StyleMe session occasion ID (canonical engine IDs post-mapping) to the
@@ -3054,7 +3091,7 @@ function categorizeModelError(err: unknown): {
   // Truncate message to avoid leaking prompt fragments in edge cases
   const message = String(err.message ?? "").slice(0, 200);
   // Detect common provider/network error shapes
-  const anyErr = err as Record<string, unknown>;
+  const anyErr = err as unknown as Record<string, unknown>;
   const httpStatus = typeof anyErr["status"] === "number" ? anyErr["status"]
     : typeof anyErr["statusCode"] === "number" ? anyErr["statusCode"]
     : undefined;
@@ -3598,51 +3635,12 @@ export function buildProfileHint(profile?: StyleMeProfileSignals): string {
 // Partitions evaluatedProducts into MOST YOU / FRESH / PUSH ME.
 // Profile alignment score = points from signals whose question is a Profile question
 // ── Dressing-requirement gate for Closet items (item-level, non-compensable only) ─────
-// Only applies checks that cannot be satisfied through layering on top of this item.
-// Compensable requirements (arms-covered, chest-neckline-covered, looser-fitting)
-// must be evaluated at the complete-outfit level, not rejected at item selection time.
+// The implementation now lives in styleme-profile-gate.ts alongside the other hard gates,
+// so the anchor selector can reach it without the anchor → result → anchor import cycle.
+// Re-exported here so every existing caller and test keeps its import path unchanged.
 //
-// Non-compensable: legs-covered on bottom/dress items.
-//   A midi or mini bottom CANNOT become legs-covered regardless of what is added on top.
-//   "n/a" hemLength → item is a top or outerwear → exempt (does not cover legs at all).
-//   null hemLength → unknown metadata → fail-open (keep the item in the pool).
-//   Corrects the NADINE engine bug: midi is NOT maxi/full, so it is excluded.
-//
-// Manual-anchor bypass: not applied — the conflicting-anchor product policy is undefined.
-// The anchor is committed before this function runs; only additional-garment candidates
-// and Candidate E alternatives pass through this gate.
-export function passesDressingRequirements(
-  item: ClosetAnchorInput,
-  dressingPreferences: readonly string[] | null | undefined,
-): boolean {
-  if (!dressingPreferences || dressingPreferences.length === 0) return true;
-  const prefs = new Set(dressingPreferences);
-
-  // legs-covered — non-compensable for garments that cover the leg zone (hemLength not "n/a")
-  if (prefs.has("legs-covered")) {
-    const hl = item.hemLength;
-    if (hl !== null && hl !== undefined && hl !== "n/a") {
-      if (hl !== "full" && hl !== "maxi") return false;
-    }
-    // hl === null/undefined → unknown metadata → fail-open
-    // hl === "n/a"          → top/outerwear → not applicable
-  }
-
-  // no-cropped-tops — non-compensable: a garment explicitly cropped (topLength === "cropped")
-  // cannot become non-cropped through layering. Only applicable where topLength is known.
-  if (prefs.has("no-cropped-tops")) {
-    const tl = item.topLength;
-    if (tl !== null && tl !== undefined && tl !== "n/a") {
-      if (tl === "cropped") return false;
-    }
-    // tl === null/undefined → unknown metadata → fail-open
-    // tl === "n/a"          → bottom/dress → not applicable
-  }
-
-  // Compensable requirements (arms-covered, chest-neckline-covered, dresses-modestly) are
-  // evaluated at the complete-candidate level in passesCandidateDressingRequirements.
-  return true;
-}
+// The anchor is NO LONGER exempt from this gate — see evaluateAnchorEligibility.
+export { passesDressingRequirements };
 
 // Candidate-level dressing gate for compensable upper-body requirements.
 // Runs AFTER candidates are assembled so that legitimate layering (outerwear covering

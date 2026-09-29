@@ -720,9 +720,20 @@ describe("R3.15 — result.tsx: Rev 3 session reads and fallback", () => {
   });
 
   it("intention translation maps exist (DFM, SMCM, Practical)", () => {
-    assert.ok(resultSrc.includes("INTENTION_DFM_MAP"), "must define INTENTION_DFM_MAP");
-    assert.ok(resultSrc.includes("INTENTION_SMCM_MAP"), "must define INTENTION_SMCM_MAP");
-    assert.ok(resultSrc.includes("INTENTION_PRACTICAL_MAP"), "must define INTENTION_PRACTICAL_MAP");
+    // The maps moved out of result.tsx into app/lib/styleme/session-vocabulary.ts so
+    // that BOTH generate and regenerate apply the same translation — regeneration used
+    // to rebuild engine input from the session row, which never stored it, and silently
+    // dropped every intention-derived signal. What this contract protects is that the
+    // three mappings still exist and that the route reaches them; where they live is
+    // an implementation detail, so assert against the module that now owns them.
+    const vocabSrc = readFileSync(join(ROOT, "app/lib/styleme/session-vocabulary.ts"), "utf8");
+    assert.ok(vocabSrc.includes("INTENTION_DFM_MAP"), "must define INTENTION_DFM_MAP");
+    assert.ok(vocabSrc.includes("INTENTION_SMCM_MAP"), "must define INTENTION_SMCM_MAP");
+    assert.ok(vocabSrc.includes("INTENTION_PRACTICAL_MAP"), "must define INTENTION_PRACTICAL_MAP");
+    assert.ok(
+      resultSrc.includes("translateIntentionsToEngineSignals"),
+      "result.tsx must translate through the shared function, not a private copy",
+    );
   });
 
   it("state is NOT passed as a mood/engine signal (zero scoring)", () => {

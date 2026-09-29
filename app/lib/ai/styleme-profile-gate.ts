@@ -51,6 +51,33 @@ export const DRESS_REGISTER_RANK: Record<string, number> = {
 };
 
 // Allowed dress register range (inclusive) per session occasion.
+//
+// DEFERRED — OWNED BY THE GARMENT INTELLIGENCE FOUNDATION. DO NOT "FIX" HERE.
+//
+// Three keys below ("date", "event", "night-out") are spelled in the StyleMe UI
+// vocabulary, but this map is looked up with the CANONICAL session occasion, which
+// is "date-night" / "special-event" / "girls-night". Those three lookups miss, and
+// passesProfileRegisterGate returns true before it reaches the athletic and evening
+// blocks — so activewear is admitted to a Date and an evening piece to a Night out.
+//
+// Correcting the keys alone would be a half-fix that changes garment eligibility.
+// This function interleaves two vocabularies:
+//
+//   OCCASION_REGISTER_RANGE[sessionOccasion]   ← session-side (this map)
+//   profile.occasionFit[sessionOccasion]       ← GARMENT-side, keyed on the same UI
+//                                                spelling in GarmentStyleMeProfile
+//
+// The occasionFit lookup is the escape hatch that lets an approved "Strong" override
+// a blanket register block. Repair the range keys without repairing occasionFit and
+// the gate starts blocking garments a human explicitly approved, with no way for the
+// approval to speak. Both sides must move together, under one canonical occasion
+// resolver, which is what the Garment Intelligence foundation is building.
+//
+// StyleMe call sites that will consume that resolver, and can then delete their local
+// handling: passesProfileOccasionGate, passesProfileRegisterGate,
+// passesRegisterCoherenceWithAnchor, getProfileOccasionTier (all in this file), and
+// styleMeSessionRegister in wardrobe-needs.ts. OCCASION_FORMALITY_TARGET and
+// _OCCASION_MAX_RANK are session-side only and have already been corrected in place.
 export const OCCASION_REGISTER_RANGE: Record<string, { min: number; max: number }> = {
   "active":    { min: 0, max: 1 },
   "everyday":  { min: 1, max: 3 },
@@ -592,3 +619,110 @@ export function hasStatementConflict(
 // avoidInStyleMe can express nuances (e.g., "avoid with formal trousers") that the gate
 // functions cannot capture without the structured token layer above.
 export const PAIRING_GUIDANCE_STATUS = "deferred" as const;
+
+// ── Dressing-requirement gate for Closet items (item-level, non-compensable only) ─────
+//
+// MOVED here from styleme-result.server.ts so the anchor selector can reach it without
+// the anchor → result → anchor import cycle that previously forced FORMALITY_RANK to be
+// duplicated. styleme-result.server.ts re-exports it, so every existing caller and test
+// keeps its import path.
+//
+// Only applies checks that cannot be satisfied through layering on top of this item.
+// Compensable requirements (arms-covered, chest-neckline-covered, dresses-modestly) are
+// evaluated at the complete-outfit level in passesCandidateDressingRequirements, never
+// rejected at item-selection time.
+//
+// Non-compensable: legs-covered on bottom/dress items.
+//   A midi or mini bottom CANNOT become legs-covered regardless of what is added on top.
+//   "n/a" hemLength → item is a top or outerwear → exempt (does not cover legs at all).
+//   null hemLength → unknown metadata → fail-open (keep the item in the pool).
+export function passesDressingRequirements(
+  item: ClosetAnchorInput,
+  dressingPreferences: readonly string[] | null | undefined,
+): boolean {
+  if (!dressingPreferences || dressingPreferences.length === 0) return true;
+  const prefs = new Set(dressingPreferences);
+
+  // legs-covered — non-compensable for garments that cover the leg zone (hemLength not "n/a")
+  if (prefs.has("legs-covered")) {
+    const hl = item.hemLength;
+    if (hl !== null && hl !== undefined && hl !== "n/a") {
+      if (hl !== "full" && hl !== "maxi") return false;
+    }
+  }
+
+  // no-cropped-tops — non-compensable: a garment explicitly cropped (topLength === "cropped")
+  // cannot become non-cropped through layering. Only applicable where topLength is known.
+  if (prefs.has("no-cropped-tops")) {
+    const tl = item.topLength;
+    if (tl !== null && tl !== undefined && tl !== "n/a") {
+      if (tl === "cropped") return false;
+    }
+  }
+
+  return true;
+}
+
+// ── Anchor eligibility ────────────────────────────────────────────────────────
+//
+// ONE deterministic gate, applied wherever an anchor is chosen — auto-selection,
+// the manual Closet picker, and candidate construction. Before this existed the
+// anchor was exempt from every hard requirement: `buildNaiaOutfitCandidates`
+// filtered the rest of the Closet with `item.id === anchor.id || passesDressingRequirements(...)`,
+// and `autoSelectClosetAnchor` was never handed the Passport at all. A customer who
+// requires legs covered could therefore be anchored to a mini skirt, and every
+// candidate built on that anchor would pass, because the candidate-level gate only
+// covers arms, shoulders and neckline.
+//
+// What this gate enforces, and what it deliberately does not:
+//
+//   T1 occasion   — an APPROVED occasionFit of "No" is a hard exclusion. A human
+//                   reviewer said this garment does not work for this occasion;
+//                   being chosen as the anchor does not overrule that.
+//   T2 formality  — NOT enforced. Formality is a ranking tier in this engine, never
+//                   a hard requirement: a Dressy request against a casual Closet must
+//                   still return the best available answer rather than nothing. The
+//                   existing in-range/out-of-range sort in autoSelectClosetAnchor and
+//                   the T2 comparator remain the only formality authorities.
+//   T3 dressing   — non-compensable requirements only (legs-covered, no-cropped-tops).
+//                   Compensable ones stay at outfit level, where a layer can satisfy them.
+//
+// Unknown metadata never rejects. A garment is refused only on explicit evidence.
+export type AnchorRejectionCode = "dressing-requirement" | "occasion-not-suitable";
+
+export interface AnchorEligibility {
+  eligible: boolean;
+  code?: AnchorRejectionCode;
+  /** Customer-facing sentence. States what happened; never blames, never invents a reason. */
+  message?: string;
+}
+
+const ANCHOR_ELIGIBLE: AnchorEligibility = { eligible: true };
+
+export function evaluateAnchorEligibility(
+  item: ClosetAnchorInput,
+  sessionOccasion: string,
+  dressingPreferences: readonly string[] | null | undefined,
+): AnchorEligibility {
+  if (!passesDressingRequirements(item, dressingPreferences)) {
+    return {
+      eligible: false,
+      code: "dressing-requirement",
+      message:
+        "This piece doesn't meet the coverage you've set in your Style Passport, " +
+        "and no layer can change that. Choose another piece, or update your Passport.",
+    };
+  }
+
+  if (!passesProfileOccasionGate(item, sessionOccasion)) {
+    return {
+      eligible: false,
+      code: "occasion-not-suitable",
+      message:
+        "This piece has been reviewed as not suitable for this occasion. " +
+        "Choose another piece, or change the occasion.",
+    };
+  }
+
+  return ANCHOR_ELIGIBLE;
+}

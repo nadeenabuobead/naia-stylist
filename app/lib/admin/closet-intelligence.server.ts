@@ -323,11 +323,12 @@ export async function listClosetItems(
       select: { id: true, fieldConfidence: true, category: true, subcategory: true },
     });
 
+    type ConfidenceRow = (typeof candidates)[number];
     const lowIds = candidates
-      .filter((c) =>
+      .filter((c: ConfidenceRow) =>
         computeOverallStoredConfidence(c.fieldConfidence, c.category, c.subcategory) === "LOW"
       )
-      .map((c) => c.id);
+      .map((c: ConfidenceRow) => c.id);
 
     andClauses.push({ id: { in: lowIds } });
   }
@@ -342,7 +343,7 @@ export async function listClosetItems(
         { formality: null },
         {
           silhouette: null,
-          category: { notIn: [...NON_SILHOUETTE_CATEGORIES] as string[] },
+          category: { notIn: [...NON_SILHOUETTE_CATEGORIES] as ClosetCategory[] },
         },
       ],
     });

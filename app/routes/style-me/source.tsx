@@ -10,6 +10,8 @@ import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { readNadineHandoff, CANONICAL_STYLEME_ENTRY } from "~/lib/styleme/handoff";
 import prisma from "~/db.server";
 import { autoSelectClosetAnchor } from "~/lib/ai/styleme-anchor.server";
+import { evaluateAnchorEligibility } from "~/lib/ai/styleme-profile-gate";
+import type { ClosetAnchorInput } from "~/lib/ai/styleme-recommendation.types";
 import { buildPrivateDownloadUrl, getCloudinaryConfig } from "~/lib/cloudinary-admin.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 
@@ -138,7 +140,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       return data({ step: "empty-closet" as const, source });
     }
     const cfg = getCloudinaryConfig();
-    const items: PickerItem[] = rawItems.map((item) => {
+    type PickerRow = (typeof rawItems)[number];
+    const items: PickerItem[] = rawItems.map((item: PickerRow) => {
       let imageUrl: string | null = null;
       if (item.imagePublicId && item.imageFormat && cfg) {
         imageUrl = buildPrivateDownloadUrl(cfg, item.imagePublicId, item.imageFormat, "private");
@@ -252,6 +255,10 @@ export async function action({ request }: ActionFunctionArgs) {
         formalityConditional: formalityConditional ?? null,
         intentions,
         bodyNeeds,
+        // Persistent dressing requirements gate the anchor before it is scored.
+        // Without this the highest-scoring garment won even when it could never
+        // satisfy a non-compensable requirement, and every candidate inherited it.
+        dressingPreferences: naiaCustomer.onboardingProfile?.dressingPreferences ?? [],
       });
 
       if (!selected) {
@@ -292,9 +299,38 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const item = await prisma.closetItem.findFirst({
       where: { id: closetItemId, customerId: naiaCustomer.id },
+      include: { styleMeProfile: true },
     });
     if (!item) {
       return data({ error: "Item not found or access denied" }, { status: 403 });
+    }
+
+    // Choosing a piece by hand does not exempt it from the session's hard requirements.
+    // The anchor appears in every candidate, so an ineligible anchor makes the whole
+    // outfit ineligible — and the customer would have received a confident, compliant-
+    // looking look that quietly broke a requirement they set in their Passport.
+    //
+    // We refuse and explain. We never silently substitute a different garment: she
+    // picked this piece deliberately and deserves to be told why it cannot be used.
+    const occasionForAnchor = (session.get("styleMeOccasion") as string | undefined) ?? "everyday";
+    const approvedProfile =
+      item.styleMeProfile?.profileStatus === "approved"
+        ? { occasionFit: (item.styleMeProfile.occasionFit as Record<string, string> | null) ?? null }
+        : null;
+    const eligibility = evaluateAnchorEligibility(
+      {
+        hemLength: item.hemLength ?? null,
+        topLength: item.topLength ?? null,
+        approvedProfile,
+      } as unknown as ClosetAnchorInput,
+      occasionForAnchor,
+      naiaCustomer.onboardingProfile?.dressingPreferences ?? [],
+    );
+    if (!eligibility.eligible) {
+      return data(
+        { error: eligibility.message, anchorRejectionCode: eligibility.code },
+        { status: 400 },
+      );
     }
 
     session.set("styleMeClosetAnchorId", closetItemId);

@@ -11,6 +11,7 @@ import type { NadineAnchorInput, ClosetAnchorInput, AnchorInput } from "./stylem
 import prisma from "../../db.server.js";
 import { buildPrivateDownloadUrl, getCloudinaryConfig } from "../../lib/cloudinary-admin.server.js";
 import { matchesSessionOccasion } from "./styleme-occasion-tokens.js";
+import { passesDressingRequirements, evaluateAnchorEligibility } from "./styleme-profile-gate.js";
 
 const VALID_HANDLES = new Set(getAllCatalogProducts().map((p) => p.handle));
 
@@ -368,6 +369,11 @@ export type AutoSelectItem = {
   garmentRelationships: string[];
   formality: string | null;
   waistShape: string | null;
+  // Coverage geometry — required so the anchor is held to the same non-compensable
+  // dressing requirements as every other garment. Before these were selected, the
+  // anchor was the one piece in the outfit nothing checked.
+  hemLength: string | null;
+  topLength: string | null;
   // Approved GarmentStyleMeProfile — for intention- and body-need-aware anchor ranking.
   // null when no approved profile exists.
   styleMeProfile: {
@@ -414,6 +420,23 @@ const _ANCHOR_CONSTRUCTION_BONUS: Record<string, number> = {
 };
 const _CONSTRUCTION_BODY_NEEDS = new Set(["structured-shape", "still-want-shape"]);
 
+/**
+ * Widens the narrow `styleMeProfile` selection used by autoSelectClosetAnchor to the
+ * shape scoreBodyNeedForClosetItem declares.
+ *
+ * The anchor query deliberately selects only the seven profile columns anchor ranking
+ * needs, not all eighteen. scoreBodyNeedForClosetItem reads four of them — construction,
+ * silhouetteCharacter, waistComfort, fabricBehaviour — and every read is optional-chained,
+ * so a partial object is behaviourally correct; only the declared type disagreed. The
+ * cast is confined here rather than repeated at each of the six call sites.
+ */
+type AnchorScoringProfile = NonNullable<ClosetAnchorInput["approvedProfile"]>;
+function asScoringProfile(
+  profile: AutoSelectItem["styleMeProfile"] | null | undefined,
+): AnchorScoringProfile | undefined {
+  return (profile ?? undefined) as unknown as AnchorScoringProfile | undefined;
+}
+
 export async function autoSelectClosetAnchor(
   customerId: string,
   signals: {
@@ -427,10 +450,15 @@ export async function autoSelectClosetAnchor(
     // Active fit/comfort body needs — used to rank anchor-capable garments by construction.
     // Ranked after occasion/register and before intention (per scoring tier order).
     bodyNeeds?: string[];
+    // Persistent Passport dressing requirements. A garment that cannot satisfy a
+    // non-compensable requirement is not eligible to anchor the session, no matter
+    // how well it scores — the anchor appears in every candidate, so an ineligible
+    // anchor makes every candidate ineligible.
+    dressingPreferences?: readonly string[] | null;
   },
   _fetchItems?: (customerId: string) => Promise<AutoSelectItem[]>,
 ): Promise<{ anchor: ClosetAnchorInput; id: string } | null> {
-  const items: AutoSelectItem[] = _fetchItems
+  const allItems: AutoSelectItem[] = _fetchItems
     ? await _fetchItems(customerId)
     : await prisma.closetItem.findMany({
         where: { customerId },
@@ -441,11 +469,22 @@ export async function autoSelectClosetAnchor(
           colors: true, primaryColor: true, pattern: true, material: true,
           styleTags: true, occasions: true, imageUrl: true,
           garmentRelationships: true, formality: true, waistShape: true,
+          hemLength: true, topLength: true,
           styleMeProfile: {
             select: { profileStatus: true, intentionPotentials: true, occasionFit: true, construction: true, silhouetteCharacter: true, waistComfort: true, fabricBehaviour: true },
           },
         },
       }) as AutoSelectItem[];
+
+  // Hard dressing gate, applied BEFORE scoring. Scoring cannot rescue a garment that
+  // violates a persistent requirement, so an ineligible piece must never reach the
+  // ranking at all. Unknown metadata fails open — only explicit evidence rejects.
+  const items: AutoSelectItem[] = allItems.filter((item) =>
+    passesDressingRequirements(
+      { hemLength: item.hemLength, topLength: item.topLength } as unknown as ClosetAnchorInput,
+      signals.dressingPreferences,
+    ),
+  );
 
   if (items.length === 0) return null;
 
@@ -530,7 +569,7 @@ export async function autoSelectClosetAnchor(
       if (needsLooseBonus) {
         const { violation, fitScore } = scoreBodyNeedForClosetItem("loose-comfortable", {
           fitProfile: null, waistShape: item.waistShape, styleTags: item.styleTags,
-          approvedProfile: approvedProfile ?? undefined,
+          approvedProfile: asScoringProfile(approvedProfile),
         });
         if (violation) {
           bonus -= 2.0; // fitted/restrictive anchor loses to occasion-valid relaxed alternative
@@ -543,7 +582,7 @@ export async function autoSelectClosetAnchor(
       if (needsLessBodyConscious) {
         const { violation, fitScore } = scoreBodyNeedForClosetItem("less-body-conscious", {
           fitProfile: null, waistShape: item.waistShape, styleTags: item.styleTags,
-          approvedProfile: approvedProfile ?? undefined,
+          approvedProfile: asScoringProfile(approvedProfile),
         });
         if (violation) {
           bonus -= 2.0; // fitted anchor loses to non-cling alternative within eligible pool
@@ -556,7 +595,7 @@ export async function autoSelectClosetAnchor(
       if (needsSofterFabrics && approvedProfile) {
         const { fitScore } = scoreBodyNeedForClosetItem("softer-easier-fabrics", {
           fitProfile: null, waistShape: item.waistShape, styleTags: item.styleTags,
-          approvedProfile: approvedProfile ?? undefined,
+          approvedProfile: asScoringProfile(approvedProfile),
         });
         if (fitScore !== null) bonus += (fitScore - 0.5) * 1.0; // soft→+0.5, rigid→-0.3, neutral→0
       }
@@ -565,7 +604,7 @@ export async function autoSelectClosetAnchor(
       if (needsWaistDef) {
         const { fitScore } = scoreBodyNeedForClosetItem("waist-definition", {
           fitProfile: null, waistShape: item.waistShape, styleTags: item.styleTags,
-          approvedProfile: approvedProfile ?? undefined,
+          approvedProfile: asScoringProfile(approvedProfile),
         });
         if (fitScore !== null && fitScore > 0) bonus += fitScore * 1.5;
       }
@@ -574,7 +613,7 @@ export async function autoSelectClosetAnchor(
       if (needsNothingTightWaist) {
         const { fitScore } = scoreBodyNeedForClosetItem("nothing-tight-waist", {
           fitProfile: null, waistShape: item.waistShape, styleTags: item.styleTags,
-          approvedProfile: approvedProfile ?? undefined,
+          approvedProfile: asScoringProfile(approvedProfile),
         });
         if (fitScore !== null) {
           if (fitScore >= 0.8) bonus += 1.0;       // elastic/stretch/drawstring
@@ -641,7 +680,7 @@ export async function autoSelectClosetAnchor(
         const ap2 = s.item.styleMeProfile?.profileStatus === "approved" ? s.item.styleMeProfile : null;
         const gfbn = (need: string) => scoreBodyNeedForClosetItem(need, {
           fitProfile: null, waistShape: s.item.waistShape,
-          styleTags: s.item.styleTags, approvedProfile: ap2 ?? undefined,
+          styleTags: s.item.styleTags, approvedProfile: asScoringProfile(ap2),
         });
         const bnDetail: Record<string, unknown> = {};
         if (needsConstructionBonus && ap2 && ANCHOR_CAPABLE_CATEGORIES.has(s.item.category)) {
