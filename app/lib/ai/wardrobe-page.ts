@@ -256,6 +256,15 @@ export interface WardrobePageInput {
    * which is deleting a finding, not deduplicating one.
    */
   garmentName?: (garmentId: string) => string | null;
+  /**
+   * The customer's own Passport lifestyle tokens, verbatim. Presentation only
+   * — used to label an already-valid combination in her own life's terms
+   * (e.g. surfacing a genuinely gym-tagged combination as its own "For active
+   * / gym days" card instead of a generic one), never to compute a new depth
+   * verdict. Defaults to empty, in which case only the three engine registers
+   * are shown, unlabelled by lifestyle specifics.
+   */
+  lifestyle?: readonly string[];
 }
 
 // ── Builder ───────────────────────────────────────────────────────────────────
@@ -348,24 +357,41 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
     const cells: PageEntry[] = [];
     if (dna.palette.length > 0) {
       const top = dna.palette[0];
-      // Abundance alone is never "never buy this colour" — it only informs
-      // priority when it's genuinely dominant AND nothing live is already
-      // recommending exactly this colour (which would mean a real gap exists
-      // that this colour would fill, the opposite of low priority).
+      // Abundance alone is never "never buy this colour". A live
+      // recommendation naming this exact colour always outranks it — that's
+      // a real gap this colour would fill, the opposite of low priority.
       const recommendedColours = new Set(
         recommendations.recommendations
           .flatMap((r) => r.attributes)
           .filter((a) => a.kind === "colour")
           .map((a) => a.label.toLowerCase()),
       );
-      const lowPriorityNote =
-        top.share >= 0.3 && top.neutral && !recommendedColours.has(top.colour.toLowerCase())
-          ? ` Another similar ${top.colour.toLowerCase()} basic may be low priority unless it gives you something you don't already have.`
-          : "";
+      const colourIsLiveGap = recommendedColours.has(top.colour.toLowerCase());
+
+      // The "enough" evidence distinguishes a role/category only by
+      // neutral-vs-colour band, not by the specific colour name — a
+      // chromatic-band cluster's own title never says which colour it is
+      // (describeCluster in wardrobe-needs.ts encodes no word for it). So a
+      // specific "you have enough of this role" connection is only honest
+      // when the dominant colour IS the neutral band, and a genuine "enough"
+      // cluster exists for it. Otherwise this stays a plain observation, with
+      // no skip advice attached — abundance without a named, covered role is
+      // not evidence of duplication.
+      const enoughNeutralCluster = top.neutral
+        ? needs.enough.find((f) => /\bneutral\b/i.test(f.title))
+        : undefined;
+
+      let body = `${top.colour} is already a big part of your wardrobe (${top.count} ${top.count === 1 ? "piece" : "pieces"}).`;
+      if (!colourIsLiveGap && top.share >= 0.3 && enoughNeutralCluster) {
+        const role = enoughNeutralCluster.title.replace(/^You already have enough /, "");
+        body = `${top.colour} is already your most common colour. You also have plenty of ${role}, ` +
+          `so another similar ${top.colour.toLowerCase()} one is low priority right now.`;
+      }
+
       cells.push({
         id: "dna-palette", claim: "dna:palette", role: "full",
         title: "Your main colours", garmentIds: [],
-        body: `${top.colour} is already a big part of your wardrobe (${top.count} ${top.count === 1 ? "piece" : "pieces"}).${lowPriorityNote}`,
+        body,
         meta: { palette: dna.palette.slice(0, 5) },
       });
     }
@@ -528,11 +554,32 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
 
   if (ready) {
     const relevantRegisters = needs.registers.filter(registerIsRelevant);
-    if (relevantRegisters.length > 0) {
+    const lifestyle = input.lifestyle ?? [];
+
+    // A combination already tagged for an activity her Passport specifically
+    // names (today: fitness/gym) is presented under that life area, not
+    // buried under whichever generic register it happens to formality-bucket
+    // into. This is a PRESENTATION pull-out only: the pairing itself, its
+    // gating and its evidence are the engine's, untouched; this card carries
+    // no enough/gap/depth verdict of its own, and never appears unless a real
+    // pairing already exists for it — nothing is invented for a declared
+    // lifestyle with no supported combination.
+    //
+    // `LIFESTYLE_PRESENTATION` is the one place a lifestyle token is tied to a
+    // presentation rule, so a future explicit cross-feature signal (a second
+    // activity, or evidence from outside Passport.lifestyle entirely) extends
+    // this table without touching anything below it.
+    const gymDeclared = lifestyle.some((id) => LIFESTYLE_PRESENTATION.gym.tokens.has(id));
+    const gymPairing = gymDeclared && intelligence.pairings.state !== "learning"
+      ? intelligence.pairings.pairings.find((p) => LIFESTYLE_PRESENTATION.gym.matchesPairing(p))
+      : undefined;
+
+    if (relevantRegisters.length > 0 || gymPairing) {
       const byRegister = new Map<RegisterId, WardrobePairing[]>();
       if (intelligence.pairings.state !== "learning") {
         for (const p of intelligence.pairings.pairings) {
           if (p.register === null) continue;
+          if (gymPairing && p.id === gymPairing.id) continue; // presented separately, not twice
           if (!relevantRegisters.some((r) => r.register === p.register)) continue;
           const list = byRegister.get(p.register) ?? [];
           list.push(p);
@@ -540,28 +587,43 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
         }
       }
       for (const list of byRegister.values()) for (const p of list) waysToGetDressedPairingIds.add(p.id);
+      if (gymPairing) waysToGetDressedPairingIds.add(gymPairing.id);
+
+      const registerEntries: PageEntry[] = relevantRegisters.map((r) => {
+        const matches = byRegister.get(r.register) ?? [];
+        return {
+          id: `explore-${r.register}`,
+          claim: `explore:${r.register}`,
+          role: "full" as EntryRole,
+          title: REGISTER_LIFE_HEADING[r.register] ?? `For ${REGISTER_WORD[r.register] ?? r.register}`,
+          // Passport need is why this is shown at all; the Closet fact
+          // decides what's said. Zero pieces is not hidden — it's named.
+          body: r.rawCount === 0
+            ? "Your Closet doesn't have anything for this part of your life yet."
+            : matches.length > 0
+              ? "A combination nAia can support from your Closet is shown below."
+              : "There isn't a combination in your Closet for this yet.",
+          garmentIds: [],
+        };
+      });
+      // Only ever added alongside a real pairing — never a bare "nothing
+      // found" card, unlike the three registers above.
+      if (gymPairing) {
+        registerEntries.push({
+          id: "explore-gym",
+          claim: "explore:gym",
+          role: "full" as EntryRole,
+          title: LIFESTYLE_PRESENTATION.gym.heading,
+          body: "A combination nAia can support from your Closet is shown below.",
+          garmentIds: [],
+        });
+      }
 
       add("do", {
         id: "ways-to-get-dressed",
         label: "Ways to get dressed with what you own",
         kind: "pointer-action",
-        entries: relevantRegisters.map((r) => {
-          const matches = byRegister.get(r.register) ?? [];
-          return {
-            id: `explore-${r.register}`,
-            claim: `explore:${r.register}`,
-            role: "full" as EntryRole,
-            title: `Explore ${REGISTER_WORD[r.register] ?? r.register} combinations you already own`,
-            // Passport need is why this is shown at all; the Closet fact
-            // decides what's said. Zero pieces is not hidden — it's named.
-            body: r.rawCount === 0
-              ? "Your Closet doesn't have anything for this part of your life yet."
-              : matches.length > 0
-                ? "A combination nAia can support from your Closet is shown below."
-                : "There isn't a combination in your Closet for this yet.",
-            garmentIds: [],
-          };
-        }),
+        entries: registerEntries,
       });
 
       for (const r of relevantRegisters) {
@@ -569,7 +631,7 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
         if (matches.length === 0) continue;
         add("do", {
           id: `do-pairings-${r.register}`,
-          // No label: it would repeat the "Explore ... combinations" entry above it.
+          // No label: it would repeat the "For ..." entry above it.
           kind: "pairings",
           entries: matches.map((pair) => ({
             id: pair.id,
@@ -578,6 +640,20 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
             body: plainPairReason(pair.reason, pair.garmentIds.length),
             garmentIds: pair.garmentIds,
           })),
+        });
+      }
+
+      if (gymPairing) {
+        add("do", {
+          id: "do-pairings-gym",
+          kind: "pairings",
+          entries: [{
+            id: gymPairing.id,
+            claim: `do-pairing:${gymPairing.id}`,
+            role: "full" as EntryRole,
+            body: plainPairReason(gymPairing.reason, gymPairing.garmentIds.length),
+            garmentIds: gymPairing.garmentIds,
+          }],
         });
       }
     }
@@ -1062,6 +1138,37 @@ const REGISTER_WORD: Readonly<Record<string, string>> = {
   everyday: "everyday dressing",
   work: "work",
   occasion: "occasion dressing",
+};
+
+/** The "Ways to get dressed" card heading for each engine register. */
+const REGISTER_LIFE_HEADING: Readonly<Record<string, string>> = {
+  everyday: "For everyday",
+  work: "For work",
+  occasion: "For dinners & events",
+};
+
+/**
+ * Lifestyle tokens tied to a presentation rule — pulling an already-valid,
+ * already-tagged combination out from under a generic register heading and
+ * into her own words for it, when her Passport specifically names that life
+ * area. Never a new depth/gap/enough computation: `matchesPairing` only reads
+ * a pairing's existing `reason` text for the SAME shared-occasion evidence
+ * `scorePair` already produces (see wardrobe-intelligence.ts).
+ *
+ * This is the one place such a rule lives, so a future life area — or a
+ * future signal beyond Passport.lifestyle entirely — extends this table
+ * without touching the "Ways to get dressed" logic that reads it.
+ */
+const LIFESTYLE_PRESENTATION: Readonly<Record<string, {
+  tokens: ReadonlySet<string>;
+  heading: string;
+  matchesPairing: (pair: WardrobePairing) => boolean;
+}>> = {
+  gym: {
+    tokens: new Set(["fitness-gym"]),
+    heading: "For active / gym days",
+    matchesPairing: (pair) => /\btagged these for gym\b/i.test(pair.reason),
+  },
 };
 
 const DRESS_LEVEL_PHRASE: Readonly<Record<string, string>> = {

@@ -160,6 +160,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     confidence: await readClosetConfidence(customer.id),
     garmentName: (id) => garments.find((g) => g.id === id)?.name ?? null,
     change,
+    lifestyle: profile?.lifestyle ?? [],
   });
 
   // Only the fields the view needs — keeps the loader payload small.

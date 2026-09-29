@@ -657,3 +657,113 @@ describe("§WP-10 Ways to get dressed: Passport need gates it, inventory only de
     assert.doesNotMatch(explore.body ?? "", /nAia hasn't|nAia has not/i);
   });
 });
+
+// ── §WP-11 — Ways to get dressed speaks her life, in the engine's own
+//    3-register data; a declared activity pulls its own already-valid
+//    combination out from under a generic heading, and only when one exists ─
+
+describe("§WP-11 lifestyle-labelled presentation, same 3-register engine", () => {
+  it("§WP-11a the three register cards are headed in life terms, not engine terms", () => {
+    const page = buildWardrobePage(inputWithRegisterPairings());
+    const explore = page.sections.find((s) => s.id === "do")!.blocks.find((b) => b.id === "ways-to-get-dressed")!;
+    const work = explore.entries.find((e) => e.id === "explore-work")!;
+    assert.equal(work.title, "For work");
+  });
+
+  it("§WP-11b a genuinely gym-tagged combination gets its own card when fitness/gym is declared", () => {
+    const input = baseInput(); // "everyday" and "work" are both needed:true here
+    (input.intelligence as unknown as { pairings: { pairings: unknown[] } }).pairings.pairings = [
+      { id: "p-gym", garmentIds: ["g10", "g11"], reason: "You've tagged these for gym.", untried: true, register: "everyday" },
+    ];
+    input.lifestyle = ["fitness-gym"];
+    const page = buildWardrobePage(input);
+
+    const doBlocks = page.sections.find((s) => s.id === "do")!.blocks;
+    const explore = doBlocks.find((b) => b.id === "ways-to-get-dressed")!;
+    const gymEntry = explore.entries.find((e) => e.id === "explore-gym");
+    assert.ok(gymEntry, "a gym card should appear");
+    assert.equal(gymEntry!.title, "For active / gym days");
+
+    const gymBlock = doBlocks.find((b) => b.id === "do-pairings-gym");
+    assert.ok(gymBlock, "the gym combination renders in its own block");
+    assert.ok(gymBlock!.entries[0].garmentIds.includes("g10"));
+
+    // Not duplicated under Everyday, and not left anywhere in the general list.
+    const everydayBlock = doBlocks.find((b) => b.id === "do-pairings-everyday");
+    assert.ok(!(everydayBlock?.entries ?? []).some((e) => e.id === "p-gym"), "not shown twice under Everyday");
+    const possibilitiesPairings = page.sections.find((s) => s.id === "possibilities")?.blocks.find((b) => b.id === "pairings");
+    assert.ok(!(possibilitiesPairings?.entries ?? []).some((e) => e.id === "p-gym"), "not left in the general list either");
+  });
+
+  it("§WP-11c gym is declared but nothing is gym-tagged: no card is invented", () => {
+    const input = inputWithRegisterPairings();
+    input.lifestyle = ["fitness-gym"];
+    const page = buildWardrobePage(input);
+    const explore = page.sections.find((s) => s.id === "do")!.blocks.find((b) => b.id === "ways-to-get-dressed")!;
+    assert.equal(explore.entries.find((e) => e.id === "explore-gym"), undefined);
+  });
+
+  it("§WP-11d a gym-tagged combination without the declared lifestyle stays a plain combination", () => {
+    const input = inputWithRegisterPairings();
+    (input.intelligence as unknown as { pairings: { pairings: unknown[] } }).pairings.pairings.push(
+      { id: "p-gym2", garmentIds: ["g12", "g13"], reason: "You've tagged these for gym.", untried: true, register: "everyday" },
+    );
+    // input.lifestyle left unset — she never told nAia fitness/gym is part of her life.
+    const page = buildWardrobePage(input);
+    const doBlocks = page.sections.find((s) => s.id === "do")!.blocks;
+    assert.equal(doBlocks.find((b) => b.id === "ways-to-get-dressed")!.entries.find((e) => e.id === "explore-gym"), undefined);
+  });
+});
+
+// ── §WP-12 — colour low-priority advice is role-specific, never bare volume ───
+
+function inputWithPalette(palette: Array<{ colour: string; count: number; share: number; neutral: boolean }>): WardrobePageInput {
+  const input = baseInput();
+  (input.intelligence as unknown as { dna: { palette: unknown } }).dna.palette = palette;
+  return input;
+}
+
+describe("§WP-12 colour advice connects abundance to actual duplication evidence", () => {
+  it("§WP-12a a dominant neutral with a genuine enough-cluster gets the full, role-specific line", () => {
+    const input = inputWithPalette([{ colour: "Black", count: 19, share: 0.4, neutral: true }]);
+    const page = buildWardrobePage(input); // baseInput()'s enough finding is "everyday neutral tops"
+    const palette = page.sections.find((s) => s.id === "now")!.blocks
+      .find((b) => b.id === "dna")!.entries.find((e) => e.id === "dna-palette")!;
+    assert.match(palette.body ?? "", /Black is already your most common colour/);
+    assert.match(palette.body ?? "", /plenty of everyday neutral tops/);
+    assert.match(palette.body ?? "", /another similar black one is low priority right now/);
+  });
+
+  it("§WP-12b a colour a live recommendation actually wants is never called low priority", () => {
+    const input = inputWithPalette([{ colour: "Grey", count: 12, share: 0.35, neutral: true }]);
+    (input.recommendations as unknown as { recommendations: unknown[] }).recommendations = [
+      { id: "rec-work", register: "work", specificity: "detailed", title: "A full-length work bottom",
+        attributes: [{ kind: "colour", values: ["grey"], label: "Grey", source: "passport" }],
+        body: "x", unlocksIds: [], criteria: {}, evidence: [], strength: "strong" },
+    ];
+    const page = buildWardrobePage(input);
+    const palette = page.sections.find((s) => s.id === "now")!.blocks
+      .find((b) => b.id === "dna")!.entries.find((e) => e.id === "dna-palette")!;
+    assert.doesNotMatch(palette.body ?? "", /low priority/i);
+    assert.match(palette.body ?? "", /Grey is already a big part of your wardrobe/);
+  });
+
+  it("§WP-12c abundant but no role is actually covered enough: observation only, no skip advice", () => {
+    const input = inputWithPalette([{ colour: "Navy", count: 10, share: 0.4, neutral: true }]);
+    (input.needs as unknown as { enough: unknown[] }).enough = []; // nothing sufficiently covered
+    const page = buildWardrobePage(input);
+    const palette = page.sections.find((s) => s.id === "now")!.blocks
+      .find((b) => b.id === "dna")!.entries.find((e) => e.id === "dna-palette")!;
+    assert.match(palette.body ?? "", /Navy is already a big part of your wardrobe/);
+    assert.doesNotMatch(palette.body ?? "", /low priority/i);
+  });
+
+  it("§WP-12d a chromatic (non-neutral) dominant colour never gets a role-specific claim the data can't back", () => {
+    const input = inputWithPalette([{ colour: "Burgundy", count: 14, share: 0.4, neutral: false }]);
+    const page = buildWardrobePage(input);
+    const palette = page.sections.find((s) => s.id === "now")!.blocks
+      .find((b) => b.id === "dna")!.entries.find((e) => e.id === "dna-palette")!;
+    assert.match(palette.body ?? "", /Burgundy is already a big part of your wardrobe/);
+    assert.doesNotMatch(palette.body ?? "", /low priority/i);
+  });
+});
