@@ -30,6 +30,7 @@ import { readClosetConfidence } from "~/lib/ai/wardrobe-confidence.server";
 import { buildWardrobePage, type WardrobePage, type PageEntry } from "~/lib/ai/wardrobe-page";
 import { registerDisplay, type DepthState } from "~/lib/ai/wardrobe-copy";
 import { garmentRegister, type RegisterId } from "~/lib/ai/wardrobe-needs";
+import { SILHOUETTE_LABELS } from "~/lib/ai/wardrobe-intelligence";
 
 // Duplicated from closet.intelligence.tsx rather than importing a private
 // constant — this route makes no change to that file at all.
@@ -153,7 +154,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // duplicated here.
   const allRegisterReadings = needs.registers
     .filter((r) => r.needed)
-    .map((r) => ({ register: r.register, ...registerDisplay(r) }))
+    .map((r) => ({ register: r.register, usableCount: r.usableCount, ...registerDisplay(r) }))
     .filter((d) => d.state !== "learning");
 
   // ── Real neutral share, for "What your wardrobe looks like" ─────────────
@@ -206,9 +207,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
   }
 
+  // ── The real recommendation's structured evidence, for the shopping card ──
+  // Same object the title/body already come from — attributes and criteria
+  // were already computed, just not threaded to the client before. Only
+  // fields that are actually non-null are ever shown; nothing here invents a
+  // rise, fabric or colour the engine didn't resolve for this customer.
+  const topRecommendation = recommendations.recommendations[0];
+  const recommendationDetail = topRecommendation
+    ? {
+        attributes: topRecommendation.attributes,
+        structure: topRecommendation.criteria.structure,
+        coverage: topRecommendation.criteria.coverage,
+        resolvingSilhouettes: topRecommendation.criteria.resolvingSilhouettes.map((s) => SILHOUETTE_LABELS[s] ?? s),
+        unlocksIds: topRecommendation.unlocksIds,
+      }
+    : null;
+
   return data({
     page, garmentCards, glanceRegisters, allRegisterReadings, neutralSharePct,
-    enoughCluster, rediscoverByRegister, bestByRegisterPreview,
+    enoughCluster, rediscoverByRegister, bestByRegisterPreview, recommendationDetail,
   });
 }
 
@@ -254,7 +271,47 @@ function shortMatchWord(card: GarmentCard | undefined): string {
   return n || "this piece";
 }
 
+/** A plain, real noun for "swap the ___" — derived from the actual changed
+ * piece's own category/subcategory, same pattern as shortMatchWord(). */
+function swapNoun(card: GarmentCard | undefined): string {
+  if (!card) return "piece";
+  const n = (card.subcategory ?? card.category).toLowerCase();
+  if (/jean|denim/.test(card.name ?? "") || /jean/.test(n)) return "jeans";
+  if (/trouser|pant/.test(n)) return "trousers";
+  if (/skirt/.test(n)) return "skirt";
+  if (/dress/.test(n)) return "dress";
+  if (/blazer|jacket|coat|cardigan/.test(n)) return "layer";
+  if (/shoe|boot|loafer|sneaker|heel|sandal/.test(n)) return "shoes";
+  if (/bag|tote|clutch/.test(n)) return "bag";
+  if (/top|shirt|blouse|tee|tank|sweater|knit/.test(n)) return "top";
+  return n || "piece";
+}
+
+function joinWords(words: string[]): string {
+  const unique = [...new Set(words)];
+  if (unique.length <= 1) return unique[0] ?? "piece";
+  return `${unique.slice(0, -1).join(", ")} and ${unique[unique.length - 1]}`;
+}
+
 const LEGS_COVERED_POLICY_LINE = 'For this preference, nAia currently checks for full-length pieces.';
+
+/**
+ * Context-aware framing for a coverage finding, using only signals that
+ * already exist on the real garment/finding: category (activewear reads
+ * differently than everyday clothing), a genuine rescuing layer, and the
+ * midi length itself (an open policy question, not an asserted failure —
+ * see the coverage-semantics spec). No new engine field, no new gating: the
+ * SAME set of garments still appears here, only how each one is framed
+ * changes. A true "matches your preference" state (for garments that
+ * already pass) isn't computed here — only contradictions are surfaced —
+ * so that third state isn't shown until that's real.
+ */
+function coverageContext(reason: string, hasRescue: boolean, category: string | undefined, hemLength: string | null): "may-depend" | "doesnt-match" {
+  if (category === "ACTIVEWEAR") return "may-depend";
+  if (reason === "keeping your legs covered" && hemLength === "midi") return "may-depend";
+  if (hasRescue) return "may-depend";
+  return "doesnt-match";
+}
 
 /**
  * The per-piece Coverage reason, in her language.
@@ -339,15 +396,22 @@ type Insight = "wear" | "work" | "shopping" | "coverage" | "profile" | null;
 export default function WardrobeIntelligencePreview() {
   const {
     page, garmentCards, glanceRegisters, allRegisterReadings, neutralSharePct,
-    enoughCluster, rediscoverByRegister, bestByRegisterPreview,
+    enoughCluster, rediscoverByRegister, bestByRegisterPreview, recommendationDetail,
   } = useLoaderData<typeof loader>() as {
     page: WardrobePage; garmentCards: GarmentCard[];
     glanceRegisters: Array<{ heading: string; stateText: string }>;
-    allRegisterReadings: Array<{ register: RegisterId; heading: string; state: DepthState; stateText: string; plain: string }>;
+    allRegisterReadings: Array<{ register: RegisterId; usableCount: number; heading: string; state: DepthState; stateText: string; plain: string }>;
     neutralSharePct: number | null;
     enoughCluster: { title: string; body: string; count: number } | null;
     rediscoverByRegister: Array<{ register: RegisterId | "other"; garmentIds: string[] }>;
     bestByRegisterPreview: Partial<Record<RegisterId, Array<{ id: string; reason: string; garmentIds: string[] }>>>;
+    recommendationDetail: {
+      attributes: Array<{ kind: string; values: string[]; label: string; source: string }>;
+      structure: string | null;
+      coverage: string[];
+      resolvingSilhouettes: string[];
+      unlocksIds: string[];
+    } | null;
   };
   const byId = new Map(garmentCards.map((c) => [c.id, c]));
 
@@ -356,6 +420,14 @@ export default function WardrobeIntelligencePreview() {
   // isn't exported for the client to reuse directly.
   const REGISTER_LABEL: Record<RegisterId, string> = {
     everyday: "Everyday", work: "Work", occasion: "Dinners & events",
+  };
+  // Same labels COVERAGE_RULES already uses server-side — repeated here only
+  // because that map isn't exported, not a new vocabulary.
+  const COVERAGE_LABEL: Record<string, string> = {
+    "legs-covered": "Full length", "prefer-full-length-trousers": "Full length",
+    "arms-covered": "Sleeved", "avoid-sleeveless": "Sleeved",
+    "chest-neckline-covered": "Higher neckline", "prefer-higher-necklines": "Higher neckline",
+    "longer-tops": "Longer cut", "no-cropped-tops": "Not cropped", "looser-fitting": "Easier fit",
   };
 
   const [insight, setInsight] = useState<Insight>(null);
@@ -451,10 +523,7 @@ export default function WardrobeIntelligencePreview() {
               );
             })}
           </div>
-          <p className="wip-dialog-note">
-            Each piece is shown once. Choose one to inspect the potential pairing — this reuses the
-            same matching results already computed, not a new outfit-generation service.
-          </p>
+          <p className="wip-dialog-note">Each piece is shown once — choose one to see it paired.</p>
         </DialogShell>
       );
     }
@@ -466,7 +535,7 @@ export default function WardrobeIntelligencePreview() {
             <div><Thumb card={rediscoverCard} height={230} /><p>{cardLabel(rediscoverCard)}</p></div>
             <div><Thumb card={card} height={230} /><p>{cardLabel(card)}</p></div>
           </div>
-          <p className="wip-dialog-note">A match between individual pieces is not a complete outfit or a guarantee of fit.</p>
+          <p className="wip-dialog-note">A good starting point — add shoes and finishing pieces to complete the look.</p>
           <button type="button" className="wip-link" onClick={() => setDialog({ kind: "matches" })}>← View all {matchIds.length} matches</button>
         </DialogShell>
       );
@@ -481,7 +550,7 @@ export default function WardrobeIntelligencePreview() {
             })}
           </div>
           <p className="wip-combo-text">{attentionCombo.body}</p>
-          <p className="wip-dialog-note">A supported combination already computed for this Closet. Footwear and other finishing items are not represented.</p>
+          <p className="wip-dialog-note">Add shoes and finishing pieces to complete the look.</p>
         </DialogShell>
       );
     }
@@ -540,24 +609,20 @@ export default function WardrobeIntelligencePreview() {
     }
     if (dialog.kind === "method") {
       return (
-        <DialogShell title="What this is based on." subtitle="How this page's findings are built and bounded." onClose={closeDialog}>
+        <DialogShell title="How nAia knows this." onClose={closeDialog}>
           <div className="wip-profile-block">
-            <h3>Existing evidence</h3>
-            <p>Every finding on this page comes from your Closet, your Style Passport, and how you&rsquo;ve used nAia — nothing is generated for this view.</p>
-          </div>
-          <div className="wip-profile-block">
-            <h3>Evidence boundaries</h3>
             <p>
-              Individual matches are not complete outfits. A colour appearing less often is not
-              automatically a shopping need. Coverage suggestions are checked against what you&rsquo;ve
-              stated you prefer. Feedback you&rsquo;ve marked &ldquo;Wore it&rdquo; is genuine self-reported
-              evidence — nAia does not automatically track everything you wear.
+              Your Wardrobe Intelligence combines the pieces you&rsquo;ve added to your Closet, your Style
+              Passport, your StyleMe activity, and feedback you&rsquo;ve chosen to share.
             </p>
           </div>
           <div className="wip-profile-block">
-            <h3>How this preview behaves</h3>
-            <p>Selecting a finding changes the main view. Deeper evidence and exploring every match open in a dialog. Nothing here is saved or recalculated.</p>
+            <p>
+              Recommendations become more accurate as you add more of your wardrobe and tell nAia what
+              you actually wear.
+            </p>
           </div>
+          <p className="wip-dialog-note">nAia only knows about pieces and wear activity you&rsquo;ve shared with it.</p>
         </DialogShell>
       );
     }
@@ -683,9 +748,9 @@ export default function WardrobeIntelligencePreview() {
                     )}
                   </div>
                   <div className="wip-feature-foot">
-                    <p>Potential individual pairings, not {matchIds.length} complete outfits.</p>
+                    <a className="wip-link" href="/style-me">Style this piece in StyleMe →</a>
                     <button type="button" className="wip-primary" onClick={() => setDialog({ kind: "matches" })}>
-                      Explore all {matchIds.length} matches <span aria-hidden="true">→</span>
+                      See all {matchIds.length} compatible pieces <span aria-hidden="true">→</span>
                     </button>
                   </div>
                 </>
@@ -697,7 +762,7 @@ export default function WardrobeIntelligencePreview() {
                   <div className="wip-feature-head">
                     <span className="wip-tag">Wear more of what you own</span>
                     <h2>How well your Closet supports your life.</h2>
-                    <p>Real combinations nAia has resolved from what you own — not guaranteed complete outfits unless StyleMe has actually validated one as such. Activewear and travel are kept separate: a shared casual tag never turns one into the other.</p>
+                    <p>Real combinations from what you already own, kept separate by the parts of your life you told nAia about — activewear and travel never blend into everyday.</p>
                   </div>
                   <div className="wip-ways-list">
                     {(["everyday", "work", "occasion"] as const).map((register) => {
@@ -706,6 +771,18 @@ export default function WardrobeIntelligencePreview() {
                       if (!reading && !entry) return null;
                       const combos = bestByRegisterPreview[register] ?? [];
                       const why = entry?.action?.kind === "reveal" ? entry.action : undefined;
+                      // The interpretation leads, not the specific combo's
+                      // reason — registerDisplay's own plain-language line
+                      // ("You own a lot... repeat the same formula") when
+                      // there is one; "strong" carries no separate sentence
+                      // by design, so it falls back to the real usable-piece
+                      // count instead of an empty paragraph.
+                      const interpretation = reading?.plain
+                        || (reading?.state === "strong" && reading.usableCount > 0
+                          ? `You have ${reading.usableCount} usable ${REGISTER_LABEL[register].toLowerCase()} pieces that combine easily.`
+                          : "");
+                      const comboWhyKey = `combo-${register}`;
+                      const comboWhy = combos[0]?.reason;
                       return (
                         <div key={register} className="wip-ways-row">
                           <div className="wip-ways-text">
@@ -713,7 +790,17 @@ export default function WardrobeIntelligencePreview() {
                               <h3>{REGISTER_LABEL[register]}</h3>
                               {reading && <span className={`wip-depth-badge wip-depth-badge--${reading.state}`}>{reading.stateText}</span>}
                             </div>
-                            <p>{combos.length > 0 ? entry?.body ?? reading?.plain ?? "" : (entry?.body ?? reading?.plain ?? "Nothing here yet.")}</p>
+                            <p>{interpretation || entry?.body || "Nothing here yet."}</p>
+                            {combos.length > 0 && comboWhy && (
+                              <>
+                                <button type="button" className="wip-link" onClick={() => toggleWhy(comboWhyKey)}>
+                                  {expandedWhy.has(comboWhyKey) ? "Show less" : "Why this works"}
+                                </button>
+                                {expandedWhy.has(comboWhyKey) && (
+                                  <p className="wip-ways-why">{comboWhy}</p>
+                                )}
+                              </>
+                            )}
                             {why && (
                               <>
                                 <button type="button" className="wip-link" onClick={() => toggleWhy(entry!.id)}>
@@ -727,11 +814,44 @@ export default function WardrobeIntelligencePreview() {
                           </div>
                           {combos.length > 0 ? (
                             <div className="wip-ways-combos">
-                              {combos.map((combo) => (
-                                <div key={combo.id} className="wip-ways-strip">
-                                  {combo.garmentIds.slice(0, 4).map((id) => <Thumb key={id} card={byId.get(id)} height={80} />)}
-                                </div>
-                              ))}
+                              {(() => {
+                                const primary = combos[0];
+                                const secondary = combos[1];
+                                // A second ranked combo that shares most of its
+                                // pieces with the first isn't a second outfit —
+                                // it's a swap. Only the piece(s) that actually
+                                // differ are shown, never the repeated ones.
+                                const sharedIds = secondary
+                                  ? primary.garmentIds.filter((id) => secondary.garmentIds.includes(id))
+                                  : [];
+                                const changedIds = secondary
+                                  ? secondary.garmentIds.filter((id) => !sharedIds.includes(id))
+                                  : [];
+                                const isSwap = secondary !== undefined && sharedIds.length > 0 && changedIds.length > 0;
+                                const isDistinctLook = secondary !== undefined && sharedIds.length === 0 && changedIds.length > 0;
+                                return (
+                                  <>
+                                    <div className="wip-ways-strip">
+                                      {primary.garmentIds.slice(0, 4).map((id) => <Thumb key={id} card={byId.get(id)} height={80} />)}
+                                    </div>
+                                    {isSwap && (
+                                      <div className="wip-ways-swap">
+                                        <span className="wip-ways-swap-label">
+                                          Or swap the {joinWords(changedIds.map((id) => swapNoun(byId.get(id))))}
+                                        </span>
+                                        <div className="wip-ways-strip wip-ways-strip--swap">
+                                          {changedIds.map((id) => <Thumb key={id} card={byId.get(id)} height={56} />)}
+                                        </div>
+                                      </div>
+                                    )}
+                                    {isDistinctLook && (
+                                      <div className="wip-ways-strip">
+                                        {secondary!.garmentIds.slice(0, 4).map((id) => <Thumb key={id} card={byId.get(id)} height={80} />)}
+                                      </div>
+                                    )}
+                                  </>
+                                );
+                              })()}
                             </div>
                           ) : entry && entry.garmentIds.length > 0 ? (
                             <div className="wip-ways-strip">
@@ -810,23 +930,52 @@ export default function WardrobeIntelligencePreview() {
                     <span className="wip-tag">Shopping priorities</span>
                     <h2>What&rsquo;s worth considering — and what you already have enough of.</h2>
                   </div>
-                  {worthConsidering && (
-                    <div className="wip-shop-block wip-shop-block--lead">
-                      <span className="wip-shop-kicker">Worth considering</span>
-                      <p className="wip-shop-title">{worthConsidering.title}</p>
-                      <p className="wip-shop-body">{worthConsidering.body}</p>
-                      {worthConsidering.garmentIds.length > 0 && (
-                        <div className="wip-ways-strip">
-                          {worthConsidering.garmentIds.slice(0, 4).map((id) => <Thumb key={id} card={byId.get(id)} height={90} />)}
-                        </div>
-                      )}
-                      <button type="button" className="wip-link" onClick={() => setDialog({ kind: "worthConsidering" })}>Why this</button>
-                    </div>
-                  )}
+                  {worthConsidering && (() => {
+                    const colourAttr = recommendationDetail?.attributes.find((a) => a.kind === "colour");
+                    // Only real, non-null evidence becomes a bullet — rise and
+                    // fabric aren't derivable at all today (no such field
+                    // exists anywhere in the engine), so they're never shown,
+                    // never guessed.
+                    const bullets = [
+                      ...(recommendationDetail?.coverage ?? []).map((c) => COVERAGE_LABEL[c]).filter((v, i, a) => v && a.indexOf(v) === i),
+                      ...(recommendationDetail?.resolvingSilhouettes ?? []),
+                      ...(recommendationDetail?.structure ? [recommendationDetail.structure === "structured" ? "Structured" : "Fluid"] : []),
+                      ...(colourAttr ? [colourAttr.values.map((v) => v[0].toUpperCase() + v.slice(1)).join(", ")] : []),
+                    ];
+                    // Human, not algorithmic: names what the colour DOES for
+                    // her rather than reciting "appears less often".
+                    const colourSentence = colourAttr
+                      ? ` ${colourAttr.label[0].toUpperCase()}${colourAttr.label.slice(1)} is a colour you said you like, so it adds a way to vary your look without leaving the palette you already wear.`
+                      : "";
+                    return (
+                      <div className="wip-shop-block wip-shop-block--lead">
+                        <span className="wip-shop-kicker">Worth adding next</span>
+                        <p className="wip-shop-title">{(worthConsidering.title ?? "").replace(/^Look for |\.$/g, "")}</p>
+                        {bullets.length > 0 && (
+                          <div className="wip-shop-bullets">
+                            <span className="wip-shop-bullets-label">Best fit for your wardrobe</span>
+                            <ul>{bullets.map((b) => <li key={b}>{b}</li>)}</ul>
+                          </div>
+                        )}
+                        <p className="wip-shop-body">
+                          {(worthConsidering.body ?? "").split(".")[0]}.{colourSentence}
+                        </p>
+                        {worthConsidering.garmentIds.length > 0 && (
+                          <>
+                            <span className="wip-shop-unlocks-label">What it unlocks</span>
+                            <div className="wip-ways-strip">
+                              {worthConsidering.garmentIds.slice(0, 4).map((id) => <Thumb key={id} card={byId.get(id)} height={90} />)}
+                            </div>
+                          </>
+                        )}
+                        <button type="button" className="wip-link" onClick={() => setDialog({ kind: "worthConsidering" })}>Why this</button>
+                      </div>
+                    );
+                  })()}
                   {lowPriority && (
                     <div className="wip-shop-block wip-shop-block--secondary">
-                      <span className="wip-shop-kicker">Can wait</span>
-                      <p className="wip-shop-title">{lowPriority.title}</p>
+                      <span className="wip-shop-kicker">You can skip this for now</span>
+                      <p className="wip-shop-title">{(lowPriority.title ?? "").replace(/^Another (similar |of your )?/i, "Another ")}</p>
                       {/* enoughCluster is the real cluster behind this finding — its
                           own body already states the real count and why another
                           one wouldn't add much; falls back to the shorter
@@ -850,9 +999,9 @@ export default function WardrobeIntelligencePreview() {
                 <>
                   <button type="button" className="wip-back" onClick={() => setInsight(null)}>← Back to the rediscovery finding</button>
                   <div className="wip-feature-head">
-                    <span className="wip-tag">Coverage / Passport requirements</span>
-                    <h2>A closer look at coverage.</h2>
-                    <p>Checked against what you&rsquo;ve told nAia you prefer.</p>
+                    <span className="wip-tag">How your wardrobe matches your preferences</span>
+                    <h2>Where context matters more than one measurement.</h2>
+                    <p>Checked against what you&rsquo;ve told nAia you prefer — activewear, layering and open policy cases are read differently, not against one blanket rule.</p>
                   </div>
                   {blockedDetail.some((b) => b.reason === "keeping your legs covered") && (
                     <p className="wip-coverage-policy">{LEGS_COVERED_POLICY_LINE}</p>
@@ -860,15 +1009,23 @@ export default function WardrobeIntelligencePreview() {
                   <div className="wip-coverage-list">
                     {blockedDetail.map((b) => {
                       const card = byId.get(b.garmentId);
+                      const state = coverageContext(b.reason, b.layers.length > 0, card?.category, card?.hemLength ?? null);
                       return (
                         <div key={b.garmentId} className="wip-coverage-item">
                           <Thumb card={card} height={160} />
                           <div className="wip-coverage-item-text">
+                            <span className={`wip-coverage-state wip-coverage-state--${state}`}>
+                              {state === "may-depend" ? "May depend on how you wear it" : "Doesn’t appear to match"}
+                            </span>
                             <h3>{b.name}</h3>
-                            <p>{coverageReasonSentence(b.reason, card?.hemLength ?? null)}</p>
-                            {b.layers.length > 0
-                              ? <p className="wip-coverage-rescue">Worn with your {b.layers[0]}, it could still work.</p>
-                              : <p className="wip-coverage-rescue wip-coverage-rescue--none">No suitable layering option was found among your added pieces.</p>}
+                            <p>
+                              {card?.category === "ACTIVEWEAR"
+                                ? "This is activewear, so this everyday preference is looser here."
+                                : coverageReasonSentence(b.reason, card?.hemLength ?? null)}
+                            </p>
+                            {b.layers.length > 0 && (
+                              <p className="wip-coverage-rescue">Worn with your {b.layers[0]}, it could still work.</p>
+                            )}
                           </div>
                         </div>
                       );
@@ -910,6 +1067,11 @@ export default function WardrobeIntelligencePreview() {
                         <div className="wip-chips">
                           {shapeChips.map((s) => <span key={s.label} className="wip-chip">{s.label} · {s.count}</span>)}
                         </div>
+                        {shapeChips.length > 1 && (
+                          <p className="wip-profile-so-what">
+                            {shapeChips[0].label} shapes appear most often, so even when you change individual garments, the overall shape of an outfit can stay similar. More variation in shape may change how your outfits feel more than another colour would.
+                          </p>
+                        )}
                       </div>
                     )}
                   </div>
@@ -949,8 +1111,8 @@ export default function WardrobeIntelligencePreview() {
               )}
               {coverage && (
                 <button type="button" className={`wip-insight${insight === "coverage" ? " is-active" : ""}`} onClick={() => setInsight("coverage")}>
-                  <span className="wip-insight-topic">Coverage</span>
-                  <h3>A closer look at coverage.</h3>
+                  <span className="wip-insight-topic">Passport alignment</span>
+                  <h3>How your wardrobe matches your preferences</h3>
                   <p>{coverage.body}</p>
                   <span className="wip-insight-arrow" aria-hidden="true">↗</span>
                 </button>
@@ -971,10 +1133,7 @@ export default function WardrobeIntelligencePreview() {
             </aside>
           </div>
 
-          <p className="wip-legal">
-            Presentation preview · populated from this Closet&rsquo;s existing analysis, not new
-            intelligence. Not the live Wardrobe Intelligence page — nothing here is saved.
-          </p>
+          <p className="wip-legal">Nothing you do on this page is saved.</p>
         </main>
       </div>
       {renderDialog()}
@@ -1067,7 +1226,10 @@ const css = `
   .wip-ways-why{font-family:var(--naia-ff-ui);font-size:11.5px;color:rgba(40,21,12,0.6);margin:8px 0 0;max-width:420px}
   .wip-ways-strip{display:flex;gap:8px;flex-shrink:0}
   .wip-ways-strip .wip-thumb{width:70px;border-radius:4px}
-  .wip-ways-combos{display:flex;flex-direction:column;gap:8px;flex-shrink:0}
+  .wip-ways-combos{display:flex;flex-direction:column;gap:10px;flex-shrink:0}
+  .wip-ways-swap{border-top:1px solid var(--naia-border);padding-top:8px}
+  .wip-ways-swap-label{display:block;font-family:var(--naia-ff-ui);font-size:10px;color:rgba(40,21,12,0.5);margin-bottom:6px}
+  .wip-ways-strip--swap .wip-thumb{width:56px}
   .wip-depth-badge{font-family:var(--naia-ff-ui);font-size:9.5px;font-weight:600;letter-spacing:0.3px;text-transform:uppercase;padding:3px 9px;border-radius:20px;background:rgba(40,21,12,0.08);color:rgba(40,21,12,0.6)}
   .wip-depth-badge--strong{background:rgba(107,29,38,0.1);color:var(--naia-accent)}
   .wip-depth-badge--needs-range,.wip-depth-badge--less-than-it-looks,.wip-depth-badge--empty{background:rgba(40,21,12,0.1);color:rgba(40,21,12,0.7)}
@@ -1080,12 +1242,19 @@ const css = `
   .wip-shop-title{font-family:var(--naia-ff-display);font-weight:400;font-size:1.15rem;line-height:1.3;margin:0 0 6px;color:var(--naia-ink)}
   .wip-shop-body{font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.6;color:rgba(40,21,12,0.65);margin:0 0 10px}
   .wip-shop-count{font-family:var(--naia-ff-ui);font-size:10.5px;color:rgba(40,21,12,0.5);margin:0}
+  .wip-shop-bullets{margin:0 0 12px}
+  .wip-shop-bullets-label,.wip-shop-unlocks-label{display:block;font-family:var(--naia-ff-ui);font-size:9.5px;letter-spacing:1px;text-transform:uppercase;color:rgba(40,21,12,0.45);margin-bottom:6px}
+  .wip-shop-bullets ul{margin:0;padding-left:18px;font-family:var(--naia-ff-ui);font-size:12px;line-height:1.7;color:rgba(40,21,12,0.7)}
+  .wip-shop-unlocks-label{margin-top:2px}
 
   /* Coverage */
   .wip-coverage-policy{margin:0 24px 14px;font-family:var(--naia-ff-ui);font-size:11.5px;font-style:italic;color:rgba(40,21,12,0.55)}
   .wip-coverage-list{padding:4px 24px 20px;display:flex;flex-direction:column;gap:14px}
   .wip-coverage-item{display:flex;gap:16px;align-items:flex-start;background:var(--naia-muted-bg);border-radius:7px;padding:14px}
   .wip-coverage-item .wip-thumb{width:100px;flex-shrink:0;border-radius:5px}
+  .wip-coverage-state{display:inline-block;font-family:var(--naia-ff-ui);font-size:9px;font-weight:600;letter-spacing:0.4px;text-transform:uppercase;padding:2px 8px;border-radius:20px;margin-bottom:6px}
+  .wip-coverage-state--may-depend{background:rgba(107,29,38,0.09);color:var(--naia-accent)}
+  .wip-coverage-state--doesnt-match{background:rgba(40,21,12,0.08);color:rgba(40,21,12,0.6)}
   .wip-coverage-item-text h3{font-family:var(--naia-ff-ui);font-size:12.5px;font-weight:600;margin:0 0 5px;color:var(--naia-ink)}
   .wip-coverage-item-text p{font-family:var(--naia-ff-ui);font-size:11.5px;color:rgba(40,21,12,0.65);line-height:1.6;margin:0 0 4px}
   .wip-coverage-rescue{font-style:italic;color:rgba(40,21,12,0.55) !important}
@@ -1099,6 +1268,7 @@ const css = `
   .wip-profile-row h3{font-family:var(--naia-ff-ui);font-size:10.5px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--naia-accent);margin:0 0 8px}
   .wip-chips{display:flex;flex-wrap:wrap;gap:8px}
   .wip-chip{font-family:var(--naia-ff-ui);font-size:11px;color:rgba(40,21,12,0.65);background:var(--naia-muted-bg);border-radius:20px;padding:5px 12px}
+  .wip-profile-so-what{font-family:var(--naia-ff-ui);font-size:11.5px;line-height:1.6;color:rgba(40,21,12,0.6);margin:10px 0 0}
 
   @media(max-width:700px){
     .wip-header{display:block}
