@@ -29,6 +29,7 @@ import { loadWardrobeIntelligence } from "~/lib/ai/wardrobe-intelligence.server"
 import { readClosetConfidence } from "~/lib/ai/wardrobe-confidence.server";
 import { buildWardrobePage, type WardrobePage, type PageEntry } from "~/lib/ai/wardrobe-page";
 import { registerDisplay, type DepthState } from "~/lib/ai/wardrobe-copy";
+import { garmentRegister, type RegisterId } from "~/lib/ai/wardrobe-needs";
 
 // Duplicated from closet.intelligence.tsx rather than importing a private
 // constant — this route makes no change to that file at all.
@@ -142,7 +143,73 @@ export async function loader({ request }: LoaderFunctionArgs) {
     if (worst.heading !== best.heading) glanceRegisters.push({ heading: worst.heading, stateText: worst.stateText });
   }
 
-  return data({ page, garmentCards, glanceRegisters });
+  // ── Every register's real reading, for "How well it supports your life" ──
+  // Same registerDisplay() vocabulary, every needed register this time (not
+  // just the contrast pair) — real depth verdicts only for the three actual
+  // registers the engine computes (everyday/work/occasion). No Activewear or
+  // Travel verdict is invented here; a real "also works for the gym" bonus
+  // pairing (when the Closet has one) is read separately, client-side, from
+  // the existing wear block — that mechanism already exists and is not
+  // duplicated here.
+  const allRegisterReadings = needs.registers
+    .filter((r) => r.needed)
+    .map((r) => ({ register: r.register, ...registerDisplay(r) }))
+    .filter((d) => d.state !== "learning");
+
+  // ── Real neutral share, for "What your wardrobe looks like" ─────────────
+  // dna.palette[].share is already a real computed fraction (not invented
+  // here) — this just sums the ones already flagged wardrobe-neutral.
+  const neutralSharePct = intelligence.dna.palette.length > 0
+    ? Math.round(intelligence.dna.palette.filter((p) => p.neutral).reduce((sum, p) => sum + p.share, 0) * 100)
+    : null;
+
+  // ── The real "enough" cluster behind the low-priority finding ────────────
+  // notAPriority.body only explains why it's LOW priority (thinner area
+  // elsewhere); needs.enough[0] is the SAME cluster with its own real count
+  // and "why it's enough" sentence — reused here, not rewritten, so "can
+  // wait, and why" cites a real number instead of just naming the register.
+  const enoughCluster = needs.enough[0]
+    ? { title: needs.enough[0].title, body: needs.enough[0].body, count: needs.enough[0].garmentIds.length }
+    : null;
+
+  // ── Rediscover matches grouped by their OWN register ─────────────────────
+  // "Show me how to wear this", not a flat grid: each matched piece already
+  // has a real formality/register (garmentRegister(), the same function the
+  // rest of the engine uses) — grouping by it is presentation only, no new
+  // pairing logic, and degrades honestly to one ungrouped list if a match's
+  // register can't be read.
+  const rediscoverEntry = page.sections.find((s) => s.id === "wear")?.blocks.find((b) => b.id === "worth-trying")?.entries[0];
+  const rediscoverByRegister: Array<{ register: RegisterId | "other"; garmentIds: string[] }> = [];
+  if (rediscoverEntry) {
+    const byId = new Map(garments.map((g) => [g.id, g]));
+    const groups = new Map<RegisterId | "other", string[]>();
+    for (const id of rediscoverEntry.garmentIds) {
+      const g = byId.get(id);
+      const r = g ? garmentRegister(g) ?? "other" : "other";
+      groups.set(r, [...(groups.get(r) ?? []), id]);
+    }
+    for (const [register, garmentIds] of groups) rediscoverByRegister.push({ register, garmentIds });
+  }
+
+  // ── Up to 2 real ranked combinations per register ────────────────────────
+  // intelligence.pairings.bestByRegister already ranks up to 5 real
+  // candidates per register by score; "Wear more of what you own" surfaces
+  // the top 2 instead of the single best, so it reads as real wearable
+  // options rather than one example pair. No new pairing logic — same
+  // already-computed list the "ways to get dressed" section draws its one
+  // pick from.
+  const bestByRegisterPreview: Partial<Record<RegisterId, Array<{ id: string; reason: string; garmentIds: string[] }>>> = {};
+  for (const register of ["everyday", "work", "occasion"] as const) {
+    const top = intelligence.pairings.bestByRegister[register]?.slice(0, 2);
+    if (top && top.length > 0) {
+      bestByRegisterPreview[register] = top.map((p) => ({ id: p.id, reason: p.reason, garmentIds: p.garmentIds }));
+    }
+  }
+
+  return data({
+    page, garmentCards, glanceRegisters, allRegisterReadings, neutralSharePct,
+    enoughCluster, rediscoverByRegister, bestByRegisterPreview,
+  });
 }
 
 type GarmentCard = {
@@ -270,11 +337,26 @@ type Insight = "wear" | "work" | "shopping" | "coverage" | "profile" | null;
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 export default function WardrobeIntelligencePreview() {
-  const { page, garmentCards, glanceRegisters } = useLoaderData<typeof loader>() as {
+  const {
+    page, garmentCards, glanceRegisters, allRegisterReadings, neutralSharePct,
+    enoughCluster, rediscoverByRegister, bestByRegisterPreview,
+  } = useLoaderData<typeof loader>() as {
     page: WardrobePage; garmentCards: GarmentCard[];
     glanceRegisters: Array<{ heading: string; stateText: string }>;
+    allRegisterReadings: Array<{ register: RegisterId; heading: string; state: DepthState; stateText: string; plain: string }>;
+    neutralSharePct: number | null;
+    enoughCluster: { title: string; body: string; count: number } | null;
+    rediscoverByRegister: Array<{ register: RegisterId | "other"; garmentIds: string[] }>;
+    bestByRegisterPreview: Partial<Record<RegisterId, Array<{ id: string; reason: string; garmentIds: string[] }>>>;
   };
   const byId = new Map(garmentCards.map((c) => [c.id, c]));
+
+  // Same locked labels wardrobe-copy.ts already uses for these three real
+  // registers — not new vocabulary, just named here too since that constant
+  // isn't exported for the client to reuse directly.
+  const REGISTER_LABEL: Record<RegisterId, string> = {
+    everyday: "Everyday", work: "Work", occasion: "Dinners & events",
+  };
 
   const [insight, setInsight] = useState<Insight>(null);
   const [dialog, setDialog] = useState<DialogState>(null);
@@ -289,8 +371,13 @@ export default function WardrobeIntelligencePreview() {
 
   const rediscover = wear?.blocks.find((b) => b.id === "worth-trying")?.entries[0];
   const waysEntries = wear?.blocks.find((b) => b.id === "ways-to-get-dressed")?.entries ?? [];
-  const forWork = waysEntries.find((e) => e.title === "For work");
   const workFinding = attention?.blocks.find((b) => b.kind === "findings")?.entries[0];
+  // The finding's own claim key ("depth-gap:work") names which real register
+  // it's about — read from it rather than assuming "work", so the rail label
+  // is never wrong for a customer whose strongest finding is elsewhere.
+  const attentionRegister = (workFinding?.claim.match(/^depth-gap:(\w+)/)?.[1] as RegisterId | undefined);
+  const attentionRegisterLabel = attentionRegister ? REGISTER_LABEL[attentionRegister] : null;
+  const attentionCombo = attentionRegister ? waysEntries.find((e) => e.id === `explore-${attentionRegister}`) : undefined;
   const coverage = attention?.blocks.find((b) => b.kind === "coverage")?.entries[0];
   const lowPriority = shop?.blocks.find((b) => b.id === "low-priority")?.entries[0];
   const worthConsidering = shop?.blocks.find((b) => b.id === "worth-considering")?.entries[0];
@@ -384,16 +471,16 @@ export default function WardrobeIntelligencePreview() {
         </DialogShell>
       );
     }
-    if (dialog.kind === "workCombo" && forWork) {
+    if (dialog.kind === "workCombo" && attentionCombo) {
       return (
         <DialogShell title="An existing work combination." subtitle="Start with the pieces you already own." onClose={closeDialog}>
-          <div className="wip-match-grid" style={{ gridTemplateColumns: `repeat(${forWork.garmentIds.length}, minmax(0,1fr))` }}>
-            {forWork.garmentIds.map((id) => {
+          <div className="wip-match-grid" style={{ gridTemplateColumns: `repeat(${attentionCombo.garmentIds.length}, minmax(0,1fr))` }}>
+            {attentionCombo.garmentIds.map((id) => {
               const card = byId.get(id);
               return <div key={id} className="wip-match-tile"><Thumb card={card} height={170} /><p>{cardLabel(card)}</p></div>;
             })}
           </div>
-          <p className="wip-combo-text">{forWork.body}</p>
+          <p className="wip-combo-text">{attentionCombo.body}</p>
           <p className="wip-dialog-note">A supported combination already computed for this Closet. Footwear and other finishing items are not represented.</p>
         </DialogShell>
       );
@@ -548,28 +635,52 @@ export default function WardrobeIntelligencePreview() {
                       <p className="wip-piece-label">{cardLabel(rediscoverCard)}</p>
                       <p className="wip-piece-hint">Already in your Closet</p>
                     </div>
-                    <div className="wip-partners">
-                      <div className="wip-partners-label">
-                        Start with these pieces <span>{previewPairs.length} of {matchIds.length}</span>
+                    {rediscoverByRegister.length > 1 ? (
+                      // Real matches, grouped by their own register — "show me
+                      // how to wear this" instead of one flat grid of
+                      // compatible pieces.
+                      <div className="wip-partners wip-partners--grouped">
+                        {rediscoverByRegister.filter((g) => g.register !== "other").map((group) => (
+                          <div key={group.register} className="wip-partner-group">
+                            <div className="wip-partners-label">{REGISTER_LABEL[group.register as RegisterId]}</div>
+                            <div className="wip-partner-grid wip-partner-grid--row">
+                              {group.garmentIds.slice(0, 3).map((id) => {
+                                const card = byId.get(id);
+                                return (
+                                  <button key={id} type="button" className="wip-partner" onClick={() => setDialog({ kind: "pair", garmentId: id })}>
+                                    <Thumb card={card} height={90} />
+                                    <span>With {shortMatchWord(card)}</span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                      <div className="wip-partner-grid">
-                        {previewPairs.map((id) => {
-                          const card = byId.get(id);
-                          return (
-                            <button key={id} type="button" className="wip-partner" onClick={() => setDialog({ kind: "pair", garmentId: id })}>
-                              <Thumb card={card} height={110} />
-                              <span>With {shortMatchWord(card)}</span>
+                    ) : (
+                      <div className="wip-partners">
+                        <div className="wip-partners-label">
+                          Start with these pieces <span>{previewPairs.length} of {matchIds.length}</span>
+                        </div>
+                        <div className="wip-partner-grid">
+                          {previewPairs.map((id) => {
+                            const card = byId.get(id);
+                            return (
+                              <button key={id} type="button" className="wip-partner" onClick={() => setDialog({ kind: "pair", garmentId: id })}>
+                                <Thumb card={card} height={110} />
+                                <span>With {shortMatchWord(card)}</span>
+                              </button>
+                            );
+                          })}
+                          {extraCount > 0 && (
+                            <button type="button" className="wip-partner wip-partner--more" onClick={() => setDialog({ kind: "matches" })}>
+                              <b>+{extraCount}</b>
+                              <span>More pieces to explore</span>
                             </button>
-                          );
-                        })}
-                        {extraCount > 0 && (
-                          <button type="button" className="wip-partner wip-partner--more" onClick={() => setDialog({ kind: "matches" })}>
-                            <b>+{extraCount}</b>
-                            <span>More pieces to explore</span>
-                          </button>
-                        )}
+                          )}
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
                   <div className="wip-feature-foot">
                     <p>Potential individual pairings, not {matchIds.length} complete outfits.</p>
@@ -584,35 +695,66 @@ export default function WardrobeIntelligencePreview() {
                 <>
                   <button type="button" className="wip-back" onClick={() => setInsight(null)}>← Back to the rediscovery finding</button>
                   <div className="wip-feature-head">
-                    <span className="wip-tag">Ways to wear what you own</span>
-                    <h2>Supported combinations, by kind of day.</h2>
-                    <p>These are pairings nAia has already resolved from your real Closet — not guaranteed complete outfits unless StyleMe has actually validated one as such.</p>
+                    <span className="wip-tag">Wear more of what you own</span>
+                    <h2>How well your Closet supports your life.</h2>
+                    <p>Real combinations nAia has resolved from what you own — not guaranteed complete outfits unless StyleMe has actually validated one as such. Activewear and travel are kept separate: a shared casual tag never turns one into the other.</p>
                   </div>
                   <div className="wip-ways-list">
-                    {waysEntries.map((entry) => {
-                      const ids = entry.garmentIds ?? [];
-                      const why = entry.action?.kind === "reveal" ? entry.action : undefined;
+                    {(["everyday", "work", "occasion"] as const).map((register) => {
+                      const reading = allRegisterReadings.find((r) => r.register === register);
+                      const entry = waysEntries.find((e) => e.id === `explore-${register}`);
+                      if (!reading && !entry) return null;
+                      const combos = bestByRegisterPreview[register] ?? [];
+                      const why = entry?.action?.kind === "reveal" ? entry.action : undefined;
                       return (
-                        <div key={entry.id} className="wip-ways-row">
+                        <div key={register} className="wip-ways-row">
                           <div className="wip-ways-text">
-                            <h3>{entry.title}</h3>
-                            <p>{entry.body}</p>
+                            <div className="wip-ways-heading">
+                              <h3>{REGISTER_LABEL[register]}</h3>
+                              {reading && <span className={`wip-depth-badge wip-depth-badge--${reading.state}`}>{reading.stateText}</span>}
+                            </div>
+                            <p>{combos.length > 0 ? entry?.body ?? reading?.plain ?? "" : (entry?.body ?? reading?.plain ?? "Nothing here yet.")}</p>
                             {why && (
                               <>
-                                <button type="button" className="wip-link" onClick={() => toggleWhy(entry.id)}>
-                                  {expandedWhy.has(entry.id) ? why.hideLabel : why.label}
+                                <button type="button" className="wip-link" onClick={() => toggleWhy(entry!.id)}>
+                                  {expandedWhy.has(entry!.id) ? why.hideLabel : why.label}
                                 </button>
-                                {expandedWhy.has(entry.id) && why.detail && (
+                                {expandedWhy.has(entry!.id) && why.detail && (
                                   <p className="wip-ways-why">{why.detail}</p>
                                 )}
                               </>
                             )}
                           </div>
-                          {ids.length > 0 && (
-                            <div className="wip-ways-strip">
-                              {ids.slice(0, 4).map((id) => <Thumb key={id} card={byId.get(id)} height={90} />)}
+                          {combos.length > 0 ? (
+                            <div className="wip-ways-combos">
+                              {combos.map((combo) => (
+                                <div key={combo.id} className="wip-ways-strip">
+                                  {combo.garmentIds.slice(0, 4).map((id) => <Thumb key={id} card={byId.get(id)} height={80} />)}
+                                </div>
+                              ))}
                             </div>
-                          )}
+                          ) : entry && entry.garmentIds.length > 0 ? (
+                            <div className="wip-ways-strip">
+                              {entry.garmentIds.slice(0, 4).map((id) => <Thumb key={id} card={byId.get(id)} height={80} />)}
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                    {waysEntries.filter((e) => !e.id.startsWith("explore-") || !["explore-everyday", "explore-work", "explore-occasion"].includes(e.id)).map((entry) => {
+                      const ids = entry.garmentIds ?? [];
+                      if (ids.length === 0) return null;
+                      // A real bonus pairing (e.g. "also works for the gym") when
+                      // eligible — never its own depth verdict, since none exists.
+                      return (
+                        <div key={entry.id} className="wip-ways-row">
+                          <div className="wip-ways-text">
+                            <h3>{entry.title}</h3>
+                            <p>{entry.body}</p>
+                          </div>
+                          <div className="wip-ways-strip">
+                            {ids.slice(0, 4).map((id) => <Thumb key={id} card={byId.get(id)} height={80} />)}
+                          </div>
                         </div>
                       );
                     })}
@@ -624,13 +766,13 @@ export default function WardrobeIntelligencePreview() {
                 <>
                   <button type="button" className="wip-back" onClick={() => setInsight(null)}>← Back to the rediscovery finding</button>
                   <div className="wip-feature-head">
-                    <span className="wip-tag">Your work wardrobe</span>
+                    <span className="wip-tag">What deserves your attention</span>
                     <h2>{workFinding.title}</h2>
                     <p>{workFinding.body} These are some of the pieces behind that finding.</p>
                   </div>
                   <div className="wip-board wip-board--work">
                     <div className="wip-work-group">
-                      <h3>Some of your work tops</h3>
+                      <h3>Some of your {attentionRegisterLabel?.toLowerCase() ?? ""} tops</h3>
                       <div className="wip-work-items">
                         {workTops.slice(0, 2).map((c) => (
                           <div key={c.id} className="wip-work-item"><Thumb card={c} height={190} /><p>{cardLabel(c)}</p></div>
@@ -638,7 +780,7 @@ export default function WardrobeIntelligencePreview() {
                       </div>
                     </div>
                     <div className="wip-work-group">
-                      <h3>Your tailored bottoms</h3>
+                      <h3>Your {attentionRegisterLabel?.toLowerCase() ?? ""} bottoms</h3>
                       <div className="wip-work-items">
                         {workBottoms.slice(0, 2).map((c) => (
                           <div key={c.id} className="wip-work-item"><Thumb card={c} height={190} /><p>{cardLabel(c)}</p></div>
@@ -652,7 +794,7 @@ export default function WardrobeIntelligencePreview() {
                         See the shopping suggestion
                       </button>
                     )}
-                    {forWork && (
+                    {attentionCombo && (
                       <button type="button" className="wip-primary" onClick={() => setDialog({ kind: "workCombo" })}>
                         Try what you own <span aria-hidden="true">→</span>
                       </button>
@@ -683,9 +825,16 @@ export default function WardrobeIntelligencePreview() {
                   )}
                   {lowPriority && (
                     <div className="wip-shop-block wip-shop-block--secondary">
-                      <span className="wip-shop-kicker">Can wait / Low priority</span>
+                      <span className="wip-shop-kicker">Can wait</span>
                       <p className="wip-shop-title">{lowPriority.title}</p>
-                      <p className="wip-shop-body">{lowPriority.body}</p>
+                      {/* enoughCluster is the real cluster behind this finding — its
+                          own body already states the real count and why another
+                          one wouldn't add much; falls back to the shorter
+                          register-only reason if that cluster isn't available. */}
+                      <p className="wip-shop-body">{enoughCluster?.body ?? lowPriority.body}</p>
+                      {enoughCluster && enoughCluster.count > 0 && (
+                        <p className="wip-shop-count">{enoughCluster.count} similar pieces already in your Closet</p>
+                      )}
                     </div>
                   )}
                   <div className="wip-feature-foot">
@@ -732,10 +881,15 @@ export default function WardrobeIntelligencePreview() {
                 <>
                   <button type="button" className="wip-back" onClick={() => setInsight(null)}>← Back to the rediscovery finding</button>
                   <div className="wip-feature-head">
-                    <span className="wip-tag">Wardrobe profile</span>
-                    <h2>The compact picture.</h2>
+                    <span className="wip-tag">What your wardrobe looks like</span>
+                    <h2>Your wardrobe, compared to your Style Passport.</h2>
                   </div>
                   <div className="wip-profile-compact">
+                    {neutralSharePct !== null && neutralSharePct >= 40 && (
+                      <p className="wip-profile-lead">
+                        {neutralSharePct}% of your colour-tagged pieces are neutral — that makes your wardrobe easy to combine, though it can also mean outfits feel visually similar.
+                      </p>
+                    )}
                     {summaryLines.map((line, i) => <p key={i}>{line}</p>)}
                     {paletteRows.length > 0 && (
                       <div className="wip-profile-row">
@@ -769,19 +923,19 @@ export default function WardrobeIntelligencePreview() {
 
             <aside className="wip-rail">
               <div className="wip-rail-heading">Also worth a look</div>
-              {waysEntries.length > 0 && (
+              {(waysEntries.length > 0 || allRegisterReadings.length > 0) && (
                 <button type="button" className={`wip-insight${insight === "wear" ? " is-active" : ""}`} onClick={() => setInsight("wear")}>
-                  <span className="wip-insight-topic">Ways to wear</span>
-                  <h3>What you can put together right now</h3>
-                  <p>Supported combinations across the parts of your life you told nAia about.</p>
+                  <span className="wip-insight-topic">Wear more of what you own</span>
+                  <h3>How well your Closet supports your life</h3>
+                  <p>Real combinations by kind of day — Everyday, Work, Dinners &amp; events kept separate.</p>
                   <span className="wip-insight-arrow" aria-hidden="true">↗</span>
                 </button>
               )}
               {workFinding && (
                 <button type="button" className={`wip-insight${insight === "work" ? " is-active" : ""}`} onClick={() => setInsight("work")}>
-                  <span className="wip-insight-topic">Work wardrobe</span>
+                  <span className="wip-insight-topic">What deserves attention{attentionRegisterLabel ? ` — ${attentionRegisterLabel}` : ""}</span>
                   <h3>{workFinding.title}</h3>
-                  <p>See the tops and bottoms behind the finding.</p>
+                  <p>See the pieces behind the finding.</p>
                   <span className="wip-insight-arrow" aria-hidden="true">↗</span>
                 </button>
               )}
@@ -868,6 +1022,9 @@ const css = `
   .wip-partners-label{font-family:var(--naia-ff-ui);font-size:11px;font-weight:600;display:flex;justify-content:space-between;margin-bottom:12px;color:var(--naia-ink)}
   .wip-partners-label span{font-weight:400;color:rgba(40,21,12,0.5)}
   .wip-partner-grid{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+  .wip-partners--grouped{display:flex;flex-direction:column;gap:16px}
+  .wip-partner-group .wip-partners-label{margin-bottom:8px}
+  .wip-partner-grid--row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
   .wip-partner{border:1px solid var(--naia-border);background:var(--naia-surface);padding:8px;border-radius:5px;text-align:center;cursor:pointer}
   .wip-partner:hover{border-color:var(--naia-accent)}
   .wip-partner span{display:block;margin-top:7px;font-family:var(--naia-ff-ui);font-size:10px;color:rgba(40,21,12,0.65)}
@@ -904,11 +1061,16 @@ const css = `
   /* Ways to wear */
   .wip-ways-list{padding:4px 24px 20px;display:flex;flex-direction:column;gap:16px}
   .wip-ways-row{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;background:var(--naia-muted-bg);border-radius:7px;padding:16px 18px}
-  .wip-ways-text h3{font-family:var(--naia-ff-display);font-weight:400;font-size:1.05rem;margin:0 0 6px;color:var(--naia-ink)}
+  .wip-ways-heading{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+  .wip-ways-text h3{font-family:var(--naia-ff-display);font-weight:400;font-size:1.05rem;margin:0;color:var(--naia-ink)}
   .wip-ways-text p{font-family:var(--naia-ff-ui);font-size:12px;line-height:1.6;color:rgba(40,21,12,0.65);margin:0;max-width:420px}
   .wip-ways-why{font-family:var(--naia-ff-ui);font-size:11.5px;color:rgba(40,21,12,0.6);margin:8px 0 0;max-width:420px}
   .wip-ways-strip{display:flex;gap:8px;flex-shrink:0}
   .wip-ways-strip .wip-thumb{width:70px;border-radius:4px}
+  .wip-ways-combos{display:flex;flex-direction:column;gap:8px;flex-shrink:0}
+  .wip-depth-badge{font-family:var(--naia-ff-ui);font-size:9.5px;font-weight:600;letter-spacing:0.3px;text-transform:uppercase;padding:3px 9px;border-radius:20px;background:rgba(40,21,12,0.08);color:rgba(40,21,12,0.6)}
+  .wip-depth-badge--strong{background:rgba(107,29,38,0.1);color:var(--naia-accent)}
+  .wip-depth-badge--needs-range,.wip-depth-badge--less-than-it-looks,.wip-depth-badge--empty{background:rgba(40,21,12,0.1);color:rgba(40,21,12,0.7)}
 
   /* Shopping priorities */
   .wip-shop-block{margin:0 24px 16px;padding:16px 18px;border-radius:7px}
@@ -917,6 +1079,7 @@ const css = `
   .wip-shop-kicker{display:block;font-family:var(--naia-ff-ui);font-size:9.5px;letter-spacing:1.4px;text-transform:uppercase;color:var(--naia-accent);font-weight:700;margin-bottom:6px}
   .wip-shop-title{font-family:var(--naia-ff-display);font-weight:400;font-size:1.15rem;line-height:1.3;margin:0 0 6px;color:var(--naia-ink)}
   .wip-shop-body{font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.6;color:rgba(40,21,12,0.65);margin:0 0 10px}
+  .wip-shop-count{font-family:var(--naia-ff-ui);font-size:10.5px;color:rgba(40,21,12,0.5);margin:0}
 
   /* Coverage */
   .wip-coverage-policy{margin:0 24px 14px;font-family:var(--naia-ff-ui);font-size:11.5px;font-style:italic;color:rgba(40,21,12,0.55)}
@@ -930,6 +1093,7 @@ const css = `
 
   /* Profile (compact canvas state) */
   .wip-profile-compact{padding:4px 24px 8px}
+  .wip-profile-lead{font-family:var(--naia-ff-body);font-style:italic;font-size:1rem;line-height:1.6;color:var(--naia-ink);margin:0 0 14px !important}
   .wip-profile-compact > p{font-family:var(--naia-ff-ui);font-size:13px;line-height:1.7;color:rgba(40,21,12,0.72);margin:0 0 12px}
   .wip-profile-row{margin-top:14px}
   .wip-profile-row h3{font-family:var(--naia-ff-ui);font-size:10.5px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--naia-accent);margin:0 0 8px}
