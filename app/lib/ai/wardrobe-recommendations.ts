@@ -206,6 +206,16 @@ const COVERAGE_RULES: Readonly<
   "looser-fitting":             { label: "an easier fit",      slots: ["top", "bottom", "dress", "outerwear"], adjective: "looser" },
 };
 
+/**
+ * Silhouettes that are genuinely trouser directions. "a-line" and "oversized"
+ * are real tokens in CANDIDATE_SILHOUETTES (wardrobe-needs.ts) but describe a
+ * skirt/dress shape and a fit family respectively, not a trouser leg — naming
+ * either as a trouser recommendation would assert a garment that isn't one.
+ * Keyed to the "trousers" noun specifically; every other coverage noun keeps
+ * the full, unfiltered candidate set.
+ */
+const TROUSER_VALID_SILHOUETTES: ReadonlySet<string> = new Set(["straight", "flared", "wide-leg", "fitted"]);
+
 // ── Candidate construction ────────────────────────────────────────────────────
 
 /**
@@ -217,7 +227,7 @@ const COVERAGE_RULES: Readonly<
 function candidateGarment(
   register: RegisterId,
   slot: string,
-  opts: { neutral?: boolean; hueFamily?: string | null; fit?: string | null } = {},
+  opts: { neutral?: boolean; hueFamily?: string | null; fit?: string | null; silhouette?: string | null } = {},
 ): WardrobeGarment {
   return {
     id: "__candidate__",
@@ -230,7 +240,7 @@ function candidateGarment(
     colors: [],
     pattern: "solid",
     material: null,
-    silhouette: null,
+    silhouette: opts.silhouette ?? null,
     fitProfile: opts.fit ?? null,
     formality: REGISTER_FORMALITY[register],
     stylePersonality: null,
@@ -283,6 +293,86 @@ function unlocks(candidate: WardrobeGarment, pool: WardrobeGarment[]): WardrobeG
       : (candidateTop && gBottom) || (candidateBottom && gTop);
     return complementary && scorePair(candidate, g).compatible;
   });
+}
+
+/**
+ * Breaks a tie between candidate silhouettes that scored identically on the
+ * primary distinct-looks simulation, using only evidence that already exists
+ * elsewhere in this engine — never a fashion-convention guess.
+ *
+ * Criteria, in order, each applied only while more than one candidate
+ * remains:
+ *   1. Stated Passport silhouette preference (exact machinery
+ *      passportAlignmentFor uses: substring match against passport.silhouette).
+ *   2. Compatibility with her real, usable pieces on the OTHER side of the
+ *      outfit (partnerPool) — the same unlocks() check every recommendation
+ *      is already judged by, just per silhouette instead of per proposal.
+ *   3. Novelty — how many pieces she already owns, anywhere in the Closet,
+ *      in that silhouette. Fewer (zero, ideally) wins: the point of the
+ *      recommendation is a shape she doesn't already have.
+ *   4. Reviewed engagement — for silhouettes she does own elsewhere, real
+ *      outfitAppearances/savedLookAppearances/outcomeKept on those pieces.
+ *      Only ever a final tiebreak among what's left, and only meaningful
+ *      when such pieces exist.
+ *
+ * There is no formality/register-suitability step: no field anywhere in the
+ * engine says whether a silhouette token reads as more or less work-
+ * appropriate, and inventing one here would be exactly the fashion-rule
+ * guess this file exists to refuse. If ties survive every real criterion,
+ * up to two silhouettes are returned rather than one asserted winner.
+ */
+function breakSilhouetteTie(
+  candidates: readonly string[],
+  input: { passport: WardrobePassport | null; partnerPool: WardrobeGarment[]; items: WardrobeGarment[]; register: RegisterId; slot: string; fit: string | null },
+): string[] {
+  let pool = [...candidates];
+  if (pool.length <= 1) return pool;
+
+  // 1. Stated Passport silhouette preference.
+  const passportPreferred = pool.filter((s) =>
+    (input.passport?.silhouette ?? []).some((sp) => norm(sp)?.includes(s)),
+  );
+  if (passportPreferred.length > 0 && passportPreferred.length < pool.length) pool = passportPreferred;
+  if (pool.length <= 1) return pool;
+
+  // 2. Compatibility with what's on the other side of the outfit.
+  const unlockCounts = new Map(
+    pool.map((s) => [
+      s,
+      unlocks(candidateGarment(input.register, input.slot, { fit: input.fit, silhouette: s }), input.partnerPool).length,
+    ]),
+  );
+  const bestUnlocks = Math.max(...pool.map((s) => unlockCounts.get(s)!));
+  const byUnlocks = pool.filter((s) => unlockCounts.get(s) === bestUnlocks);
+  if (byUnlocks.length < pool.length) pool = byUnlocks;
+  if (pool.length <= 1) return pool;
+
+  // 3. Novelty — least (ideally zero) already owned in this silhouette.
+  const ownedCounts = new Map(
+    pool.map((s) => [s, input.items.filter((g) => norm(g.silhouette) === s).length]),
+  );
+  const fewestOwned = Math.min(...pool.map((s) => ownedCounts.get(s)!));
+  const byNovelty = pool.filter((s) => ownedCounts.get(s) === fewestOwned);
+  if (byNovelty.length < pool.length) pool = byNovelty;
+  if (pool.length <= 1) return pool;
+
+  // 4. Reviewed engagement on pieces she already owns in that silhouette —
+  // only discriminates when at least one candidate has real signal.
+  const engagement = new Map(
+    pool.map((s) => [
+      s,
+      input.items
+        .filter((g) => norm(g.silhouette) === s)
+        .reduce((sum, g) => sum + g.outfitAppearances + g.savedLookAppearances + (g.outcomeKept ?? 0), 0),
+    ]),
+  );
+  const mostEngaged = Math.max(...pool.map((s) => engagement.get(s)!));
+  if (mostEngaged > 0) {
+    const byEngagement = pool.filter((s) => engagement.get(s) === mostEngaged);
+    if (byEngagement.length < pool.length) pool = byEngagement;
+  }
+
+  return pool.slice(0, 2);
 }
 
 // ── Evidence gathering ────────────────────────────────────────────────────────
@@ -540,12 +630,13 @@ function buildRecommendation(
   };
   let best = broadUnlocks;
   // Set only when a real garment type (from a stated Passport preference, not
-  // a guess) AND a genuine "different from what you own" contrast both hold —
-  // see the repetition/shape branch below. When set, it replaces the generic
-  // slot-noun title with one naming the actual garment type and the actual
-  // silhouette she already owns, instead of naming a specific NEW silhouette
-  // the simulation cannot actually rank (see the tie check there).
-  let shapeContrastPhrase: string | null = null;
+  // a guess) resolves a genuine silhouette winner (or up to two, if every
+  // real tiebreak criterion still ties) — see breakSilhouetteTie() and the
+  // repetition/shape branch below. When set, the title names the actual
+  // garment type and the actual winning silhouette(s) instead of the
+  // generic slot noun.
+  let shapeWinnerAdjective: string | null = null;
+  let shapeWinnerWhy: string | null = null;
 
   // ── What would actually CLOSE this gap ───────────────────────────────────
   //
@@ -598,25 +689,35 @@ function buildRecommendation(
       const coverageForNoun = statedCoverage(passport, slot);
       const coverageNoun = coverageForNoun.length > 0 ? COVERAGE_RULES[coverageForNoun[0]].noun : undefined;
 
-      if (tied && coverageNoun) {
-        const ownSilhouettes = [...new Set(
-          registerPool
-            .filter((g) => g.slot === slot)
-            .map((g) => norm(g.silhouette))
-            .filter((s): s is string => s !== null),
-        )];
-        if (ownSilhouettes.length === 1) {
-          const ownWord = (SILHOUETTE_LABELS[ownSilhouettes[0]] ?? ownSilhouettes[0]).toLowerCase();
-          const collective = coverageNoun === "trousers" ? "pairs" : coverageNoun;
-          shapeContrastPhrase = `a shape that's different from the ${ownWord} ${collective} you already own`;
+      if (tied && coverageNoun === "trousers") {
+        const ownSilhouettes = new Set(
+          registerPool.filter((g) => g.slot === slot).map((g) => norm(g.silhouette)).filter((s): s is string => s !== null),
+        );
+        const validCandidates = [...new Set(resolving.map((r) => r.silhouette))]
+          .filter((s) => TROUSER_VALID_SILHOUETTES.has(s) && !ownSilhouettes.has(s));
+        const winners = breakSilhouetteTie(validCandidates, {
+          passport, partnerPool, items, register, slot,
+          fit: fitIsTheChange ? (leadFamily === "structured" ? STRUCTURED_FIT : SOFT_FIT) : null,
+        });
+        if (winners.length > 0) {
+          const winnerLabels = winners.map((s) => (SILHOUETTE_LABELS[s] ?? s).toLowerCase());
+          shapeWinnerAdjective = joinOr(winnerLabels);
+          criteria.resolvingSilhouettes = winners;
+          // Real comparison, not an asserted claim: the winner's own unlocks
+          // count against her usable work tops, named plainly.
+          const bestCount = Math.max(
+            ...winners.map((s) => unlocks(
+              candidateGarment(register, slot, { silhouette: s, fit: fitIsTheChange ? (leadFamily === "structured" ? STRUCTURED_FIT : SOFT_FIT) : null }),
+              partnerPool,
+            ).length),
+          );
+          shapeWinnerWhy = `A ${joinOr(winnerLabels)} shape would work with ${bestCount} of your work pieces — your current work trousers are both straight, so this adds a genuinely different option rather than another version of what you own.`;
         }
       }
 
-      // The tied/resolved case names no specific silhouette at all (handled
-      // by shapeContrastPhrase in the title below) — nothing here would be
-      // more honest than what that phrase already says, so no attribute chip
-      // is added for it. Every other case is unchanged.
-      if (!shapeContrastPhrase) {
+      // A resolved winner is named directly in the title below — no separate
+      // attribute chip repeats it. Every other case is unchanged.
+      if (!shapeWinnerAdjective) {
         attributes.push({
           kind: "structure",
           values: fitIsTheChange ? [leadFamily, ...silhouettes] : silhouettes,
@@ -740,12 +841,12 @@ function buildRecommendation(
       : "";
   const coveragePrefix = coverageAdjective ? `${coverageAdjective} ` : "";
   let title: string;
-  if (shapeContrastPhrase) {
-    // The evidenced ceiling: names the real garment type and contrasts it
-    // with what she actually owns, without asserting a winner among tied
-    // candidate silhouettes. "Look for full-length work trousers in a shape
-    // that's different from the straight pairs you already own."
-    title = `Look for ${coveragePrefix}${REGISTER_WORD[register]} ${noun} in ${shapeContrastPhrase}.`;
+  if (shapeWinnerAdjective) {
+    // The deterministic tie-break resolved a real winner (or, when every
+    // criterion still tied, up to two) — named directly, never left as "a
+    // different shape". "Look for full-length bootcut work trousers." /
+    // "Look for full-length flared or wide-leg work trousers."
+    title = `Look for ${coveragePrefix}${shapeWinnerAdjective} ${REGISTER_WORD[register]} ${noun}.`;
   } else {
     const phrase = `${coveragePrefix}${structureWord}${REGISTER_WORD[register]} ${noun}${coverageSuffix}`;
     // "One option to explore" rather than a directive. The engine has
@@ -783,9 +884,11 @@ function buildRecommendation(
     specificity,
     title,
     attributes,
-    body: selfSufficient
-      ? `${reasonForGap} A piece like this is a complete look on its own, so it adds an option you can wear without needing anything else to work with it.${colourNote}`
-      : `${reasonForGap} A piece like this could pair with ${best.length} ${best.length === 1 ? "piece" : "pieces"} already in your Closet, so it adds ways to dress rather than another version of something you have.${colourNote}`,
+    body: shapeWinnerWhy
+      ? `${shapeWinnerWhy}${colourNote}`
+      : selfSufficient
+        ? `${reasonForGap} A piece like this is a complete look on its own, so it adds an option you can wear without needing anything else to work with it.${colourNote}`
+        : `${reasonForGap} A piece like this could pair with ${best.length} ${best.length === 1 ? "piece" : "pieces"} already in your Closet, so it adds ways to dress rather than another version of something you have.${colourNote}`,
     unlocksIds: best.slice(0, 6).map((g) => g.id),
     criteria,
     evidence,

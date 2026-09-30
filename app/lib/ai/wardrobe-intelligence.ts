@@ -1428,21 +1428,27 @@ function buildDna(items: WardrobeGarment[], coverage: WardrobeCoverage): Wardrob
     const coreCount = items.filter((i) => CORE_SLOTS.has(i.slot)).length;
     const minRecurrence = Math.max(3, Math.ceil(coreCount * 0.15));
 
+    // Silhouette and fit are two different fields, but the customer reads one
+    // ranked list of shapes — so both are gathered as candidates and ranked
+    // together BY COUNT before taking the top MAX_SHAPES. Filling silhouette
+    // slots first and only then topping up from fitProfile (the previous
+    // approach) let a lower-count silhouette outrank a higher-count fit —
+    // "fitted (9) and relaxed (10)" instead of "relaxed (10) and fitted (9)".
     const silCounts = countBy(items, (i) => norm(i.silhouette));
-    for (const [token, count] of topEntries(silCounts, MAX_SHAPES)) {
+    const fitCounts = countBy(items, (i) => norm(i.fitProfile));
+    const candidates: WardrobeShape[] = [];
+    for (const [token, count] of silCounts) {
       if (count < minRecurrence) continue;
-      shapes.push({ label: SILHOUETTE_LABELS[token] ?? titleCase(token), count, field: "silhouette" });
+      candidates.push({ label: SILHOUETTE_LABELS[token] ?? titleCase(token), count, field: "silhouette" });
     }
-    if (shapes.length < MAX_SHAPES) {
-      const fitCounts = countBy(items, (i) => norm(i.fitProfile));
-      for (const [token, count] of topEntries(fitCounts, MAX_SHAPES)) {
-        if (count < minRecurrence) continue;
-        const label = FIT_LABELS[token] ?? titleCase(token);
-        if (shapes.some((sh) => sh.label === label)) continue;
-        shapes.push({ label, count, field: "fitProfile" });
-        if (shapes.length >= MAX_SHAPES) break;
-      }
+    for (const [token, count] of fitCounts) {
+      if (count < minRecurrence) continue;
+      const label = FIT_LABELS[token] ?? titleCase(token);
+      if (candidates.some((c) => c.label === label)) continue;
+      candidates.push({ label, count, field: "fitProfile" });
     }
+    candidates.sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+    shapes.push(...candidates.slice(0, MAX_SHAPES));
     // Counts stay in the data as evidence; the customer reads the shape, not the tally.
     if (shapes.length > 1) {
       shapesReading = `${capitalise(shapes[0].label.toLowerCase())} shapes recur most, with ${joinList(shapes.slice(1, 3).map((sh) => sh.label.toLowerCase()))} close behind.`;
@@ -1881,7 +1887,24 @@ function buildPairings(
   // Majority vote over formality, not a new judgement — the same bucket
   // classifyUsability's caller already relies on elsewhere. Ties/absence
   // resolve to null rather than guessing a register.
+  //
+  // A combination where EVERY piece is activewear/swimwear/loungewear is a
+  // legitimate pairing within its own functional wardrobe — functionCompatible
+  // already allows it — but it is not evidence of ordinary Everyday, Work or
+  // Occasion dressing, and formality alone cannot tell the two apart (a Nike
+  // hoodie's own formality reads "casual" the same as a cardigan's). The
+  // crossover rule governs whether a functional LAYER may join ordinary
+  // pieces; it was never meant to let an all-activewear top+bottom (+layer)
+  // set stand in for what "Everyday" means. So: register classification
+  // requires at least one genuinely ordinary piece in the set — an
+  // all-functional combination gets no register at all, the same honest
+  // null this function already returns for a tie.
   const pairingRegister = (ids: string[]): "everyday" | "work" | "occasion" | null => {
+    const hasOrdinaryPiece = ids.some((id) => {
+      const g = byId.get(id);
+      return g !== undefined && !FUNCTIONAL_CATEGORIES.has(g.category);
+    });
+    if (!hasOrdinaryPiece) return null;
     const counts = new Map<"everyday" | "work" | "occasion", number>();
     for (const id of ids) {
       const g = byId.get(id);

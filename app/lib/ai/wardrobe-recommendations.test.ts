@@ -902,12 +902,14 @@ describe("§WR-9 emitted attributes resolve the tested outcome", () => {
     }
   });
 
-  it("§WR-9i a stated garment-type preference names the type, and a tied simulation names no specific silhouette", () => {
+  it("§WR-9i a stated garment-type preference resolves a real silhouette winner via the deterministic tie-break", () => {
     // Same tied-bottom fixture as §WR-9a, but she has also stated
     // prefer-full-length-trousers — real evidence for an actual garment
-    // type. The simulation still ties every candidate silhouette (all her
-    // bottoms are identical), so the title must contrast against what she
-    // owns rather than assert a winner the evidence does not support.
+    // type. The primary distinct-looks simulation still ties every
+    // candidate silhouette (all her bottoms are identical), but the
+    // secondary tie-break must still resolve to one or two real,
+    // trouser-valid silhouettes — never a vague "different shape" fallback,
+    // and never an invalid trouser term.
     const { recs } = run(
       repetitiveWork(),
       makePassport({ lifestyle: ["work-office"], dressingPreferences: ["legs-covered", "prefer-full-length-trousers"] }),
@@ -915,9 +917,49 @@ describe("§WR-9 emitted attributes resolve the tested outcome", () => {
     const rec = recs.recommendations.find((r) => r.register === "work")!;
     assert.ok(rec, "a recommendation is made");
     assert.match(rec.title, /trousers/, "the stated garment type names itself in the title");
-    assert.match(rec.title, /different from the straight pairs you already own/, "contrasts with what she owns instead of naming a winner");
-    for (const banned of ["a-line", "fitted", "flared", "oversized", "wide-leg"]) {
-      assert.doesNotMatch(rec.title, new RegExp(banned, "i"), `no specific new silhouette should be asserted: found "${banned}"`);
+    assert.doesNotMatch(rec.title, /different from the straight pairs|a different shape/i, "must name a real winner, not the vague fallback");
+    assert.ok(rec.criteria.resolvingSilhouettes.length >= 1 && rec.criteria.resolvingSilhouettes.length <= 2, "one winner, or at most two if every real criterion still ties");
+    for (const s of rec.criteria.resolvingSilhouettes) {
+      assert.ok(["straight", "flared", "wide-leg", "fitted"].includes(s), `"${s}" is not a valid trouser silhouette`);
+    }
+    for (const banned of ["a-line", "oversized"]) {
+      assert.doesNotMatch(rec.title, new RegExp(banned, "i"), `invalid trouser term should never be asserted: found "${banned}"`);
+    }
+    assert.match(rec.body, /would work with \d+ of your work pieces/, "the body explains why in one sentence, with a real count");
+  });
+
+  it("§WR-9j the trouser-silhouette tie-break never proposes a-line or oversized even when they would otherwise tie or win", () => {
+    // a-line and oversized are real CANDIDATE_SILHOUETTES tokens and could
+    // easily win a naive tie-break (they're valid for other slots/garment
+    // types) — they must never surface for a trousers-typed recommendation.
+    const { recs } = run(
+      repetitiveWork(),
+      makePassport({ lifestyle: ["work-office"], dressingPreferences: ["legs-covered", "prefer-full-length-trousers"] }),
+    );
+    const rec = recs.recommendations.find((r) => r.register === "work")!;
+    assert.ok(rec);
+    assert.ok(!rec.criteria.resolvingSilhouettes.includes("a-line"));
+    assert.ok(!rec.criteria.resolvingSilhouettes.includes("oversized"));
+  });
+
+  it("§WR-9k novelty breaks the tie toward a silhouette she does not already own elsewhere in the Closet", () => {
+    // She owns a flared skirt elsewhere (a different slot, so it never
+    // enters the work-bottom pool) — the novelty criterion must prefer the
+    // silhouette she owns NONE of over one she already has, even off-slot.
+    const withFlaredSkirt = [
+      ...repetitiveWork(),
+      makeGarment({ slot: "bottom", category: "BOTTOMS", subcategory: "skirt", formality: "casual", topLength: "n/a", hemLength: "full", silhouette: "flared", fitProfile: "flowy" }),
+    ];
+    const { recs } = run(
+      withFlaredSkirt,
+      makePassport({ lifestyle: ["work-office"], dressingPreferences: ["legs-covered", "prefer-full-length-trousers"] }),
+    );
+    const rec = recs.recommendations.find((r) => r.register === "work")!;
+    assert.ok(rec);
+    // flared is no longer novel (she owns one), so it must not be the sole
+    // winner while wide-leg (still unowned) is available.
+    if (rec.criteria.resolvingSilhouettes.length === 1) {
+      assert.notEqual(rec.criteria.resolvingSilhouettes[0], "flared", "flared is already owned elsewhere and should lose to a genuinely novel silhouette");
     }
   });
 

@@ -1555,6 +1555,21 @@ describe("§WI-19 display discipline", () => {
     assert.ok(shapes.includes("Straight"));
   });
 
+  it("ranks shapes by count across BOTH silhouette and fit fields together, not silhouette-then-fit", () => {
+    // Straight (silhouette, 5) > Relaxed (fitProfile, 4) > Fitted (silhouette, 3).
+    // Filling silhouette slots first and only then topping up from fitProfile
+    // would place Fitted (3) ahead of Relaxed (4) — a lower count outranking
+    // a higher one just because it came from the other field.
+    const items = richWardrobe().flatMap((g, i) => [
+      { ...g, id: `${g.id}-a`, silhouette: i < 5 ? "straight" : "fitted", fitProfile: i < 4 ? "relaxed" : "tailored" },
+      // Padding so every count clears minRecurrence (3) against a bigger core.
+      { ...g, id: `${g.id}-b`, silhouette: i < 5 ? "straight" : "fitted", fitProfile: i < 4 ? "relaxed" : "tailored" },
+    ]);
+    const shapes = run(items).dna.shapes.map((sh) => sh.label);
+    const order = shapes.filter((s) => ["Straight", "Relaxed", "Fitted"].includes(s));
+    assert.deepEqual(order, ["Straight", "Relaxed", "Fitted"], `expected count order, got: ${order.join(", ")}`);
+  });
+
   it("marks contradictions as discoveries and everything else as patterns", () => {
     const items = richWardrobe().map((g) =>
       g.id === "t1" ? { ...g, garmentRelationships: ["love-style-struggle"] } : g,
@@ -1815,5 +1830,67 @@ describe("§WI-21 combination eligibility matches the Coverage section", () => {
     const allIds = new Set(result.pairings.pairings.flatMap((p) => p.garmentIds));
     assert.equal(allIds.has(sportsBra.id), false);
     assert.equal(result.pairings.pairings.length, 0);
+  });
+
+  it("§WI-21e an all-activewear top+bottom+layer combination never represents Everyday, even though it is a valid pairing", () => {
+    // The exact shape of a real bug: three activewear pieces pair freely
+    // with each other (functionCompatible allows same-category pairing —
+    // correct, sportswear stays sportswear), and the hoodie is even a
+    // genuine crossover-eligible layer. But the top and bottom are still
+    // activewear, not ordinary clothing, and a shared "casual" formality
+    // does not change that. pairingRegister must not label this set
+    // "everyday" — a formality bucket cannot distinguish a Nike hoodie's
+    // "casual" from a cardigan's.
+    const passport: WardrobePassport = { ...PASSPORT, dressingPreferences: [] };
+    const hoodie = makeGarment({
+      id: "hoodie", name: "Black Nike Zip-Up Hoodie", category: "ACTIVEWEAR", slot: "outerwear",
+      formality: "casual", occasions: ["casual", "weekend", "travel", "gym"], subcategory: "zip-up hoodie",
+    });
+    const driFit = makeGarment({
+      id: "dri-fit", name: "Light Blue Nike Dri-FIT T-Shirt", category: "ACTIVEWEAR", slot: "top",
+      formality: "casual", occasions: ["travel", "gym"],
+    });
+    const leggings = makeGarment({
+      id: "flare-leggings", name: "Charcoal Flare Leggings", category: "ACTIVEWEAR", slot: "bottom",
+      formality: "casual", occasions: ["travel", "gym"],
+    });
+
+    const result = run([hoodie, driFit, leggings, ...filler(3)], { passport });
+
+    const everydayCombos = result.pairings.bestByRegister.everyday ?? [];
+    const allActivewearSet = new Set([hoodie.id, driFit.id, leggings.id]);
+    for (const combo of everydayCombos) {
+      const comboSet = new Set(combo.garmentIds);
+      const isAllActivewear = combo.garmentIds.every((id) => allActivewearSet.has(id));
+      assert.ok(!isAllActivewear, `an all-activewear set must never be the Everyday register's representative combination: ${[...comboSet].join(", ")}`);
+    }
+  });
+
+  it("§WI-21f a genuinely eligible crossover layer paired with ORDINARY pieces still represents Everyday", () => {
+    // The permitted case, preserved: the same crossover-eligible hoodie,
+    // this time layered over ordinary (non-functional) jeans and a top —
+    // the settled crossover rule exists precisely to let this combination
+    // register as Everyday.
+    const passport: WardrobePassport = { ...PASSPORT, dressingPreferences: [] };
+    const hoodie = makeGarment({
+      id: "hoodie", name: "Black Nike Zip-Up Hoodie", category: "ACTIVEWEAR", slot: "outerwear",
+      formality: "casual", occasions: ["casual", "weekend", "travel", "gym"], subcategory: "zip-up hoodie",
+    });
+    const jeans = makeGarment({
+      id: "jeans", name: "Medium Blue Wash Jeans", category: "BOTTOMS", slot: "bottom",
+      formality: "casual",
+    });
+    const tee = makeGarment({
+      id: "tee", name: "White Cotton Tee", category: "TOPS", slot: "top",
+      formality: "casual",
+    });
+
+    const result = run([hoodie, jeans, tee, ...filler(3)], { passport });
+
+    const everydayCombos = result.pairings.bestByRegister.everyday ?? [];
+    const found = everydayCombos.some((combo) =>
+      combo.garmentIds.includes(hoodie.id) && combo.garmentIds.includes(jeans.id) && combo.garmentIds.includes(tee.id),
+    );
+    assert.ok(found, "a crossover-eligible layer over genuinely ordinary pieces must still be able to represent Everyday");
   });
 });

@@ -28,6 +28,7 @@ import { getCloudinaryConfig, buildPrivateDownloadUrl } from "~/lib/cloudinary-a
 import { loadWardrobeIntelligence } from "~/lib/ai/wardrobe-intelligence.server";
 import { readClosetConfidence } from "~/lib/ai/wardrobe-confidence.server";
 import { buildWardrobePage, type WardrobePage, type PageEntry } from "~/lib/ai/wardrobe-page";
+import { registerDisplay, type DepthState } from "~/lib/ai/wardrobe-copy";
 
 // Duplicated from closet.intelligence.tsx rather than importing a private
 // constant — this route makes no change to that file at all.
@@ -115,7 +116,33 @@ export async function loader({ request }: LoaderFunctionArgs) {
     hemLength: g.hemLength ?? null,
   }));
 
-  return data({ page, garmentCards });
+  // ── "Your wardrobe at a glance" — the two highest-value register readings ──
+  //
+  // registerDisplay() is the same, already-shipped customer-safe vocabulary
+  // the profile/lifestyle line already uses ("Plenty of options", "Fewer
+  // combinations", ...) — nothing new is invented here. Only registers she
+  // actually needs (needed === true) are candidates, and "learning" is
+  // excluded: it isn't a conclusion, it's an absence of one. From what's
+  // left, only the single BEST and single WORST reading survive — an
+  // editorial contrast, not a per-register report. A customer with only one
+  // needed register, or every needed register in the same state, gets one
+  // line, not two padded-out ones.
+  const DEPTH_RANK: Readonly<Record<DepthState, number>> = {
+    strong: 0, "limited-variety": 1, "needs-range": 2, "less-than-it-looks": 3, empty: 4, learning: -1,
+  };
+  const glanceCandidates = needs.registers
+    .filter((r) => r.needed)
+    .map(registerDisplay)
+    .filter((d) => d.state !== "learning");
+  const glanceRegisters: Array<{ heading: string; stateText: string }> = [];
+  if (glanceCandidates.length > 0) {
+    const best = [...glanceCandidates].sort((a, b) => DEPTH_RANK[a.state] - DEPTH_RANK[b.state])[0];
+    const worst = [...glanceCandidates].sort((a, b) => DEPTH_RANK[b.state] - DEPTH_RANK[a.state])[0];
+    glanceRegisters.push({ heading: best.heading, stateText: best.stateText });
+    if (worst.heading !== best.heading) glanceRegisters.push({ heading: worst.heading, stateText: worst.stateText });
+  }
+
+  return data({ page, garmentCards, glanceRegisters });
 }
 
 type GarmentCard = {
@@ -141,6 +168,13 @@ function cardLabel(card: GarmentCard | undefined): string {
   return [card.primaryColor, card.subcategory ?? card.category.toLowerCase()].filter(Boolean).join(" ");
 }
 
+/** Strips the recommendation-title verb phrase down to its noun phrase, for
+ * compact display (rail headline, glance strip). Same transform in both
+ * places — one source, not two copies drifting apart. */
+function shortRecTitle(title: string | undefined): string {
+  return (title ?? "").replace(/^Look for |^One option to explore: /i, "").replace(/\.$/, "");
+}
+
 /** A short, real word for "with a ___" — derived from the actual matched
  * piece's own category/name, never a fixed label for one customer's items. */
 function shortMatchWord(card: GarmentCard | undefined): string {
@@ -153,20 +187,26 @@ function shortMatchWord(card: GarmentCard | undefined): string {
   return n || "this piece";
 }
 
+const LEGS_COVERED_POLICY_LINE = 'For this preference, nAia currently checks for full-length pieces.';
+
 /**
  * The per-piece Coverage reason, in her language.
  *
- * legs-covered gets a specific sentence naming the actual hem length that
- * tripped the check, when it's known — a midi-length piece "may not meet
- * your preference" reads as a surprising or wrong flag without it, even
- * though the underlying check is unchanged and correct. Every other reason
- * keeps the existing generic phrasing. Driven entirely by the real
+ * The legs-covered POLICY (full/maxi only) is explained once, at the top of
+ * the Coverage canvas — see LEGS_COVERED_POLICY_LINE — so each affected
+ * piece only needs its own short length + outcome, not the whole sentence
+ * repeated. midi gets "under the current rule" rather than "on its own":
+ * midi is the one length where whether it should qualify is a live, open
+ * policy question (see the coverage-semantics spec) — every other
+ * insufficient length is unambiguous regardless of where that policy
+ * question lands, so it reads as a plain fact. Driven entirely by the real
  * `hemLength` value on the real garment — nothing here is specific to one
  * customer or one piece.
  */
 function coverageReasonSentence(reason: string, hemLength: string | null): string {
   if (reason === "keeping your legs covered" && hemLength && hemLength !== "full" && hemLength !== "maxi" && hemLength !== "n/a") {
-    return `This is a ${hemLength} length; your "legs covered" preference is currently checked against full-length pieces.`;
+    const qualifier = hemLength === "midi" ? "under the current rule" : "on its own";
+    return `${hemLength[0].toUpperCase()}${hemLength.slice(1)} length — does not meet this preference ${qualifier}.`;
   }
   const plain = reason.replace(/^keeping your /, "").replace(/^avoiding /, "avoiding ");
   return `May not meet your preference for ${plain} on its own.`;
@@ -230,8 +270,9 @@ type Insight = "wear" | "work" | "shopping" | "coverage" | "profile" | null;
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 export default function WardrobeIntelligencePreview() {
-  const { page, garmentCards } = useLoaderData<typeof loader>() as {
+  const { page, garmentCards, glanceRegisters } = useLoaderData<typeof loader>() as {
     page: WardrobePage; garmentCards: GarmentCard[];
+    glanceRegisters: Array<{ heading: string; stateText: string }>;
   };
   const byId = new Map(garmentCards.map((c) => [c.id, c]));
 
@@ -472,6 +513,26 @@ export default function WardrobeIntelligencePreview() {
             </div>
           </header>
 
+          {(glanceRegisters.length > 0 || worthConsidering || lowPriority) && (
+            <div className="wip-glance" aria-label="Your wardrobe at a glance">
+              {glanceRegisters.map((g) => (
+                <span key={g.heading} className="wip-glance-item">
+                  <b>{g.heading}</b> — {g.stateText.toLowerCase()}
+                </span>
+              ))}
+              {worthConsidering && (
+                <span className="wip-glance-item wip-glance-item--positive">
+                  <b>Worth considering</b> — {shortRecTitle(worthConsidering.title)}
+                </span>
+              )}
+              {lowPriority && (
+                <span className="wip-glance-item">
+                  <b>Can wait</b> — {shortRecTitle(lowPriority.title)}
+                </span>
+              )}
+            </div>
+          )}
+
           <div className="wip-layout">
             <section className="wip-focus" aria-live="polite" aria-label="Selected wardrobe discovery">
               {insight === null && (
@@ -644,6 +705,9 @@ export default function WardrobeIntelligencePreview() {
                     <h2>A closer look at coverage.</h2>
                     <p>Checked against what you&rsquo;ve told nAia you prefer.</p>
                   </div>
+                  {blockedDetail.some((b) => b.reason === "keeping your legs covered") && (
+                    <p className="wip-coverage-policy">{LEGS_COVERED_POLICY_LINE}</p>
+                  )}
                   <div className="wip-coverage-list">
                     {blockedDetail.map((b) => {
                       const card = byId.get(b.garmentId);
@@ -724,7 +788,7 @@ export default function WardrobeIntelligencePreview() {
               {shoppingHeadline && (
                 <button type="button" className={`wip-insight${insight === "shopping" ? " is-active" : ""}`} onClick={() => setInsight("shopping")}>
                   <span className="wip-insight-topic">Shopping priorities</span>
-                  <h3>{worthConsidering ? `Worth considering: ${(worthConsidering.title ?? "").replace(/^Look for |^One option to explore: /i, "")}` : lowPriority!.title}</h3>
+                  <h3>{worthConsidering ? `Worth considering: ${shortRecTitle(worthConsidering.title)}` : lowPriority!.title}</h3>
                   <p>{worthConsidering ? worthConsidering.body : lowPriority!.body}</p>
                   <span className="wip-insight-arrow" aria-hidden="true">↗</span>
                 </button>
@@ -775,6 +839,12 @@ const css = `
   .wip-status{text-align:right;min-width:180px}
   .wip-status strong{display:block;font-family:var(--naia-ff-ui);font-size:12.5px;font-weight:600;color:var(--naia-ink)}
   .wip-link{border:0;background:none;padding:0;margin-top:6px;font-family:var(--naia-ff-ui);font-size:11.5px;color:var(--naia-accent);text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+
+  .wip-glance{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 22px;padding:12px 0;margin-bottom:22px;border-top:1px solid var(--naia-border);border-bottom:1px solid var(--naia-border)}
+  .wip-glance-item{font-family:var(--naia-ff-ui);font-size:11.5px;color:rgba(40,21,12,0.65);white-space:nowrap}
+  .wip-glance-item b{font-family:var(--naia-ff-ui);font-weight:600;color:var(--naia-ink);text-transform:uppercase;font-size:10px;letter-spacing:0.4px}
+  .wip-glance-item--positive b{color:var(--naia-accent)}
+  @media(max-width:700px){.wip-glance{gap:6px 16px}.wip-glance-item{white-space:normal}}
 
   .wip-layout{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:26px;align-items:start}
   @media(max-width:900px){.wip-layout{grid-template-columns:1fr}}
@@ -849,6 +919,7 @@ const css = `
   .wip-shop-body{font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.6;color:rgba(40,21,12,0.65);margin:0 0 10px}
 
   /* Coverage */
+  .wip-coverage-policy{margin:0 24px 14px;font-family:var(--naia-ff-ui);font-size:11.5px;font-style:italic;color:rgba(40,21,12,0.55)}
   .wip-coverage-list{padding:4px 24px 20px;display:flex;flex-direction:column;gap:14px}
   .wip-coverage-item{display:flex;gap:16px;align-items:flex-start;background:var(--naia-muted-bg);border-radius:7px;padding:14px}
   .wip-coverage-item .wip-thumb{width:100px;flex-shrink:0;border-radius:5px}
