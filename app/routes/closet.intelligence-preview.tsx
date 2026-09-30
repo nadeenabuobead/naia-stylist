@@ -585,7 +585,7 @@ export default function WardrobeIntelligencePreview() {
       const capability = profileBlock.entries?.find((e) => e.id === "closet-capability");
       const strengths = (capability?.meta?.strengths ?? []) as Array<{ label: string; count: number }>;
       return (
-        <DialogShell title="Your Passport comparisons." subtitle="Deeper evidence behind your wardrobe profile." onClose={closeDialog}>
+        <DialogShell title="How your wardrobe compares with your Style Passport." subtitle="Deeper evidence behind your wardrobe profile." onClose={closeDialog}>
           {entries.map((e) => e.title && e.body ? (
             <div key={e.id} className="wip-profile-block">
               <h3>{e.title}</h3>
@@ -922,7 +922,7 @@ export default function WardrobeIntelligencePreview() {
                     )}
                     {attentionCombo && (
                       <button type="button" className="wip-primary" onClick={() => setDialog({ kind: "workCombo" })}>
-                        See this combination <span aria-hidden="true">→</span>
+                        View this combination <span aria-hidden="true">→</span>
                       </button>
                     )}
                   </div>
