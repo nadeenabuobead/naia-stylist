@@ -164,14 +164,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ? Math.round(intelligence.dna.palette.filter((p) => p.neutral).reduce((sum, p) => sum + p.share, 0) * 100)
     : null;
 
-  // ── The real "enough" cluster behind the low-priority finding ────────────
-  // notAPriority.body only explains why it's LOW priority (thinner area
-  // elsewhere); needs.enough[0] is the SAME cluster with its own real count
-  // and "why it's enough" sentence — reused here, not rewritten, so "can
-  // wait, and why" cites a real number instead of just naming the register.
-  const enoughCluster = needs.enough[0]
-    ? { title: needs.enough[0].title, body: needs.enough[0].body, count: needs.enough[0].garmentIds.length }
-    : null;
+  // ── The real "enough" clusters behind the low-priority finding ───────────
+  // notAPriority.body only explains why ONE cluster is LOW priority (thinner
+  // area elsewhere); needs.enough already computes up to 3 real repetition
+  // clusters with their own count and "why it's enough" sentence — all of
+  // them are surfaced here now, not just the one the low-priority finding
+  // happened to reference, so "where your wardrobe repeats" shows real
+  // breadth instead of a single example.
+  const enoughClusters = needs.enough.map((e) => ({ title: e.title, body: e.body, garmentIds: e.garmentIds, count: e.garmentIds.length }));
+  const enoughCluster = enoughClusters[0] ?? null;
 
   // ── Rediscover matches grouped by their OWN register ─────────────────────
   // "Show me how to wear this", not a flat grid: each matched piece already
@@ -225,7 +226,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return data({
     page, garmentCards, glanceRegisters, allRegisterReadings, neutralSharePct,
-    enoughCluster, rediscoverByRegister, bestByRegisterPreview, recommendationDetail,
+    enoughCluster, enoughClusters, rediscoverByRegister, bestByRegisterPreview, recommendationDetail,
   });
 }
 
@@ -396,13 +397,14 @@ type Insight = "wear" | "work" | "shopping" | "coverage" | "profile" | null;
 export default function WardrobeIntelligencePreview() {
   const {
     page, garmentCards, glanceRegisters, allRegisterReadings, neutralSharePct,
-    enoughCluster, rediscoverByRegister, bestByRegisterPreview, recommendationDetail,
+    enoughCluster, enoughClusters, rediscoverByRegister, bestByRegisterPreview, recommendationDetail,
   } = useLoaderData<typeof loader>() as {
     page: WardrobePage; garmentCards: GarmentCard[];
     glanceRegisters: Array<{ heading: string; stateText: string }>;
     allRegisterReadings: Array<{ register: RegisterId; usableCount: number; heading: string; state: DepthState; stateText: string; plain: string }>;
     neutralSharePct: number | null;
-    enoughCluster: { title: string; body: string; count: number } | null;
+    enoughCluster: { title: string; body: string; garmentIds: string[]; count: number } | null;
+    enoughClusters: Array<{ title: string; body: string; garmentIds: string[]; count: number }>;
     rediscoverByRegister: Array<{ register: RegisterId | "other"; garmentIds: string[] }>;
     bestByRegisterPreview: Partial<Record<RegisterId, Array<{ id: string; reason: string; garmentIds: string[] }>>>;
     recommendationDetail: {
@@ -583,7 +585,7 @@ export default function WardrobeIntelligencePreview() {
       const capability = profileBlock.entries?.find((e) => e.id === "closet-capability");
       const strengths = (capability?.meta?.strengths ?? []) as Array<{ label: string; count: number }>;
       return (
-        <DialogShell title="How nAia knows this." subtitle="The deeper evidence behind your wardrobe profile." onClose={closeDialog}>
+        <DialogShell title="Your Passport comparisons." subtitle="Deeper evidence behind your wardrobe profile." onClose={closeDialog}>
           {entries.map((e) => e.title && e.body ? (
             <div key={e.id} className="wip-profile-block">
               <h3>{e.title}</h3>
@@ -601,9 +603,6 @@ export default function WardrobeIntelligencePreview() {
               )}
             </div>
           )}
-          <p className="wip-dialog-note">
-            Selected findings from your Closet, Style Passport and StyleMe history — not a new analysis.
-          </p>
         </DialogShell>
       );
     }
@@ -660,7 +659,7 @@ export default function WardrobeIntelligencePreview() {
             <div className="wip-status">
               <strong>{page.basis}</strong>
               <button type="button" className="wip-link" onClick={() => setDialog({ kind: "status" })}>
-                {previewStatus ? `${previewStatus} ↗` : "Confirm closet status ↗"}
+                {previewStatus ? `${previewStatus} ↗` : "Is your Closet up to date? →"}
               </button>
             </div>
           </header>
@@ -923,7 +922,7 @@ export default function WardrobeIntelligencePreview() {
                     )}
                     {attentionCombo && (
                       <button type="button" className="wip-primary" onClick={() => setDialog({ kind: "workCombo" })}>
-                        Try what you own <span aria-hidden="true">→</span>
+                        See this combination <span aria-hidden="true">→</span>
                       </button>
                     )}
                   </div>
@@ -939,6 +938,14 @@ export default function WardrobeIntelligencePreview() {
                   </div>
                   {worthConsidering && (() => {
                     const colourAttr = recommendationDetail?.attributes.find((a) => a.kind === "colour");
+                    // colourAttr.label is already the single LEAD colour (the
+                    // one she owns least of among her stated favourites) and
+                    // .values is [lead, ...alternatives] in that same order —
+                    // the engine already separates these; this just stops
+                    // flattening them into one line that reads as though all
+                    // three were equally "best fit".
+                    const colourLead = colourAttr?.label;
+                    const colourAlternatives = colourAttr?.values.slice(1) ?? [];
                     // Only real, non-null evidence becomes a bullet — rise and
                     // fabric aren't derivable at all today (no such field
                     // exists anywhere in the engine), so they're never shown,
@@ -947,21 +954,26 @@ export default function WardrobeIntelligencePreview() {
                       ...(recommendationDetail?.coverage ?? []).map((c) => COVERAGE_LABEL[c]).filter((v, i, a) => v && a.indexOf(v) === i),
                       ...(recommendationDetail?.resolvingSilhouettes ?? []),
                       ...(recommendationDetail?.structure ? [recommendationDetail.structure === "structured" ? "Structured" : "Fluid"] : []),
-                      ...(colourAttr ? [colourAttr.values.map((v) => v[0].toUpperCase() + v.slice(1)).join(", ")] : []),
                     ];
                     // Human, not algorithmic: names what the colour DOES for
                     // her rather than reciting "appears less often".
-                    const colourSentence = colourAttr
-                      ? ` ${colourAttr.label[0].toUpperCase()}${colourAttr.label.slice(1)} is a colour you said you like, so it adds a way to vary your look without leaving the palette you already wear.`
+                    const colourSentence = colourLead
+                      ? ` ${colourLead[0].toUpperCase()}${colourLead.slice(1)} would add variety while staying within the palette you already enjoy wearing.`
                       : "";
                     return (
                       <div className="wip-shop-block wip-shop-block--lead">
                         <span className="wip-shop-kicker">Worth adding next</span>
                         <p className="wip-shop-title">{(worthConsidering.title ?? "").replace(/^Look for |\.$/g, "")}</p>
-                        {bullets.length > 0 && (
+                        {(bullets.length > 0 || colourLead) && (
                           <div className="wip-shop-bullets">
                             <span className="wip-shop-bullets-label">Best fit for your wardrobe</span>
-                            <ul>{bullets.map((b) => <li key={b}>{b}</li>)}</ul>
+                            <ul>
+                              {bullets.map((b) => <li key={b}>{b}</li>)}
+                              {colourLead && <li>Best fit: {colourLead[0].toUpperCase()}{colourLead.slice(1)}</li>}
+                              {colourAlternatives.length > 0 && (
+                                <li>Also within your palette: {colourAlternatives.map((c) => c[0].toUpperCase() + c.slice(1)).join(", ")}</li>
+                              )}
+                            </ul>
                           </div>
                         )}
                         <p className="wip-shop-body">
@@ -988,15 +1000,32 @@ export default function WardrobeIntelligencePreview() {
                           one wouldn't add much; falls back to the shorter
                           register-only reason if that cluster isn't available. */}
                       <p className="wip-shop-body">{enoughCluster?.body ?? lowPriority.body}</p>
-                      {enoughCluster && enoughCluster.count > 0 && (
-                        <p className="wip-shop-count">{enoughCluster.count} similar pieces already in your Closet</p>
+                      {enoughCluster && enoughCluster.garmentIds.length > 0 && (
+                        <div className="wip-ways-strip">
+                          {enoughCluster.garmentIds.slice(0, 4).map((id) => <Thumb key={id} card={byId.get(id)} height={70} />)}
+                        </div>
                       )}
+                    </div>
+                  )}
+                  {enoughClusters.length > 1 && (
+                    <div className="wip-shop-block wip-shop-block--secondary">
+                      <span className="wip-shop-kicker">Where else your wardrobe repeats</span>
+                      {enoughClusters.slice(1).map((c) => (
+                        <div key={c.title} className="wip-repeat-row">
+                          <p className="wip-shop-body">{c.body}</p>
+                          {c.garmentIds.length > 0 && (
+                            <div className="wip-ways-strip">
+                              {c.garmentIds.slice(0, 4).map((id) => <Thumb key={id} card={byId.get(id)} height={56} />)}
+                            </div>
+                          )}
+                        </div>
+                      ))}
                     </div>
                   )}
                   <div className="wip-feature-foot">
                     <p>A shopping priority, not a rule.</p>
                     <button type="button" className="wip-primary" onClick={() => setInsight(null)}>
-                      Explore what you have <span aria-hidden="true">→</span>
+                      See what I can wear now <span aria-hidden="true">→</span>
                     </button>
                   </div>
                 </>
@@ -1011,7 +1040,14 @@ export default function WardrobeIntelligencePreview() {
                     <p>Checked against what you&rsquo;ve told nAia you prefer — activewear, layering and open policy cases are read differently, not against one blanket rule.</p>
                   </div>
                   {blockedDetail.some((b) => b.reason === "keeping your legs covered") && (
-                    <p className="wip-coverage-policy">{LEGS_COVERED_POLICY_LINE}</p>
+                    <>
+                      <button type="button" className="wip-link" onClick={() => toggleWhy("coverage-policy")}>
+                        {expandedWhy.has("coverage-policy") ? "Hide" : "How is this checked?"}
+                      </button>
+                      {expandedWhy.has("coverage-policy") && (
+                        <p className="wip-coverage-policy">{LEGS_COVERED_POLICY_LINE}</p>
+                      )}
+                    </>
                   )}
                   <div className="wip-coverage-list">
                     {blockedDetail.map((b) => {
@@ -1022,7 +1058,7 @@ export default function WardrobeIntelligencePreview() {
                           <Thumb card={card} height={160} />
                           <div className="wip-coverage-item-text">
                             <span className={`wip-coverage-state wip-coverage-state--${state}`}>
-                              {state === "may-depend" ? "May depend on how you wear it" : "Doesn’t appear to match"}
+                              {state === "may-depend" ? "May depend on how you wear it" : "Outside your usual preference"}
                             </span>
                             <h3>{b.name}</h3>
                             <p>
@@ -1084,7 +1120,7 @@ export default function WardrobeIntelligencePreview() {
                   </div>
                   <div className="wip-feature-foot">
                     <p>The supporting picture, without another long report.</p>
-                    <button type="button" className="wip-link" onClick={() => setDialog({ kind: "profile" })}>How nAia knows this ↗</button>
+                    <button type="button" className="wip-link" onClick={() => setDialog({ kind: "profile" })}>Your Passport comparisons ↗</button>
                   </div>
                 </>
               )}
@@ -1249,6 +1285,8 @@ const css = `
   .wip-shop-title{font-family:var(--naia-ff-display);font-weight:400;font-size:1.15rem;line-height:1.3;margin:0 0 6px;color:var(--naia-ink)}
   .wip-shop-body{font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.6;color:rgba(40,21,12,0.65);margin:0 0 10px}
   .wip-shop-count{font-family:var(--naia-ff-ui);font-size:10.5px;color:rgba(40,21,12,0.5);margin:0}
+  .wip-repeat-row{padding:8px 0}
+  .wip-repeat-row .wip-shop-body{margin:0 0 8px}
   .wip-shop-bullets{margin:0 0 12px}
   .wip-shop-bullets-label,.wip-shop-unlocks-label{display:block;font-family:var(--naia-ff-ui);font-size:9.5px;letter-spacing:1px;text-transform:uppercase;color:rgba(40,21,12,0.45);margin-bottom:6px}
   .wip-shop-bullets ul{margin:0;padding-left:18px;font-family:var(--naia-ff-ui);font-size:12px;line-height:1.7;color:rgba(40,21,12,0.7)}
