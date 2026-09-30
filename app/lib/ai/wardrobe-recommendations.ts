@@ -188,7 +188,7 @@ const STRUCTURE_LABEL: Readonly<Record<string, string>> = {
  * full-length trousers was recommended "a work bottom" with no length at all.
  */
 const COVERAGE_RULES: Readonly<
-  Record<string, { label: string; slots: readonly string[]; adjective?: string }>
+  Record<string, { label: string; slots: readonly string[]; adjective?: string; noun?: string }>
 > = {
   "arms-covered":               { label: "sleeves",            slots: ["top", "dress", "outerwear"], adjective: "sleeved" },
   "avoid-sleeveless":           { label: "sleeves",            slots: ["top", "dress", "outerwear"], adjective: "sleeved" },
@@ -197,7 +197,12 @@ const COVERAGE_RULES: Readonly<
   "longer-tops":                { label: "a longer cut",       slots: ["top"], adjective: "longer" },
   "no-cropped-tops":            { label: "not cropped",        slots: ["top"] },
   "legs-covered":               { label: "full length",        slots: ["bottom", "dress"], adjective: "full-length" },
-  "prefer-full-length-trousers":{ label: "full length",        slots: ["bottom"], adjective: "full-length" },
+  // A garment-TYPE preference, not just a length one. Same length adjective as
+  // legs-covered (so they collapse to one line on a bottom), but `noun`
+  // lets the title say "trousers" instead of the generic slot noun — the
+  // one piece of real evidence anywhere in this vocabulary that names an
+  // actual garment type, not just a shape or a length.
+  "prefer-full-length-trousers":{ label: "full length",        slots: ["bottom"], adjective: "full-length", noun: "trousers" },
   "looser-fitting":             { label: "an easier fit",      slots: ["top", "bottom", "dress", "outerwear"], adjective: "looser" },
 };
 
@@ -344,9 +349,17 @@ function statedCoverage(passport: WardrobePassport | null, slot: string): string
   const prefs = (passport?.dressingPreferences ?? []).filter(
     (p) => COVERAGE_RULES[p]?.slots.includes(slot),
   );
+  // A garment-type-specific preference ("full-length trousers") says more
+  // than a same-length generic one ("legs covered") and must survive the
+  // label dedup below even when she stated the generic one first in her
+  // Passport answers — order noun-bearing preferences first, everything
+  // else keeps her stated order.
+  const ordered = [...prefs].sort(
+    (a, b) => (COVERAGE_RULES[a].noun ? 0 : 1) - (COVERAGE_RULES[b].noun ? 0 : 1),
+  );
   // Collapse duplicates that mean the same thing on a garment ("sleeves").
   const seenLabels = new Set<string>();
-  return prefs.filter((p) => {
+  return ordered.filter((p) => {
     const label = COVERAGE_RULES[p].label;
     if (seenLabels.has(label)) return false;
     seenLabels.add(label);
@@ -526,6 +539,13 @@ function buildRecommendation(
     register, slot, colourFamilies: [], structure: null, resolvingSilhouettes: [], coverage: [],
   };
   let best = broadUnlocks;
+  // Set only when a real garment type (from a stated Passport preference, not
+  // a guess) AND a genuine "different from what you own" contrast both hold —
+  // see the repetition/shape branch below. When set, it replaces the generic
+  // slot-noun title with one naming the actual garment type and the actual
+  // silhouette she already owns, instead of naming a specific NEW silhouette
+  // the simulation cannot actually rank (see the tie check there).
+  let shapeContrastPhrase: string | null = null;
 
   // ── What would actually CLOSE this gap ───────────────────────────────────
   //
@@ -563,14 +583,49 @@ function buildRecommendation(
 
       criteria.structure = fitIsTheChange ? leadFamily : null;
       criteria.resolvingSilhouettes = silhouettes;
-      attributes.push({
-        kind: "structure",
-        values: fitIsTheChange ? [leadFamily, ...silhouettes] : silhouettes,
-        label: fitIsTheChange
-          ? `${STRUCTURE_LABEL[leadFamily] ?? leadFamily}, in ${joinOr(plainSilhouettes)}`
-          : `a different shape — ${joinOr(plainSilhouettes)}`,
-        source: "closet",
-      });
+
+      // Do the tested silhouettes actually differ from one another, or did
+      // they all clear the threshold together? gapResolvingClasses returns
+      // every candidate that clears it, sorted by distinctLooks then name —
+      // when the top candidates score identically, naming one specific
+      // silhouette ("A-line") would assert a winner the simulation never
+      // produced; it would just be the alphabetically-first tied name.
+      const topScore = resolving[0]?.distinctLooks;
+      const tied = resolving.filter((r) => r.distinctLooks === topScore).length > 1;
+
+      // A real garment-type preference (not a guess) lets the title name what
+      // she'd actually be shopping for. Only trousers carries one today.
+      const coverageForNoun = statedCoverage(passport, slot);
+      const coverageNoun = coverageForNoun.length > 0 ? COVERAGE_RULES[coverageForNoun[0]].noun : undefined;
+
+      if (tied && coverageNoun) {
+        const ownSilhouettes = [...new Set(
+          registerPool
+            .filter((g) => g.slot === slot)
+            .map((g) => norm(g.silhouette))
+            .filter((s): s is string => s !== null),
+        )];
+        if (ownSilhouettes.length === 1) {
+          const ownWord = (SILHOUETTE_LABELS[ownSilhouettes[0]] ?? ownSilhouettes[0]).toLowerCase();
+          const collective = coverageNoun === "trousers" ? "pairs" : coverageNoun;
+          shapeContrastPhrase = `a shape that's different from the ${ownWord} ${collective} you already own`;
+        }
+      }
+
+      // The tied/resolved case names no specific silhouette at all (handled
+      // by shapeContrastPhrase in the title below) — nothing here would be
+      // more honest than what that phrase already says, so no attribute chip
+      // is added for it. Every other case is unchanged.
+      if (!shapeContrastPhrase) {
+        attributes.push({
+          kind: "structure",
+          values: fitIsTheChange ? [leadFamily, ...silhouettes] : silhouettes,
+          label: fitIsTheChange
+            ? `${STRUCTURE_LABEL[leadFamily] ?? leadFamily}, in ${joinOr(plainSilhouettes)}`
+            : `a different shape — ${joinOr(plainSilhouettes)}`,
+          source: "closet",
+        });
+      }
       evidence.push(
         ev(
           "garment-fact",
@@ -666,7 +721,12 @@ function buildRecommendation(
 
   const specificity: Specificity =
     attributes.length > 0 || coverageAdjective !== null ? "detailed" : "slot";
-  const noun = SLOT_NOUN[slot] ?? slot;
+  // A stated coverage preference can name the actual garment type ("trousers")
+  // — real evidence, not a guess — and that's always a better noun than the
+  // generic slot word when it's there, independent of the shape-contrast case
+  // below.
+  const coverageNounForTitle = coverage.length > 0 ? COVERAGE_RULES[coverage[0]].noun : undefined;
+  const noun = coverageNounForTitle ?? SLOT_NOUN[slot] ?? slot;
   const structureWord = criteria.structure === "structured" ? "structured " : criteria.structure === "soft" ? "softer " : "";
   // When the gap is that her own coverage rules rule pieces out, say so in the
   // title: "an occasion dress with more coverage" is the actual answer, where
@@ -679,10 +739,20 @@ function buildRecommendation(
       ? " with more coverage"
       : "";
   const coveragePrefix = coverageAdjective ? `${coverageAdjective} ` : "";
-  const phrase = `${coveragePrefix}${structureWord}${REGISTER_WORD[register]} ${noun}${coverageSuffix}`;
-  // "One option to explore" rather than a directive. The engine has evidence
-  // for a gap; it does not have evidence that buying is the only answer.
-  const title = `One option to explore: ${/^[aeiou]/i.test(phrase) ? "an" : "a"} ${phrase}`;
+  let title: string;
+  if (shapeContrastPhrase) {
+    // The evidenced ceiling: names the real garment type and contrasts it
+    // with what she actually owns, without asserting a winner among tied
+    // candidate silhouettes. "Look for full-length work trousers in a shape
+    // that's different from the straight pairs you already own."
+    title = `Look for ${coveragePrefix}${REGISTER_WORD[register]} ${noun} in ${shapeContrastPhrase}.`;
+  } else {
+    const phrase = `${coveragePrefix}${structureWord}${REGISTER_WORD[register]} ${noun}${coverageSuffix}`;
+    // "One option to explore" rather than a directive. The engine has
+    // evidence for a gap; it does not have evidence that buying is the only
+    // answer.
+    title = `One option to explore: ${/^[aeiou]/i.test(phrase) ? "an" : "a"} ${phrase}`;
+  }
 
   // The body explains what it would DO, not what it is. The reason to buy is
   // the combinations it creates, and that number is measured, not asserted.

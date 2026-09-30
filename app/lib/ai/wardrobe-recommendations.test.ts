@@ -565,7 +565,10 @@ describe("§WR-2r coverage belongs in the name, not beside it", () => {
     }));
     const work = recs.recommendations.find((r) => r.register === "work");
     assert.ok(work);
-    assert.match(work!.title, /^One option to explore: a full-length work bottom$/);
+    // She stated BOTH the generic length preference and the garment-type one.
+    // The garment-type preference is strictly more informative on a bottom —
+    // "trousers" survives the collision, not the generic "bottom" noun.
+    assert.match(work!.title, /^One option to explore: a full-length work trousers$/);
     // The attributes line carries the colour alone — the name already says the
     // rest, and "grey · full length" read as two equal tags for one garment.
     assert.ok(!work!.attributes.some((a) => a.kind === "coverage"), "coverage should not be repeated beside the name");
@@ -580,7 +583,10 @@ describe("§WR-2r coverage belongs in the name, not beside it", () => {
     }));
     const work = recs.recommendations.find((r) => r.register === "work");
     assert.ok(work);
-    assert.ok(work!.criteria.coverage.includes("legs-covered"), "moving it into the name must not drop it from criteria");
+    // The more specific, garment-type-bearing preference is the one that
+    // survives the dedup and lands in criteria — not the generic one it
+    // collapsed with.
+    assert.ok(work!.criteria.coverage.includes("prefer-full-length-trousers"), "the specific preference must survive the dedup");
     assert.equal(work!.specificity, "detailed", "a named requirement is still specificity");
   });
 
@@ -893,6 +899,25 @@ describe("§WR-9 emitted attributes resolve the tested outcome", () => {
         !rec.criteria.resolvingSilhouettes.every((s) => s === "flared"),
         "the proposal must differ from what she already owns",
       );
+    }
+  });
+
+  it("§WR-9i a stated garment-type preference names the type, and a tied simulation names no specific silhouette", () => {
+    // Same tied-bottom fixture as §WR-9a, but she has also stated
+    // prefer-full-length-trousers — real evidence for an actual garment
+    // type. The simulation still ties every candidate silhouette (all her
+    // bottoms are identical), so the title must contrast against what she
+    // owns rather than assert a winner the evidence does not support.
+    const { recs } = run(
+      repetitiveWork(),
+      makePassport({ lifestyle: ["work-office"], dressingPreferences: ["legs-covered", "prefer-full-length-trousers"] }),
+    );
+    const rec = recs.recommendations.find((r) => r.register === "work")!;
+    assert.ok(rec, "a recommendation is made");
+    assert.match(rec.title, /trousers/, "the stated garment type names itself in the title");
+    assert.match(rec.title, /different from the straight pairs you already own/, "contrasts with what she owns instead of naming a winner");
+    for (const banned of ["a-line", "fitted", "flared", "oversized", "wide-leg"]) {
+      assert.doesNotMatch(rec.title, new RegExp(banned, "i"), `no specific new silhouette should be asserted: found "${banned}"`);
     }
   });
 
