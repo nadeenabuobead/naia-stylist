@@ -791,7 +791,15 @@ export default function WardrobeIntelligencePreview() {
                               {reading && <span className={`wip-depth-badge wip-depth-badge--${reading.state}`}>{reading.stateText}</span>}
                             </div>
                             <p>{interpretation || entry?.body || "Nothing here yet."}</p>
-                            {combos.length > 0 && comboWhy && (
+                            {/* One reveal trigger per card. combos.length > 0 means
+                                this register already shows a real ranked
+                                combination, so ITS reason is the relevant "why" —
+                                the entry-level action (whyThisWorks, meant for
+                                registers with no combo of their own, e.g. the
+                                gym-bonus entries below) would just repeat the
+                                same visible label a second time and is skipped
+                                here. */}
+                            {combos.length > 0 && comboWhy ? (
                               <>
                                 <button type="button" className="wip-link" onClick={() => toggleWhy(comboWhyKey)}>
                                   {expandedWhy.has(comboWhyKey) ? "Show less" : "Why this works"}
@@ -800,8 +808,7 @@ export default function WardrobeIntelligencePreview() {
                                   <p className="wip-ways-why">{comboWhy}</p>
                                 )}
                               </>
-                            )}
-                            {why && (
+                            ) : why && (
                               <>
                                 <button type="button" className="wip-link" onClick={() => toggleWhy(entry!.id)}>
                                   {expandedWhy.has(entry!.id) ? why.hideLabel : why.label}
