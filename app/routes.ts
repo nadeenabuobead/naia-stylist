@@ -13,6 +13,9 @@ export default [
   route("passport", "routes/passport.tsx"),
   route("closet", "routes/closet._index.tsx"),
   route("closet/intelligence", "routes/closet.intelligence.tsx"),
+  // Presentation preview only — not linked from navigation, makes no writes.
+  // See app/routes/closet.intelligence-preview.tsx.
+  route("closet/intelligence-preview", "routes/closet.intelligence-preview.tsx"),
   route("style-me", "routes/style-me/_index.tsx"),
   // Rev 3 — Psychology-First StyleMe (Group 5)
   route("style-me/state", "routes/style-me/state.tsx"),
