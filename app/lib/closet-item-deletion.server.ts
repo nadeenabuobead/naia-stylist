@@ -17,6 +17,7 @@
 
 import prisma from "../db.server.js";
 import { deleteCloudinaryAsset, type DeleteAssetFn } from "./cloudinary-admin.server.js";
+import { writeSourceEvidence } from "./ai/taste-reconcile.server.js";
 
 export type DeleteClosetItemResult =
   | { deleted: true }
@@ -44,5 +45,15 @@ export async function deleteClosetItemWithImage(
   }
 
   await prisma.closetItem.delete({ where: { id: item.id } });
+
+  // Deleting the item means its CLOSET_RELATIONSHIP evidence no longer has a
+  // source — clear it via the canonical writer so reconciliation can demote
+  // any tendency that depended on it. Never let this block the delete itself.
+  try {
+    await writeSourceEvidence(customerId, "CLOSET_RELATIONSHIP", item.id, []);
+  } catch (err) {
+    console.error("taste-evidence: failed to clean up evidence after closet item delete", err);
+  }
+
   return { deleted: true };
 }

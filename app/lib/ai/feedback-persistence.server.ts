@@ -10,6 +10,7 @@
 
 import prisma from "../../db.server.js";
 import type { RecommendationFeedbackRecord, PostWearAnswers } from "./feedback-contract.js";
+import { writeSourceEvidence } from "./taste-reconcile.server.js";
 
 // ── Injectable function types ─────────────────────────────────────────────────
 
@@ -168,6 +169,15 @@ async function _deletePostWearReview(sessionId: string, customerId: string): Pro
       additionalNotes: null,
     },
   });
+
+  // The row survives (legacy fields are preserved), but the Phase 4B1 content
+  // that produced POST_OUTFIT_REVIEW evidence is gone — clear its evidence too.
+  try {
+    await writeSourceEvidence(customerId, "POST_OUTFIT_REVIEW", existing.id, []);
+  } catch (err) {
+    console.error("taste-evidence: failed to clean up evidence after post-wear review delete", err);
+  }
+
   return { ok: true };
 }
 

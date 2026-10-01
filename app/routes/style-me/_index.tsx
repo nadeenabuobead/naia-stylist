@@ -3,6 +3,7 @@ import { data, redirect, type ActionFunctionArgs, type LoaderFunctionArgs, type 
 import { clearStyleMeSession } from "~/lib/session.server";
 import { getCurrentNaiaCustomer, requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { prisma } from "~/lib/prisma.server";
+import { writeSourceEvidence } from "~/lib/ai/taste-reconcile.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 
@@ -33,11 +34,22 @@ export async function action({ request }: ActionFunctionArgs) {
       // Verify ownership before any delete
       const session = await prisma.stylingSession.findUnique({
         where: { id: sessionId },
-        select: { customerId: true, suggestions: { select: { id: true } } },
+        select: {
+          customerId: true,
+          suggestions: { select: { id: true, outcome: { select: { id: true } } } },
+          review: { select: { id: true } },
+        },
       });
       if (!session || session.customerId !== customer.id) {
         return data({ error: "Not found" }, { status: 404 });
       }
+
+      // Capture evidence source-record ids before the cascade removes them —
+      // they're needed afterward to clear their derived TasteEvidence.
+      const styleMeOutcomeIds = session.suggestions
+        .map((s) => s.outcome?.id)
+        .filter((id): id is string => Boolean(id));
+      const postOutfitReviewId = session.review?.id ?? null;
 
       // SavedLook.fromSuggestionId is a plain string (no FK cascade) — must delete manually
       const suggestionIds = session.suggestions.map((s) => s.id);
@@ -54,6 +66,19 @@ export async function action({ request }: ActionFunctionArgs) {
       // PostOutfitReview, StylingEvent. RecommendationFeedback.sessionId is SetNull (stays).
       // ClosetItem records are not touched.
       await prisma.stylingSession.delete({ where: { id: sessionId } });
+
+      // The cascade above removed StyleMeOutcome/PostOutfitReview rows, but their
+      // derived TasteEvidence has no FK and would otherwise survive orphaned.
+      try {
+        for (const outcomeId of styleMeOutcomeIds) {
+          await writeSourceEvidence(customer.id, "STYLEME_OUTCOME", outcomeId, []);
+        }
+        if (postOutfitReviewId) {
+          await writeSourceEvidence(customer.id, "POST_OUTFIT_REVIEW", postOutfitReviewId, []);
+        }
+      } catch (err) {
+        console.error("taste-evidence: failed to clean up evidence after session delete", err);
+      }
 
       return data({ ok: true });
     } catch (e) {

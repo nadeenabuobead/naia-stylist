@@ -15,6 +15,7 @@
 //   - No ClosetItem fields are mutated — the original record is never destructively overwritten.
 
 import prisma from "~/db.server";
+import { writeSourceEvidence } from "~/lib/ai/taste-reconcile.server";
 
 import {
   GARMENT_SILHOUETTE_VALUES,
@@ -391,12 +392,41 @@ export async function revertOverrideField(
 /** Permanently deletes a single ClosetItem and its cascade children
  *  (ClosetItemAdminReview, ClosetAnalysisSnapshot). OutfitItem refs are set to null. */
 export async function deleteClosetItem(itemId: string): Promise<void> {
+  const item = await prisma.closetItem.findUnique({
+    where: { id: itemId },
+    select: { customerId: true },
+  });
+
   await prisma.closetItem.delete({ where: { id: itemId } });
+
+  // Same cleanup as the customer-facing delete path: the item's
+  // CLOSET_RELATIONSHIP evidence has no source left once it's gone.
+  if (item) {
+    try {
+      await writeSourceEvidence(item.customerId, "CLOSET_RELATIONSHIP", itemId, []);
+    } catch (err) {
+      console.error("taste-evidence: failed to clean up evidence after admin closet item delete", err);
+    }
+  }
 }
 
 /** Permanently deletes multiple ClosetItems. Returns the count actually deleted. */
 export async function deleteClosetItems(itemIds: string[]): Promise<number> {
+  const items = await prisma.closetItem.findMany({
+    where: { id: { in: itemIds } },
+    select: { id: true, customerId: true },
+  });
+
   const result = await prisma.closetItem.deleteMany({ where: { id: { in: itemIds } } });
+
+  for (const item of items) {
+    try {
+      await writeSourceEvidence(item.customerId, "CLOSET_RELATIONSHIP", item.id, []);
+    } catch (err) {
+      console.error("taste-evidence: failed to clean up evidence after admin closet bulk delete", err);
+    }
+  }
+
   return result.count;
 }
 
