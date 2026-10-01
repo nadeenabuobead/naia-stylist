@@ -339,7 +339,7 @@ type GarmentCard = {
 };
 
 const SWATCH: Readonly<Record<string, string>> = {
-  black: "#1A1512", white: "#FBF9F6", cream: "#EFE6D8", ivory: "#F2EAD9",
+  black: "#1A1512", white: "#E3DDD2", cream: "#EFE6D8", ivory: "#F2EAD9",
   beige: "#DCCCB6", "off-white": "#F4EFE7", nude: "#E3C9B4", tan: "#C79E74",
   camel: "#B68B5B", taupe: "#B3A294", stone: "#CFC5B8", brown: "#6B4A32",
   grey: "#9A948D", gray: "#9A948D", charcoal: "#3B3835", navy: "#22304A",
@@ -468,12 +468,12 @@ type DialogState =
   | null;
 
 function DialogShell({
-  title, subtitle, onClose, children,
-}: { title: string; subtitle?: string; onClose: () => void; children: React.ReactNode }) {
+  title, subtitle, onClose, children, className,
+}: { title: string; subtitle?: string; onClose: () => void; children: React.ReactNode; className?: string }) {
   return (
     <div className="wip-dialog-backdrop" onClick={onClose}>
       <div
-        className="wip-dialog"
+        className={className ? `wip-dialog ${className}` : "wip-dialog"}
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -791,7 +791,7 @@ export default function WardrobeIntelligencePreview() {
     }
     if (dialog.kind === "method") {
       return (
-        <DialogShell title="How nAia knows this." onClose={closeDialog}>
+        <DialogShell title="How nAia knows this." onClose={closeDialog} className="wip-dialog--compact">
           <div className="wip-profile-block">
             <p>
               Your Wardrobe Intelligence combines the pieces you&rsquo;ve added to your Closet, your Style
@@ -1235,7 +1235,7 @@ const css = `
      takeaway on the left, supporting detail + the "See which" link on the
      right. A divider (not a border around each half) keeps it reading as
      one card with two halves, not two separate cards. */
-  .wip-passport-card{display:grid;grid-template-columns:1fr 1fr;gap:32px;background:var(--naia-surface);border:1px solid var(--naia-border);border-radius:8px;padding:26px 30px}
+  .wip-passport-card{display:grid;grid-template-columns:1fr 1fr;gap:32px;background:var(--naia-surface);border:1px solid var(--naia-border);border-radius:8px;padding:26px 30px;margin-top:30px}
   @media(max-width:700px){.wip-passport-card{grid-template-columns:1fr;gap:16px;padding:20px}}
   .wip-passport-col{min-width:0}
   .wip-passport-divider{display:none}
@@ -1272,23 +1272,31 @@ const css = `
   .wip-mood-tab{font-family:var(--naia-ff-ui);font-size:11.5px;font-weight:600;letter-spacing:0.3px;color:rgba(40,21,12,0.6);background:var(--naia-bg);border:1px solid var(--naia-border);border-radius:20px;padding:7px 14px;cursor:pointer}
   .wip-mood-tab span{margin-left:5px;opacity:0.7}
   .wip-mood-tab.is-active{background:var(--naia-accent);border-color:var(--naia-accent);color:#fff}
-  .wip-mood-grid{display:grid;grid-template-columns:repeat(var(--mood-cols,1),1fr);gap:22px}
+  .wip-mood-grid{display:grid;grid-template-columns:repeat(var(--mood-cols,1),1fr);gap:14px}
   @media(max-width:860px){.wip-mood-grid{grid-template-columns:repeat(min(var(--mood-cols,1),2),1fr)}}
   @media(max-width:560px){.wip-mood-grid{grid-template-columns:1fr}}
-  .wip-mood-tile{display:block;width:100%;border:1px solid var(--naia-border);border-radius:8px;background:var(--naia-surface);padding:14px;text-align:left;cursor:pointer}
+  .wip-mood-tile{display:block;width:100%;border:1px solid var(--naia-border);border-radius:8px;background:var(--naia-surface);padding:11px;text-align:left;cursor:pointer}
   .wip-mood-tile:hover{border-color:rgba(40,21,12,0.3)}
-  .wip-mood-collage{display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:1fr;gap:8px;aspect-ratio:1/1}
+  /* Collage height reduced ~40% from the original square (aspect-ratio 1/1
+     -> 5/3) so a whole look reads at a glance, compact-editorial, not a
+     full-page product gallery; object-fit:contain on each thumb (below)
+     already prevents any awkward cropping at the shorter ratio. */
+  .wip-mood-collage{display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:1fr;gap:5px;aspect-ratio:5/3}
   .wip-mood-collage .wip-thumb{border-radius:0;height:100% !important;background:none}
-  .wip-mood-meta{display:block;font-family:var(--naia-ff-ui);font-size:11px;letter-spacing:1px;text-transform:uppercase;color:rgba(40,21,12,0.55);font-weight:600;margin-top:11px}
-  .wip-mood-card-body{margin-top:11px}
-  .wip-mood-reason{font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.55;color:rgba(40,21,12,0.7);margin:6px 0 10px}
-  .wip-mood-chips{display:flex;flex-wrap:wrap;gap:6px}
+  .wip-mood-meta{display:block;font-family:var(--naia-ff-ui);font-size:11px;letter-spacing:1px;text-transform:uppercase;color:rgba(40,21,12,0.55);font-weight:600;margin-top:8px}
+  .wip-mood-card-body{margin-top:8px}
+  .wip-mood-reason{font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.55;color:rgba(40,21,12,0.7);margin:4px 0 7px}
+  .wip-mood-chips{display:flex;flex-wrap:wrap;gap:5px}
   .wip-mood-chips .wip-chip{font-size:10px;padding:4px 10px}
 
   /* Pieces worth rediscovering */
-  .wip-piece-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:26px}
-  @media(max-width:900px){.wip-piece-grid{grid-template-columns:repeat(2,1fr)}}
-  @media(max-width:600px){.wip-piece-grid{grid-template-columns:1fr}}
+  /* One curated editorial row, not three cards spread to the full container
+     width: fixed, consistent column widths (not 1fr) so the row hugs its
+     own content and sits left-aligned, closer together, rather than
+     stretching each image into a wide, mostly-empty box. */
+  .wip-piece-grid{display:grid;grid-template-columns:repeat(3,minmax(0,200px));gap:16px}
+  @media(max-width:900px){.wip-piece-grid{grid-template-columns:repeat(2,minmax(0,200px))}}
+  @media(max-width:600px){.wip-piece-grid{grid-template-columns:minmax(0,240px)}}
   .wip-piece-card{display:flex;flex-direction:column}
   .wip-piece-thumb .wip-thumb{width:100%;border-radius:4px;margin-bottom:8px}
   .wip-piece-card h3{font-family:var(--naia-ff-ui);font-weight:700;font-size:14px;margin:0 0 3px;color:var(--naia-ink)}
@@ -1298,7 +1306,10 @@ const css = `
   /* Two-column analysis: How your wardrobe supports your life | Where it repeats.
      Each column is its own bordered cream card, matching the moodboard/shop
      card treatment, rather than two borderless text blocks. */
-  .wip-analysis-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+  /* align-items:start so each column sizes to its own content — CSS grid's
+     default stretch was forcing both columns to match the taller sibling's
+     height, leaving a large empty gap under the shorter one. */
+  .wip-analysis-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start}
   @media(max-width:900px){.wip-analysis-grid{grid-template-columns:1fr;gap:20px}}
   .wip-analysis-col{background:var(--naia-surface);border:1px solid var(--naia-border);border-radius:8px;padding:24px 26px}
 
@@ -1329,7 +1340,9 @@ const css = `
 
   /* Shop smarter — each side its own bordered cream card, matching the
      analysis/moodboard card treatment. */
-  .wip-shop-split{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+  /* Same fix as the analysis grid: let each card hug its own content
+     instead of stretching to match whichever column is taller. */
+  .wip-shop-split{display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start}
   @media(max-width:700px){.wip-shop-split{grid-template-columns:1fr;gap:20px}}
   .wip-shop-col{background:var(--naia-surface);border:1px solid var(--naia-border);border-radius:8px;padding:24px 26px}
   .wip-shop-col-label{display:block;font-family:var(--naia-ff-ui);font-size:9.5px;letter-spacing:1.4px;text-transform:uppercase;font-weight:700;color:rgba(40,21,12,0.45);margin-bottom:12px}
@@ -1364,6 +1377,14 @@ const css = `
 
   .wip-dialog-backdrop{position:fixed;inset:0;background:rgba(40,21,12,0.35);display:flex;align-items:center;justify-content:center;padding:20px;z-index:50}
   .wip-dialog{background:var(--naia-surface);border-radius:10px;max-width:780px;width:100%;max-height:88vh;overflow:auto;box-shadow:0 20px 60px rgba(20,10,5,0.25)}
+  /* Scoped to the methodology dialog only — its content is two short
+     paragraphs and a note, not the richer grids/lists other dialogs hold,
+     so it gets its own narrower, shorter frame rather than the shared one. */
+  .wip-dialog--compact{max-width:480px;max-height:none}
+  .wip-dialog--compact .wip-dialog-head{padding:16px 20px 10px}
+  .wip-dialog--compact .wip-dialog-body{padding:12px 20px 18px}
+  .wip-dialog--compact .wip-profile-block{padding:10px 0;border-bottom:1px solid var(--naia-border)}
+  .wip-dialog--compact .wip-profile-block:last-child{border-bottom:0}
   .wip-dialog-head{position:sticky;top:0;background:var(--naia-surface);padding:20px 22px 14px;border-bottom:1px solid var(--naia-border);display:flex;justify-content:space-between;gap:14px}
   .wip-dialog-head h2{font-family:var(--naia-ff-display);font-weight:300;font-size:1.4rem;margin:0}
   .wip-dialog-head p{font-family:var(--naia-ff-ui);font-size:11.5px;color:rgba(40,21,12,0.55);margin:6px 0 0}
