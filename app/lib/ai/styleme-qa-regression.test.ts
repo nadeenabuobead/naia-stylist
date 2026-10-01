@@ -303,18 +303,24 @@ describe("A. scoreBodyNeedForClosetItem — nothing-tight-waist", () => {
 // ── B. Anchor scoring ─────────────────────────────────────────────────────────
 
 describe("B. autoSelectClosetAnchor — formality / register", () => {
-  it("B1 _OCCASION_MAX_RANK uses canonical 'dinner' (not 'dinner-out') — evening-formality item in range", async () => {
+  it("B1 _OCCASION_MAX_RANK uses canonical 'dinner' (not 'dinner-out') — occasion-formality item in range", async () => {
+    // Fixture rank lowered 6 -> 5 in RC-C. The subject of this test is the canonical
+    // occasion key, not the ceiling arithmetic: with the canonical "dinner" the ceiling
+    // is 5, and with the old misspelling it would be 4 (table miss -> 3, band {1,4}
+    // intersected with Dressy -> max 4), so an `occasion`-rank item still proves the key.
+    // Rank 6 no longer qualifies because OCCASION_FORMALITY_TARGET["dinner"] is {2,5} —
+    // a dinner never reaches `evening`, which the anchor ceiling used to contradict.
     const dressy = makeAutoItem("dressy", {
       category: "DRESSES",
       occasions: ["dinner"],
-      formality: "evening",   // rank 6 — in range for dinner (max 4 + dressy boost 2 = 6)
+      formality: "occasion",   // rank 5 — the top of the dinner + Dressy band (4-5)
     });
     const casual = makeAutoItem("casual", {
       category: "TOPS",
       occasions: ["dinner"],
       formality: "casual",
     });
-    // With formality-occasion on a dinner occasion, evening-wear IS in range (max 4+2=6)
+    // With formality-occasion on a dinner occasion, occasion-wear IS in range (ceiling 5)
     const result = await autoSelectClosetAnchor("u1", {
       occasion: "dinner",
       moods: [],
@@ -322,7 +328,7 @@ describe("B. autoSelectClosetAnchor — formality / register", () => {
       formalityConditional: "formality-occasion",
     }, async () => [dressy, casual]);
     assert.ok(result !== null);
-    assert.equal(result.id, "dressy", "evening-formality item must be in-range for dressy dinner with formality-occasion");
+    assert.equal(result.id, "dressy", "occasion-formality item must be in-range for dressy dinner with formality-occasion");
   });
 
   it("B2 _OCCASION_MAX_RANK uses canonical 'work' — business-casual in range, business-formal out of range", async () => {
@@ -346,10 +352,13 @@ describe("B. autoSelectClosetAnchor — formality / register", () => {
   });
 
   it("B3 formality-occasion token fires register bonus (not formality-dressy)", async () => {
+    // Fixture rank lowered 6 -> 5 in RC-C for the same reason as B1. The register bonus
+    // range is still FORMALITY_CONDITIONAL_ADJUSTMENTS["formality-occasion"] = [4,6], so
+    // a rank-5 item proves the token fires exactly as a rank-6 one did.
     const evening = makeAutoItem("evening", {
       category: "DRESSES",
       occasions: ["dinner"],
-      formality: "evening",
+      formality: "occasion",
     });
     const casual = makeAutoItem("casual", {
       category: "DRESSES",
@@ -358,14 +367,14 @@ describe("B. autoSelectClosetAnchor — formality / register", () => {
     });
     // With wrong token "formality-dressy" (the old bug), no register bonus would fire and
     // casual may beat evening for the same occasion. With the fix, formality-occasion
-    // gives evening +0.5 register bonus because rank 6 is in [4,6].
+    // gives it +0.5 register bonus because rank 5 is in [4,6].
     const result = await autoSelectClosetAnchor("u1", {
       occasion: "dinner",
       moods: [],
       desiredFeelings: [],
       formalityConditional: "formality-occasion",
     }, async () => [casual, evening]);
-    // evening (rank 6) is in the [4,6] range → gets +0.5 register bonus → beats casual (rank 1)
+    // rank 5 is in the [4,6] range → gets +0.5 register bonus → beats casual (rank 1)
     assert.ok(result !== null);
     assert.equal(result.id, "evening", "formality-occasion token must trigger register bonus for evening-formality items");
   });

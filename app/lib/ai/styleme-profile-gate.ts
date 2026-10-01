@@ -803,3 +803,75 @@ export function explainDressingRequirements(
     topLength: tl,
   };
 }
+
+// ── Occasion × formality target register ──────────────────────────────────────
+//
+// Lives here rather than in styleme-result.server.ts because the anchor needs the
+// same answer, and styleme-result.server.ts imports FROM styleme-anchor.server.ts.
+// One resolver, one pair of tables, three call sites.
+//
+// Keys MUST be canonical session occasion IDs — the values StylingSession.occasion
+// actually holds, after REV3_OCCASION_MAP has normalised the UI answer.
+//
+// girls-night tops out at `occasion` (5), not `evening` (6). A night out and a
+// special event are different rooms: {2,6} spanned the entire scale, which made
+// "Night out + Dressy" and "Special event + Dressy" resolve to the identical band
+// and return the identical outfit.
+export const OCCASION_FORMALITY_TARGET: Record<string, { min: number; max: number }> = {
+  "everyday":      { min: 1, max: 2 },
+  "work":          { min: 2, max: 4 },
+  "dinner":        { min: 2, max: 5 },
+  "date-night":    { min: 2, max: 3 },
+  "special-event": { min: 3, max: 6 },
+  "girls-night":   { min: 2, max: 5 },
+  "family":        { min: 1, max: 2 },
+  "travel":        { min: 1, max: 2 },
+  "active":        { min: 1, max: 1 },
+};
+
+// The register she explicitly asked for.
+export const FORMALITY_CONDITIONAL_ADJUSTMENTS: Record<string, { min: number; max: number }> = {
+  "formality-relaxed": { min: 1, max: 2 },
+  "formality-smart":   { min: 2, max: 3 },
+  "formality-polished":{ min: 3, max: 4 },
+  "formality-occasion":{ min: 4, max: 6 },
+};
+
+/**
+ * Resolves the target formality band for an occasion and an explicit formality answer.
+ *
+ * Intersecting two absolute bands is only meaningful when they overlap. For four
+ * reachable combinations it produced min > max — a band no formality rank can
+ * satisfy, so every candidate scored "outside target", T2 tied at -1 for the whole
+ * pool, and formality was silently switched off. date-night + Dressy resolved to
+ * 4-3; family + Dressy to 4-2.
+ *
+ * Where they do overlap the intersection is kept, unchanged. Where they do not, the
+ * explicit answer owns the direction and the occasion supplies the other edge.
+ */
+export function getTargetFormalityRange(
+  occasion: string,
+  formalityConditional: string | null,
+): { min: number; max: number } {
+  const base = OCCASION_FORMALITY_TARGET[occasion] ?? { min: 1, max: 4 };
+  if (!formalityConditional) return base;
+  const adj = FORMALITY_CONDITIONAL_ADJUSTMENTS[formalityConditional];
+  if (!adj) return base;
+
+  const min = Math.max(base.min, adj.min);
+  const max = Math.min(base.max, adj.max);
+  if (min <= max) return { min, max };
+
+  if (adj.min > base.max) {
+    // She asked to dress above what the occasion expects. The occasion's own
+    // ceiling falls OUTSIDE the band: if it stayed inside, "Dressy at a family
+    // gathering" would count smart-casual as within-target and the occasion would
+    // neutralise the request rather than calibrate it.
+    return { min: base.max + 1, max: adj.min };
+  }
+  // She asked to dress below what the occasion expects. Here the occasion's floor
+  // stays INSIDE the band — deliberately asymmetric with the case above. A special
+  // event has a real external floor in a way a family gathering has no real
+  // ceiling, so dressing down is calibrated more firmly than dressing up.
+  return { min: adj.max, max: base.min };
+}

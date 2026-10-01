@@ -1472,7 +1472,7 @@ export interface CandidateRankKey {
   bodyNeedFitScore: number | null; // T3b: higher = better; null = neutral (tied)
   intentionFit: number;            // T4: complete-outfit all-12-intention score
   passportAlignment: number;       // T5: higher = better
-  formalityOvershootAbs: number;   // T6a: when both outside-target, lower = better
+  formalityOvershootAbs: number;   // T2b: distance outside the band, either direction; lower = better
   optionalNonMatchCount: number;   // T6b: off-occasion explicit non-matches; fewer = better
   discretionaryPieceCount: number; // T6c: outerwear + bag + accessory + jewelry; fewer = better
   // T6d: stable sort (Array.prototype.sort)
@@ -1483,9 +1483,17 @@ export function compareCandidateRankKeys(a: CandidateRankKey, b: CandidateRankKe
   // T1: higher occasionTier = better (2=fully valid, 1=partial/uncertain, 0=invalid)
   if (a.occasionTier !== b.occasionTier)
     return b.occasionTier - a.occasionTier;
-  // T2: within-target(1) > unknown(0) > known outside-target(-1)
+  // T2a: within-target(1) > unknown(0) > known outside-target(-1)
   if (a.formalityFitPriority !== b.formalityFitPriority)
     return b.formalityFitPriority - a.formalityFitPriority;
+  // T2b: same fit class and both known outside-target — the candidate closer to the
+  // band wins, before intention is consulted. Severity belongs to the formality
+  // judgement, not to the quality tiebreaks: while it sat at T6a, a dinner session
+  // whose band was 2-2 ranked a 1.73-step overshoot above a 0.92-step one because
+  // T4 separated them first.
+  if (a.formalityFitPriority === -1 && b.formalityFitPriority === -1 &&
+      Math.abs(a.formalityOvershootAbs - b.formalityOvershootAbs) > 0.0001)
+    return a.formalityOvershootAbs - b.formalityOvershootAbs;
   // T3a: fewer violations = better
   if (a.knownViolationCount !== b.knownViolationCount)
     return a.knownViolationCount - b.knownViolationCount;
@@ -1501,10 +1509,6 @@ export function compareCandidateRankKeys(a: CandidateRankKey, b: CandidateRankKe
   // T5: higher passportAlignment = better
   if (Math.abs(a.passportAlignment - b.passportAlignment) > 0.001)
     return b.passportAlignment - a.passportAlignment;
-  // T6a: when both known outside-target, smaller absolute overshoot = better
-  if (a.formalityFitPriority === -1 && b.formalityFitPriority === -1 &&
-      Math.abs(a.formalityOvershootAbs - b.formalityOvershootAbs) > 0.0001)
-    return a.formalityOvershootAbs - b.formalityOvershootAbs;
   // T6b: fewer off-occasion non-matches = better
   if (a.optionalNonMatchCount !== b.optionalNonMatchCount)
     return a.optionalNonMatchCount - b.optionalNonMatchCount;
@@ -2117,42 +2121,16 @@ export const FORMALITY_RANK: Record<string, number> = {
 // _OCCASION_MAX_RANK in styleme-anchor.server.ts was corrected the same way in the
 // systemic QA pass; this table and OCCASION_REGISTER_RANGE were missed. The register
 // table is NOT corrected here — see the deferral note on passesProfileRegisterGate.
-const OCCASION_FORMALITY_TARGET: Record<string, { min: number; max: number }> = {
-  "everyday":      { min: 1, max: 2 },
-  "work":          { min: 2, max: 4 },
-  "dinner":        { min: 2, max: 5 },
-  "date-night":    { min: 2, max: 3 },
-  "special-event": { min: 3, max: 6 },
-  "girls-night":   { min: 2, max: 6 },
-  "family":        { min: 1, max: 2 },
-  "travel":        { min: 1, max: 2 },
-  "active":        { min: 1, max: 1 },
-};
-
 // Maps each StyleMe session occasion ID (canonical engine IDs post-mapping) to the
 // Canonical session→closet vocabulary bridge. Imported and re-exported here so
 // callers that import from styleme-result.server.ts continue to work unchanged.
 export { SESSION_OCCASION_TO_CLOSET_TOKENS } from "./styleme-occasion-tokens.js";
+// Occasion x formality band resolver. Moved to styleme-profile-gate.ts so the anchor
+// can use the same answer without a circular import; re-exported here so every
+// existing caller keeps working unchanged.
+export { getTargetFormalityRange, OCCASION_FORMALITY_TARGET, FORMALITY_CONDITIONAL_ADJUSTMENTS } from "./styleme-profile-gate.js";
 import { matchesSessionOccasion } from "./styleme-occasion-tokens.js";
-
-// formalityConditional narrows the target range (intersection, not expansion).
-const FORMALITY_CONDITIONAL_ADJUSTMENTS: Record<string, { min: number; max: number }> = {
-  "formality-relaxed": { min: 1, max: 2 },
-  "formality-smart":   { min: 2, max: 3 },
-  "formality-polished":{ min: 3, max: 4 },
-  "formality-occasion":{ min: 4, max: 6 },
-};
-
-export function getTargetFormalityRange(
-  occasion: string,
-  formalityConditional: string | null,
-): { min: number; max: number } {
-  const base = OCCASION_FORMALITY_TARGET[occasion] ?? { min: 1, max: 4 };
-  if (!formalityConditional) return base;
-  const adj = FORMALITY_CONDITIONAL_ADJUSTMENTS[formalityConditional];
-  if (!adj) return base;
-  return { min: Math.max(base.min, adj.min), max: Math.min(base.max, adj.max) };
-}
+import { getTargetFormalityRange } from "./styleme-profile-gate.js";
 
 // Per-slot formality contribution weight (0 = excluded from register judgment).
 // Outerwear is meaningful but slightly discounted — it can be removed and is often

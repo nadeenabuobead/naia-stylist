@@ -11,7 +11,7 @@ import type { NadineAnchorInput, ClosetAnchorInput, AnchorInput } from "./stylem
 import prisma from "../../db.server.js";
 import { buildPrivateDownloadUrl, getCloudinaryConfig } from "../../lib/cloudinary-admin.server.js";
 import { matchesSessionOccasion } from "./styleme-occasion-tokens.js";
-import { passesDressingRequirements, evaluateAnchorEligibility, explainDressingRequirements, canSlotAnchorOutfit } from "./styleme-profile-gate.js";
+import { passesDressingRequirements, evaluateAnchorEligibility, explainDressingRequirements, canSlotAnchorOutfit, getTargetFormalityRange, FORMALITY_CONDITIONAL_ADJUSTMENTS } from "./styleme-profile-gate.js";
 import { closetItemToSlot } from "./closet-slot.js";
 
 const VALID_HANDLES = new Set(getAllCatalogProducts().map((p) => p.handle));
@@ -575,10 +575,22 @@ export async function autoSelectClosetAnchor(
   // Unknown formality (null) is treated as in-range (tier 0) — fail-open.
   // formalityConditional "formality-dressy" raises the ceiling by 2 ranks.
   const targetMaxRank = _OCCASION_MAX_RANK[signals.occasion] ?? 3;
-  // "formality-occasion" (Dressy) raises the ceiling by 2 so evening/occasion-wear anchors
-  // can be selected for dressy dinner, date-night, etc.
+  // "formality-occasion" (Dressy) raises the ceiling by 2 so evening/occasion-wear
+  // anchors can be selected for dressy sessions — but never above the resolved
+  // target band. The flat +2 did not know what the band was: Night out + Dressy
+  // raised the ceiling to 6, so an evening gown was anchor-eligible and then made
+  // every candidate overdressed against a 4-5 band, and because the anchor sits in
+  // every candidate, no amount of ranking could recover.
+  //
+  // Capping rather than replacing keeps this ceiling never LOOSER than before, so
+  // no occasion silently gains eligibility it did not have. Out-of-range items only
+  // sort last here, they are not filtered, so the pool can never empty either.
   const formalityBoost = signals.formalityConditional === "formality-occasion" ? 2 : 0;
-  const effectiveMaxRank = Math.min(6, targetMaxRank + formalityBoost);
+  const targetBandMax = getTargetFormalityRange(
+    signals.occasion,
+    signals.formalityConditional ?? null,
+  ).max;
+  const effectiveMaxRank = Math.min(6, targetMaxRank + formalityBoost, targetBandMax);
   const isFormallyInRange = (item: AutoSelectItem): boolean => {
     if (!item.formality) return true; // unknown → in-range (fail-open)
     const rank = _FORMALITY_RANK[item.formality] ?? 0;
@@ -597,14 +609,6 @@ export async function autoSelectClosetAnchor(
   const needsNothingTightWaist = activeBodyNeeds.includes("nothing-tight-waist");
   const needsMoreCoverage = activeBodyNeeds.includes("more-coverage");
 
-  // Preferred formality range for register bonus — mirrors FORMALITY_CONDITIONAL_ADJUSTMENTS
-  // in styleme-result.server.ts. Items within this range receive a modest register bonus.
-  const _FORMALITY_CONDITIONAL_TARGET: Record<string, { min: number; max: number }> = {
-    "formality-relaxed": { min: 1, max: 2 },
-    "formality-smart":   { min: 2, max: 3 },
-    "formality-polished":{ min: 3, max: 4 },
-    "formality-occasion":{ min: 4, max: 6 },
-  };
 
   const mapped: ScoredItem[] = items.map((item) => {
     const baseScore = scoreClosetItemForSession(
@@ -625,7 +629,7 @@ export async function autoSelectClosetAnchor(
       if (!signals.formalityConditional || !item.formality) return 0;
       const rank = _FORMALITY_RANK[item.formality] ?? null;
       if (rank === null) return 0;
-      const range = _FORMALITY_CONDITIONAL_TARGET[signals.formalityConditional];
+      const range = FORMALITY_CONDITIONAL_ADJUSTMENTS[signals.formalityConditional];
       if (!range) return 0;
       if (rank >= range.min && rank <= range.max) return 2.5;
       const distance = rank < range.min ? range.min - rank : rank - range.max;
