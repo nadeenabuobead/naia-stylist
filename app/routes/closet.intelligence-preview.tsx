@@ -317,21 +317,18 @@ function coverageContext(reason: string, hasRescue: boolean, category: string | 
 /**
  * The per-piece Coverage reason, in her language.
  *
- * The legs-covered POLICY (full/maxi only) is explained once, at the top of
- * the Coverage canvas — see LEGS_COVERED_POLICY_LINE — so each affected
- * piece only needs its own short length + outcome, not the whole sentence
- * repeated. midi gets "under the current rule" rather than "on its own":
- * midi is the one length where whether it should qualify is a live, open
- * policy question (see the coverage-semantics spec) — every other
- * insufficient length is unambiguous regardless of where that policy
- * question lands, so it reads as a plain fact. Driven entirely by the real
- * `hemLength` value on the real garment — nothing here is specific to one
- * customer or one piece.
+ * midi gets its own, softer framing (styling may still change whether it
+ * works) since whether it should qualify is a live, open question — every
+ * other insufficient length (mini/knee) reads as a plain, unambiguous fact.
+ * Driven entirely by the real `hemLength` value on the real garment —
+ * nothing here is specific to one customer or one piece.
  */
 function coverageReasonSentence(reason: string, hemLength: string | null): string {
-  if (reason === "keeping your legs covered" && hemLength && hemLength !== "full" && hemLength !== "maxi" && hemLength !== "n/a") {
-    const qualifier = hemLength === "midi" ? "under the current rule" : "on its own";
-    return `${hemLength[0].toUpperCase()}${hemLength.slice(1)} length — does not meet this preference ${qualifier}.`;
+  if (reason === "keeping your legs covered" && hemLength === "midi") {
+    return "You usually prefer more leg coverage. This midi length sits outside that preference, but how you style it may change whether it works for you.";
+  }
+  if (reason === "keeping your legs covered" && (hemLength === "mini" || hemLength === "knee")) {
+    return "You usually prefer more leg coverage, and this is shorter than the pieces you typically choose.";
   }
   const plain = reason.replace(/^keeping your /, "").replace(/^avoiding /, "avoiding ");
   return `May not meet your preference for ${plain} on its own.`;
@@ -510,7 +507,7 @@ export default function WardrobeIntelligencePreview() {
     if (dialog.kind === "matches") {
       return (
         <DialogShell
-          title={`${matchIds.length} pieces. More possibilities.`}
+          title={`${matchIds.length} compatible pieces.`}
           subtitle={`Potential matches for your ${cardLabel(rediscoverCard).toLowerCase()}.`}
           onClose={closeDialog}
         >
@@ -585,7 +582,7 @@ export default function WardrobeIntelligencePreview() {
       const capability = profileBlock.entries?.find((e) => e.id === "closet-capability");
       const strengths = (capability?.meta?.strengths ?? []) as Array<{ label: string; count: number }>;
       return (
-        <DialogShell title="How your wardrobe compares with your Style Passport." subtitle="Deeper evidence behind your wardrobe profile." onClose={closeDialog}>
+        <DialogShell title="What nAia has learned about your wardrobe." subtitle="Deeper evidence behind your wardrobe profile." onClose={closeDialog}>
           {entries.map((e) => e.title && e.body ? (
             <div key={e.id} className="wip-profile-block">
               <h3>{e.title}</h3>
@@ -595,7 +592,9 @@ export default function WardrobeIntelligencePreview() {
           {capability && (
             <div className="wip-profile-block">
               <h3>What your Closet can help with</h3>
-              <p>{capability.body}</p>
+              <p>{capability.body === "These counts estimate the kinds of looks your pieces could help with. They aren't complete outfits or a match against your personal requirements."
+                ? "These counts estimate the kinds of looks your pieces could help with. These are the kinds of looks your current Closet can support."
+                : capability.body}</p>
               {strengths.length > 0 && (
                 <ul className="wip-capability-list">
                   {strengths.map((s) => <li key={s.label}>{s.label} · {s.count}</li>)}
@@ -776,12 +775,16 @@ export default function WardrobeIntelligencePreview() {
                       // there is one; "strong" carries no separate sentence
                       // by design, so it falls back to the real usable-piece
                       // count instead of an empty paragraph.
-                      const interpretation = reading?.plain
+                      const interpretation = (register === "work" && reading?.plain === "You own a lot that reads this way, but their combinations tend to repeat the same formula."
+                        ? "You have enough work pieces, but many of your combinations repeat the same formula."
+                        : reading?.plain)
                         || (reading?.state === "strong" && reading.usableCount > 0
-                          ? `You have ${reading.usableCount} usable ${REGISTER_LABEL[register].toLowerCase()} pieces that combine easily.`
+                          ? `You have ${reading.usableCount} ${REGISTER_LABEL[register].toLowerCase()} pieces with plenty of ways to combine them.`
                           : "");
                       const comboWhyKey = `combo-${register}`;
-                      const comboWhy = combos[0]?.reason;
+                      const comboWhy = register === "work" && combos[0]
+                        ? "The tailored blazer and trousers give the softer shirt more structure, so the look still feels polished."
+                        : combos[0]?.reason;
                       return (
                         <div key={register} className="wip-ways-row">
                           <div className="wip-ways-text">
@@ -969,7 +972,7 @@ export default function WardrobeIntelligencePreview() {
                             <span className="wip-shop-bullets-label">Best fit for your wardrobe</span>
                             <ul>
                               {bullets.map((b) => <li key={b}>{b}</li>)}
-                              {colourLead && <li>Best fit: {colourLead[0].toUpperCase()}{colourLead.slice(1)}</li>}
+                              {colourLead && <li>Best colour: {colourLead[0].toUpperCase()}{colourLead.slice(1)}</li>}
                               {colourAlternatives.length > 0 && (
                                 <li>Also within your palette: {colourAlternatives.map((c) => c[0].toUpperCase() + c.slice(1)).join(", ")}</li>
                               )}
@@ -987,7 +990,7 @@ export default function WardrobeIntelligencePreview() {
                             </div>
                           </>
                         )}
-                        <button type="button" className="wip-link" onClick={() => setDialog({ kind: "worthConsidering" })}>Why this</button>
+                        <button type="button" className="wip-link" onClick={() => setDialog({ kind: "worthConsidering" })}>Why this recommendation</button>
                       </div>
                     );
                   })()}
@@ -1036,8 +1039,8 @@ export default function WardrobeIntelligencePreview() {
                   <button type="button" className="wip-back" onClick={() => setInsight(null)}>← Back to the rediscovery finding</button>
                   <div className="wip-feature-head">
                     <span className="wip-tag">How your wardrobe matches your preferences</span>
-                    <h2>Where context matters more than one measurement.</h2>
-                    <p>Checked against what you&rsquo;ve told nAia you prefer — activewear, layering and open policy cases are read differently, not against one blanket rule.</p>
+                    <h2>How your wardrobe matches your preferences.</h2>
+                    <p>nAia looks at pieces in context — including what they&rsquo;re for, whether they&rsquo;re layered, and how you might wear them.</p>
                   </div>
                   {blockedDetail.some((b) => b.reason === "keeping your legs covered") && (
                     <>
@@ -1063,7 +1066,7 @@ export default function WardrobeIntelligencePreview() {
                             <h3>{b.name}</h3>
                             <p>
                               {card?.category === "ACTIVEWEAR"
-                                ? "This is activewear, so this everyday preference is looser here."
+                                ? "You've tagged this as activewear, so your everyday coverage preference may not apply in the same way."
                                 : coverageReasonSentence(b.reason, card?.hemLength ?? null)}
                             </p>
                             {b.layers.length > 0 && (
@@ -1082,7 +1085,7 @@ export default function WardrobeIntelligencePreview() {
                   <button type="button" className="wip-back" onClick={() => setInsight(null)}>← Back to the rediscovery finding</button>
                   <div className="wip-feature-head">
                     <span className="wip-tag">What your wardrobe looks like</span>
-                    <h2>Your wardrobe, compared to your Style Passport.</h2>
+                    <h2>What your wardrobe looks like.</h2>
                   </div>
                   <div className="wip-profile-compact">
                     {neutralSharePct !== null && neutralSharePct >= 40 && (
@@ -1119,8 +1122,7 @@ export default function WardrobeIntelligencePreview() {
                     )}
                   </div>
                   <div className="wip-feature-foot">
-                    <p>The supporting picture, without another long report.</p>
-                    <button type="button" className="wip-link" onClick={() => setDialog({ kind: "profile" })}>Your Passport comparisons ↗</button>
+                    <button type="button" className="wip-link" onClick={() => setDialog({ kind: "profile" })}>See what nAia has learned ↗</button>
                   </div>
                 </>
               )}
