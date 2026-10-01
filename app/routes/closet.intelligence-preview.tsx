@@ -463,7 +463,6 @@ type DialogState =
   | { kind: "worthConsidering" }
   | { kind: "coverage" }
   | { kind: "profile" }
-  | { kind: "method" }
   | { kind: "status" }
   | null;
 
@@ -790,25 +789,6 @@ export default function WardrobeIntelligencePreview() {
         </DialogShell>
       );
     }
-    if (dialog.kind === "method") {
-      return (
-        <DialogShell title="How nAia knows this." onClose={closeDialog} className="wip-dialog--compact">
-          <div className="wip-profile-block">
-            <p>
-              Your Wardrobe Intelligence combines the pieces you&rsquo;ve added to your Closet, your Style
-              Passport, your StyleMe activity, and feedback you&rsquo;ve chosen to share.
-            </p>
-          </div>
-          <div className="wip-profile-block">
-            <p>
-              Recommendations become more accurate as you add more of your wardrobe and tell nAia what
-              you actually wear.
-            </p>
-          </div>
-          <p className="wip-dialog-note">nAia only knows about pieces and wear activity you&rsquo;ve shared with it.</p>
-        </DialogShell>
-      );
-    }
     if (dialog.kind === "status") {
       return (
         <DialogShell title="How much have you added?" subtitle="This changes how confidently a finding can discuss what's missing." onClose={closeDialog}>
@@ -919,7 +899,7 @@ export default function WardrobeIntelligencePreview() {
             const takeaway = summaryLines.find((l) => /colour|color/i.test(l)) ?? summaryLines[0] ?? null;
             if (!takeaway && !coverage.body) return null;
             return (
-              <section className="wip-passport-card">
+              <section className="wip-card-shell wip-passport-card">
                 <div className="wip-passport-col">
                   <span className="wip-eyebrow-accent">Style Passport</span>
                   {takeaway && <p className="wip-passport-takeaway">{takeaway}</p>}
@@ -939,41 +919,41 @@ export default function WardrobeIntelligencePreview() {
               real silhouette chips — the same real palette/shape data the
               deeper profile dialog draws from, just surfaced here too. ──── */}
           {profileBlock && (paletteRows.length > 0 || shapeChips.length > 0) && (
-            <section className="wip-looks-card">
-              <div className="wip-looks-head">
-                <h2 className="wip-section-title">What your wardrobe looks like.</h2>
+            <section className="wip-section">
+              <h2 className="wip-section-title">What your wardrobe looks like.</h2>
+              <div className="wip-card-shell wip-looks-card">
                 {neutralSharePct !== null && neutralSharePct >= 40 && (
                   <p className="wip-looks-headline">{neutralSharePct}% of your pieces are warm neutrals — easy to combine, though outfits can start to feel similar.</p>
                 )}
-              </div>
-              {paletteRows.length > 0 && (
-                <div className="wip-colour-bar">
-                  {paletteRows.map((c) => (
-                    <span key={c.colour} style={{ width: `${Math.max(c.share * 100, 2)}%`, background: swatchColour(c.colour) }} />
-                  ))}
-                </div>
-              )}
-              <div className="wip-looks-legend-row">
                 {paletteRows.length > 0 && (
-                  <div className="wip-legend">
+                  <div className="wip-colour-bar">
                     {paletteRows.map((c) => (
-                      <span key={c.colour} className="wip-legend-item">
-                        <span className="wip-legend-dot" style={{ background: swatchColour(c.colour) }} />
-                        {c.colour} <em>{c.count}</em>
-                      </span>
+                      <span key={c.colour} style={{ width: `${Math.max(c.share * 100, 2)}%`, background: swatchColour(c.colour) }} />
                     ))}
                   </div>
                 )}
-                {shapeChips.length > 0 && (
-                  <div className="wip-silhouette-group">
-                    <span className="wip-eyebrow-accent">Silhouettes</span>
-                    <div className="wip-chips">
-                      {shapeChips.map((s) => <span key={s.label} className="wip-chip">{s.label} · {s.count}</span>)}
+                <div className="wip-looks-legend-row">
+                  {paletteRows.length > 0 && (
+                    <div className="wip-legend">
+                      {paletteRows.map((c) => (
+                        <span key={c.colour} className="wip-legend-item">
+                          <span className="wip-legend-dot" style={{ background: swatchColour(c.colour) }} />
+                          {c.colour} <em>{c.count}</em>
+                        </span>
+                      ))}
                     </div>
-                  </div>
-                )}
+                  )}
+                  {shapeChips.length > 0 && (
+                    <div className="wip-silhouette-group">
+                      <span className="wip-eyebrow-accent">Silhouettes</span>
+                      <div className="wip-chips">
+                        {shapeChips.map((s) => <span key={s.label} className="wip-chip">{s.label} · {s.count}</span>)}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <button type="button" className="wip-link wip-section-more" onClick={() => setDialog({ kind: "profile" })}>See details →</button>
               </div>
-              <button type="button" className="wip-link wip-section-more" onClick={() => setDialog({ kind: "profile" })}>See details →</button>
             </section>
           )}
 
@@ -1056,11 +1036,12 @@ export default function WardrobeIntelligencePreview() {
           </section>
 
           {/* ── Section 6: two-column analysis ─────────────────────────────── */}
-          <section className="wip-section wip-analysis wip-section--quiet">
+          <section className="wip-section wip-analysis">
             <div className="wip-analysis-grid">
             {allRegisterReadings.length > 0 && (
             <div className="wip-analysis-col">
               <h2 className="wip-section-title">How your wardrobe supports your life.</h2>
+              <div className="wip-card-shell wip-analysis-card">
               {(["everyday", "work", "occasion"] as const).map((register) => {
                 const reading = allRegisterReadings.find((r) => r.register === register);
                 if (!reading) return null;
@@ -1106,12 +1087,14 @@ export default function WardrobeIntelligencePreview() {
                   </div>
                 );
               })}
+              </div>
             </div>
             )}
 
             {enoughClusters.length > 0 && (
             <div className="wip-analysis-col">
               <h2 className="wip-section-title">Where your wardrobe repeats.</h2>
+              <div className="wip-card-shell wip-analysis-card">
               {enoughClusters.map((c) => (
                 <div key={c.title} className="wip-repeat-card">
                   <h3>{c.title}</h3>
@@ -1123,6 +1106,7 @@ export default function WardrobeIntelligencePreview() {
                   )}
                 </div>
               ))}
+              </div>
             </div>
             )}
             </div>
@@ -1130,11 +1114,11 @@ export default function WardrobeIntelligencePreview() {
 
           {/* ── Section 7: shop smarter ─────────────────────────────────────── */}
           {(worthConsidering || lowPriority) && (
-            <section className="wip-section wip-section--quiet">
+            <section className="wip-section">
               <h2 className="wip-section-title">Shop smarter.</h2>
               <div className="wip-shop-split">
                 {worthConsidering && (
-                  <div className="wip-shop-col">
+                  <div className="wip-card-shell wip-shop-col">
                     <span className="wip-shop-col-label wip-shop-col-label--buy">Worth adding</span>
                     <h3>{(worthConsidering.title ?? "").replace(/^Look for |\.$/g, "")}</h3>
                     {(recBullets.length > 0 || recColourLead) && (
@@ -1158,7 +1142,7 @@ export default function WardrobeIntelligencePreview() {
                   </div>
                 )}
                 {lowPriority && (
-                  <div className="wip-shop-col">
+                  <div className="wip-card-shell wip-shop-col">
                     <span className="wip-shop-col-label">Skip for now</span>
                     <h3>{(lowPriority.title ?? "").replace(/^Another (similar |of your )?/i, "Another ")}</h3>
                     <p>{enoughCluster?.body ?? lowPriority.body}</p>
@@ -1176,8 +1160,18 @@ export default function WardrobeIntelligencePreview() {
             </section>
           )}
 
-          <button type="button" className="wip-link wip-method-link" onClick={() => setDialog({ kind: "method" })}>How nAia works this out →</button>
-          <p className="wip-legal">Nothing you do on this page is saved.</p>
+          <section className="wip-section wip-method">
+            <h2 className="wip-section-title">How nAia works this out.</h2>
+            <p className="wip-method-body">
+              Wardrobe Intelligence looks at the pieces you&rsquo;ve added to your Closet, your Style Passport, and
+              how your wardrobe works together to surface patterns, possibilities and useful next steps.
+            </p>
+            <p className="wip-method-body">
+              As you add more pieces to your Closet, nAia gets a clearer picture of your wardrobe and where it
+              can help most.
+            </p>
+            <p className="wip-legal">nAia only works with the wardrobe and preference information you choose to share.</p>
+          </section>
         </main>
       </div>
       {renderDialog()}
@@ -1186,6 +1180,15 @@ export default function WardrobeIntelligencePreview() {
 }
 
 const css = `
+  /* Route-scoped override of the shared MyNaiaLayout body shell. The large
+     gap before the footer is NOT this route's own padding — it's
+     .mn-body's own padding-bottom:8rem (128px desktop / 6rem mobile),
+     baked into naia-design-system.css and shared by every My nAia page.
+     .wip-main only ever contributed its own 24px on top of that. Scoped
+     with :has(.wip-app) so this never touches .mn-body on any other
+     page — not a global change to the shared layout. */
+  .mn-body.mn-body--compact:has(.wip-app){padding-bottom:2rem}
+
   .wip-app{max-width:1180px;margin:0 auto}
   .wip-main{padding:8px 0 24px}
   .wip-eyebrow{font-family:var(--naia-ff-ui);font-size:9px;letter-spacing:2.5px;text-transform:uppercase;color:rgba(40,21,12,0.5);margin:0 0 14px}
@@ -1228,24 +1231,36 @@ const css = `
 
   .wip-section{margin:0;padding:30px 0 0;border-top:1px solid var(--naia-border)}
   .wip-hero + .wip-section{border-top:0;padding-top:36px}
-  .wip-section-title{font-family:var(--naia-ff-display);font-weight:300;font-size:1.5rem;margin:0 0 6px;color:var(--naia-ink)}
-  /* Hierarchy: the moodboard is the visual hero; rediscovery stays at this
-     base weight as the clear second; everything from the analysis section
-     downward is deliberately quieter, so the page reads as sequenced
-     rather than a flat list of equally-weighted sections. */
-  .wip-section--hero .wip-section-title{font-size:1.9rem}
-  .wip-section--quiet{padding-top:26px}
-  .wip-section--quiet .wip-section-title{font-size:1.2rem;font-weight:400;opacity:0.88}
+  /* ONE shared section-heading style — every main WI heading below the
+     hero (What your wardrobe looks like / Your Closet, styled / Pieces
+     worth rediscovering / How your wardrobe supports your life / Where
+     your wardrobe repeats / Shop smarter / How nAia works this out) uses
+     this exact rule, with no per-section size/weight/opacity override.
+     Previously two modifiers (--hero, --quiet) made three different
+     title treatments; "Shop smarter." being visibly smaller than its
+     siblings was that inconsistency, not a one-off to patch. */
+  .wip-section-title{font-family:var(--naia-ff-display);font-weight:300;font-size:1.5rem;line-height:1.25;letter-spacing:0;margin:0 0 6px;color:var(--naia-ink)}
   .wip-section-sub{font-family:var(--naia-ff-ui);font-size:12.5px;color:rgba(40,21,12,0.55);margin:0 0 18px}
   .wip-section-more{display:block;margin-top:14px}
   .wip-eyebrow-accent{display:block;font-family:var(--naia-ff-ui);font-size:9.5px;letter-spacing:1.8px;text-transform:uppercase;font-weight:700;color:var(--naia-accent);margin:0 0 10px}
+
+  /* ONE shared card shell — Style Passport, What your wardrobe looks
+     like, How your wardrobe supports your life, Where your wardrobe
+     repeats, and both Shop smarter cards all use this exact visual
+     treatment (border radius, border, background, internal padding).
+     Each specific class below carries ONLY its own layout (grid
+     columns, gap, max-width) — never a second copy of the shell
+     properties that could drift from this one. The moodboard is the
+     one deliberate exception, per its own editorial-plate treatment. */
+  .wip-card-shell{background:var(--naia-surface);border:1px solid var(--naia-border);border-radius:8px;padding:26px 30px}
+  @media(max-width:700px){.wip-card-shell{padding:20px}}
 
   /* Style Passport summary — one horizontal card, split in two: the real
      takeaway on the left, supporting detail + the "See which" link on the
      right. A divider (not a border around each half) keeps it reading as
      one card with two halves, not two separate cards. */
-  .wip-passport-card{display:grid;grid-template-columns:1fr 1fr;gap:32px;background:var(--naia-surface);border:1px solid var(--naia-border);border-radius:8px;padding:26px 30px;margin-top:30px}
-  @media(max-width:700px){.wip-passport-card{grid-template-columns:1fr;gap:16px;padding:20px}}
+  .wip-passport-card{display:grid;grid-template-columns:1fr 1fr;gap:32px;margin-top:30px}
+  @media(max-width:700px){.wip-passport-card{grid-template-columns:1fr;gap:16px}}
   .wip-passport-col{min-width:0}
   .wip-passport-divider{display:none}
   .wip-passport-takeaway{font-family:var(--naia-ff-ui);font-weight:600;font-size:15px;line-height:1.5;color:var(--naia-ink);margin:0}
@@ -1255,9 +1270,7 @@ const css = `
   /* What your wardrobe looks like — a segmented proportional colour bar
      (each piece's real share as its width) instead of a row of equal
      circular swatches, plus the existing silhouette chips alongside it. */
-  .wip-looks-card{background:var(--naia-surface);border:1px solid var(--naia-border);border-radius:8px;padding:26px 30px}
-  .wip-looks-head{margin-bottom:14px}
-  .wip-looks-headline{font-family:var(--naia-ff-ui);font-weight:600;font-size:13.5px;line-height:1.5;color:var(--naia-ink);margin:8px 0 0}
+  .wip-looks-headline{font-family:var(--naia-ff-ui);font-weight:600;font-size:13.5px;line-height:1.5;color:var(--naia-ink);margin:0 0 14px}
   .wip-colour-bar{display:flex;width:100%;height:14px;border-radius:7px;overflow:hidden;background:var(--naia-muted-bg)}
   .wip-colour-bar span{display:block;height:100%}
   .wip-looks-legend-row{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;flex-wrap:wrap;margin-top:16px}
@@ -1348,9 +1361,15 @@ const css = `
   /* align-items:start so each column sizes to its own content — CSS grid's
      default stretch was forcing both columns to match the taller sibling's
      height, leaving a large empty gap under the shorter one. */
-  .wip-analysis-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start}
+  /* align-items:stretch (the default — no longer overridden) is what makes
+     this an equally-sized pair: both columns take the row's full height,
+     and .wip-analysis-card's flex:1 below makes the visible card box
+     itself fill that height, so a shorter card's bottom border still
+     lines up with its taller sibling's instead of ending early. */
+  .wip-analysis-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}
   @media(max-width:900px){.wip-analysis-grid{grid-template-columns:1fr;gap:20px}}
-  .wip-analysis-col{background:var(--naia-surface);border:1px solid var(--naia-border);border-radius:8px;padding:24px 26px}
+  .wip-analysis-col{display:flex;flex-direction:column}
+  .wip-analysis-card{flex:1}
 
   /* How your wardrobe supports your life */
   .wip-life-row{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:13px 0;border-top:1px solid var(--naia-border)}
@@ -1381,9 +1400,11 @@ const css = `
      analysis/moodboard card treatment. */
   /* Same fix as the analysis grid: let each card hug its own content
      instead of stretching to match whichever column is taller. */
-  .wip-shop-split{display:grid;grid-template-columns:1fr 1fr;gap:32px;align-items:start;max-width:920px;margin:0 auto}
+  /* Same equal-height approach as the analysis grid: default stretch, not
+     align-items:start, so Worth adding / Skip for now form a matched pair
+     regardless of which has more copy. */
+  .wip-shop-split{display:grid;grid-template-columns:1fr 1fr;gap:32px;max-width:920px;margin:0 auto}
   @media(max-width:700px){.wip-shop-split{grid-template-columns:1fr;gap:20px}}
-  .wip-shop-col{background:var(--naia-surface);border:1px solid var(--naia-border);border-radius:8px;padding:24px 26px}
   .wip-shop-col-label{display:block;font-family:var(--naia-ff-ui);font-size:9.5px;letter-spacing:1.4px;text-transform:uppercase;font-weight:700;color:rgba(40,21,12,0.45);margin-bottom:12px}
   .wip-shop-col-label--buy{color:var(--naia-accent)}
   .wip-shop-col h3{font-family:var(--naia-ff-ui);font-weight:700;font-size:14px;line-height:1.3;margin:0 0 8px;color:var(--naia-ink)}
@@ -1400,8 +1421,11 @@ const css = `
   .wip-findings-list{margin:0 0 12px;padding-left:16px;font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.7;color:rgba(40,21,12,0.65)}
 
   /* Quiet trailing methodology link */
-  .wip-method-link{display:block;margin-top:30px}
-  .wip-legal{font-family:var(--naia-ff-ui);font-size:9.5px;color:rgba(40,21,12,0.45);margin-top:16px}
+  /* Quiet inline methodology — no longer a click-to-open modal. Same
+     .wip-section-title as every other heading; body stays understated
+     (smaller, muted) rather than reading as another full finding. */
+  .wip-method-body{font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.65;color:rgba(40,21,12,0.6);margin:0 0 10px;max-width:640px}
+  .wip-legal{font-family:var(--naia-ff-ui);font-size:9.5px;color:rgba(40,21,12,0.45);margin-top:10px}
   .wip-empty{font-family:var(--naia-ff-ui);font-size:13px;color:rgba(40,21,12,0.6);padding:40px 0}
 
   .wip-thumb{width:100%;display:flex;align-items:center;justify-content:center;background:var(--naia-muted-bg);border-radius:4px;overflow:hidden;flex-shrink:0}
