@@ -2455,6 +2455,13 @@ function logNaiaSelectionDiag(data: {
     compositeScore: number;
     deterministicFallbackRank: string;
     pieces: Array<{ slot: string; pieceRole: string; label: string | null; occasionStatus: string; formality: string | null }>;
+    // QA instrumentation. The EXACT CandidateRankKey this candidate was ranked by —
+    // read from the rankKeys map the sort itself used, never recomputed. Without it a
+    // failing run could only be read backwards from the chosen outfit.
+    rankKey: CandidateRankKey;
+    rankOrder: number;          // 0-based position after the T1-T6d sort
+    isModelEligible: boolean;   // passed isTiedAtT1T4 against deterministicBest
+    pieceLabels: string[];
   }>;
   modelCallAttempted: boolean;
   modelReturnedId?: string | null;
@@ -2463,6 +2470,11 @@ function logNaiaSelectionDiag(data: {
   fallbackUsed: boolean;
   fallbackReason?: string;
   finalCandidateId: string;
+  // QA instrumentation — the three decision points the previous payload omitted.
+  deterministicBestId: string;
+  deterministicBestRankKey: CandidateRankKey;
+  rankedOrder: string[];        // candidate ids, best first
+  modelEligibleIds: string[];   // the exact set offered to the model
 }): void {
   if (process.env.NAIA_STYLEME_DIAGNOSTICS !== "true") return;
   console.log("[nAia-selection-diag]", JSON.stringify(data));
@@ -5074,8 +5086,16 @@ export async function computeStyleMeResult(
           const e = occasionEvidence.get(c.id)!;
           const s = outfitScores.get(c.id)!;
           const itemMap = new Map(allItems.map((i) => [i.id, i]));
+          // Read-only reads of the structures the real ranking path produced above.
+          const liveRankKey = rankKeys.get(c.id)!;
+          const liveRankOrder = rankedCandidates.findIndex((rc) => rc.id === c.id);
+          const liveModelEligible = modelEligible.some((mc) => mc.id === c.id);
           return {
             id: c.id,
+            rankKey: liveRankKey,
+            rankOrder: liveRankOrder,
+            isModelEligible: liveModelEligible,
+            pieceLabels: c.pieces.map((p) => p.label ?? p.closetId),
             knownOccasionPieces: e.knownOccasionPieces,
             matchingOccasionPieces: e.matchingOccasionPieces,
             explicitNonMatches: e.explicitNonMatchCount,
@@ -5100,6 +5120,10 @@ export async function computeStyleMeResult(
         fallbackUsed,
         fallbackReason,
         finalCandidateId: finalCandidate.id,
+        deterministicBestId: deterministicBest.id,
+        deterministicBestRankKey: bestKey,
+        rankedOrder: rankedCandidates.map((c) => c.id),
+        modelEligibleIds: modelEligible.map((c) => c.id),
       });
     }
   } else if (getClosetItems) {
