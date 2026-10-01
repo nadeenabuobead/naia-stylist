@@ -311,3 +311,34 @@ foundation module — take them in the same merge as `app/lib/garment/`, not bef
 
 `444660c` is the fix for the coverage defect described in §2.2; that deferral is
 now tracked upstream rather than open-ended.
+
+---
+
+## 7. Deferred — `feel-like-myself` has no T4 identity signal
+
+Found during QA of the Test 2 `feel-sharper` fix on 2026-10-01. **Not investigated and
+not fixed in that pass, by instruction.**
+
+`feel-like-myself` scores a flat `0` at T4 for the QA customer. The legacy path for that
+intention is `outfitIdentityScore`, which returns `0` as soon as
+`scoringArchetypesFor(profile)` is empty — so every candidate ties and the winner falls
+through to the T6 tie-breaks rather than being chosen by the intention. The control arm
+of the A/B therefore proves nothing about identity; it only proves the tie-breaks are
+deterministic.
+
+The cause is upstream of StyleMe: this isolated branch does not resolve canonical Rev 7
+Passport style directions. `buildProfileSignals` projects `styleDirections` onto V3
+archetype tokens via `projectStyleDirectionsToArchetypes`, and `scoringArchetypesFor`
+falls back to the stale legacy `stylePersonalities` when that projection is empty — a
+Rev 7 customer's stored `stylePersonalities` is data the Rev 7 flow never rewrites. For
+a customer whose directions do not project, both arrays end up empty and the signal
+vanishes silently.
+
+**Revisit when StyleMe consumes `resolvePassport()` from the shared Passport
+foundation.** At that point `scoringArchetypesFor` should be deleted rather than
+adapted, and T4 identity should read resolved style directions directly. Until then,
+`feel-like-myself` is honest about having no evidence — it does not fabricate an
+identity signal — but it also cannot differentiate outfits.
+
+Related: §3 records the one stale `stylePersonalities` read that remains
+(`buildSessionFingerprint` in `styleme-recommendation.ts`).
