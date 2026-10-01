@@ -1037,11 +1037,11 @@ export default function WardrobeIntelligencePreview() {
 
           {/* ── Section 6: two-column analysis ─────────────────────────────── */}
           <section className="wip-section wip-analysis">
-            <div className="wip-analysis-grid">
+            <div className="wip-paired-grid wip-analysis-grid">
             {allRegisterReadings.length > 0 && (
             <div className="wip-analysis-col">
               <h2 className="wip-section-title">How your wardrobe supports your life.</h2>
-              <div className="wip-card-shell wip-analysis-card">
+              <div className="wip-card-shell wip-paired-card wip-analysis-card">
               {(["everyday", "work", "occasion"] as const).map((register) => {
                 const reading = allRegisterReadings.find((r) => r.register === register);
                 if (!reading) return null;
@@ -1094,7 +1094,7 @@ export default function WardrobeIntelligencePreview() {
             {enoughClusters.length > 0 && (
             <div className="wip-analysis-col">
               <h2 className="wip-section-title">Where your wardrobe repeats.</h2>
-              <div className="wip-card-shell wip-analysis-card">
+              <div className="wip-card-shell wip-paired-card wip-analysis-card">
               {enoughClusters.map((c) => (
                 <div key={c.title} className="wip-repeat-card">
                   <h3>{c.title}</h3>
@@ -1116,9 +1116,9 @@ export default function WardrobeIntelligencePreview() {
           {(worthConsidering || lowPriority) && (
             <section className="wip-section">
               <h2 className="wip-section-title">Shop smarter.</h2>
-              <div className="wip-shop-split">
+              <div className="wip-paired-grid wip-shop-split">
                 {worthConsidering && (
-                  <div className="wip-card-shell wip-shop-col">
+                  <div className="wip-card-shell wip-paired-card wip-shop-col">
                     <span className="wip-shop-col-label wip-shop-col-label--buy">Worth adding</span>
                     <h3>{(worthConsidering.title ?? "").replace(/^Look for |\.$/g, "")}</h3>
                     {(recBullets.length > 0 || recColourLead) && (
@@ -1142,7 +1142,7 @@ export default function WardrobeIntelligencePreview() {
                   </div>
                 )}
                 {lowPriority && (
-                  <div className="wip-card-shell wip-shop-col">
+                  <div className="wip-card-shell wip-paired-card wip-shop-col">
                     <span className="wip-shop-col-label">Skip for now</span>
                     <h3>{(lowPriority.title ?? "").replace(/^Another (similar |of your )?/i, "Another ")}</h3>
                     <p>{enoughCluster?.body ?? lowPriority.body}</p>
@@ -1301,7 +1301,7 @@ const css = `
      especially on a 1-look tab (Everyday/Work often have just one). Capping
      the GRID itself (not just the collage inside it) is what actually
      removes that unused width, on every column count. */
-  .wip-mood-grid{display:grid;grid-template-columns:repeat(var(--mood-cols,1),1fr);gap:16px;max-width:820px;margin:0 auto}
+  .wip-mood-grid{display:grid;grid-template-columns:repeat(var(--mood-cols,1),1fr);gap:16px;max-width:740px;margin:0 auto}
   @media(max-width:860px){.wip-mood-grid{grid-template-columns:repeat(min(var(--mood-cols,1),2),1fr)}}
   @media(max-width:560px){.wip-mood-grid{grid-template-columns:1fr}}
   .wip-mood-tile{display:block;width:100%;border:1px solid var(--naia-border);border-radius:8px;background:var(--naia-surface);padding:9px;text-align:left;cursor:pointer}
@@ -1311,20 +1311,22 @@ const css = `
      aspect-ratio can't describe an asymmetric 1-large/2-small layout the
      same way it describes an even grid. object-fit:contain on every
      Thumb still prevents any cropping regardless of shape. */
-  .wip-mood-collage{display:grid;gap:7px;height:380px}
-  @media(max-width:700px){.wip-mood-collage{height:300px}}
+  .wip-mood-collage{display:grid;gap:6px;height:330px}
+  @media(max-width:700px){.wip-mood-collage{height:280px}}
   .wip-mood-collage .wip-thumb{border-radius:0;height:100% !important;background:none}
   /* One garment, rare fallback (e.g. a single dress): centered, not stretched. */
   .wip-mood-collage--n1{grid-template-columns:1fr;max-width:300px;margin:0 auto}
   /* Two pieces: a centered pair, not two images pulled to opposite edges of
      the tile. */
   .wip-mood-collage--n2{grid-template-columns:1fr 1fr;max-width:460px;margin:0 auto}
-  /* Three pieces: one main piece (the first garment — typically the
-     layer/outerwear piece a candidate lists first) reads larger, with the
-     other two grouped close beside it as supporting pieces — a compact
-     editorial composition, not three equal boxes spread apart. */
-  .wip-mood-collage--n3{grid-template-columns:1.3fr 1fr;grid-template-rows:1fr 1fr;max-width:620px;margin:0 auto}
-  .wip-mood-collage--n3 .wip-thumb:first-child{grid-row:1 / 3}
+  /* Three pieces: one row, not a 2-row stack — stacking the lead across
+     both rows (previous version) multiplied width AND height together,
+     making it 2-3x the visual area of each support. A single shared row
+     means only the WIDTH differs (lead ~25% wider), which reads as
+     "moderately more prominent" rather than dominant, keeps every piece
+     at the same height as its neighbours, and leaves no row-height
+     mismatch to show up as unused canvas. */
+  .wip-mood-collage--n3{grid-template-columns:1.25fr 1fr 1fr;max-width:600px;margin:0 auto}
   /* Four or more, rare: back to an even grid rather than guessing a
      composition no real candidate actually produces. */
   .wip-mood-collage--n4{grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr}
@@ -1361,14 +1363,32 @@ const css = `
   /* align-items:start so each column sizes to its own content — CSS grid's
      default stretch was forcing both columns to match the taller sibling's
      height, leaving a large empty gap under the shorter one. */
+  /* ONE shared paired-card grid — both two-column rows (lifestyle/
+     repetition and Worth adding/Skip for now) use this exact rule, so
+     they share total row width, column width, gutter and stacking
+     breakpoint. Shop Smarter previously had its own max-width:920px and a
+     different gap, which is what made it visibly narrower than this row
+     and left its card edges not lining up underneath. */
+  .wip-paired-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+  @media(max-width:900px){.wip-paired-grid{grid-template-columns:1fr;gap:20px}}
   /* align-items:stretch (the default — no longer overridden) is what makes
-     this an equally-sized pair: both columns take the row's full height,
-     and .wip-analysis-card's flex:1 below makes the visible card box
-     itself fill that height, so a shorter card's bottom border still
-     lines up with its taller sibling's instead of ending early. */
-  .wip-analysis-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}
-  @media(max-width:900px){.wip-analysis-grid{grid-template-columns:1fr;gap:20px}}
+     each pair equally sized within its own row: both columns take the
+     row's full height, and .wip-paired-card's flex:1/min-height below
+     make the visible card box itself fill that height, so a shorter
+     card's bottom border still lines up with its taller sibling's
+     instead of ending early. */
   .wip-analysis-col{display:flex;flex-direction:column}
+  /* Shared height across BOTH rows, not just within each row: without
+     this, the lifestyle/repetition pair and the shop-smarter pair could
+     each be internally equal-height but still end up two different
+     heights from each other, breaking the "cards line up underneath"
+     requirement. 420px is sized to the analysis row's real content (up
+     to 3 register rows with evidence thumbnails) — the shorter
+     Shop-smarter cards reach the same floor and stay top-aligned inside
+     it (plain block flow, nothing centers their content vertically).
+     Desktop only — mobile stacks to one column and sizes naturally. */
+  .wip-paired-card{display:flex;flex-direction:column}
+  @media(min-width:901px){.wip-paired-card{min-height:420px}}
   .wip-analysis-card{flex:1}
 
   /* How your wardrobe supports your life */
@@ -1398,13 +1418,11 @@ const css = `
 
   /* Shop smarter — each side its own bordered cream card, matching the
      analysis/moodboard card treatment. */
-  /* Same fix as the analysis grid: let each card hug its own content
-     instead of stretching to match whichever column is taller. */
-  /* Same equal-height approach as the analysis grid: default stretch, not
-     align-items:start, so Worth adding / Skip for now form a matched pair
-     regardless of which has more copy. */
-  .wip-shop-split{display:grid;grid-template-columns:1fr 1fr;gap:32px;max-width:920px;margin:0 auto}
-  @media(max-width:700px){.wip-shop-split{grid-template-columns:1fr;gap:20px}}
+  /* Grid shape (width, gutter, stacking breakpoint) now comes entirely
+     from .wip-paired-grid, shared with the analysis row — this used to
+     declare its own max-width:920px and a different gap, which is what
+     made Shop Smarter visibly narrower and its cards not line up
+     underneath the lifestyle/repetition pair. */
   .wip-shop-col-label{display:block;font-family:var(--naia-ff-ui);font-size:9.5px;letter-spacing:1.4px;text-transform:uppercase;font-weight:700;color:rgba(40,21,12,0.45);margin-bottom:12px}
   .wip-shop-col-label--buy{color:var(--naia-accent)}
   .wip-shop-col h3{font-family:var(--naia-ff-ui);font-weight:700;font-size:14px;line-height:1.3;margin:0 0 8px;color:var(--naia-ink)}
