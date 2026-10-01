@@ -9,15 +9,20 @@
 // garments and findings render here automatically. It never calls
 // readAndRecordChange or the completeness action: this pass makes no writes.
 //
-// Composition: one vertical page, five sections, no right rail and no panel
+// Composition: one vertical page, six sections, no right rail and no panel
 // that swaps out the main screen. Deep evidence (Passport alignment, full
 // wardrobe-profile provenance, the full per-register breakdown, "why this
 // recommendation") lives behind small secondary links, each opening a single
-// dialog — never replacing what's on screen. A "Your Closet, styled" visual
-// moodboard section is deliberately NOT included yet: it would need looks
-// the engine doesn't yet compute (Travel/Active registers, more than two
-// ranked combos per register, piece-swap suggestions), and nothing here is
-// ever handwritten to fill that gap — it's a separate, scoped engine task.
+// dialog — never replacing what's on screen.
+//
+// "Your Closet, styled." (Moodboard V1) is a presentation-only diversity
+// SELECTION over combinations intelligence.pairings.bestByRegister already
+// ranked — see selectMoodboardLooks() below. It generates, rescores, and
+// invents nothing: every look shown is a real resolved combination. It does
+// NOT attempt Travel or Active registers (the engine has no such registers
+// today — Travel folds into Everyday, Active is a fragile regex relabel) or
+// "swap a piece" (no engine primitive for it yet) — both are separately
+// scoped engine (V2) work.
 
 import { useState } from "react";
 import { redirect, type LoaderFunctionArgs, type LinksFunction, data } from "react-router";
@@ -196,20 +201,32 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
   }
 
-  // ── Up to 2 real ranked combinations per register ────────────────────────
+  // ── Every real ranked combination per register ───────────────────────────
   // intelligence.pairings.bestByRegister already ranks up to 5 real
-  // candidates per register by score; "How your wardrobe supports your life"
-  // surfaces the top 2 instead of the single best, so a second one can read
-  // as a genuine swap rather than one example pair. No new pairing logic —
-  // same already-computed list the "ways to get dressed" section draws its
-  // one pick from.
-  const bestByRegisterPreview: Partial<Record<RegisterId, Array<{ id: string; reason: string; garmentIds: string[] }>>> = {};
+  // candidates per register by score (the engine's own cap, not a display
+  // choice) — kept here in full, unsliced, as the shared source for both the
+  // top-2 preview below and the moodboard's diversity selection.
+  const allCombosByRegister: Partial<Record<RegisterId, Array<{ id: string; reason: string; garmentIds: string[] }>>> = {};
   for (const register of ["everyday", "work", "occasion"] as const) {
-    const top = intelligence.pairings.bestByRegister[register]?.slice(0, 2);
-    if (top && top.length > 0) {
-      bestByRegisterPreview[register] = top.map((p) => ({ id: p.id, reason: p.reason, garmentIds: p.garmentIds }));
+    const all = intelligence.pairings.bestByRegister[register];
+    if (all && all.length > 0) {
+      allCombosByRegister[register] = all.map((p) => ({ id: p.id, reason: p.reason, garmentIds: p.garmentIds }));
     }
   }
+
+  // ── Top 2 per register, for "How your wardrobe supports your life" ──────
+  // A second one reads as a genuine swap rather than one example pair. No
+  // new pairing logic — same list moodboardLooks draws from below.
+  const bestByRegisterPreview: Partial<Record<RegisterId, Array<{ id: string; reason: string; garmentIds: string[] }>>> = {};
+  for (const register of ["everyday", "work", "occasion"] as const) {
+    const top = allCombosByRegister[register]?.slice(0, 2);
+    if (top) bestByRegisterPreview[register] = top;
+  }
+
+  // ── "Your Closet, styled." — a diverse real-look selection ───────────────
+  // See selectMoodboardLooks() below: chooses among the real combos above,
+  // generates nothing.
+  const moodboardLooks = selectMoodboardLooks(allCombosByRegister);
 
   // ── The real recommendation's structured evidence, for the shopping card ──
   // Same object the title/body already come from — attributes and criteria
@@ -229,8 +246,57 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return data({
     page, garmentCards, glanceRegisters, allRegisterReadings, neutralSharePct,
-    enoughCluster, enoughClusters, rediscoverPieces, bestByRegisterPreview, recommendationDetail,
+    enoughCluster, enoughClusters, rediscoverPieces, bestByRegisterPreview, moodboardLooks, recommendationDetail,
   });
+}
+
+/**
+ * Moodboard V1 diversity selection — presentation only.
+ *
+ * Chooses which of the engine's ALREADY-RANKED real combinations to show on
+ * "Your Closet, styled." It never generates, rescores, or invents a look —
+ * every candidate here is a real intelligence.pairings.bestByRegister entry.
+ * It round-robins across registers, consuming each register's own real rank
+ * order first-to-last (so "best" stays best and a thin register doesn't
+ * crowd out a deep one), enforces that no garment appears in more than 2
+ * selected looks, and tries not to repeat a garment in the
+ * immediately-adjacent selection (relaxed only if nothing else is left to
+ * pick from that register). Stops at `targetCount` or when every register is
+ * exhausted — a thinner Closet simply gets fewer looks, never a backfilled
+ * or fabricated one.
+ */
+function selectMoodboardLooks(
+  byRegister: Partial<Record<RegisterId, Array<{ id: string; reason: string; garmentIds: string[] }>>>,
+  targetCount = 6,
+): Array<{ id: string; register: RegisterId; reason: string; garmentIds: string[] }> {
+  const registers = (["everyday", "work", "occasion"] as const).filter((r) => (byRegister[r]?.length ?? 0) > 0);
+  const queues: Partial<Record<RegisterId, Array<{ id: string; reason: string; garmentIds: string[] }>>> = {};
+  for (const r of registers) queues[r] = [...(byRegister[r] ?? [])];
+
+  const selected: Array<{ id: string; register: RegisterId; reason: string; garmentIds: string[] }> = [];
+  const usedCount = new Map<string, number>();
+  let lastGarmentIds = new Set<string>();
+
+  const fits = (ids: string[]) => ids.every((id) => (usedCount.get(id) ?? 0) < 2);
+  const overlapsLast = (ids: string[]) => ids.some((id) => lastGarmentIds.has(id));
+
+  let progress = true;
+  while (selected.length < targetCount && progress) {
+    progress = false;
+    for (const r of registers) {
+      if (selected.length >= targetCount) break;
+      const queue = queues[r]!;
+      let pickIdx = queue.findIndex((c) => fits(c.garmentIds) && !overlapsLast(c.garmentIds));
+      if (pickIdx === -1) pickIdx = queue.findIndex((c) => fits(c.garmentIds));
+      if (pickIdx === -1) continue;
+      const [chosen] = queue.splice(pickIdx, 1);
+      selected.push({ ...chosen, register: r });
+      for (const id of chosen.garmentIds) usedCount.set(id, (usedCount.get(id) ?? 0) + 1);
+      lastGarmentIds = new Set(chosen.garmentIds);
+      progress = true;
+    }
+  }
+  return selected;
 }
 
 type GarmentCard = {
@@ -350,6 +416,7 @@ type DialogState =
   | { kind: "matches"; anchorId: string }
   | { kind: "pair"; anchorId: string; garmentId: string }
   | { kind: "workCombo" }
+  | { kind: "moodboardLook"; lookId: string }
   | { kind: "worthConsidering" }
   | { kind: "lifestyle" }
   | { kind: "coverage" }
@@ -388,7 +455,7 @@ function DialogShell({
 export default function WardrobeIntelligencePreview() {
   const {
     page, garmentCards, glanceRegisters, allRegisterReadings, neutralSharePct,
-    enoughCluster, enoughClusters, rediscoverPieces, bestByRegisterPreview, recommendationDetail,
+    enoughCluster, enoughClusters, rediscoverPieces, bestByRegisterPreview, moodboardLooks, recommendationDetail,
   } = useLoaderData<typeof loader>() as {
     page: WardrobePage; garmentCards: GarmentCard[];
     glanceRegisters: Array<{ heading: string; stateText: string }>;
@@ -398,6 +465,7 @@ export default function WardrobeIntelligencePreview() {
     enoughClusters: Array<{ title: string; body: string; garmentIds: string[]; count: number }>;
     rediscoverPieces: Array<{ garmentId: string; matchIds: string[] }>;
     bestByRegisterPreview: Partial<Record<RegisterId, Array<{ id: string; reason: string; garmentIds: string[] }>>>;
+    moodboardLooks: Array<{ id: string; register: RegisterId; reason: string; garmentIds: string[] }>;
     recommendationDetail: {
       attributes: Array<{ kind: string; values: string[]; label: string; source: string }>;
       structure: string | null;
@@ -413,6 +481,13 @@ export default function WardrobeIntelligencePreview() {
   // isn't exported for the client to reuse directly.
   const REGISTER_LABEL: Record<RegisterId, string> = {
     everyday: "Everyday", work: "Work", occasion: "Dinners & events",
+  };
+  // Short captions for the moodboard — the full "Dinners & events" register
+  // label reads as an analytical category when it's a small overlay on a
+  // photo; "Dinner" is the same real register, just said the way a person
+  // would say it.
+  const MOOD_CAPTION: Record<RegisterId, string> = {
+    everyday: "Everyday", work: "Work", occasion: "Dinner",
   };
   // Same labels COVERAGE_RULES already uses server-side — repeated here only
   // because that map isn't exported, not a new vocabulary.
@@ -544,6 +619,22 @@ export default function WardrobeIntelligencePreview() {
           </div>
           <p className="wip-combo-text">{attentionCombo.body}</p>
           <p className="wip-dialog-note">Add shoes and finishing pieces to complete the look.</p>
+        </DialogShell>
+      );
+    }
+    if (dialog.kind === "moodboardLook") {
+      const look = moodboardLooks.find((l) => l.id === dialog.lookId);
+      if (!look) return null;
+      return (
+        <DialogShell title={`A ${MOOD_CAPTION[look.register].toLowerCase()} look.`} subtitle="A real combination from what you already own." onClose={closeDialog}>
+          <div className="wip-match-grid" style={{ gridTemplateColumns: `repeat(${look.garmentIds.length}, minmax(0,1fr))` }}>
+            {look.garmentIds.map((id) => {
+              const card = byId.get(id);
+              return <div key={id} className="wip-match-tile"><Thumb card={card} height={170} /><p>{cardLabel(card)}</p></div>;
+            })}
+          </div>
+          <p className="wip-combo-text">{look.reason}</p>
+          <a className="wip-link" href="/style-me">Style this look in StyleMe →</a>
         </DialogShell>
       );
     }
@@ -826,7 +917,25 @@ export default function WardrobeIntelligencePreview() {
             )}
           </div>
 
-          {/* ── Section 2: pieces worth rediscovering ──────────────────────── */}
+          {/* ── Section 2: Your Closet, styled (Moodboard V1) ──────────────── */}
+          {moodboardLooks.length > 0 && (
+            <section className="wip-section">
+              <h2 className="wip-section-title">Your Closet, styled.</h2>
+              <p className="wip-section-sub">Looks you can already create from what you own.</p>
+              <div className="wip-mood-grid">
+                {moodboardLooks.map((look) => (
+                  <button key={look.id} type="button" className="wip-mood-tile" onClick={() => setDialog({ kind: "moodboardLook", lookId: look.id })}>
+                    <div className="wip-mood-collage">
+                      {look.garmentIds.slice(0, 4).map((id) => <Thumb key={id} card={byId.get(id)} height={150} />)}
+                    </div>
+                    <span className="wip-mood-caption">{MOOD_CAPTION[look.register]}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* ── Section 3: pieces worth rediscovering ──────────────────────── */}
           <section className="wip-section">
             <h2 className="wip-section-title">Pieces worth rediscovering.</h2>
             {rediscoverPieces.slice(0, 3).map((piece) => {
@@ -857,7 +966,7 @@ export default function WardrobeIntelligencePreview() {
             })}
           </section>
 
-          {/* ── Section 3: how your wardrobe supports your life ────────────── */}
+          {/* ── Section 4: how your wardrobe supports your life ────────────── */}
           {allRegisterReadings.length > 0 && (
             <section className="wip-section">
               <h2 className="wip-section-title">How your wardrobe supports your life.</h2>
@@ -905,7 +1014,7 @@ export default function WardrobeIntelligencePreview() {
             </section>
           )}
 
-          {/* ── Section 4: where your wardrobe repeats ─────────────────────── */}
+          {/* ── Section 5: where your wardrobe repeats ─────────────────────── */}
           {enoughClusters.length > 0 && (
             <section className="wip-section">
               <h2 className="wip-section-title">Where your wardrobe repeats.</h2>
@@ -923,7 +1032,7 @@ export default function WardrobeIntelligencePreview() {
             </section>
           )}
 
-          {/* ── Section 5: shop smarter ─────────────────────────────────────── */}
+          {/* ── Section 6: shop smarter ─────────────────────────────────────── */}
           {(worthConsidering || lowPriority) && (
             <section className="wip-section">
               <h2 className="wip-section-title">Shop smarter.</h2>
@@ -1004,7 +1113,17 @@ const css = `
 
   .wip-section{margin:0 0 56px}
   .wip-section-title{font-family:var(--naia-ff-display);font-weight:300;font-size:1.5rem;margin:0 0 6px;color:var(--naia-ink)}
+  .wip-section-sub{font-family:var(--naia-ff-ui);font-size:12.5px;color:rgba(40,21,12,0.55);margin:0 0 20px}
   .wip-section-more{display:block;margin-top:14px}
+
+  /* Your Closet, styled (Moodboard V1) */
+  .wip-mood-grid{column-count:2;column-gap:14px}
+  @media(min-width:640px){.wip-mood-grid{column-count:3}}
+  .wip-mood-tile{display:block;width:100%;break-inside:avoid;margin-bottom:14px;border:0;background:none;padding:0;text-align:left;cursor:pointer}
+  .wip-mood-collage{display:grid;grid-template-columns:1fr 1fr;gap:3px;border-radius:6px;overflow:hidden}
+  .wip-mood-collage .wip-thumb{border-radius:0}
+  .wip-mood-tile:hover .wip-mood-collage{outline:2px solid var(--naia-accent);outline-offset:2px}
+  .wip-mood-caption{display:block;font-family:var(--naia-ff-ui);font-size:10.5px;color:rgba(40,21,12,0.55);margin-top:6px}
 
   /* Pieces worth rediscovering */
   .wip-piece-card{display:flex;align-items:flex-start;gap:20px;padding:20px 0;border-top:1px solid var(--naia-border)}
