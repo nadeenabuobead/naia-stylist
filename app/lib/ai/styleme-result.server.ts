@@ -77,6 +77,7 @@ import {
   computeRegisterAlignmentScore,
   passesDressingRequirements,
   evaluateAnchorEligibility,
+  explainDressingRequirements,
 } from "./styleme-profile-gate.js";
 
 // ── Passport option label resolver ───────────────────────────────────────────
@@ -3933,6 +3934,37 @@ export function selectAdditionalClosetGarments(
 
   for (const item of closetItems) {
     if (item.id === anchorId) continue;
+
+    // DIAGNOSTIC ONLY — logged BEFORE the gate's `continue`, because an item the gate
+    // rejects currently produces no log line at all, which makes "the gate passed it"
+    // and "the gate never saw it" indistinguishable in the logs. Behaviour unchanged:
+    // the predicate below is still the only thing that decides.
+    //
+    // StyleMe reads hemLength/topLength straight off loadAllClosetItemsForEngine with
+    // no normalisation, so the values printed here ARE the stored ClosetItem values.
+    // Note that StyleMe does NOT apply ClosetItemAdminReview overrides — if a reviewer
+    // corrected a hem, StyleMe would still read the raw AI value, and that divergence
+    // would show up as a stored value disagreeing with what the Closet UI displays.
+    if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true") {
+      const x = explainDressingRequirements(item, profile?.dressingPreferences);
+      console.log("[nAia-dressing-gate]", JSON.stringify({
+        entry: "candidate",
+        closetId: item.id,
+        name: item.name ?? null,
+        category: item.category,
+        subcategory: item.subcategory ?? null,
+        slot: resolveProfileSlot(item, closetItemToSlot(item.category, item.subcategory)),
+        hemLengthStored: x.hemLength,
+        topLengthStored: x.topLength,
+        hemLengthSeenByGate: item.hemLength ?? null,
+        resolvedDressingPreferences: x.requirements,
+        legsCoveredPresent: x.legsCoveredPresent,
+        legsCovered: x.legsCovered,
+        noCroppedTops: x.noCroppedTops,
+        passesDressingRequirements: x.passes,
+      }));
+    }
+
     if (!passesDressingRequirements(item, profile?.dressingPreferences)) continue;
 
     // APPROVED profile truth gates — take precedence over all legacy classification.

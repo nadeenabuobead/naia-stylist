@@ -733,3 +733,56 @@ export function evaluateAnchorEligibility(
 
   return ANCHOR_ELIGIBLE;
 }
+
+// ── Diagnostic explainer (NAIA_STYLEME_DIAGNOSTICS only) ─────────────────────
+//
+// Reports WHY passesDressingRequirements reached its answer. Pure, read-only, and
+// called from nothing but the diagnostic log blocks — it must never gate anything.
+// Mirrors the real predicate rather than reimplementing it: the overall verdict is
+// taken from passesDressingRequirements itself, so the two cannot drift.
+export interface DressingGateExplanation {
+  passes: boolean;
+  requirements: string[];
+  legsCoveredPresent: boolean;
+  /** e.g. "legs-covered: PASS — hemLength=full", "legs-covered: FAIL — hemLength=midi" */
+  legsCovered: string | null;
+  noCroppedTops: string | null;
+  hemLength: string | null;
+  topLength: string | null;
+}
+
+export function explainDressingRequirements(
+  item: ClosetAnchorInput,
+  dressingPreferences: readonly string[] | null | undefined,
+): DressingGateExplanation {
+  const prefs = [...(dressingPreferences ?? [])];
+  const hl = item.hemLength ?? null;
+  const tl = item.topLength ?? null;
+
+  let legsCovered: string | null = null;
+  if (prefs.includes("legs-covered")) {
+    if (hl === null || hl === undefined) legsCovered = "legs-covered: PASS-UNKNOWN — hemLength=null (fail-open)";
+    else if (hl === "n/a") legsCovered = "legs-covered: NOT-APPLICABLE — hemLength=n/a (does not cover the leg zone)";
+    else if (hl === "full" || hl === "maxi") legsCovered = `legs-covered: PASS — hemLength=${hl}`;
+    else legsCovered = `legs-covered: FAIL — hemLength=${hl}`;
+  }
+
+  let noCroppedTops: string | null = null;
+  if (prefs.includes("no-cropped-tops")) {
+    if (tl === null || tl === undefined) noCroppedTops = "no-cropped-tops: PASS-UNKNOWN — topLength=null (fail-open)";
+    else if (tl === "n/a") noCroppedTops = "no-cropped-tops: NOT-APPLICABLE — topLength=n/a";
+    else if (tl === "cropped") noCroppedTops = "no-cropped-tops: FAIL — topLength=cropped";
+    else noCroppedTops = `no-cropped-tops: PASS — topLength=${tl}`;
+  }
+
+  return {
+    // Taken from the real predicate so the explanation can never disagree with the gate.
+    passes: passesDressingRequirements(item, dressingPreferences),
+    requirements: prefs,
+    legsCoveredPresent: prefs.includes("legs-covered"),
+    legsCovered,
+    noCroppedTops,
+    hemLength: hl,
+    topLength: tl,
+  };
+}

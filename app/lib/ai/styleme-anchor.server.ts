@@ -11,7 +11,7 @@ import type { NadineAnchorInput, ClosetAnchorInput, AnchorInput } from "./stylem
 import prisma from "../../db.server.js";
 import { buildPrivateDownloadUrl, getCloudinaryConfig } from "../../lib/cloudinary-admin.server.js";
 import { matchesSessionOccasion } from "./styleme-occasion-tokens.js";
-import { passesDressingRequirements, evaluateAnchorEligibility } from "./styleme-profile-gate.js";
+import { passesDressingRequirements, evaluateAnchorEligibility, explainDressingRequirements } from "./styleme-profile-gate.js";
 
 const VALID_HANDLES = new Set(getAllCatalogProducts().map((p) => p.handle));
 
@@ -502,6 +502,31 @@ export async function autoSelectClosetAnchor(
   //
   // 2. Non-compensable dressing requirements. Unknown metadata fails open — only
   //    explicit evidence rejects.
+  // DIAGNOSTIC ONLY — emitted for EVERY loaded item, including ones the filter below
+  // removes, so a garment that never reaches ranking is still visible in the logs.
+  // Behaviour unchanged: the filter is still the only thing that decides.
+  if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true") {
+    for (const item of allItems) {
+      const probe = { hemLength: item.hemLength, topLength: item.topLength } as unknown as ClosetAnchorInput;
+      const x = explainDressingRequirements(probe, signals.dressingPreferences);
+      console.log("[nAia-dressing-gate]", JSON.stringify({
+        entry: "auto-anchor",
+        closetId: item.id,
+        name: item.name ?? null,
+        category: item.category,
+        subcategory: item.subcategory ?? null,
+        hemLengthStored: item.hemLength ?? null,
+        topLengthStored: item.topLength ?? null,
+        resolvedDressingPreferences: x.requirements,
+        legsCoveredPresent: x.legsCoveredPresent,
+        legsCovered: x.legsCovered,
+        noCroppedTops: x.noCroppedTops,
+        passesDressingRequirements: x.passes,
+        anchorCapable: ANCHOR_CAPABLE_CATEGORIES.has(item.category),
+      }));
+    }
+  }
+
   const items: AutoSelectItem[] = allItems.filter(
     (item) =>
       ANCHOR_CAPABLE_CATEGORIES.has(item.category) &&
