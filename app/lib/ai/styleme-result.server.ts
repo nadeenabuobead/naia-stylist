@@ -3793,7 +3793,7 @@ const _SLOT_CONSTRUCTION_BONUS: Record<string, number> = {
 };
 const _SLOT_CONSTRUCTION_NEEDS = new Set(["structured-shape", "still-want-shape"]);
 
-function computeBodyNeedSlotBonus(
+export function computeBodyNeedSlotBonus(
   bodyNeeds: string[],
   item: ClosetAnchorInput,
   slot: string,
@@ -3818,6 +3818,16 @@ function computeBodyNeedSlotBonus(
       if (violation) bonus -= 2.0;
       else if (fitScore !== null && fitScore > 0) bonus += fitScore * 2.0;
     }
+  }
+
+  // More coverage — same magnitude as less-body-conscious above. Both are
+  // exposure-avoidance needs, so an exposing piece is penalised and a covering
+  // one rewarded on the same scale. Without this branch the single body need the
+  // customer chose had no influence on which garment filled the slot.
+  if (bodyNeeds.includes("more-coverage")) {
+    const { violation, fitScore } = scoreBodyNeedForClosetItem("more-coverage", item);
+    if (violation) bonus -= 2.0;
+    else if (fitScore !== null && fitScore > 0) bonus += fitScore * 1.7;
   }
 
   // Fabric-based: softer/easier fabrics

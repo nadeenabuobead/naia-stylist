@@ -396,6 +396,13 @@ export type AutoSelectItem = {
   // anchor was the one piece in the outfit nothing checked.
   hemLength: string | null;
   topLength: string | null;
+  // more-coverage reads all five coverage signals, not just hem. Selecting only
+  // hem/top length left the anchor scoring blind to sleeves, neckline, shoulders
+  // and midriff — the signals that actually decide whether a piece covers.
+  sleeveLength: string | null;
+  necklineCoverage: string | null;
+  shoulderCoverage: boolean | null;
+  midriffExposed: boolean | null;
   // Approved GarmentStyleMeProfile — for intention- and body-need-aware anchor ranking.
   // null when no approved profile exists.
   styleMeProfile: {
@@ -492,6 +499,8 @@ export async function autoSelectClosetAnchor(
           styleTags: true, occasions: true, imageUrl: true,
           garmentRelationships: true, formality: true, waistShape: true,
           hemLength: true, topLength: true,
+          sleeveLength: true, necklineCoverage: true,
+          shoulderCoverage: true, midriffExposed: true,
           styleMeProfile: {
             select: { profileStatus: true, intentionPotentials: true, occasionFit: true, construction: true, silhouetteCharacter: true, waistComfort: true, fabricBehaviour: true },
           },
@@ -586,6 +595,7 @@ export async function autoSelectClosetAnchor(
   const needsSofterFabrics = activeBodyNeeds.includes("softer-easier-fabrics");
   const needsWaistDef = activeBodyNeeds.includes("waist-definition");
   const needsNothingTightWaist = activeBodyNeeds.includes("nothing-tight-waist");
+  const needsMoreCoverage = activeBodyNeeds.includes("more-coverage");
 
   // Preferred formality range for register bonus — mirrors FORMALITY_CONDITIONAL_ADJUSTMENTS
   // in styleme-result.server.ts. Items within this range receive a modest register bonus.
@@ -661,6 +671,23 @@ export async function autoSelectClosetAnchor(
           bonus -= 2.0; // fitted anchor loses to non-cling alternative within eligible pool
         } else if (fitScore !== null && fitScore > 0) {
           bonus += fitScore * 1.7; // max +1.7 for clearly relaxed silhouette
+        }
+      }
+
+      // More coverage: the five coverage-geometry signals. Scored at the same
+      // magnitude as less-body-conscious — both are exposure-avoidance needs.
+      if (needsMoreCoverage) {
+        const { violation, fitScore } = scoreBodyNeedForClosetItem("more-coverage", {
+          fitProfile: null, waistShape: item.waistShape, styleTags: item.styleTags,
+          sleeveLength: item.sleeveLength, necklineCoverage: item.necklineCoverage,
+          hemLength: item.hemLength, shoulderCoverage: item.shoulderCoverage,
+          midriffExposed: item.midriffExposed,
+          approvedProfile: asScoringProfile(approvedProfile),
+        });
+        if (violation) {
+          bonus -= 2.0; // exposing anchor loses to a covering alternative in the eligible pool
+        } else if (fitScore !== null && fitScore > 0) {
+          bonus += fitScore * 1.7; // max +1.7 for a fully covering piece
         }
       }
 
@@ -754,6 +781,9 @@ export async function autoSelectClosetAnchor(
         const gfbn = (need: string) => scoreBodyNeedForClosetItem(need, {
           fitProfile: null, waistShape: s.item.waistShape,
           styleTags: s.item.styleTags, approvedProfile: asScoringProfile(ap2),
+          sleeveLength: s.item.sleeveLength, necklineCoverage: s.item.necklineCoverage,
+          hemLength: s.item.hemLength, shoulderCoverage: s.item.shoulderCoverage,
+          midriffExposed: s.item.midriffExposed,
         });
         const bnDetail: Record<string, unknown> = {};
         if (needsConstructionBonus && ap2 && isStructuralAnchorCandidate(s.item)) {
@@ -771,6 +801,10 @@ export async function autoSelectClosetAnchor(
         if (needsSofterFabrics && isStructuralAnchorCandidate(s.item)) {
           const r = gfbn("softer-easier-fabrics");
           bnDetail["softer-easier-fabrics"] = { fitScore: r.fitScore };
+        }
+        if (needsMoreCoverage && isStructuralAnchorCandidate(s.item)) {
+          const r = gfbn("more-coverage");
+          bnDetail["more-coverage"] = { violation: r.violation, fitScore: r.fitScore, bonus: r.violation ? -2.0 : (r.fitScore ?? 0) * 1.7 };
         }
         return {
           id: s.item.id, name: s.item.name, score: s.score,
