@@ -329,3 +329,124 @@ describe("AL-E — Everyday formality constraints remain intact", () => {
     assert.ok(out.formalityOvershoot > 0, "an evening layer must still register as overshoot at T2");
   });
 });
+
+// ── Test 9: structural slot, not category allowlist ──────────────────────────
+//
+// ed21895 fixed the bag-anchor bug with the wrong abstraction — a fixed category
+// allowlist {TOPS,BOTTOMS,DRESSES,OUTERWEAR}. ACTIVEWEAR is absent from it, so an
+// "Active / busy day" session lost its entire valid wardrobe: 9 activewear garments
+// plus 6 pairs of shoes were removed before scoring, the 21 survivors matched nothing
+// for the occasion, and autoSelectClosetAnchor returned null — "nAia couldn't find a
+// clear starting point."
+//
+// The product rule is structural garment vs finishing accessory, decided on the
+// RESOLVED slot via closetItemToSlot. Any category that resolves to top / bottom /
+// dress / set / outerwear qualifies; shoes, bags, accessories and jewellery never do.
+
+import { canSlotAnchorOutfit, STRUCTURAL_ANCHOR_SLOTS, evaluateAnchorEligibility } from "../ai/styleme-profile-gate.js";
+import { closetItemToSlot } from "../ai/closet-slot.js";
+
+describe("AL-F — anchor capability is decided on the resolved slot", () => {
+  function row(o: Record<string, unknown>) {
+    return {
+      subcategory: null, colors: [], primaryColor: null, pattern: null, material: null,
+      styleTags: [], occasions: ["casual"], imageUrl: null, garmentRelationships: [],
+      waistShape: null, hemLength: null, topLength: null, formality: "casual",
+      styleMeProfile: null, ...o,
+    };
+  }
+  /** One structural garment so a valid anchor always exists, plus the item under test. */
+  const control = row({ id: "ctl", name: "Control Top", category: "TOPS" });
+
+  async function anchorFrom(rows: unknown[]) {
+    return autoSelectClosetAnchor("cust", {
+      occasion: "everyday", moods: [], desiredFeelings: [], intentions: [], bodyNeeds: [],
+    }, async () => rows as never[]);
+  }
+
+  test("AL-F.1 ACTIVEWEAR resolving to top CAN auto-anchor", async () => {
+    const tee = row({ id: "aw-top", name: "Black Nike Dri-FIT T-Shirt", category: "ACTIVEWEAR", subcategory: "t-shirt",
+      garmentRelationships: ["favourite"] }); // outscores the control
+    assert.equal(closetItemToSlot("ACTIVEWEAR", "t-shirt"), "top");
+    const picked = await anchorFrom([tee, control]);
+    assert.equal(picked!.id, "aw-top");
+  });
+
+  test("AL-F.2 ACTIVEWEAR resolving to bottom CAN auto-anchor", async () => {
+    const leggings = row({ id: "aw-bottom", name: "Black High-Waist Leggings", category: "ACTIVEWEAR",
+      subcategory: "leggings", garmentRelationships: ["favourite"] });
+    assert.equal(closetItemToSlot("ACTIVEWEAR", "leggings"), "bottom");
+    const picked = await anchorFrom([leggings, control]);
+    assert.equal(picked!.id, "aw-bottom");
+  });
+
+  test("AL-F.3 a bag CANNOT auto-anchor even scoring higher", async () => {
+    const bag = row({ id: "bag", name: "Camel Suede Tote Bag", category: "BAGS",
+      occasions: ["casual", "weekend", "work"], garmentRelationships: ["favourite"] });
+    const picked = await anchorFrom([bag, control]);
+    assert.equal(picked!.id, "ctl");
+  });
+
+  test("AL-F.4 shoes CANNOT auto-anchor", async () => {
+    const shoes = row({ id: "shoe", name: "White Platform Sneakers", category: "SHOES",
+      occasions: ["casual", "weekend", "work"], garmentRelationships: ["favourite"] });
+    assert.equal(picked_id(await anchorFrom([shoes, control])), "ctl");
+  });
+
+  test("AL-F.5 jewellery and accessories CANNOT auto-anchor", async () => {
+    for (const cat of ["JEWELRY", "ACCESSORIES"]) {
+      const acc = row({ id: `acc-${cat}`, name: cat, category: cat,
+        occasions: ["casual", "weekend", "work"], garmentRelationships: ["favourite"] });
+      assert.equal(picked_id(await anchorFrom([acc, control])), "ctl", `${cat} must not anchor`);
+    }
+  });
+
+  test("AL-F.6 ordinary TOPS / BOTTOMS / DRESSES / OUTERWEAR still anchor", async () => {
+    for (const cat of ["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR"]) {
+      const g = row({ id: `g-${cat}`, name: cat, category: cat, garmentRelationships: ["favourite"] });
+      assert.equal(picked_id(await anchorFrom([g])), `g-${cat}`, `${cat} must still anchor`);
+    }
+  });
+
+  test("AL-F.7 the rule is the slot set, not a category list", () => {
+    assert.deepEqual([...STRUCTURAL_ANCHOR_SLOTS].sort(), ["bottom", "dress", "outerwear", "set", "top"]);
+    for (const s of ["top", "bottom", "dress", "set", "outerwear"]) assert.equal(canSlotAnchorOutfit(s), true);
+    for (const s of ["bag", "shoe", "accessory", "jewelry", "unknown"]) assert.equal(canSlotAnchorOutfit(s), false);
+  });
+
+  test("AL-F.8 SWIMWEAR / OTHER resolve to unknown and stay ineligible", async () => {
+    for (const cat of ["SWIMWEAR", "OTHER"]) {
+      assert.equal(closetItemToSlot(cat, null), "unknown");
+      const g = row({ id: `u-${cat}`, name: cat, category: cat, garmentRelationships: ["favourite"] });
+      assert.equal(picked_id(await anchorFrom([g, control])), "ctl");
+    }
+  });
+
+  test("AL-F.9 manual anchoring is unchanged — eligibility ignores slot capability", () => {
+    // The manual picker uses evaluateAnchorEligibility, which checks only dressing
+    // requirements and approved occasionFit. It must NOT acquire a capability rule:
+    // a customer who deliberately chooses an accessory is making a choice.
+    const bagItem = g({ id: "bag", category: "BAGS" });
+    assert.equal(evaluateAnchorEligibility(bagItem, "everyday", []).eligible, true);
+    const shoeItem = g({ id: "shoe", category: "SHOES" });
+    assert.equal(evaluateAnchorEligibility(shoeItem, "everyday", []).eligible, true);
+  });
+
+  test("AL-F.10 Test 2's bag-anchor regression stays fixed", async () => {
+    // The original failure: a bag at 12.75 beating every garment at 12.00 because the
+    // approved-intention bonus gave it the margin and capability was only a tiebreak.
+    const bag = row({ id: "bag", name: "Black Leather Shoulder Bag", category: "BAGS", formality: "smart-casual",
+      styleMeProfile: { profileStatus: "approved", intentionPotentials: { "feel-sharper": "Supporting" },
+        occasionFit: null, construction: "structured" } });
+    const top = row({ id: "top", name: "Black Long-Sleeve Top", category: "TOPS",
+      styleMeProfile: { profileStatus: "approved", intentionPotentials: { "feel-sharper": "None" },
+        occasionFit: null, construction: "soft" } });
+    const picked = await autoSelectClosetAnchor("cust", {
+      occasion: "everyday", moods: [], desiredFeelings: [],
+      intentions: ["feel-sharper"], bodyNeeds: ["nothing-specific"],
+    }, async () => [bag, top] as never[]);
+    assert.equal(picked!.id, "top");
+  });
+});
+
+function picked_id(p: { id: string } | null): string | null { return p ? p.id : null; }

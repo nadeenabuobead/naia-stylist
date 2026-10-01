@@ -27,7 +27,6 @@ import type {
 export type { OutfitCandidate } from "./styleme-recommendation.types.js";
 import {
   loadAllClosetItemsForEngine,
-  ANCHOR_CAPABLE_CATEGORIES,
   scoreClosetItemForSession,
   scoreBodyNeedForClosetItem,
   computeEnergyPotential,

@@ -11,7 +11,8 @@ import type { NadineAnchorInput, ClosetAnchorInput, AnchorInput } from "./stylem
 import prisma from "../../db.server.js";
 import { buildPrivateDownloadUrl, getCloudinaryConfig } from "../../lib/cloudinary-admin.server.js";
 import { matchesSessionOccasion } from "./styleme-occasion-tokens.js";
-import { passesDressingRequirements, evaluateAnchorEligibility, explainDressingRequirements } from "./styleme-profile-gate.js";
+import { passesDressingRequirements, evaluateAnchorEligibility, explainDressingRequirements, canSlotAnchorOutfit } from "./styleme-profile-gate.js";
+import { closetItemToSlot } from "./closet-slot.js";
 
 const VALID_HANDLES = new Set(getAllCatalogProducts().map((p) => p.handle));
 
@@ -137,7 +138,28 @@ export async function resolveActionAnchor(
 // no Passport profile signals are used here.
 // Ties broken by: anchor-capable category first, then recency (createdAt DESC).
 
+// DEPRECATED as the anchoring rule. Kept only because it is exported.
+//
+// It was the wrong abstraction: a fixed category allowlist cannot express "structural
+// garment vs finishing accessory". ACTIVEWEAR, LOUNGEWEAR and SETS are absent from it,
+// yet closetItemToSlot resolves them to real top / bottom / outerwear / set slots. Using
+// it as a hard gate removed every activewear garment from the anchor pool, which emptied
+// Active / busy day sessions entirely — the one occasion whose valid wardrobe lives in
+// those categories. Use isStructuralAnchorCandidate() instead.
 export const ANCHOR_CAPABLE_CATEGORIES = new Set(["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR"]);
+
+/**
+ * Can this garment carry an outfit?
+ *
+ * Decided on the RESOLVED slot, through the same closetItemToSlot mapping the rest of
+ * the engine uses — so any category that resolves to a structural slot qualifies, and
+ * no second allowlist has to be maintained alongside it. Shoes, bags, accessories and
+ * jewellery resolve to finishing slots and never qualify; SWIMWEAR and OTHER resolve to
+ * "unknown" and are likewise excluded.
+ */
+function isStructuralAnchorCandidate(item: { category: string; subcategory?: string | null }): boolean {
+  return canSlotAnchorOutfit(closetItemToSlot(item.category, item.subcategory ?? null));
+}
 
 export type ClosetScoringProfile = {
   favoriteColors?: string[] | null;
@@ -483,9 +505,10 @@ export async function autoSelectClosetAnchor(
   //
   // 1. Anchor capability is a GATE, not a tiebreak.
   //
-  //    ANCHOR_CAPABLE_CATEGORIES has always said what may anchor an outfit — a top,
-  //    a bottom, a dress, an outer layer. But it was only consulted as the third
-  //    tiebreak, AFTER score, so it could only ever decide an exact tie. On
+  //    isStructuralAnchorCandidate decides this on the RESOLVED slot. Capability was
+  //    previously only the third tiebreak, AFTER score, so it could only ever decide an
+  //    exact tie — and the first attempt at a gate used a fixed category allowlist,
+  //    which removed every ACTIVEWEAR garment and emptied Active / busy day. On
   //    2026-10-01 a bag beat the whole wardrobe for an Everyday "feel sharper"
   //    session: 12.75 against 12.00 for every garment behind it. The 0.75 was the
   //    approved-intention bonus (Supporting 0.5 × 1.5), so the margin existed
@@ -522,14 +545,14 @@ export async function autoSelectClosetAnchor(
         legsCovered: x.legsCovered,
         noCroppedTops: x.noCroppedTops,
         passesDressingRequirements: x.passes,
-        anchorCapable: ANCHOR_CAPABLE_CATEGORIES.has(item.category),
+        anchorCapable: isStructuralAnchorCandidate(item),
       }));
     }
   }
 
   const items: AutoSelectItem[] = allItems.filter(
     (item) =>
-      ANCHOR_CAPABLE_CATEGORIES.has(item.category) &&
+      isStructuralAnchorCandidate(item) &&
       passesDressingRequirements(
         { hemLength: item.hemLength, topLength: item.topLength } as unknown as ClosetAnchorInput,
         signals.dressingPreferences,
@@ -604,7 +627,7 @@ export async function autoSelectClosetAnchor(
     // A violation penalty (-2.0) ensures a fitted anchor loses to an occasion-valid
     // relaxed alternative WITHIN the eligible pool, without rescuing occasion-invalid items.
     const bodyNeedBonus = (() => {
-      if (!ANCHOR_CAPABLE_CATEGORIES.has(item.category)) return 0;
+      if (!isStructuralAnchorCandidate(item)) return 0;
       let bonus = 0;
 
       // Construction-based needs (structured-shape / still-want-shape)
@@ -686,7 +709,7 @@ export async function autoSelectClosetAnchor(
     return {
       item,
       score: baseScore + registerBonus + bodyNeedBonus + intentionBonus,
-      isAnchorCapable: ANCHOR_CAPABLE_CATEGORIES.has(item.category),
+      isAnchorCapable: isStructuralAnchorCandidate(item),
       inRange: isFormallyInRange(item),
     };
   });
@@ -733,19 +756,19 @@ export async function autoSelectClosetAnchor(
           styleTags: s.item.styleTags, approvedProfile: asScoringProfile(ap2),
         });
         const bnDetail: Record<string, unknown> = {};
-        if (needsConstructionBonus && ap2 && ANCHOR_CAPABLE_CATEGORIES.has(s.item.category)) {
+        if (needsConstructionBonus && ap2 && isStructuralAnchorCandidate(s.item)) {
           const c = ap2.construction;
           bnDetail.construction = c ? (_ANCHOR_CONSTRUCTION_BONUS[c] ?? 0) : 0;
         }
-        if (needsLooseBonus && ANCHOR_CAPABLE_CATEGORIES.has(s.item.category)) {
+        if (needsLooseBonus && isStructuralAnchorCandidate(s.item)) {
           const r = gfbn("loose-comfortable");
           bnDetail["loose-comfortable"] = { violation: r.violation, fitScore: r.fitScore, bonus: r.violation ? -2.0 : (r.fitScore ?? 0) * 2.0 };
         }
-        if (needsLessBodyConscious && ANCHOR_CAPABLE_CATEGORIES.has(s.item.category)) {
+        if (needsLessBodyConscious && isStructuralAnchorCandidate(s.item)) {
           const r = gfbn("less-body-conscious");
           bnDetail["less-body-conscious"] = { violation: r.violation, fitScore: r.fitScore, bonus: r.violation ? -2.0 : (r.fitScore ?? 0) * 1.7 };
         }
-        if (needsSofterFabrics && ANCHOR_CAPABLE_CATEGORIES.has(s.item.category)) {
+        if (needsSofterFabrics && isStructuralAnchorCandidate(s.item)) {
           const r = gfbn("softer-easier-fabrics");
           bnDetail["softer-easier-fabrics"] = { fitScore: r.fitScore };
         }

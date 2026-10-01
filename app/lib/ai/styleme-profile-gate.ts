@@ -96,6 +96,23 @@ export const OCCASION_REGISTER_RANGE: Record<string, { min: number; max: number 
 // candidate-level intention scoring via their approved intentionPotentials.
 export const STRUCTURAL_EXCLUDES = new Set(["bag", "accessory", "jewelry"]);
 
+// Slots a garment must resolve to in order to carry an outfit — the structural half of
+// the wardrobe, as opposed to the finishing half (bag / shoe / accessory / jewelry).
+//
+// This is the product rule "structural garment vs finishing accessory", expressed where
+// it belongs: on the resolved SLOT, not on the raw category. A category allowlist cannot
+// state it — ACTIVEWEAR, LOUNGEWEAR and SETS all resolve to real structural slots via
+// closetItemToSlot, and an allowlist that omits them silently removes whole wardrobes
+// from anchoring. That is exactly what broke Active / busy day sessions.
+export const STRUCTURAL_ANCHOR_SLOTS = new Set<string>([
+  "top", "bottom", "dress", "set", "outerwear",
+]);
+
+/** True when a resolved slot can carry an outfit. Shoes and accessories cannot. */
+export function canSlotAnchorOutfit(slot: string): boolean {
+  return STRUCTURAL_ANCHOR_SLOTS.has(slot);
+}
+
 // Valid OutfitSlot values — used to validate profile exactSlot before casting.
 export const VALID_OUTFIT_SLOTS = new Set<string>([
   "top", "bottom", "dress", "set", "outerwear", "shoe", "bag", "accessory", "jewelry",
