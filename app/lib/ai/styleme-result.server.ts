@@ -1898,6 +1898,31 @@ export function buildNaiaOutfitCandidates(
     console.log("[nAia-candidates]", JSON.stringify({ anchor: anchor.id, candidates: out }));
   }
 
+  if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true") {
+    const BASE = new Set(["top", "bottom", "dress", "set"]);
+    console.log("[nAia-slot-pipeline]", JSON.stringify({
+      stage: "S5-candidates-before-ranking",
+      anchorId: anchor.id,
+      anchorSlot: anchor.slot,
+      candidates: [
+        ["A", candidateA], ["B", candidateB], ["C", candidateC], ["D", candidateD], ["E", candidateE],
+      ].map(([id, c]) => {
+        const cand = c as OutfitCandidate | null;
+        if (!cand) return { id, present: false };
+        const slots = cand.pieces.map((pc) => pc.slot);
+        return {
+          id,
+          present: true,
+          slots,
+          pieces: cand.pieces.map((pc) => ({ slot: pc.slot, closetId: pc.closetId, label: pc.label ?? null })),
+          // The ST16 question: did this candidate end up with any base clothing slot?
+          hasBaseClothing: slots.some((sl) => BASE.has(sl)),
+          hasBottomOrOnepiece: slots.some((sl) => sl === "bottom" || sl === "dress" || sl === "set"),
+        };
+      }),
+    }));
+  }
+
   return [candidateA, candidateB, candidateC, candidateD, candidateE];
 }
 
@@ -3902,6 +3927,34 @@ export function coreClothingMeetsLooseNeed(
 // anchor or primary NADINE product. Runs in both nAia and NADINE modes.
 // At most one item per slot. The anchor is always excluded by ID.
 
+
+// QA instrumentation (C4). Snapshots the structural-slot pipeline so a missing bottom
+// can be attributed to an exact stage instead of inferred from the finished outfit.
+// Pure reads; no effect on selection. Behind NAIA_STYLEME_DIAGNOSTICS.
+function logSlotPipeline(
+  stage: string,
+  candidatesBySlot: Map<OutfitSlot, Array<{ item: ClosetAnchorInput; score: number }>>,
+  extra: Record<string, unknown> = {},
+): void {
+  if (process.env.NAIA_STYLEME_DIAGNOSTICS !== "true") return;
+  const STRUCTURAL = ["top", "bottom", "dress", "set", "shoe", "outerwear"];
+  const slots: Record<string, unknown> = {};
+  for (const [slot, list] of candidatesBySlot.entries()) {
+    slots[slot] = {
+      count: list.length,
+      top3: list.slice(0, 3).map((c) => ({ id: c.item.id, name: c.item.name ?? null, score: Math.round(c.score * 1000) / 1000 })),
+    };
+  }
+  console.log("[nAia-slot-pipeline]", JSON.stringify({
+    stage,
+    keys: [...candidatesBySlot.keys()],
+    structuralPresent: STRUCTURAL.filter((sl) => candidatesBySlot.has(sl as OutfitSlot)),
+    structuralAbsent: STRUCTURAL.filter((sl) => !candidatesBySlot.has(sl as OutfitSlot)),
+    slots,
+    ...extra,
+  }));
+}
+
 export function selectAdditionalClosetGarments(
   anchor: NormalizedStyleAnchor | null,
   primaryProduct: StyleMePrimaryProduct | null,
@@ -4098,6 +4151,14 @@ export function selectAdditionalClosetGarments(
 
   for (const list of candidatesBySlot.values()) list.sort((a, b) => b.score - a.score);
 
+  logSlotPipeline("S1-after-scoring", candidatesBySlot, {
+    anchorId: anchorId ?? null,
+    anchorSlot: anchorClosetItem ? closetItemToSlot(anchorClosetItem.category, anchorClosetItem.subcategory ?? null) : null,
+    coveredSlots: [...coveredSlots],
+    sessionOccasion: session.occasion,
+    formalityConditional: session.formalityConditional ?? null,
+  });
+
   // ── Base-architecture exclusivity ──────────────────────────────────────────
   // Enforce selection-order-independence: if candidates include both a separates
   // slot (top or bottom) AND a one-piece slot (dress or set), only the architecture
@@ -4141,6 +4202,12 @@ export function selectAdditionalClosetGarments(
     }
   }
 
+  logSlotPipeline("S2-after-architecture-exclusivity", candidatesBySlot, {
+    hasSeparatesInCandidates, hasOnepieceInCandidates,
+    committedSeparates: coveredSlots.has("top") || coveredSlots.has("bottom"),
+    committedOnepiece: coveredSlots.has("dress") || coveredSlots.has("set"),
+  });
+
   // ── Outfit size cap + prioritised optional selection ───────────────────────
   // Total outfit pieces = anchor + primary NADINE product + additional closet garments.
   // Stay within MAX_OUTFIT_PIECES. Base garments (top/bottom/dress/set) are always
@@ -4159,6 +4226,16 @@ export function selectAdditionalClosetGarments(
     const fresh = recentlyShownIds ? candidates.find((c) => !recentlyShownIds.has(c.item.id)) : null;
     const chosen = fresh ?? candidates[0];
     result.push({ slot, id: chosen.item.id, label: chosen.item.name, imageUrl: chosen.item.imageUrl, colors: chosen.item.colors ?? [] });
+  }
+
+  if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true") {
+    console.log("[nAia-slot-pipeline]", JSON.stringify({
+      stage: "S3-after-phase1-base",
+      committedCount, maxAdditional,
+      phase1: result.map((r) => ({ slot: r.slot, id: r.id, label: r.label })),
+      phase1Slots: result.map((r) => r.slot),
+      baseSlotsOfferedByCandidates: ["top", "bottom", "dress", "set"].filter((sl) => candidatesBySlot.has(sl as OutfitSlot)),
+    }));
   }
 
   // Phase 2: optional finishing pieces — shoes first (never crowded by accessories/bags),
@@ -4374,6 +4451,14 @@ export function selectAdditionalClosetGarments(
         return [];
       }
     }
+  }
+
+  if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true") {
+    console.log("[nAia-slot-pipeline]", JSON.stringify({
+      stage: "S4-selectAdditionalClosetGarments-return",
+      returned: result.map((r) => ({ slot: r.slot, id: r.id, label: r.label })),
+      returnedSlots: result.map((r) => r.slot),
+    }));
   }
 
   return result;
