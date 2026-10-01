@@ -151,7 +151,11 @@ describe("FB-C — girls-night and special-event are differentiated under Dressy
 
 describe("FB-D — bands that already overlapped are unchanged", () => {
   const UNCHANGED: Array<[string, string | null, number, number]> = [
-    ["everyday", null, 1, 2], ["travel", null, 1, 2], ["active", null, 1, 1],
+    // "active" was deliberately widened from {1,1} to {1,2} (narrow Active/busy
+    // practicality revision) — see OCCASION_FORMALITY_TARGET["active"] in
+    // styleme-profile-gate.ts. The band is still fixed (no formality question is
+    // ever asked for "active"), just no longer casual-only.
+    ["everyday", null, 1, 2], ["travel", null, 1, 2], ["active", null, 1, 2],
     ["work", null, 2, 4], ["dinner", null, 2, 5],
     ["work", "formality-smart", 2, 3], ["work", "formality-polished", 3, 4],
     ["dinner", "formality-relaxed", 2, 2], ["dinner", "formality-occasion", 4, 5],

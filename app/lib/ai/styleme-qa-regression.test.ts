@@ -6,6 +6,7 @@
 //   D. Slot/core need satisfaction
 //   E. Wording / system-prompt guards
 //   F. Real-like QA-fixture analogs (Tests 5, 12, 15, 17, 19)
+//   G. Active/busy practicality band (O7-equivalent, narrow Option 2 revision)
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
@@ -20,7 +21,11 @@ import type { AutoSelectItem } from "./styleme-anchor.server.ts";
 import {
   coreClothingMeetsBodyNeed,
   coreClothingMeetsLooseNeed,
+  evaluateCompleteOutfit,
+  isTiedAtT1T4,
+  computeIntentionFit,
 } from "./styleme-result.server.ts";
+import type { CandidateRankKey, OutfitCandidate } from "./styleme-result.server.ts";
 import type { ClosetAnchorInput } from "./styleme-recommendation.types.ts";
 import {
   SESSION_OCCASION_TO_CLOSET_TOKENS,
@@ -577,13 +582,62 @@ describe("C. Active occasion", () => {
     );
   });
 
-  it("C5 _OCCASION_MAX_RANK['active'] gives tightest cap (casual only)", async () => {
-    // active occasion: max formality = casual (rank 1). A smart-casual item is out of range
-    // and must lose to a casual item for the same occasion.
+  // C5 revised (narrow Option 2 band loosening): _OCCASION_MAX_RANK['active'] moved
+  // from 1 (casual only) to 2 (casual through smart-casual) — see
+  // OCCASION_FORMALITY_TARGET["active"] in styleme-profile-gate.ts for the matching
+  // whole-outfit band. Rank 1 and rank 2 are now BOTH top-tier (tier 0) for Active;
+  // rank 3+ remains tier 1 (deprioritized), regardless of other signal scores.
+
+  it("C5a active occasion: rank 1 (casual) still beats rank 3 (business-casual) — upper bound still excludes it", async () => {
+    const businessCasual = makeAutoItem("business-casual-top", {
+      category: "TOPS",
+      occasions: ["active", "gym"], // better occasion-token match than the casual item
+      formality: "business-casual", // rank 3 > 2 → still out of range for active
+    });
+    const casual = makeAutoItem("casual-tee", {
+      category: "TOPS",
+      occasions: ["active"],
+      formality: "casual", // rank 1 → in range
+    });
+    const result = await autoSelectClosetAnchor("u1", {
+      occasion: "active",
+      moods: [],
+      desiredFeelings: [],
+    }, async () => [businessCasual, casual]);
+    assert.ok(result !== null);
+    assert.equal(result.id, "casual-tee", "rank 3 must remain out of range for active even with a better token match");
+  });
+
+  it("C5b active occasion: rank 2 (smart-casual) also beats rank 3 (business-casual) — rank 2 is top-tier too", async () => {
+    const businessCasual = makeAutoItem("business-casual-top", {
+      category: "TOPS",
+      occasions: ["active", "gym"], // better occasion-token match than the smart-casual item
+      formality: "business-casual", // rank 3 → out of range for active
+    });
     const smartCasual = makeAutoItem("smart", {
       category: "TOPS",
-      occasions: ["active", "gym"],
-      formality: "smart-casual", // rank 2 > 1 → out of range for active
+      occasions: ["active"],
+      formality: "smart-casual", // rank 2 → now in range for active
+    });
+    const result = await autoSelectClosetAnchor("u1", {
+      occasion: "active",
+      moods: [],
+      desiredFeelings: [],
+    }, async () => [businessCasual, smartCasual]);
+    assert.ok(result !== null);
+    assert.equal(result.id, "smart", "rank 2 must be top-tier (in-range) for active, beating rank 3 despite the weaker token match");
+  });
+
+  it("C5c active occasion: rank 1 and rank 2 are now in the SAME top tier — the better-matched rank 2 item can win", async () => {
+    // Under the old {1,1}/ceiling-1 policy this exact fixture (rank-2 item with a
+    // stronger occasion-token match) was forced to lose to the rank-1 item purely by
+    // formality tier. Under the loosened {1,2}/ceiling-2 policy, both are tier 0, so
+    // the better occasion-token match is free to decide the outcome — proving rank 1
+    // no longer automatically dominates rank 2 for active.
+    const smartCasual = makeAutoItem("smart", {
+      category: "TOPS",
+      occasions: ["active", "gym"], // stronger occasion-token match
+      formality: "smart-casual", // rank 2 → now in range for active
     });
     const casual = makeAutoItem("casual-tee", {
       category: "TOPS",
@@ -596,7 +650,7 @@ describe("C. Active occasion", () => {
       desiredFeelings: [],
     }, async () => [smartCasual, casual]);
     assert.ok(result !== null);
-    assert.equal(result.id, "casual-tee", "active occasion max rank=casual: casual item must beat smart-casual");
+    assert.equal(result.id, "smart", "rank 1 and rank 2 must be equally top-tier for active: the better-matched rank 2 item wins");
   });
 
   it("C6 active occasion does not normalize to 'everyday' in token matching", () => {
@@ -898,6 +952,168 @@ describe("F. Real-like QA fixture analogs", () => {
     assert.ok(
       RESULT_SRC.includes("feel-softer: None"),
       "result.server.ts must explicitly block the softer claim when feel-softer:None",
+    );
+  });
+});
+
+// ── G. Active/busy practicality band (O7-equivalent end-to-end regression) ───
+// Covers the narrow Option 2 revision: OCCASION_FORMALITY_TARGET["active"]
+// {1,1}→{1,2} and _OCCASION_MAX_RANK["active"] 1→2. O7 flow:
+//   Low-energy → Give me energy → Softer / more flexible fabrics →
+//   Active / busy day → nAia chooses.
+// No exact outfit is asserted — only tier/eligibility membership (formalityFit →
+// formalityFitPriority → isTiedAtT1T4) and that T3/T4 handling is unaffected.
+
+describe("G. Active/busy practicality band", () => {
+  const activeSession = {
+    occasion: "active", formalityConditional: null as string | null,
+    moods: ["low-energy"], desiredFeelings: ["energised"],
+    bodyNeeds: ["softer-easier-fabrics"], coverageConditional: null as string | null,
+    todayColours: { preferred: [], avoid: [] }, practicalIds: [],
+    source: "my-closet" as const,
+  };
+
+  const makeItem = (
+    id: string,
+    category: string,
+    opts: Partial<{ occasions: string[]; styleTags: string[]; formality: string | null }> = {},
+  ): ClosetAnchorInput => ({
+    type: "closet", id, name: id,
+    category,
+    colors: ["black"], primaryColor: "black",
+    pattern: null, material: null,
+    styleTags: opts.styleTags ?? [],
+    occasions: opts.occasions ?? ["active"],
+    imageUrl: "",
+    formality: opts.formality ?? null,
+  } as ClosetAnchorInput);
+
+  const makeCandidate = (id: "A" | "B" | "C", pieces: Array<{ id: string; slot: string }>): OutfitCandidate => ({
+    id,
+    pieces: pieces.map((p) => ({ closetId: p.id, slot: p.slot, label: p.id, colors: [] })),
+  });
+
+  // Mirrors the production T2 derivation in styleme-result.server.ts
+  // (suit.formalityFit === "within-target" ? 1 : suit.formalityFit === "unknown" ? 0 : -1).
+  const formalityPriority = (fit: string) =>
+    fit === "within-target" ? 1 : fit === "unknown" ? 0 : -1;
+
+  const BASE_KEY: Omit<CandidateRankKey, "formalityFitPriority" | "formalityOvershootAbs"> = {
+    occasionTier: 2, knownViolationCount: 0, bodyNeedFitScore: null,
+    intentionFit: 0, passportAlignment: 0,
+    optionalNonMatchCount: 0, discretionaryPieceCount: 0,
+  };
+
+  it("G1 O7: rank-1 casual and rank-2 smart-casual/practical Active candidates are BOTH within-target and model-eligible together", () => {
+    const casualTop = makeItem("ct", "TOPS", { formality: "casual" });
+    const casualBottom = makeItem("cb", "BOTTOMS", { formality: "casual" });
+    const casualShoe = makeItem("cs", "SHOES", { formality: "casual" });
+    const candidateCasual = makeCandidate("A", [
+      { id: "ct", slot: "top" }, { id: "cb", slot: "bottom" }, { id: "cs", slot: "shoe" },
+    ]);
+
+    // Loafers/flats + smart trousers + comfortable knit — practical but one rank up.
+    const smartTop = makeItem("st", "TOPS", { formality: "smart-casual" });
+    const smartBottom = makeItem("sb", "BOTTOMS", { formality: "smart-casual" });
+    const smartShoe = makeItem("ss", "SHOES", { formality: "smart-casual" });
+    const candidatePractical = makeCandidate("B", [
+      { id: "st", slot: "top" }, { id: "sb", slot: "bottom" }, { id: "ss", slot: "shoe" },
+    ]);
+
+    const allItems = [casualTop, casualBottom, casualShoe, smartTop, smartBottom, smartShoe];
+    const scoreCasual = evaluateCompleteOutfit(candidateCasual, allItems, activeSession);
+    const scorePractical = evaluateCompleteOutfit(candidatePractical, allItems, activeSession);
+
+    assert.strictEqual(scoreCasual.formalityFit, "within-target", "rank-1 Active outfit must be within-target");
+    assert.strictEqual(
+      scorePractical.formalityFit, "within-target",
+      "rank-2 smart-casual/practical Active outfit must ALSO be within-target under the loosened {1,2} band — this is the core fix",
+    );
+
+    const keyCasual: CandidateRankKey = {
+      ...BASE_KEY,
+      formalityFitPriority: formalityPriority(scoreCasual.formalityFit),
+      formalityOvershootAbs: Math.abs(scoreCasual.formalityOvershoot),
+    };
+    const keyPractical: CandidateRankKey = {
+      ...BASE_KEY,
+      formalityFitPriority: formalityPriority(scorePractical.formalityFit),
+      formalityOvershootAbs: Math.abs(scorePractical.formalityOvershoot),
+    };
+    assert.ok(
+      isTiedAtT1T4(keyCasual, keyPractical),
+      "rank-1 and rank-2 Active candidates must be tied at T1-T4 (both model-eligible together) under the loosened band — " +
+      "not excluded from Claude's eligible set solely because a rank-1 candidate exists",
+    );
+  });
+
+  it("G2 O7 upper-bound guard: rank-4+/evening Active candidate remains excluded despite the loosening", () => {
+    const blazer = makeItem("bl", "OUTERWEAR", { formality: "business-formal" });
+    const tailored = makeItem("tt", "BOTTOMS", { formality: "business-formal" });
+    const dressShoe = makeItem("ds", "SHOES", { formality: "evening" });
+    const candidateFormal = makeCandidate("C", [
+      { id: "bl", slot: "outerwear" }, { id: "tt", slot: "bottom" }, { id: "ds", slot: "shoe" },
+    ]);
+
+    const casualTop = makeItem("ct2", "TOPS", { formality: "casual" });
+    const casualShoe = makeItem("cs2", "SHOES", { formality: "casual" });
+    const candidateCasual = makeCandidate("A", [
+      { id: "ct2", slot: "top" }, { id: "cs2", slot: "shoe" },
+    ]);
+
+    const allItems = [blazer, tailored, dressShoe, casualTop, casualShoe];
+    const scoreFormal = evaluateCompleteOutfit(candidateFormal, allItems, activeSession);
+    const scoreCasual = evaluateCompleteOutfit(candidateCasual, allItems, activeSession);
+
+    assert.strictEqual(
+      scoreFormal.formalityFit, "overdressed",
+      "rank-4+/evening Active candidate must remain overdressed even under the loosened {1,2} band",
+    );
+    assert.ok(scoreFormal.formalityOvershoot >= 2, "formal/evening overshoot must still be large, not softened by the loosening");
+
+    const keyFormal: CandidateRankKey = {
+      ...BASE_KEY,
+      formalityFitPriority: formalityPriority(scoreFormal.formalityFit),
+      formalityOvershootAbs: Math.abs(scoreFormal.formalityOvershoot),
+    };
+    const keyCasual: CandidateRankKey = {
+      ...BASE_KEY,
+      formalityFitPriority: formalityPriority(scoreCasual.formalityFit),
+      formalityOvershootAbs: Math.abs(scoreCasual.formalityOvershoot),
+    };
+    assert.ok(
+      !isTiedAtT1T4(keyFormal, keyCasual),
+      "formal/evening candidate must NOT be tied with a casual candidate — the loosening must not make formal/evening Active outfits normal candidates",
+    );
+  });
+
+  it("G3 T3/T4 non-regression: softer-easier-fabrics slot-bonus scoring and give-energy intention fit are unaffected by the Active formality-band change", () => {
+    // softer-easier-fabrics: same fabric-based scoring exercised by A15-A19, untouched
+    // by this patch (scoreBodyNeedForClosetItem takes no occasion/formality input).
+    const soft = scoreBodyNeedForClosetItem("softer-easier-fabrics", {
+      fitProfile: null, waistShape: null, styleTags: [],
+      approvedProfile: {
+        exactSlot: null, outfitFunction: null, dressRegister: null,
+        fabricBehaviour: ["soft"], silhouetteCharacter: [], visualWeight: null,
+        construction: null, stylingEffort: null, layeringBehaviour: null,
+        waistComfort: null, statementLevel: null, occasionFit: null,
+        intentionPotentials: null, naturalPairings: null, intentionalMix: null,
+        avoidInStyleMe: null,
+      },
+    });
+    assert.ok(soft.fitScore !== null && soft.fitScore > 0.5, "softer-easier-fabrics scoring must be unchanged: soft fabric → fitScore > 0.5");
+
+    // give-energy: computeIntentionFit/computeEnergyFit take no occasion parameter at
+    // all — they cannot be affected by OCCASION_FORMALITY_TARGET/_OCCASION_MAX_RANK.
+    // Exercising it here confirms it still runs end-to-end against an Active-shaped
+    // candidate set without error and produces a score in the defined [0,3] range.
+    const candidateA = makeCandidate("A", [{ id: "ct", slot: "top" }, { id: "cs", slot: "shoe" }]);
+    const casualTop = makeItem("ct", "TOPS", { formality: "casual" });
+    const casualShoe = makeItem("cs", "SHOES", { formality: "casual" });
+    const energyFit = computeIntentionFit(["give-energy"], candidateA, candidateA, [casualTop, casualShoe], undefined);
+    assert.ok(
+      Number.isFinite(energyFit) && energyFit >= 0 && energyFit <= 3,
+      `give-energy intentionFit must remain a well-formed score in [0,3], got ${energyFit}`,
     );
   });
 });

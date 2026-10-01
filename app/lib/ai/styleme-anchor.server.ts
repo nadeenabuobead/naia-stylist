@@ -434,7 +434,7 @@ const _OCCASION_MAX_RANK: Record<string, number> = {
   "special-event": 5,
   travel: 2,
   family: 2,
-  active: 1,   // athletic/active day — casual only, no structured formalwear
+  active: 2,   // athletic/active day — casual through smart-casual; formal/evening excluded
 };
 
 // Construction bonus values for structured-shape / still-want-shape at anchor level.

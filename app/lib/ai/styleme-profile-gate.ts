@@ -863,7 +863,7 @@ export const OCCASION_FORMALITY_TARGET: Record<string, { min: number; max: numbe
   "girls-night":   { min: 2, max: 5 },
   "family":        { min: 1, max: 2 },
   "travel":        { min: 1, max: 2 },
-  "active":        { min: 1, max: 1 },
+  "active":        { min: 1, max: 2 },
 };
 
 // The register she explicitly asked for.
