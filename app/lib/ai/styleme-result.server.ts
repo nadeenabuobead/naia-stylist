@@ -1555,6 +1555,9 @@ export function buildNaiaOutfitCandidates(
   allItems: ClosetAnchorInput[],
   profile: StyleMeProfileSignals | undefined,
   recentlyShownIds: Set<string> | undefined,
+  /** Forwarded to the Candidate A selection so the caller learns which finishing slots
+   *  the suitability rule suppressed. Additive and optional. */
+  suppressedFinishingOut?: Set<string>,
 ): [OutfitCandidate, OutfitCandidate | null, OutfitCandidate | null, OutfitCandidate | null, OutfitCandidate | null] {
   const profile_ = profile as ClosetScoringProfile | undefined;
   const signals = { occasion: session.occasion, moods: session.moods, desiredFeelings: session.desiredFeelings };
@@ -1597,6 +1600,7 @@ export function buildNaiaOutfitCandidates(
     allItems,
     profile_,
     recentlyShownIds,
+    suppressedFinishingOut,
   );
 
   const anchorPiece: OutfitCandidate["pieces"][0] = {
@@ -2155,7 +2159,7 @@ export { SESSION_OCCASION_TO_CLOSET_TOKENS } from "./styleme-occasion-tokens.js"
 // existing caller keeps working unchanged.
 export { getTargetFormalityRange, OCCASION_FORMALITY_TARGET, FORMALITY_CONDITIONAL_ADJUSTMENTS } from "./styleme-profile-gate.js";
 import { matchesSessionOccasion } from "./styleme-occasion-tokens.js";
-import { getTargetFormalityRange } from "./styleme-profile-gate.js";
+import { getTargetFormalityRange, finishingPieceIsSuitable } from "./styleme-profile-gate.js";
 
 // Per-slot formality contribution weight (0 = excluded from register judgment).
 // Outerwear is meaningful but slightly discounted — it can be removed and is often
@@ -3624,16 +3628,99 @@ function buildCompletionPiece(
   return { slot: "bottom", description: bottomDesc };
 }
 
+
+// ── Finishing-slot suggestions ────────────────────────────────────────────────
+//
+// A bag or shoe slot can be deliberately left unfilled when nothing the customer owns
+// clears the suitability threshold (see finishingPieceIsSuitable). Rather than show a
+// four-piece look with a gap, the existing Complete the Look channel describes what
+// would finish it — something she may already own but has not uploaded, or something
+// worth adding.
+//
+// Register wording is keyed off the resolved target band, so it tracks RC-C rather than
+// introducing a second notion of formality.
+const FINISHING_SUGGESTION_BAG: Readonly<Record<string, string>> = {
+  evening:  "a small evening bag or clutch",
+  polished: "a structured clutch or compact top-handle bag",
+  smart:    "a neat crossbody or small shoulder bag",
+  relaxed:  "a simple everyday bag",
+};
+const FINISHING_SUGGESTION_SHOE: Readonly<Record<string, string>> = {
+  evening:  "an evening heel or refined strappy sandal",
+  polished: "a polished heel or sleek pointed flat",
+  smart:    "a clean loafer, ankle boot or low heel",
+  relaxed:  "a simple flat or minimal sneaker",
+};
+
+/** Maps a resolved target band onto the four suggestion registers. */
+export function finishingSuggestionRegister(band: { min: number; max: number }): string {
+  if (band.max >= 6) return "evening";
+  if (band.max >= 4) return "polished";
+  if (band.max >= 3) return "smart";
+  return "relaxed";
+}
+
+/**
+ * Finishing slots with no owned piece in the look. Separate from
+ * getMissingEssentialSlots, which owns top/bottom semantics and is pinned by its own
+ * tests — this does not touch it.
+ */
+export function getMissingFinishingSlots(
+  anchorSlot: string | null,
+  additionalItems: Array<{ slot: string }>,
+): Array<"shoe" | "bag"> {
+  const present = new Set<string>(additionalItems.map((i) => i.slot));
+  if (anchorSlot) present.add(anchorSlot);
+  const missing: Array<"shoe" | "bag"> = [];
+  if (!present.has("shoe")) missing.push("shoe");
+  if (!present.has("bag")) missing.push("bag");
+  return missing;
+}
+
+export function buildFinishingSuggestion(
+  slot: "shoe" | "bag",
+  band: { min: number; max: number },
+): StyleMeCompletionPiece {
+  const register = finishingSuggestionRegister(band);
+  const table = slot === "bag" ? FINISHING_SUGGESTION_BAG : FINISHING_SUGGESTION_SHOE;
+  const phrase = table[register] ?? table.smart;
+  return {
+    slot,
+    description: `Add ${phrase} to finish the look.`,
+  } as StyleMeCompletionPiece;
+}
+
 export function buildCompletionLayer(
   anchor: NormalizedStyleAnchor | null,
   primaryProduct: StyleMePrimaryProduct | null,
   session: StyleMeSessionInput,
   additionalItems: Array<{ slot: string }> = [],
   mode?: StyleMeMode,
+  /**
+   * Finishing slots the suitability rule deliberately left unfilled. Only these produce a
+   * generated recommendation — a slot empty for any other reason is left alone, so the
+   * long-standing top/bottom-only contract of this function is unchanged by default.
+   */
+  suppressedFinishingSlots: Array<"shoe" | "bag"> = [],
 ): StyleMeCompletionPiece[] {
   const filledSlots = getFilledClothingSlots(anchor, primaryProduct, additionalItems);
   const missingSlots = getMissingEssentialSlots(filledSlots);
-  if (missingSlots.length === 0) return [];
+
+  // Only slots the suitability rule suppressed. A slot that is empty because the closet
+  // simply holds nothing for it is NOT described here — that would change what this
+  // function has always returned for every outfit, and 12 existing contracts pin it.
+  const finishingBand = getTargetFormalityRange(session.occasion, session.formalityConditional ?? null);
+  const stillMissing = new Set(getMissingFinishingSlots(
+    anchor?.type === "closet" ? (anchor as NormalizedClosetAnchor).slot as string
+    : anchor?.type === "nadine" ? (anchor as NormalizedNadineAnchor).slot as string
+    : null,
+    additionalItems,
+  ));
+  const finishingSuggestions = suppressedFinishingSlots
+    .filter((slot) => stillMissing.has(slot))
+    .map((slot) => buildFinishingSuggestion(slot, finishingBand));
+
+  if (missingSlots.length === 0) return finishingSuggestions;
 
   const anchorColors: string[] =
     anchor?.type === "closet"
@@ -3642,21 +3729,24 @@ export function buildCompletionLayer(
       ? (anchor as NormalizedNadineAnchor).colors
       : [];
 
-  return missingSlots.map((slot) =>
-    buildCompletionPiece(
-      slot,
-      primaryProduct?.slot ?? null,
-      primaryProduct?.title ?? null,
-      session.occasion,
-      anchorColors,
-      session.todayColours.preferred,
-      session.desiredFeelings,
-      session.bodyNeeds,
-      session.moods,
-      session.coverageConditional,
-      mode,
+  return [
+    ...missingSlots.map((slot) =>
+      buildCompletionPiece(
+        slot,
+        primaryProduct?.slot ?? null,
+        primaryProduct?.title ?? null,
+        session.occasion,
+        anchorColors,
+        session.todayColours.preferred,
+        session.desiredFeelings,
+        session.bodyNeeds,
+        session.moods,
+        session.coverageConditional,
+        mode,
+      ),
     ),
-  );
+    ...finishingSuggestions,
+  ];
 }
 
 // ── Display image resolution ──────────────────────────────────────────────────
@@ -3962,6 +4052,13 @@ export function selectAdditionalClosetGarments(
   closetItems: ClosetAnchorInput[],
   profile?: ClosetScoringProfile | null,
   recentlyShownIds?: Set<string>,
+  /**
+   * Optional out-collector. Receives any suitability-gated slot that had candidates but
+   * none that cleared the threshold, so the caller can offer a generated recommendation
+   * for exactly those slots. Additive and optional: existing callers are unaffected, and
+   * a slot that is empty for any other reason is NOT reported here.
+   */
+  suppressedFinishingOut?: Set<string>,
 ): Array<{ slot: OutfitSlot; id: string; label: string | null; imageUrl: string | null; colors: string[] }> {
   const anchorId = anchor?.type === "closet" ? (anchor as NormalizedClosetAnchor).id : null;
 
@@ -4238,13 +4335,88 @@ export function selectAdditionalClosetGarments(
     }));
   }
 
+  // Target band at function scope — the per-item `targetRange` inside the scoring loop is
+  // block-scoped. This is the same resolver call, so the two cannot disagree.
+  const finishingTargetBand = getTargetFormalityRange(
+    session.occasion,
+    session.formalityConditional ?? null,
+  );
+
+  // Outfit base register — the most formal base garment actually committed (anchor plus
+  // the Phase 1 picks). Finishing suitability is judged against this, so the test scales
+  // with the look being built rather than imposing an absolute bar.
+  const baseRegisterRank = (() => {
+    const ranks: number[] = [];
+    const consider = (it: ClosetAnchorInput | null | undefined, slot: string) => {
+      if (!it || !BASE_SLOTS_SET.has(slot)) return;
+      const r = it.formality ? (FORMALITY_RANK[it.formality] ?? null) : null;
+      if (r !== null) ranks.push(r);
+    };
+    consider(anchorClosetItem, (anchor as { slot?: string } | null)?.slot ?? "");
+    for (const r of result) consider(closetItems.find((i) => i.id === r.id), r.slot);
+    return ranks.length > 0 ? Math.max(...ranks) : null;
+  })();
+
+  // Slots where an unsuitable owned piece is worse than none at all. A bag or shoe that
+  // contradicts the occasion is visible in the finished look; offering it because it was
+  // the only option is how an evening gown ended up with a business tote.
+  const SUITABILITY_GATED_SLOTS = new Set<string>(["bag", "shoe"]);
+
+  // Only when the customer actually answered the formality question. This mirrors the
+  // convention computeRegisterAlignmentScore already follows: without an explicit register
+  // the engine softens to a bonus-only, no-penalty judgement, because the band is then the
+  // occasion's full envelope rather than anything she asked for. Removing a garment on that
+  // basis would be stronger than the signal supports — a casual shoe with business-casual
+  // chinos for an unspecified work day is a preference, not a mistake.
+  const suitabilityGateActive = !!session.formalityConditional;
+
   // Phase 2: optional finishing pieces — shoes first (never crowded by accessories/bags),
   // then remaining by score with a secondary slot tiebreaker. At most one accessory+jewelry.
   const optionalWinners: Array<{ slot: OutfitSlot; item: ClosetAnchorInput; score: number }> = [];
   for (const [slot, candidates] of candidatesBySlot.entries()) {
     if (BASE_SLOTS_SET.has(slot)) continue;
-    const fresh = recentlyShownIds ? candidates.find((c) => !recentlyShownIds.has(c.item.id)) : null;
-    const chosen = fresh ?? candidates[0];
+    // Narrow to pieces that clear the suitability threshold BEFORE choosing, so a
+    // lower-scoring but appropriate bag still beats a higher-scoring inappropriate one.
+    // When nothing clears it the slot is left unfilled and the completion layer suggests
+    // something instead. Slots outside SUITABILITY_GATED_SLOTS are untouched.
+    const eligible = suitabilityGateActive && SUITABILITY_GATED_SLOTS.has(slot)
+      ? candidates.filter((c) =>
+          finishingPieceIsSuitable(
+            c.item.formality ? (FORMALITY_RANK[c.item.formality] ?? null) : null,
+            baseRegisterRank,
+            finishingTargetBand,
+          ))
+      : candidates;
+
+    if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true" && suitabilityGateActive && SUITABILITY_GATED_SLOTS.has(slot)) {
+      console.log("[nAia-finishing-suitability]", JSON.stringify({
+        slot,
+        targetBand: finishingTargetBand,
+        baseRegisterRank,
+        considered: candidates.map((c) => ({
+          id: c.item.id, name: c.item.name ?? null,
+          formality: c.item.formality ?? null,
+          formalityRank: c.item.formality ? (FORMALITY_RANK[c.item.formality] ?? null) : null,
+          score: Math.round(c.score * 1000) / 1000,
+          suitable: finishingPieceIsSuitable(
+            c.item.formality ? (FORMALITY_RANK[c.item.formality] ?? null) : null,
+            baseRegisterRank,
+            finishingTargetBand,
+          ),
+        })),
+        eligibleCount: eligible.length,
+        slotLeftUnfilled: eligible.length === 0,
+      }));
+    }
+
+    if (eligible.length === 0) {
+      // Nothing appropriate — leave the slot unfilled and tell the caller, so the
+      // completion layer can describe what would finish the look instead.
+      if (candidates.length > 0) suppressedFinishingOut?.add(slot);
+      continue;
+    }
+    const fresh = recentlyShownIds ? eligible.find((c) => !recentlyShownIds.has(c.item.id)) : null;
+    const chosen = fresh ?? eligible[0];
     optionalWinners.push({ slot, item: chosen.item, score: chosen.score });
   }
 
@@ -4985,6 +5157,11 @@ export async function computeStyleMeResult(
   // Song reason — deterministic from matched mood/occasion tags; never from Claude
   const songReason = buildSongReason(song.moods, song.occasions, session.moods, session.occasion);
 
+  // Finishing slots the suitability rule leaves unfilled. Populated by whichever selection
+  // branch runs, and read by the completion layer so exactly those slots get a generated
+  // recommendation instead of an inappropriate owned piece.
+  const suppressedFinishingSlots = new Set<string>();
+
   // Primary product (nAia piece — nadine-recommendation only).
   // Assembled before the Claude call so completion context can inform wording.
   // Never set for my-closet (effectiveOutcome is closet-led).
@@ -5028,6 +5205,7 @@ export async function computeStyleMeResult(
       allItems,
       engineInput.profile,
       recentClosetSet,
+      suppressedFinishingSlots,
     );
 
     const anchorId = (anchor as NormalizedClosetAnchor).id;
@@ -5237,6 +5415,7 @@ export async function computeStyleMeResult(
       allItems,
       engineInput.profile,
       recentClosetSetForGarments,
+      suppressedFinishingSlots,
     );
   }
 
@@ -5244,7 +5423,10 @@ export async function computeStyleMeResult(
   // primary NADINE recommendation, and any additional Closet garments in the look.
   // Computed before wording so the explanation can reference the full outfit.
   const additionalClosetItems = recommendation.selectedClosetGarments ?? [];
-  const completionLayer = buildCompletionLayer(anchor ?? null, primaryProduct, session, additionalClosetItems, mode);
+  const completionLayer = buildCompletionLayer(
+    anchor ?? null, primaryProduct, session, additionalClosetItems, mode,
+    [...suppressedFinishingSlots].filter((s): s is "shoe" | "bag" => s === "shoe" || s === "bag"),
+  );
 
   // Anchor summary — passed to both Claude and deterministic fallback so the
   // anchor's colour, slot, and label are available for inclusion in Why This Works.

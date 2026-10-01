@@ -875,3 +875,45 @@ export function getTargetFormalityRange(
   // ceiling, so dressing down is calibrated more firmly than dressing up.
   return { min: adj.max, max: base.min };
 }
+
+// ── Finishing-piece suitability ───────────────────────────────────────────────
+//
+// "Best available owned item" is not the same as "good enough to recommend." A bag
+// or shoe that is the highest-scoring option in the closet can still be wrong for the
+// occasion, and offering it is worse than offering nothing: ST15 paired an evening gown
+// with a business tote and block-heel ankle boots, and ST16 paired an evening skirt with
+// the same tote, in both cases because they were the only options and scoring had no
+// opinion about whether they belonged.
+//
+// The test uses FORMALITY_RANK — the scale getTargetFormalityRange already speaks and
+// evaluateCompleteOutfit already scores the outfit register with. No second formality
+// system is introduced, and the approved dressRegister path is left exactly as it is.
+//
+// A finishing piece is UNSUITABLE only when BOTH hold:
+//
+//   1. it sits below the occasion's target register floor, and
+//   2. it sits more than one rank below the outfit's own base register.
+//
+// Requiring both is what makes the rule safe. Condition 1 alone strips a wardrobe that
+// simply owns no formalwear — measured against the real QA runs it removed Omar's penny
+// loafers AND his watch from a Night out, leaving him with no shoes at all, because his
+// closet tops out one rank below the band. Condition 2 scales the judgement to the
+// outfit actually being built: a rank-3 shoe beside rank-4 trousers is proportionate, the
+// same shoe beside a rank-6 gown is not.
+//
+// Unknown formality is always suitable (fail-open) — an absent signal must never remove
+// a garment. An unknown base register is likewise fail-open.
+export const FINISHING_SUITABILITY_MAX_GAP_BELOW_BASE = 1;
+
+export function finishingPieceIsSuitable(
+  pieceFormalityRank: number | null,
+  baseRegisterRank: number | null,
+  targetBand: { min: number; max: number },
+): boolean {
+  if (pieceFormalityRank === null) return true;          // unknown → keep
+  if (baseRegisterRank === null) return true;            // nothing to compare against → keep
+  const belowBandFloor = pieceFormalityRank < targetBand.min;
+  if (!belowBandFloor) return true;
+  const gapBelowBase = baseRegisterRank - pieceFormalityRank;
+  return gapBelowBase <= FINISHING_SUITABILITY_MAX_GAP_BELOW_BASE;
+}
