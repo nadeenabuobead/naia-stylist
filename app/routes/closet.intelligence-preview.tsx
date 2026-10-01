@@ -611,13 +611,14 @@ export default function WardrobeIntelligencePreview() {
           title={`${piece.matchIds.length} compatible pieces.`}
           subtitle={`Potential matches for your ${cardLabel(anchor).toLowerCase()}.`}
           onClose={closeDialog}
+          className="wip-dialog--matches"
         >
           <div className="wip-match-grid">
             {piece.matchIds.map((id) => {
               const card = byId.get(id);
               return (
                 <button key={id} type="button" className="wip-match-tile" onClick={() => setDialog({ kind: "pair", anchorId: piece.garmentId, garmentId: id })}>
-                  <Thumb card={card} height={150} />
+                  <Thumb card={card} height={92} />
                   <p>{cardLabel(card)}</p>
                 </button>
               );
@@ -677,7 +678,7 @@ export default function WardrobeIntelligencePreview() {
     if (dialog.kind === "worthConsidering" && worthConsidering) {
       const detail = worthConsidering.action?.kind === "reveal" ? worthConsidering.action.detail : undefined;
       return (
-        <DialogShell title="What could add useful variety?" subtitle="A recommendation has to be more specific than “buy more grey.”" onClose={closeDialog}>
+        <DialogShell title="What could add useful variety?" subtitle="A recommendation has to be more specific than “buy more grey.”" onClose={closeDialog} className="wip-dialog--compact">
           <div className="wip-profile-block">
             <h3>The finding</h3>
             <p>{worthConsidering.title}</p>
@@ -910,7 +911,11 @@ export default function WardrobeIntelligencePreview() {
               score, so that half of the reference card is replaced with a
               real qualitative takeaway instead of an invented number. ──── */}
           {coverage && (() => {
-            const mayDependCount = blockedDetail.filter((b) => coverageContext(b.reason, b.layers.length > 0, byId.get(b.garmentId)?.category, byId.get(b.garmentId)?.hemLength ?? null) === "may-depend").length;
+            // Same count the sentence below already states (blockedDetail.length) —
+            // previously this used a narrower "may-depend only" filter, producing a
+            // different number (e.g. "4") than the sentence's total (e.g. "Six"),
+            // which read as two conflicting counts for the same finding.
+            const closerLookCount = blockedDetail.length;
             const takeaway = summaryLines.find((l) => /colour|color/i.test(l)) ?? summaryLines[0] ?? null;
             if (!takeaway && !coverage.body) return null;
             return (
@@ -921,7 +926,7 @@ export default function WardrobeIntelligencePreview() {
                 </div>
                 <div className="wip-passport-divider" />
                 <div className="wip-passport-col">
-                  {mayDependCount > 0 && <p className="wip-passport-count">{mayDependCount} {mayDependCount === 1 ? "piece needs" : "pieces need"} a closer look</p>}
+                  {closerLookCount > 0 && <p className="wip-passport-count">{closerLookCount} {closerLookCount === 1 ? "piece needs" : "pieces need"} a closer look</p>}
                   <p className="wip-passport-body">{coverage.body}</p>
                   <button type="button" className="wip-link" onClick={() => setDialog({ kind: "coverage" })}>See which →</button>
                 </div>
@@ -977,6 +982,10 @@ export default function WardrobeIntelligencePreview() {
             const registersPresent = (["everyday", "work", "occasion"] as const).filter((r) => moodboardLooks.some((l) => l.register === r));
             const active = activeMoodRegister && registersPresent.includes(activeMoodRegister) ? activeMoodRegister : registersPresent[0];
             const shown = moodboardLooks.filter((l) => l.register === active);
+            const tabCounts = new Map(registersPresent.map((r) => [r, moodboardLooks.filter((l) => l.register === r).length] as const));
+            // A "1" next to every tab says nothing a customer can use — only
+            // show counts at all when they actually vary across tabs.
+            const showTabCounts = [...tabCounts.values()].some((n) => n !== 1);
             return (
               <section className="wip-section wip-section--hero">
                 <div className="wip-mood-head">
@@ -995,7 +1004,7 @@ export default function WardrobeIntelligencePreview() {
                         className={`wip-mood-tab${r === active ? " is-active" : ""}`}
                         onClick={() => setActiveMoodRegister(r)}
                       >
-                        {REGISTER_LABEL[r]} <span>{moodboardLooks.filter((l) => l.register === r).length}</span>
+                        {REGISTER_LABEL[r]} {showTabCounts && <span>{tabCounts.get(r)}</span>}
                       </button>
                     ))}
                   </div>
@@ -1178,7 +1187,7 @@ export default function WardrobeIntelligencePreview() {
 
 const css = `
   .wip-app{max-width:1180px;margin:0 auto}
-  .wip-main{padding:8px 0 56px}
+  .wip-main{padding:8px 0 24px}
   .wip-eyebrow{font-family:var(--naia-ff-ui);font-size:9px;letter-spacing:2.5px;text-transform:uppercase;color:rgba(40,21,12,0.5);margin:0 0 14px}
 
   /* Hero: headline, full width, dominant — summary below it, then the 3
@@ -1275,13 +1284,15 @@ const css = `
   .wip-mood-grid{display:grid;grid-template-columns:repeat(var(--mood-cols,1),1fr);gap:14px}
   @media(max-width:860px){.wip-mood-grid{grid-template-columns:repeat(min(var(--mood-cols,1),2),1fr)}}
   @media(max-width:560px){.wip-mood-grid{grid-template-columns:1fr}}
-  .wip-mood-tile{display:block;width:100%;border:1px solid var(--naia-border);border-radius:8px;background:var(--naia-surface);padding:11px;text-align:left;cursor:pointer}
+  .wip-mood-tile{display:block;width:100%;border:1px solid var(--naia-border);border-radius:8px;background:var(--naia-surface);padding:9px;text-align:left;cursor:pointer}
   .wip-mood-tile:hover{border-color:rgba(40,21,12,0.3)}
-  /* Collage height reduced ~40% from the original square (aspect-ratio 1/1
-     -> 5/3) so a whole look reads at a glance, compact-editorial, not a
-     full-page product gallery; object-fit:contain on each thumb (below)
-     already prevents any awkward cropping at the shorter ratio. */
-  .wip-mood-collage{display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:1fr;gap:5px;aspect-ratio:5/3}
+  /* Second tightening pass: flatter still (5/3 -> 12/5, ~30% shorter again)
+     PLUS an explicit max-height. The aspect-ratio alone made a 1- or
+     2-column tile (Everyday/Work tabs often have few looks, so a wide
+     card) balloon back up in height; the cap keeps every column count
+     inside the same ~350-420px band regardless of card width.
+     object-fit:contain on each thumb (below) still prevents any cropping. */
+  .wip-mood-collage{display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:1fr;gap:4px;aspect-ratio:12/5;max-height:380px}
   .wip-mood-collage .wip-thumb{border-radius:0;height:100% !important;background:none}
   .wip-mood-meta{display:block;font-family:var(--naia-ff-ui);font-size:11px;letter-spacing:1px;text-transform:uppercase;color:rgba(40,21,12,0.55);font-weight:600;margin-top:8px}
   .wip-mood-card-body{margin-top:8px}
@@ -1385,6 +1396,14 @@ const css = `
   .wip-dialog--compact .wip-dialog-body{padding:12px 20px 18px}
   .wip-dialog--compact .wip-profile-block{padding:10px 0;border-bottom:1px solid var(--naia-border)}
   .wip-dialog--compact .wip-profile-block:last-child{border-bottom:0}
+  /* Scoped to the "compatible pieces" dialog only — the workCombo/
+     moodboardLook dialogs reuse the same .wip-match-grid/.wip-match-tile
+     classes at their own (unchanged) size, since those hold only 2-3
+     tiles forming one reasoned combination, not an open-ended count grid. */
+  .wip-dialog--matches{max-width:620px}
+  .wip-dialog--matches .wip-match-grid{gap:9px}
+  .wip-dialog--matches .wip-match-tile{padding:7px}
+  .wip-dialog--matches .wip-match-tile p{font-size:9.5px;margin:6px 0 0}
   .wip-dialog-head{position:sticky;top:0;background:var(--naia-surface);padding:20px 22px 14px;border-bottom:1px solid var(--naia-border);display:flex;justify-content:space-between;gap:14px}
   .wip-dialog-head h2{font-family:var(--naia-ff-display);font-weight:300;font-size:1.4rem;margin:0}
   .wip-dialog-head p{font-family:var(--naia-ff-ui);font-size:11.5px;color:rgba(40,21,12,0.55);margin:6px 0 0}
