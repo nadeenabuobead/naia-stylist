@@ -905,15 +905,30 @@ export function getTargetFormalityRange(
 // a garment. An unknown base register is likewise fail-open.
 export const FINISHING_SUITABILITY_MAX_GAP_BELOW_BASE = 1;
 
+// Slots judged on condition 1 alone, because the piece is OPTIONAL: if nothing clears the
+// register floor the slot is simply left unfilled and described instead, so there is no
+// risk of leaving the outfit short of something it needs. A shoe is not in this set — an
+// outfit with no shoes is broken, so a shoe is only removed when the mismatch is severe
+// relative to the look (both conditions), which is what keeps a wardrobe owning no
+// formalwear from being left barefoot.
+//
+// This asymmetry is the whole reason ST16's tote survived the first version: its outfit's
+// base register was 2, so a rank-3 bag was not "below the base" at all, and the lenient
+// test cleared it even though the band floor was 4.
+export const FINISHING_STRICT_SLOTS = new Set<string>(["bag"]);
+
 export function finishingPieceIsSuitable(
   pieceFormalityRank: number | null,
   baseRegisterRank: number | null,
   targetBand: { min: number; max: number },
+  slot?: string,
 ): boolean {
   if (pieceFormalityRank === null) return true;          // unknown → keep
-  if (baseRegisterRank === null) return true;            // nothing to compare against → keep
   const belowBandFloor = pieceFormalityRank < targetBand.min;
   if (!belowBandFloor) return true;
+  // Optional slots stop here: below the floor is enough to leave it out.
+  if (slot !== undefined && FINISHING_STRICT_SLOTS.has(slot)) return false;
+  if (baseRegisterRank === null) return true;            // nothing to compare against → keep
   const gapBelowBase = baseRegisterRank - pieceFormalityRank;
   return gapBelowBase <= FINISHING_SUITABILITY_MAX_GAP_BELOW_BASE;
 }

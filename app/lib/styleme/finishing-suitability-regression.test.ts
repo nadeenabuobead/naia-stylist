@@ -27,6 +27,7 @@ import assert from "node:assert/strict";
 
 import {
   selectAdditionalClosetGarments,
+  buildNaiaOutfitCandidates,
   buildCompletionLayer,
   getMissingFinishingSlots,
   finishingSuggestionRegister,
@@ -277,6 +278,95 @@ describe("FS-G — no explicit formality means no removal (fail-open)", () => {
 
   test("FS-G.3 and that removal is reported so a suggestion can replace it", () => {
     assert.ok(suggested(A("chinos", "bottom"), items, S("work", "formality-polished")).includes("shoe"));
+  });
+});
+
+// ── FS-H: an optional slot must earn its place (strict bag) ─────────────────
+
+describe("FS-H — a bag is judged on the band floor alone", () => {
+  // ST16's tote survived the first version because its outfit's base register was 2, so a
+  // rank-3 bag was not "below the base" at all and the lenient two-condition test cleared
+  // it even though the band floor was 4. A bag is optional: if nothing clears the floor the
+  // slot is simply described instead, so there is no risk in being strict.
+  const band = { min: 4, max: 5 };
+
+  test("FS-H.1 a below-floor bag is unsuitable even when the base register is lower still", () => {
+    assert.equal(finishingPieceIsSuitable(3, 2, band, "bag"), false);
+  });
+
+  test("FS-H.2 a shoe in the same position is kept — an outfit needs shoes", () => {
+    assert.equal(finishingPieceIsSuitable(3, 2, band, "shoe"), true);
+  });
+
+  test("FS-H.3 an in-band bag is still suitable", () => {
+    assert.equal(finishingPieceIsSuitable(4, 2, band, "bag"), true);
+  });
+
+  test("FS-H.4 a casual band never rejects a bag", () => {
+    assert.equal(finishingPieceIsSuitable(1, 1, { min: 1, max: 2 }, "bag"), true);
+  });
+
+  test("FS-H.5 unknown formality keeps the bag (fail-open)", () => {
+    assert.equal(finishingPieceIsSuitable(null, 6, band, "bag"), true);
+  });
+
+  test("FS-H.6 ST16 shape end to end: the tote goes, the in-band shoe stays", () => {
+    const items = [
+      g({ id: "blazer", category: "OUTERWEAR", formality: "business-formal" }),
+      g({ id: "tank", category: "TOPS", formality: "smart-casual", approvedProfile: prof("smart-casual") }),
+      g({ id: "skirt", category: "BOTTOMS", formality: "business-formal" }),
+      g({ id: "pump", category: "SHOES", formality: "business-formal" }),
+      g({ id: "tote", category: "BAGS", formality: "business-casual" }),
+    ];
+    const p = picked(A("blazer", "outerwear"), items, S("girls-night", "formality-occasion"));
+    assert.ok(!p.includes("bag:tote"), `the tote must not survive; got ${p.join(" | ")}`);
+    assert.ok(p.includes("shoe:pump"), p.join(" | "));
+  });
+});
+
+// ── FS-I: the alternative candidates obey the same gate ─────────────────────
+
+describe("FS-I — B/C/D/E cannot re-admit what A rejected", () => {
+  // ST15's boots never appeared in Candidate A's shoe list at all: A chose the stiletto
+  // pump. Candidate E swapped the shoe on body-need/intention grounds, which is
+  // formality-blind, and E then outranked A at T4. The gate now applies to every swap pool.
+  const items = [
+    g({ id: "gown", category: "DRESSES", formality: "evening" }),
+    g({ id: "pump", category: "SHOES", formality: "business-formal" }),
+    g({ id: "boots", category: "SHOES", formality: "business-casual" }),
+    g({ id: "sneaker", category: "SHOES", formality: "casual" }),
+  ];
+  // A body need plus an intention are what make Candidate E get built at all.
+  const sess = {
+    ...S("special-event", "formality-occasion"),
+    bodyNeeds: ["waist-definition"], intentions: ["express-myself"],
+  } as unknown as StyleMeSessionInput;
+
+  test("FS-I.1 no candidate contains the below-register shoe", () => {
+    const cands = buildNaiaOutfitCandidates(A("gown", "dress"), sess, items, undefined, undefined)
+      .filter((c): c is NonNullable<typeof c> => c !== null);
+    const shoes = cands.flatMap((c) => c.pieces.filter((p) => p.slot === "shoe").map((p) => p.closetId));
+    assert.ok(shoes.length > 0, "at least one candidate should carry a shoe");
+    assert.ok(!shoes.includes("boots"), `boots must not re-enter via an alternative; got ${shoes.join(",")}`);
+    assert.ok(!shoes.includes("sneaker"), `a casual shoe must not re-enter; got ${shoes.join(",")}`);
+  });
+
+  test("FS-I.2 the suitable shoe is what every candidate carries", () => {
+    const cands = buildNaiaOutfitCandidates(A("gown", "dress"), sess, items, undefined, undefined)
+      .filter((c): c is NonNullable<typeof c> => c !== null);
+    for (const c of cands) {
+      for (const p of c.pieces.filter((x) => x.slot === "shoe")) {
+        assert.equal(p.closetId, "pump", `candidate ${c.id} carries ${p.closetId}`);
+      }
+    }
+  });
+
+  test("FS-I.3 without an explicit formality the alternatives are unrestricted", () => {
+    const openSess = { ...sess, formalityConditional: null } as unknown as StyleMeSessionInput;
+    const cands = buildNaiaOutfitCandidates(A("gown", "dress"), openSess, items, undefined, undefined)
+      .filter((c): c is NonNullable<typeof c> => c !== null);
+    const shoes = new Set(cands.flatMap((c) => c.pieces.filter((p) => p.slot === "shoe").map((p) => p.closetId)));
+    assert.ok(shoes.size >= 1, "candidates still build without a formality answer");
   });
 });
 

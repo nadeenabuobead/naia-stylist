@@ -1649,6 +1649,41 @@ export function buildNaiaOutfitCandidates(
   // alternative exists), B falls back to swapping the single highest-variance slot.
   const B_SLOTS = new Set(["top", "bottom", "dress", "set", "shoe"]);
   const bTargetRange = getTargetFormalityRange(session.occasion, session.formalityConditional ?? null);
+
+  // ── Finishing suitability for the ALTERNATIVE candidates ───────────────────
+  //
+  // selectAdditionalClosetGarments gates Candidate A, but B/C/D/E are assembled here by
+  // their own slot-swap exploration and never consulted it. That is how ST15 shipped
+  // block-heel ankle boots with an evening gown: A correctly chose the stiletto pump and
+  // the boots never even appeared in A's candidate list, but Candidate E swapped the shoe
+  // on body-need/intention grounds alone — it is formality-blind — and E outranked A at T4.
+  //
+  // The same predicate, the same band, and the base register of the committed base (anchor
+  // plus A's base pieces) now apply to every swap pool, so an item A rejected cannot
+  // re-enter through an alternative.
+  const altSuitabilityActive = !!session.formalityConditional;
+  const altBaseRegisterRank = (() => {
+    const BASE = new Set(["top", "bottom", "dress", "set"]);
+    const byId = new Map(allItems.map((i) => [i.id, i]));
+    const ranks: number[] = [];
+    for (const pc of candidateA.pieces) {
+      if (!BASE.has(pc.slot)) continue;
+      const it = byId.get(pc.closetId);
+      const r = it?.formality ? (FORMALITY_RANK[it.formality] ?? null) : null;
+      if (r !== null) ranks.push(r);
+    }
+    return ranks.length > 0 ? Math.max(...ranks) : null;
+  })();
+  const altSlotSuitable = (item: ClosetAnchorInput, slot: string): boolean => {
+    if (!altSuitabilityActive) return true;
+    if (!SUITABILITY_GATED_SLOTS_SHARED.has(slot)) return true;
+    return finishingPieceIsSuitable(
+      item.formality ? (FORMALITY_RANK[item.formality] ?? null) : null,
+      altBaseRegisterRank,
+      bTargetRange,
+      slot,
+    );
+  };
   let candidateB: OutfitCandidate | null = null;
 
   // Map slot → item chosen by A (to detect differences)
@@ -1685,6 +1720,7 @@ export function buildNaiaOutfitCandidates(
         item.garmentRelationships,
       );
       if (score <= 0) continue;
+      if (!altSlotSuitable(item, slot)) continue;   // same gate as Candidate A
       const formalityRank = item.formality ? (FORMALITY_RANK[item.formality] ?? null) : null;
       scoredAlts.push({ item, score, formalityRank });
     }
@@ -1829,7 +1865,8 @@ export function buildNaiaOutfitCandidates(
       for (const slot of structuralSlots) {
         if (seed.pieces.some((p) => p.closetId === anchor.id && p.slot === slot)) continue;
         const eligible = dressingEligibleItems.filter(
-          (item) => !seedItemIds.has(item.id) && resolveProfileSlot(item, closetItemToSlot(item.category, item.subcategory)) === slot,
+          (item) => !seedItemIds.has(item.id) && resolveProfileSlot(item, closetItemToSlot(item.category, item.subcategory)) === slot
+            && altSlotSuitable(item, slot),
         );
         for (const alt of eligible) {
           const trial1Pieces = seed.pieces.map((p) =>
@@ -1850,7 +1887,8 @@ export function buildNaiaOutfitCandidates(
             if (slot2 === slot) continue;
             if (seed.pieces.some((p) => p.closetId === anchor.id && p.slot === slot2)) continue;
               const eligible2 = dressingEligibleItems.filter(
-              (item) => !trial1Ids.has(item.id) && resolveProfileSlot(item, closetItemToSlot(item.category, item.subcategory)) === slot2,
+              (item) => !trial1Ids.has(item.id) && resolveProfileSlot(item, closetItemToSlot(item.category, item.subcategory)) === slot2
+                && altSlotSuitable(item, slot2),
             );
             for (const alt2 of eligible2) {
               const trial2Pieces = trial1Pieces.map((p) =>
@@ -3629,6 +3667,10 @@ function buildCompletionPiece(
 }
 
 
+// Slots where an unsuitable owned piece is worse than none. Shared by the Candidate A
+// selection path and the B/C/D/E swap paths so the two cannot drift apart.
+const SUITABILITY_GATED_SLOTS_SHARED = new Set<string>(["bag", "shoe"]);
+
 // ── Finishing-slot suggestions ────────────────────────────────────────────────
 //
 // A bag or shoe slot can be deliberately left unfilled when nothing the customer owns
@@ -4360,7 +4402,7 @@ export function selectAdditionalClosetGarments(
   // Slots where an unsuitable owned piece is worse than none at all. A bag or shoe that
   // contradicts the occasion is visible in the finished look; offering it because it was
   // the only option is how an evening gown ended up with a business tote.
-  const SUITABILITY_GATED_SLOTS = new Set<string>(["bag", "shoe"]);
+  const SUITABILITY_GATED_SLOTS = SUITABILITY_GATED_SLOTS_SHARED;
 
   // Only when the customer actually answered the formality question. This mirrors the
   // convention computeRegisterAlignmentScore already follows: without an explicit register
@@ -4385,6 +4427,7 @@ export function selectAdditionalClosetGarments(
             c.item.formality ? (FORMALITY_RANK[c.item.formality] ?? null) : null,
             baseRegisterRank,
             finishingTargetBand,
+            slot,
           ))
       : candidates;
 
@@ -4402,6 +4445,7 @@ export function selectAdditionalClosetGarments(
             c.item.formality ? (FORMALITY_RANK[c.item.formality] ?? null) : null,
             baseRegisterRank,
             finishingTargetBand,
+            slot,
           ),
         })),
         eligibleCount: eligible.length,

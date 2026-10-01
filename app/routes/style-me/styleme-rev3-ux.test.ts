@@ -1449,3 +1449,38 @@ describe("SM-REV3-M2 — Step 1 progress indicator and Continue gating are uncha
     assert.ok(state.includes('selected !== "other" || otherText.trim().length > 0'));
   });
 });
+
+// ── M  Complete the Look type labels ────────────────────────────────────────
+//
+// The label was a two-way ternary on `piece.slot === "top"`, so every slot that was not a
+// top rendered as "Bottom". A generated evening-bag recommendation was therefore shown
+// under the heading "Bottom". These assertions read result.tsx source, matching the rest
+// of this file's approach.
+
+describe("§M — Complete the Look renders the correct type label per slot", () => {
+  const result = src("result.tsx");
+
+  it("M.1 the two-way top/Bottom ternary is gone", () => {
+    assert.ok(
+      !/piece\.slot === "top" \? "Top" : "Bottom"/.test(result),
+      "a binary ternary mislabels every non-top slot as Bottom",
+    );
+  });
+
+  it("M.2 labels come from an explicit slot map", () => {
+    assert.ok(/COMPLETION_SLOT_LABELS\[piece\.slot\]/.test(result));
+  });
+
+  it("M.3 the map defines bag, shoe, top and bottom", () => {
+    const block = result.slice(result.indexOf("const COMPLETION_SLOT_LABELS"));
+    const map = block.slice(0, block.indexOf("};"));
+    assert.ok(/bag:\s*"Bag"/.test(map), "bag must render as Bag");
+    assert.ok(/shoe:\s*"Shoes"/.test(map), "shoe must render as Shoes");
+    assert.ok(/top:\s*"Top"/.test(map));
+    assert.ok(/bottom:\s*"Bottom"/.test(map));
+  });
+
+  it("M.4 an unknown slot falls back to a neutral word, not another slot's name", () => {
+    assert.ok(/COMPLETION_SLOT_LABELS\[piece\.slot\] \?\? "Piece"/.test(result));
+  });
+});

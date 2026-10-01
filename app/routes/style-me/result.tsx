@@ -1054,6 +1054,22 @@ const FEELING_LABELS: Record<string, string> = {
   "more-effortless": "More effortless", "more-elevated": "More elevated",
   "more-attractive": "More attractive", "like-myself": "Like myself again",
 };
+// Complete the Look type labels. This was a two-way ternary on `=== "top"`, so every slot
+// that was not a top rendered as "Bottom" — which is how a generated evening-bag
+// recommendation ended up labelled "Bottom". Keyed explicitly so a new slot shows a
+// neutral fallback rather than silently borrowing another slot's name.
+const COMPLETION_SLOT_LABELS: Record<string, string> = {
+  top: "Top",
+  bottom: "Bottom",
+  dress: "Dress",
+  set: "Set",
+  shoe: "Shoes",
+  bag: "Bag",
+  outerwear: "Layer",
+  accessory: "Accessory",
+  jewelry: "Jewellery",
+};
+
 const OCCASION_LABELS: Record<string, string> = {
   "everyday": "Everyday", "work": "Work", "dinner": "Dinner", "date-night": "Date night",
   "girls-night": "Evening out", "family": "Family gathering", "special-event": "Special event",
@@ -1514,13 +1530,13 @@ export default function StyleMeResult() {
           </div>
         )}
 
-        {/* Complete the Look — generic wardrobe guidance for missing essential clothing slots */}
+        {/* Complete the Look — generic wardrobe guidance for missing clothing and finishing slots */}
         {suggestionMeta?.completionLayer && suggestionMeta.completionLayer.length > 0 && (
           <div className="sm-result-section">
             <p className="sm-result-section-head">Complete the Look</p>
             {(suggestionMeta.completionLayer as Array<{ slot: string; description: string }>).map((piece, i) => (
               <div key={i} className="sm-item-card sm-item-card--secondary">
-                <p className="sm-item-type-label">{piece.slot === "top" ? "Top" : "Bottom"}</p>
+                <p className="sm-item-type-label">{COMPLETION_SLOT_LABELS[piece.slot] ?? "Piece"}</p>
                 <p className="sm-item-notes--secondary">{piece.description}</p>
               </div>
             ))}
