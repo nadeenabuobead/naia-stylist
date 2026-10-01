@@ -342,3 +342,70 @@ identity signal — but it also cannot differentiate outfits.
 
 Related: §3 records the one stale `stylePersonalities` read that remains
 (`buildSessionFingerprint` in `styleme-recommendation.ts`).
+
+---
+
+## 8. QA notes — Test 6, and three things it exposed
+
+**Test 6: StyleMe PASS — upstream garment metadata defect identified.**
+Dinner + Smart casual, `legs-covered` Passport, 2026-10-01. Every layer of StyleMe
+behaved correctly on the data it was given; the defect is upstream.
+
+### 8.1 Closet / Garment Intelligence metadata correction required
+
+`Burgundy Midi Skirt` (`cmtqxeqdp0011l9047g1yirxc`, BOTTOMS / skirt) is stored with
+raw **`hemLength: "maxi"`**. The name says midi; the hem metadata says floor-length.
+
+Diagnostic evidence from the real run, identical on both entry paths:
+
+```
+hemLengthStored               "maxi"
+hemLengthSeenByGate           "maxi"
+resolvedDressingPreferences   ["legs-covered","no-cropped-tops",
+                               "dresses-modestly","prefer-full-length-trousers"]
+legsCovered                   legs-covered: PASS — hemLength=maxi
+passesDressingRequirements    true
+entry                         logged for BOTH "auto-anchor" and "candidate"
+```
+
+Consequences, all correct given the input: `passesDressingRequirements` accepted it
+because `maxi` is one of the two accepted values; `sanitizeFactualWordingClaims` never
+fired because it is gated on `hemLength === "midi"`; and the wording described "the
+long, covered line" because the model was told the skirt is maxi. Not hallucination.
+
+**Do not patch StyleMe for this.** The correction belongs to the Closet/GI record. A
+midi hem is non-compensable for `legs-covered`, so once the record says `midi` the
+existing gate will exclude the garment with no engine change.
+
+### 8.2 Consumers do not see the same effective garment truth
+
+StyleMe reads **raw `ClosetItem`** via `loadAllClosetItemsForEngine`. Wardrobe
+Intelligence reads the **effective** item via `getEffectiveClosetItem`, which applies
+`ClosetItemAdminReview.overrides`.
+
+So a reviewer correcting this skirt's hem through the admin review path would fix it
+for WI and **not** for StyleMe, which would keep reading `"maxi"` and keep admitting
+the garment. The Closet UI and the engine would disagree, with no error anywhere.
+
+This decides something for the `ResolvedGarment` contract in §5: admin-correction
+precedence must be applied **before** any consumer sees the garment, not per-consumer.
+StyleMe should receive already-resolved truth and delete its raw read. Until then,
+check which correction route actually reaches the engine before trusting a fix.
+
+### 8.3 `prefer-full-length-trousers` reaches StyleMe and is inert
+
+Her Passport carries four dressing requirements. StyleMe implements two:
+`passesDressingRequirements` handles `legs-covered` and `no-cropped-tops`, and
+`passesCandidateDressingRequirements` handles the compensable arms / shoulder /
+neckline set via `arms-covered`, `chest-neckline-covered` and `dresses-modestly`.
+
+**`prefer-full-length-trousers` is read by nothing.** It arrives in
+`profile.dressingPreferences`, reaches both gates, and matches no branch — so it
+neither excludes nor ranks anything.
+
+Separate from §8.1 and deliberately not mixed into Test 6. It is a Passport ↔ StyleMe
+integration gap: the semantics need deciding first — whether it is a hard constraint
+on trouser hem specifically, a preference expressible at T5, or a garment-level
+`ResolvedGarment` concern — and that decision belongs with the canonical Passport
+workstream, not here. Worth auditing the other dressing-preference IDs for the same
+silent inertness at the same time.
