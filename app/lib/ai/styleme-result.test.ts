@@ -11307,10 +11307,16 @@ describe("§REV2.6 computeIntentionFit — balance factor for ≥2 intentions", 
   function makeCandidate(id: string, pieces: string[]): OutfitCandidate {
     return { id, pieces: pieces.map((closetId) => ({ slot: "top", closetId, label: null, colors: [] })) };
   }
+  // Carries ALL FOUR structure signals so its feel-sharper unit score is exactly 1.0.
+  // This block is about the BALANCE FACTOR arithmetic, not about how structure is
+  // measured, so the fixture must sit at the top of the scale for the 1.5 figure
+  // below to mean what it says. outfitStructureScore reads styleTags, construction
+  // fitProfile, silhouette and register — partial evidence yields a partial score.
   const structuredItem: ClosetAnchorInput = {
     type: "closet", id: "blazer", name: "Blazer", category: "TOPS",
     colors: [], primaryColor: null, pattern: null, material: null,
     styleTags: ["structured"], occasions: [], imageUrl: "", fitProfile: "structured",
+    silhouette: "straight", formality: "smart-casual",
   };
   const flowingItem: ClosetAnchorInput = {
     type: "closet", id: "blouse", name: "Blouse", category: "TOPS",

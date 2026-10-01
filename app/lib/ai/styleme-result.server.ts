@@ -1143,7 +1143,24 @@ export function computeEnergyFit(
 
 // ── Shared outfit feature functions (all return [0,1]; used by singleIntentionUnitScore) ──
 
-const STRUCTURE_TAGS = new Set(["structured", "tailored", "sharp", "polished", "fitted", "minimalist"]);
+// Sharpness tokens, taken from GARMENT_STYLE_TAG_VOCAB in garment-intelligence.types.ts —
+// the vocabulary the Closet AI actually emits. Two tokens previously listed here,
+// "sharp" and "minimalist", are not in that vocabulary and could never match any
+// analysed garment; the AI emits "minimal". Meanwhile its own sharpness words —
+// clean, refined, elevated, sophisticated, classic, understated — were not looked for
+// at all, so a demonstrably sharp garment scored exactly like a sweatshirt.
+//
+// "fitted" is deliberately NOT here. Fitted is closeness to the body, not structure:
+// a body-skimming jersey top is not sharp. formCharacterScore already honours that
+// distinction for reviewed garments; this set now agrees with it.
+const STRUCTURE_TAGS = new Set([
+  "structured", "tailored", "polished", "classic",
+  "elevated", "refined", "sophisticated", "minimal", "clean", "understated",
+]);
+// fitProfile values that genuinely carry construction (FIT_PROFILE_VALUES subset).
+const STRUCTURE_FIT_PROFILES = new Set(["structured", "tailored"]);
+// Silhouettes that read as clean and defined (GARMENT_SILHOUETTE_VALUES subset).
+const STRUCTURE_SILHOUETTES = new Set(["straight", "column"]);
 // "soft" intentionally excluded — closet AI uses it for physical fabric softness,
 // not the feel-softer emotional intention. Physical soft ≠ feel-softer emotion.
 const FLOW_TAGS = new Set(["flowing", "relaxed", "loose", "flowy", "oversized"]);
@@ -1173,20 +1190,39 @@ export function outfitStructureScore(
   const itemMap = new Map(allItems.map((i) => [i.id, i]));
   const structural = candidate.pieces.filter((p) => !BODY_NEED_STRUCTURAL_SLOTS.has(p.slot));
   if (structural.length === 0) return 0;
-  // Max-piece structure density: score = bestPieceScore / totalPieces.
-  // A uniform-structure closet can still differentiate candidates: fewer pieces
-  // with the same peak structure score produces a higher density (sharper focus).
-  let maxPieceScore = 0;
+
+  // MEAN per-piece structure, not max-over-count.
+  //
+  // The previous formula was bestPieceScore / totalPieces, which broke the intention
+  // in two ways. Adding a sharper piece raised the denominator without raising the
+  // numerator, so a blazer + trousers + loafers outfit scored LOWER (0.25) than the
+  // same look without the blazer (0.33) — the metric inverted. And because only the
+  // single best piece counted, swapping any other piece for a sharper one left the
+  // score unchanged, so Candidate E's todayBetter() check saw no improvement and
+  // rejected every genuine upgrade. A mean fixes both: every piece contributes, and
+  // any swap moves the score.
+  let total = 0;
   for (const piece of structural) {
     const item = itemMap.get(piece.closetId);
     if (!item) continue;
-    const hasTag = (item.styleTags ?? []).some((t) => STRUCTURE_TAGS.has(t.toLowerCase()));
-    const hasFit = item.fitProfile != null && STRUCTURE_TAGS.has(item.fitProfile.toLowerCase());
-    const pieceScore = (hasTag ? 0.5 : 0) + (hasFit ? 0.5 : 0);
-    if (pieceScore > maxPieceScore) maxPieceScore = pieceScore;
+    total += pieceStructureScore(item);
   }
-  if (maxPieceScore === 0) return 0;
-  return maxPieceScore / structural.length;
+  return total / structural.length;
+}
+
+// Per-piece structure evidence in [0,1], from the fields an analysed Closet item
+// actually carries. Each signal is independent and partial evidence still counts —
+// a garment with no structure evidence scores 0, never a negative.
+function pieceStructureScore(item: ClosetAnchorInput): number {
+  let score = 0;
+  if ((item.styleTags ?? []).some((t) => STRUCTURE_TAGS.has(t.toLowerCase()))) score += 0.4;
+  if (item.fitProfile != null && STRUCTURE_FIT_PROFILES.has(item.fitProfile.toLowerCase())) score += 0.3;
+  if (item.silhouette != null && STRUCTURE_SILHOUETTES.has(item.silhouette.toLowerCase())) score += 0.2;
+  // Register above casual is weak but real evidence of a more deliberate garment.
+  // Occasion and formality remain T1/T2 — this only breaks ties inside T4.
+  const rank = item.formality ? (FORMALITY_RANK[item.formality] ?? 0) : 0;
+  if (rank >= 2) score += 0.1;
+  return Math.min(1, score);
 }
 
 export function outfitFlowScore(

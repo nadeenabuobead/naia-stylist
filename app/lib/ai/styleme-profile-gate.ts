@@ -336,7 +336,14 @@ export function passesLayeringRequirement(
 // Tag sets duplicated here to keep this file standalone (no .server imports).
 // Kept in sync with STRUCTURE_TAGS / FLOW_TAGS in styleme-result.server.ts.
 // "fitted" is intentionally excluded — a fitted silhouette is not a structured garment.
-const GATE_STRUCTURE_TAGS = new Set(["structured", "tailored", "sharp", "polished", "minimalist"]);
+// Kept in sync with STRUCTURE_TAGS in styleme-result.server.ts, which is itself
+// aligned to GARMENT_STYLE_TAG_VOCAB — the tokens the Closet AI emits. "sharp" and
+// "minimalist" were never in that vocabulary and matched nothing.
+const GATE_STRUCTURE_TAGS = new Set([
+  "structured", "tailored", "polished", "classic",
+  "elevated", "refined", "sophisticated", "minimal", "clean", "understated",
+]);
+const GATE_STRUCTURE_FIT_PROFILES = new Set(["structured", "tailored"]);
 // "soft" intentionally excluded — closet AI uses it for physical fabric softness,
 // not the feel-softer emotional intention. Physical soft ≠ feel-softer emotion.
 const GATE_FLOW_TAGS = new Set(["flowing", "relaxed", "loose", "flowy", "oversized"]);
@@ -353,7 +360,7 @@ function legacyPieceIntentionScore(item: ClosetAnchorInput, intentionId: string)
     case "give-structure":
     case "feel-sharper": {
       const hasTag = [...GATE_STRUCTURE_TAGS].some((t) => tags.has(t));
-      const hasFit = fp !== null && GATE_STRUCTURE_TAGS.has(fp);
+      const hasFit = fp !== null && GATE_STRUCTURE_FIT_PROFILES.has(fp);
       return Math.min(1.0, (hasTag ? 0.5 : 0) + (hasFit ? 0.5 : 0));
     }
     case "feel-softer": {
