@@ -2135,11 +2135,23 @@ import { getTargetFormalityRange } from "./styleme-profile-gate.js";
 // Per-slot formality contribution weight (0 = excluded from register judgment).
 // Outerwear is meaningful but slightly discounted — it can be removed and is often
 // transitional. Bag/accessory/jewelry carry no outfit-register signal.
+// Finishing pieces carry 0.15 each. They were 0, which made a business tote in an
+// evening look literally invisible to the formality judgement. The weight is chosen so
+// that the whole finishing layer cannot outweigh a single removable layer:
+//
+//   bag + accessory + jewelry (0.45)  <  one outerwear (0.7)  <  one base piece (1.0)
+//
+// so no combination of finishing pieces can move the outfit register by a full rank,
+// and structural garments stay dominant. Exported for the regression that pins it.
+export const FINISHING_PIECE_FORMALITY_WEIGHT = 0.15;
 const PIECE_FORMALITY_WEIGHT: Record<string, number> = {
   top: 1.0, bottom: 1.0, dress: 1.0, set: 1.0,
   shoe: 1.0,
   outerwear: 0.7,
-  bag: 0, accessory: 0, jewelry: 0, unknown: 0,
+  bag: FINISHING_PIECE_FORMALITY_WEIGHT,
+  accessory: FINISHING_PIECE_FORMALITY_WEIGHT,
+  jewelry: FINISHING_PIECE_FORMALITY_WEIGHT,
+  unknown: 0,
 };
 
 // Whole-outfit suitability evaluation: formality register + occasion coverage.
@@ -2219,10 +2231,14 @@ export function evaluateCompleteOutfit(
     }
     return false;
   };
+  // Piece ROLE, read from the slot directly. This used to ask whether the slot's
+  // formality weight was 0, which happened to be true of exactly bag/accessory/jewelry
+  // — until RC-D gave them a non-zero weight and the proxy quietly stopped identifying
+  // them. Burden is a question about what a piece does in the outfit, not about how much
+  // it contributes to the register, so the two must not share a signal.
   const optionalPieceCount = candidate.pieces.filter((p) => {
-    const weight = PIECE_FORMALITY_WEIGHT[p.slot] ?? 0;
-    if (weight === 0) return true;                      // bag / accessory / jewelry
-    if (p.slot !== "outerwear") return false;           // base pieces and shoes are never burden
+    if (BASE_CLOTHING_SLOTS.has(p.slot) || SHOE_SLOTS.has(p.slot)) return false; // never burden
+    if (p.slot !== "outerwear") return true;            // bag / accessory / jewelry / unknown
     return !layerIsWorking(p.closetId);
   }).length;
 
@@ -3998,9 +4014,35 @@ export function selectAdditionalClosetGarments(
     // with no penalty, preserving the pre-existing fail-open behaviour for unspecified
     // formality sessions. Items without an approved register rank always get 0 (fail-open).
     const targetRange = getTargetFormalityRange(session.occasion, session.formalityConditional ?? null);
-    const itemRegisterRank = item.approvedProfile?.dressRegister
+    let itemRegisterRank = item.approvedProfile?.dressRegister
       ? (DRESS_REGISTER_RANK[item.approvedProfile.dressRegister] ?? null)
       : null;
+    let registerRankSource: "dressRegister" | "formality" | "none" =
+      itemRegisterRank === null ? "none" : "dressRegister";
+    // FINISHING SLOTS ONLY: fall back to the garment's own formality when no approved
+    // dressRegister exists.
+    //
+    // This is why a business tote won a Dressy night out. registerBonus reads the
+    // approved GarmentStyleMeProfile and nothing else, so for an unreviewed garment it is
+    // always 0 — while item.formality was populated the whole time and simply never
+    // consulted. Phase 2 then ordered optionals on occasion tags and relationship history
+    // alone, where a frequently-worn tote wins on familiarity.
+    //
+    // Scoped to finishing slots (BODY_NEED_STRUCTURAL_SLOTS, whose name is the inverse of
+    // its contents) so structural-piece ranking is untouched: a formality fallback on
+    // top/bottom/dress/set/shoe/outerwear would re-rank every unreviewed garment in the
+    // closet, which is not what RC-D is for.
+    //
+    // FORMALITY_RANK is the scale getTargetFormalityRange already speaks. The pre-existing
+    // offset between DRESS_REGISTER_RANK and FORMALITY_RANK in the branch above is NOT
+    // corrected here — see the register-gate deferral note.
+    if (itemRegisterRank === null && BODY_NEED_STRUCTURAL_SLOTS.has(slot) && item.formality) {
+      const fallback = FORMALITY_RANK[item.formality] ?? null;
+      if (fallback !== null) {
+        itemRegisterRank = fallback;
+        registerRankSource = "formality";
+      }
+    }
     const registerBonus = computeRegisterAlignmentScore(
       itemRegisterRank,
       targetRange,
@@ -4016,6 +4058,8 @@ export function selectAdditionalClosetGarments(
         bodyNeedSlotBonus: Math.round(bodyNeedSlotBonus * 1000) / 1000,
         intentionBonus: Math.round(intentionBonus * 1000) / 1000,
         registerBonus: Math.round(registerBonus * 1000) / 1000,
+        registerRank: itemRegisterRank,
+        registerRankSource,
         intentionPotentials: activeIntentions.length > 0
           ? Object.fromEntries(activeIntentions.map((iid) => [
               iid,
