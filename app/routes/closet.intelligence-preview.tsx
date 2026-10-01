@@ -190,14 +190,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // its own real compatible-match ids. No new finding, no invented piece:
   // every entry here already existed as real engine output.
   const worthTryingEntries = page.sections.find((s) => s.id === "wear")?.blocks.find((b) => b.id === "worth-trying")?.entries ?? [];
-  const rediscoverPieces: Array<{ garmentId: string; matchIds: string[] }> = [];
+  const rediscoverPieces: Array<{ garmentId: string; matchIds: string[]; insight: string }> = [];
   for (const entry of worthTryingEntries) {
     const members = entry.meta?.members as Array<{ garmentId: string; title: string }> | undefined;
     if (members && members.length > 0) {
-      for (const m of members) rediscoverPieces.push({ garmentId: m.garmentId, matchIds: entry.garmentIds });
+      // A grouped finding's body already explains both real pieces together
+      // (e.g. "the same 6 pieces work with either") — real, just shared.
+      const insight = entry.body ?? "";
+      for (const m of members) rediscoverPieces.push({ garmentId: m.garmentId, matchIds: entry.garmentIds, insight });
     } else {
       const gid = entry.meta?.garmentId as string | undefined;
-      if (gid) rediscoverPieces.push({ garmentId: gid, matchIds: entry.garmentIds });
+      // meta.label is the engine's own short real insight line for this
+      // piece (e.g. "Works across relaxed and polished looks"); body is the
+      // longer rediscovery explanation, used only if label isn't present.
+      const insight = (entry.meta?.label as string | undefined) ?? entry.body ?? "";
+      if (gid) rediscoverPieces.push({ garmentId: gid, matchIds: entry.garmentIds, insight });
     }
   }
 
@@ -463,7 +470,7 @@ export default function WardrobeIntelligencePreview() {
     neutralSharePct: number | null;
     enoughCluster: { title: string; body: string; garmentIds: string[]; count: number } | null;
     enoughClusters: Array<{ title: string; body: string; garmentIds: string[]; count: number }>;
-    rediscoverPieces: Array<{ garmentId: string; matchIds: string[] }>;
+    rediscoverPieces: Array<{ garmentId: string; matchIds: string[]; insight: string }>;
     bestByRegisterPreview: Partial<Record<RegisterId, Array<{ id: string; reason: string; garmentIds: string[] }>>>;
     moodboardLooks: Array<{ id: string; register: RegisterId; reason: string; garmentIds: string[] }>;
     recommendationDetail: {
@@ -481,13 +488,6 @@ export default function WardrobeIntelligencePreview() {
   // isn't exported for the client to reuse directly.
   const REGISTER_LABEL: Record<RegisterId, string> = {
     everyday: "Everyday", work: "Work", occasion: "Dinners & events",
-  };
-  // Short captions for the moodboard — the full "Dinners & events" register
-  // label reads as an analytical category when it's a small overlay on a
-  // photo; "Dinner" is the same real register, just said the way a person
-  // would say it.
-  const MOOD_CAPTION: Record<RegisterId, string> = {
-    everyday: "Everyday", work: "Work", occasion: "Dinner",
   };
   // Same labels COVERAGE_RULES already uses server-side — repeated here only
   // because that map isn't exported, not a new vocabulary.
@@ -626,7 +626,7 @@ export default function WardrobeIntelligencePreview() {
       const look = moodboardLooks.find((l) => l.id === dialog.lookId);
       if (!look) return null;
       return (
-        <DialogShell title={`A ${MOOD_CAPTION[look.register].toLowerCase()} look.`} subtitle="A real combination from what you already own." onClose={closeDialog}>
+        <DialogShell title={`A ${REGISTER_LABEL[look.register].toLowerCase()} look.`} subtitle="A real combination from what you already own." onClose={closeDialog}>
           <div className="wip-match-grid" style={{ gridTemplateColumns: `repeat(${look.garmentIds.length}, minmax(0,1fr))` }}>
             {look.garmentIds.map((id) => {
               const card = byId.get(id);
@@ -882,53 +882,65 @@ export default function WardrobeIntelligencePreview() {
       <div className="wip-app">
         <main className="wip-main">
           <p className="wip-eyebrow">My nAia / Wardrobe Intelligence</p>
-          <header className="wip-header">
-            <h1 className="wip-h1">Your wardrobe, <em className="sp-shell-accent">understood.</em></h1>
-            <div className="wip-status">
-              <button type="button" className="wip-link" onClick={() => setDialog({ kind: "status" })}>
-                {previewStatus ? `${previewStatus} ↗` : "Is your Closet up to date? →"}
-              </button>
+          <div className="wip-hero">
+            <div className="wip-hero-main">
+              <header className="wip-header">
+                <h1 className="wip-h1">Your wardrobe, <em className="sp-shell-accent">understood.</em></h1>
+                <div className="wip-status">
+                  <button type="button" className="wip-link" onClick={() => setDialog({ kind: "status" })}>
+                    {previewStatus ? `${previewStatus} ↗` : "Is your Closet up to date? →"}
+                  </button>
+                </div>
+              </header>
+              <p className="wip-summary">
+                A stylist&rsquo;s perspective on what you own, how you wear it, and where to focus next.{" "}
+                {page.reading ?? "Find more in what you own. See what deserves your attention."}
+              </p>
             </div>
-          </header>
-          <p className="wip-summary">{page.reading ?? "Find more in what you own. See what deserves your attention."}</p>
 
-          {/* ── Section 1: 3 headline insights ─────────────────────────────── */}
-          <div className="wip-cards">
-            {glanceRegisters[0] && (
-              <div className="wip-card">
-                <span className="wip-card-kicker wip-card-kicker--positive">Strongest</span>
-                <h3>{glanceRegisters[0].heading} wardrobe</h3>
-                <p>{glanceRegisters[0].stateText}</p>
-              </div>
-            )}
-            {glanceRegisters[1] && (
-              <div className="wip-card">
-                <span className="wip-card-kicker">Needs attention</span>
-                <h3>{glanceRegisters[1].heading} wardrobe</h3>
-                <p>{glanceRegisters[1].stateText}</p>
-              </div>
-            )}
-            {(worthConsidering || lowPriority) && (
-              <div className="wip-card">
-                <span className="wip-card-kicker wip-card-kicker--positive">Best next move</span>
-                <h3>{worthConsidering ? shortRecTitle(worthConsidering.title) : lowPriority!.title}</h3>
-                {recColourLead && <p>Best colour: {recColourLead[0].toUpperCase()}{recColourLead.slice(1)}</p>}
-              </div>
-            )}
+            {/* ── Section 1: 3 headline insights ───────────────────────────── */}
+            <div className="wip-cards">
+              {glanceRegisters[0] && (
+                <div className="wip-card">
+                  <span className="wip-card-kicker wip-card-kicker--positive">Strongest</span>
+                  <h3>{glanceRegisters[0].heading} wardrobe</h3>
+                  <p>{glanceRegisters[0].stateText}</p>
+                </div>
+              )}
+              {glanceRegisters[1] && (
+                <div className="wip-card">
+                  <span className="wip-card-kicker">Needs attention</span>
+                  <h3>{glanceRegisters[1].heading} wardrobe</h3>
+                  <p>{glanceRegisters[1].stateText}</p>
+                </div>
+              )}
+              {(worthConsidering || lowPriority) && (
+                <div className="wip-card">
+                  <span className="wip-card-kicker wip-card-kicker--positive">Best next move</span>
+                  <h3>{worthConsidering ? shortRecTitle(worthConsidering.title) : lowPriority!.title}</h3>
+                  {recColourLead && <p>Best colour: {recColourLead[0].toUpperCase()}{recColourLead.slice(1)}</p>}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* ── Section 2: Your Closet, styled (Moodboard V1) ──────────────── */}
           {moodboardLooks.length > 0 && (
             <section className="wip-section">
               <h2 className="wip-section-title">Your Closet, styled.</h2>
-              <p className="wip-section-sub">Looks you can already create from what you own.</p>
+              <p className="wip-section-sub">
+                {moodboardLooks.length} look{moodboardLooks.length === 1 ? "" : "s"}, built from what you already own.
+              </p>
               <div className="wip-mood-grid">
-                {moodboardLooks.map((look) => (
+                {moodboardLooks.map((look, i) => (
                   <button key={look.id} type="button" className="wip-mood-tile" onClick={() => setDialog({ kind: "moodboardLook", lookId: look.id })}>
-                    <div className="wip-mood-collage">
-                      {look.garmentIds.slice(0, 4).map((id) => <Thumb key={id} card={byId.get(id)} height={150} />)}
+                    <div className="wip-mood-collage" style={{ gridTemplateColumns: look.garmentIds.length <= 2 ? "1fr" : "1fr 1fr" }}>
+                      {look.garmentIds.map((id) => <Thumb key={id} card={byId.get(id)} height={140} />)}
                     </div>
-                    <span className="wip-mood-caption">{MOOD_CAPTION[look.register]}</span>
+                    <span className="wip-mood-meta">
+                      <span className="wip-mood-number">{String(i + 1).padStart(2, "0")}</span>
+                      <span className="wip-mood-register">{REGISTER_LABEL[look.register]}</span>
+                    </span>
                   </button>
                 ))}
               </div>
@@ -938,37 +950,34 @@ export default function WardrobeIntelligencePreview() {
           {/* ── Section 3: pieces worth rediscovering ──────────────────────── */}
           <section className="wip-section">
             <h2 className="wip-section-title">Pieces worth rediscovering.</h2>
-            {rediscoverPieces.slice(0, 3).map((piece) => {
-              const card = byId.get(piece.garmentId);
-              const looks = piece.matchIds.slice(0, 3);
-              return (
-                <div key={piece.garmentId} className="wip-piece-card">
-                  <div className="wip-piece-thumb"><Thumb card={card} height={84} /></div>
-                  <div className="wip-piece-body">
+            <p className="wip-section-sub">You have more ways to wear these than you think.</p>
+            <div className="wip-piece-grid">
+              {rediscoverPieces.slice(0, 3).map((piece) => {
+                const card = byId.get(piece.garmentId);
+                return (
+                  <div key={piece.garmentId} className="wip-piece-card">
+                    <div className="wip-piece-thumb"><Thumb card={card} height={220} /></div>
                     <h3>{cardLabel(card)}</h3>
-                    <p>You have more ways to wear this than you think.</p>
-                    {looks.length > 0 && (
-                      <div className="wip-piece-looks">
-                        {looks.map((id) => <Thumb key={id} card={byId.get(id)} height={56} />)}
-                      </div>
-                    )}
+                    {piece.insight && <p>{piece.insight}</p>}
                     <div className="wip-piece-actions">
                       <a className="wip-link" href="/style-me">Style this in StyleMe →</a>
-                      {piece.matchIds.length > looks.length && (
-                        <button type="button" className="wip-link" onClick={() => setDialog({ kind: "matches", anchorId: piece.garmentId })}>
+                      {piece.matchIds.length > 0 && (
+                        <button type="button" className="wip-link wip-link--secondary" onClick={() => setDialog({ kind: "matches", anchorId: piece.garmentId })}>
                           See {piece.matchIds.length} compatible pieces
                         </button>
                       )}
                     </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </section>
 
-          {/* ── Section 4: how your wardrobe supports your life ────────────── */}
-          {allRegisterReadings.length > 0 && (
-            <section className="wip-section">
+          {/* ── Section 4: two-column analysis ─────────────────────────────── */}
+          <section className="wip-section wip-analysis">
+            <div className="wip-analysis-grid">
+            {allRegisterReadings.length > 0 && (
+            <div className="wip-analysis-col">
               <h2 className="wip-section-title">How your wardrobe supports your life.</h2>
               {(["everyday", "work", "occasion"] as const).map((register) => {
                 const reading = allRegisterReadings.find((r) => r.register === register);
@@ -1011,12 +1020,11 @@ export default function WardrobeIntelligencePreview() {
                 );
               })}
               <button type="button" className="wip-link wip-section-more" onClick={() => setDialog({ kind: "lifestyle" })}>See all lifestyle insights →</button>
-            </section>
-          )}
+            </div>
+            )}
 
-          {/* ── Section 5: where your wardrobe repeats ─────────────────────── */}
-          {enoughClusters.length > 0 && (
-            <section className="wip-section">
+            {enoughClusters.length > 0 && (
+            <div className="wip-analysis-col">
               <h2 className="wip-section-title">Where your wardrobe repeats.</h2>
               {enoughClusters.map((c) => (
                 <div key={c.title} className="wip-repeat-card">
@@ -1029,8 +1037,10 @@ export default function WardrobeIntelligencePreview() {
                   )}
                 </div>
               ))}
-            </section>
-          )}
+            </div>
+            )}
+            </div>
+          </section>
 
           {/* ── Section 6: shop smarter ─────────────────────────────────────── */}
           {(worthConsidering || lowPriority) && (
@@ -1075,16 +1085,20 @@ export default function WardrobeIntelligencePreview() {
             </section>
           )}
 
-          {/* ── Secondary links — deep evidence, never the main story ──────── */}
-          <div className="wip-footer-links">
-            {coverage && (
-              <button type="button" className="wip-link" onClick={() => setDialog({ kind: "coverage" })}>See how your wardrobe matches your Style Passport →</button>
-            )}
-            {profileBlock && (
-              <button type="button" className="wip-link" onClick={() => setDialog({ kind: "profile" })}>What your wardrobe looks like →</button>
-            )}
-          </div>
-          <button type="button" className="wip-link wip-method-link" onClick={() => setDialog({ kind: "method" })}>How nAia works this out</button>
+          {/* ── Section 6 (quiet): Explore your results — deep evidence, ───── */}
+          {/* never the main story ─────────────────────────────────────────── */}
+          <section className="wip-section wip-explore">
+            <h2 className="wip-section-title">Explore your results.</h2>
+            <div className="wip-footer-links">
+              {coverage && (
+                <button type="button" className="wip-link" onClick={() => setDialog({ kind: "coverage" })}>See how your wardrobe matches your Style Passport →</button>
+              )}
+              {profileBlock && (
+                <button type="button" className="wip-link" onClick={() => setDialog({ kind: "profile" })}>What your wardrobe looks like →</button>
+              )}
+              <button type="button" className="wip-link" onClick={() => setDialog({ kind: "method" })}>How nAia works this out →</button>
+            </div>
+          </section>
           <p className="wip-legal">Nothing you do on this page is saved.</p>
         </main>
       </div>
@@ -1094,51 +1108,72 @@ export default function WardrobeIntelligencePreview() {
 }
 
 const css = `
-  .wip-app{max-width:860px;margin:0 auto}
+  .wip-app{max-width:1180px;margin:0 auto}
   .wip-main{padding:8px 0 56px}
   .wip-eyebrow{font-family:var(--naia-ff-ui);font-size:9px;letter-spacing:2.5px;text-transform:uppercase;color:rgba(40,21,12,0.5);margin:0 0 14px}
+
+  /* Hero: headline + summary (left) beside the 3 headline insights (right) */
+  .wip-hero{display:flex;align-items:flex-start;justify-content:space-between;gap:48px;flex-wrap:wrap}
+  .wip-hero-main{flex:1 1 420px;min-width:280px}
   .wip-header{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;flex-wrap:wrap}
   .wip-h1{font-family:var(--naia-ff-display);font-weight:200;font-size:2rem;letter-spacing:0.01em;text-transform:uppercase;line-height:1.05;margin:0}
   .wip-h1 em{font-family:var(--naia-ff-body);font-style:italic;text-transform:none}
   .wip-status{padding-top:6px}
   .wip-link{border:0;background:none;padding:0;font-family:var(--naia-ff-ui);font-size:11.5px;color:var(--naia-accent);text-decoration:underline;text-underline-offset:3px;cursor:pointer}
-  .wip-summary{font-family:var(--naia-ff-ui);font-size:14px;line-height:1.6;color:rgba(40,21,12,0.72);margin:14px 0 32px;max-width:620px}
+  .wip-link--secondary{color:rgba(40,21,12,0.55)}
+  .wip-summary{font-family:var(--naia-ff-ui);font-size:14px;line-height:1.6;color:rgba(40,21,12,0.72);margin:14px 0 0;max-width:560px}
 
-  .wip-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px;padding:24px 0;margin-bottom:48px;border-top:1px solid var(--naia-border);border-bottom:1px solid var(--naia-border)}
-  @media(max-width:700px){.wip-cards{grid-template-columns:1fr}}
+  .wip-cards{display:flex;flex-wrap:wrap;flex-shrink:0}
+  .wip-card{padding:0 30px;min-width:150px}
+  .wip-card:first-child{padding-left:0}
+  .wip-card + .wip-card{border-left:1px solid var(--naia-border)}
   .wip-card-kicker{display:block;font-family:var(--naia-ff-ui);font-size:9.5px;letter-spacing:1.6px;text-transform:uppercase;font-weight:700;color:rgba(40,21,12,0.5)}
   .wip-card-kicker--positive{color:var(--naia-accent)}
   .wip-card h3{font-family:var(--naia-ff-ui);font-weight:700;font-size:15px;line-height:1.3;margin:8px 0 4px;color:var(--naia-ink)}
   .wip-card p{font-family:var(--naia-ff-ui);font-size:11.5px;color:rgba(40,21,12,0.6);margin:0}
+  @media(max-width:900px){.wip-cards{width:100%}}
+  @media(max-width:520px){
+    .wip-cards{flex-direction:column;gap:14px}
+    .wip-card{padding:0}
+    .wip-card + .wip-card{border-left:0;border-top:1px solid var(--naia-border);padding-top:14px}
+  }
 
-  .wip-section{margin:0 0 56px}
+  .wip-section{margin:0;padding:40px 0 0;border-top:1px solid var(--naia-border)}
+  .wip-hero + .wip-section{border-top:0;padding-top:48px}
   .wip-section-title{font-family:var(--naia-ff-display);font-weight:300;font-size:1.5rem;margin:0 0 6px;color:var(--naia-ink)}
-  .wip-section-sub{font-family:var(--naia-ff-ui);font-size:12.5px;color:rgba(40,21,12,0.55);margin:0 0 20px}
+  .wip-section-sub{font-family:var(--naia-ff-ui);font-size:12.5px;color:rgba(40,21,12,0.55);margin:0 0 24px}
   .wip-section-more{display:block;margin-top:14px}
 
   /* Your Closet, styled (Moodboard V1) */
-  .wip-mood-grid{column-count:2;column-gap:14px}
-  @media(min-width:640px){.wip-mood-grid{column-count:3}}
-  .wip-mood-tile{display:block;width:100%;break-inside:avoid;margin-bottom:14px;border:0;background:none;padding:0;text-align:left;cursor:pointer}
-  .wip-mood-collage{display:grid;grid-template-columns:1fr 1fr;gap:3px;border-radius:6px;overflow:hidden}
-  .wip-mood-collage .wip-thumb{border-radius:0}
+  .wip-mood-grid{display:grid;grid-template-columns:1fr;gap:24px}
+  @media(min-width:540px){.wip-mood-grid{grid-template-columns:repeat(2,1fr)}}
+  @media(min-width:820px){.wip-mood-grid{grid-template-columns:repeat(3,1fr)}}
+  @media(min-width:1150px){.wip-mood-grid{grid-template-columns:repeat(6,1fr)}}
+  .wip-mood-tile{display:block;width:100%;border:0;background:none;padding:0;text-align:left;cursor:pointer}
+  .wip-mood-collage{display:grid;gap:4px;border-radius:6px;overflow:hidden;background:var(--naia-muted-bg);aspect-ratio:3/4}
+  .wip-mood-collage .wip-thumb{border-radius:0;height:100% !important}
   .wip-mood-tile:hover .wip-mood-collage{outline:2px solid var(--naia-accent);outline-offset:2px}
-  .wip-mood-caption{display:block;font-family:var(--naia-ff-ui);font-size:10.5px;color:rgba(40,21,12,0.55);margin-top:6px}
+  .wip-mood-meta{display:flex;align-items:baseline;gap:8px;margin-top:10px}
+  .wip-mood-number{font-family:var(--naia-ff-ui);font-size:10px;color:rgba(40,21,12,0.4)}
+  .wip-mood-register{font-family:var(--naia-ff-ui);font-size:10.5px;letter-spacing:1px;text-transform:uppercase;color:rgba(40,21,12,0.6);font-weight:600}
 
   /* Pieces worth rediscovering */
-  .wip-piece-card{display:flex;align-items:flex-start;gap:20px;padding:20px 0;border-top:1px solid var(--naia-border)}
-  .wip-piece-card:last-child{padding-bottom:0;border-bottom:1px solid var(--naia-border)}
-  .wip-piece-thumb .wip-thumb{width:84px;border-radius:4px}
-  .wip-piece-body{flex:1;min-width:0}
-  .wip-piece-body h3{font-family:var(--naia-ff-ui);font-weight:700;font-size:14px;margin:0 0 4px;color:var(--naia-ink)}
-  .wip-piece-body > p{font-family:var(--naia-ff-ui);font-size:12px;color:rgba(40,21,12,0.6);margin:0 0 10px}
-  .wip-piece-looks{display:flex;gap:8px;margin-bottom:10px}
-  .wip-piece-looks .wip-thumb{width:56px;border-radius:4px}
-  .wip-piece-actions{display:flex;gap:20px;align-items:center;flex-wrap:wrap}
+  .wip-piece-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:32px}
+  @media(max-width:900px){.wip-piece-grid{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:600px){.wip-piece-grid{grid-template-columns:1fr}}
+  .wip-piece-card{display:flex;flex-direction:column}
+  .wip-piece-thumb .wip-thumb{width:100%;border-radius:4px;margin-bottom:16px}
+  .wip-piece-card h3{font-family:var(--naia-ff-ui);font-weight:700;font-size:14px;margin:0 0 6px;color:var(--naia-ink)}
+  .wip-piece-card > p{font-family:var(--naia-ff-ui);font-size:12px;line-height:1.5;color:rgba(40,21,12,0.6);margin:0 0 14px}
+  .wip-piece-actions{display:flex;flex-direction:column;gap:7px;align-items:flex-start}
+
+  /* Two-column analysis: How your wardrobe supports your life | Where it repeats */
+  .wip-analysis-grid{display:grid;grid-template-columns:1fr 1fr;gap:56px}
+  @media(max-width:900px){.wip-analysis-grid{grid-template-columns:1fr;gap:40px}}
 
   /* How your wardrobe supports your life */
-  .wip-life-row{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;padding:18px 0;border-top:1px solid var(--naia-border)}
-  .wip-life-row:last-of-type{border-bottom:1px solid var(--naia-border)}
+  .wip-life-row{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:16px 0;border-top:1px solid var(--naia-border)}
+  .wip-life-row:first-of-type{border-top:0;padding-top:0}
   .wip-life-main{flex:1;min-width:0}
   .wip-life-heading{display:flex;align-items:baseline;gap:10px}
   .wip-life-heading h3{font-family:var(--naia-ff-ui);font-weight:700;font-size:14px;margin:0;color:var(--naia-ink)}
@@ -1148,18 +1183,18 @@ const css = `
   .wip-life-count{font-family:var(--naia-ff-ui);font-size:10.5px;color:rgba(40,21,12,0.5);margin:0 0 4px}
   .wip-life-text{font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.6;color:rgba(40,21,12,0.65);margin:0}
   .wip-life-looks{display:flex;gap:8px;flex-shrink:0}
-  .wip-life-looks .wip-thumb{width:64px;border-radius:4px}
+  .wip-life-looks .wip-thumb{width:56px;border-radius:4px}
 
   /* Where your wardrobe repeats */
-  .wip-repeat-card{padding:18px 0;border-top:1px solid var(--naia-border)}
-  .wip-repeat-card:last-child{padding-bottom:0;border-bottom:1px solid var(--naia-border)}
+  .wip-repeat-card{padding:16px 0;border-top:1px solid var(--naia-border)}
+  .wip-repeat-card:first-child{border-top:0;padding-top:0}
   .wip-repeat-card h3{font-family:var(--naia-ff-ui);font-weight:700;font-size:14px;margin:0 0 6px;color:var(--naia-ink)}
   .wip-repeat-card p{font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.6;color:rgba(40,21,12,0.65);margin:0 0 12px}
   .wip-repeat-looks{display:flex;gap:8px;flex-wrap:wrap}
-  .wip-repeat-looks .wip-thumb{width:70px;border-radius:4px}
+  .wip-repeat-looks .wip-thumb{width:64px;border-radius:4px}
 
   /* Shop smarter */
-  .wip-shop-split{display:grid;grid-template-columns:1fr 1fr;gap:36px}
+  .wip-shop-split{display:grid;grid-template-columns:1fr 1fr;gap:48px}
   @media(max-width:700px){.wip-shop-split{grid-template-columns:1fr;gap:28px}}
   .wip-shop-col-label{display:block;font-family:var(--naia-ff-ui);font-size:9.5px;letter-spacing:1.4px;text-transform:uppercase;font-weight:700;color:rgba(40,21,12,0.45);margin-bottom:10px}
   .wip-shop-col-label--buy{color:var(--naia-accent)}
@@ -1169,9 +1204,11 @@ const css = `
   .wip-shop-looks{display:flex;gap:8px;margin-bottom:10px}
   .wip-shop-looks .wip-thumb{width:64px;border-radius:4px}
 
-  .wip-footer-links{display:flex;flex-wrap:wrap;gap:10px 28px;padding-top:24px;margin-top:8px;border-top:1px solid var(--naia-border)}
-  .wip-method-link{display:block;margin-top:16px}
-  .wip-legal{font-family:var(--naia-ff-ui);font-size:9.5px;color:rgba(40,21,12,0.45);margin-top:18px}
+  /* Explore your results (quiet footer) */
+  .wip-explore{padding-top:32px}
+  .wip-explore .wip-section-title{font-size:1.1rem;font-weight:300;opacity:0.82;margin-bottom:14px}
+  .wip-footer-links{display:flex;flex-wrap:wrap;gap:10px 32px}
+  .wip-legal{font-family:var(--naia-ff-ui);font-size:9.5px;color:rgba(40,21,12,0.45);margin-top:24px}
   .wip-empty{font-family:var(--naia-ff-ui);font-size:13px;color:rgba(40,21,12,0.6);padding:40px 0}
 
   .wip-thumb{width:100%;display:flex;align-items:center;justify-content:center;background:var(--naia-muted-bg);border-radius:4px;overflow:hidden;flex-shrink:0}
@@ -1181,7 +1218,7 @@ const css = `
   @media(max-width:700px){
     .wip-header{display:block}
     .wip-status{padding-top:12px}
-    .wip-piece-card,.wip-life-row{flex-direction:column}
+    .wip-life-row{flex-direction:column}
   }
 
   .wip-dialog-backdrop{position:fixed;inset:0;background:rgba(40,21,12,0.35);display:flex;align-items:center;justify-content:center;padding:20px;z-index:50}
