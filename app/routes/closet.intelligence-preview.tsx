@@ -258,6 +258,23 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 /**
+ * Two real combinations "read" as the same outfit — not two different ways
+ * to wear the Closet — when they differ by at most one swapped piece (one
+ * garment removed, one added; an identical set counts too, diff 0). A real
+ * customer's top-ranked combos are frequently just that: the same anchor
+ * pieces with one jean or one trouser swapped. This is one of two tests
+ * that decide whether a look earns its own moodboard slot — it never
+ * touches which combinations exist or how they're ranked.
+ */
+function combosReadAsSameOutfit(a: string[], b: string[]): boolean {
+  const setA = new Set(a);
+  const setB = new Set(b);
+  const onlyInA = a.filter((id) => !setB.has(id)).length;
+  const onlyInB = b.filter((id) => !setA.has(id)).length;
+  return onlyInA + onlyInB <= 2;
+}
+
+/**
  * Moodboard V1 diversity selection — presentation only.
  *
  * Chooses which of the engine's ALREADY-RANKED real combinations to show on
@@ -265,12 +282,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
  * every candidate here is a real intelligence.pairings.bestByRegister entry.
  * It round-robins across registers, consuming each register's own real rank
  * order first-to-last (so "best" stays best and a thin register doesn't
- * crowd out a deep one), enforces that no garment appears in more than 2
- * selected looks, and tries not to repeat a garment in the
- * immediately-adjacent selection (relaxed only if nothing else is left to
- * pick from that register). Stops at `targetCount` or when every register is
- * exhausted — a thinner Closet simply gets fewer looks, never a backfilled
- * or fabricated one.
+ * crowd out a deep one), and rejects a candidate on either of two tests:
+ * it reads as the same outfit as one already selected (one swapped piece,
+ * see combosReadAsSameOutfit), OR it reuses a garment already anchoring a
+ * selected look. That second test is the stronger one in practice: a real
+ * Closet's top-ranked combos per register are frequently the SAME blazer or
+ * hoodie paired with several different shirts/trousers in turn — each pair
+ * can differ by two real pieces and still not pass combosReadAsSameOutfit,
+ * yet repeating the same anchor garment across "distinct" hero slots is
+ * exactly the repetition this selector exists to prevent. Each garment may
+ * anchor at most one selected look. Quality over quantity: stops at
+ * `targetCount` (6) or when every register is exhausted of genuinely
+ * distinct candidates, whichever comes first. A Closet whose real depth is
+ * mostly one or two formulas gets fewer, honestly distinct looks, never
+ * padded out to 6 with near-repeats.
  */
 function selectMoodboardLooks(
   byRegister: Partial<Record<RegisterId, Array<{ id: string; reason: string; garmentIds: string[] }>>>,
@@ -282,10 +307,9 @@ function selectMoodboardLooks(
 
   const selected: Array<{ id: string; register: RegisterId; reason: string; garmentIds: string[] }> = [];
   const usedCount = new Map<string, number>();
-  let lastGarmentIds = new Set<string>();
 
-  const fits = (ids: string[]) => ids.every((id) => (usedCount.get(id) ?? 0) < 2);
-  const overlapsLast = (ids: string[]) => ids.some((id) => lastGarmentIds.has(id));
+  const fits = (ids: string[]) => ids.every((id) => (usedCount.get(id) ?? 0) < 1);
+  const isSameAsSelected = (ids: string[]) => selected.some((s) => combosReadAsSameOutfit(s.garmentIds, ids));
 
   let progress = true;
   while (selected.length < targetCount && progress) {
@@ -293,13 +317,11 @@ function selectMoodboardLooks(
     for (const r of registers) {
       if (selected.length >= targetCount) break;
       const queue = queues[r]!;
-      let pickIdx = queue.findIndex((c) => fits(c.garmentIds) && !overlapsLast(c.garmentIds));
-      if (pickIdx === -1) pickIdx = queue.findIndex((c) => fits(c.garmentIds));
+      const pickIdx = queue.findIndex((c) => fits(c.garmentIds) && !isSameAsSelected(c.garmentIds));
       if (pickIdx === -1) continue;
       const [chosen] = queue.splice(pickIdx, 1);
       selected.push({ ...chosen, register: r });
       for (const id of chosen.garmentIds) usedCount.set(id, (usedCount.get(id) ?? 0) + 1);
-      lastGarmentIds = new Set(chosen.garmentIds);
       progress = true;
     }
   }
@@ -924,9 +946,9 @@ export default function WardrobeIntelligencePreview() {
             </div>
           </div>
 
-          {/* ── Section 2: Your Closet, styled (Moodboard V1) ──────────────── */}
+          {/* ── Section 2: Your Closet, styled (Moodboard V1) — visual hero ─── */}
           {moodboardLooks.length > 0 && (
-            <section className="wip-section">
+            <section className="wip-section wip-section--hero">
               <h2 className="wip-section-title">Your Closet, styled.</h2>
               <p className="wip-section-sub">
                 {moodboardLooks.length} look{moodboardLooks.length === 1 ? "" : "s"}, built from what you already own.
@@ -965,7 +987,7 @@ export default function WardrobeIntelligencePreview() {
                     : piece.insight;
                   return (
                   <div key={piece.garmentId} className="wip-piece-card">
-                    <div className="wip-piece-thumb"><Thumb card={card} height={130} /></div>
+                    <div className="wip-piece-thumb"><Thumb card={card} height={170} /></div>
                     <h3>{cardLabel(card)}</h3>
                     {displayInsight && <p>{displayInsight}</p>}
                     <div className="wip-piece-actions">
@@ -984,7 +1006,7 @@ export default function WardrobeIntelligencePreview() {
           </section>
 
           {/* ── Section 4: two-column analysis ─────────────────────────────── */}
-          <section className="wip-section wip-analysis">
+          <section className="wip-section wip-analysis wip-section--quiet">
             <div className="wip-analysis-grid">
             {allRegisterReadings.length > 0 && (
             <div className="wip-analysis-col">
@@ -1019,13 +1041,18 @@ export default function WardrobeIntelligencePreview() {
                         <button type="button" className="wip-link" onClick={() => setDialog({ kind: "workCombo" })}>View this combination →</button>
                       )}
                     </div>
-                    {primary && (
-                      <div className="wip-life-looks">
-                        {primary.garmentIds.slice(0, 3).map((id) => <Thumb key={id} card={byId.get(id)} height={64} />)}
-                        {isSwap && changedIds.slice(0, 1).map((id) => <Thumb key={id} card={byId.get(id)} height={64} />)}
-                        {isDistinctLook && secondary!.garmentIds.slice(0, 1).map((id) => <Thumb key={id} card={byId.get(id)} height={64} />)}
-                      </div>
-                    )}
+                    {primary && (() => {
+                      // Evidence tier: max 3 thumbnails per row. The swap/
+                      // distinct-look piece (if any) always gets a slot;
+                      // the rest come from the primary combo.
+                      const extra = isSwap ? changedIds.slice(0, 1) : isDistinctLook ? secondary!.garmentIds.slice(0, 1) : [];
+                      const lifeLookIds = [...primary.garmentIds.slice(0, 3 - extra.length), ...extra];
+                      return (
+                        <div className="wip-evidence-row">
+                          {lifeLookIds.map((id) => <Thumb key={id} card={byId.get(id)} height={56} />)}
+                        </div>
+                      );
+                    })()}
                   </div>
                 );
               })}
@@ -1041,8 +1068,8 @@ export default function WardrobeIntelligencePreview() {
                   <h3>{c.title}</h3>
                   <p>{c.body}</p>
                   {c.garmentIds.length > 0 && (
-                    <div className="wip-repeat-looks">
-                      {c.garmentIds.slice(0, 6).map((id) => <Thumb key={id} card={byId.get(id)} height={70} />)}
+                    <div className="wip-evidence-row">
+                      {c.garmentIds.slice(0, 5).map((id) => <Thumb key={id} card={byId.get(id)} height={56} />)}
                     </div>
                   )}
                 </div>
@@ -1054,65 +1081,113 @@ export default function WardrobeIntelligencePreview() {
 
           {/* ── Section 6: shop smarter ─────────────────────────────────────── */}
           {(worthConsidering || lowPriority) && (
-            <section className="wip-section">
+            <section className="wip-section wip-section--quiet">
               <h2 className="wip-section-title">Shop smarter.</h2>
               <div className="wip-shop-split">
                 {worthConsidering && (
                   <div className="wip-shop-col">
                     <span className="wip-shop-col-label wip-shop-col-label--buy">Worth adding</span>
-                    <div className="wip-shop-col-row">
-                      {worthConsidering.garmentIds.length > 0 && (
-                        <div className="wip-shop-col-media"><Thumb card={byId.get(worthConsidering.garmentIds[0])} height={100} /></div>
-                      )}
-                      <div className="wip-shop-col-body">
-                        <h3>{(worthConsidering.title ?? "").replace(/^Look for |\.$/g, "")}</h3>
-                        {(recBullets.length > 0 || recColourLead) && (
-                          <ul>
-                            {recBullets.map((b) => <li key={b}>{b}</li>)}
-                            {recColourLead && <li>Best colour: {recColourLead[0].toUpperCase()}{recColourLead.slice(1)}</li>}
-                            {recColourAlternatives.length > 0 && (
-                              <li>Also within your palette: {recColourAlternatives.map((c) => c[0].toUpperCase() + c.slice(1)).join(", ")}</li>
-                            )}
-                          </ul>
+                    <h3>{(worthConsidering.title ?? "").replace(/^Look for |\.$/g, "")}</h3>
+                    {(recBullets.length > 0 || recColourLead) && (
+                      <ul>
+                        {recBullets.map((b) => <li key={b}>{b}</li>)}
+                        {recColourLead && <li>Best colour: {recColourLead[0].toUpperCase()}{recColourLead.slice(1)}</li>}
+                        {recColourAlternatives.length > 0 && (
+                          <li>Also within your palette: {recColourAlternatives.map((c) => c[0].toUpperCase() + c.slice(1)).join(", ")}</li>
                         )}
-                        <p>{(worthConsidering.body ?? "").split(".")[0]}.</p>
-                        <button type="button" className="wip-link" onClick={() => setDialog({ kind: "worthConsidering" })}>Why this recommendation →</button>
-                      </div>
-                    </div>
+                      </ul>
+                    )}
+                    {worthConsidering.garmentIds.length > 0 && (
+                      <>
+                        <p className="wip-shop-evidence-label">Works with pieces you own</p>
+                        <div className="wip-evidence-row">
+                          {worthConsidering.garmentIds.slice(0, 4).map((id) => <Thumb key={id} card={byId.get(id)} height={56} />)}
+                        </div>
+                      </>
+                    )}
+                    <button type="button" className="wip-link" onClick={() => setDialog({ kind: "worthConsidering" })}>Why this recommendation →</button>
                   </div>
                 )}
                 {lowPriority && (
                   <div className="wip-shop-col">
                     <span className="wip-shop-col-label">Skip for now</span>
-                    <div className="wip-shop-col-row">
-                      {enoughCluster && enoughCluster.garmentIds.length > 0 && (
-                        <div className="wip-shop-col-media"><Thumb card={byId.get(enoughCluster.garmentIds[0])} height={100} /></div>
-                      )}
-                      <div className="wip-shop-col-body">
-                        <h3>{(lowPriority.title ?? "").replace(/^Another (similar |of your )?/i, "Another ")}</h3>
-                        <p>{enoughCluster?.body ?? lowPriority.body}</p>
-                      </div>
-                    </div>
+                    <h3>{(lowPriority.title ?? "").replace(/^Another (similar |of your )?/i, "Another ")}</h3>
+                    <p>{enoughCluster?.body ?? lowPriority.body}</p>
+                    {enoughCluster && enoughCluster.garmentIds.length > 0 && (
+                      <>
+                        <p className="wip-shop-evidence-label">Similar pieces you own</p>
+                        <div className="wip-evidence-row">
+                          {enoughCluster.garmentIds.slice(0, 4).map((id) => <Thumb key={id} card={byId.get(id)} height={56} />)}
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
             </section>
           )}
 
-          {/* ── Section 6 (quiet): Explore your results — deep evidence, ───── */}
-          {/* never the main story ─────────────────────────────────────────── */}
-          <section className="wip-section wip-explore">
-            <h2 className="wip-section-title">Explore your results.</h2>
-            <div className="wip-footer-links">
-              {coverage && (
-                <button type="button" className="wip-link" onClick={() => setDialog({ kind: "coverage" })}>See how your wardrobe matches your Style Passport →</button>
+          {/* ── Section 7: how your wardrobe matches your Style Passport ────── */}
+          {coverage && (() => {
+            const mayDependCount = blockedDetail.filter((b) => coverageContext(b.reason, b.layers.length > 0, byId.get(b.garmentId)?.category, byId.get(b.garmentId)?.hemLength ?? null) === "may-depend").length;
+            const activewearCount = blockedDetail.filter((b) => byId.get(b.garmentId)?.category === "ACTIVEWEAR").length;
+            const findings = [
+              summaryLines.find((l) => /colour|color/i.test(l)) ?? null,
+              coverage.body ?? null,
+              mayDependCount > 0
+                ? `${mayDependCount} ${mayDependCount === 1 ? "piece" : "pieces"} may depend on how you wear them${activewearCount > 0 ? " — activewear and layering read differently here" : ""}.`
+                : null,
+            ].filter((f): f is string => Boolean(f)).slice(0, 4);
+            if (findings.length === 0) return null;
+            const [headline, ...supporting] = findings;
+            return (
+              <section className="wip-section wip-section--quiet">
+                <h2 className="wip-section-title">How your wardrobe matches your Style Passport.</h2>
+                <p className="wip-findings-headline">{headline}</p>
+                {supporting.length > 0 && (
+                  <ul className="wip-findings-list">
+                    {supporting.map((f, i) => <li key={i}>{f}</li>)}
+                  </ul>
+                )}
+                <button type="button" className="wip-link wip-section-more" onClick={() => setDialog({ kind: "coverage" })}>See details →</button>
+              </section>
+            );
+          })()}
+
+          {/* ── Section 8: what your wardrobe looks like ─────────────────────── */}
+          {profileBlock && (
+            <section className="wip-section wip-section--quiet">
+              <h2 className="wip-section-title">What your wardrobe looks like.</h2>
+              {neutralSharePct !== null && neutralSharePct >= 40 && (
+                <p className="wip-findings-headline">{neutralSharePct}% of your colour-tagged pieces are neutral — easy to combine, though outfits can feel visually similar.</p>
               )}
-              {profileBlock && (
-                <button type="button" className="wip-link" onClick={() => setDialog({ kind: "profile" })}>What your wardrobe looks like →</button>
+              {paletteRows.length > 0 && (
+                <div className="wip-swatches">
+                  {paletteRows.map((c) => (
+                    <div key={c.colour} className="wip-swatch-item">
+                      <span className="wip-swatch" style={{ background: swatchColour(c.colour) }} />
+                      {c.colour} · {c.count}
+                    </div>
+                  ))}
+                </div>
               )}
-              <button type="button" className="wip-link" onClick={() => setDialog({ kind: "method" })}>How nAia works this out →</button>
-            </div>
-          </section>
+              {shapeChips.length > 0 && (
+                <>
+                  <div className="wip-chips">
+                    {shapeChips.map((s) => <span key={s.label} className="wip-chip">{s.label} · {s.count}</span>)}
+                  </div>
+                  {shapeChips.length > 1 && (
+                    <p className="wip-profile-so-what">
+                      {shapeChips[0].label} shapes appear most often, so even when you change individual garments, the overall shape of an outfit can stay similar.
+                    </p>
+                  )}
+                </>
+              )}
+              <button type="button" className="wip-link wip-section-more" onClick={() => setDialog({ kind: "profile" })}>See details →</button>
+            </section>
+          )}
+
+          <button type="button" className="wip-link wip-method-link" onClick={() => setDialog({ kind: "method" })}>How nAia works this out →</button>
           <p className="wip-legal">Nothing you do on this page is saved.</p>
         </main>
       </div>
@@ -1155,6 +1230,13 @@ const css = `
   .wip-section{margin:0;padding:30px 0 0;border-top:1px solid var(--naia-border)}
   .wip-hero + .wip-section{border-top:0;padding-top:36px}
   .wip-section-title{font-family:var(--naia-ff-display);font-weight:300;font-size:1.5rem;margin:0 0 6px;color:var(--naia-ink)}
+  /* Hierarchy: the moodboard is the visual hero; rediscovery stays at this
+     base weight as the clear second; everything from the analysis section
+     downward is deliberately quieter, so the page reads as sequenced
+     rather than a flat list of equally-weighted sections. */
+  .wip-section--hero .wip-section-title{font-size:1.9rem}
+  .wip-section--quiet{padding-top:26px}
+  .wip-section--quiet .wip-section-title{font-size:1.2rem;font-weight:400;opacity:0.88}
   .wip-section-sub{font-family:var(--naia-ff-ui);font-size:12.5px;color:rgba(40,21,12,0.55);margin:0 0 18px}
   .wip-section-more{display:block;margin-top:14px}
 
@@ -1166,20 +1248,20 @@ const css = `
   .wip-mood-grid{display:grid;grid-template-columns:1fr;gap:22px}
   @media(min-width:640px){.wip-mood-grid{grid-template-columns:repeat(2,1fr)}}
   @media(min-width:960px){.wip-mood-grid{grid-template-columns:repeat(3,1fr)}}
-  .wip-mood-tile{display:block;width:100%;border:1px solid var(--naia-border);border-radius:8px;background:var(--naia-surface);padding:20px;text-align:left;cursor:pointer}
+  .wip-mood-tile{display:block;width:100%;border:1px solid var(--naia-border);border-radius:8px;background:var(--naia-surface);padding:14px;text-align:left;cursor:pointer}
   .wip-mood-tile:hover{border-color:rgba(40,21,12,0.3)}
-  .wip-mood-collage{display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:1fr;gap:14px;aspect-ratio:4/5}
+  .wip-mood-collage{display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:1fr;gap:8px;aspect-ratio:1/1}
   .wip-mood-collage .wip-thumb{border-radius:0;height:100% !important;background:none}
-  .wip-mood-meta{display:block;font-family:var(--naia-ff-ui);font-size:11px;letter-spacing:1px;text-transform:uppercase;color:rgba(40,21,12,0.55);font-weight:600;margin-top:16px}
+  .wip-mood-meta{display:block;font-family:var(--naia-ff-ui);font-size:11px;letter-spacing:1px;text-transform:uppercase;color:rgba(40,21,12,0.55);font-weight:600;margin-top:11px}
 
   /* Pieces worth rediscovering */
   .wip-piece-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:26px}
   @media(max-width:900px){.wip-piece-grid{grid-template-columns:repeat(2,1fr)}}
   @media(max-width:600px){.wip-piece-grid{grid-template-columns:1fr}}
   .wip-piece-card{display:flex;flex-direction:column}
-  .wip-piece-thumb .wip-thumb{width:100%;border-radius:4px;margin-bottom:10px}
-  .wip-piece-card h3{font-family:var(--naia-ff-ui);font-weight:700;font-size:14px;margin:0 0 4px;color:var(--naia-ink)}
-  .wip-piece-card > p{font-family:var(--naia-ff-ui);font-size:12px;line-height:1.5;color:rgba(40,21,12,0.6);margin:0 0 10px}
+  .wip-piece-thumb .wip-thumb{width:100%;border-radius:4px;margin-bottom:8px}
+  .wip-piece-card h3{font-family:var(--naia-ff-ui);font-weight:700;font-size:14px;margin:0 0 3px;color:var(--naia-ink)}
+  .wip-piece-card > p{font-family:var(--naia-ff-ui);font-size:12px;line-height:1.5;color:rgba(40,21,12,0.6);margin:0 0 8px}
   .wip-piece-actions{display:flex;flex-direction:column;gap:7px;align-items:flex-start}
 
   /* Two-column analysis: How your wardrobe supports your life | Where it repeats */
@@ -1197,35 +1279,41 @@ const css = `
   .wip-life-bar-fill{height:100%;background:var(--naia-accent);border-radius:2px}
   .wip-life-count{font-family:var(--naia-ff-ui);font-size:10.5px;color:rgba(40,21,12,0.5);margin:0 0 4px}
   .wip-life-text{font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.6;color:rgba(40,21,12,0.65);margin:0}
-  .wip-life-looks{display:flex;gap:8px;flex-shrink:0}
-  .wip-life-looks .wip-thumb{width:60px;border-radius:4px}
 
   /* Where your wardrobe repeats */
   .wip-repeat-card{padding:13px 0;border-top:1px solid var(--naia-border)}
   .wip-repeat-card:first-child{border-top:0;padding-top:0}
   .wip-repeat-card h3{font-family:var(--naia-ff-ui);font-weight:700;font-size:14px;margin:0 0 6px;color:var(--naia-ink)}
   .wip-repeat-card p{font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.6;color:rgba(40,21,12,0.65);margin:0 0 10px}
-  .wip-repeat-looks{display:flex;gap:8px;flex-wrap:wrap}
-  .wip-repeat-looks .wip-thumb{width:60px;border-radius:4px}
+
+  /* Shared evidence-tier thumbnail system — every evidence row on the page
+     (lifestyle combos, repetition clusters, shop-smarter support) uses this
+     one fixed size, so nothing competes on scale with the moodboard or the
+     rediscovery images above it. */
+  .wip-evidence-row{display:flex;gap:8px;flex-wrap:wrap}
+  .wip-evidence-row .wip-thumb{width:56px;height:56px;border-radius:4px}
 
   /* Shop smarter */
   .wip-shop-split{display:grid;grid-template-columns:1fr 1fr;gap:40px}
   @media(max-width:700px){.wip-shop-split{grid-template-columns:1fr;gap:24px}}
   .wip-shop-col-label{display:block;font-family:var(--naia-ff-ui);font-size:9.5px;letter-spacing:1.4px;text-transform:uppercase;font-weight:700;color:rgba(40,21,12,0.45);margin-bottom:12px}
   .wip-shop-col-label--buy{color:var(--naia-accent)}
-  .wip-shop-col-row{display:flex;gap:18px;align-items:flex-start}
-  .wip-shop-col-media .wip-thumb{width:100px;border-radius:4px;flex-shrink:0}
-  .wip-shop-col-body{flex:1;min-width:0}
   .wip-shop-col h3{font-family:var(--naia-ff-ui);font-weight:700;font-size:14px;line-height:1.3;margin:0 0 8px;color:var(--naia-ink)}
   .wip-shop-col ul{margin:0 0 10px;padding-left:16px;font-family:var(--naia-ff-ui);font-size:12px;line-height:1.7;color:rgba(40,21,12,0.7)}
-  .wip-shop-col-body > p{font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.6;color:rgba(40,21,12,0.65);margin:0 0 10px}
-  @media(max-width:480px){.wip-shop-col-row{flex-direction:column}.wip-shop-col-media .wip-thumb{width:100%}}
+  .wip-shop-col > p{font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.6;color:rgba(40,21,12,0.65);margin:0 0 10px}
+  .wip-shop-evidence-label{font-family:var(--naia-ff-ui);font-size:9.5px;letter-spacing:0.6px;text-transform:uppercase;color:rgba(40,21,12,0.4);margin:0 0 8px}
+  .wip-shop-col .wip-evidence-row{margin-bottom:12px}
 
-  /* Explore your results (quiet footer) */
-  .wip-explore{padding-top:32px}
-  .wip-explore .wip-section-title{font-size:1.1rem;font-weight:300;opacity:0.82;margin-bottom:14px}
-  .wip-footer-links{display:flex;flex-wrap:wrap;gap:10px 32px}
-  .wip-legal{font-family:var(--naia-ff-ui);font-size:9.5px;color:rgba(40,21,12,0.45);margin-top:24px}
+  /* Passport-match + wardrobe-profile — compact, real, inline page content,
+     not dialog teasers. One prominent takeaway, then supporting facts as a
+     short list — not a wall of equally-weighted paragraphs. Deep per-item
+     evidence stays behind "See details". */
+  .wip-findings-headline{font-family:var(--naia-ff-ui);font-weight:600;font-size:14.5px;line-height:1.5;color:var(--naia-ink);margin:0 0 10px}
+  .wip-findings-list{margin:0 0 12px;padding-left:16px;font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.7;color:rgba(40,21,12,0.65)}
+
+  /* Quiet trailing methodology link */
+  .wip-method-link{display:block;margin-top:30px}
+  .wip-legal{font-family:var(--naia-ff-ui);font-size:9.5px;color:rgba(40,21,12,0.45);margin-top:16px}
   .wip-empty{font-family:var(--naia-ff-ui);font-size:13px;color:rgba(40,21,12,0.6);padding:40px 0}
 
   .wip-thumb{width:100%;display:flex;align-items:center;justify-content:center;background:var(--naia-muted-bg);border-radius:4px;overflow:hidden;flex-shrink:0}
