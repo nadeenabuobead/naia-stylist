@@ -1012,7 +1012,7 @@ export default function WardrobeIntelligencePreview() {
                 <div className="wip-mood-grid" style={{ "--mood-cols": shown.length >= 5 ? 3 : shown.length === 4 ? 2 : shown.length } as React.CSSProperties}>
                   {shown.map((look, i) => (
                     <button key={look.id} type="button" className="wip-mood-tile" onClick={() => setDialog({ kind: "moodboardLook", lookId: look.id })}>
-                      <div className="wip-mood-collage">
+                      <div className={`wip-mood-collage wip-mood-collage--n${Math.min(look.garmentIds.length, 4)}`}>
                         {look.garmentIds.map((id) => <Thumb key={id} card={byId.get(id)} height={140} />)}
                       </div>
                       <div className="wip-mood-card-body">
@@ -1281,19 +1281,40 @@ const css = `
   .wip-mood-tab{font-family:var(--naia-ff-ui);font-size:11.5px;font-weight:600;letter-spacing:0.3px;color:rgba(40,21,12,0.6);background:var(--naia-bg);border:1px solid var(--naia-border);border-radius:20px;padding:7px 14px;cursor:pointer}
   .wip-mood-tab span{margin-left:5px;opacity:0.7}
   .wip-mood-tab.is-active{background:var(--naia-accent);border-color:var(--naia-accent);color:#fff}
-  .wip-mood-grid{display:grid;grid-template-columns:repeat(var(--mood-cols,1),1fr);gap:14px}
+  /* Content-hugging, centered fashion-plate container — not a full-width
+     dashboard card. The previous aspect-ratio-only approach always
+     stretched to the section's full ~1180px column, which is what left a
+     huge empty cream rectangle around a modestly-sized image collage,
+     especially on a 1-look tab (Everyday/Work often have just one). Capping
+     the GRID itself (not just the collage inside it) is what actually
+     removes that unused width, on every column count. */
+  .wip-mood-grid{display:grid;grid-template-columns:repeat(var(--mood-cols,1),1fr);gap:16px;max-width:820px;margin:0 auto}
   @media(max-width:860px){.wip-mood-grid{grid-template-columns:repeat(min(var(--mood-cols,1),2),1fr)}}
   @media(max-width:560px){.wip-mood-grid{grid-template-columns:1fr}}
   .wip-mood-tile{display:block;width:100%;border:1px solid var(--naia-border);border-radius:8px;background:var(--naia-surface);padding:9px;text-align:left;cursor:pointer}
   .wip-mood-tile:hover{border-color:rgba(40,21,12,0.3)}
-  /* Second tightening pass: flatter still (5/3 -> 12/5, ~30% shorter again)
-     PLUS an explicit max-height. The aspect-ratio alone made a 1- or
-     2-column tile (Everyday/Work tabs often have few looks, so a wide
-     card) balloon back up in height; the cap keeps every column count
-     inside the same ~350-420px band regardless of card width.
-     object-fit:contain on each thumb (below) still prevents any cropping. */
-  .wip-mood-collage{display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:1fr;gap:4px;aspect-ratio:12/5;max-height:380px}
+  /* A fixed height (not aspect-ratio) is what makes the 360-420px target
+     reliable now that composition varies by piece count below — an
+     aspect-ratio can't describe an asymmetric 1-large/2-small layout the
+     same way it describes an even grid. object-fit:contain on every
+     Thumb still prevents any cropping regardless of shape. */
+  .wip-mood-collage{display:grid;gap:7px;height:380px}
+  @media(max-width:700px){.wip-mood-collage{height:300px}}
   .wip-mood-collage .wip-thumb{border-radius:0;height:100% !important;background:none}
+  /* One garment, rare fallback (e.g. a single dress): centered, not stretched. */
+  .wip-mood-collage--n1{grid-template-columns:1fr;max-width:300px;margin:0 auto}
+  /* Two pieces: a centered pair, not two images pulled to opposite edges of
+     the tile. */
+  .wip-mood-collage--n2{grid-template-columns:1fr 1fr;max-width:460px;margin:0 auto}
+  /* Three pieces: one main piece (the first garment — typically the
+     layer/outerwear piece a candidate lists first) reads larger, with the
+     other two grouped close beside it as supporting pieces — a compact
+     editorial composition, not three equal boxes spread apart. */
+  .wip-mood-collage--n3{grid-template-columns:1.3fr 1fr;grid-template-rows:1fr 1fr;max-width:620px;margin:0 auto}
+  .wip-mood-collage--n3 .wip-thumb:first-child{grid-row:1 / 3}
+  /* Four or more, rare: back to an even grid rather than guessing a
+     composition no real candidate actually produces. */
+  .wip-mood-collage--n4{grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr}
   .wip-mood-meta{display:block;font-family:var(--naia-ff-ui);font-size:11px;letter-spacing:1px;text-transform:uppercase;color:rgba(40,21,12,0.55);font-weight:600;margin-top:8px}
   .wip-mood-card-body{margin-top:8px}
   .wip-mood-reason{font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.55;color:rgba(40,21,12,0.7);margin:4px 0 7px}
@@ -1305,9 +1326,16 @@ const css = `
      width: fixed, consistent column widths (not 1fr) so the row hugs its
      own content and sits left-aligned, closer together, rather than
      stretching each image into a wide, mostly-empty box. */
-  .wip-piece-grid{display:grid;grid-template-columns:repeat(3,minmax(0,200px));gap:16px}
-  @media(max-width:900px){.wip-piece-grid{grid-template-columns:repeat(2,minmax(0,200px))}}
-  @media(max-width:600px){.wip-piece-grid{grid-template-columns:minmax(0,240px)}}
+  /* Fixed-width tracks already stopped the row from stretching edge to
+     edge, but a grid's content defaults to start-aligned — left-heavy —
+     unless told to center. justify-content is what actually centers the
+     group; the narrower column width + bigger gap make it read as one
+     curated edit rather than three cards; the margin-bottom is the gap
+     before the analysis cards below, which previously relied only on
+     the next section's own top padding and read as too sudden. */
+  .wip-piece-grid{display:grid;grid-template-columns:repeat(3,minmax(0,180px));gap:22px;justify-content:center;margin-bottom:16px}
+  @media(max-width:900px){.wip-piece-grid{grid-template-columns:repeat(2,minmax(0,180px))}}
+  @media(max-width:600px){.wip-piece-grid{grid-template-columns:minmax(0,220px)}}
   .wip-piece-card{display:flex;flex-direction:column}
   .wip-piece-thumb .wip-thumb{width:100%;border-radius:4px;margin-bottom:8px}
   .wip-piece-card h3{font-family:var(--naia-ff-ui);font-weight:700;font-size:14px;margin:0 0 3px;color:var(--naia-ink)}
@@ -1353,7 +1381,7 @@ const css = `
      analysis/moodboard card treatment. */
   /* Same fix as the analysis grid: let each card hug its own content
      instead of stretching to match whichever column is taller. */
-  .wip-shop-split{display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start}
+  .wip-shop-split{display:grid;grid-template-columns:1fr 1fr;gap:32px;align-items:start;max-width:920px;margin:0 auto}
   @media(max-width:700px){.wip-shop-split{grid-template-columns:1fr;gap:20px}}
   .wip-shop-col{background:var(--naia-surface);border:1px solid var(--naia-border);border-radius:8px;padding:24px 26px}
   .wip-shop-col-label{display:block;font-family:var(--naia-ff-ui);font-size:9.5px;letter-spacing:1.4px;text-transform:uppercase;font-weight:700;color:rgba(40,21,12,0.45);margin-bottom:12px}
