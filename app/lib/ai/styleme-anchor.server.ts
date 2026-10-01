@@ -476,14 +476,39 @@ export async function autoSelectClosetAnchor(
         },
       }) as AutoSelectItem[];
 
-  // Hard dressing gate, applied BEFORE scoring. Scoring cannot rescue a garment that
-  // violates a persistent requirement, so an ineligible piece must never reach the
-  // ranking at all. Unknown metadata fails open — only explicit evidence rejects.
-  const items: AutoSelectItem[] = allItems.filter((item) =>
-    passesDressingRequirements(
-      { hemLength: item.hemLength, topLength: item.topLength } as unknown as ClosetAnchorInput,
-      signals.dressingPreferences,
-    ),
+  // ── Eligibility, applied BEFORE scoring ───────────────────────────────────
+  //
+  // Scoring cannot rescue a garment that is not eligible to anchor, so an ineligible
+  // piece must never reach the ranking at all.
+  //
+  // 1. Anchor capability is a GATE, not a tiebreak.
+  //
+  //    ANCHOR_CAPABLE_CATEGORIES has always said what may anchor an outfit — a top,
+  //    a bottom, a dress, an outer layer. But it was only consulted as the third
+  //    tiebreak, AFTER score, so it could only ever decide an exact tie. On
+  //    2026-10-01 a bag beat the whole wardrobe for an Everyday "feel sharper"
+  //    session: 12.75 against 12.00 for every garment behind it. The 0.75 was the
+  //    approved-intention bonus (Supporting 0.5 × 1.5), so the margin existed
+  //    precisely because the customer asked for something, and capability never got
+  //    a vote. A bag then held one of the five outfit slots and the look came back
+  //    with no outer layer.
+  //
+  //    An outfit is not built around a handbag. This is a category rule, not a
+  //    score, so it belongs here with the other hard requirements.
+  //
+  //    MANUAL anchoring is untouched. A customer who deliberately picks an accessory
+  //    from her own Closet is making a choice, and source.tsx honours it; this gate
+  //    governs only what nAia selects on her behalf.
+  //
+  // 2. Non-compensable dressing requirements. Unknown metadata fails open — only
+  //    explicit evidence rejects.
+  const items: AutoSelectItem[] = allItems.filter(
+    (item) =>
+      ANCHOR_CAPABLE_CATEGORIES.has(item.category) &&
+      passesDressingRequirements(
+        { hemLength: item.hemLength, topLength: item.topLength } as unknown as ClosetAnchorInput,
+        signals.dressingPreferences,
+      ),
   );
 
   if (items.length === 0) return null;

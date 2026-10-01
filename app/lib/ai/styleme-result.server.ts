@@ -2190,7 +2190,9 @@ export interface OutfitSuitabilityScore {
 export function evaluateCompleteOutfit(
   candidate: OutfitCandidate,
   allItems: ClosetAnchorInput[],
-  session: Pick<StyleMeSessionInput, "occasion" | "formalityConditional" | "moods" | "desiredFeelings">,
+  // "intentions" is optional on StyleMeSessionInput, so existing callers and fixtures
+  // that omit it keep working; it is read only to tell a working layer from a burden.
+  session: Pick<StyleMeSessionInput, "occasion" | "formalityConditional" | "moods" | "desiredFeelings" | "intentions">,
 ): OutfitSuitabilityScore {
   const itemMap = new Map(allItems.map((i) => [i.id, i]));
   const targetFormalityRange = getTargetFormalityRange(
@@ -2205,10 +2207,46 @@ export function evaluateCompleteOutfit(
     return { slot: p.slot, formality: item?.formality ?? null, weight };
   });
 
-  // Outerwear and zero-weight pieces (bag, accessory, jewelry) count as "optional burden"
-  // for compositeScore tie-breaking. Outerwear is removable and should not tip a close
-  // comparison over a cleaner base outfit, even when it contributes to formality register.
-  const optionalPieceCount = pieceFormalities.filter((p) => p.slot === "outerwear" || p.weight === 0).length;
+  // "Optional burden" for the T6c tie-break: pieces the outfit could shed without
+  // losing anything. Bags, accessories and jewellery always qualify.
+  //
+  // An outer layer qualifies only when it is NOT doing work. Counting every layer as
+  // burden made T6c mechanically prefer the no-layer twin of any otherwise-tied
+  // outfit, which is right for a gratuitous jacket and wrong for a coat that is
+  // carrying the look. T6c is still free to prefer simplicity — it just no longer
+  // treats "has a layer" as itself a reason to lose.
+  //
+  // A layer is doing work when a human reviewer rated it Strong or Supporting for
+  // one of today's intentions, or when it carries the register the occasion asked for
+  // while the base pieces do not. Both are evidence, not heuristics: an unrated layer
+  // on a casual base is still burden and can still be dropped.
+  const targetBand = targetFormalityRange;
+  const baseCarriesRegister = candidate.pieces.some((p) => {
+    if (!BASE_CLOTHING_SLOTS.has(p.slot)) return false;
+    const f = itemMap.get(p.closetId)?.formality;
+    const r = f ? (FORMALITY_RANK[f] ?? 0) : 0;
+    return r >= targetBand.min;
+  });
+  const layerIsWorking = (closetId: string): boolean => {
+    const item = itemMap.get(closetId);
+    if (!item) return false;
+    const ratings = item.approvedProfile?.intentionPotentials as Record<string, string> | null | undefined;
+    const activeIntentions = session.intentions ?? [];
+    if (ratings && activeIntentions.some((id) => ratings[id] === "Strong" || ratings[id] === "Supporting")) {
+      return true;
+    }
+    if (!baseCarriesRegister && item.formality) {
+      const r = FORMALITY_RANK[item.formality] ?? 0;
+      if (r >= targetBand.min && r <= targetBand.max) return true;
+    }
+    return false;
+  };
+  const optionalPieceCount = candidate.pieces.filter((p) => {
+    const weight = PIECE_FORMALITY_WEIGHT[p.slot] ?? 0;
+    if (weight === 0) return true;                      // bag / accessory / jewelry
+    if (p.slot !== "outerwear") return false;           // base pieces and shoes are never burden
+    return !layerIsWorking(p.closetId);
+  }).length;
 
   // Per-piece weighted formality penalty — normalized so piece count alone does not
   // inflate the penalty. Each piece with known formality contributes independently:
@@ -4103,6 +4141,45 @@ export function selectAdditionalClosetGarments(
         const [reserved] = optRest.splice(idx, 1);
         optRest.unshift(reserved);
       }
+    }
+  }
+
+  // ── Meaningful-layer reservation ───────────────────────────────────────────
+  //
+  // An outer layer that is doing real styling work must not be crowded out of the
+  // piece budget by a finishing accessory.
+  //
+  // THE FAILURE THIS FIXES (QA, 2026-10-01, Everyday + "Help me feel sharper"):
+  // the bag anchor consumed one of the five outfit slots, Phase 1 took top and
+  // bottom, shoes took the next, and exactly one slot remained. optRest is ordered
+  // by raw score, and the contest for that slot was
+  //
+  //     Gold Hoop Earrings            13.00   feel-sharper: None
+  //     Camel Leather Belt            12.75   feel-sharper: Supporting
+  //     Beige Oversized Blazer        12.50   feel-sharper: Strong, construction: tailored
+  //
+  // The earrings won on 0.5 of raw score and the only garment in the wardrobe that
+  // a human had rated Strong for the thing she actually asked for never entered the
+  // outfit. The intention bonus (×1.5) cannot outweigh baseScore differences that
+  // come from occasion tags and relationship history, so score alone will keep
+  // making this mistake.
+  //
+  // This is NOT "always keep outerwear". The reservation fires only when the layer
+  // carries approved evidence for an ACTIVE intention, and only when the budget is
+  // about to run out. A layer with no such evidence stays where its score put it and
+  // can still lose — see the redundant-layer regression test.
+  if (activeIntentions.length > 0 && result.length < maxAdditional) {
+    const layerIdx = optRest.findIndex((o) => {
+      if (o.slot !== "outerwear") return false;
+      // Approved human rating only. No heuristic may promote a layer.
+      const ratings = o.item.approvedProfile?.intentionPotentials as Record<string, string> | null | undefined;
+      if (!ratings) return false;
+      return activeIntentions.some((id) => ratings[id] === "Strong" || ratings[id] === "Supporting");
+    });
+    // Only worth reserving if something scoring higher would otherwise take the slot.
+    if (layerIdx > 0) {
+      const [reservedLayer] = optRest.splice(layerIdx, 1);
+      optRest.unshift(reservedLayer);
     }
   }
 
