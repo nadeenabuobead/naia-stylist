@@ -107,9 +107,9 @@ describe("SMV.1 — Intention labels map to the canonical 16 intention IDs", () 
 describe("SMV.2 — revised Fit / Comfort labels map to the existing body-need IDs", () => {
   const REVISED_LABEL_TO_ID: Record<string, string> = {
     "More room around my waist":            "nothing-tight-waist",
-    "A little more ease through the body":  "less-body-conscious",
+    "A little less body-hugging":           "less-body-conscious",
     "More coverage":                        "more-coverage",
-    "Soft / easy fabrics":                  "softer-easier-fabrics",
+    "Softer / more flexible fabrics":       "softer-easier-fabrics",
     "Loose and comfortable":                "loose-comfortable",
     "Keep some shape":                      "still-want-shape",
     "Waist definition":                     "waist-definition",
@@ -147,7 +147,7 @@ describe("SMV.2 — revised Fit / Comfort labels map to the existing body-need I
       "waist-definition must not be collapsed into another signal");
   });
 
-  it("physical 'Soft / easy fabrics' is a different signal from the emotional 'feel-softer' intention", () => {
+  it("physical 'Softer / more flexible fabrics' is a different signal from the emotional 'feel-softer' intention", () => {
     assert.ok(STYLEME_FIT_COMFORT_OPTIONS.some((o) => o.id === "softer-easier-fabrics"));
     assert.ok(STYLEME_INTENTION_OPTIONS.some((o) => o.id === "feel-softer"));
     assert.equal(

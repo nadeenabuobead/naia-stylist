@@ -1455,9 +1455,9 @@ describe("R3.23 — Fit / Comfort UI: exact 9 approved IDs, correct labels", () 
   // IDs carry the QA-tested body-need semantics. Labels are display copy only.
   const APPROVED_LABELS: Record<string, string> = {
     "nothing-tight-waist":   "More room around my waist",
-    "less-body-conscious":   "A little more ease through the body",
+    "less-body-conscious":   "A little less body-hugging",
     "more-coverage":         "More coverage",
-    "softer-easier-fabrics": "Soft / easy fabrics",
+    "softer-easier-fabrics": "Softer / more flexible fabrics",
     "loose-comfortable":     "Loose and comfortable",
     "still-want-shape":      "Keep some shape",
     "waist-definition":      "Waist definition",

@@ -720,7 +720,7 @@ describe("SM-REV3-L6 — Physical Need 8 UI IDs all round-trip via styleMeBodyNe
   it("less-body-conscious label is the preference-phrased Rev 3 copy", () => {
     assert.equal(
       STYLEME_FIT_COMFORT_LABELS["less-body-conscious"],
-      "A little more ease through the body",
+      "A little less body-hugging",
     );
     const labels = Object.values(STYLEME_FIT_COMFORT_LABELS);
     assert.ok(!labels.includes("Less body-conscious"), "old label removed");

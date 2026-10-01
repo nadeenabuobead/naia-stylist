@@ -149,9 +149,9 @@ export const STYLEME_ORIGINAL_INTENTION_IDS: readonly string[] = [
 
 export const STYLEME_FIT_COMFORT_OPTIONS: readonly StyleMeOption[] = [
   { id: "nothing-tight-waist",   label: "More room around my waist" },
-  { id: "less-body-conscious",   label: "A little more ease through the body" },
+  { id: "less-body-conscious",   label: "A little less body-hugging" },
   { id: "more-coverage",         label: "More coverage" },
-  { id: "softer-easier-fabrics", label: "Soft / easy fabrics" },
+  { id: "softer-easier-fabrics", label: "Softer / more flexible fabrics" },
   { id: "loose-comfortable",     label: "Loose and comfortable" },
   { id: "still-want-shape",      label: "Keep some shape" },
   { id: "waist-definition",      label: "Waist definition" },
