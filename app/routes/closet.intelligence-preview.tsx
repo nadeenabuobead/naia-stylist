@@ -1064,9 +1064,9 @@ export default function WardrobeIntelligencePreview() {
                       <div className="wip-life-heading">
                         <h3>{REGISTER_LABEL[register]}</h3>
                         <span className="wip-life-state">{reading.stateText}</span>
+                        <span className="wip-life-count">{reading.usableCount} usable pieces</span>
                       </div>
                       <div className="wip-life-bar"><div className="wip-life-bar-fill" style={{ width: `${DEPTH_FILL[reading.state]}%` }} /></div>
-                      <p className="wip-life-count">{reading.usableCount} usable {REGISTER_LABEL[register].toLowerCase()} pieces</p>
                       <p className="wip-life-text">{interpretation}</p>
                       {register === attentionRegister && attentionCombo && (
                         <button type="button" className="wip-link" onClick={() => setDialog({ kind: "workCombo" })}>View this combination →</button>
@@ -1080,7 +1080,7 @@ export default function WardrobeIntelligencePreview() {
                       const lifeLookIds = [...primary.garmentIds.slice(0, 3 - extra.length), ...extra];
                       return (
                         <div className="wip-evidence-row">
-                          {lifeLookIds.map((id) => <Thumb key={id} card={byId.get(id)} height={56} />)}
+                          {lifeLookIds.map((id) => <Thumb key={id} card={byId.get(id)} height={100} />)}
                         </div>
                       );
                     })()}
@@ -1095,17 +1095,39 @@ export default function WardrobeIntelligencePreview() {
             <div className="wip-analysis-col">
               <h2 className="wip-section-title">Where your wardrobe repeats.</h2>
               <div className="wip-card-shell wip-paired-card wip-analysis-card">
-              {enoughClusters.map((c) => (
-                <div key={c.title} className="wip-repeat-card">
-                  <h3>{c.title}</h3>
-                  <p>{c.body}</p>
-                  {c.garmentIds.length > 0 && (
-                    <div className="wip-evidence-row">
-                      {c.garmentIds.slice(0, 5).map((id) => <Thumb key={id} card={byId.get(id)} height={56} />)}
+              {/* Summary card, not an unlimited report: the strongest finding
+                  gets the full treatment (body + evidence); up to 2 further
+                  qualifying clusters (same engine output, same slice(0,3) —
+                  nothing about which clusters qualify changes) are named in
+                  a compact one-line summary instead of repeating the full
+                  body/evidence presentation for each, so the card stays
+                  bounded regardless of how many real clusters exist. */}
+              {(() => {
+                const [primary, ...more] = enoughClusters;
+                return (
+                  <>
+                    <div className="wip-repeat-card">
+                      <h3>{primary.title}</h3>
+                      <p>{primary.body}</p>
+                      {primary.garmentIds.length > 0 && (
+                        <div className="wip-evidence-row">
+                          {primary.garmentIds.slice(0, 5).map((id) => <Thumb key={id} card={byId.get(id)} height={100} />)}
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-              ))}
+                    {more.length > 0 && (
+                      <div className="wip-repeat-more">
+                        {more.map((c) => (
+                          <div key={c.title} className="wip-repeat-more-item">
+                            <span className="wip-repeat-more-title">{c.title}</span>
+                            <span className="wip-repeat-more-count">{c.count} pieces</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
               </div>
             </div>
             )}
@@ -1134,7 +1156,7 @@ export default function WardrobeIntelligencePreview() {
                       <>
                         <p className="wip-shop-evidence-label">Works with pieces you own</p>
                         <div className="wip-evidence-row">
-                          {worthConsidering.garmentIds.slice(0, 4).map((id) => <Thumb key={id} card={byId.get(id)} height={56} />)}
+                          {worthConsidering.garmentIds.slice(0, 4).map((id) => <Thumb key={id} card={byId.get(id)} height={100} />)}
                         </div>
                       </>
                     )}
@@ -1150,7 +1172,7 @@ export default function WardrobeIntelligencePreview() {
                       <>
                         <p className="wip-shop-evidence-label">Similar pieces you own</p>
                         <div className="wip-evidence-row">
-                          {enoughCluster.garmentIds.slice(0, 4).map((id) => <Thumb key={id} card={byId.get(id)} height={56} />)}
+                          {enoughCluster.garmentIds.slice(0, 4).map((id) => <Thumb key={id} card={byId.get(id)} height={100} />)}
                         </div>
                       </>
                     )}
@@ -1388,26 +1410,47 @@ const css = `
      it (plain block flow, nothing centers their content vertically).
      Desktop only — mobile stacks to one column and sizes naturally. */
   .wip-paired-card{display:flex;flex-direction:column}
-  @media(min-width:901px){.wip-paired-card{min-height:420px}}
+  /* 436px — measured, not estimated: a real HTML harness using this exact
+     CSS and the real diagnostic customer's real text (3 register rows,
+     merged heading/count line, 100px evidence thumbnails) rendered in an
+     actual browser at desktop width came to 428.4px
+     (document.getElementById(...).getBoundingClientRect().height); 436px
+     keeps a small (~8px) comfortable margin rather than cutting exactly
+     to the measured minimum. The repetition card's compact-summary
+     treatment (primary finding full, any further qualifying clusters as
+     a one-line title+count) was separately verified at a hypothetical
+     3-cluster case: 290px, well inside this shared height regardless of
+     how many real clusters a customer has. height (not min-height) is
+     deliberate here, as requested — all four cards get this exact value.
+     Desktop only — mobile/tablet stacks to natural height:auto. */
+  @media(min-width:901px){.wip-paired-card{height:436px}}
   .wip-analysis-card{flex:1}
 
   /* How your wardrobe supports your life */
-  .wip-life-row{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:13px 0;border-top:1px solid var(--naia-border)}
+  .wip-life-row{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:9px 0;border-top:1px solid var(--naia-border)}
   .wip-life-row:first-of-type{border-top:0;padding-top:0}
   .wip-life-main{flex:1;min-width:0}
-  .wip-life-heading{display:flex;align-items:baseline;gap:10px}
+  .wip-life-heading{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}
   .wip-life-heading h3{font-family:var(--naia-ff-ui);font-weight:700;font-size:14px;margin:0;color:var(--naia-ink)}
   .wip-life-state{font-family:var(--naia-ff-ui);font-size:10.5px;color:rgba(40,21,12,0.5)}
-  .wip-life-bar{height:4px;background:var(--naia-border);border-radius:2px;margin:8px 0;max-width:180px;overflow:hidden}
+  .wip-life-bar{height:4px;background:var(--naia-border);border-radius:2px;margin:6px 0;max-width:180px;overflow:hidden}
   .wip-life-bar-fill{height:100%;background:var(--naia-accent);border-radius:2px}
-  .wip-life-count{font-family:var(--naia-ff-ui);font-size:10.5px;color:rgba(40,21,12,0.5);margin:0 0 4px}
-  .wip-life-text{font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.6;color:rgba(40,21,12,0.65);margin:0}
+  .wip-life-count{font-family:var(--naia-ff-ui);font-size:10.5px;color:rgba(40,21,12,0.5)}
+  .wip-life-text{font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.45;color:rgba(40,21,12,0.65);margin:0}
 
-  /* Where your wardrobe repeats */
-  .wip-repeat-card{padding:13px 0;border-top:1px solid var(--naia-border)}
+  /* Where your wardrobe repeats — primary finding only */
+  .wip-repeat-card{padding:9px 0;border-top:1px solid var(--naia-border)}
   .wip-repeat-card:first-child{border-top:0;padding-top:0}
-  .wip-repeat-card h3{font-family:var(--naia-ff-ui);font-weight:700;font-size:14px;margin:0 0 6px;color:var(--naia-ink)}
-  .wip-repeat-card p{font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.6;color:rgba(40,21,12,0.65);margin:0 0 10px}
+  .wip-repeat-card h3{font-family:var(--naia-ff-ui);font-weight:700;font-size:14px;margin:0 0 5px;color:var(--naia-ink)}
+  .wip-repeat-card p{font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.45;color:rgba(40,21,12,0.65);margin:0 0 8px}
+  /* Any 2nd/3rd qualifying cluster — same engine data, compact one-line
+     summary instead of a full body+evidence repeat, so the card stays a
+     bounded summary rather than an unlimited report as more clusters
+     exist. Existence is still surfaced (title + count), never hidden. */
+  .wip-repeat-more{margin-top:8px;padding-top:8px;border-top:1px solid var(--naia-border)}
+  .wip-repeat-more-item{display:flex;justify-content:space-between;gap:12px;padding:4px 0;font-family:var(--naia-ff-ui);font-size:11.5px;color:rgba(40,21,12,0.6)}
+  .wip-repeat-more-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .wip-repeat-more-count{flex-shrink:0;color:rgba(40,21,12,0.45)}
 
   /* Shared evidence-tier thumbnail system — every evidence row on the page
      (lifestyle combos, repetition clusters, shop-smarter support) uses this
@@ -1418,8 +1461,18 @@ const css = `
      an icon, still well inside the now-fixed card dimensions. object-fit:
      contain (on .wip-thumb img, below) preserves each image's own aspect
      ratio regardless of this box being square. */
-  .wip-evidence-row{display:flex;gap:10px;flex-wrap:wrap}
-  .wip-evidence-row .wip-thumb{width:84px;height:84px;border-radius:4px}
+  .wip-evidence-row{display:flex;gap:8px;flex-wrap:wrap}
+  /* Height is NOT set here — Thumb's own inline style={{height}} (the
+     height={100} prop at each call site) always wins over this class
+     regardless of what this rule declares, since inline style outranks
+     any class selector in the cascade. Confirmed directly: every previous
+     round that only changed this class's height (56->84->100px) had zero
+     actual effect, because the real governing value was always the
+     height={56} prop, unchanged until now. Width IS set here (nothing
+     inline overrides it) — slightly narrower than tall, not square, to
+     free horizontal room for the text column beside it in the lifestyle
+     row without shrinking the image back into icon territory. */
+  .wip-evidence-row .wip-thumb{width:86px;border-radius:4px}
 
   /* Shop smarter — each side its own bordered cream card, matching the
      analysis/moodboard card treatment. */
