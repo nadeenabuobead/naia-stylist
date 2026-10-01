@@ -409,3 +409,56 @@ on trouser hem specifically, a preference expressible at T5, or a garment-level
 `ResolvedGarment` concern — and that decision belongs with the canonical Passport
 workstream, not here. Worth auditing the other dressing-preference IDs for the same
 silent inertness at the same time.
+
+---
+
+## 9. DEFERRED_TO_RESOLVED_GARMENT / GI OPACITY
+
+**Test 10: StyleMe PASS on represented garment truth — deferred GI opacity/coverage gap.**
+Date night + Polished + `more-coverage`, 2026-10-01. A `Black Embroidered Mesh Tank Top`
+(TOPS / "sleeveless blouse", the auto-anchor) was accepted with a blazer compensating for
+arm and shoulder coverage. StyleMe reasoned correctly about every attribute it was given.
+No StyleMe patch, and no StyleMe-only `mesh` rule.
+
+### 9.1 `ResolvedGarment` needs a canonical opacity / actual-coverage interpretation
+
+Coverage is currently inferred from **geometry alone** — `sleeveLength`,
+`necklineCoverage`, `shoulderCoverage`, `hemLength`, `midriffExposed`. Those describe
+*where fabric sits*, never whether you can see through it. A sleeveless mesh tank under a
+full-sleeved blazer satisfies `arms-covered` by the letter while the torso stays exposed.
+
+Consumers must not be left to infer coverage from geometry. `ResolvedGarment` should
+expose a resolved coverage verdict — the question "is this body area actually covered" —
+rather than raw fields each consumer re-interprets in its own way.
+
+### 9.2 Material is useful evidence but not a complete opacity model
+
+`GarmentMaterial` in `garment-intelligence.types.ts` already carries five inherently
+sheer or semi-sheer values:
+
+```
+"chiffon" | "georgette" | "lace" | "mesh" | "tulle"
+```
+
+The field exists as `ClosetItem.material`, the Closet AI populates it, and **no coverage
+path reads it** — not `scoreBodyNeedForClosetItem`, not `passesDressingRequirements`, not
+`passesCandidateDressingRequirements`. So the common cases need no new field; they need
+an existing one to be consumed.
+
+But material alone is not sufficient: **lining is not represented anywhere**. A lined lace
+dress is opaque; a heavy knit mesh may not be sheer. Resolving opacity from material
+*plus* a lining signal is the shape of the real answer.
+
+### 9.3 `more-coverage` is a soft signal that can stop discriminating entirely
+
+`more-coverage` is a T3 body need, not a constraint. It produces `knownViolationCount`
+(T3a) and `bodyNeedFitScore` (T3b) — both comparators. Nothing is ever refused for it.
+
+Worse, `scoreBodyNeedFitForRanking` sums violations and averages fit scores across all
+structural pieces, so a covering layer dilutes a violating base into a ratio. And when the
+violating garment is the **anchor** it appears in every candidate, making the violation
+count identical across the pool — so the need cannot even rank, let alone exclude.
+
+This is a product/integration decision, not a Test 10 patch: should a stated coverage
+need ever be a hard constraint, and should an anchor-carried violation be treated
+differently from a replaceable-piece violation? Recorded here, not acted on.
