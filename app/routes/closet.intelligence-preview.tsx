@@ -9,13 +9,15 @@
 // garments and findings render here automatically. It never calls
 // readAndRecordChange or the completeness action: this pass makes no writes.
 //
-// Composition: a compact header, one garment-led discovery as the main view,
-// a short list of other findings that SWAP the main view when selected (no
-// second long page), and detail behind a dialog only where expansion
-// genuinely benefits from extra space (all matches, deeper provenance).
-// Selecting a rail finding shows its useful evidence immediately — no extra
-// click required to see basic evidence for Ways to wear, Work wardrobe,
-// Shopping priorities or Coverage.
+// Composition: one vertical page, five sections, no right rail and no panel
+// that swaps out the main screen. Deep evidence (Passport alignment, full
+// wardrobe-profile provenance, the full per-register breakdown, "why this
+// recommendation") lives behind small secondary links, each opening a single
+// dialog — never replacing what's on screen. A "Your Closet, styled" visual
+// moodboard section is deliberately NOT included yet: it would need looks
+// the engine doesn't yet compute (Travel/Active registers, more than two
+// ranked combos per register, piece-swap suggestions), and nothing here is
+// ever handwritten to fill that gap — it's a separate, scoped engine task.
 
 import { useState } from "react";
 import { redirect, type LoaderFunctionArgs, type LinksFunction, data } from "react-router";
@@ -29,7 +31,7 @@ import { loadWardrobeIntelligence } from "~/lib/ai/wardrobe-intelligence.server"
 import { readClosetConfidence } from "~/lib/ai/wardrobe-confidence.server";
 import { buildWardrobePage, type WardrobePage, type PageEntry } from "~/lib/ai/wardrobe-page";
 import { registerDisplay, type DepthState } from "~/lib/ai/wardrobe-copy";
-import { garmentRegister, type RegisterId } from "~/lib/ai/wardrobe-needs";
+import { type RegisterId } from "~/lib/ai/wardrobe-needs";
 import { SILHOUETTE_LABELS } from "~/lib/ai/wardrobe-intelligence";
 
 // Duplicated from closet.intelligence.tsx rather than importing a private
@@ -128,7 +130,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // left, only the single BEST and single WORST reading survive — an
   // editorial contrast, not a per-register report. A customer with only one
   // needed register, or every needed register in the same state, gets one
-  // line, not two padded-out ones.
+  // line, not two padded-out ones. These are also the real basis for the
+  // "Strongest" / "Needs attention" headline cards.
   const DEPTH_RANK: Readonly<Record<DepthState, number>> = {
     strong: 0, "limited-variety": 1, "needs-range": 2, "less-than-it-looks": 3, empty: 4, learning: -1,
   };
@@ -144,7 +147,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     if (worst.heading !== best.heading) glanceRegisters.push({ heading: worst.heading, stateText: worst.stateText });
   }
 
-  // ── Every register's real reading, for "How well it supports your life" ──
+  // ── Every register's real reading, for "How your wardrobe supports your life" ──
   // Same registerDisplay() vocabulary, every needed register this time (not
   // just the contrast pair) — real depth verdicts only for the three actual
   // registers the engine computes (everyday/work/occasion). No Activewear or
@@ -169,37 +172,37 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // area elsewhere); needs.enough already computes up to 3 real repetition
   // clusters with their own count and "why it's enough" sentence — all of
   // them are surfaced here now, not just the one the low-priority finding
-  // happened to reference, so "where your wardrobe repeats" shows real
+  // happened to reference, so "Where your wardrobe repeats" shows real
   // breadth instead of a single example.
   const enoughClusters = needs.enough.map((e) => ({ title: e.title, body: e.body, garmentIds: e.garmentIds, count: e.garmentIds.length }));
   const enoughCluster = enoughClusters[0] ?? null;
 
-  // ── Rediscover matches grouped by their OWN register ─────────────────────
-  // "Show me how to wear this", not a flat grid: each matched piece already
-  // has a real formality/register (garmentRegister(), the same function the
-  // rest of the engine uses) — grouping by it is presentation only, no new
-  // pairing logic, and degrades honestly to one ungrouped list if a match's
-  // register can't be read.
-  const rediscoverEntry = page.sections.find((s) => s.id === "wear")?.blocks.find((b) => b.id === "worth-trying")?.entries[0];
-  const rediscoverByRegister: Array<{ register: RegisterId | "other"; garmentIds: string[] }> = [];
-  if (rediscoverEntry) {
-    const byId = new Map(garments.map((g) => [g.id, g]));
-    const groups = new Map<RegisterId | "other", string[]>();
-    for (const id of rediscoverEntry.garmentIds) {
-      const g = byId.get(id);
-      const r = g ? garmentRegister(g) ?? "other" : "other";
-      groups.set(r, [...(groups.get(r) ?? []), id]);
+  // ── Real pieces worth rediscovering, one per garment ─────────────────────
+  // "worth-trying" entries are either a single piece (meta.garmentId) or a
+  // real GROUPED finding about several pieces that share the same matches
+  // (meta.members, e.g. two blazers she marked as hard to style) — this
+  // flattens both shapes into one simple list of real pieces, each carrying
+  // its own real compatible-match ids. No new finding, no invented piece:
+  // every entry here already existed as real engine output.
+  const worthTryingEntries = page.sections.find((s) => s.id === "wear")?.blocks.find((b) => b.id === "worth-trying")?.entries ?? [];
+  const rediscoverPieces: Array<{ garmentId: string; matchIds: string[] }> = [];
+  for (const entry of worthTryingEntries) {
+    const members = entry.meta?.members as Array<{ garmentId: string; title: string }> | undefined;
+    if (members && members.length > 0) {
+      for (const m of members) rediscoverPieces.push({ garmentId: m.garmentId, matchIds: entry.garmentIds });
+    } else {
+      const gid = entry.meta?.garmentId as string | undefined;
+      if (gid) rediscoverPieces.push({ garmentId: gid, matchIds: entry.garmentIds });
     }
-    for (const [register, garmentIds] of groups) rediscoverByRegister.push({ register, garmentIds });
   }
 
   // ── Up to 2 real ranked combinations per register ────────────────────────
   // intelligence.pairings.bestByRegister already ranks up to 5 real
-  // candidates per register by score; "Wear more of what you own" surfaces
-  // the top 2 instead of the single best, so it reads as real wearable
-  // options rather than one example pair. No new pairing logic — same
-  // already-computed list the "ways to get dressed" section draws its one
-  // pick from.
+  // candidates per register by score; "How your wardrobe supports your life"
+  // surfaces the top 2 instead of the single best, so a second one can read
+  // as a genuine swap rather than one example pair. No new pairing logic —
+  // same already-computed list the "ways to get dressed" section draws its
+  // one pick from.
   const bestByRegisterPreview: Partial<Record<RegisterId, Array<{ id: string; reason: string; garmentIds: string[] }>>> = {};
   for (const register of ["everyday", "work", "occasion"] as const) {
     const top = intelligence.pairings.bestByRegister[register]?.slice(0, 2);
@@ -226,7 +229,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return data({
     page, garmentCards, glanceRegisters, allRegisterReadings, neutralSharePct,
-    enoughCluster, enoughClusters, rediscoverByRegister, bestByRegisterPreview, recommendationDetail,
+    enoughCluster, enoughClusters, rediscoverPieces, bestByRegisterPreview, recommendationDetail,
   });
 }
 
@@ -254,26 +257,15 @@ function cardLabel(card: GarmentCard | undefined): string {
 }
 
 /** Strips the recommendation-title verb phrase down to its noun phrase, for
- * compact display (rail headline, glance strip). Same transform in both
+ * compact display (headline card, glance strip). Same transform in both
  * places — one source, not two copies drifting apart. */
 function shortRecTitle(title: string | undefined): string {
   return (title ?? "").replace(/^Look for |^One option to explore: /i, "").replace(/\.$/, "");
 }
 
-/** A short, real word for "with a ___" — derived from the actual matched
- * piece's own category/name, never a fixed label for one customer's items. */
-function shortMatchWord(card: GarmentCard | undefined): string {
-  if (!card) return "this piece";
-  const n = (card.subcategory ?? card.category).toLowerCase();
-  if (/jean|denim/.test(card.name ?? "") || /jean|denim/.test(n)) return "denim";
-  if (/blazer/.test(n)) return "a blazer";
-  if (/trouser|pant/.test(n)) return "tailoring";
-  if (/coat|jacket/.test(n)) return "outerwear";
-  return n || "this piece";
-}
-
 /** A plain, real noun for "swap the ___" — derived from the actual changed
- * piece's own category/subcategory, same pattern as shortMatchWord(). */
+ * piece's own category/subcategory, never a fixed label for one customer's
+ * items. */
 function swapNoun(card: GarmentCard | undefined): string {
   if (!card) return "piece";
   const n = (card.subcategory ?? card.category).toLowerCase();
@@ -347,16 +339,20 @@ function Thumb({ card, height = 220 }: { card: GarmentCard | undefined; height?:
 
 // ── Dialog ───────────────────────────────────────────────────────────────────
 //
-// Kept only where expansion genuinely benefits from extra space: exploring
-// every match, deeper Passport/profile provenance, and the closet-status
-// control. Coverage no longer has a dialog — every affected piece and its
-// reason is already in the selected Coverage canvas.
+// Every piece of deep or secondary evidence (full compatible-pieces list, a
+// specific pairing, a specific work combination, why a recommendation was
+// made, Passport alignment, full wardrobe-profile provenance, the full
+// per-register breakdown, methodology) lives behind one of these. None of
+// them ever replaces the main page — they open on top of it and close back
+// to exactly where the reader was.
 
 type DialogState =
-  | { kind: "matches" }
-  | { kind: "pair"; garmentId: string }
+  | { kind: "matches"; anchorId: string }
+  | { kind: "pair"; anchorId: string; garmentId: string }
   | { kind: "workCombo" }
   | { kind: "worthConsidering" }
+  | { kind: "lifestyle" }
+  | { kind: "coverage" }
   | { kind: "profile" }
   | { kind: "method" }
   | { kind: "status" }
@@ -387,14 +383,12 @@ function DialogShell({
   );
 }
 
-type Insight = "wear" | "work" | "shopping" | "coverage" | "profile" | null;
-
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 export default function WardrobeIntelligencePreview() {
   const {
     page, garmentCards, glanceRegisters, allRegisterReadings, neutralSharePct,
-    enoughCluster, enoughClusters, rediscoverByRegister, bestByRegisterPreview, recommendationDetail,
+    enoughCluster, enoughClusters, rediscoverPieces, bestByRegisterPreview, recommendationDetail,
   } = useLoaderData<typeof loader>() as {
     page: WardrobePage; garmentCards: GarmentCard[];
     glanceRegisters: Array<{ heading: string; stateText: string }>;
@@ -402,7 +396,7 @@ export default function WardrobeIntelligencePreview() {
     neutralSharePct: number | null;
     enoughCluster: { title: string; body: string; garmentIds: string[]; count: number } | null;
     enoughClusters: Array<{ title: string; body: string; garmentIds: string[]; count: number }>;
-    rediscoverByRegister: Array<{ register: RegisterId | "other"; garmentIds: string[] }>;
+    rediscoverPieces: Array<{ garmentId: string; matchIds: string[] }>;
     bestByRegisterPreview: Partial<Record<RegisterId, Array<{ id: string; reason: string; garmentIds: string[] }>>>;
     recommendationDetail: {
       attributes: Array<{ kind: string; values: string[]; label: string; source: string }>;
@@ -428,8 +422,14 @@ export default function WardrobeIntelligencePreview() {
     "chest-neckline-covered": "Higher neckline", "prefer-higher-necklines": "Higher neckline",
     "longer-tops": "Longer cut", "no-cropped-tops": "Not cropped", "looser-fitting": "Easier fit",
   };
+  // A visual encoding of the real categorical depth state — not a fabricated
+  // score. The same five states registerDisplay() already returns, just
+  // given a relative bar length so "strong" reads as visibly fuller than
+  // "needs-range" without inventing a number.
+  const DEPTH_FILL: Record<DepthState, number> = {
+    strong: 100, "limited-variety": 70, "needs-range": 55, "less-than-it-looks": 35, empty: 15, learning: 0,
+  };
 
-  const [insight, setInsight] = useState<Insight>(null);
   const [dialog, setDialog] = useState<DialogState>(null);
   const [previewStatus, setPreviewStatus] = useState<string | null>(null);
   const [expandedWhy, setExpandedWhy] = useState<Set<string>>(new Set());
@@ -440,14 +440,12 @@ export default function WardrobeIntelligencePreview() {
   const shop = page.sections.find((s) => s.id === "shop");
   const profileSection = page.sections.find((s) => s.id === "profile");
 
-  const rediscover = wear?.blocks.find((b) => b.id === "worth-trying")?.entries[0];
   const waysEntries = wear?.blocks.find((b) => b.id === "ways-to-get-dressed")?.entries ?? [];
   const workFinding = attention?.blocks.find((b) => b.kind === "findings")?.entries[0];
   // The finding's own claim key ("depth-gap:work") names which real register
-  // it's about — read from it rather than assuming "work", so the rail label
-  // is never wrong for a customer whose strongest finding is elsewhere.
+  // it's about — read from it rather than assuming "work", so this is never
+  // wrong for a customer whose strongest finding is elsewhere.
   const attentionRegister = (workFinding?.claim.match(/^depth-gap:(\w+)/)?.[1] as RegisterId | undefined);
-  const attentionRegisterLabel = attentionRegister ? REGISTER_LABEL[attentionRegister] : null;
   const attentionCombo = attentionRegister ? waysEntries.find((e) => e.id === `explore-${attentionRegister}`) : undefined;
   const coverage = attention?.blocks.find((b) => b.kind === "coverage")?.entries[0];
   const lowPriority = shop?.blocks.find((b) => b.id === "low-priority")?.entries[0];
@@ -457,41 +455,30 @@ export default function WardrobeIntelligencePreview() {
   const paletteRows = (profileBlock?.meta?.palette ?? []) as Array<{ colour: string; count: number }>;
   const shapeChips = (profileBlock?.meta?.shapes ?? []) as Array<{ label: string; count: number }>;
   const summaryLines = (profileBlock?.meta?.summaryLines ?? []) as string[];
-
-  if (!rediscover) {
-    // No dynamic rediscovery candidate for this Closet — the preview has
-    // nothing honest to lead with. Real state, not an error.
-    return (
-      <MyNaiaLayout compact>
-        <style>{css}</style>
-        <div className="wip-app">
-          <main className="wip-main">
-            <p className="wip-empty">
-              Nothing to preview yet — this Closet doesn&rsquo;t currently have a &ldquo;piece worth
-              rediscovering&rdquo; finding to lead with.
-            </p>
-          </main>
-        </div>
-      </MyNaiaLayout>
-    );
-  }
-
-  const rediscoverMembers = (rediscover.meta?.members as Array<{ garmentId: string; title: string }> | undefined);
-  const rediscoverGarmentId = (rediscover.meta?.garmentId as string | undefined) ?? rediscoverMembers?.[0]?.garmentId;
-  const rediscoverCard = byId.get(rediscoverGarmentId ?? "");
-  const matchIds = rediscover.garmentIds;
-  const previewPairs = matchIds.slice(0, 3);
-  const extraCount = Math.max(0, matchIds.length - previewPairs.length);
-
-  const workGarments = (workFinding?.garmentIds ?? []).map((id) => byId.get(id)).filter((c): c is GarmentCard => !!c);
-  const workTops = workGarments.filter((c) => c.category === "TOPS");
-  const workBottoms = workGarments.filter((c) => c.category === "BOTTOMS" || c.category === "ONE_PIECE");
+  const profileEntries = (profileBlock?.entries ?? []).filter((e) => e.id !== "closet-capability" && !e.id.startsWith("hero-"));
+  const capability = profileBlock?.entries?.find((e) => e.id === "closet-capability");
+  const capabilityStrengths = (capability?.meta?.strengths ?? []) as Array<{ label: string; count: number }>;
 
   const blockedDetail = (coverage?.meta?.blockedDetail ?? []) as Array<{
     garmentId: string; name: string; reason: string; layers: string[];
   }>;
 
-  const shoppingHeadline = worthConsidering ?? lowPriority;
+  const recColourAttr = recommendationDetail?.attributes.find((a) => a.kind === "colour");
+  // colourAttr.label is already the single LEAD colour (the one she owns
+  // least of among her stated favourites) and .values is [lead,
+  // ...alternatives] in that same order — the engine already separates
+  // these; this just stops flattening them into one line that reads as
+  // though all three were equally "best fit".
+  const recColourLead = recColourAttr?.label;
+  const recColourAlternatives = recColourAttr?.values.slice(1) ?? [];
+  // Only real, non-null evidence becomes a bullet — rise and fabric aren't
+  // derivable at all today (no such field exists anywhere in the engine),
+  // so they're never shown, never guessed.
+  const recBullets = [
+    ...(recommendationDetail?.coverage ?? []).map((c) => COVERAGE_LABEL[c]).filter((v, i, a) => v && a.indexOf(v) === i),
+    ...(recommendationDetail?.resolvingSilhouettes ?? []),
+    ...(recommendationDetail?.structure ? [recommendationDetail.structure === "structured" ? "Structured" : "Fluid"] : []),
+  ];
 
   function closeDialog() { setDialog(null); }
   function toggleWhy(id: string) {
@@ -505,17 +492,20 @@ export default function WardrobeIntelligencePreview() {
   function renderDialog() {
     if (!dialog) return null;
     if (dialog.kind === "matches") {
+      const piece = rediscoverPieces.find((p) => p.garmentId === dialog.anchorId);
+      if (!piece) return null;
+      const anchor = byId.get(piece.garmentId);
       return (
         <DialogShell
-          title={`${matchIds.length} compatible pieces.`}
-          subtitle={`Potential matches for your ${cardLabel(rediscoverCard).toLowerCase()}.`}
+          title={`${piece.matchIds.length} compatible pieces.`}
+          subtitle={`Potential matches for your ${cardLabel(anchor).toLowerCase()}.`}
           onClose={closeDialog}
         >
           <div className="wip-match-grid">
-            {matchIds.map((id) => {
+            {piece.matchIds.map((id) => {
               const card = byId.get(id);
               return (
-                <button key={id} type="button" className="wip-match-tile" onClick={() => setDialog({ kind: "pair", garmentId: id })}>
+                <button key={id} type="button" className="wip-match-tile" onClick={() => setDialog({ kind: "pair", anchorId: piece.garmentId, garmentId: id })}>
                   <Thumb card={card} height={150} />
                   <p>{cardLabel(card)}</p>
                 </button>
@@ -527,15 +517,19 @@ export default function WardrobeIntelligencePreview() {
       );
     }
     if (dialog.kind === "pair") {
+      const piece = rediscoverPieces.find((p) => p.garmentId === dialog.anchorId);
+      const anchor = byId.get(dialog.anchorId);
       const card = byId.get(dialog.garmentId);
       return (
         <DialogShell title="Try these together." subtitle="A potential pairing from the resolved matching results." onClose={closeDialog}>
           <div className="wip-pair">
-            <div><Thumb card={rediscoverCard} height={230} /><p>{cardLabel(rediscoverCard)}</p></div>
+            <div><Thumb card={anchor} height={230} /><p>{cardLabel(anchor)}</p></div>
             <div><Thumb card={card} height={230} /><p>{cardLabel(card)}</p></div>
           </div>
           <p className="wip-dialog-note">A good starting point — add shoes and finishing pieces to complete the look.</p>
-          <button type="button" className="wip-link" onClick={() => setDialog({ kind: "matches" })}>← View all {matchIds.length} matches</button>
+          {piece && (
+            <button type="button" className="wip-link" onClick={() => setDialog({ kind: "matches", anchorId: dialog.anchorId })}>← View all {piece.matchIds.length} matches</button>
+          )}
         </DialogShell>
       );
     }
@@ -563,27 +557,156 @@ export default function WardrobeIntelligencePreview() {
           </div>
           {detail && (
             <div className="wip-profile-block">
-              <h3>Why this</h3>
+              <h3>Why this recommendation</h3>
               <p>{detail}</p>
             </div>
           )}
         </DialogShell>
       );
     }
-    if (dialog.kind === "profile" && profileBlock) {
-      // Real disclosure entries the engine already computed — Lifestyle and
-      // Shape (buildPassportView's structure comparison) among them. Colour
-      // and Register comparisons are deliberately not duplicated here: the
-      // engine already folds colour into the palette line below and register
-      // into the Lifestyle entry, rather than showing the same fact three
-      // ways (comparisonDimension(), wardrobe-copy.ts:518-528). No new
-      // comparison is added or invented for this preview.
-      const entries = (profileBlock.entries ?? []).filter((e) => e.id !== "closet-capability" && !e.id.startsWith("hero-"));
-      const capability = profileBlock.entries?.find((e) => e.id === "closet-capability");
-      const strengths = (capability?.meta?.strengths ?? []) as Array<{ label: string; count: number }>;
+    if (dialog.kind === "lifestyle") {
+      return (
+        <DialogShell title="How well your Closet supports your life." subtitle="Real combinations by kind of day — Everyday, Work, Dinners & events kept separate." onClose={closeDialog}>
+          {(["everyday", "work", "occasion"] as const).map((register) => {
+            const reading = allRegisterReadings.find((r) => r.register === register);
+            const entry = waysEntries.find((e) => e.id === `explore-${register}`);
+            if (!reading && !entry) return null;
+            const combos = bestByRegisterPreview[register] ?? [];
+            const why = entry?.action?.kind === "reveal" ? entry.action : undefined;
+            const interpretation = (register === "work" && reading?.plain === "You own a lot that reads this way, but their combinations tend to repeat the same formula."
+              ? "You have enough work pieces, but many of your combinations repeat the same formula."
+              : reading?.plain)
+              || (reading?.state === "strong" && reading.usableCount > 0
+                ? `You have ${reading.usableCount} ${REGISTER_LABEL[register].toLowerCase()} pieces with plenty of ways to combine them.`
+                : "");
+            const comboWhyKey = `combo-${register}`;
+            const comboWhy = register === "work" && combos[0]
+              ? "The tailored blazer and trousers give the softer shirt more structure, so the look still feels polished."
+              : combos[0]?.reason;
+            return (
+              <div key={register} className="wip-profile-block">
+                <h3>{REGISTER_LABEL[register]} · {reading?.stateText}</h3>
+                <p>{interpretation || entry?.body || "Nothing here yet."}</p>
+                {combos.length > 0 && comboWhy ? (
+                  <>
+                    <button type="button" className="wip-link" onClick={() => toggleWhy(comboWhyKey)}>
+                      {expandedWhy.has(comboWhyKey) ? "Show less" : "Why this works"}
+                    </button>
+                    {expandedWhy.has(comboWhyKey) && <p className="wip-ways-why">{comboWhy}</p>}
+                  </>
+                ) : why && (
+                  <>
+                    <button type="button" className="wip-link" onClick={() => toggleWhy(entry!.id)}>
+                      {expandedWhy.has(entry!.id) ? why.hideLabel : why.label}
+                    </button>
+                    {expandedWhy.has(entry!.id) && why.detail && <p className="wip-ways-why">{why.detail}</p>}
+                  </>
+                )}
+                {combos.length > 0 ? (
+                  <div className="wip-ways-strip">
+                    {combos[0].garmentIds.slice(0, 4).map((id) => <Thumb key={id} card={byId.get(id)} height={72} />)}
+                  </div>
+                ) : entry && entry.garmentIds.length > 0 && (
+                  <div className="wip-ways-strip">
+                    {entry.garmentIds.slice(0, 4).map((id) => <Thumb key={id} card={byId.get(id)} height={72} />)}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {waysEntries.filter((e) => !["explore-everyday", "explore-work", "explore-occasion"].includes(e.id)).map((entry) => {
+            const ids = entry.garmentIds ?? [];
+            if (ids.length === 0) return null;
+            return (
+              <div key={entry.id} className="wip-profile-block">
+                <h3>{entry.title}</h3>
+                <p>{entry.body}</p>
+                <div className="wip-ways-strip">
+                  {ids.slice(0, 4).map((id) => <Thumb key={id} card={byId.get(id)} height={72} />)}
+                </div>
+              </div>
+            );
+          })}
+        </DialogShell>
+      );
+    }
+    if (dialog.kind === "coverage" && coverage) {
+      return (
+        <DialogShell title="How your wardrobe matches your preferences." subtitle="nAia looks at pieces in context — including what they&rsquo;re for, whether they&rsquo;re layered, and how you might wear them." onClose={closeDialog}>
+          {blockedDetail.some((b) => b.reason === "keeping your legs covered") && (
+            <>
+              <button type="button" className="wip-link" onClick={() => toggleWhy("coverage-policy")}>
+                {expandedWhy.has("coverage-policy") ? "Hide" : "How is this checked?"}
+              </button>
+              {expandedWhy.has("coverage-policy") && <p className="wip-coverage-policy">{LEGS_COVERED_POLICY_LINE}</p>}
+            </>
+          )}
+          <div className="wip-coverage-list">
+            {blockedDetail.map((b) => {
+              const card = byId.get(b.garmentId);
+              const state = coverageContext(b.reason, b.layers.length > 0, card?.category, card?.hemLength ?? null);
+              return (
+                <div key={b.garmentId} className="wip-coverage-item">
+                  <Thumb card={card} height={140} />
+                  <div className="wip-coverage-item-text">
+                    <span className={`wip-coverage-state wip-coverage-state--${state}`}>
+                      {state === "may-depend" ? "May depend on how you wear it" : "Outside your usual preference"}
+                    </span>
+                    <h3>{b.name}</h3>
+                    <p>
+                      {card?.category === "ACTIVEWEAR"
+                        ? "You've tagged this as activewear, so your everyday coverage preference may not apply in the same way."
+                        : coverageReasonSentence(b.reason, card?.hemLength ?? null)}
+                    </p>
+                    {b.layers.length > 0 && <p className="wip-coverage-rescue">Worn with your {b.layers[0]}, it could still work.</p>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </DialogShell>
+      );
+    }
+    if (dialog.kind === "profile") {
       return (
         <DialogShell title="What nAia has learned about your wardrobe." subtitle="Deeper evidence behind your wardrobe profile." onClose={closeDialog}>
-          {entries.map((e) => e.title && e.body ? (
+          {neutralSharePct !== null && neutralSharePct >= 40 && (
+            <div className="wip-profile-block">
+              <p>{neutralSharePct}% of your colour-tagged pieces are neutral — that makes your wardrobe easy to combine, though it can also mean outfits feel visually similar.</p>
+            </div>
+          )}
+          {summaryLines.length > 0 && (
+            <div className="wip-profile-block">
+              {summaryLines.map((line, i) => <p key={i}>{line}</p>)}
+            </div>
+          )}
+          {paletteRows.length > 0 && (
+            <div className="wip-profile-block">
+              <h3>Your main colours</h3>
+              <div className="wip-swatches">
+                {paletteRows.map((c) => (
+                  <div key={c.colour} className="wip-swatch-item">
+                    <span className="wip-swatch" style={{ background: swatchColour(c.colour) }} />
+                    {c.colour} · {c.count}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {shapeChips.length > 0 && (
+            <div className="wip-profile-block">
+              <h3>Your main shapes</h3>
+              <div className="wip-chips">
+                {shapeChips.map((s) => <span key={s.label} className="wip-chip">{s.label} · {s.count}</span>)}
+              </div>
+              {shapeChips.length > 1 && (
+                <p className="wip-profile-so-what">
+                  {shapeChips[0].label} shapes appear most often, so even when you change individual garments, the overall shape of an outfit can stay similar. More variation in shape may change how your outfits feel more than another colour would.
+                </p>
+              )}
+            </div>
+          )}
+          {profileEntries.map((e) => e.title && e.body ? (
             <div key={e.id} className="wip-profile-block">
               <h3>{e.title}</h3>
               <p>{e.body}</p>
@@ -595,9 +718,9 @@ export default function WardrobeIntelligencePreview() {
               <p>{capability.body === "These counts estimate the kinds of looks your pieces could help with. They aren't complete outfits or a match against your personal requirements."
                 ? "These counts estimate the kinds of looks your pieces could help with. These are the kinds of looks your current Closet can support."
                 : capability.body}</p>
-              {strengths.length > 0 && (
+              {capabilityStrengths.length > 0 && (
                 <ul className="wip-capability-list">
-                  {strengths.map((s) => <li key={s.label}>{s.label} · {s.count}</li>)}
+                  {capabilityStrengths.map((s) => <li key={s.label}>{s.label} · {s.count}</li>)}
                 </ul>
               )}
             </div>
@@ -644,6 +767,24 @@ export default function WardrobeIntelligencePreview() {
     return null;
   }
 
+  if (rediscoverPieces.length === 0) {
+    // No dynamic rediscovery candidate for this Closet — the preview has
+    // nothing honest to lead with. Real state, not an error.
+    return (
+      <MyNaiaLayout compact>
+        <style>{css}</style>
+        <div className="wip-app">
+          <main className="wip-main">
+            <p className="wip-empty">
+              Nothing to preview yet — this Closet doesn&rsquo;t currently have a &ldquo;piece worth
+              rediscovering&rdquo; finding to lead with.
+            </p>
+          </main>
+        </div>
+      </MyNaiaLayout>
+    );
+  }
+
   return (
     <MyNaiaLayout compact>
       <style>{css}</style>
@@ -651,533 +792,190 @@ export default function WardrobeIntelligencePreview() {
         <main className="wip-main">
           <p className="wip-eyebrow">My nAia / Wardrobe Intelligence</p>
           <header className="wip-header">
-            <div>
-              <h1 className="wip-h1">Your wardrobe, <em className="sp-shell-accent">understood.</em></h1>
-              <p className="wip-subhead">{page.reading ?? "Find more in what you own. See what deserves your attention."}</p>
-            </div>
+            <h1 className="wip-h1">Your wardrobe, <em className="sp-shell-accent">understood.</em></h1>
             <div className="wip-status">
-              <strong>{page.basis}</strong>
               <button type="button" className="wip-link" onClick={() => setDialog({ kind: "status" })}>
                 {previewStatus ? `${previewStatus} ↗` : "Is your Closet up to date? →"}
               </button>
             </div>
           </header>
+          <p className="wip-summary">{page.reading ?? "Find more in what you own. See what deserves your attention."}</p>
 
-          {(glanceRegisters.length > 0 || worthConsidering || lowPriority) && (
-            <div className="wip-glance" aria-label="Your wardrobe at a glance">
-              {glanceRegisters.map((g) => (
-                <span key={g.heading} className="wip-glance-item">
-                  <b>{g.heading}</b> — {g.stateText.toLowerCase()}
-                </span>
-              ))}
-              {worthConsidering && (
-                <span className="wip-glance-item wip-glance-item--positive">
-                  <b>Worth considering</b> — {shortRecTitle(worthConsidering.title)}
-                </span>
-              )}
-              {lowPriority && (
-                <span className="wip-glance-item">
-                  <b>Can wait</b> — {shortRecTitle(lowPriority.title)}
-                </span>
-              )}
-            </div>
-          )}
-
-          <div className="wip-layout">
-            <section className="wip-focus" aria-live="polite" aria-label="Selected wardrobe discovery">
-              {insight === null && (
-                <>
-                  <div className="wip-feature-head">
-                    <span className="wip-tag">A piece to rediscover</span>
-                    <h2>{rediscover.title ?? "More ways to wear this."}</h2>
-                    <p>{rediscoverMembers ? rediscover.body : rediscover.meta?.rediscover as string ?? rediscover.body}</p>
-                  </div>
-                  <div className="wip-board wip-board--split">
-                    <div className="wip-hero-piece">
-                      <Thumb card={rediscoverCard} height={300} />
-                      <p className="wip-piece-label">{cardLabel(rediscoverCard)}</p>
-                      <p className="wip-piece-hint">Already in your Closet</p>
-                    </div>
-                    {rediscoverByRegister.length > 1 ? (
-                      // Real matches, grouped by their own register — "show me
-                      // how to wear this" instead of one flat grid of
-                      // compatible pieces.
-                      <div className="wip-partners wip-partners--grouped">
-                        {rediscoverByRegister.filter((g) => g.register !== "other").map((group) => (
-                          <div key={group.register} className="wip-partner-group">
-                            <div className="wip-partners-label">{REGISTER_LABEL[group.register as RegisterId]}</div>
-                            <div className="wip-partner-grid wip-partner-grid--row">
-                              {group.garmentIds.slice(0, 3).map((id) => {
-                                const card = byId.get(id);
-                                return (
-                                  <button key={id} type="button" className="wip-partner" onClick={() => setDialog({ kind: "pair", garmentId: id })}>
-                                    <Thumb card={card} height={90} />
-                                    <span>With {shortMatchWord(card)}</span>
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="wip-partners">
-                        <div className="wip-partners-label">
-                          Start with these pieces <span>{previewPairs.length} of {matchIds.length}</span>
-                        </div>
-                        <div className="wip-partner-grid">
-                          {previewPairs.map((id) => {
-                            const card = byId.get(id);
-                            return (
-                              <button key={id} type="button" className="wip-partner" onClick={() => setDialog({ kind: "pair", garmentId: id })}>
-                                <Thumb card={card} height={110} />
-                                <span>With {shortMatchWord(card)}</span>
-                              </button>
-                            );
-                          })}
-                          {extraCount > 0 && (
-                            <button type="button" className="wip-partner wip-partner--more" onClick={() => setDialog({ kind: "matches" })}>
-                              <b>+{extraCount}</b>
-                              <span>More pieces to explore</span>
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  <div className="wip-feature-foot">
-                    <a className="wip-link" href="/style-me">Style this piece in StyleMe →</a>
-                    <button type="button" className="wip-primary" onClick={() => setDialog({ kind: "matches" })}>
-                      See all {matchIds.length} compatible pieces <span aria-hidden="true">→</span>
-                    </button>
-                  </div>
-                </>
-              )}
-
-              {insight === "wear" && (
-                <>
-                  <button type="button" className="wip-back" onClick={() => setInsight(null)}>← Back to the rediscovery finding</button>
-                  <div className="wip-feature-head">
-                    <span className="wip-tag">Wear more of what you own</span>
-                    <h2>How well your Closet supports your life.</h2>
-                    <p>Real combinations from what you already own, kept separate by the parts of your life you told nAia about — activewear and travel never blend into everyday.</p>
-                  </div>
-                  <div className="wip-ways-list">
-                    {(["everyday", "work", "occasion"] as const).map((register) => {
-                      const reading = allRegisterReadings.find((r) => r.register === register);
-                      const entry = waysEntries.find((e) => e.id === `explore-${register}`);
-                      if (!reading && !entry) return null;
-                      const combos = bestByRegisterPreview[register] ?? [];
-                      const why = entry?.action?.kind === "reveal" ? entry.action : undefined;
-                      // The interpretation leads, not the specific combo's
-                      // reason — registerDisplay's own plain-language line
-                      // ("You own a lot... repeat the same formula") when
-                      // there is one; "strong" carries no separate sentence
-                      // by design, so it falls back to the real usable-piece
-                      // count instead of an empty paragraph.
-                      const interpretation = (register === "work" && reading?.plain === "You own a lot that reads this way, but their combinations tend to repeat the same formula."
-                        ? "You have enough work pieces, but many of your combinations repeat the same formula."
-                        : reading?.plain)
-                        || (reading?.state === "strong" && reading.usableCount > 0
-                          ? `You have ${reading.usableCount} ${REGISTER_LABEL[register].toLowerCase()} pieces with plenty of ways to combine them.`
-                          : "");
-                      const comboWhyKey = `combo-${register}`;
-                      const comboWhy = register === "work" && combos[0]
-                        ? "The tailored blazer and trousers give the softer shirt more structure, so the look still feels polished."
-                        : combos[0]?.reason;
-                      return (
-                        <div key={register} className="wip-ways-row">
-                          <div className="wip-ways-text">
-                            <div className="wip-ways-heading">
-                              <h3>{REGISTER_LABEL[register]}</h3>
-                              {reading && <span className={`wip-depth-badge wip-depth-badge--${reading.state}`}>{reading.stateText}</span>}
-                            </div>
-                            <p>{interpretation || entry?.body || "Nothing here yet."}</p>
-                            {/* One reveal trigger per card. combos.length > 0 means
-                                this register already shows a real ranked
-                                combination, so ITS reason is the relevant "why" —
-                                the entry-level action (whyThisWorks, meant for
-                                registers with no combo of their own, e.g. the
-                                gym-bonus entries below) would just repeat the
-                                same visible label a second time and is skipped
-                                here. */}
-                            {combos.length > 0 && comboWhy ? (
-                              <>
-                                <button type="button" className="wip-link" onClick={() => toggleWhy(comboWhyKey)}>
-                                  {expandedWhy.has(comboWhyKey) ? "Show less" : "Why this works"}
-                                </button>
-                                {expandedWhy.has(comboWhyKey) && (
-                                  <p className="wip-ways-why">{comboWhy}</p>
-                                )}
-                              </>
-                            ) : why && (
-                              <>
-                                <button type="button" className="wip-link" onClick={() => toggleWhy(entry!.id)}>
-                                  {expandedWhy.has(entry!.id) ? why.hideLabel : why.label}
-                                </button>
-                                {expandedWhy.has(entry!.id) && why.detail && (
-                                  <p className="wip-ways-why">{why.detail}</p>
-                                )}
-                              </>
-                            )}
-                          </div>
-                          {combos.length > 0 ? (
-                            <div className="wip-ways-combos">
-                              {(() => {
-                                const primary = combos[0];
-                                const secondary = combos[1];
-                                // A second ranked combo that shares most of its
-                                // pieces with the first isn't a second outfit —
-                                // it's a swap. Only the piece(s) that actually
-                                // differ are shown, never the repeated ones.
-                                const sharedIds = secondary
-                                  ? primary.garmentIds.filter((id) => secondary.garmentIds.includes(id))
-                                  : [];
-                                const changedIds = secondary
-                                  ? secondary.garmentIds.filter((id) => !sharedIds.includes(id))
-                                  : [];
-                                const isSwap = secondary !== undefined && sharedIds.length > 0 && changedIds.length > 0;
-                                const isDistinctLook = secondary !== undefined && sharedIds.length === 0 && changedIds.length > 0;
-                                return (
-                                  <>
-                                    <div className="wip-ways-strip">
-                                      {primary.garmentIds.slice(0, 4).map((id) => <Thumb key={id} card={byId.get(id)} height={80} />)}
-                                    </div>
-                                    {isSwap && (
-                                      <div className="wip-ways-swap">
-                                        <span className="wip-ways-swap-label">
-                                          Or swap the {joinWords(changedIds.map((id) => swapNoun(byId.get(id))))}
-                                        </span>
-                                        <div className="wip-ways-strip wip-ways-strip--swap">
-                                          {changedIds.map((id) => <Thumb key={id} card={byId.get(id)} height={56} />)}
-                                        </div>
-                                      </div>
-                                    )}
-                                    {isDistinctLook && (
-                                      <div className="wip-ways-strip">
-                                        {secondary!.garmentIds.slice(0, 4).map((id) => <Thumb key={id} card={byId.get(id)} height={80} />)}
-                                      </div>
-                                    )}
-                                  </>
-                                );
-                              })()}
-                            </div>
-                          ) : entry && entry.garmentIds.length > 0 ? (
-                            <div className="wip-ways-strip">
-                              {entry.garmentIds.slice(0, 4).map((id) => <Thumb key={id} card={byId.get(id)} height={80} />)}
-                            </div>
-                          ) : null}
-                        </div>
-                      );
-                    })}
-                    {waysEntries.filter((e) => !e.id.startsWith("explore-") || !["explore-everyday", "explore-work", "explore-occasion"].includes(e.id)).map((entry) => {
-                      const ids = entry.garmentIds ?? [];
-                      if (ids.length === 0) return null;
-                      // A real bonus pairing (e.g. "also works for the gym") when
-                      // eligible — never its own depth verdict, since none exists.
-                      return (
-                        <div key={entry.id} className="wip-ways-row">
-                          <div className="wip-ways-text">
-                            <h3>{entry.title}</h3>
-                            <p>{entry.body}</p>
-                          </div>
-                          <div className="wip-ways-strip">
-                            {ids.slice(0, 4).map((id) => <Thumb key={id} card={byId.get(id)} height={80} />)}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </>
-              )}
-
-              {insight === "work" && workFinding && (
-                <>
-                  <button type="button" className="wip-back" onClick={() => setInsight(null)}>← Back to the rediscovery finding</button>
-                  <div className="wip-feature-head">
-                    <span className="wip-tag">What deserves your attention</span>
-                    <h2>{workFinding.title}</h2>
-                    <p>{workFinding.body} These are some of the pieces behind that finding.</p>
-                  </div>
-                  <div className="wip-board wip-board--work">
-                    <div className="wip-work-group">
-                      <h3>Some of your {attentionRegisterLabel?.toLowerCase() ?? ""} tops</h3>
-                      <div className="wip-work-items">
-                        {workTops.slice(0, 2).map((c) => (
-                          <div key={c.id} className="wip-work-item"><Thumb card={c} height={190} /><p>{cardLabel(c)}</p></div>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="wip-work-group">
-                      <h3>Your {attentionRegisterLabel?.toLowerCase() ?? ""} bottoms</h3>
-                      <div className="wip-work-items">
-                        {workBottoms.slice(0, 2).map((c) => (
-                          <div key={c.id} className="wip-work-item"><Thumb card={c} height={190} /><p>{cardLabel(c)}</p></div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="wip-feature-foot">
-                    {worthConsidering && (
-                      <button type="button" className="wip-link" onClick={() => setInsight("shopping")}>
-                        See the shopping suggestion
-                      </button>
-                    )}
-                    {attentionCombo && (
-                      <button type="button" className="wip-primary" onClick={() => setDialog({ kind: "workCombo" })}>
-                        View this combination <span aria-hidden="true">→</span>
-                      </button>
-                    )}
-                  </div>
-                </>
-              )}
-
-              {insight === "shopping" && shoppingHeadline && (
-                <>
-                  <button type="button" className="wip-back" onClick={() => setInsight(null)}>← Back to the rediscovery finding</button>
-                  <div className="wip-feature-head">
-                    <span className="wip-tag">Shopping priorities</span>
-                    <h2>What&rsquo;s worth considering — and what you already have enough of.</h2>
-                  </div>
-                  {worthConsidering && (() => {
-                    const colourAttr = recommendationDetail?.attributes.find((a) => a.kind === "colour");
-                    // colourAttr.label is already the single LEAD colour (the
-                    // one she owns least of among her stated favourites) and
-                    // .values is [lead, ...alternatives] in that same order —
-                    // the engine already separates these; this just stops
-                    // flattening them into one line that reads as though all
-                    // three were equally "best fit".
-                    const colourLead = colourAttr?.label;
-                    const colourAlternatives = colourAttr?.values.slice(1) ?? [];
-                    // Only real, non-null evidence becomes a bullet — rise and
-                    // fabric aren't derivable at all today (no such field
-                    // exists anywhere in the engine), so they're never shown,
-                    // never guessed.
-                    const bullets = [
-                      ...(recommendationDetail?.coverage ?? []).map((c) => COVERAGE_LABEL[c]).filter((v, i, a) => v && a.indexOf(v) === i),
-                      ...(recommendationDetail?.resolvingSilhouettes ?? []),
-                      ...(recommendationDetail?.structure ? [recommendationDetail.structure === "structured" ? "Structured" : "Fluid"] : []),
-                    ];
-                    // Human, not algorithmic: names what the colour DOES for
-                    // her rather than reciting "appears less often".
-                    const colourSentence = colourLead
-                      ? ` ${colourLead[0].toUpperCase()}${colourLead.slice(1)} would add variety while staying within the palette you already enjoy wearing.`
-                      : "";
-                    return (
-                      <div className="wip-shop-block wip-shop-block--lead">
-                        <span className="wip-shop-kicker">Worth adding next</span>
-                        <p className="wip-shop-title">{(worthConsidering.title ?? "").replace(/^Look for |\.$/g, "")}</p>
-                        {(bullets.length > 0 || colourLead) && (
-                          <div className="wip-shop-bullets">
-                            <span className="wip-shop-bullets-label">Best fit for your wardrobe</span>
-                            <ul>
-                              {bullets.map((b) => <li key={b}>{b}</li>)}
-                              {colourLead && <li>Best colour: {colourLead[0].toUpperCase()}{colourLead.slice(1)}</li>}
-                              {colourAlternatives.length > 0 && (
-                                <li>Also within your palette: {colourAlternatives.map((c) => c[0].toUpperCase() + c.slice(1)).join(", ")}</li>
-                              )}
-                            </ul>
-                          </div>
-                        )}
-                        <p className="wip-shop-body">
-                          {(worthConsidering.body ?? "").split(".")[0]}.{colourSentence}
-                        </p>
-                        {worthConsidering.garmentIds.length > 0 && (
-                          <>
-                            <span className="wip-shop-unlocks-label">What it unlocks</span>
-                            <div className="wip-ways-strip">
-                              {worthConsidering.garmentIds.slice(0, 4).map((id) => <Thumb key={id} card={byId.get(id)} height={90} />)}
-                            </div>
-                          </>
-                        )}
-                        <button type="button" className="wip-link" onClick={() => setDialog({ kind: "worthConsidering" })}>Why this recommendation</button>
-                      </div>
-                    );
-                  })()}
-                  {lowPriority && (
-                    <div className="wip-shop-block wip-shop-block--secondary">
-                      <span className="wip-shop-kicker">You can skip this for now</span>
-                      <p className="wip-shop-title">{(lowPriority.title ?? "").replace(/^Another (similar |of your )?/i, "Another ")}</p>
-                      {/* enoughCluster is the real cluster behind this finding — its
-                          own body already states the real count and why another
-                          one wouldn't add much; falls back to the shorter
-                          register-only reason if that cluster isn't available. */}
-                      <p className="wip-shop-body">{enoughCluster?.body ?? lowPriority.body}</p>
-                      {enoughCluster && enoughCluster.garmentIds.length > 0 && (
-                        <div className="wip-ways-strip">
-                          {enoughCluster.garmentIds.slice(0, 4).map((id) => <Thumb key={id} card={byId.get(id)} height={70} />)}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {enoughClusters.length > 1 && (
-                    <div className="wip-shop-block wip-shop-block--secondary">
-                      <span className="wip-shop-kicker">Where else your wardrobe repeats</span>
-                      {enoughClusters.slice(1).map((c) => (
-                        <div key={c.title} className="wip-repeat-row">
-                          <p className="wip-shop-body">{c.body}</p>
-                          {c.garmentIds.length > 0 && (
-                            <div className="wip-ways-strip">
-                              {c.garmentIds.slice(0, 4).map((id) => <Thumb key={id} card={byId.get(id)} height={56} />)}
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <div className="wip-feature-foot">
-                    <p>A shopping priority, not a rule.</p>
-                    <button type="button" className="wip-primary" onClick={() => setInsight(null)}>
-                      See what I can wear now <span aria-hidden="true">→</span>
-                    </button>
-                  </div>
-                </>
-              )}
-
-              {insight === "coverage" && coverage && (
-                <>
-                  <button type="button" className="wip-back" onClick={() => setInsight(null)}>← Back to the rediscovery finding</button>
-                  <div className="wip-feature-head">
-                    <span className="wip-tag">How your wardrobe matches your preferences</span>
-                    <h2>How your wardrobe matches your preferences.</h2>
-                    <p>nAia looks at pieces in context — including what they&rsquo;re for, whether they&rsquo;re layered, and how you might wear them.</p>
-                  </div>
-                  {blockedDetail.some((b) => b.reason === "keeping your legs covered") && (
-                    <>
-                      <button type="button" className="wip-link" onClick={() => toggleWhy("coverage-policy")}>
-                        {expandedWhy.has("coverage-policy") ? "Hide" : "How is this checked?"}
-                      </button>
-                      {expandedWhy.has("coverage-policy") && (
-                        <p className="wip-coverage-policy">{LEGS_COVERED_POLICY_LINE}</p>
-                      )}
-                    </>
-                  )}
-                  <div className="wip-coverage-list">
-                    {blockedDetail.map((b) => {
-                      const card = byId.get(b.garmentId);
-                      const state = coverageContext(b.reason, b.layers.length > 0, card?.category, card?.hemLength ?? null);
-                      return (
-                        <div key={b.garmentId} className="wip-coverage-item">
-                          <Thumb card={card} height={160} />
-                          <div className="wip-coverage-item-text">
-                            <span className={`wip-coverage-state wip-coverage-state--${state}`}>
-                              {state === "may-depend" ? "May depend on how you wear it" : "Outside your usual preference"}
-                            </span>
-                            <h3>{b.name}</h3>
-                            <p>
-                              {card?.category === "ACTIVEWEAR"
-                                ? "You've tagged this as activewear, so your everyday coverage preference may not apply in the same way."
-                                : coverageReasonSentence(b.reason, card?.hemLength ?? null)}
-                            </p>
-                            {b.layers.length > 0 && (
-                              <p className="wip-coverage-rescue">Worn with your {b.layers[0]}, it could still work.</p>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </>
-              )}
-
-              {insight === "profile" && profileBlock && (
-                <>
-                  <button type="button" className="wip-back" onClick={() => setInsight(null)}>← Back to the rediscovery finding</button>
-                  <div className="wip-feature-head">
-                    <span className="wip-tag">What your wardrobe looks like</span>
-                    <h2>What your wardrobe looks like.</h2>
-                  </div>
-                  <div className="wip-profile-compact">
-                    {neutralSharePct !== null && neutralSharePct >= 40 && (
-                      <p className="wip-profile-lead">
-                        {neutralSharePct}% of your colour-tagged pieces are neutral — that makes your wardrobe easy to combine, though it can also mean outfits feel visually similar.
-                      </p>
-                    )}
-                    {summaryLines.map((line, i) => <p key={i}>{line}</p>)}
-                    {paletteRows.length > 0 && (
-                      <div className="wip-profile-row">
-                        <h3>Your main colours</h3>
-                        <div className="wip-swatches">
-                          {paletteRows.map((c) => (
-                            <div key={c.colour} className="wip-swatch-item">
-                              <span className="wip-swatch" style={{ background: swatchColour(c.colour) }} />
-                              {c.colour} · {c.count}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    {shapeChips.length > 0 && (
-                      <div className="wip-profile-row">
-                        <h3>Your main shapes</h3>
-                        <div className="wip-chips">
-                          {shapeChips.map((s) => <span key={s.label} className="wip-chip">{s.label} · {s.count}</span>)}
-                        </div>
-                        {shapeChips.length > 1 && (
-                          <p className="wip-profile-so-what">
-                            {shapeChips[0].label} shapes appear most often, so even when you change individual garments, the overall shape of an outfit can stay similar. More variation in shape may change how your outfits feel more than another colour would.
-                          </p>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  <div className="wip-feature-foot">
-                    <button type="button" className="wip-link" onClick={() => setDialog({ kind: "profile" })}>See what nAia has learned ↗</button>
-                  </div>
-                </>
-              )}
-            </section>
-
-            <aside className="wip-rail">
-              <div className="wip-rail-heading">Also worth a look</div>
-              {(waysEntries.length > 0 || allRegisterReadings.length > 0) && (
-                <button type="button" className={`wip-insight${insight === "wear" ? " is-active" : ""}`} onClick={() => setInsight("wear")}>
-                  <span className="wip-insight-topic">Wear more of what you own</span>
-                  <h3>How well your Closet supports your life</h3>
-                  <p>Real combinations by kind of day — Everyday, Work, Dinners &amp; events kept separate.</p>
-                  <span className="wip-insight-arrow" aria-hidden="true">↗</span>
-                </button>
-              )}
-              {workFinding && (
-                <button type="button" className={`wip-insight${insight === "work" ? " is-active" : ""}`} onClick={() => setInsight("work")}>
-                  <span className="wip-insight-topic">What deserves attention{attentionRegisterLabel ? ` — ${attentionRegisterLabel}` : ""}</span>
-                  <h3>{workFinding.title}</h3>
-                  <p>See the pieces behind the finding.</p>
-                  <span className="wip-insight-arrow" aria-hidden="true">↗</span>
-                </button>
-              )}
-              {shoppingHeadline && (
-                <button type="button" className={`wip-insight${insight === "shopping" ? " is-active" : ""}`} onClick={() => setInsight("shopping")}>
-                  <span className="wip-insight-topic">Shopping priorities</span>
-                  <h3>{worthConsidering ? `Worth considering: ${shortRecTitle(worthConsidering.title)}` : lowPriority!.title}</h3>
-                  <p>{worthConsidering ? worthConsidering.body : lowPriority!.body}</p>
-                  <span className="wip-insight-arrow" aria-hidden="true">↗</span>
-                </button>
-              )}
-              {coverage && (
-                <button type="button" className={`wip-insight${insight === "coverage" ? " is-active" : ""}`} onClick={() => setInsight("coverage")}>
-                  <span className="wip-insight-topic">Passport alignment</span>
-                  <h3>How your wardrobe matches your preferences</h3>
-                  <p>{coverage.body}</p>
-                  <span className="wip-insight-arrow" aria-hidden="true">↗</span>
-                </button>
-              )}
-              {profileBlock && (
-                <button type="button" className={`wip-insight${insight === "profile" ? " is-active" : ""}`} onClick={() => setInsight("profile")}>
-                  <span className="wip-insight-topic">Wardrobe profile</span>
-                  <h3>Colours, shapes and how you ask to feel.</h3>
-                  <p>A compact snapshot, with deeper evidence one click away.</p>
-                  <span className="wip-insight-arrow" aria-hidden="true">↗</span>
-                </button>
-              )}
-
-              <div className="wip-bottom-line">
-                <span>Start with what you own. Add only what earns its place.</span>
-                <button type="button" className="wip-link" onClick={() => setDialog({ kind: "method" })}>What this is based on</button>
+          {/* ── Section 1: 3 headline insights ─────────────────────────────── */}
+          <div className="wip-cards">
+            {glanceRegisters[0] && (
+              <div className="wip-card">
+                <span className="wip-card-kicker wip-card-kicker--positive">Strongest</span>
+                <h3>{glanceRegisters[0].heading} wardrobe</h3>
+                <p>{glanceRegisters[0].stateText}</p>
               </div>
-            </aside>
+            )}
+            {glanceRegisters[1] && (
+              <div className="wip-card">
+                <span className="wip-card-kicker">Needs attention</span>
+                <h3>{glanceRegisters[1].heading} wardrobe</h3>
+                <p>{glanceRegisters[1].stateText}</p>
+              </div>
+            )}
+            {(worthConsidering || lowPriority) && (
+              <div className="wip-card">
+                <span className="wip-card-kicker wip-card-kicker--positive">Best next move</span>
+                <h3>{worthConsidering ? shortRecTitle(worthConsidering.title) : lowPriority!.title}</h3>
+                {recColourLead && <p>Best colour: {recColourLead[0].toUpperCase()}{recColourLead.slice(1)}</p>}
+              </div>
+            )}
           </div>
 
+          {/* ── Section 2: pieces worth rediscovering ──────────────────────── */}
+          <section className="wip-section">
+            <h2 className="wip-section-title">Pieces worth rediscovering.</h2>
+            {rediscoverPieces.slice(0, 3).map((piece) => {
+              const card = byId.get(piece.garmentId);
+              const looks = piece.matchIds.slice(0, 3);
+              return (
+                <div key={piece.garmentId} className="wip-piece-card">
+                  <div className="wip-piece-thumb"><Thumb card={card} height={84} /></div>
+                  <div className="wip-piece-body">
+                    <h3>{cardLabel(card)}</h3>
+                    <p>You have more ways to wear this than you think.</p>
+                    {looks.length > 0 && (
+                      <div className="wip-piece-looks">
+                        {looks.map((id) => <Thumb key={id} card={byId.get(id)} height={56} />)}
+                      </div>
+                    )}
+                    <div className="wip-piece-actions">
+                      <a className="wip-link" href="/style-me">Style this in StyleMe →</a>
+                      {piece.matchIds.length > looks.length && (
+                        <button type="button" className="wip-link" onClick={() => setDialog({ kind: "matches", anchorId: piece.garmentId })}>
+                          See {piece.matchIds.length} compatible pieces
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </section>
+
+          {/* ── Section 3: how your wardrobe supports your life ────────────── */}
+          {allRegisterReadings.length > 0 && (
+            <section className="wip-section">
+              <h2 className="wip-section-title">How your wardrobe supports your life.</h2>
+              {(["everyday", "work", "occasion"] as const).map((register) => {
+                const reading = allRegisterReadings.find((r) => r.register === register);
+                if (!reading) return null;
+                const combos = bestByRegisterPreview[register] ?? [];
+                const interpretation = (register === "work" && reading.plain === "You own a lot that reads this way, but their combinations tend to repeat the same formula."
+                  ? "You have enough work pieces, but many of your combinations repeat the same formula."
+                  : reading.plain)
+                  || (reading.state === "strong" && reading.usableCount > 0
+                    ? `You have ${reading.usableCount} ${REGISTER_LABEL[register].toLowerCase()} pieces with plenty of ways to combine them.`
+                    : "");
+                const primary = combos[0];
+                const secondary = combos[1];
+                const sharedIds = secondary ? primary.garmentIds.filter((id) => secondary.garmentIds.includes(id)) : [];
+                const changedIds = secondary ? secondary.garmentIds.filter((id) => !sharedIds.includes(id)) : [];
+                const isSwap = secondary !== undefined && sharedIds.length > 0 && changedIds.length > 0;
+                const isDistinctLook = secondary !== undefined && sharedIds.length === 0 && changedIds.length > 0;
+                return (
+                  <div key={register} className="wip-life-row">
+                    <div className="wip-life-main">
+                      <div className="wip-life-heading">
+                        <h3>{REGISTER_LABEL[register]}</h3>
+                        <span className="wip-life-state">{reading.stateText}</span>
+                      </div>
+                      <div className="wip-life-bar"><div className="wip-life-bar-fill" style={{ width: `${DEPTH_FILL[reading.state]}%` }} /></div>
+                      <p className="wip-life-count">{reading.usableCount} usable {REGISTER_LABEL[register].toLowerCase()} pieces</p>
+                      <p className="wip-life-text">{interpretation}</p>
+                      {register === attentionRegister && attentionCombo && (
+                        <button type="button" className="wip-link" onClick={() => setDialog({ kind: "workCombo" })}>View this combination →</button>
+                      )}
+                    </div>
+                    {primary && (
+                      <div className="wip-life-looks">
+                        {primary.garmentIds.slice(0, 3).map((id) => <Thumb key={id} card={byId.get(id)} height={64} />)}
+                        {isSwap && changedIds.slice(0, 1).map((id) => <Thumb key={id} card={byId.get(id)} height={64} />)}
+                        {isDistinctLook && secondary!.garmentIds.slice(0, 1).map((id) => <Thumb key={id} card={byId.get(id)} height={64} />)}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              <button type="button" className="wip-link wip-section-more" onClick={() => setDialog({ kind: "lifestyle" })}>See all lifestyle insights →</button>
+            </section>
+          )}
+
+          {/* ── Section 4: where your wardrobe repeats ─────────────────────── */}
+          {enoughClusters.length > 0 && (
+            <section className="wip-section">
+              <h2 className="wip-section-title">Where your wardrobe repeats.</h2>
+              {enoughClusters.map((c) => (
+                <div key={c.title} className="wip-repeat-card">
+                  <h3>{c.title}</h3>
+                  <p>{c.body}</p>
+                  {c.garmentIds.length > 0 && (
+                    <div className="wip-repeat-looks">
+                      {c.garmentIds.slice(0, 6).map((id) => <Thumb key={id} card={byId.get(id)} height={70} />)}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </section>
+          )}
+
+          {/* ── Section 5: shop smarter ─────────────────────────────────────── */}
+          {(worthConsidering || lowPriority) && (
+            <section className="wip-section">
+              <h2 className="wip-section-title">Shop smarter.</h2>
+              <div className="wip-shop-split">
+                {worthConsidering && (
+                  <div className="wip-shop-col">
+                    <span className="wip-shop-col-label wip-shop-col-label--buy">Worth adding</span>
+                    <h3>{(worthConsidering.title ?? "").replace(/^Look for |\.$/g, "")}</h3>
+                    {(recBullets.length > 0 || recColourLead) && (
+                      <ul>
+                        {recBullets.map((b) => <li key={b}>{b}</li>)}
+                        {recColourLead && <li>Best colour: {recColourLead[0].toUpperCase()}{recColourLead.slice(1)}</li>}
+                        {recColourAlternatives.length > 0 && (
+                          <li>Also within your palette: {recColourAlternatives.map((c) => c[0].toUpperCase() + c.slice(1)).join(", ")}</li>
+                        )}
+                      </ul>
+                    )}
+                    <p>{(worthConsidering.body ?? "").split(".")[0]}.</p>
+                    {worthConsidering.garmentIds.length > 0 && (
+                      <div className="wip-shop-looks">
+                        {worthConsidering.garmentIds.slice(0, 4).map((id) => <Thumb key={id} card={byId.get(id)} height={64} />)}
+                      </div>
+                    )}
+                    <button type="button" className="wip-link" onClick={() => setDialog({ kind: "worthConsidering" })}>Why this recommendation →</button>
+                  </div>
+                )}
+                {lowPriority && (
+                  <div className="wip-shop-col">
+                    <span className="wip-shop-col-label">Skip for now</span>
+                    <h3>{(lowPriority.title ?? "").replace(/^Another (similar |of your )?/i, "Another ")}</h3>
+                    <p>{enoughCluster?.body ?? lowPriority.body}</p>
+                    {enoughCluster && enoughCluster.garmentIds.length > 0 && (
+                      <div className="wip-shop-looks">
+                        {enoughCluster.garmentIds.slice(0, 4).map((id) => <Thumb key={id} card={byId.get(id)} height={64} />)}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
+
+          {/* ── Secondary links — deep evidence, never the main story ──────── */}
+          <div className="wip-footer-links">
+            {coverage && (
+              <button type="button" className="wip-link" onClick={() => setDialog({ kind: "coverage" })}>See how your wardrobe matches your Style Passport →</button>
+            )}
+            {profileBlock && (
+              <button type="button" className="wip-link" onClick={() => setDialog({ kind: "profile" })}>What your wardrobe looks like →</button>
+            )}
+          </div>
+          <button type="button" className="wip-link wip-method-link" onClick={() => setDialog({ kind: "method" })}>How nAia works this out</button>
           <p className="wip-legal">Nothing you do on this page is saved.</p>
         </main>
       </div>
@@ -1187,143 +985,84 @@ export default function WardrobeIntelligencePreview() {
 }
 
 const css = `
-  .wip-app{max-width:1180px;margin:0 auto}
-  .wip-main{padding:8px 0 40px}
+  .wip-app{max-width:860px;margin:0 auto}
+  .wip-main{padding:8px 0 56px}
   .wip-eyebrow{font-family:var(--naia-ff-ui);font-size:9px;letter-spacing:2.5px;text-transform:uppercase;color:rgba(40,21,12,0.5);margin:0 0 14px}
-  .wip-header{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:22px;flex-wrap:wrap}
+  .wip-header{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;flex-wrap:wrap}
   .wip-h1{font-family:var(--naia-ff-display);font-weight:200;font-size:2rem;letter-spacing:0.01em;text-transform:uppercase;line-height:1.05;margin:0}
-  .wip-h1 em{text-transform:none}
-  .wip-subhead{font-family:var(--naia-ff-body);font-style:italic;font-size:1rem;color:rgba(40,21,12,0.6);margin:10px 0 0;max-width:520px}
-  .wip-status{text-align:right;min-width:180px}
-  .wip-status strong{display:block;font-family:var(--naia-ff-ui);font-size:12.5px;font-weight:600;color:var(--naia-ink)}
-  .wip-link{border:0;background:none;padding:0;margin-top:6px;font-family:var(--naia-ff-ui);font-size:11.5px;color:var(--naia-accent);text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+  .wip-h1 em{font-family:var(--naia-ff-body);font-style:italic;text-transform:none}
+  .wip-status{padding-top:6px}
+  .wip-link{border:0;background:none;padding:0;font-family:var(--naia-ff-ui);font-size:11.5px;color:var(--naia-accent);text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+  .wip-summary{font-family:var(--naia-ff-ui);font-size:14px;line-height:1.6;color:rgba(40,21,12,0.72);margin:14px 0 32px;max-width:620px}
 
-  .wip-glance{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 22px;padding:12px 0;margin-bottom:22px;border-top:1px solid var(--naia-border);border-bottom:1px solid var(--naia-border)}
-  .wip-glance-item{font-family:var(--naia-ff-ui);font-size:11.5px;color:rgba(40,21,12,0.65);white-space:nowrap}
-  .wip-glance-item b{font-family:var(--naia-ff-ui);font-weight:600;color:var(--naia-ink);text-transform:uppercase;font-size:10px;letter-spacing:0.4px}
-  .wip-glance-item--positive b{color:var(--naia-accent)}
-  @media(max-width:700px){.wip-glance{gap:6px 16px}.wip-glance-item{white-space:normal}}
+  .wip-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px;padding:24px 0;margin-bottom:48px;border-top:1px solid var(--naia-border);border-bottom:1px solid var(--naia-border)}
+  @media(max-width:700px){.wip-cards{grid-template-columns:1fr}}
+  .wip-card-kicker{display:block;font-family:var(--naia-ff-ui);font-size:9.5px;letter-spacing:1.6px;text-transform:uppercase;font-weight:700;color:rgba(40,21,12,0.5)}
+  .wip-card-kicker--positive{color:var(--naia-accent)}
+  .wip-card h3{font-family:var(--naia-ff-ui);font-weight:700;font-size:15px;line-height:1.3;margin:8px 0 4px;color:var(--naia-ink)}
+  .wip-card p{font-family:var(--naia-ff-ui);font-size:11.5px;color:rgba(40,21,12,0.6);margin:0}
 
-  .wip-layout{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:26px;align-items:start}
-  @media(max-width:900px){.wip-layout{grid-template-columns:1fr}}
+  .wip-section{margin:0 0 56px}
+  .wip-section-title{font-family:var(--naia-ff-display);font-weight:300;font-size:1.5rem;margin:0 0 6px;color:var(--naia-ink)}
+  .wip-section-more{display:block;margin-top:14px}
 
-  .wip-focus{background:var(--naia-surface);border:1px solid var(--naia-border);border-radius:10px;overflow:hidden}
-  .wip-feature-head{padding:24px 24px 16px}
-  .wip-tag{display:inline-flex;align-items:center;gap:6px;font-family:var(--naia-ff-ui);font-size:9.5px;letter-spacing:1.6px;text-transform:uppercase;color:var(--naia-accent);font-weight:600}
-  .wip-tag:before{content:'';width:5px;height:5px;border-radius:50%;background:var(--naia-accent)}
-  .wip-feature-head h2{font-family:var(--naia-ff-display);font-weight:300;font-size:1.75rem;line-height:1.15;margin:10px 0 8px;color:var(--naia-ink)}
-  .wip-feature-head p{font-family:var(--naia-ff-ui);font-size:13px;line-height:1.6;color:rgba(40,21,12,0.65);max-width:560px;margin:0}
-  .wip-back{border:0;background:none;padding:20px 24px 0;font-family:var(--naia-ff-ui);font-size:11px;color:var(--naia-accent);cursor:pointer}
+  /* Pieces worth rediscovering */
+  .wip-piece-card{display:flex;align-items:flex-start;gap:20px;padding:20px 0;border-top:1px solid var(--naia-border)}
+  .wip-piece-card:last-child{padding-bottom:0;border-bottom:1px solid var(--naia-border)}
+  .wip-piece-thumb .wip-thumb{width:84px;border-radius:4px}
+  .wip-piece-body{flex:1;min-width:0}
+  .wip-piece-body h3{font-family:var(--naia-ff-ui);font-weight:700;font-size:14px;margin:0 0 4px;color:var(--naia-ink)}
+  .wip-piece-body > p{font-family:var(--naia-ff-ui);font-size:12px;color:rgba(40,21,12,0.6);margin:0 0 10px}
+  .wip-piece-looks{display:flex;gap:8px;margin-bottom:10px}
+  .wip-piece-looks .wip-thumb{width:56px;border-radius:4px}
+  .wip-piece-actions{display:flex;gap:20px;align-items:center;flex-wrap:wrap}
 
-  .wip-board{margin:0 18px;background:var(--naia-muted-bg);border-radius:7px;padding:20px;min-height:280px}
-  .wip-board--split{display:grid;grid-template-columns:42% minmax(0,1fr);gap:22px}
-  .wip-hero-piece{display:flex;flex-direction:column;align-items:center;justify-content:center}
-  .wip-thumb{width:100%;display:flex;align-items:center;justify-content:center;background:var(--naia-surface);border-radius:4px;overflow:hidden}
-  .wip-thumb img{width:100%;height:100%;object-fit:contain}
-  .wip-thumb-fallback{font-family:var(--naia-ff-ui);font-size:11px;color:rgba(40,21,12,0.4)}
-  .wip-piece-label{font-family:var(--naia-ff-ui);font-size:12px;font-weight:600;text-align:center;margin:10px 0 2px}
-  .wip-piece-hint{font-family:var(--naia-ff-ui);font-size:10px;color:rgba(40,21,12,0.5);text-align:center;margin:0}
-  .wip-partners-label{font-family:var(--naia-ff-ui);font-size:11px;font-weight:600;display:flex;justify-content:space-between;margin-bottom:12px;color:var(--naia-ink)}
-  .wip-partners-label span{font-weight:400;color:rgba(40,21,12,0.5)}
-  .wip-partner-grid{display:grid;grid-template-columns:1fr 1fr;gap:11px}
-  .wip-partners--grouped{display:flex;flex-direction:column;gap:16px}
-  .wip-partner-group .wip-partners-label{margin-bottom:8px}
-  .wip-partner-grid--row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
-  .wip-partner{border:1px solid var(--naia-border);background:var(--naia-surface);padding:8px;border-radius:5px;text-align:center;cursor:pointer}
-  .wip-partner:hover{border-color:var(--naia-accent)}
-  .wip-partner span{display:block;margin-top:7px;font-family:var(--naia-ff-ui);font-size:10px;color:rgba(40,21,12,0.65)}
-  .wip-partner--more{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:135px;border-style:dashed}
-  .wip-partner--more b{font-family:var(--naia-ff-display);font-weight:300;font-size:1.7rem;color:var(--naia-accent)}
+  /* How your wardrobe supports your life */
+  .wip-life-row{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;padding:18px 0;border-top:1px solid var(--naia-border)}
+  .wip-life-row:last-of-type{border-bottom:1px solid var(--naia-border)}
+  .wip-life-main{flex:1;min-width:0}
+  .wip-life-heading{display:flex;align-items:baseline;gap:10px}
+  .wip-life-heading h3{font-family:var(--naia-ff-ui);font-weight:700;font-size:14px;margin:0;color:var(--naia-ink)}
+  .wip-life-state{font-family:var(--naia-ff-ui);font-size:10.5px;color:rgba(40,21,12,0.5)}
+  .wip-life-bar{height:4px;background:var(--naia-border);border-radius:2px;margin:8px 0;max-width:180px;overflow:hidden}
+  .wip-life-bar-fill{height:100%;background:var(--naia-accent);border-radius:2px}
+  .wip-life-count{font-family:var(--naia-ff-ui);font-size:10.5px;color:rgba(40,21,12,0.5);margin:0 0 4px}
+  .wip-life-text{font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.6;color:rgba(40,21,12,0.65);margin:0}
+  .wip-life-looks{display:flex;gap:8px;flex-shrink:0}
+  .wip-life-looks .wip-thumb{width:64px;border-radius:4px}
 
-  .wip-board--work{display:grid;grid-template-columns:1fr 1fr;gap:20px}
-  .wip-board--work h3{font-family:var(--naia-ff-ui);font-size:11px;font-weight:600;margin:0 0 14px}
-  .wip-work-items{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-  .wip-work-item p{font-family:var(--naia-ff-ui);font-size:10px;text-align:center;margin:8px 0 0}
+  /* Where your wardrobe repeats */
+  .wip-repeat-card{padding:18px 0;border-top:1px solid var(--naia-border)}
+  .wip-repeat-card:last-child{padding-bottom:0;border-bottom:1px solid var(--naia-border)}
+  .wip-repeat-card h3{font-family:var(--naia-ff-ui);font-weight:700;font-size:14px;margin:0 0 6px;color:var(--naia-ink)}
+  .wip-repeat-card p{font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.6;color:rgba(40,21,12,0.65);margin:0 0 12px}
+  .wip-repeat-looks{display:flex;gap:8px;flex-wrap:wrap}
+  .wip-repeat-looks .wip-thumb{width:70px;border-radius:4px}
 
-  .wip-feature-foot{padding:18px 24px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
-  .wip-feature-foot p{font-family:var(--naia-ff-ui);font-size:10.5px;line-height:1.6;color:rgba(40,21,12,0.6);margin:0;max-width:260px}
-  .wip-primary{padding:11px 16px;border:1px solid var(--naia-accent);background:var(--naia-accent);color:#fff;border-radius:5px;font-family:var(--naia-ff-ui);font-size:11.5px;font-weight:600;display:inline-flex;align-items:center;gap:10px;cursor:pointer}
-  .wip-primary:hover{background:#5a1720}
+  /* Shop smarter */
+  .wip-shop-split{display:grid;grid-template-columns:1fr 1fr;gap:36px}
+  @media(max-width:700px){.wip-shop-split{grid-template-columns:1fr;gap:28px}}
+  .wip-shop-col-label{display:block;font-family:var(--naia-ff-ui);font-size:9.5px;letter-spacing:1.4px;text-transform:uppercase;font-weight:700;color:rgba(40,21,12,0.45);margin-bottom:10px}
+  .wip-shop-col-label--buy{color:var(--naia-accent)}
+  .wip-shop-col h3{font-family:var(--naia-ff-ui);font-weight:700;font-size:14px;line-height:1.3;margin:0 0 8px;color:var(--naia-ink)}
+  .wip-shop-col ul{margin:0 0 10px;padding-left:16px;font-family:var(--naia-ff-ui);font-size:12px;line-height:1.7;color:rgba(40,21,12,0.7)}
+  .wip-shop-col > p{font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.6;color:rgba(40,21,12,0.65);margin:0 0 10px}
+  .wip-shop-looks{display:flex;gap:8px;margin-bottom:10px}
+  .wip-shop-looks .wip-thumb{width:64px;border-radius:4px}
 
-  .wip-rail-heading{font-family:var(--naia-ff-ui);font-size:9.5px;letter-spacing:1.6px;text-transform:uppercase;color:rgba(40,21,12,0.5);font-weight:600;margin:0 0 12px}
-  .wip-insight{display:block;width:100%;text-align:left;background:transparent;border:0;border-top:1px solid var(--naia-border);padding:17px 24px 17px 0;position:relative;cursor:pointer}
-  .wip-insight-topic{font-family:var(--naia-ff-ui);font-size:9.5px;letter-spacing:1px;text-transform:uppercase;color:rgba(40,21,12,0.5)}
-  .wip-insight h3{font-family:var(--naia-ff-display);font-weight:300;font-size:1.2rem;line-height:1.15;margin:7px 0 6px;color:var(--naia-ink)}
-  .wip-insight p{font-family:var(--naia-ff-ui);font-size:11px;color:rgba(40,21,12,0.6);line-height:1.5;margin:0}
-  .wip-insight-arrow{position:absolute;top:38px;right:0;color:var(--naia-accent);font-size:16px}
-  .wip-insight:hover h3{color:var(--naia-accent)}
-  .wip-insight.is-active{background:rgba(107,29,38,0.07);border-radius:6px;padding:16px 12px;border-top-color:transparent}
-
-  .wip-swatches{display:flex;gap:18px;margin-top:10px;flex-wrap:wrap}
-  .wip-swatch-item{font-family:var(--naia-ff-ui);font-size:9.5px;color:rgba(40,21,12,0.55);text-align:center}
-  .wip-swatch{width:26px;height:26px;display:block;margin:0 auto 6px;border-radius:50%;border:1px solid var(--naia-border)}
-
-  .wip-bottom-line{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-top:20px;padding-top:16px;border-top:1px solid var(--naia-border);font-family:var(--naia-ff-ui);font-size:10.5px;color:rgba(40,21,12,0.55)}
+  .wip-footer-links{display:flex;flex-wrap:wrap;gap:10px 28px;padding-top:24px;margin-top:8px;border-top:1px solid var(--naia-border)}
+  .wip-method-link{display:block;margin-top:16px}
   .wip-legal{font-family:var(--naia-ff-ui);font-size:9.5px;color:rgba(40,21,12,0.45);margin-top:18px}
   .wip-empty{font-family:var(--naia-ff-ui);font-size:13px;color:rgba(40,21,12,0.6);padding:40px 0}
 
-  /* Ways to wear */
-  .wip-ways-list{padding:4px 24px 20px;display:flex;flex-direction:column;gap:16px}
-  .wip-ways-row{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;background:var(--naia-muted-bg);border-radius:7px;padding:16px 18px}
-  .wip-ways-heading{display:flex;align-items:center;gap:10px;margin-bottom:6px}
-  .wip-ways-text h3{font-family:var(--naia-ff-display);font-weight:400;font-size:1.05rem;margin:0;color:var(--naia-ink)}
-  .wip-ways-text p{font-family:var(--naia-ff-ui);font-size:12px;line-height:1.6;color:rgba(40,21,12,0.65);margin:0;max-width:420px}
-  .wip-ways-why{font-family:var(--naia-ff-ui);font-size:11.5px;color:rgba(40,21,12,0.6);margin:8px 0 0;max-width:420px}
-  .wip-ways-strip{display:flex;gap:8px;flex-shrink:0}
-  .wip-ways-strip .wip-thumb{width:70px;border-radius:4px}
-  .wip-ways-combos{display:flex;flex-direction:column;gap:10px;flex-shrink:0}
-  .wip-ways-swap{border-top:1px solid var(--naia-border);padding-top:8px}
-  .wip-ways-swap-label{display:block;font-family:var(--naia-ff-ui);font-size:10px;color:rgba(40,21,12,0.5);margin-bottom:6px}
-  .wip-ways-strip--swap .wip-thumb{width:56px}
-  .wip-depth-badge{font-family:var(--naia-ff-ui);font-size:9.5px;font-weight:600;letter-spacing:0.3px;text-transform:uppercase;padding:3px 9px;border-radius:20px;background:rgba(40,21,12,0.08);color:rgba(40,21,12,0.6)}
-  .wip-depth-badge--strong{background:rgba(107,29,38,0.1);color:var(--naia-accent)}
-  .wip-depth-badge--needs-range,.wip-depth-badge--less-than-it-looks,.wip-depth-badge--empty{background:rgba(40,21,12,0.1);color:rgba(40,21,12,0.7)}
-
-  /* Shopping priorities */
-  .wip-shop-block{margin:0 24px 16px;padding:16px 18px;border-radius:7px}
-  .wip-shop-block--lead{background:rgba(107,29,38,0.07);border:1px solid rgba(107,29,38,0.18)}
-  .wip-shop-block--secondary{background:var(--naia-muted-bg)}
-  .wip-shop-kicker{display:block;font-family:var(--naia-ff-ui);font-size:9.5px;letter-spacing:1.4px;text-transform:uppercase;color:var(--naia-accent);font-weight:700;margin-bottom:6px}
-  .wip-shop-title{font-family:var(--naia-ff-display);font-weight:400;font-size:1.15rem;line-height:1.3;margin:0 0 6px;color:var(--naia-ink)}
-  .wip-shop-body{font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.6;color:rgba(40,21,12,0.65);margin:0 0 10px}
-  .wip-shop-count{font-family:var(--naia-ff-ui);font-size:10.5px;color:rgba(40,21,12,0.5);margin:0}
-  .wip-repeat-row{padding:8px 0}
-  .wip-repeat-row .wip-shop-body{margin:0 0 8px}
-  .wip-shop-bullets{margin:0 0 12px}
-  .wip-shop-bullets-label,.wip-shop-unlocks-label{display:block;font-family:var(--naia-ff-ui);font-size:9.5px;letter-spacing:1px;text-transform:uppercase;color:rgba(40,21,12,0.45);margin-bottom:6px}
-  .wip-shop-bullets ul{margin:0;padding-left:18px;font-family:var(--naia-ff-ui);font-size:12px;line-height:1.7;color:rgba(40,21,12,0.7)}
-  .wip-shop-unlocks-label{margin-top:2px}
-
-  /* Coverage */
-  .wip-coverage-policy{margin:0 24px 14px;font-family:var(--naia-ff-ui);font-size:11.5px;font-style:italic;color:rgba(40,21,12,0.55)}
-  .wip-coverage-list{padding:4px 24px 20px;display:flex;flex-direction:column;gap:14px}
-  .wip-coverage-item{display:flex;gap:16px;align-items:flex-start;background:var(--naia-muted-bg);border-radius:7px;padding:14px}
-  .wip-coverage-item .wip-thumb{width:100px;flex-shrink:0;border-radius:5px}
-  .wip-coverage-state{display:inline-block;font-family:var(--naia-ff-ui);font-size:9px;font-weight:600;letter-spacing:0.4px;text-transform:uppercase;padding:2px 8px;border-radius:20px;margin-bottom:6px}
-  .wip-coverage-state--may-depend{background:rgba(107,29,38,0.09);color:var(--naia-accent)}
-  .wip-coverage-state--doesnt-match{background:rgba(40,21,12,0.08);color:rgba(40,21,12,0.6)}
-  .wip-coverage-item-text h3{font-family:var(--naia-ff-ui);font-size:12.5px;font-weight:600;margin:0 0 5px;color:var(--naia-ink)}
-  .wip-coverage-item-text p{font-family:var(--naia-ff-ui);font-size:11.5px;color:rgba(40,21,12,0.65);line-height:1.6;margin:0 0 4px}
-  .wip-coverage-rescue{font-style:italic;color:rgba(40,21,12,0.55) !important}
-  .wip-coverage-rescue--none{font-style:normal;color:rgba(40,21,12,0.45) !important}
-
-  /* Profile (compact canvas state) */
-  .wip-profile-compact{padding:4px 24px 8px}
-  .wip-profile-lead{font-family:var(--naia-ff-body);font-style:italic;font-size:1rem;line-height:1.6;color:var(--naia-ink);margin:0 0 14px !important}
-  .wip-profile-compact > p{font-family:var(--naia-ff-ui);font-size:13px;line-height:1.7;color:rgba(40,21,12,0.72);margin:0 0 12px}
-  .wip-profile-row{margin-top:14px}
-  .wip-profile-row h3{font-family:var(--naia-ff-ui);font-size:10.5px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--naia-accent);margin:0 0 8px}
-  .wip-chips{display:flex;flex-wrap:wrap;gap:8px}
-  .wip-chip{font-family:var(--naia-ff-ui);font-size:11px;color:rgba(40,21,12,0.65);background:var(--naia-muted-bg);border-radius:20px;padding:5px 12px}
-  .wip-profile-so-what{font-family:var(--naia-ff-ui);font-size:11.5px;line-height:1.6;color:rgba(40,21,12,0.6);margin:10px 0 0}
+  .wip-thumb{width:100%;display:flex;align-items:center;justify-content:center;background:var(--naia-muted-bg);border-radius:4px;overflow:hidden;flex-shrink:0}
+  .wip-thumb img{width:100%;height:100%;object-fit:contain}
+  .wip-thumb-fallback{font-family:var(--naia-ff-ui);font-size:11px;color:rgba(40,21,12,0.4)}
 
   @media(max-width:700px){
     .wip-header{display:block}
-    .wip-status{text-align:left;margin-top:12px}
-    .wip-board--split{grid-template-columns:1fr}
-    .wip-board--work{grid-template-columns:1fr}
-    .wip-ways-row{flex-direction:column}
-    .wip-coverage-item{flex-direction:column}
+    .wip-status{padding-top:12px}
+    .wip-piece-card,.wip-life-row{flex-direction:column}
   }
 
   .wip-dialog-backdrop{position:fixed;inset:0;background:rgba(40,21,12,0.35);display:flex;align-items:center;justify-content:center;padding:20px;z-index:50}
@@ -1343,12 +1082,35 @@ const css = `
   .wip-profile-block{padding:14px 0;border-bottom:1px solid var(--naia-border)}
   .wip-profile-block:last-child{border-bottom:0}
   .wip-profile-block h3{font-family:var(--naia-ff-ui);font-size:10.5px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--naia-accent);margin:0 0 8px}
-  .wip-profile-block p{font-family:var(--naia-ff-ui);font-size:13px;line-height:1.7;color:rgba(40,21,12,0.72);margin:0}
+  .wip-profile-block p{font-family:var(--naia-ff-ui);font-size:13px;line-height:1.7;color:rgba(40,21,12,0.72);margin:0 0 6px}
+  .wip-profile-block p:last-child{margin-bottom:0}
+  .wip-ways-strip{display:flex;gap:8px;margin-top:10px}
+  .wip-ways-strip .wip-thumb{width:70px;border-radius:4px}
+  .wip-ways-why{font-family:var(--naia-ff-ui);font-size:11.5px;color:rgba(40,21,12,0.6);margin:8px 0 0;max-width:420px}
+  .wip-swatches{display:flex;gap:18px;margin-top:10px;flex-wrap:wrap}
+  .wip-swatch-item{font-family:var(--naia-ff-ui);font-size:9.5px;color:rgba(40,21,12,0.55);text-align:center}
+  .wip-swatch{width:26px;height:26px;display:block;margin:0 auto 6px;border-radius:50%;border:1px solid var(--naia-border)}
+  .wip-chips{display:flex;flex-wrap:wrap;gap:8px}
+  .wip-chip{font-family:var(--naia-ff-ui);font-size:11px;color:rgba(40,21,12,0.65);background:var(--naia-muted-bg);border-radius:20px;padding:5px 12px}
+  .wip-profile-so-what{font-family:var(--naia-ff-ui);font-size:11.5px;line-height:1.6;color:rgba(40,21,12,0.6);margin:10px 0 0}
   .wip-capability-list{list-style:none;margin:10px 0 0;padding:0;display:flex;flex-wrap:wrap;gap:8px 16px;font-family:var(--naia-ff-ui);font-size:11.5px;color:rgba(40,21,12,0.6)}
-  .wip-combo-text{font-family:var(--naia-ff-body);font-style:italic;font-size:1rem;line-height:1.6;margin-top:16px;color:var(--naia-ink)}
+  .wip-combo-text{font-family:var(--naia-ff-ui);font-size:13px;line-height:1.6;margin-top:16px;color:var(--naia-ink)}
   .wip-status-options{display:flex;flex-direction:column;gap:12px}
   .wip-status-choice{padding:14px 16px;text-align:left;background:var(--naia-bg);border:1px solid var(--naia-border);border-radius:5px;cursor:pointer}
   .wip-status-choice:hover{border-color:var(--naia-accent)}
   .wip-status-choice b{display:block;font-family:var(--naia-ff-ui);font-size:13px;font-weight:600}
   .wip-status-choice span{display:block;font-family:var(--naia-ff-ui);font-size:11.5px;color:rgba(40,21,12,0.55);margin-top:3px}
+
+  /* Coverage dialog */
+  .wip-coverage-policy{margin:0 0 14px;font-family:var(--naia-ff-ui);font-size:11.5px;font-style:italic;color:rgba(40,21,12,0.55)}
+  .wip-coverage-list{display:flex;flex-direction:column;gap:14px;margin-top:14px}
+  .wip-coverage-item{display:flex;gap:16px;align-items:flex-start;background:var(--naia-muted-bg);border-radius:7px;padding:14px}
+  .wip-coverage-item .wip-thumb{width:100px;flex-shrink:0;border-radius:5px}
+  .wip-coverage-state{display:inline-block;font-family:var(--naia-ff-ui);font-size:9px;font-weight:600;letter-spacing:0.4px;text-transform:uppercase;padding:2px 8px;border-radius:20px;margin-bottom:6px}
+  .wip-coverage-state--may-depend{background:rgba(107,29,38,0.09);color:var(--naia-accent)}
+  .wip-coverage-state--doesnt-match{background:rgba(40,21,12,0.08);color:rgba(40,21,12,0.6)}
+  .wip-coverage-item-text h3{font-family:var(--naia-ff-ui);font-size:12.5px;font-weight:600;margin:0 0 5px;color:var(--naia-ink)}
+  .wip-coverage-item-text p{font-family:var(--naia-ff-ui);font-size:11.5px;color:rgba(40,21,12,0.65);line-height:1.6;margin:0 0 4px}
+  .wip-coverage-rescue{font-style:italic;color:rgba(40,21,12,0.55) !important}
+  @media(max-width:600px){.wip-coverage-item{flex-direction:column}}
 `;
