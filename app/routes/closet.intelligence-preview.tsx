@@ -1413,8 +1413,13 @@ const css = `
      (lifestyle combos, repetition clusters, shop-smarter support) uses this
      one fixed size, so nothing competes on scale with the moodboard or the
      rediscovery images above it. */
-  .wip-evidence-row{display:flex;gap:8px;flex-wrap:wrap}
-  .wip-evidence-row .wip-thumb{width:56px;height:56px;border-radius:4px}
+  /* One shared evidence-thumbnail size across lifestyle/repetition/Shop
+     Smarter — large enough to read as real wardrobe evidence rather than
+     an icon, still well inside the now-fixed card dimensions. object-fit:
+     contain (on .wip-thumb img, below) preserves each image's own aspect
+     ratio regardless of this box being square. */
+  .wip-evidence-row{display:flex;gap:10px;flex-wrap:wrap}
+  .wip-evidence-row .wip-thumb{width:84px;height:84px;border-radius:4px}
 
   /* Shop smarter — each side its own bordered cream card, matching the
      analysis/moodboard card treatment. */
