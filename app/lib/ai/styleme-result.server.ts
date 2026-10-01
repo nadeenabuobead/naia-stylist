@@ -4417,9 +4417,22 @@ export function selectAdditionalClosetGarments(
       if (p?.statementLevel === "statement" || p?.outfitFunction === "statement") finalStatementCount++;
     }
     // Remove result pieces in reverse order until at most one statement piece remains.
+    //
+    // Base clothing slots are protected. The anchor is never in `result`, so it is
+    // already immune; without this guard an outerwear statement anchor plus a statement
+    // bottom resolved by deleting the bottom, and the outfit shipped with nothing on the
+    // lower body. ST16 showed it end to end: Phase 1 selected the Black Draped Maxi Skirt
+    // (score 19.263, the highest-scoring bottom), this loop spliced it out, and the
+    // 4-piece result was ranked and won — a missing core slot costs nothing in
+    // computeOccasionTier, so incompleteness was rewarded.
+    //
+    // Two statement pieces are a styling imperfection; an outfit with no top, bottom,
+    // dress or set is not wearable. When the only removable statement piece is a base
+    // garment the conflict is left unresolved by design. A statement shoe or layer can
+    // still be dropped.
     for (let i = result.length - 1; i >= 0 && finalStatementCount > 1; i--) {
       const r = result[i];
-      if (STRUCTURAL_EXCLUDES.has(r.slot)) continue;
+      if (STRUCTURAL_EXCLUDES.has(r.slot) || BASE_CLOTHING_SLOTS.has(r.slot)) continue;
       const ri = closetItemById.get(r.id);
       const p = ri?.approvedProfile;
       if (p?.statementLevel === "statement" || p?.outfitFunction === "statement") {
