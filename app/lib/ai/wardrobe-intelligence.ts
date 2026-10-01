@@ -1912,12 +1912,19 @@ function buildPairings(
       const bucket = f ? FORMALITY_BUCKET[f] : undefined;
       if (bucket) counts.set(bucket, (counts.get(bucket) ?? 0) + 1);
     }
+    // A true tie between two buckets (e.g. one garment reads "work", the
+    // other "occasion") must return null, not silently default to whichever
+    // bucket's garment happened to be listed first in `ids` — that ordering
+    // is an artifact of how the candidate was built (a layer is always
+    // listed before the one-piece it's worn over), not a real majority.
     let best: "everyday" | "work" | "occasion" | null = null;
     let bestCount = 0;
+    let tied = false;
     for (const [bucket, count] of counts) {
-      if (count > bestCount) { best = bucket; bestCount = count; }
+      if (count > bestCount) { best = bucket; bestCount = count; tied = false; }
+      else if (count === bestCount && bestCount > 0) { tied = true; }
     }
-    return best;
+    return tied ? null : best;
   };
 
   const toPairing = (candidate: (typeof ranked)[number]): WardrobePairing => {
