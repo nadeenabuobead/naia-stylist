@@ -25,7 +25,7 @@ import {
   buildDbPayload,
   styleSourceToSessionSource,
 } from "~/lib/ai/styleme-result.server";
-import { resolveActionAnchor, loadAllClosetItemsForEngine } from "~/lib/ai/styleme-anchor.server";
+import { autoSelectClosetAnchor, resolveActionAnchor, loadAllClosetItemsForEngine } from "~/lib/ai/styleme-anchor.server";
 import { parseSuggestionMetadata } from "~/lib/ai/styleme-result.types";
 import { issueImageToken } from "~/lib/dev-tryon-image-tokens.server";
 import { isTryOnEligible } from "~/lib/ai/tryon-product-eligibility";
@@ -645,6 +645,10 @@ export async function action({ request }: ActionFunctionArgs) {
       if (!anchorResult.ok) {
         return data({ error: anchorResult.message }, { status: anchorResult.status });
       }
+      // The reroll anchor is resolved further down, once the previous outfit is known —
+      // see "New Look needs a fresh structural centre". This call stays so an invalid or
+      // inaccessible session anchor still fails here, exactly as before.
+      let regenAnchor = anchorResult.anchor;
 
       let journeyCtx = null;
       if (naiaCustomer) {
@@ -719,6 +723,45 @@ export async function action({ request }: ActionFunctionArgs) {
         ? [...(session.practicalIds ?? []), ...regenTranslated.practicalIds]
         : (session.practicalIds ?? []);
 
+      // ── New Look needs a fresh structural centre ──────────────────────────
+      //
+      // The anchor was chosen once at the source step and persisted as
+      // StylingSession.closetAnchorId, so every reroll rebuilt on the SAME garment. The
+      // anchor appears in every candidate, so the core could barely move and a reroll could
+      // only vary finishing pieces — the dominant cause of "New Look" returning the same
+      // look.
+      //
+      // For regenerate only, automatic selection runs again with the previous outfit's ids
+      // as a fail-open diversity preference. Fail-open end to end: if no equally-correct
+      // alternative anchor exists, autoSelectClosetAnchor returns the same garment and
+      // behaviour is unchanged; if it returns nothing at all, the session anchor is kept.
+      //
+      // StylingSession.closetAnchorId is NOT written here. The persisted brief — occasion,
+      // formality, intentions, body needs, anchor — stays exactly as the customer submitted
+      // it; the fresher anchor applies to THIS generated result only.
+      if (sessionSource !== "naia-piece" && naiaCustomer && recentlyShownClosetIds.length > 0) {
+        try {
+          const rerollAnchor = await autoSelectClosetAnchor(naiaCustomer.id, {
+            occasion: session.occasion ?? "everyday",
+            moods: regenMoods,
+            desiredFeelings: regenDesiredFeelings,
+            formalityConditional: session.formalityConditional ?? null,
+            intentions: session.intentions ?? [],
+            bodyNeeds: regenBodyNeeds,
+            dressingPreferences: naiaCustomer.onboardingProfile?.dressingPreferences ?? [],
+            previousOutfitClosetIds: recentlyShownClosetIds,
+          });
+          if (rerollAnchor) {
+            const resolved = await resolveActionAnchor(
+              sessionSource, session.customerId, null, rerollAnchor.id,
+            );
+            if (resolved.ok && resolved.anchor) regenAnchor = resolved.anchor;
+          }
+        } catch {
+          /* graceful: keep the session anchor */
+        }
+      }
+
       const engineInput = buildEngineInput({
         moods: regenMoods,
         desiredFeelings: regenDesiredFeelings,
@@ -732,7 +775,7 @@ export async function action({ request }: ActionFunctionArgs) {
         source: sessionSource,
         profile: buildEphemeralContextSignals(buildProfileSignals(naiaCustomer?.onboardingProfile), journeyCtx),
         mode: regenMode,
-        anchor: anchorResult.anchor,
+        anchor: regenAnchor,
         recentlyShownHandles,
         ...(recentlyShownClosetIds.length > 0 && { recentlyShownClosetIds }),
         ...(prevOutfitClosetIds && { prevOutfitClosetIds }),

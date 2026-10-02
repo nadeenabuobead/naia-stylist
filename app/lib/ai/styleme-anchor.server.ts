@@ -484,6 +484,14 @@ export async function autoSelectClosetAnchor(
     // how well it scores — the anchor appears in every candidate, so an ineligible
     // anchor makes every candidate ineligible.
     dressingPreferences?: readonly string[] | null;
+    /**
+     * New Look, Same Vibe only. Closet ids from the MOST RECENT rendered outfit. Used as a
+     * fail-open preference so a reroll can explore a different structural centre. Only
+     * structural candidates can ever match an id here — a previous bag or shoe id cannot
+     * collide with an anchor candidate — so the raw previous-outfit id list is sufficient
+     * and no slot resolution is needed at this layer.
+     */
+    previousOutfitClosetIds?: readonly string[] | null;
   },
   _fetchItems?: (customerId: string) => Promise<AutoSelectItem[]>,
 ): Promise<{ anchor: ClosetAnchorInput; id: string } | null> {
@@ -852,7 +860,42 @@ export async function autoSelectClosetAnchor(
     return above.find(s => rankOf(s) === nearestAbove);
   })();
 
-  const winnerEntry = fallbackWinnerEntry ?? defaultWinnerEntry;
+  // ── Reroll diversity preference ───────────────────────────────────────────
+  //
+  // New Look, Same Vibe must be able to move the structural centre of the outfit. The anchor
+  // appears in every candidate, so while it is fixed the core can barely change and a reroll
+  // can only vary finishing pieces.
+  //
+  // Placement, deliberately the weakest tier that can still do the job:
+  //
+  //   occasion eligibility  >  formality ceiling  >  formality floor
+  //     >  single-point-band fallback  >  THIS  >  score / stable ordering
+  //
+  // It only ever chooses between anchors that are ALREADY equally correct: the candidate
+  // must be viable on exactly the same terms as the default winner (positive score,
+  // occasion-compatible) and tied with it on both the ceiling and floor tiers. It cannot
+  // promote a lower-tier anchor, and it does not run at all when the single-point fallback
+  // has already decided. Correctness is never traded for variety.
+  //
+  // Fail-open throughout: no previous outfit, the default winner already outside the
+  // previous look, or no equally-correct alternative — all keep the existing behaviour, and
+  // an anchor is never withheld to manufacture diversity.
+  const diversityWinnerEntry = (() => {
+    if (fallbackWinnerEntry) return undefined;
+    if (!defaultWinnerEntry) return undefined;
+    const previous = new Set(signals.previousOutfitClosetIds ?? []);
+    if (previous.size === 0) return undefined;
+    if (!previous.has(defaultWinnerEntry.item.id)) return undefined; // already a fresh centre
+    return scored.find((s) =>
+      s.score > 0 &&
+      isOccasionCompatible(s.item) &&
+      s.inRange === defaultWinnerEntry.inRange &&
+      s.atOrAboveFloor === defaultWinnerEntry.atOrAboveFloor &&
+      !previous.has(s.item.id),
+    );
+  })();
+
+  const winnerEntry = fallbackWinnerEntry ?? diversityWinnerEntry ?? defaultWinnerEntry;
   if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true") {
     console.log("[nAia-anchor-rank]", JSON.stringify({
       occasion: signals.occasion,
@@ -861,6 +904,8 @@ export async function autoSelectClosetAnchor(
       bodyNeeds: activeBodyNeeds,
       targetBandMin,
       singlePointBandFallbackUsed: fallbackWinnerEntry !== undefined,
+      rerollDiversityUsed: diversityWinnerEntry !== undefined,
+      previousOutfitCount: (signals.previousOutfitClosetIds ?? []).length,
       defaultWinnerId: defaultWinnerEntry?.item.id ?? null,
       top10: scored.slice(0, 10).map((s) => {
         const ap2 = s.item.styleMeProfile?.profileStatus === "approved" ? s.item.styleMeProfile : null;
