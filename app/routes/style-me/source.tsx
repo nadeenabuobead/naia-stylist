@@ -102,6 +102,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       session.set("styleMeMode", "nadine");
     }
     session.unset("styleMeClosetAnchorId");
+    session.unset("styleMeAnchorProvenance");
     session.unset("styleMeAnchorMode");
     return redirect("/style-me/result", {
       headers: { "Set-Cookie": await commitSession(session) },
@@ -189,6 +190,7 @@ export async function action({ request }: ActionFunctionArgs) {
       session.set("styleMeMode", "naia");
       session.unset("styleMeNadineAnchorHandle");
       session.unset("styleMeClosetAnchorId");
+    session.unset("styleMeAnchorProvenance");
       return redirect("/style-me/source", {
         headers: { "Set-Cookie": await commitSession(session) },
       });
@@ -204,6 +206,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // Clear stale anchor keys and hydration keys whenever source changes.
     session.unset("styleMeNadineAnchorHandle");
     session.unset("styleMeClosetAnchorId");
+    session.unset("styleMeAnchorProvenance");
     session.unset("styleMeAnchorMode");
     session.unset("styleMeSourcePrev");
     session.unset("styleMeAnchorMethodPrev");
@@ -270,6 +273,8 @@ export async function action({ request }: ActionFunctionArgs) {
       }
 
       session.set("styleMeClosetAnchorId", selected.id);
+      // nAia chose this garment, so a reroll may move the structural centre.
+      session.set("styleMeAnchorProvenance", "AUTO");
       return redirect("/style-me/result", {
         headers: { "Set-Cookie": await commitSession(session) },
       });
@@ -334,6 +339,10 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     session.set("styleMeClosetAnchorId", closetItemId);
+    // The customer chose this garment. Captured as its own key because styleMeAnchorMode is
+    // unset on the next line — it drives the step UI, and by the time the result route
+    // creates the StylingSession row both flows would otherwise look identical.
+    session.set("styleMeAnchorProvenance", "MANUAL");
     session.unset("styleMeAnchorMode");
     return redirect("/style-me/result", {
       headers: { "Set-Cookie": await commitSession(session) },
@@ -350,6 +359,7 @@ export async function action({ request }: ActionFunctionArgs) {
         session.unset("styleMeSource");
         session.unset("styleMeAnchorMode");
         session.unset("styleMeClosetAnchorId");
+    session.unset("styleMeAnchorProvenance");
         return redirect("/style-me/occasion", {
           headers: { "Set-Cookie": await commitSession(session) },
         });
@@ -362,6 +372,7 @@ export async function action({ request }: ActionFunctionArgs) {
       session.unset("styleMeSource");
       session.unset("styleMeAnchorMode");
       session.unset("styleMeClosetAnchorId");
+    session.unset("styleMeAnchorProvenance");
     } else if (from === "closet-anchor") {
       // Save anchor method for hydration before clearing (so AnchorMethodStep restores selection).
       const prevAnchorMode = session.get("styleMeAnchorMode") as string | undefined;

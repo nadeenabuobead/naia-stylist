@@ -287,6 +287,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const source = cookieSession.get("styleMeSource");
     const nadineAnchorHandle = (cookieSession.get("styleMeNadineAnchorHandle") as string | undefined) ?? null;
     const closetAnchorId = (cookieSession.get("styleMeClosetAnchorId") as string | undefined) ?? null;
+    // Who chose the anchor. source.tsx records this at both write sites, because
+    // styleMeAnchorMode is unset immediately after a manual pick and by this point the two
+    // flows would otherwise be indistinguishable. Anything unrecognised is treated as
+    // MANUAL — see the regenerate branch.
+    const rawProvenance = cookieSession.get("styleMeAnchorProvenance") as string | undefined;
+    const anchorProvenance: "AUTO" | "MANUAL" | null =
+      rawProvenance === "AUTO" ? "AUTO" : rawProvenance === "MANUAL" ? "MANUAL" : null;
 
     const isRev3Session = !!rev3State;
 
@@ -353,6 +360,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         practicalIds,
         styleFrom: source === "my-closet" ? "CLOSET" : source === "naia-piece" ? "NAIA" : "BOTH",
         closetAnchorId: (source === "my-closet" || source === "both") ? (closetAnchorId ?? null) : null,
+        anchorProvenance: (source === "my-closet" || source === "both") ? anchorProvenance : null,
         parentSessionId: adjustVibeSourceId,
         // Rev 3 — Psychology-First (Group 5). Wording context only; zero product scoring.
         ...(isRev3Session && {
@@ -739,7 +747,15 @@ export async function action({ request }: ActionFunctionArgs) {
       // StylingSession.closetAnchorId is NOT written here. The persisted brief — occasion,
       // formality, intentions, body needs, anchor — stays exactly as the customer submitted
       // it; the fresher anchor applies to THIS generated result only.
-      if (sessionSource !== "naia-piece" && naiaCustomer && recentlyShownClosetIds.length > 0) {
+      //
+      // PROVENANCE GATE. Only a garment nAia chose may be moved. When the customer picked it
+      // — Style This Piece, or a manual closet selection — that garment is part of the
+      // brief, not a starting point, and New Look varies the outfit AROUND it instead.
+      // null means a session created before provenance was recorded, and is read as MANUAL:
+      // keeping a garment that did not need keeping is a far smaller failure than silently
+      // replacing one the customer asked to style.
+      const anchorIsAuto = session.anchorProvenance === "AUTO";
+      if (anchorIsAuto && sessionSource !== "naia-piece" && naiaCustomer && recentlyShownClosetIds.length > 0) {
         try {
           const rerollAnchor = await autoSelectClosetAnchor(naiaCustomer.id, {
             occasion: session.occasion ?? "everyday",

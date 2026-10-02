@@ -315,6 +315,7 @@ model StylingSession {
   // Source Selection
   styleFrom       StyleSource @default(BOTH)
   closetAnchorId  String?     // ClosetItem ID selected for CLOSET/BOTH sources; null for NAIA
+  anchorProvenance AnchorProvenance?  // null = historical, treated as MANUAL
 
   // Weather/Context
   weather         String?
@@ -337,6 +338,15 @@ enum StyleSource {
   CLOSET      // Only from her wardrobe
   NAIA        // Only from nAia store
   BOTH        // Mix of both
+}
+
+// Who chose the anchor garment. Decides whether "New Look, Same Vibe" may move the
+// structural centre of the outfit: nAia's own pick is a starting point, the customer's is
+// part of the brief. Nullable — historical rows predate this and are read as MANUAL, the
+// conservative default, because silently replacing a garment she chose is the worse failure.
+enum AnchorProvenance {
+  AUTO        // autoSelectClosetAnchor picked it ("nAia chooses")
+  MANUAL      // the customer picked it (Style This Piece / manual closet selection)
 }
 
 model OutfitSuggestion {
