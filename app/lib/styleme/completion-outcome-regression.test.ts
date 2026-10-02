@@ -195,3 +195,48 @@ describe("CO-E — duplicate-render protection still holds", () => {
     assert.equal(isDup({ itemType: "SHOES", closetItemId: null }), false, "the shoe is filled, so not covered");
   });
 });
+
+// ── CO-F: each completion card is labelled by its own slot ──────────────────
+//
+// The O4 shape produces two cards — a missing bottom and a missing bag. They must be
+// labelled independently. Before 7c6bb2d the UI used a binary ternary
+// (`slot === "top" ? "Top" : "Bottom"`), so EVERY non-top slot rendered as "Bottom" and a
+// generated evening-bag recommendation appeared under a "Bottom" heading. The explicit map
+// replaced it; this pins the pairing end to end so the ternary cannot come back.
+
+describe("CO-F — completion labels follow the slot, not a fallback", () => {
+  // Mirrors COMPLETION_SLOT_LABELS in app/routes/style-me/result.tsx.
+  const LABELS: Record<string, string> = {
+    top: "Top", bottom: "Bottom", dress: "Dress", set: "Set",
+    shoe: "Shoes", bag: "Bag", outerwear: "Layer",
+    accessory: "Accessory", jewelry: "Jewellery",
+  };
+  const render = (slots: string[]) => slots.map((s) => LABELS[s] ?? "Piece");
+
+  test("CO-F.1 the O4 shape yields bottom + bag, labelled Bottom + Bag", () => {
+    const slots = layer("outerwear", ["top", "shoe"], DRESSY_NIGHT, []);
+    assert.deepEqual(slots, ["bottom", "bag"], `got ${JSON.stringify(slots)}`);
+    assert.deepEqual(render(slots), ["Bottom", "Bag"]);
+  });
+
+  test("CO-F.2 no two cards share a label when their slots differ", () => {
+    const slots = layer("outerwear", ["top", "shoe"], DRESSY_NIGHT, []);
+    const labels = render(slots);
+    assert.equal(new Set(labels).size, labels.length, `duplicate label in ${JSON.stringify(labels)}`);
+  });
+
+  test("CO-F.3 every slot the completion layer can emit has its own label", () => {
+    // Guards the map against a slot being added to the engine without a label, which would
+    // silently render as the neutral fallback rather than borrowing another slot's name.
+    for (const slot of ["top", "bottom", "shoe", "bag"]) {
+      assert.ok(LABELS[slot], `no label for ${slot}`);
+      assert.notEqual(LABELS[slot], undefined);
+    }
+    assert.equal(LABELS["bag"], "Bag");
+    assert.equal(LABELS["shoe"], "Shoes");
+  });
+
+  test("CO-F.4 an unmapped slot falls back to the neutral label, never to Bottom", () => {
+    assert.equal(LABELS["something-new"] ?? "Piece", "Piece");
+  });
+});
