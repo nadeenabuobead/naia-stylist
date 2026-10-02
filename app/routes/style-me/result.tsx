@@ -1070,6 +1070,30 @@ const COMPLETION_SLOT_LABELS: Record<string, string> = {
   jewelry: "Jewellery",
 };
 
+// Complete the Look and Finishing Layer can describe the same gap twice. The engine always
+// emits a SHOES / BAG / ACCESSORY entry in suggestion.items; when an owned piece filled the
+// slot it carries closetItemId, and when nothing did it is generic guidance with
+// closetItemId null. Once the suitability rule began leaving a slot deliberately unfilled,
+// that generic entry and the Complete the Look suggestion became two cards for one missing
+// shoe. Owned pieces are never affected — they always have a closetItemId.
+const COMPLETION_SLOT_TO_ITEM_TYPE: Record<string, string> = {
+  shoe: "SHOES",
+  bag: "BAG",
+  accessory: "ACCESSORY",
+  jewelry: "ACCESSORY",
+};
+
+function isDuplicateOfCompletionSuggestion(
+  item: { itemType?: string; closetItemId?: string | null },
+  completionLayer: unknown,
+): boolean {
+  if (item.closetItemId) return false; // an owned piece always renders
+  const layer = Array.isArray(completionLayer)
+    ? (completionLayer as Array<{ slot?: string }>)
+    : [];
+  return layer.some((p) => COMPLETION_SLOT_TO_ITEM_TYPE[p.slot ?? ""] === item.itemType);
+}
+
 const OCCASION_LABELS: Record<string, string> = {
   "everyday": "Everyday", "work": "Work", "dinner": "Dinner", "date-night": "Date night",
   "girls-night": "Evening out", "family": "Family gathering", "special-event": "Special event",
@@ -1548,6 +1572,8 @@ export default function StyleMeResult() {
           <p className="sm-result-section-head">Finishing Layer</p>
           {suggestion.items?.filter((item: any) => {
             if (!["SHOES", "ACCESSORY", "BAG"].includes(item.itemType)) return false;
+            // Already described under Complete the Look — do not say it twice.
+            if (isDuplicateOfCompletionSuggestion(item, suggestionMeta?.completionLayer)) return false;
             const anchorSlot = suggestionMeta?.anchorSlot ?? null;
             if (anchorSlot) {
               const suppress: Record<string, string> = { shoe: "SHOES", bag: "BAG", accessory: "ACCESSORY", jewelry: "ACCESSORY" };

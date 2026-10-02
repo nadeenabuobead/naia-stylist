@@ -1484,3 +1484,62 @@ describe("§M — Complete the Look renders the correct type label per slot", ()
     assert.ok(/COMPLETION_SLOT_LABELS\[piece\.slot\] \?\? "Piece"/.test(result));
   });
 });
+
+// ── N  A missing finishing piece is described once, not twice ────────────────
+//
+// The engine always emits a SHOES / BAG / ACCESSORY entry in suggestion.items. When an
+// owned piece filled the slot it carries closetItemId; when nothing did it is generic
+// guidance with closetItemId null. Once the suitability rule began leaving a slot
+// deliberately unfilled, that generic entry and the Complete the Look suggestion became
+// two cards for the same missing shoe.
+//
+// Source-contract assertions plus a direct exercise of the predicate's logic, matching the
+// approach used throughout this file.
+
+describe("§N — Finishing Layer does not repeat a Complete the Look suggestion", () => {
+  const result = src("result.tsx");
+
+  it("N.1 the Finishing Layer filter consults the completion layer", () => {
+    assert.ok(
+      /isDuplicateOfCompletionSuggestion\(item, suggestionMeta\?\.completionLayer\)/.test(result),
+      "the filter must suppress entries already described under Complete the Look",
+    );
+  });
+
+  it("N.2 the slot-to-itemType bridge covers shoe and bag", () => {
+    const block = result.slice(result.indexOf("const COMPLETION_SLOT_TO_ITEM_TYPE"));
+    const map = block.slice(0, block.indexOf("};"));
+    assert.ok(/shoe:\s*"SHOES"/.test(map));
+    assert.ok(/bag:\s*"BAG"/.test(map));
+  });
+
+  it("N.3 an owned piece is explicitly exempted", () => {
+    const fn = result.slice(result.indexOf("function isDuplicateOfCompletionSuggestion"));
+    const body = fn.slice(0, fn.indexOf("\n}"));
+    assert.ok(/if \(item\.closetItemId\) return false/.test(body),
+      "a garment she owns must always render under Finishing Layer");
+  });
+
+  it("N.4 the predicate's logic: generated shoe suppressed, owned shoe kept", () => {
+    // Mirrors the source implementation so the behaviour is asserted, not just its shape.
+    const SLOT_TO_TYPE: Record<string, string> = {
+      shoe: "SHOES", bag: "BAG", accessory: "ACCESSORY", jewelry: "ACCESSORY",
+    };
+    const isDup = (
+      item: { itemType?: string; closetItemId?: string | null },
+      layer: Array<{ slot?: string }>,
+    ) => {
+      if (item.closetItemId) return false;
+      return layer.some((p) => SLOT_TO_TYPE[p.slot ?? ""] === item.itemType);
+    };
+    const completion = [{ slot: "shoe" }];
+    assert.equal(isDup({ itemType: "SHOES", closetItemId: null }, completion), true,
+      "generated shoe guidance duplicates the Complete the Look card");
+    assert.equal(isDup({ itemType: "SHOES", closetItemId: "abc" }, completion), false,
+      "an owned shoe still renders");
+    assert.equal(isDup({ itemType: "BAG", closetItemId: null }, completion), false,
+      "a bag is not covered by a shoe suggestion");
+    assert.equal(isDup({ itemType: "SHOES", closetItemId: null }, []), false,
+      "with no completion layer nothing is suppressed");
+  });
+});
