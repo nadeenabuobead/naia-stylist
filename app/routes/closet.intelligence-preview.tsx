@@ -248,6 +248,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const topRecommendation = recommendations.recommendations[0];
   const recommendationDetail = topRecommendation
     ? {
+        register: topRecommendation.register,
         attributes: topRecommendation.attributes,
         structure: topRecommendation.criteria.structure,
         coverage: topRecommendation.criteria.coverage,
@@ -446,6 +447,57 @@ function Thumb({ card, height = 220 }: { card: GarmentCard | undefined; height?:
   );
 }
 
+/** The one shared evidence-image frame for the four summary cards (lifestyle,
+ * repeats, worth adding, skip for now). Height is fixed here, not passed per
+ * call site, so it can't drift apart the way the old per-call `height` prop
+ * once did. */
+function EvidenceThumb({ card }: { card: GarmentCard | undefined }) {
+  return <Thumb card={card} height={100} />;
+}
+
+function cap(s: string): string {
+  return s.length > 0 ? s[0].toUpperCase() + s.slice(1) : s;
+}
+
+/**
+ * Builds the "Why nAia recommends this" copy entirely from fields the
+ * recommendation engine already resolved for this customer — never a fixed
+ * sentence. Each clause is independently conditional: a register reading, a
+ * silhouette gap, an unlock count and a colour lead may each be present or
+ * absent for a different customer/recommendation, and a clause that has
+ * nothing to cite is dropped rather than filled in with guessed wording.
+ */
+function buildWhyNaiaRecommends(input: {
+  registerReading: { heading: string; stateText: string } | undefined;
+  recTitle: string;
+  resolvingSilhouettes: string[];
+  unlocksCount: number;
+  colourLead: string | undefined;
+}): string[] {
+  const { registerReading, recTitle, resolvingSilhouettes, unlocksCount, colourLead } = input;
+  const sentences: string[] = [];
+
+  if (registerReading) {
+    sentences.push(`Your ${registerReading.heading.toLowerCase()} wardrobe has ${registerReading.stateText.toLowerCase()}.`);
+  }
+
+  const addsVariety = resolvingSilhouettes.length > 0;
+  const worksWithOwned = unlocksCount > 0;
+  if (addsVariety && worksWithOwned) {
+    sentences.push(`${cap(recTitle)} would add more shape variety and work with ${unlocksCount} piece${unlocksCount === 1 ? "" : "s"} you already own.`);
+  } else if (addsVariety) {
+    sentences.push(`${cap(recTitle)} would add more shape variety to this register.`);
+  } else if (worksWithOwned) {
+    sentences.push(`${cap(recTitle)} would work with ${unlocksCount} piece${unlocksCount === 1 ? "" : "s"} you already own.`);
+  }
+
+  if (colourLead) {
+    sentences.push(`${cap(colourLead)} is one of your preferred colours, but it appears less often in your Closet.`);
+  }
+
+  return sentences;
+}
+
 // ── Dialog ───────────────────────────────────────────────────────────────────
 //
 // Every piece of deep or secondary evidence (full compatible-pieces list, a
@@ -460,9 +512,7 @@ type DialogState =
   | { kind: "pair"; anchorId: string; garmentId: string }
   | { kind: "workCombo" }
   | { kind: "moodboardLook"; lookId: string }
-  | { kind: "worthConsidering" }
   | { kind: "coverage" }
-  | { kind: "profile" }
   | { kind: "status" }
   | null;
 
@@ -508,6 +558,7 @@ export default function WardrobeIntelligencePreview() {
     bestByRegisterPreview: Partial<Record<RegisterId, Array<{ id: string; reason: string; garmentIds: string[] }>>>;
     moodboardLooks: Array<{ id: string; register: RegisterId; reason: string; garmentIds: string[] }>;
     recommendationDetail: {
+      register: RegisterId;
       attributes: Array<{ kind: string; values: string[]; label: string; source: string }>;
       structure: string | null;
       coverage: string[];
@@ -587,6 +638,17 @@ export default function WardrobeIntelligencePreview() {
     ...(recommendationDetail?.resolvingSilhouettes ?? []),
     ...(recommendationDetail?.structure ? [recommendationDetail.structure === "structured" ? "Structured" : "Fluid"] : []),
   ];
+  const recTitle = (worthConsidering?.title ?? "").replace(/^Look for |\.$/g, "");
+  // Built entirely from fields the engine already resolved for this
+  // customer — see buildWhyNaiaRecommends(). A clause with nothing to cite
+  // is dropped, never filled in with guessed wording.
+  const whyNaiaLines = buildWhyNaiaRecommends({
+    registerReading: allRegisterReadings.find((r) => r.register === recommendationDetail?.register),
+    recTitle,
+    resolvingSilhouettes: recommendationDetail?.resolvingSilhouettes ?? [],
+    unlocksCount: recommendationDetail?.unlocksIds.length ?? 0,
+    colourLead: recColourLead,
+  });
 
   function closeDialog() { setDialog(null); }
   function toggleWhy(id: string) {
@@ -672,23 +734,6 @@ export default function WardrobeIntelligencePreview() {
         </DialogShell>
       );
     }
-    if (dialog.kind === "worthConsidering" && worthConsidering) {
-      const detail = worthConsidering.action?.kind === "reveal" ? worthConsidering.action.detail : undefined;
-      return (
-        <DialogShell title="What could add useful variety?" subtitle="A recommendation has to be more specific than “buy more grey.”" onClose={closeDialog} className="wip-dialog--compact">
-          <div className="wip-profile-block">
-            <h3>The finding</h3>
-            <p>{worthConsidering.title}</p>
-          </div>
-          {detail && (
-            <div className="wip-profile-block">
-              <h3>Why this recommendation</h3>
-              <p>{detail}</p>
-            </div>
-          )}
-        </DialogShell>
-      );
-    }
     if (dialog.kind === "coverage" && coverage) {
       return (
         <DialogShell title="How your wardrobe matches your preferences." subtitle="nAia looks at pieces in context — including what they&rsquo;re for, whether they&rsquo;re layered, and how you might wear them." onClose={closeDialog}>
@@ -723,52 +768,6 @@ export default function WardrobeIntelligencePreview() {
               );
             })}
           </div>
-        </DialogShell>
-      );
-    }
-    if (dialog.kind === "profile") {
-      // Four concise sections, each reusing real strings/values already
-      // computed elsewhere on this page (summaryLines/profileEntries from
-      // wardrobe-page.ts, glanceRegisters from this route) — nothing here
-      // is a new calculation, only a shorter presentation of the same real
-      // data. wardrobe-page.ts itself is untouched, since summaryLines is
-      // also read by the main page's Style Passport takeaway.
-      const patternLines = [summaryLines[0], summaryLines[1]].filter((l): l is string => Boolean(l));
-      const styleLines = [
-        summaryLines[2],
-        profileEntries.find((e) => e.id === "intentions-chosen")?.body,
-      ].filter((l): l is string => Boolean(l));
-      const feedbackBody = profileEntries.find((e) => e.id === "outcome-feedback")?.body;
-      const supportSentence = glanceRegisters[0]
-        ? `Your current Closet gives you the strongest support for ${glanceRegisters[0].heading.toLowerCase()} dressing` +
-          (glanceRegisters[1] ? `, with fewer combinations for ${glanceRegisters[1].heading.toLowerCase()}.` : ".")
-        : null;
-      return (
-        <DialogShell title="What nAia has learned about your wardrobe." subtitle="Deeper evidence behind your wardrobe profile." onClose={closeDialog} className="wip-dialog--compact">
-          {patternLines.length > 0 && (
-            <div className="wip-profile-block">
-              <h3>Your wardrobe pattern</h3>
-              <p>{patternLines.join(" ")}</p>
-            </div>
-          )}
-          {styleLines.length > 0 && (
-            <div className="wip-profile-block">
-              <h3>How you tend to style</h3>
-              <p>{styleLines.join(" ")}</p>
-            </div>
-          )}
-          {feedbackBody && (
-            <div className="wip-profile-block">
-              <h3>What nAia is learning from your feedback</h3>
-              <p>{feedbackBody}</p>
-            </div>
-          )}
-          {supportSentence && (
-            <div className="wip-profile-block">
-              <h3>What your Closet can support</h3>
-              <p>{supportSentence}</p>
-            </div>
-          )}
         </DialogShell>
       );
     }
@@ -935,10 +934,59 @@ export default function WardrobeIntelligencePreview() {
                     </div>
                   )}
                 </div>
-                <button type="button" className="wip-link wip-section-more" onClick={() => setDialog({ kind: "profile" })}>See details →</button>
               </div>
             </section>
           )}
+
+          {/* ── Section 3b: what nAia has learned — inline, replaces the old
+              "See details →" modal. Same four concise sections built from
+              the same real summaryLines/profileEntries/glanceRegisters data
+              the modal used; the feedback section only renders when real
+              feedback exists. ──────────────────────────────────────────── */}
+          {profileBlock && (() => {
+            const patternLines = [summaryLines[0], summaryLines[1]].filter((l): l is string => Boolean(l));
+            const styleLines = [
+              summaryLines[2],
+              profileEntries.find((e) => e.id === "intentions-chosen")?.body,
+            ].filter((l): l is string => Boolean(l));
+            const feedbackBody = profileEntries.find((e) => e.id === "outcome-feedback")?.body;
+            const supportSentence = glanceRegisters[0]
+              ? `Your current Closet gives you the strongest support for ${glanceRegisters[0].heading.toLowerCase()} dressing` +
+                (glanceRegisters[1] ? `, with fewer combinations for ${glanceRegisters[1].heading.toLowerCase()}.` : ".")
+              : null;
+            if (patternLines.length === 0 && styleLines.length === 0 && !feedbackBody && !supportSentence) return null;
+            return (
+              <section className="wip-section">
+                <h2 className="wip-section-title">What nAia has learned about your wardrobe.</h2>
+                <div className="wip-card-shell">
+                  {patternLines.length > 0 && (
+                    <div className="wip-profile-block">
+                      <h3>Your wardrobe pattern</h3>
+                      <p>{patternLines.join(" ")}</p>
+                    </div>
+                  )}
+                  {styleLines.length > 0 && (
+                    <div className="wip-profile-block">
+                      <h3>How you tend to style</h3>
+                      <p>{styleLines.join(" ")}</p>
+                    </div>
+                  )}
+                  {feedbackBody && (
+                    <div className="wip-profile-block">
+                      <h3>What nAia is learning from your feedback</h3>
+                      <p>{feedbackBody}</p>
+                    </div>
+                  )}
+                  {supportSentence && (
+                    <div className="wip-profile-block">
+                      <h3>What your Closet can support</h3>
+                      <p>{supportSentence}</p>
+                    </div>
+                  )}
+                </div>
+              </section>
+            );
+          })()}
 
           {/* ── Section 4: Your Closet, styled (Moodboard V1) — visual hero ─── */}
           {moodboardLooks.length > 0 && (() => {
@@ -1020,7 +1068,7 @@ export default function WardrobeIntelligencePreview() {
 
           {/* ── Section 6: two-column analysis ─────────────────────────────── */}
           <section className="wip-section wip-analysis">
-            <div className="wip-paired-grid wip-analysis-grid">
+            <div className="wip-paired-grid">
             {allRegisterReadings.length > 0 && (
             <div className="wip-analysis-col">
               <h2 className="wip-section-title">How your wardrobe supports your life.</h2>
@@ -1063,7 +1111,7 @@ export default function WardrobeIntelligencePreview() {
                       const lifeLookIds = [...primary.garmentIds.slice(0, 3 - extra.length), ...extra];
                       return (
                         <div className="wip-evidence-row">
-                          {lifeLookIds.map((id) => <Thumb key={id} card={byId.get(id)} height={100} />)}
+                          {lifeLookIds.map((id) => <EvidenceThumb key={id} card={byId.get(id)} />)}
                         </div>
                       );
                     })()}
@@ -1094,7 +1142,7 @@ export default function WardrobeIntelligencePreview() {
                       <p>{primary.body}</p>
                       {primary.garmentIds.length > 0 && (
                         <div className="wip-evidence-row">
-                          {primary.garmentIds.slice(0, 5).map((id) => <Thumb key={id} card={byId.get(id)} height={100} />)}
+                          {primary.garmentIds.slice(0, 5).map((id) => <EvidenceThumb key={id} card={byId.get(id)} />)}
                         </div>
                       )}
                     </div>
@@ -1121,11 +1169,11 @@ export default function WardrobeIntelligencePreview() {
           {(worthConsidering || lowPriority) && (
             <section className="wip-section">
               <h2 className="wip-section-title">Shop smarter.</h2>
-              <div className="wip-paired-grid wip-shop-split">
+              <div className="wip-paired-grid">
                 {worthConsidering && (
                   <div className="wip-card-shell wip-paired-card wip-shop-col">
                     <span className="wip-shop-col-label wip-shop-col-label--buy">Worth adding</span>
-                    <h3>{(worthConsidering.title ?? "").replace(/^Look for |\.$/g, "")}</h3>
+                    <h3>{recTitle}</h3>
                     {(recBullets.length > 0 || recColourLead) && (
                       <ul>
                         {recBullets.map((b) => <li key={b}>{b}</li>)}
@@ -1139,11 +1187,16 @@ export default function WardrobeIntelligencePreview() {
                       <>
                         <p className="wip-shop-evidence-label">Works with pieces you own</p>
                         <div className="wip-evidence-row">
-                          {worthConsidering.garmentIds.slice(0, 4).map((id) => <Thumb key={id} card={byId.get(id)} height={100} />)}
+                          {worthConsidering.garmentIds.slice(0, 4).map((id) => <EvidenceThumb key={id} card={byId.get(id)} />)}
                         </div>
                       </>
                     )}
-                    <button type="button" className="wip-link" onClick={() => setDialog({ kind: "worthConsidering" })}>Why this recommendation →</button>
+                    {whyNaiaLines.length > 0 && (
+                      <div className="wip-shop-why">
+                        <span className="wip-shop-why-label">Why nAia recommends this</span>
+                        <p>{whyNaiaLines.join(" ")}</p>
+                      </div>
+                    )}
                   </div>
                 )}
                 {lowPriority && (
@@ -1155,7 +1208,7 @@ export default function WardrobeIntelligencePreview() {
                       <>
                         <p className="wip-shop-evidence-label">Similar pieces you own</p>
                         <div className="wip-evidence-row">
-                          {enoughCluster.garmentIds.slice(0, 4).map((id) => <Thumb key={id} card={byId.get(id)} height={100} />)}
+                          {enoughCluster.garmentIds.slice(0, 4).map((id) => <EvidenceThumb key={id} card={byId.get(id)} />)}
                         </div>
                       </>
                     )}
@@ -1471,6 +1524,9 @@ const css = `
   .wip-shop-col > p{font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.6;color:rgba(40,21,12,0.65);margin:0 0 10px}
   .wip-shop-evidence-label{font-family:var(--naia-ff-ui);font-size:9.5px;letter-spacing:0.6px;text-transform:uppercase;color:rgba(40,21,12,0.4);margin:0 0 8px}
   .wip-shop-col .wip-evidence-row{margin-bottom:12px}
+  .wip-shop-why{margin-top:auto;padding-top:10px}
+  .wip-shop-why-label{display:block;font-family:var(--naia-ff-ui);font-size:9.5px;letter-spacing:0.6px;text-transform:uppercase;color:rgba(40,21,12,0.4);margin:0 0 4px}
+  .wip-shop-why p{font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.6;color:rgba(40,21,12,0.65);margin:0}
 
   /* Passport-match + wardrobe-profile — compact, real, inline page content,
      not dialog teasers. One prominent takeaway, then supporting facts as a
