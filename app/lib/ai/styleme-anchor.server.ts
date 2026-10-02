@@ -597,7 +597,33 @@ export async function autoSelectClosetAnchor(
     return rank <= effectiveMaxRank;
   };
 
-  type ScoredItem = { item: AutoSelectItem; score: number; isAnchorCapable: boolean; inRange: boolean };
+  // ── Lower bound (C3) ───────────────────────────────────────────────────────
+  //
+  // The gate above is a CEILING only. Nothing preferred an anchor that reaches the
+  // band's floor, so ST13 (Family + Smart casual, band 2-2) anchored on rank-1 casual
+  // jeans: once a below-band garment is pinned into a weight-1.0 structural slot, every
+  // candidate inherits it and no later ranking can lift the outfit into the band.
+  //
+  // This is a sort TIER, not a filter, and it sits directly below the ceiling tier so
+  // the ceiling's precedence is untouched. When no candidate reaches the floor every
+  // entry scores false, the tier ties, and selection falls through to score exactly as
+  // before — so a wardrobe with nothing at the band still gets its best anchor rather
+  // than none. Unknown formality counts as satisfying the floor, mirroring the
+  // fail-open treatment the ceiling already gives it.
+  const targetBandMin = getTargetFormalityRange(
+    signals.occasion,
+    signals.formalityConditional ?? null,
+  ).min;
+  const isAtOrAboveBandFloor = (item: AutoSelectItem): boolean => {
+    if (!item.formality) return true; // unknown → fail-open
+    const rank = _FORMALITY_RANK[item.formality] ?? 0;
+    return rank >= targetBandMin;
+  };
+
+  type ScoredItem = {
+    item: AutoSelectItem; score: number; isAnchorCapable: boolean;
+    inRange: boolean; atOrAboveFloor: boolean;
+  };
 
   const activeIntentions = signals.intentions ?? [];
   const activeBodyNeeds = signals.bodyNeeds ?? [];
@@ -742,12 +768,16 @@ export async function autoSelectClosetAnchor(
       score: baseScore + registerBonus + bodyNeedBonus + intentionBonus,
       isAnchorCapable: isStructuralAnchorCandidate(item),
       inRange: isFormallyInRange(item),
+      atOrAboveFloor: isAtOrAboveBandFloor(item),
     };
   });
 
   const scored = mapped.sort((a, b) => {
     // Tier 0 (in-range formality) always beats Tier 1 (known out-of-range)
     if (a.inRange !== b.inRange) return a.inRange ? -1 : 1;
+    // C3: an anchor that reaches the band's floor beats one below it. Ties when no
+    // candidate reaches the floor, which is what makes this fail-open.
+    if (a.atOrAboveFloor !== b.atOrAboveFloor) return a.atOrAboveFloor ? -1 : 1;
     if (b.score !== a.score) return b.score - a.score;
     // Tiebreaker: prefer garments that can anchor an outfit
     if (a.isAnchorCapable !== b.isAnchorCapable) return a.isAnchorCapable ? -1 : 1;
@@ -812,6 +842,9 @@ export async function autoSelectClosetAnchor(
         }
         return {
           id: s.item.id, name: s.item.name, score: s.score,
+          formality: s.item.formality ?? null,
+          atOrAboveBandFloor: s.atOrAboveFloor,
+          targetBandMin,
           construction: ap2?.construction ?? null,
           silhouetteCharacter: ap2?.silhouetteCharacter ?? null,
           fabricBehaviour: ap2?.fabricBehaviour ?? null,
