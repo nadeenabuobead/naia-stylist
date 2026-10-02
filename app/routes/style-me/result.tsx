@@ -794,7 +794,10 @@ export async function action({ request }: ActionFunctionArgs) {
         anchor: regenAnchor,
         recentlyShownHandles,
         ...(recentlyShownClosetIds.length > 0 && { recentlyShownClosetIds }),
-        ...(prevOutfitClosetIds && { prevOutfitClosetIds }),
+        // Plain property, not a conditional spread: excess-property checking must stay live
+        // here. The spread is what let this field be dropped silently for the life of the
+        // feature. undefined is correct for a first generation — it skips the dedupe.
+        prevOutfitClosetIds,
         // Rev 3 wording context — stored on session, never affects scoring
         ...(session.state && {
           state: session.state,

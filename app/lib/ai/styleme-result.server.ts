@@ -200,6 +200,14 @@ export function buildEngineInput(params: {
   anchor?: AnchorInput | null;
   recentlyShownHandles?: string[];
   recentlyShownClosetIds?: string[];
+  /**
+   * Closet ids from the MOST RECENT rendered outfit. Reroll only. This was read by
+   * computeStyleMeResult and typed on StyleMeEngineInput, but was never declared here and
+   * never returned below — the call site passed it through a conditional spread, which
+   * defeats excess-property checking, so it compiled and was dropped at runtime. The reroll
+   * dedupe therefore never executed once, for any customer, in either provenance mode.
+   */
+  prevOutfitClosetIds?: string[];
   mode?: StyleMeMode;
   // Rev 3 — Psychology-First wording context (Group 5). Zero engine scoring.
   state?: string;
@@ -228,6 +236,7 @@ export function buildEngineInput(params: {
     anchor: params.anchor ?? null,
     recentlyShownHandles: params.recentlyShownHandles ?? [],
     recentlyShownClosetIds: params.recentlyShownClosetIds,
+    prevOutfitClosetIds: params.prevOutfitClosetIds,
     mode: params.mode,
     gender: params.gender ?? null,
   };
