@@ -21,6 +21,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
 import { autoSelectClosetAnchor } from "../ai/styleme-anchor.server.js";
+import { passesCandidateDressingRequirements } from "../ai/styleme-result.server.js";
 
 const row = (o: Record<string, unknown>) => ({
   subcategory: null, colors: [], primaryColor: null, pattern: null, material: null,
@@ -142,23 +143,16 @@ describe("RD-C — diversity never overrides a correctness tier", () => {
       "a Passport dressing requirement the gate can evaluate outranks the diversity preference");
   });
 
-  test("RD-C.3b KNOWN GAP: the anchor dressing pre-filter only probes hem/top length", async () => {
-    // Pre-existing and NOT introduced by the diversity tier, but the tier makes it
-    // consequential, so it is pinned here rather than left to be rediscovered.
+  test("RD-C.3b a sleeveless anchor is CORRECTLY allowed — arms-covered is compensable", async () => {
+    // Not a gap. passesDressingRequirements is the item-level gate and deliberately applies
+    // ONLY non-compensable rules — legs-covered (hemLength) and no-cropped-tops (topLength).
+    // Its own contract says so: "Compensable requirements (arms-covered,
+    // chest-neckline-covered, dresses-modestly) are evaluated at the complete-outfit level
+    // in passesCandidateDressingRequirements, never rejected at item-selection time."
     //
-    // styleme-anchor.server.ts builds the eligible set with
-    //   passesDressingRequirements({ hemLength, topLength }, dressingPreferences)
-    // so sleeveLength, necklineCoverage, shoulderCoverage and midriffExposed are never
-    // supplied and a requirement such as arms-covered cannot be evaluated — it fails open.
-    // Before the diversity tier the stable order happened to keep the covered garment; now
-    // an unused sleeveless one can be surfaced instead.
-    //
-    // The data is already available: RC-A added all four fields to AutoSelectItem and the
-    // Prisma select. The fix is to pass them at this call site, which changes anchor
-    // eligibility for every session and therefore belongs in its own reviewed change.
-    //
-    // This test asserts TODAY'S behaviour. When the pre-filter is fixed it will fail, which
-    // is the intended signal to update it to expect "covered".
+    // A sleeveless top plus a sleeved blazer satisfies arms-covered, so rejecting it at the
+    // anchor would discard outfits that are perfectly valid. The enforcement happens after
+    // assembly, where layering can be seen. RD-D covers that half.
     const rows = [
       row({ id: "covered", name: "Covered", category: "TOPS", sleeveLength: "full" }),
       row({ id: "bare", name: "Bare", category: "TOPS", sleeveLength: "sleeveless" }),
@@ -168,7 +162,7 @@ describe("RD-C — diversity never overrides a correctness tier", () => {
       dressingPreferences: ["arms-covered"],
     } as never, async () => rows as never);
     assert.equal(got?.id ?? null, "bare",
-      "documents the gap: arms-covered is not evaluated at the anchor pre-filter");
+      "the item-level gate must not pre-reject a compensable exposure");
   });
 
   test("RD-C.4 the single-point-band fallback still decides when it applies", async () => {
@@ -180,5 +174,68 @@ describe("RD-C — diversity never overrides a correctness tier", () => {
     ];
     assert.equal(await pick(rows, sig("family", "formality-smart", ["trousers"])), "trousers",
       "the ST13 fallback ranks above diversity");
+  });
+});
+
+// ── RD-D: the other half — the candidate gate enforces what the anchor cannot ─
+//
+// Anchor eligibility and outfit eligibility are two deliberately different questions.
+// passesDressingRequirements asks "could this item ever satisfy the requirement?" and so
+// applies only non-compensable rules. passesCandidateDressingRequirements asks "does this
+// assembled outfit satisfy it?" and can see the layering that compensates.
+//
+// Reroll diversity may surface a fresh sleeveless anchor. These prove that cannot ship an
+// uncovered outfit: the candidate gate rejects it unless something actually covers the zone,
+// and when every candidate is rejected filteredCandidates empties and the existing
+// sameCombination path keeps the previous look.
+
+describe("RD-D — a diverse anchor cannot smuggle a coverage violation into the outfit", () => {
+  const g = (o: Record<string, unknown>) => ({
+    type: "closet", subcategory: null, colors: [], primaryColor: null, pattern: null,
+    material: null, styleTags: [], occasions: ["party"], imageUrl: null,
+    garmentRelationships: [], formality: "business-formal", fitProfile: null, waistShape: null,
+    sleeveLength: null, necklineCoverage: null, hemLength: null, topLength: null,
+    shoulderCoverage: null, midriffExposed: null, silhouette: null, stylePersonality: null,
+    approvedProfile: null, ...o,
+  });
+  const candidate = (pieces: Array<[string, string]>) =>
+    ({ id: "X", pieces: pieces.map(([slot, closetId]) => ({ slot, closetId, label: closetId })) });
+
+  const items = [
+    g({ id: "bare", category: "TOPS", sleeveLength: "sleeveless" }),
+    g({ id: "trousers", category: "BOTTOMS", hemLength: "full" }),
+    g({ id: "sleevedBlazer", category: "OUTERWEAR", sleeveLength: "full" }),
+    g({ id: "vest", category: "OUTERWEAR", sleeveLength: "sleeveless" }),
+  ];
+
+  test("RD-D.1 sleeveless base with NO covering layer is rejected", () => {
+    assert.equal(
+      passesCandidateDressingRequirements(
+        candidate([["top", "bare"], ["bottom", "trousers"]]) as never,
+        items as never, ["arms-covered"]),
+      false);
+  });
+
+  test("RD-D.2 the same base WITH a sleeved layer is accepted", () => {
+    assert.equal(
+      passesCandidateDressingRequirements(
+        candidate([["top", "bare"], ["bottom", "trousers"], ["outerwear", "sleevedBlazer"]]) as never,
+        items as never, ["arms-covered"]),
+      true, "layering is exactly what makes this requirement compensable");
+  });
+
+  test("RD-D.3 a sleeveless layer does not compensate", () => {
+    assert.equal(
+      passesCandidateDressingRequirements(
+        candidate([["top", "bare"], ["bottom", "trousers"], ["outerwear", "vest"]]) as never,
+        items as never, ["arms-covered"]),
+      false);
+  });
+
+  test("RD-D.4 no dressing requirement means no rejection", () => {
+    assert.equal(
+      passesCandidateDressingRequirements(
+        candidate([["top", "bare"], ["bottom", "trousers"]]) as never, items as never, []),
+      true);
   });
 });
