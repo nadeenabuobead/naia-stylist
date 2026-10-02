@@ -1239,6 +1239,38 @@ export default function StyleMeResult() {
   const suggestion = generateFetcher.data?.suggestion || loaderData.suggestion;
   const error = generateFetcher.data?.error || loaderData.error;
 
+  // ── TEMPORARY DIAGNOSTIC — remove once the reroll render question is closed ──
+  //
+  // The MANUAL TOP reroll rendered the generic error while the server returned 200 with
+  // { sameCombination: true } — the same payload the MANUAL DRESS reroll returned and
+  // rendered correctly on this same build. Source analysis cannot reconcile it: the
+  // fallback copy proves `error` was falsy, and generationSettled must have been true to
+  // avoid the loading screen, yet the sameCombination guard did not fire. Those cannot both
+  // hold, so the answer is a runtime value rather than a structural one.
+  //
+  // In an effect so it is client-only and never pollutes the server log. Reads state and
+  // logs; changes no condition, branch, fetcher, action or render output.
+  useEffect(() => {
+    console.log("[nAia-reroll-render-state]", {
+      generateFetcherState: generateFetcher.state,
+      generateFetcherData: generateFetcher.data,
+      generateFetcherDataKeys:
+        generateFetcher.data && typeof generateFetcher.data === "object"
+          ? Object.keys(generateFetcher.data)
+          : null,
+      sameCombination: generateFetcher.data?.sameCombination,
+      sameCombinationType: typeof generateFetcher.data?.sameCombination,
+      fetcherSuggestion: generateFetcher.data?.suggestion,
+      fetcherError: generateFetcher.data?.error,
+      loaderSuggestion: loaderData.suggestion,
+      loaderError: loaderData.error,
+      suggestion,
+      error,
+      generationSettled,
+      isLoading,
+    });
+  });
+
   // Whether to show the pending-save banner (active pending state, not dismissed, not yet saved).
   const showPendingBanner = !!loaderData.pendingState && !pendingDismissed && !isSaved;
 
