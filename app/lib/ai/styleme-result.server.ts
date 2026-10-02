@@ -3669,7 +3669,11 @@ function buildCompletionPiece(
 
 // Slots where an unsuitable owned piece is worse than none. Shared by the Candidate A
 // selection path and the B/C/D/E swap paths so the two cannot drift apart.
-const SUITABILITY_GATED_SLOTS_SHARED = new Set<string>(["bag", "shoe"]);
+//
+// `accessory` is gated but, unlike bag and shoe, produces no suggestion when it is left
+// out: getMissingFinishingSlots reports shoe and bag only, so an omitted accessory simply
+// disappears. That is deliberate — "add a belt" is not worth a line of copy.
+const SUITABILITY_GATED_SLOTS_SHARED = new Set<string>(["bag", "shoe", "accessory"]);
 
 // ── Finishing-slot suggestions ────────────────────────────────────────────────
 //

@@ -29,6 +29,7 @@ import {
   selectAdditionalClosetGarments,
   buildNaiaOutfitCandidates,
   buildCompletionLayer,
+  evaluateCompleteOutfit,
   getMissingFinishingSlots,
   finishingSuggestionRegister,
 } from "../ai/styleme-result.server.js";
@@ -389,5 +390,104 @@ describe("FS-F — suggestion helpers", () => {
     assert.equal(finishingSuggestionRegister({ min: 4, max: 5 }), "polished");
     assert.equal(finishingSuggestionRegister({ min: 2, max: 3 }), "smart");
     assert.equal(finishingSuggestionRegister({ min: 1, max: 2 }), "relaxed");
+  });
+});
+
+// ── FS-J: accessories are optional, so they must earn their place ───────────
+//
+// ST13 recommended a Black Ribbed Knit Beanie (formality `casual`, rank 1) against an
+// explicit Smart casual 2-2 target. The register penalty had already fired — the beanie
+// scored -1.5 — but a penalty only lowers a score, it never excludes, and the beanie was
+// the only accessory left with a positive total (the silk scarf and the belt both landed
+// at -0.50 and were cut by the `score <= 0` gate). `accessory` simply was not a gated slot.
+//
+// Strict like bag, for the same reason: an accessory is optional, so leaving it out costs
+// nothing. Unlike bag it produces no suggestion — getMissingFinishingSlots reports shoe and
+// bag only, so an omitted accessory disappears cleanly.
+//
+// FIXTURE NOTE: the category token is ACCESSORIES, plural. "ACCESSORY" resolves to the
+// `unknown` slot and the fixture never reaches the accessory contest at all — the first
+// draft of this block did that and "passed" while testing nothing.
+
+describe("FS-J — accessory suitability", () => {
+  const smartFamily = S("family", "formality-smart");
+  const base = () => [
+    g({ id: "shirt", category: "TOPS", formality: "business-casual",
+      occasions: ["family"], approvedProfile: prof("smart-casual") }),
+    g({ id: "jeans", category: "BOTTOMS", formality: "casual",
+      occasions: ["family"], approvedProfile: prof("casual") }),
+    g({ id: "tote", category: "BAGS", formality: "smart-casual",
+      occasions: ["family"], approvedProfile: prof("smart-casual") }),
+  ];
+  const acc = (id: string, formality: string, register: string) =>
+    g({ id, category: "ACCESSORIES", formality, occasions: ["family"], approvedProfile: prof(register) });
+
+  test("FS-J.1 band 2-2: a rank-1 accessory is omitted", () => {
+    const items = [...base(), acc("beanie", "casual", "casual")];
+    const p = picked(A("shirt", "top"), items, smartFamily);
+    assert.ok(!p.some((x) => x.startsWith("accessory:")), `got ${p.join(" | ")}`);
+  });
+
+  test("FS-J.2 band 2-2: a rank-2 accessory is retained", () => {
+    const items = [...base(), acc("belt", "smart-casual", "smart-casual")];
+    const p = picked(A("shirt", "top"), items, smartFamily);
+    assert.ok(p.includes("accessory:belt"), `got ${p.join(" | ")}`);
+  });
+
+  test("FS-J.3 band 2-2: a rank-3 accessory is retained", () => {
+    const items = [...base(), acc("scarf", "business-casual", "smart-casual")];
+    const p = picked(A("shirt", "top"), items, smartFamily);
+    assert.ok(p.includes("accessory:scarf"), `got ${p.join(" | ")}`);
+  });
+
+  test("FS-J.4 the rank-1 accessory survives when there is no formality answer", () => {
+    const items = [...base(), acc("beanie", "casual", "casual")];
+    const p = picked(A("shirt", "top"), items, S("family", null));
+    assert.ok(p.includes("accessory:beanie"),
+      `without an explicit register nothing may be removed; got ${p.join(" | ")}`);
+  });
+
+  test("FS-J.5 omitting an accessory produces NO suggestion", () => {
+    const items = [...base(), acc("beanie", "casual", "casual")];
+    const slots = suggested(A("shirt", "top"), items, smartFamily);
+    assert.ok(!slots.includes("accessory"), `got ${JSON.stringify(slots)}`);
+  });
+
+  test("FS-J.6 jewelry is unaffected — a rank-1 jewel is still selected", () => {
+    const items = [
+      ...base(),
+      g({ id: "studs", category: "JEWELRY", formality: "casual",
+        occasions: ["family"], approvedProfile: prof("casual") }),
+    ];
+    const p = picked(A("shirt", "top"), items, smartFamily);
+    assert.ok(p.includes("jewelry:studs"),
+      `jewelry was deliberately left ungated; got ${p.join(" | ")}`);
+  });
+
+  test("FS-J.7 the predicate itself: accessory is strict, shoe is not", () => {
+    const band = { min: 2, max: 2 };
+    // rank 1, base register 3 — a gap of 2, so both rules agree here.
+    assert.equal(finishingPieceIsSuitable(1, 3, band, "accessory"), false);
+    // rank 1 with the base also at 1 — only the strict rule still rejects it.
+    assert.equal(finishingPieceIsSuitable(1, 1, band, "accessory"), false);
+    assert.equal(finishingPieceIsSuitable(1, 1, band, "shoe"), true);
+  });
+
+  test("FS-J.8 ST13 lands within-target once the beanie is gone", () => {
+    const items = [...base(), acc("beanie", "casual", "casual")];
+    const suppressed = new Set<string>();
+    const sel = selectAdditionalClosetGarments(
+      A("shirt", "top"), null, smartFamily, items, null, undefined, suppressed);
+    assert.ok(suppressed.has("accessory"), "the accessory slot must be reported as suppressed");
+    const candidate = {
+      id: "A",
+      pieces: [{ slot: "top", closetId: "shirt", label: "shirt" },
+        ...sel.map((x) => ({ slot: x.slot, closetId: x.id, label: x.label }))],
+    } as unknown as Parameters<typeof evaluateCompleteOutfit>[0];
+    const r = evaluateCompleteOutfit(candidate, items, smartFamily);
+    assert.equal(r.formalityFit, "within-target",
+      `register ${r.outfitFormalityRank} against ${JSON.stringify(r.targetFormalityRange)}`);
+    assert.ok(Math.abs((r.outfitFormalityRank ?? 0) - 2.0) < 0.0001,
+      `expected exactly 2.0, got ${r.outfitFormalityRank}`);
   });
 });

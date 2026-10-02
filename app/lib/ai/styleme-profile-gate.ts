@@ -906,16 +906,26 @@ export function getTargetFormalityRange(
 export const FINISHING_SUITABILITY_MAX_GAP_BELOW_BASE = 1;
 
 // Slots judged on condition 1 alone, because the piece is OPTIONAL: if nothing clears the
-// register floor the slot is simply left unfilled and described instead, so there is no
-// risk of leaving the outfit short of something it needs. A shoe is not in this set — an
-// outfit with no shoes is broken, so a shoe is only removed when the mismatch is severe
-// relative to the look (both conditions), which is what keeps a wardrobe owning no
-// formalwear from being left barefoot.
+// register floor the slot is simply left out, so there is no risk of leaving the outfit
+// short of something it needs. A shoe is not in this set — an outfit with no shoes is
+// broken, so a shoe is only removed when the mismatch is severe relative to the look
+// (both conditions), which is what keeps a wardrobe owning no formalwear from being left
+// barefoot.
+//
+// `accessory` joined after ST13 recommended a Black Ribbed Knit Beanie (rank 1) against an
+// explicit Smart casual 2-2 target. The register penalty had fired — the beanie scored
+// -1.5 — but a penalty only lowers a score, it never excludes, and the beanie was the only
+// accessory left with a positive total. Omitting it also moves that outfit from
+// underdressed 1.935 to within-target 2.000.
+//
+// `jewelry` is deliberately NOT here. The same argument would apply, but there is no
+// observed case for it yet and widening without evidence is how a narrow rule turns into
+// a blunt one.
 //
 // This asymmetry is the whole reason ST16's tote survived the first version: its outfit's
 // base register was 2, so a rank-3 bag was not "below the base" at all, and the lenient
 // test cleared it even though the band floor was 4.
-export const FINISHING_STRICT_SLOTS = new Set<string>(["bag"]);
+export const FINISHING_STRICT_SLOTS = new Set<string>(["bag", "accessory"]);
 
 export function finishingPieceIsSuitable(
   pieceFormalityRank: number | null,
