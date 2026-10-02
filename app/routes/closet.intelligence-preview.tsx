@@ -566,8 +566,6 @@ export default function WardrobeIntelligencePreview() {
   const shapeChips = (profileBlock?.meta?.shapes ?? []) as Array<{ label: string; count: number }>;
   const summaryLines = (profileBlock?.meta?.summaryLines ?? []) as string[];
   const profileEntries = (profileBlock?.entries ?? []).filter((e) => e.id !== "closet-capability" && !e.id.startsWith("hero-"));
-  const capability = profileBlock?.entries?.find((e) => e.id === "closet-capability");
-  const capabilityStrengths = (capability?.meta?.strengths ?? []) as Array<{ label: string; count: number }>;
 
   const blockedDetail = (coverage?.meta?.blockedDetail ?? []) as Array<{
     garmentId: string; name: string; reason: string; layers: string[];
@@ -729,61 +727,46 @@ export default function WardrobeIntelligencePreview() {
       );
     }
     if (dialog.kind === "profile") {
+      // Four concise sections, each reusing real strings/values already
+      // computed elsewhere on this page (summaryLines/profileEntries from
+      // wardrobe-page.ts, glanceRegisters from this route) — nothing here
+      // is a new calculation, only a shorter presentation of the same real
+      // data. wardrobe-page.ts itself is untouched, since summaryLines is
+      // also read by the main page's Style Passport takeaway.
+      const patternLines = [summaryLines[0], summaryLines[1]].filter((l): l is string => Boolean(l));
+      const styleLines = [
+        summaryLines[2],
+        profileEntries.find((e) => e.id === "intentions-chosen")?.body,
+      ].filter((l): l is string => Boolean(l));
+      const feedbackBody = profileEntries.find((e) => e.id === "outcome-feedback")?.body;
+      const supportSentence = glanceRegisters[0]
+        ? `Your current Closet gives you the strongest support for ${glanceRegisters[0].heading.toLowerCase()} dressing` +
+          (glanceRegisters[1] ? `, with fewer combinations for ${glanceRegisters[1].heading.toLowerCase()}.` : ".")
+        : null;
       return (
-        <DialogShell title="What nAia has learned about your wardrobe." subtitle="Deeper evidence behind your wardrobe profile." onClose={closeDialog}>
-          {neutralSharePct !== null && neutralSharePct >= 40 && (
+        <DialogShell title="What nAia has learned about your wardrobe." subtitle="Deeper evidence behind your wardrobe profile." onClose={closeDialog} className="wip-dialog--compact">
+          {patternLines.length > 0 && (
             <div className="wip-profile-block">
-              <p>{neutralSharePct}% of your colour-tagged pieces are neutral — that makes your wardrobe easy to combine, though it can also mean outfits feel visually similar.</p>
+              <h3>Your wardrobe pattern</h3>
+              <p>{patternLines.join(" ")}</p>
             </div>
           )}
-          {summaryLines.length > 0 && (
+          {styleLines.length > 0 && (
             <div className="wip-profile-block">
-              {summaryLines.map((line, i) => <p key={i}>{line}</p>)}
+              <h3>How you tend to style</h3>
+              <p>{styleLines.join(" ")}</p>
             </div>
           )}
-          {paletteRows.length > 0 && (
+          {feedbackBody && (
             <div className="wip-profile-block">
-              <h3>Your main colours</h3>
-              <div className="wip-swatches">
-                {paletteRows.map((c) => (
-                  <div key={c.colour} className="wip-swatch-item">
-                    <span className="wip-swatch" style={{ background: swatchColour(c.colour) }} />
-                    {c.colour} · {c.count}
-                  </div>
-                ))}
-              </div>
+              <h3>What nAia is learning from your feedback</h3>
+              <p>{feedbackBody}</p>
             </div>
           )}
-          {shapeChips.length > 0 && (
+          {supportSentence && (
             <div className="wip-profile-block">
-              <h3>Your main shapes</h3>
-              <div className="wip-chips">
-                {shapeChips.map((s) => <span key={s.label} className="wip-chip">{s.label} · {s.count}</span>)}
-              </div>
-              {shapeChips.length > 1 && (
-                <p className="wip-profile-so-what">
-                  {shapeChips[0].label} shapes appear most often, so even when you change individual garments, the overall shape of an outfit can stay similar. More variation in shape may change how your outfits feel more than another colour would.
-                </p>
-              )}
-            </div>
-          )}
-          {profileEntries.map((e) => e.title && e.body ? (
-            <div key={e.id} className="wip-profile-block">
-              <h3>{e.title}</h3>
-              <p>{e.body}</p>
-            </div>
-          ) : null)}
-          {capability && (
-            <div className="wip-profile-block">
-              <h3>What your Closet can help with</h3>
-              <p>{capability.body === "These counts estimate the kinds of looks your pieces could help with. They aren't complete outfits or a match against your personal requirements."
-                ? "These counts estimate the kinds of looks your pieces could help with. These are the kinds of looks your current Closet can support."
-                : capability.body}</p>
-              {capabilityStrengths.length > 0 && (
-                <ul className="wip-capability-list">
-                  {capabilityStrengths.map((s) => <li key={s.label}>{s.label} · {s.count}</li>)}
-                </ul>
-              )}
+              <h3>What your Closet can support</h3>
+              <p>{supportSentence}</p>
             </div>
           )}
         </DialogShell>
@@ -1552,13 +1535,8 @@ const css = `
   .wip-ways-strip{display:flex;gap:8px;margin-top:10px}
   .wip-ways-strip .wip-thumb{width:70px;border-radius:4px}
   .wip-ways-why{font-family:var(--naia-ff-ui);font-size:11.5px;color:rgba(40,21,12,0.6);margin:8px 0 0;max-width:420px}
-  .wip-swatches{display:flex;gap:18px;margin-top:10px;flex-wrap:wrap}
-  .wip-swatch-item{font-family:var(--naia-ff-ui);font-size:9.5px;color:rgba(40,21,12,0.55);text-align:center}
-  .wip-swatch{width:26px;height:26px;display:block;margin:0 auto 6px;border-radius:50%;border:1px solid var(--naia-border)}
   .wip-chips{display:flex;flex-wrap:wrap;gap:8px}
   .wip-chip{font-family:var(--naia-ff-ui);font-size:11px;color:rgba(40,21,12,0.65);background:var(--naia-muted-bg);border-radius:20px;padding:5px 12px}
-  .wip-profile-so-what{font-family:var(--naia-ff-ui);font-size:11.5px;line-height:1.6;color:rgba(40,21,12,0.6);margin:10px 0 0}
-  .wip-capability-list{list-style:none;margin:10px 0 0;padding:0;display:flex;flex-wrap:wrap;gap:8px 16px;font-family:var(--naia-ff-ui);font-size:11.5px;color:rgba(40,21,12,0.6)}
   .wip-combo-text{font-family:var(--naia-ff-ui);font-size:13px;line-height:1.6;margin-top:16px;color:var(--naia-ink)}
   .wip-status-options{display:flex;flex-direction:column;gap:12px}
   .wip-status-choice{padding:14px 16px;text-align:left;background:var(--naia-bg);border:1px solid var(--naia-border);border-radius:5px;cursor:pointer}
