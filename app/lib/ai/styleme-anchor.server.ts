@@ -803,13 +803,65 @@ export async function autoSelectClosetAnchor(
       || !item.garmentRelationships.includes("occasion-only");        // other-occasion tags, no restriction
   };
 
-  const winnerEntry = scored.find(s => s.score > 0 && isOccasionCompatible(s.item));
+  const defaultWinnerEntry = scored.find(s => s.score > 0 && isOccasionCompatible(s.item));
+
+  // ── Single-point band, nothing in it: dressing up beats dressing down ──────
+  //
+  // C3 added a floor tier BELOW the ceiling tier, which is correct whenever something in
+  // the closet reaches the band. It cannot help when the band is one rank wide and the
+  // closet straddles it: Family + Smart casual resolves to 2-2, ST13's closet holds rank 1
+  // and rank 3 and nothing at rank 2, so the ceiling demoted the rank-3 pieces, the floor
+  // demoted the rank-1 pieces, and the ceiling — read first — kept the rank-1 jeans.
+  //
+  // Both misses are one rank, but they are not equally recoverable. A rank-1 bottom pinned
+  // into a weight-1.0 structural slot held the whole ST13 outfit at register 1.045 against
+  // a 2-2 target; the rank-3 alternative lets construction land near 2.33. The outfit can
+  // be dressed down around a slightly-too-smart anchor far more readily than it can be
+  // lifted around a too-casual one.
+  //
+  // Deliberately narrow. Every condition must hold:
+  //   - the customer answered the formality question
+  //   - the band is a single rank
+  //   - no viable anchor sits inside it (unknown formality counts as inside — fail-open)
+  //   - viable anchors exist on BOTH sides
+  //   - the nearest on each side are equally distant from the band
+  // Any in-band anchor, any wider band, any absent formality answer, or an unequal gap and
+  // this does not fire at all. Nothing is filtered: it only changes which viable candidate
+  // is picked, and only in the case where the previous answer was the worse of two misses.
+  const fallbackWinnerEntry = (() => {
+    if (!signals.formalityConditional) return undefined;
+    const band = getTargetFormalityRange(signals.occasion, signals.formalityConditional);
+    if (band.min !== band.max) return undefined;
+
+    const viable = scored.filter(s => s.score > 0 && isOccasionCompatible(s.item));
+    const rankOf = (s: ScoredItem): number | null =>
+      s.item.formality ? (_FORMALITY_RANK[s.item.formality] ?? null) : null;
+
+    // An unknown rank is treated as acceptable, so its presence suppresses the fallback.
+    if (viable.some(s => { const r = rankOf(s); return r === null || r === band.min; })) return undefined;
+
+    const below = viable.filter(s => { const r = rankOf(s); return r !== null && r < band.min; });
+    const above = viable.filter(s => { const r = rankOf(s); return r !== null && r > band.max; });
+    if (below.length === 0 || above.length === 0) return undefined;
+
+    const nearestBelow = Math.max(...below.map(s => rankOf(s) as number));
+    const nearestAbove = Math.min(...above.map(s => rankOf(s) as number));
+    if (band.min - nearestBelow !== nearestAbove - band.max) return undefined;
+
+    // `scored` is already sorted, so this is the best-scoring candidate at that rank.
+    return above.find(s => rankOf(s) === nearestAbove);
+  })();
+
+  const winnerEntry = fallbackWinnerEntry ?? defaultWinnerEntry;
   if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true") {
     console.log("[nAia-anchor-rank]", JSON.stringify({
       occasion: signals.occasion,
       formalityConditional: signals.formalityConditional ?? null,
       intentions: activeIntentions,
       bodyNeeds: activeBodyNeeds,
+      targetBandMin,
+      singlePointBandFallbackUsed: fallbackWinnerEntry !== undefined,
+      defaultWinnerId: defaultWinnerEntry?.item.id ?? null,
       top10: scored.slice(0, 10).map((s) => {
         const ap2 = s.item.styleMeProfile?.profileStatus === "approved" ? s.item.styleMeProfile : null;
         const gfbn = (need: string) => scoreBodyNeedForClosetItem(need, {

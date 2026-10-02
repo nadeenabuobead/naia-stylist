@@ -188,10 +188,20 @@ describe("AF-5 — ST13: C3 cannot reach it, and the reason is worth pinning", (
     assert.ok(!ranks.includes(2), "if this closet ever gains a rank-2 piece, AF-5.3 should flip");
   });
 
-  test("AF-5.3 so the ceiling still decides and the rank-1 anchor is kept", async () => {
+  test("AF-5.3 the floor tier alone cannot decide it — both sides are demoted", async () => {
+    // Superseded as an OUTCOME by the single-point-band fallback (AF-6, AF-7): this
+    // originally asserted the rank-1 jeans were kept, which was true of C3 on its own.
+    // The structural fact it was pinning still holds and is what the fallback needed —
+    // the ceiling demotes the rank-3 pieces and the floor demotes the rank-1 pieces, so
+    // neither tier can separate them and something else has to decide.
+    const RANK: Record<string, number> = {
+      casual: 1, "smart-casual": 2, "business-casual": 3, "business-formal": 4, occasion: 5, evening: 6,
+    };
+    const ranks = (rows as unknown as Array<{ formality: string }>).map(r => RANK[r.formality]);
+    assert.ok(ranks.some(r => r < 2), "below-band pieces exist, demoted by the floor tier");
+    assert.ok(ranks.some(r => r > 2), "above-band pieces exist, demoted by the ceiling tier");
     const picked = await autoSelectClosetAnchor("cust", sig("family", "formality-smart"), async () => rows);
-    assert.equal(picked!.id, "Medium Blue Wash Jeans",
-      "C3 is a tier below the ceiling by design; it cannot lift a closet with nothing in band");
+    assert.ok(picked, "and an anchor is still returned either way");
   });
 
   test("AF-5.4 but add one rank-2 piece and C3 takes it immediately", async () => {
@@ -202,5 +212,137 @@ describe("AF-5 — ST13: C3 cannot reach it, and the reason is worth pinning", (
     ] as never[];
     const picked = await autoSelectClosetAnchor("cust", sig("family", "formality-smart"), async () => withSmartCasual);
     assert.equal(picked!.id, "Smart Knit Top");
+  });
+});
+
+// ── AF-6: single-point band with nothing in it ──────────────────────────────
+//
+// The narrow fallback C3 exposed. When the band is one rank wide, the closet straddles it,
+// and the nearest miss on each side is the same distance, the above-band anchor is taken:
+// an outfit can be dressed down around a slightly-too-smart anchor far more readily than
+// it can be lifted around a too-casual one. ST13 held register 1.045 against a 2-2 target
+// on rank-1 jeans; the rank-3 alternative lets construction land near 2.33.
+
+describe("AF-6 — equally-distant miss prefers the above-band anchor", () => {
+  const straddle = [
+    // Listed first, stronger occasion footprint — the pre-fallback winner.
+    row({ id: "jeans", name: "Jeans", category: "BOTTOMS",
+      formality: "casual", occasions: ["family"] }),
+    row({ id: "trousers", name: "Tailored Trousers", category: "BOTTOMS",
+      formality: "business-casual", occasions: ["family"] }),
+  ] as never[];
+
+  test("AF-6.1 band 2-2, no rank-2 anchor, rank-1 and rank-3 present → rank-3 wins", async () => {
+    const picked = await autoSelectClosetAnchor("cust", sig("family", "formality-smart"), async () => straddle);
+    assert.equal(picked!.id, "trousers");
+  });
+
+  test("AF-6.2 add a rank-2 anchor and it wins instead — normal precedence returns", async () => {
+    const withInBand = [
+      ...straddle,
+      row({ id: "smartKnit", name: "Smart Knit Top", category: "TOPS",
+        formality: "smart-casual", occasions: ["family"] }),
+    ] as never[];
+    const picked = await autoSelectClosetAnchor("cust", sig("family", "formality-smart"), async () => withInBand);
+    assert.equal(picked!.id, "smartKnit");
+  });
+
+  test("AF-6.3 only below-band anchors → fail-open, best below-band still selected", async () => {
+    const belowOnly = [
+      row({ id: "jeans", name: "Jeans", category: "BOTTOMS", formality: "casual", occasions: ["family"] }),
+      row({ id: "tee", name: "Tee", category: "TOPS", formality: "casual", occasions: ["family"] }),
+    ] as never[];
+    const picked = await autoSelectClosetAnchor("cust", sig("family", "formality-smart"), async () => belowOnly);
+    assert.ok(picked, "an anchor must still be returned");
+    assert.ok(["jeans", "tee"].includes(picked!.id));
+  });
+
+  test("AF-6.4 only above-band anchors → best above-band selected", async () => {
+    const aboveOnly = [
+      row({ id: "trousers", name: "Tailored Trousers", category: "BOTTOMS",
+        formality: "business-casual", occasions: ["family"] }),
+      row({ id: "blazer", name: "Blazer", category: "OUTERWEAR",
+        formality: "business-formal", occasions: ["family"] }),
+    ] as never[];
+    const picked = await autoSelectClosetAnchor("cust", sig("family", "formality-smart"), async () => aboveOnly);
+    assert.ok(picked, "an anchor must still be returned");
+    assert.ok(["trousers", "blazer"].includes(picked!.id));
+  });
+
+  test("AF-6.5 an unequal gap does not trigger it", async () => {
+    // rank 1 is one below the 2-2 band; rank 4 is two above. Not equally distant.
+    const unequal = [
+      row({ id: "jeans", name: "Jeans", category: "BOTTOMS", formality: "casual", occasions: ["family"] }),
+      row({ id: "blazer", name: "Blazer", category: "OUTERWEAR",
+        formality: "business-formal", occasions: ["family"] }),
+    ] as never[];
+    const picked = await autoSelectClosetAnchor("cust", sig("family", "formality-smart"), async () => unequal);
+    assert.equal(picked!.id, "jeans", "the fallback is for equally-distant misses only");
+  });
+
+  test("AF-6.6 a non-single-point band keeps current behaviour", async () => {
+    // girls-night + Dressy is 4-5. A rank-2 top and a rank-6 gown straddle it, but the
+    // band is two ranks wide so the fallback must not fire — the ceiling decides.
+    const rows = [
+      row({ id: "tank", name: "Tank", category: "TOPS",
+        formality: "smart-casual", occasions: ["evening"] }),
+      row({ id: "gown", name: "Gown", category: "DRESSES",
+        formality: "evening", occasions: ["evening"] }),
+    ] as never[];
+    const picked = await autoSelectClosetAnchor("cust", sig("girls-night", "formality-occasion"), async () => rows);
+    assert.equal(picked!.id, "tank", "in-range beats out-of-range; the fallback is inactive");
+  });
+
+  test("AF-6.7 no explicit formality answer keeps current behaviour", async () => {
+    // family with no answer resolves to 1-2, which is not single-point, and the fallback
+    // requires an explicit answer regardless.
+    const picked = await autoSelectClosetAnchor("cust", sig("family", null), async () => straddle);
+    assert.equal(picked!.id, "jeans");
+  });
+
+  test("AF-6.8 unknown formality suppresses the fallback (it counts as acceptable)", async () => {
+    const withUnknown = [
+      ...straddle,
+      row({ id: "unlabelled", name: "Unlabelled Top", category: "TOPS",
+        formality: null, occasions: ["family"] }),
+    ] as never[];
+    const picked = await autoSelectClosetAnchor("cust", sig("family", "formality-smart"), async () => withUnknown);
+    assert.notEqual(picked!.id, "trousers",
+      "an unknown-rank garment is fail-open acceptable, so the straddle fallback must not fire");
+  });
+});
+
+// ── AF-7: ST13 end to end ───────────────────────────────────────────────────
+
+describe("AF-7 — ST13 now selects the smarter structural anchor", () => {
+  const RANK: Record<string, number> = {
+    casual: 1, "smart-casual": 2, "business-casual": 3, "business-formal": 4, occasion: 5, evening: 6,
+  };
+  const rows = [
+    row({ id: "Medium Blue Wash Jeans", name: "Medium Blue Wash Jeans", category: "BOTTOMS",
+      formality: "casual", occasions: ["family"] }),
+    row({ id: "Black Long-Sleeve Top", name: "Black Long-Sleeve Top", category: "TOPS",
+      formality: "casual", occasions: ["family"] }),
+    row({ id: "White Long-Sleeve Button-Up Blouse", name: "White Long-Sleeve Button-Up Blouse",
+      category: "TOPS", formality: "business-casual", occasions: ["family"] }),
+    row({ id: "Black Tailored Trousers", name: "Black Tailored Trousers", category: "BOTTOMS",
+      formality: "business-casual", occasions: ["family"] }),
+  ] as never[];
+
+  test("AF-7.1 the anchor is no longer the rank-1 jeans", async () => {
+    const picked = await autoSelectClosetAnchor("cust", sig("family", "formality-smart"), async () => rows);
+    assert.notEqual(picked!.id, "Medium Blue Wash Jeans");
+  });
+
+  test("AF-7.2 the anchor is above the band rather than below it", async () => {
+    const picked = await autoSelectClosetAnchor("cust", sig("family", "formality-smart"), async () => rows);
+    const chosen = (rows as unknown as Array<{ id: string; formality: string }>).find(r => r.id === picked!.id)!;
+    assert.ok(RANK[chosen.formality] > 2,
+      `anchor ${picked!.id} is rank ${RANK[chosen.formality]}; the 2-2 band had nothing in it, so above is preferred`);
+  });
+
+  test("AF-7.3 and it is one of the business-casual structural pieces", async () => {
+    const picked = await autoSelectClosetAnchor("cust", sig("family", "formality-smart"), async () => rows);
+    assert.ok(["White Long-Sleeve Button-Up Blouse", "Black Tailored Trousers"].includes(picked!.id));
   });
 });
