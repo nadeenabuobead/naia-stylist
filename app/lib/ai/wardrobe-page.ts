@@ -1132,10 +1132,15 @@ function buildProfileBlock(input: WardrobePageInput): PageBlock | null {
   if (dna.shapes.length > 0) {
     summaryLines.push(dna.shapesReading ?? "Straight shapes recur most in your Closet.");
   }
-  const topRequest = needs.styleMe.state === "available" ? needs.styleMe.requests[0] : undefined;
-  if (topRequest) {
+  // Register-demand presentation reads the clean, deduped 90-day demand
+  // layer (needs.demand), not the raw, contaminated needs.styleMe.requests —
+  // and is gated on its own availability, never on needs.styleMe.state
+  // (which also gates unrelated intention copy below and must not be
+  // widened just to surface this). See styleme-demand-evidence.ts.
+  const topDemand = needs.demand.registerDemand[0];
+  if (topDemand) {
     summaryLines.push(
-      `You most often ask for ${DRESS_LEVEL_SHORT[topRequest.register] ?? DRESS_LEVEL_PHRASE[topRequest.register]} looks.`,
+      `Recently, you most often ask for ${DRESS_LEVEL_SHORT[topDemand.register] ?? DRESS_LEVEL_PHRASE[topDemand.register]} looks.`,
     );
   }
   // "Wore it" is genuine self-reported wear evidence, not nothing — the
@@ -1177,16 +1182,23 @@ function buildProfileBlock(input: WardrobePageInput): PageBlock | null {
     });
   }
 
+  // Decoupled from needs.styleMe.state on purpose — gated only on the clean
+  // demand layer having something to show, so a customer whose old
+  // styleMe.state never reaches "available" (e.g. too little reachedFor/
+  // struggles/strongIntentions signal) can still see her real recent
+  // register demand, without widening styleMe.state itself and exposing
+  // the unrelated intentions-chosen/outcome-feedback entries below for her.
+  if (topDemand) {
+    const totalDemand = needs.demand.registerDemand.reduce((sum, d) => sum + d.demandEventCount, 0);
+    entries.push({
+      id: "dress-level", claim: "styleme-dress-level", role: "full",
+      title: "How you usually want your looks to feel",
+      body: `Over the last 90 days, ${topDemand.demandEventCount} of the ${totalDemand} StyleMe requests nAia could classify were ${DRESS_LEVEL_PHRASE[topDemand.register]}.`,
+      garmentIds: [],
+    });
+  }
+
   if (needs.styleMe.state === "available") {
-    if (topRequest) {
-      const total = needs.styleMe.requests.reduce((sum, r) => sum + r.sessions, 0);
-      entries.push({
-        id: "dress-level", claim: "styleme-dress-level", role: "full",
-        title: "How you usually want your looks to feel",
-        body: `${topRequest.sessions} of the ${total} StyleMe requests nAia could classify were ${DRESS_LEVEL_PHRASE[topRequest.register]}.`,
-        garmentIds: [],
-      });
-    }
     const chosen = needs.intentions.chosen.slice(0, 4);
     if (chosen.length > 0) {
       const dominates = chosen.length > 1 && chosen[0].sessions >= chosen[1].sessions * 2;

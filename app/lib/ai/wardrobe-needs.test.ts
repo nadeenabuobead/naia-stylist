@@ -24,6 +24,7 @@ import {
   IDENTITY_INTENTIONS,
 } from "./wardrobe-needs.ts";
 import type { WardrobeGarment, WardrobePassport } from "./wardrobe-intelligence.ts";
+import type { RawStyleMeDemandFact } from "./styleme-demand-evidence.ts";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -147,6 +148,7 @@ function run(
     passport?: WardrobePassport | null;
     sessions?: StyleMeSessionFact[] | null;
     outcomes?: OutcomeFact[] | null;
+    demandFacts?: RawStyleMeDemandFact[] | null;
   } = {},
 ): WardrobeNeeds {
   return computeWardrobeNeeds({
@@ -154,6 +156,7 @@ function run(
     passport: opts.passport ?? null,
     styleMeSessions: opts.sessions ?? null,
     outcomes: opts.outcomes ?? null,
+    styleMeDemandFacts: opts.demandFacts ?? null,
   });
 }
 
@@ -970,5 +973,83 @@ describe("§WN-12 a repetition finding's evidence is the tops and bottoms, not a
     }
     const accessoryIds = items.filter((g) => ["bag", "shoes", "outerwear"].includes(g.slot)).map((g) => g.id);
     for (const id of accessoryIds) assert.ok(!finding.garmentIds.includes(id), `${id} should never be repetition evidence`);
+  });
+});
+
+// ── §WN-13 StyleMe-demand V1 — a separate, 90-day-windowed, additive input ──
+
+function demandFact(partial: Partial<RawStyleMeDemandFact> & { sessionId: string; createdAt: Date }): RawStyleMeDemandFact {
+  return {
+    occasion: "everyday", register: "everyday", formalityConditional: null,
+    intentions: [], desiredFeeling: null, closetAnchorId: "anchor-1", styleFrom: "CLOSET",
+    ...partial,
+  };
+}
+
+describe("§WN-13 StyleMe-demand V1 wiring", () => {
+  it("13a — styleMeDemandFacts is additive: supplying it changes nothing but needs.demand", () => {
+    const items = makeLook("casual", 5);
+    const sessions: StyleMeSessionFact[] = [{ id: "s1", register: "everyday", intentions: ["feel-like-myself"], garmentIds: [] }];
+    const withoutDemand = run(items, { sessions });
+    const withDemand = run(items, {
+      sessions,
+      demandFacts: [demandFact({ sessionId: "d1", createdAt: new Date("2026-09-01T10:00:00.000Z") })],
+    });
+
+    assert.deepEqual(withDemand.registers, withoutDemand.registers);
+    assert.deepEqual(withDemand.enough, withoutDemand.enough);
+    assert.deepEqual(withDemand.couldUseMore, withoutDemand.couldUseMore);
+    assert.deepEqual(withDemand.synthesis, withoutDemand.synthesis);
+    assert.deepEqual(withDemand.styleMe, withoutDemand.styleMe);
+    assert.deepEqual(withDemand.outcomes, withoutDemand.outcomes);
+    assert.deepEqual(withDemand.intentions, withoutDemand.intentions);
+    assert.deepEqual(withDemand.headlines, withoutDemand.headlines);
+    // The new field itself DOES legitimately differ (learning vs available) —
+    // that's the one place demand is allowed to show up.
+    assert.notDeepEqual(withDemand.demand, withoutDemand.demand);
+  });
+
+  it("13b — registerDemand reuses the existing register's distinctLooks/depthLabel verbatim, never recomputing them", () => {
+    const items = makeLook("casual", 5);
+    const needs = run(items, {
+      demandFacts: [demandFact({ sessionId: "d1", createdAt: new Date("2026-09-01T10:00:00.000Z") })],
+    });
+    const everydayRegister = needs.registers.find((r) => r.register === "everyday")!;
+    const everydayDemand = needs.demand.registerDemand.find((d) => d.register === "everyday")!;
+    assert.equal(everydayDemand.closetDistinctLooks, everydayRegister.distinctLooks);
+    assert.equal(everydayDemand.closetDepthLabel, everydayRegister.depthLabel);
+    assert.equal(everydayDemand.demandEventCount, 1);
+  });
+
+  it("13c — many repeated demand events for a register never change that register's structural reading", () => {
+    const items = makeLook("casual", 5);
+    const noDemand = run(items, {});
+    const heavyDemand = run(items, {
+      demandFacts: Array.from({ length: 20 }, (_, i) =>
+        demandFact({ sessionId: `d${i}`, createdAt: new Date(Date.parse("2026-09-01T10:00:00.000Z") + i * 3_600_000), intentions: ["feel-like-myself"] })),
+    });
+    assert.deepEqual(heavyDemand.registers, noDemand.registers, "20 repeated demand events must not alter the structural register reading at all");
+    assert.deepEqual(heavyDemand.enough, noDemand.enough);
+    assert.deepEqual(heavyDemand.couldUseMore, noDemand.couldUseMore);
+    assert.equal(heavyDemand.demand.registerDemand.find((d) => d.register === "everyday")!.demandEventCount, 20);
+  });
+
+  it("13d — demand is derived only from styleMeDemandFacts, never from styleMeSessions, even when the two disagree", () => {
+    const items = makeLook("casual", 5);
+    const needs = run(items, {
+      sessions: [{ id: "old1", register: "work", intentions: ["confidence"], garmentIds: [] }],
+      demandFacts: [demandFact({
+        sessionId: "new1", createdAt: new Date("2026-09-01T10:00:00.000Z"),
+        occasion: "everyday", register: "everyday", intentions: ["feel-attractive"],
+      })],
+    });
+
+    // The OLD system (styleMe.requests) must read only styleMeSessions.
+    assert.equal(needs.styleMe.requests.find((r) => r.register === "work")?.sessions, 1, "the old raw system must still see the work request");
+    assert.equal(needs.styleMe.requests.some((r) => r.register === "everyday"), false, "the old raw system must never pick up a demandFacts-only register");
+
+    // The NEW system (demand.registerDemand) must read only styleMeDemandFacts.
+    assert.equal(needs.demand.registerDemand.find((d) => d.register === "everyday")?.demandEventCount, 1, "demand must see the everyday demand fact");
+    assert.equal(needs.demand.registerDemand.some((d) => d.register === "work"), false, "demand must never pick up a styleMeSessions-only register");
   });
 });

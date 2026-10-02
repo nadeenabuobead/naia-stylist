@@ -55,6 +55,7 @@ import {
   derivePositiveGarmentEvidence,
   type RawOutcomeFact,
 } from "~/lib/ai/wardrobe-feedback-evidence";
+import { demandWindowCutoff, type RawStyleMeDemandFact } from "~/lib/ai/styleme-demand-evidence";
 
 // db.server is plain JS, so the Prisma client is untyped at this boundary.
 // This row shape is the explicit contract for everything this module reads.
@@ -114,13 +115,18 @@ export async function loadWardrobeIntelligence(
     include: { adminReview: true, styleMeProfile: true },
   });
 
-  const [outfitCounts, savedCounts, seenCombinations, styleMeSessions, outcomes, rawFeedbackFacts] = await Promise.all([
+  const [outfitCounts, savedCounts, seenCombinations, styleMeSessions, outcomes, rawFeedbackFacts, styleMeDemandFacts] = await Promise.all([
     countOutfitAppearances(customerId),
     countSavedLookAppearances(customerId),
     loadSeenCombinations(customerId),
     loadStyleMeSessions(customerId),
     loadOutcomes(customerId),
     loadRawOutcomeFactsForEvidence(customerId),
+    // StyleMe-demand V1 — a SEPARATE, 90-day-windowed, uncapped fact set.
+    // Deliberately not derived from styleMeSessions above, which keeps its
+    // own take:200 cap for the older requests/struggles/chosen system. See
+    // styleme-demand-evidence.ts.
+    loadStyleMeDemandFacts(customerId),
   ]);
 
   // StyleMe-feedback evidence, V1 — see wardrobe-feedback-evidence.ts for the
@@ -291,6 +297,7 @@ export async function loadWardrobeIntelligence(
     passport: options.passport,
     styleMeSessions,
     outcomes,
+    styleMeDemandFacts,
   });
 
   const recommendations = computeWardrobeRecommendations({
@@ -372,6 +379,58 @@ async function loadStyleMeSessions(customerId: string): Promise<StyleMeSessionFa
     garmentIds: session.suggestions
       .flatMap((suggestion) => suggestion.items.map((item) => item.closetItemId))
       .filter((id): id is string => Boolean(id)),
+  }));
+}
+
+/**
+ * StyleMe-demand V1 — a SEPARATE fact set from loadStyleMeSessions() above.
+ * Deliberately 90-day windowed rather than row-capped (see
+ * styleme-demand-evidence.ts for why), and loads only the scalar fields
+ * RawStyleMeDemandFact needs — no `suggestions`/items relation, which
+ * loadStyleMeSessions() only carries for the unrelated garmentIds/
+ * "reachedFor" feature and demand has no use for.
+ *
+ * `asOf` defaults to the real current time in production; tests supply a
+ * fixed value so the 90-day boundary is deterministic, not an inline
+ * Date.now().
+ */
+async function loadStyleMeDemandFacts(customerId: string, asOf: Date = new Date()): Promise<RawStyleMeDemandFact[]> {
+  const cutoff = demandWindowCutoff(asOf);
+  const sessions: Array<{
+    id: string;
+    createdAt: Date;
+    occasion: string | null;
+    formalityConditional: string | null;
+    intentions: string[];
+    desiredFeeling: string | null;
+    closetAnchorId: string | null;
+    styleFrom: string;
+  }> = await prisma.stylingSession.findMany({
+    where: { customerId, createdAt: { gte: cutoff } },
+    select: {
+      id: true,
+      createdAt: true,
+      occasion: true,
+      formalityConditional: true,
+      intentions: true,
+      desiredFeeling: true,
+      closetAnchorId: true,
+      styleFrom: true,
+    },
+    orderBy: { createdAt: "desc" },
+    // No take: N — the 90-day window is the bound, not a row count.
+  });
+
+  return sessions.map((session) => ({
+    sessionId: session.id,
+    createdAt: session.createdAt,
+    occasion: session.occasion,
+    register: styleMeSessionRegister(session.occasion, session.formalityConditional),
+    formalityConditional: session.formalityConditional,
+    intentions: session.intentions ?? [],
+    desiredFeeling: session.desiredFeeling,
+    closetAnchorId: session.closetAnchorId,
+    styleFrom: session.styleFrom,
   }));
 }
 

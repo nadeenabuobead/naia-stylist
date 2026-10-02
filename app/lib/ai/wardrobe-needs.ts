@@ -60,6 +60,7 @@ import {
   type Usability,
 } from "~/lib/ai/wardrobe-intelligence";
 import { MIN_OUTCOMES_FOR_CLAIM } from "~/lib/ai/wardrobe-feedback-evidence";
+import { deriveStyleMeDemand, type RawStyleMeDemandFact } from "~/lib/ai/styleme-demand-evidence";
 
 // classifyUsability/layersThatResolve/Usability now live in wardrobe-intelligence.ts
 // so buildPairings can gate combinations with the same rule — re-exported here so
@@ -205,6 +206,16 @@ export interface WardrobeNeedsInput {
   styleMeSessions: StyleMeSessionFact[] | null;
   /** null = outcomes were not queried; [] = queried, none recorded. */
   outcomes: OutcomeFact[] | null;
+  /**
+   * StyleMe-demand V1 — a SEPARATE fact set from styleMeSessions above, on
+   * its own 90-day rolling window with no row cap (see
+   * styleme-demand-evidence.ts / loadStyleMeDemandFacts()). Deliberately
+   * not derived from styleMeSessions, and does not feed or alter
+   * styleMe/intentions below. Optional so every existing caller keeps
+   * compiling and behaving unchanged — null means "not supplied", same as
+   * omitting it, and produces a "learning" demand reading.
+   */
+  styleMeDemandFacts?: RawStyleMeDemandFact[] | null;
 }
 
 // ── Outputs ───────────────────────────────────────────────────────────────────
@@ -371,6 +382,79 @@ export interface IntentionReading {
   closetStrengths: Array<{ intention: string; label: string; strong: number }>;
 }
 
+/**
+ * StyleMe-demand evidence, V1 — runs in PARALLEL to StyleMeReading.requests/
+ * .struggles and IntentionReading.chosen above, which this does not replace,
+ * alter, or feed into. Those remain raw, undeduped session counts; this is
+ * the deduped, event-identity-aware layer (see styleme-demand-evidence.ts)
+ * that a later pass may migrate the page onto, after comparing outputs.
+ *
+ * `closetDistinctLooks`/`closetDepthLabel` are the existing RegisterReading
+ * fields, reused verbatim — demand never recomputes or mutates them.
+ */
+export interface RegisterDemandComparison {
+  register: RegisterId;
+  demandEventCount: number;
+  demandFirstSeen: string;
+  demandLastSeen: string;
+  closetDistinctLooks: number | null;
+  closetDepthLabel: string | null;
+}
+
+export interface StyleMeDemandReading {
+  state: BlockState;
+  learningNote?: string;
+  /** Raw rows excluded as a synthetic exact-timestamp collision group. */
+  syntheticExcludedCount: number;
+  /** Raw rows absorbed into an earlier event by the 2-minute retry window. */
+  retriesCollapsedCount: number;
+  registerDemand: RegisterDemandComparison[];
+  intentionDemand: Array<{ intention: string; eventCount: number; firstSeen: string; lastSeen: string }>;
+}
+
+/**
+ * Consumes the SEPARATE, 90-day-windowed `styleMeDemandFacts` input —
+ * never the (differently-capped) `styleMeSessions` that
+ * StyleMeReading/IntentionReading above read. See WardrobeNeedsInput.
+ */
+function buildStyleMeDemandReading(
+  demandFacts: RawStyleMeDemandFact[] | null | undefined,
+  registers: RegisterReading[],
+): StyleMeDemandReading {
+  const emptyReading = (learningNote: string): StyleMeDemandReading => ({
+    state: "learning", learningNote,
+    syntheticExcludedCount: 0, retriesCollapsedCount: 0,
+    registerDemand: [], intentionDemand: [],
+  });
+  if (demandFacts === null || demandFacts === undefined) {
+    return emptyReading("nAia hasn't read your StyleMe history into this page yet.");
+  }
+  if (demandFacts.length === 0) {
+    return emptyReading("Once you've used StyleMe a few times, nAia can compare what you ask for against what your Closet supports.");
+  }
+
+  const derived = deriveStyleMeDemand(demandFacts);
+  const registerDemand: RegisterDemandComparison[] = derived.registerDemand.map((d) => {
+    const reading = registers.find((r) => r.register === d.register);
+    return {
+      register: d.register as RegisterId,
+      demandEventCount: d.eventCount,
+      demandFirstSeen: d.firstSeen,
+      demandLastSeen: d.lastSeen,
+      closetDistinctLooks: reading?.distinctLooks ?? null,
+      closetDepthLabel: reading?.depthLabel ?? null,
+    };
+  });
+
+  return {
+    state: "available",
+    syntheticExcludedCount: derived.syntheticExcludedCount,
+    retriesCollapsedCount: derived.retriesCollapsedCount,
+    registerDemand,
+    intentionDemand: derived.intentionDemand,
+  };
+}
+
 export interface Headline {
   id: string;
   text: string;
@@ -391,6 +475,9 @@ export interface WardrobeNeeds {
   outcomes: OutcomeReading;
   /** What she asks to feel, and what her Closet can support — kept apart. */
   intentions: IntentionReading;
+  /** Deduped StyleMe-demand evidence, V1 — additive only. Runs parallel to
+   * `styleMe`/`intentions` above; does not replace or feed either one. */
+  demand: StyleMeDemandReading;
   headlines: Headline[];
 }
 
@@ -1384,7 +1471,7 @@ function buildHeadlines(
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 export function computeWardrobeNeeds(input: WardrobeNeedsInput): WardrobeNeeds {
-  const { items, passport, styleMeSessions, outcomes } = input;
+  const { items, passport, styleMeSessions, outcomes, styleMeDemandFacts } = input;
 
   const empty: WardrobeNeeds = {
     state: "learning",
@@ -1394,6 +1481,7 @@ export function computeWardrobeNeeds(input: WardrobeNeedsInput): WardrobeNeeds {
     styleMe: { state: "learning", learningNote: "StyleMe history appears here once you've used it.", reachedFor: [], requests: [], struggles: [], strongIntentions: [], thinIntentions: [] },
     outcomes: buildOutcomeReading(outcomes),
     intentions: buildIntentionReading(items, styleMeSessions),
+    demand: buildStyleMeDemandReading(styleMeDemandFacts, []),
     headlines: [],
   };
   if (items.length < MIN_WARDROBE_SIZE) return empty;
@@ -1419,6 +1507,7 @@ export function computeWardrobeNeeds(input: WardrobeNeedsInput): WardrobeNeeds {
     registers, enough, couldUseMore, noUrgentNeed,
     synthesis, styleMe, outcomes: outcomeReading,
     intentions: buildIntentionReading(items, styleMeSessions),
+    demand: buildStyleMeDemandReading(styleMeDemandFacts, registers),
   };
 
   return { ...withoutHeadlines, headlines: buildHeadlines(withoutHeadlines) };

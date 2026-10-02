@@ -103,6 +103,14 @@ function baseInput(over: Partial<WardrobePageInput> = {}): WardrobePageInput {
       chosen: [{ intention: "put-together", label: "feel put together", sessions: 60 },
                { intention: "easy", label: "keep things easy", sessions: 20 }],
       closetStrengths: [{ intention: "put-together", label: "feel put together", strong: 22 }] },
+    // Mirrors styleMe.requests above so the existing dress-level copy this
+    // fixture already exercised keeps reading the same numbers — this
+    // fixture predates the clean-demand-layer migration; tests that care
+    // about demand specifically build their own needs.demand.
+    demand: { state: "available", syntheticExcludedCount: 0, retriesCollapsedCount: 0,
+      registerDemand: [{ register: "everyday", demandEventCount: 149, demandFirstSeen: "2026-01-01", demandLastSeen: "2026-01-01",
+        closetDistinctLooks: 9, closetDepthLabel: "Strong everyday depth" }],
+      intentionDemand: [] },
     headlines: [
       { id: "need-work-repetition", text: "You have work pieces, but fewer ways to combine them", source: "depth", evidence: [] },
       { id: "f1", text: "You already have enough everyday neutral tops", source: "depth", evidence: [] },
@@ -1155,5 +1163,86 @@ describe("§WP-12 the profile's colour line is generic — abundance-to-low-prio
     const block = page.sections.find((s) => s.id === "profile")!.blocks.find((b) => b.id === "profile")!;
     const lines = (block.meta as Record<string, unknown>).summaryLines as string[];
     assert.ok(lines.some((l) => /mostly colours you like; grey appears less often/i.test(l)));
+  });
+});
+
+// ── §WP-20 — register-demand migration: clean 90-day layer, decoupled from styleMe.state ──
+
+function profileBlockOf(page: ReturnType<typeof buildWardrobePage>) {
+  return page.sections.find((s) => s.id === "profile")!.blocks.find((b) => b.id === "profile")!;
+}
+
+describe("§WP-20 register-demand migration — clean 90-day layer, decoupled from styleMe.state", () => {
+  it("§WP-20a a customer with clean register demand but styleMe.state !== 'available' still receives the register-demand summary line and reveal", () => {
+    const input = baseInput();
+    (input.needs as unknown as { styleMe: unknown }).styleMe =
+      { state: "learning", learningNote: "x", reachedFor: [], requests: [], struggles: [], strongIntentions: [], thinIntentions: [] };
+    (input.needs as unknown as { demand: unknown }).demand = {
+      state: "available", syntheticExcludedCount: 0, retriesCollapsedCount: 0,
+      registerDemand: [{ register: "everyday", demandEventCount: 11, demandFirstSeen: "2026-07-20", demandLastSeen: "2026-10-01",
+        closetDistinctLooks: 9, closetDepthLabel: "Strong everyday depth" }],
+      intentionDemand: [],
+    };
+    const page = buildWardrobePage(input);
+    const block = profileBlockOf(page);
+    const lines = (block.meta as Record<string, unknown>).summaryLines as string[];
+    assert.ok(lines.some((l) => /most often ask for/i.test(l)), "the summary line must appear even though styleMe.state is learning");
+    assert.ok(block.entries.some((e) => e.id === "dress-level"), "the dress-level reveal entry must appear");
+  });
+
+  it("§WP-20b the newly-visible register-demand copy does not cause intentions-chosen to appear", () => {
+    const input = baseInput();
+    (input.needs as unknown as { styleMe: unknown }).styleMe =
+      { state: "learning", learningNote: "x", reachedFor: [], requests: [], struggles: [], strongIntentions: [], thinIntentions: [] };
+    (input.needs as unknown as { demand: unknown }).demand = {
+      state: "available", syntheticExcludedCount: 0, retriesCollapsedCount: 0,
+      registerDemand: [{ register: "everyday", demandEventCount: 11, demandFirstSeen: "2026-07-20", demandLastSeen: "2026-10-01",
+        closetDistinctLooks: 9, closetDepthLabel: "Strong everyday depth" }],
+      intentionDemand: [],
+    };
+    const page = buildWardrobePage(input);
+    const block = profileBlockOf(page);
+    assert.ok(!block.entries.some((e) => e.id === "intentions-chosen"), "intentions-chosen must stay suppressed — styleMe.state was never widened");
+    assert.ok(!block.entries.some((e) => e.id === "outcome-feedback"), "outcome-feedback must stay suppressed too, for the same reason");
+  });
+
+  it("§WP-20c an existing customer (styleMe.state available) still receives the same section structure — both entries present", () => {
+    const page = buildWardrobePage(baseInput());
+    const block = profileBlockOf(page);
+    assert.ok(block.entries.some((e) => e.id === "dress-level"));
+    assert.ok(block.entries.some((e) => e.id === "intentions-chosen"));
+  });
+
+  it("§WP-20d the top register, and the displayed numerator/denominator, come entirely from clean demand — never from raw styleMe.requests", () => {
+    const input = baseInput();
+    // Deliberately divergent: styleMe.requests says "work" dominates with a
+    // large raw count; demand says "everyday" dominates with a much smaller,
+    // clean count. If any raw value leaked through, this would be caught.
+    (input.needs as unknown as { styleMe: unknown }).styleMe = {
+      state: "available", reachedFor: [], struggles: [], strongIntentions: [], thinIntentions: [],
+      requests: [{ register: "work", sessions: 999 }],
+    };
+    (input.needs as unknown as { demand: unknown }).demand = {
+      state: "available", syntheticExcludedCount: 0, retriesCollapsedCount: 0,
+      registerDemand: [
+        { register: "everyday", demandEventCount: 73, demandFirstSeen: "2026-07-20", demandLastSeen: "2026-10-02",
+          closetDistinctLooks: 7, closetDepthLabel: "Strong everyday depth" },
+        { register: "occasion", demandEventCount: 28, demandFirstSeen: "2026-09-24", demandLastSeen: "2026-10-02",
+          closetDistinctLooks: 3, closetDepthLabel: "Workable occasion depth" },
+        { register: "work", demandEventCount: 8, demandFirstSeen: "2026-07-20", demandLastSeen: "2026-10-01",
+          closetDistinctLooks: 2, closetDepthLabel: "Limited usable work depth" },
+      ],
+      intentionDemand: [],
+    };
+    const page = buildWardrobePage(input);
+    const block = profileBlockOf(page);
+    const lines = (block.meta as Record<string, unknown>).summaryLines as string[];
+
+    assert.ok(lines.some((l) => /most often ask for (relaxed|everyday)/i.test(l)), "the summary line must name the clean-demand top register (everyday), not the raw-requests top register (work)");
+    assert.ok(!lines.some((l) => /999/.test(l)), "the raw styleMe.requests count must never appear");
+
+    const entry = block.entries.find((e) => e.id === "dress-level")!;
+    assert.equal(entry.body, "Over the last 90 days, 73 of the 109 StyleMe requests nAia could classify were on the more everyday, relaxed side.");
+    assert.doesNotMatch(entry.body, /999|work-ready/, "no raw request count or raw top-register wording leaks into the migrated copy");
   });
 });
