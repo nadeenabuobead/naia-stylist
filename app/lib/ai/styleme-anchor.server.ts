@@ -11,7 +11,7 @@ import type { NadineAnchorInput, ClosetAnchorInput, AnchorInput } from "./stylem
 import prisma from "../../db.server.js";
 import { buildPrivateDownloadUrl, getCloudinaryConfig } from "../../lib/cloudinary-admin.server.js";
 import { matchesSessionOccasion } from "./styleme-occasion-tokens.js";
-import { passesDressingRequirements, evaluateAnchorEligibility, explainDressingRequirements, canSlotAnchorOutfit, getTargetFormalityRange, FORMALITY_CONDITIONAL_ADJUSTMENTS } from "./styleme-profile-gate.js";
+import { passesDressingRequirements, evaluateAnchorEligibility, explainDressingRequirements, canSlotAnchorOutfit, getTargetFormalityRange, FORMALITY_CONDITIONAL_ADJUSTMENTS, profileOccasionRating } from "./styleme-profile-gate.js";
 import { closetItemToSlot } from "./closet-slot.js";
 
 const VALID_HANDLES = new Set(getAllCatalogProducts().map((p) => p.handle));
@@ -795,7 +795,7 @@ export async function autoSelectClosetAnchor(
     // Approved occasionFit "No" is a hard exclusion — intention cannot rescue it.
     const ap = item.styleMeProfile?.profileStatus === "approved" ? item.styleMeProfile : null;
     if (ap?.occasionFit) {
-      const fit = (ap.occasionFit as Record<string, string>)[signals.occasion];
+      const fit = profileOccasionRating(ap.occasionFit as Record<string, string>, signals.occasion);
       if (fit === "No") return false;
     }
     return matchesSessionOccasion(item.occasions, signals.occasion)  // normalized match

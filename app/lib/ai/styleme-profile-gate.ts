@@ -137,13 +137,50 @@ export function resolveProfileSlot(
 // Returns false when an APPROVED profile explicitly marks this garment "No" for the occasion.
 // "No" is a hard exclusion — overrides all positive session signals.
 // When no approved profile exists, returns true (legacy logic takes over).
+// ── Canonical occasion → approved-profile occasionFit key (C1) ────────────────
+//
+// StyleMe sessions carry canonical occasion IDs; GarmentStyleMeProfile.occasionFit is
+// stored under the admin's OCCASION_IDS vocabulary. Six of the nine spellings coincide,
+// three do not, and every read indexed occasionFit by the session value directly — so for
+// those three the key simply missed and ALL approved occasion truth was silently discarded:
+// a reviewer's "No" for a night out carried exactly as much weight as no rating at all.
+//
+// Observed before this bridge: ST15, ST16 and O4 all fell through to the legacy occasions[]
+// array for tiering, and O4's uniform occasionTier 0 came from that fallback rather than
+// from anything a reviewer had said.
+//
+// Five call sites read this value — passesProfileOccasionGate, passesProfileRegisterGate,
+// passesRegisterCoherenceWithAnchor, getProfileOccasionTier, and isOccasionCompatible in
+// the anchor. All five go through this resolver, so a "No" cannot be honoured by one gate
+// and ignored by another.
+//
+// A vocabulary bridge and nothing more. No garment metadata is reinterpreted, no canonical
+// session value is renamed, and an occasion with no mapping resolves to itself — so the six
+// already-matching spellings and any unknown occasion behave exactly as before. A missing
+// key still yields undefined, preserving each caller's own fail-open path.
+export const CANONICAL_OCCASION_TO_PROFILE_KEY: Readonly<Record<string, string>> = {
+  "date-night": "date",
+  "special-event": "event",
+  "girls-night": "night-out",
+};
+
+/** The approved occasionFit rating for a canonical session occasion, or undefined. */
+export function profileOccasionRating(
+  occasionFit: Record<string, string> | null | undefined,
+  sessionOccasion: string,
+): string | undefined {
+  if (!occasionFit) return undefined;
+  const key = CANONICAL_OCCASION_TO_PROFILE_KEY[sessionOccasion] ?? sessionOccasion;
+  return occasionFit[key];
+}
+
 export function passesProfileOccasionGate(
   item: ClosetAnchorInput,
   sessionOccasion: string,
 ): boolean {
   const profile = item.approvedProfile;
   if (!profile?.occasionFit) return true;
-  const rating = profile.occasionFit[sessionOccasion];
+  const rating = profileOccasionRating(profile.occasionFit, sessionOccasion);
   return rating !== "No";
 }
 
@@ -179,7 +216,7 @@ export function passesProfileRegisterGate(
   // defer to that authoritative truth rather than applying a blanket register rule.
   // A "No" rating or absent rating falls through to the generic register check below.
   if (profile.occasionFit) {
-    const rating = profile.occasionFit[sessionOccasion];
+    const rating = profileOccasionRating(profile.occasionFit, sessionOccasion);
     if (rating === "Strong" || rating === "Acceptable") return true;
   }
 
@@ -214,8 +251,8 @@ export function passesRegisterCoherenceWithAnchor(
 
   // Shared-occasion approval: both pieces approved for this occasion → bypass register gap.
   if (sessionOccasion) {
-    const anchorRating = anchorItem.approvedProfile.occasionFit?.[sessionOccasion];
-    const itemRating = item.approvedProfile.occasionFit?.[sessionOccasion];
+    const anchorRating = profileOccasionRating(anchorItem.approvedProfile.occasionFit, sessionOccasion);
+    const itemRating = profileOccasionRating(item.approvedProfile.occasionFit, sessionOccasion);
     const anchorApproved = anchorRating === "Strong" || anchorRating === "Acceptable";
     const itemApproved = itemRating === "Strong" || itemRating === "Acceptable";
     if (anchorApproved && itemApproved) return true;
@@ -237,7 +274,7 @@ export function getProfileOccasionTier(
 ): 0 | 1 | 2 | null {
   const profile = item.approvedProfile;
   if (!profile?.occasionFit) return null;
-  const rating = profile.occasionFit[sessionOccasion];
+  const rating = profileOccasionRating(profile.occasionFit, sessionOccasion);
   if (rating === "Strong") return 2;
   if (rating === "Acceptable") return 1;
   if (rating === "No") return 0;
