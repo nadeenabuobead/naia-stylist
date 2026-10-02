@@ -751,7 +751,7 @@ export default function WardrobeIntelligencePreview() {
               const state = coverageContext(b.reason, b.layers.length > 0, card?.category, card?.hemLength ?? null);
               return (
                 <div key={b.garmentId} className="wip-coverage-item">
-                  <Thumb card={card} height={140} />
+                  <Thumb card={card} height={120} />
                   <div className="wip-coverage-item-text">
                     <span className={`wip-coverage-state wip-coverage-state--${state}`}>
                       {state === "may-depend" ? "May depend on how you wear it" : "Outside your usual preference"}
@@ -973,7 +973,7 @@ export default function WardrobeIntelligencePreview() {
                   )}
                   {feedbackBody && (
                     <div className="wip-profile-block">
-                      <h3>What nAia is learning from your feedback</h3>
+                      <h3>Your StyleMe feedback</h3>
                       <p>{feedbackBody}</p>
                     </div>
                   )}
@@ -1265,6 +1265,7 @@ const css = `
   .wip-h1 em{font-family:var(--naia-ff-body);font-style:italic;text-transform:none}
   .wip-status{padding-top:6px}
   .wip-link{border:0;background:none;padding:0;font-family:var(--naia-ff-ui);font-size:11.5px;color:var(--naia-accent);text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+  .wip-life-main .wip-link{white-space:nowrap}
   .wip-link--secondary{color:rgba(40,21,12,0.55)}
   .wip-summary{font-family:var(--naia-ff-ui);font-size:14px;line-height:1.6;color:rgba(40,21,12,0.72);margin:14px 0 0;max-width:620px}
   .wip-summary-row{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;flex-wrap:wrap}
@@ -1603,7 +1604,7 @@ const css = `
   /* Coverage dialog */
   .wip-coverage-policy{margin:0 0 14px;font-family:var(--naia-ff-ui);font-size:11.5px;font-style:italic;color:rgba(40,21,12,0.55)}
   .wip-coverage-list{display:flex;flex-direction:column;gap:14px;margin-top:14px}
-  .wip-coverage-item{display:flex;gap:16px;align-items:flex-start;background:var(--naia-muted-bg);border-radius:7px;padding:14px}
+  .wip-coverage-item{display:flex;gap:16px;align-items:flex-start;background:var(--naia-muted-bg);border-radius:7px;padding:11px 14px}
   .wip-coverage-item .wip-thumb{width:100px;flex-shrink:0;border-radius:5px}
   .wip-coverage-state{display:inline-block;font-family:var(--naia-ff-ui);font-size:9px;font-weight:600;letter-spacing:0.4px;text-transform:uppercase;padding:2px 8px;border-radius:20px;margin-bottom:6px}
   .wip-coverage-state--may-depend{background:rgba(107,29,38,0.09);color:var(--naia-accent)}
