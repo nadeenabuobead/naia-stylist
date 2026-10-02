@@ -1540,6 +1540,7 @@ export function computeOutfitSignature(closetIds: string[]): string {
   return [...closetIds].sort().join("|");
 }
 
+
 // Builds up to four validated outfit candidates for nAia closet mode.
 // Candidate A — full primary selection (may include discretionary outerwear when eligible).
 // Candidate B — session-register-aligned multi-slot alternative (best in-target items per slot).
@@ -2155,6 +2156,40 @@ type PieceOccasionStatus =
 export type PieceRole = "base" | "shoe" | "optional";
 
 const BASE_CLOTHING_SLOTS = new Set(["top", "bottom", "dress", "set"]);
+
+// ── Core look signature ───────────────────────────────────────────────────────
+//
+// "New Look, Same Vibe" must return a meaningfully different CORE outfit. A different bag,
+// shoe, jewel, accessory or outer layer is not a new look, however much the whole-outfit
+// signature changes.
+//
+// computeOutfitSignature covers every piece, so swapping only a bag produced a different
+// string and the reroll dedupe let it through — which is how a finishing-only variation was
+// presented as a New Look. That function is still right for the internal C/D/E duplicate
+// checks, which are about identical candidates rather than about core diversity, so it is
+// left alone.
+//
+// CORE_LOOK_SLOTS is the existing BASE_CLOTHING_SLOTS, not a second vocabulary. The engine's
+// authoritative OutfitSlot union is
+//   top | bottom | dress | set | outerwear | shoe | bag | accessory | jewelry | unknown
+// and there is no separate jumpsuit slot — a jumpsuit resolves through DIRECT_SLOT_MAP as
+// DRESSES -> dress or SETS -> set, both already core. So this covers every structural
+// formula the engine supports: separates (top+bottom), dress-led, and set/one-piece.
+//
+// outerwear is deliberately excluded. It is structural enough to carry formality weight, but
+// an outfit that changed only its jacket is the same look wearing a different jacket.
+export const CORE_LOOK_SLOTS = BASE_CLOTHING_SLOTS;
+
+/** Deterministic, order-independent signature of a candidate's structural clothing only. */
+export function computeCoreLookSignature(
+  pieces: Array<{ closetId: string; slot: string }>,
+): string {
+  return pieces
+    .filter((p) => CORE_LOOK_SLOTS.has(p.slot))
+    .map((p) => p.closetId)
+    .sort()
+    .join("|");
+}
 const SHOE_SLOTS = new Set(["shoe"]);
 
 function getPieceRole(slot: string): PieceRole {
@@ -5296,10 +5331,46 @@ export async function computeStyleMeResult(
     // for a combination that will be rejected.
     const prevIds = engineInput.prevOutfitClosetIds;
     const allCandidates = [candidateA, candidateB, candidateC, candidateD, candidateE].filter((c): c is OutfitCandidate => c !== null);
+
+    // ── New Look, Same Vibe: the CORE must differ ────────────────────────────
+    //
+    // The previous outfit arrives as a flat id list with no slots, so each id is resolved
+    // back to its slot through the customer's own closet. When every previous id resolves,
+    // the comparison is on structural clothing only — a different bag, shoe, jewel,
+    // accessory or outer layer no longer counts as a new look.
+    //
+    // Fail-safe: if the previous outfit cannot be resolved to a core (an id no longer in the
+    // closet, or a previous look that somehow had no structural piece), fall back to the
+    // whole-outfit comparison this has always used, rather than silently dropping the
+    // dedupe or treating every candidate as different.
+    const itemByIdForCore = new Map(allItems.map((i) => [i.id, i]));
+    const prevCorePieces = (prevIds ?? [])
+      .map((id) => {
+        const it = itemByIdForCore.get(id);
+        return it ? { closetId: id, slot: closetItemToSlot(it.category, it.subcategory ?? null) as string } : null;
+      })
+      .filter((p): p is { closetId: string; slot: string } => p !== null);
+    const prevCoreSig = prevCorePieces.length ? computeCoreLookSignature(prevCorePieces) : "";
+
     const prevSig = prevIds?.length ? computeOutfitSignature(prevIds) : null;
-    const dedupedCandidates = prevSig
-      ? allCandidates.filter((c) => computeOutfitSignature(c.pieces.map((p) => p.closetId)) !== prevSig)
-      : allCandidates;
+    const dedupedCandidates = !prevSig
+      ? allCandidates
+      : prevCoreSig
+        ? allCandidates.filter((c) => computeCoreLookSignature(c.pieces) !== prevCoreSig)
+        : allCandidates.filter((c) => computeOutfitSignature(c.pieces.map((p) => p.closetId)) !== prevSig);
+
+    if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true" && prevSig) {
+      console.log("[nAia-core-diversity]", JSON.stringify({
+        prevCoreSig: prevCoreSig || null,
+        usedCoreComparison: !!prevCoreSig,
+        candidates: allCandidates.map((c) => ({
+          id: c.id,
+          coreSig: computeCoreLookSignature(c.pieces),
+          coreDiffers: computeCoreLookSignature(c.pieces) !== prevCoreSig,
+        })),
+        survivingCount: dedupedCandidates.length,
+      }));
+    }
 
     // Candidate-level dressing gate: reject candidates that fail compensable coverage
     // requirements (arms-covered, chest-neckline-covered, dresses-modestly) after checking
