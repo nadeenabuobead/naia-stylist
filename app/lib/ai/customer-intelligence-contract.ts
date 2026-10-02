@@ -84,7 +84,22 @@ export const PRECEDENCE_ORDER = [
 
 export type ProvenanceRef =
   | { kind: "passport"; field?: string }
+  /** Reserved for an adapter that genuinely holds a StyleMeOutcome row id.
+   * No current adapter does — see the two aggregate-reference variants
+   * below, which is what wardrobe-feedback-evidence.ts's public output
+   * (FormulaEvidence / GarmentPositiveEvidence) actually retains. Do not
+   * populate this one with a formulaKey or closetItemId; that would be a
+   * manufactured id, not a real row reference. */
   | { kind: "styleme-outcome"; id: string }
+  /** Honest reference to a formula-level aggregate — the frozen module's
+   * own formulaKey, never an individual outcome submission id (it doesn't
+   * retain those). */
+  | { kind: "styleme-outcome-formula"; formulaKey: string }
+  /** Honest reference to a garment-level aggregate — the frozen module's
+   * own closetItemId, same reasoning. */
+  | { kind: "styleme-outcome-garment"; closetItemId: string }
+  /** Demand provenance has no such gap — DemandEvent.sessionId is a real,
+   * surviving session id from the frozen 90-day derivation. */
   | { kind: "styleme-demand"; id: string }
   | { kind: "closet-state"; itemIds: string[] }
   | { kind: "taste-tendency"; id: string }
@@ -95,10 +110,33 @@ export type ProvenanceRef =
 // Deliberately not one universal scalar — a demand count and a reconciled
 // tendency score answer different questions and are not meant to be
 // compared numerically against each other.
-
+//
+// The "count" kind carries two optional, source-native qualifiers rather
+// than forcing every count to be either a bare number or a full
+// "reconciled" shape:
+//   tier      — a source's own supported-ness label, when it has one, e.g.
+//               "supported" | "strongly-supported" (wardrobe-feedback-
+//               evidence.ts's FormulaSupportState — not imported here, kept
+//               as a plain string so this contract stays dependency-free;
+//               "none" is never actually emitted, since a finding with no
+//               tier-worthy evidence produces no finding at all). A count
+//               with no native tier (demand, garment-level outcome counts)
+//               simply omits this field — never invent one.
+//   qualifier — an outcome-specific direction, when the source has one:
+//               "positive" | "negative" | "mixed". This is NOT a universal
+//               polarity field — demand counts never set it, because a
+//               request has no direction. It exists on "count" specifically
+//               so outcome evidence can state whether a count is affirming,
+//               contradicting, or genuinely ambiguous, without forcing every
+//               signal class to pretend it has a polarity.
+//
+// IMPORTANT: signalClass "explicit-outcome" alone never implies a positive
+// claim. A "mixed" or "negative" qualifier is exactly as "explicit-outcome"
+// as a "positive" one — a resolver must read support.qualifier before
+// treating any count-shaped outcome finding as affirmative.
 export type FindingSupport =
   | { kind: "direct" }
-  | { kind: "count"; value: number }
+  | { kind: "count"; value: number; tier?: string; qualifier?: "positive" | "negative" | "mixed" }
   | { kind: "structural"; value?: number; label?: string }
   | { kind: "reconciled"; score: number; state?: string };
 
@@ -124,9 +162,27 @@ export interface ResolvedFinding {
    * flattened into one generic "preference" string. */
   value: string;
   signalClass: SignalClass;
-  /** Which concrete source produced this, e.g. "passport" | "styleme-outcome"
-   * | "styleme-demand" | "closet-state" | "taste-tendency" | "buy-skip". */
+  /** Which concrete source/evidence family produced this — WHERE it came
+   * from, e.g. "passport" | "styleme-outcome" | "styleme-demand" |
+   * "closet-state" | "taste-tendency" | "buy-skip". Never used to encode
+   * WHAT the value represents or its polarity — that's dimension and
+   * support.qualifier respectively. One source can and should produce
+   * findings across several dimensions (styleme-demand → register AND
+   * intention; styleme-outcome → outfit-formula AND garment). */
   source: string;
+  /** WHAT semantic thing `value` represents, independent of where the
+   * evidence came from. Free-form, matching how `source` is already typed
+   * — and matching TasteEvidence's own real `dimension` field (self-
+   * expression | comfort | formality | fit | garment-category), the
+   * closest existing precedent in this codebase, rather than inventing a
+   * competing vocabulary. Example values actually used by Phase 2
+   * adapters: "register" | "intention" (styleme-demand), "outfit-formula"
+   * | "garment" (styleme-outcome). A future Passport adapter's dimension
+   * would be a Passport field family (e.g. "favorite-color",
+   * "silhouette"); a future Buy-or-Skip adapter's might be
+   * "garment-category" — deliberately left open rather than closed now
+   * for sources that don't exist yet. */
+  dimension: string;
   provenanceRefs: ProvenanceRef[];
   support: FindingSupport;
   temporal: FindingTemporal;
