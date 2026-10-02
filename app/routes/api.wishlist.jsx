@@ -17,6 +17,8 @@ import { splitStyleExpression } from "../lib/passport/rev7-vocabulary";
 import { checkEntitlement } from "../lib/plan/entitlement.server";
 import { moderateImageContent } from "../lib/image-moderation.server";
 import { screenGarmentSuitability } from "../lib/image-suitability.server";
+import { loadWardrobeIntelligence } from "../lib/ai/wardrobe-intelligence.server";
+import { adaptWardrobeFindings } from "../lib/ai/customer-intelligence-wardrobe-adapter";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -63,6 +65,119 @@ const CLOSET_COMPATIBLE_CATEGORIES = {
   "Accessory": ["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR"],
   "Jewelry":   ["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR"],
 };
+
+// Phase 3 — Shared Customer Intelligence, first consumer.
+// Maps a Buy-or-Skip category to the lowercase slot vocabulary WI's own
+// RecommendationCriteria.slot uses (wardrobe-recommendations.ts SLOT_NOUN:
+// "top" | "bottom" | "dress" | "outerwear"). Shoes/Bag/Accessory/Jewelry are
+// intentionally absent — WI has no register-depth/slot concept for them.
+const BUYSKIP_CORE_SLOT_BY_CATEGORY = { Top: "top", Bottom: "bottom", Dress: "dress", Outerwear: "outerwear" };
+export const WARDROBE_CONTEXT_ELIGIBLE_CATEGORIES = new Set(Object.keys(BUYSKIP_CORE_SLOT_BY_CATEGORY));
+
+const WARDROBE_CONTEXT_PASSPORT_FIELDS = [
+  "lifestyle", "favoriteColors", "avoidColors", "stylePersonalities", "silhouette",
+  "structure", "fitPreferences", "styleStruggles", "styleSupport", "becoming",
+  "styleExpression", "styleDirections", "explorationLevel", "dressingHabits",
+  "dressingPreferences", "coveragePreferences", "preferredCoverage",
+  "dressingRequirementsNote", "fitConcerns", "dressesFor", "neutralVsColour",
+  "colourIntensity", "printAppetite",
+];
+const WARDROBE_CONTEXT_ARRAY_FIELDS = new Set([
+  "lifestyle", "favoriteColors", "avoidColors", "stylePersonalities", "silhouette",
+  "fitPreferences", "styleStruggles", "styleSupport", "becoming", "styleExpression",
+  "styleDirections", "dressingHabits", "dressingPreferences", "coveragePreferences",
+  "fitConcerns", "dressesFor",
+]);
+
+// Mirrors the field-by-field fallback pattern already used when building a
+// WardrobePassport for WI elsewhere (closet.intelligence-preview.tsx) — any
+// field absent on this session's onboardingProfile degrades to null/[]
+// rather than throwing, which WI already treats as "unknown" for that
+// dimension.
+export function toWardrobePassport(profile) {
+  if (!profile) return null;
+  const passport = {};
+  for (const field of WARDROBE_CONTEXT_PASSPORT_FIELDS) {
+    const raw = profile[field];
+    passport[field] = WARDROBE_CONTEXT_ARRAY_FIELDS.has(field) ? (raw ?? []) : (raw ?? null);
+  }
+  return passport;
+}
+
+/**
+ * Deliberately conservative. A thin register alone (e.g. "work has limited
+ * usable depth") does NOT imply any particular slot addresses it — DepthFinding
+ * carries no slot dimension. The only honest way to connect a register-level
+ * gap to a Buy-or-Skip CATEGORY is through WI's own structured
+ * RecommendationCriteria, which already names which slot would actually move
+ * that register's distinct-looks count (see wardrobe-recommendations.ts
+ * gapResolvingClasses). This function uses only criteria.register +
+ * criteria.slot — never recommendation prose, never colour/structure/
+ * silhouette/coverage, and never forOccasion or AI-observed silhouette.
+ *
+ * Context is surfaced only when ALL of:
+ *   1. a real "could use more" finding exists for some register;
+ *   2. WI's own recommendations name EXACTLY ONE slot for that register
+ *      (zero = no structured criterion yet; more than one = WI itself
+ *      hasn't settled on a single slot, so neither is treated as "the" gap);
+ *   3. the submitted category maps to that same slot;
+ *   4. exactly one register satisfies 1-3 — if two different thin registers
+ *      both cleanly point at the submitted category's slot, there is no
+ *      honest way to say which one's gap this item would address, so
+ *      neither is surfaced.
+ */
+export function resolveWardrobeContext(normalizedCategory, couldUseMore, registers, recommendations) {
+  const coreSlot = BUYSKIP_CORE_SLOT_BY_CATEGORY[normalizedCategory];
+  if (!coreSlot || !couldUseMore || couldUseMore.length === 0) return null;
+
+  const thinRegisters = new Set(couldUseMore.map((f) => f.register));
+  const matchedRegisters = [];
+  for (const register of thinRegisters) {
+    const recommendedSlots = new Set(
+      (recommendations ?? [])
+        .filter((r) => r.register === register && r.criteria?.slot)
+        .map((r) => r.criteria.slot),
+    );
+    if (recommendedSlots.size !== 1) continue; // no structured criterion, or WI itself is ambiguous here
+    const [onlySlot] = recommendedSlots;
+    if (onlySlot === coreSlot) matchedRegisters.push(register);
+  }
+  if (matchedRegisters.length !== 1) return null;
+
+  const [register] = matchedRegisters;
+  const finding = couldUseMore.find((f) => f.register === register);
+  if (!finding) return null;
+  const [resolved] = adaptWardrobeFindings([finding], registers);
+  return resolved ?? null;
+}
+
+const WARDROBE_CONTEXT_REGISTER_LABEL = {
+  everyday: "everyday",
+  work: "work",
+  occasion: "occasion and evening",
+};
+
+/**
+ * The "Treat this as context only" line is a prompt instruction, not a
+ * deterministic guard. Buy or Skip has no post-AI hard-constraint validator
+ * for ANY of its existing rules (dressing requirements, avoided colours,
+ * etc. are all enforced the same prompt-based way — see the
+ * dressingRequirementsNote block above). This fix introduces no new
+ * deterministic verdict logic; it relies on the same mechanism the rest of
+ * the prompt already relies on. What IS guaranteed deterministically: this
+ * code never sets or infers a verdict itself, and never widens eligibility
+ * beyond resolveWardrobeContext's gate.
+ */
+export function buildWardrobeContextBlock(wardrobeContext) {
+  if (!wardrobeContext) return "";
+  const registerLabel = WARDROBE_CONTEXT_REGISTER_LABEL[wardrobeContext.value] ?? wardrobeContext.value;
+  const depthDetail = wardrobeContext.support?.label ?? "limited variety";
+  return `WARDROBE CONTEXT — a structural fact about the customer's current Closet, not a judgment about this item:
+The customer's current Closet has limited usable depth for ${registerLabel} dressing (${depthDetail}). This item may be relevant to that gap if its actual cut, function and compatibility support it — the gap alone does not mean this specific item fits well, suits her colouring, is good quality, or is worth the price.
+-> Treat this as context only. Do NOT let this alone justify a BUY verdict, and do NOT let it soften a SKIP that hard dressing requirements, fit/comfort problems, or quality/value concerns otherwise require. It may inform fillsGap, your reasoning, and betterDirection — nothing else.
+
+`;
+}
 
 function optionLabel(questionId, optionId) {
   // ALL_QUESTIONS covers the live Rev 7 flow plus retired questions, so a stored
@@ -338,6 +453,22 @@ async function analyzeItem(request) {
     const compatibleClosetCategories = CLOSET_COMPATIBLE_CATEGORIES[normalizedCategory] || ["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR"];
     const eligibleClosetItems = closetItems.filter(i => compatibleClosetCategories.includes(i.category));
 
+    // Phase 3 — Shared Customer Intelligence, first consumer. Additive only:
+    // a failure here must never block the core Buy-or-Skip verdict, so it
+    // degrades to "no context" on any error rather than throwing.
+    let wardrobeContext = null;
+    if (WARDROBE_CONTEXT_ELIGIBLE_CATEGORIES.has(normalizedCategory)) {
+      try {
+        const wi = await loadWardrobeIntelligence(naiaCustomer.id, {
+          imageUrlById: new Map(),
+          passport: toWardrobePassport(styleProfile),
+        });
+        wardrobeContext = resolveWardrobeContext(normalizedCategory, wi.needs.couldUseMore, wi.needs.registers, wi.recommendations.recommendations);
+      } catch (wardrobeContextErr) {
+        console.error("[buy-skip] wardrobe intelligence lookup failed (non-fatal):", wardrobeContextErr?.message ?? wardrobeContextErr);
+      }
+    }
+
     // ── 5. Call Claude AI ──────────────────────────────────────────────────────
     // Sanitize user-entered strings before embedding them in the prompt
     const sanitize = s => typeof s === "string" ? s.replace(/"/g, "'").replace(/\n/g, " ").trim() : "";
@@ -477,7 +608,7 @@ They want to ${goalLine}.
 → Do NOT use CURRENT FOCUS to generate an automatic BUY or SKIP. The verdict must come from the item + Passport + Closet evidence.
 
 `;
-})()}CUSTOMER'S INPUTS:
+})()}${buildWardrobeContextBlock(wardrobeContext)}CUSTOMER'S INPUTS:
 
 OCCASION: ${safeOccasion || "(not provided)"}
 ${safeOccasion ? `→ Does this item suit "${safeOccasion}"? One concrete reason referencing the item's formality and that occasion's dress code. If yes, one styling tip. If no, what adjustment would help.` : "→ Suggest the most suitable occasions given this customer's actual lifestyle contexts."}
@@ -705,6 +836,17 @@ Respond ONLY with valid JSON, no markdown:
               skipIf:                typeof analysis.skipIf === "string" && analysis.skipIf.trim() ? analysis.skipIf.trim() : null,
               betterDirection:       typeof analysis.betterDirection === "string" && analysis.betterDirection.trim() ? analysis.betterDirection.trim() : null,
               finalThought:          analysis.finalThought          ?? null,
+              // Phase 3 — Shared Customer Intelligence. Diagnostic only: the
+              // one structural WI finding (if any) that was surfaced as
+              // context for this analysis. Never itself a verdict signal.
+              wardrobeIntelligenceContext: wardrobeContext
+                ? {
+                    source:  wardrobeContext.source,
+                    dimension: wardrobeContext.dimension,
+                    value:   wardrobeContext.value,
+                    support: wardrobeContext.support,
+                  }
+                : null,
             },
           },
         });

@@ -25,6 +25,7 @@ import {
 } from "./wardrobe-needs.ts";
 import type { WardrobeGarment, WardrobePassport } from "./wardrobe-intelligence.ts";
 import type { RawStyleMeDemandFact } from "./styleme-demand-evidence.ts";
+import { adaptWardrobeFindings } from "./customer-intelligence-wardrobe-adapter.ts";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -1051,5 +1052,21 @@ describe("§WN-13 StyleMe-demand V1 wiring", () => {
     // The NEW system (demand.registerDemand) must read only styleMeDemandFacts.
     assert.equal(needs.demand.registerDemand.find((d) => d.register === "everyday")?.demandEventCount, 1, "demand must see the everyday demand fact");
     assert.equal(needs.demand.registerDemand.some((d) => d.register === "work"), false, "demand must never pick up a styleMeSessions-only register");
+  });
+});
+
+describe("§CIA-WI-7 Phase 3 wardrobe adapter has zero effect on WI's own output", () => {
+  it("calling adaptWardrobeFindings alongside computeWardrobeNeeds, on the same output, never changes what WI computes", () => {
+    const items = makeLook("casual", 13);
+    const passport = makePassport({ lifestyle: ["everyday-casual"] });
+
+    const before = run(items, { passport });
+    assert.ok(before.couldUseMore.length > 0, "sanity: this fixture produces a real couldUseMore finding");
+
+    const findings = adaptWardrobeFindings(before.couldUseMore, before.registers);
+    assert.ok(findings.length > 0, "sanity: the adapter actually produced something from this fixture");
+
+    const after = run(items, { passport });
+    assert.deepEqual(after, before, "WI's output must be byte-identical whether or not the Phase 3 adapter was also called on its output");
   });
 });
