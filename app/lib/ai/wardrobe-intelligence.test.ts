@@ -31,7 +31,8 @@ import {
   type WardrobeIntelligenceFlags,
   type WardrobePassport,
 } from "./wardrobe-intelligence.ts";
-import type { FormulaSupportState, GarmentPositiveEvidence } from "./wardrobe-feedback-evidence.ts";
+import type { FormulaSupportState, GarmentPositiveEvidence, FormulaEvidence } from "./wardrobe-feedback-evidence.ts";
+import { adaptStyleMeOutcomeFormulaFindings, adaptStyleMeOutcomeGarmentFindings } from "./customer-intelligence-styleme-outcome-adapter.ts";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -2077,5 +2078,36 @@ describe("§FB-W rediscovery priority: positive evidence deprioritizes without r
     ]);
     const withEvidence = run(items, { positiveGarmentEvidence: strongestPossibleEvidence });
     assert.ok(!withEvidence.opportunities.rediscover.some((r) => r.garmentId === "not-underused"), "evidence must never grant rediscovery eligibility to a structurally ineligible garment");
+  });
+});
+
+describe("§CIA-WI Phase 2 shared-intelligence adapters have zero effect on WI's own output", () => {
+  it("running the StyleMe-outcome adapter alongside WI, on the same evidence, never changes what WI computes", () => {
+    const items = neutralWardrobe();
+    const formulaEvidence: ReadonlyMap<string, FormulaSupportState> = new Map([
+      [combinationKey(["top-black", "bottom-black"]), "strongly-supported"],
+    ]);
+    const formulaEvidenceDetail: ReadonlyMap<string, FormulaEvidence> = new Map([
+      [combinationKey(["top-black", "bottom-black"]), {
+        formulaKey: combinationKey(["top-black", "bottom-black"]), garmentIds: ["top-black", "bottom-black"],
+        positiveDates: ["2026-09-01", "2026-09-10", "2026-09-19"], negativeDates: [], mixedDates: [],
+        state: "strongly-supported", hasNegativeEvidence: false,
+      }],
+    ]);
+    const positiveGarmentEvidence: ReadonlyMap<string, GarmentPositiveEvidence> = new Map([
+      ["top-black", { closetItemId: "top-black", positiveDates: ["2026-09-01", "2026-09-10", "2026-09-19"] }],
+    ]);
+
+    const withoutAdapterCall = run(items, { passport: PASSPORT, formulaEvidence, positiveGarmentEvidence });
+
+    // Also run the Phase 2 adapters on the exact same evidence objects WI consumed.
+    const findings = [
+      ...adaptStyleMeOutcomeFormulaFindings(formulaEvidenceDetail),
+      ...adaptStyleMeOutcomeGarmentFindings(positiveGarmentEvidence),
+    ];
+    assert.ok(findings.length > 0, "sanity: the adapter actually produced something from this fixture");
+
+    const withAdapterCall = run(items, { passport: PASSPORT, formulaEvidence, positiveGarmentEvidence });
+    assert.deepEqual(withAdapterCall, withoutAdapterCall, "WI's output must be byte-identical whether or not the Phase 2 adapter was also called on the same evidence");
   });
 });
