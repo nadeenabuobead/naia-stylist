@@ -1318,6 +1318,41 @@ export default function StyleMeResult() {
     );
   }
 
+  // ── No alternative found ─────────────────────────────────────────
+  //
+  // A reroll whose candidates are all core-equivalent to the current look returns
+  // { sameCombination: true } with no suggestion. That is a valid settled outcome, not a
+  // failure, and the engine deliberately skips the model call and persists nothing.
+  //
+  // This must be checked BEFORE the error guard below. That guard treats a falsy
+  // `suggestion` as failure, and when this page was reached through the generation flow
+  // loaderData.suggestion is null — so a correct no-alternative response rendered
+  // "Something went wrong". The guard's own condition is left exactly as it was.
+  //
+  // Scoped with `!suggestion` on purpose: when a previous look IS on screen, `suggestion`
+  // is truthy, the error guard never fires, and the inline message beside the New Look
+  // button already handles it. This covers only the case where there is nothing to show.
+  if (generateFetcher.data?.sameCombination && !suggestion) {
+    return (
+      <div className="sm-loading-wrap">
+        <div style={{ textAlign: "center", maxWidth: "500px", padding: "40px" }}>
+          <h1 style={{ fontFamily: "var(--naia-ff-display)", fontSize: "32px", fontWeight: 900, color: "var(--naia-ink)", marginBottom: "16px" }}>
+            No other look today
+          </h1>
+          <p className="sm-same-combination-msg" style={{ fontFamily: "var(--naia-ff-body)", fontSize: "18px", fontStyle: "italic", color: "var(--naia-muted)", marginBottom: "32px" }}>
+            nAia couldn&rsquo;t find a different combination with your available pieces.
+          </p>
+          <Form method="post">
+            <input type="hidden" name="intent" value="start-over" />
+            <button type="submit" className="sm-result-action-btn sm-result-action-btn--primary">
+              Start Again
+            </button>
+          </Form>
+        </div>
+      </div>
+    );
+  }
+
   // ── Error state ──────────────────────────────────────────────────
   if (error || !suggestion) {
     return (
