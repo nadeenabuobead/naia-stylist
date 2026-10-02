@@ -50,6 +50,11 @@ import {
   computeWardrobeRecommendations,
   type WardrobeRecommendations,
 } from "~/lib/ai/wardrobe-recommendations";
+import {
+  deriveFormulaEvidence,
+  derivePositiveGarmentEvidence,
+  type RawOutcomeFact,
+} from "~/lib/ai/wardrobe-feedback-evidence";
 
 // db.server is plain JS, so the Prisma client is untyped at this boundary.
 // This row shape is the explicit contract for everything this module reads.
@@ -109,13 +114,25 @@ export async function loadWardrobeIntelligence(
     include: { adminReview: true, styleMeProfile: true },
   });
 
-  const [outfitCounts, savedCounts, seenCombinations, styleMeSessions, outcomes] = await Promise.all([
+  const [outfitCounts, savedCounts, seenCombinations, styleMeSessions, outcomes, rawFeedbackFacts] = await Promise.all([
     countOutfitAppearances(customerId),
     countSavedLookAppearances(customerId),
     loadSeenCombinations(customerId),
     loadStyleMeSessions(customerId),
     loadOutcomes(customerId),
+    loadRawOutcomeFactsForEvidence(customerId),
   ]);
+
+  // StyleMe-feedback evidence, V1 — see wardrobe-feedback-evidence.ts for the
+  // full scope contract. formulaEvidence may only break an exact tie inside
+  // buildPairings' already-computed ranking; positiveGarmentEvidence may
+  // only adjust rediscovery priority. Neither touches register depth,
+  // repetition, candidate eligibility, or moodboard content.
+  const formulaEvidenceDetail = deriveFormulaEvidence(rawFeedbackFacts);
+  const positiveGarmentEvidence = derivePositiveGarmentEvidence(formulaEvidenceDetail);
+  // buildPairings' tie-break only ever needs the state, not the full
+  // evidence detail — keep the engine's input surface minimal.
+  const formulaEvidence = new Map([...formulaEvidenceDetail].map(([key, ev]) => [key, ev.state] as const));
 
   // Per-garment outcome tallies. A garment inherits the outcome of every look it
   // appeared in — that is a fact about the LOOK, so only look-level and
@@ -265,6 +282,8 @@ export async function loadWardrobeIntelligence(
     passport: options.passport,
     seenCombinations,
     flags: options.flags ?? DEFAULT_FLAGS,
+    formulaEvidence,
+    positiveGarmentEvidence,
   });
 
   const needs = computeWardrobeNeeds({
@@ -409,6 +428,61 @@ async function loadOutcomes(customerId: string): Promise<OutcomeFact[]> {
       garmentIds: (row.suggestion?.items ?? [])
         .map((item) => item.closetItemId)
         .filter((id): id is string => Boolean(id)),
+    }));
+}
+
+/**
+ * Raw StyleMe-feedback facts for the V1 evidence layer — deliberately NOT
+ * the same shape as loadOutcomes() above. That function drops a null
+ * closetItemId immediately (`.filter((id): id is string => Boolean(id))`),
+ * which is safe for its own purpose (look-level/register-level tallies)
+ * but would silently reconstruct a partial historical formula if reused
+ * here. This loader keeps every item's closetItemId/itemType/
+ * shopifyProductId intact so wardrobe-feedback-evidence.ts can apply its
+ * own formula-integrity rule and exclude what it cannot verify.
+ */
+async function loadRawOutcomeFactsForEvidence(customerId: string): Promise<RawOutcomeFact[]> {
+  const db = prisma as unknown as {
+    styleMeOutcome: {
+      findMany: (args: unknown) => Promise<Array<{
+        id: string;
+        suggestionId: string;
+        outcomeStatus: string;
+        changeTypes: string[];
+        submittedAt: Date;
+        suggestion: {
+          items: Array<{ closetItemId: string | null; itemType: string; shopifyProductId: string | null }>;
+        } | null;
+      }>>;
+    };
+  };
+
+  const rows = await db.styleMeOutcome.findMany({
+    where: { customerId },
+    select: {
+      id: true,
+      suggestionId: true,
+      outcomeStatus: true,
+      changeTypes: true,
+      submittedAt: true,
+      suggestion: {
+        select: {
+          items: { select: { closetItemId: true, itemType: true, shopifyProductId: true } },
+        },
+      },
+    },
+  });
+
+  const VALID = new Set(["wore-it", "changed-something", "didnt-wear-it"]);
+  return rows
+    .filter((row) => VALID.has(row.outcomeStatus))
+    .map((row) => ({
+      outcomeId: row.id,
+      suggestionId: row.suggestionId,
+      outcomeStatus: row.outcomeStatus as RawOutcomeFact["outcomeStatus"],
+      changeTypes: row.changeTypes,
+      submittedAt: row.submittedAt,
+      items: row.suggestion?.items ?? [],
     }));
 }
 

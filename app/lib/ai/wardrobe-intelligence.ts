@@ -40,6 +40,8 @@
 //   3. Every block declares its own availability. When the data is too thin, the
 //      block returns state "learning" with an honest reason — never a placeholder.
 
+import { evidenceTierRank, type FormulaSupportState, type GarmentPositiveEvidence } from "~/lib/ai/wardrobe-feedback-evidence";
+
 // ── Signal model ──────────────────────────────────────────────────────────────
 
 export type SignalType =
@@ -1779,6 +1781,7 @@ function buildPairings(
   items: WardrobeGarment[],
   seenCombinations: ReadonlySet<string>,
   passport: WardrobePassport | null,
+  formulaEvidence: ReadonlyMap<string, FormulaSupportState> | null = null,
 ): WardrobePairings {
   // The same per-garment rule the Coverage section applies: a garment that
   // fails a stated requirement with no genuine rescue never appears here, full
@@ -1875,9 +1878,24 @@ function buildPairings(
     };
   }
 
+  // Feedback evidence tie-break — locked scope: this comparator term can
+  // only ever matter when b.score - a.score is exactly 0. It replaces what
+  // was previously an arbitrary alphabetical-only tiebreak with a more
+  // meaningful one for candidates that are already equally ranked; it can
+  // never move a candidate ahead of (or behind) one with a different
+  // score, and never changes which candidates exist in `candidates` to
+  // begin with. See wardrobe-feedback-evidence.ts for how the evidence
+  // itself is derived — StyleMe activity/generation only, never a
+  // historical look resurfacing as moodboard content.
+  const evidenceRank = (ids: string[]): number =>
+    evidenceTierRank(formulaEvidence?.get(combinationKey(ids)) ?? "none");
+
   const ranked = candidates
     .map((c) => ({ ...c, untried: !seenCombinations.has(combinationKey(c.ids)) }))
-    .sort((a, b) => b.score - a.score || combinationKey(a.ids).localeCompare(combinationKey(b.ids)));
+    .sort((a, b) =>
+      b.score - a.score
+      || evidenceRank(b.ids) - evidenceRank(a.ids)
+      || combinationKey(a.ids).localeCompare(combinationKey(b.ids)));
 
   // Lead each relationship with the most specific TRUE thing not already said in
   // this section. Nothing is invented — a reason is only skipped, never made up.
@@ -3088,8 +3106,9 @@ function slotPlural(slot: string): string {
 function buildOpportunities(
   items: WardrobeGarment[],
   passport: WardrobePassport | null,
+  positiveGarmentEvidence: ReadonlyMap<string, GarmentPositiveEvidence> | null,
 ): WardrobeOpportunities {
-  const rediscover = buildRediscover(items, passport);
+  const rediscover = buildRediscover(items, passport, positiveGarmentEvidence);
 
   const worthConsidering = findGaps(items, passport);
   const anything = rediscover.length > 0 || worthConsidering.length > 0;
@@ -3116,7 +3135,18 @@ function buildOpportunities(
  * A piece only qualifies if it carries at least one underuse signal AND is
  * demonstrably usable with what she already owns.
  */
-function buildRediscover(items: WardrobeGarment[], passport: WardrobePassport | null): RediscoverPiece[] {
+/** A verified wore-it signal proves a garment is not neglected — its
+ * rediscovery PRIORITY drops among already-eligible candidates. The
+ * underlying structural "difficult to style"/"rarely reach for" relationship
+ * tag itself is never touched; a garment can still legitimately appear here
+ * with this evidence present, just lower in the ranking. */
+const REDISCOVER_POSITIVE_EVIDENCE_PENALTY = 4;
+
+function buildRediscover(
+  items: WardrobeGarment[],
+  passport: WardrobePassport | null,
+  positiveGarmentEvidence: ReadonlyMap<string, GarmentPositiveEvidence> | null = null,
+): RediscoverPiece[] {
   const hasInteractionHistory = items.some((g) => g.outfitAppearances > 0 || g.savedLookAppearances > 0);
   const activeRelevant = isActiveRelevant(items, passport);
 
@@ -3176,6 +3206,11 @@ function buildRediscover(items: WardrobeGarment[], passport: WardrobePassport | 
 
       // Ranked down only when activewear is incidental to this customer's life.
       if (!activeRelevant && FUNCTIONAL_CATEGORIES.has(garment.category)) score -= 6;
+
+      // Ranked down, never excluded, when the customer has told nAia she
+      // actually wore this piece — priority only, the structural
+      // "underused" signal above is never rewritten by feedback.
+      if (positiveGarmentEvidence?.has(garment.id)) score -= REDISCOVER_POSITIVE_EVIDENCE_PENALTY;
 
       const alignment = passportAlignmentFor(garment, passport);
       const matches = alignment.dimensions;
@@ -3557,10 +3592,23 @@ export interface WardrobeIntelligenceInput {
    */
   seenCombinations: ReadonlySet<string>;
   flags?: WardrobeIntelligenceFlags;
+  /**
+   * StyleMe-feedback evidence, V1 — see wardrobe-feedback-evidence.ts for
+   * how this is derived and the full scope contract. Locked here too:
+   * `formulaEvidence` may only break an exact tie in buildPairings' already-
+   * computed primary ranking; `positiveGarmentEvidence` may only adjust
+   * rediscovery priority among already-eligible pieces. Neither ever
+   * changes pairing eligibility, register depth, repetition, or candidate
+   * generation, and neither resurfaces a historical StyleMe look as
+   * moodboard content. Both default to null (no-op) so every existing
+   * caller is unaffected.
+   */
+  formulaEvidence?: ReadonlyMap<string, FormulaSupportState> | null;
+  positiveGarmentEvidence?: ReadonlyMap<string, GarmentPositiveEvidence> | null;
 }
 
 export function computeWardrobeIntelligence(input: WardrobeIntelligenceInput): WardrobeIntelligence {
-  const { items, passport, seenCombinations } = input;
+  const { items, passport, seenCombinations, formulaEvidence = null, positiveGarmentEvidence = null } = input;
   const flags = input.flags ?? DEFAULT_FLAGS;
   const coverage = computeCoverage(items, flags);
   const signalAvailability = buildSignalAvailability(items, coverage, passport);
@@ -3602,11 +3650,11 @@ export function computeWardrobeIntelligence(input: WardrobeIntelligenceInput): W
     };
   }
 
-  const pairings = buildPairings(items, seenCombinations, passport);
+  const pairings = buildPairings(items, seenCombinations, passport, formulaEvidence);
   const dna = buildDna(items, coverage);
   const passportView = buildPassportView(items, coverage, passport);
   const passportDimensionsShown = new Set(passportView.comparisons.map((c) => c.id));
-  const opportunities = buildOpportunities(items, passport);
+  const opportunities = buildOpportunities(items, passport, positiveGarmentEvidence);
 
   return {
     ready: true,

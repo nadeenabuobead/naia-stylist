@@ -31,6 +31,7 @@ import {
   type WardrobeIntelligenceFlags,
   type WardrobePassport,
 } from "./wardrobe-intelligence.ts";
+import type { FormulaSupportState, GarmentPositiveEvidence } from "./wardrobe-feedback-evidence.ts";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -75,6 +76,8 @@ function run(
     passport?: WardrobePassport | null;
     seen?: Set<string>;
     flags?: WardrobeIntelligenceFlags;
+    formulaEvidence?: ReadonlyMap<string, FormulaSupportState> | null;
+    positiveGarmentEvidence?: ReadonlyMap<string, GarmentPositiveEvidence> | null;
   } = {},
 ): WardrobeIntelligence {
   return computeWardrobeIntelligence({
@@ -82,6 +85,8 @@ function run(
     passport: opts.passport ?? null,
     seenCombinations: opts.seen ?? new Set<string>(),
     flags: opts.flags,
+    formulaEvidence: opts.formulaEvidence ?? null,
+    positiveGarmentEvidence: opts.positiveGarmentEvidence ?? null,
   });
 }
 
@@ -1892,5 +1897,185 @@ describe("§WI-21 combination eligibility matches the Coverage section", () => {
       combo.garmentIds.includes(hoodie.id) && combo.garmentIds.includes(jeans.id) && combo.garmentIds.includes(tee.id),
     );
     assert.ok(found, "a crossover-eligible layer over genuinely ordinary pieces must still be able to represent Everyday");
+  });
+});
+
+// ── StyleMe-feedback evidence wiring — V1 ───────────────────────────────────
+//
+// wardrobe-feedback-evidence.test.ts proves the evidence DERIVATION in
+// isolation. These tests prove the two WIRING points in this engine never
+// exceed the locked V1 contract: the primary pairing score is untouched and
+// evidence may only break an exact tie; every other computation this engine
+// produces is byte-identical whether or not evidence is supplied.
+
+describe("§FB-W structural independence: feedback never touches anything but pairings order and rediscover priority", () => {
+  it("coverage, dna, heroes, snapshot and recommendations are identical with and without feedback evidence", () => {
+    const items = neutralWardrobe();
+    const withoutEvidence = run(items, { passport: PASSPORT });
+    const strongEvidence: ReadonlyMap<string, FormulaSupportState> = new Map([
+      [combinationKey(["top-black", "bottom-black"]), "strongly-supported"],
+    ]);
+    const strongGarmentEvidence: ReadonlyMap<string, GarmentPositiveEvidence> = new Map([
+      ["top-black", { closetItemId: "top-black", positiveDates: ["2026-09-01", "2026-09-10", "2026-09-19"] }],
+    ]);
+    const withEvidence = run(items, { passport: PASSPORT, formulaEvidence: strongEvidence, positiveGarmentEvidence: strongGarmentEvidence });
+
+    assert.deepEqual(withEvidence.coverage, withoutEvidence.coverage);
+    assert.deepEqual(withEvidence.dna, withoutEvidence.dna);
+    assert.deepEqual(withEvidence.heroes, withoutEvidence.heroes);
+    assert.deepEqual(withEvidence.snapshot, withoutEvidence.snapshot);
+    assert.deepEqual(withEvidence.signalAvailability, withoutEvidence.signalAvailability);
+    // passportView and observations both read pairings/opportunities only
+    // by STATE/COUNT (pairings.state, pairings.totalFound) — never by
+    // order or membership — so they must be identical too. This closes the
+    // one gap in "feedback touches nothing but the two approved points":
+    // Passport structural truth is never overwritten by feedback.
+    assert.deepEqual(withEvidence.passportView, withoutEvidence.passportView);
+    assert.deepEqual(withEvidence.observations, withoutEvidence.observations);
+  });
+
+  it("an empty evidence map produces byte-identical output to no evidence at all (the pre-V1 default path)", () => {
+    // formulaEvidence/positiveGarmentEvidence default to null — the exact
+    // pre-V1 behavior. An empty (but non-null) map exercises the new code
+    // path's lookups while supplying zero real evidence, and must produce
+    // the identical result: the tie-break/priority-adjustment terms must
+    // be true no-ops when there is genuinely nothing to cite.
+    const items = neutralWardrobe();
+    const withNull = run(items, { passport: PASSPORT, formulaEvidence: null, positiveGarmentEvidence: null });
+    const withEmpty = run(items, {
+      passport: PASSPORT,
+      formulaEvidence: new Map<string, FormulaSupportState>(),
+      positiveGarmentEvidence: new Map<string, GarmentPositiveEvidence>(),
+    });
+    assert.deepEqual(withEmpty, withNull, "no feedback — null or empty — must produce the exact pre-V1 result, including pairing and rediscovery order");
+  });
+});
+
+describe("§FB-W tie-break-only: feedback never overtakes a higher-ranked pairing, and is a no-op absent a genuine tie", () => {
+  // Shared attribute set for both tests below — only occasions/colour differ
+  // between candidates, so any score difference is attributable to a single,
+  // known, explicit lever (scorePair's shared-occasions bonus, weight 8),
+  // not an unexplained emergent effect of the real scoring function.
+  const twinAttrs = {
+    pattern: "solid" as const, material: "wool", silhouette: "straight",
+    fitProfile: "tailored", formality: "smart-casual", visualWeight: "medium" as const,
+    colourProfile: { hueFamily: null, wardrobeNeutral: true, lightDark: "dark" as const, energyTier: "neutral-versatile" as const },
+  };
+
+  it("feedback cannot overtake a candidate with a genuinely, explicitly higher primary score", () => {
+    // high-top/high-bottom share an occasion tag (scorePair's +8 bonus);
+    // low-top/low-bottom share none — a real, known, substantial score gap,
+    // not a guess about emergent engine behaviour.
+    const items: WardrobeGarment[] = [
+      makeGarment({ id: "high-top", slot: "top", primaryColor: "Navy", occasions: ["work"], ...twinAttrs }),
+      makeGarment({ id: "high-bottom", category: "BOTTOMS", slot: "bottom", primaryColor: "Navy", occasions: ["work"], ...twinAttrs }),
+      makeGarment({ id: "low-top", slot: "top", primaryColor: "Grey", occasions: [], ...twinAttrs }),
+      makeGarment({ id: "low-bottom", category: "BOTTOMS", slot: "bottom", primaryColor: "Grey", occasions: [], ...twinAttrs }),
+      makeGarment({ id: "filler-dress", category: "DRESSES", slot: "dress", primaryColor: "Black" }),
+    ];
+    const highKey = combinationKey(["high-top", "high-bottom"]);
+    const lowKey = combinationKey(["low-top", "low-bottom"]);
+
+    const base = run(items, { passport: null });
+    const baseIds = base.pairings.pairings.map((p) => p.id);
+    assert.deepEqual(baseIds, [highKey, lowKey], "the occasion-matched pair must rank first on primary score alone");
+
+    // Give the LOWER-scoring pair the strongest possible evidence tier.
+    const evidence: ReadonlyMap<string, FormulaSupportState> = new Map([[lowKey, "strongly-supported"]]);
+    const withEvidence = run(items, { passport: null, formulaEvidence: evidence });
+    const withIds = withEvidence.pairings.pairings.map((p) => p.id);
+
+    assert.deepEqual(withIds, [highKey, lowKey], "strongly-supported evidence on the lower-scored pair must never move it ahead of a genuinely higher-scored one");
+  });
+
+  it("feedback breaks a genuine exact tie between two symmetric, non-overlapping candidates — without changing which candidates are selected", () => {
+    // Two structurally-identical twin pairs (same attributes, different ids,
+    // no shared garments) — the primary score, a pure function of garment
+    // attributes, MUST be identical for both by construction. This is a
+    // real, engineered tie, not an assumption about the scoring formula.
+    const items: WardrobeGarment[] = [
+      makeGarment({ id: "twin-top-1", slot: "top", primaryColor: "Navy", ...twinAttrs }),
+      makeGarment({ id: "twin-bottom-1", category: "BOTTOMS", slot: "bottom", primaryColor: "Navy", ...twinAttrs }),
+      makeGarment({ id: "twin-top-2", slot: "top", primaryColor: "Navy", ...twinAttrs }),
+      makeGarment({ id: "twin-bottom-2", category: "BOTTOMS", slot: "bottom", primaryColor: "Navy", ...twinAttrs }),
+      makeGarment({ id: "filler-dress2", category: "DRESSES", slot: "dress", primaryColor: "Black" }),
+    ];
+
+    const base = run(items, { passport: null });
+    const pair1Key = combinationKey(["twin-top-1", "twin-bottom-1"]);
+    const pair2Key = combinationKey(["twin-top-2", "twin-bottom-2"]);
+    const baseIds = base.pairings.pairings.map((p) => p.id);
+    assert.ok(baseIds.includes(pair1Key) && baseIds.includes(pair2Key), "both twin pairs must be real, selected candidates");
+    // With no StyleMe outcome evidence at all, the existing deterministic
+    // fallback (alphabetical on the combination key) must choose pair1
+    // ("candidate A") first — this is the baseline the evidence tie-break
+    // is about to flip, asserted explicitly rather than assumed.
+    assert.ok(baseIds.indexOf(pair1Key) < baseIds.indexOf(pair2Key), "absent evidence, the alphabetical fallback must rank pair1 ahead of pair2");
+
+    const evidence: ReadonlyMap<string, FormulaSupportState> = new Map([[pair2Key, "strongly-supported"]]);
+    const withEvidence = run(items, { passport: null, formulaEvidence: evidence });
+    const withIds = withEvidence.pairings.pairings.map((p) => p.id);
+
+    // Same two candidates selected either way — evidence changed order, not membership.
+    assert.deepEqual([...baseIds].sort(), [...withIds].sort());
+    // pair2 (the one with evidence) now sorts strictly ahead of pair1.
+    assert.ok(withIds.indexOf(pair2Key) < withIds.indexOf(pair1Key), "evidence must move the supported twin ahead of its exact-tied sibling");
+  });
+});
+
+describe("§FB-W rediscovery priority: positive evidence deprioritizes without rewriting the structural tag", () => {
+  it("a garment with verified positive evidence ranks below an otherwise-identical garment without it", () => {
+    const struggleAttrs = { category: "TOPS", slot: "top" as const, garmentRelationships: ["love-style-struggle"] };
+    const partners = [
+      makeGarment({ id: "p1", slot: "bottom", category: "BOTTOMS" }),
+      makeGarment({ id: "p2", slot: "bottom", category: "BOTTOMS" }),
+      makeGarment({ id: "p3", slot: "bottom", category: "BOTTOMS" }),
+      makeGarment({ id: "p4", slot: "bottom", category: "BOTTOMS" }),
+    ];
+    const items: WardrobeGarment[] = [
+      makeGarment({ id: "struggle-a", name: "A", ...struggleAttrs }),
+      makeGarment({ id: "struggle-b", name: "B", ...struggleAttrs }),
+      ...partners,
+    ];
+
+    const base = run(items);
+    const baseIds = base.opportunities.rediscover.map((r) => r.garmentId);
+    assert.ok(baseIds.includes("struggle-a") && baseIds.includes("struggle-b"), "both must qualify for rediscovery structurally");
+
+    const positiveEvidence: ReadonlyMap<string, GarmentPositiveEvidence> = new Map([
+      ["struggle-a", { closetItemId: "struggle-a", positiveDates: ["2026-09-01", "2026-09-10", "2026-09-19"] }],
+    ]);
+    const withEvidence = run(items, { positiveGarmentEvidence: positiveEvidence });
+    const withIds = withEvidence.opportunities.rediscover.map((r) => r.garmentId);
+
+    // Still structurally eligible — feedback adjusts priority, not eligibility.
+    assert.ok(withIds.includes("struggle-a") && withIds.includes("struggle-b"));
+    // struggle-b (no evidence) now ranks ahead of struggle-a (verified worn).
+    assert.ok(withIds.indexOf("struggle-b") < withIds.indexOf("struggle-a"), "verified positive evidence must deprioritize, never exclude");
+  });
+
+  it("feedback can never make a structurally ineligible garment eligible", () => {
+    // No low-use/struggle/unsure tag, and this specific garment's own
+    // outfitAppearances is nonzero — so it fails BOTH underuse signals
+    // (statedAs() and the hasInteractionHistory/zero-appearances check) by
+    // construction. buildRediscover's eligibility test (`!underused`) runs
+    // and returns null BEFORE positiveGarmentEvidence is ever read, so no
+    // amount of evidence can reach it.
+    const notUnderused = makeGarment({ id: "not-underused", slot: "top", garmentRelationships: [], outfitAppearances: 1 });
+    const partners = [
+      makeGarment({ id: "p1", slot: "bottom", category: "BOTTOMS" }),
+      makeGarment({ id: "p2", slot: "bottom", category: "BOTTOMS" }),
+      makeGarment({ id: "p3", slot: "bottom", category: "BOTTOMS" }),
+    ];
+    const items: WardrobeGarment[] = [notUnderused, ...partners];
+
+    const base = run(items);
+    assert.ok(!base.opportunities.rediscover.some((r) => r.garmentId === "not-underused"), "a non-underused garment must not appear without evidence either — sanity check on the fixture");
+
+    const strongestPossibleEvidence: ReadonlyMap<string, GarmentPositiveEvidence> = new Map([
+      ["not-underused", { closetItemId: "not-underused", positiveDates: ["2026-09-01", "2026-09-10", "2026-09-19"] }],
+    ]);
+    const withEvidence = run(items, { positiveGarmentEvidence: strongestPossibleEvidence });
+    assert.ok(!withEvidence.opportunities.rediscover.some((r) => r.garmentId === "not-underused"), "evidence must never grant rediscovery eligibility to a structurally ineligible garment");
   });
 });

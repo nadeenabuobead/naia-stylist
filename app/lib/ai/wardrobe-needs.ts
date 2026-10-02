@@ -59,6 +59,7 @@ import {
   type BlockState,
   type Usability,
 } from "~/lib/ai/wardrobe-intelligence";
+import { MIN_OUTCOMES_FOR_CLAIM } from "~/lib/ai/wardrobe-feedback-evidence";
 
 // classifyUsability/layersThatResolve/Usability now live in wardrobe-intelligence.ts
 // so buildPairings can gate combinations with the same rule — re-exported here so
@@ -163,8 +164,10 @@ const ENOUGH_CLUSTER = 5;
 const EFFECTIVE_DEPTH_MIN_RAW = 6;
 /** Blocked share at which raw depth stops translating into usable depth. */
 const EFFECTIVE_DEPTH_BLOCKED_SHARE = 0.5;
-/** Outcomes needed before feedback may drive a conclusion. */
-const MIN_OUTCOMES_FOR_CLAIM = 3;
+// MIN_OUTCOMES_FOR_CLAIM now lives in wardrobe-feedback-evidence.ts (the
+// evidence layer's canonical threshold) and is imported below, so this
+// headline-copy gate and that layer's STRONGLY_SUPPORTED gate can never
+// silently drift to two different numbers.
 /** Generated appearances needed before "nAia repeatedly reaches for" is fair. */
 const MIN_APPEARANCES_FOR_REACH = 3;
 
