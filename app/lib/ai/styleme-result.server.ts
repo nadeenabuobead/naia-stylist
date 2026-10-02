@@ -3743,28 +3743,44 @@ export function buildCompletionLayer(
   additionalItems: Array<{ slot: string }> = [],
   mode?: StyleMeMode,
   /**
-   * Finishing slots the suitability rule deliberately left unfilled. Only these produce a
-   * generated recommendation — a slot empty for any other reason is left alone, so the
-   * long-standing top/bottom-only contract of this function is unchanged by default.
+   * Finishing slots the suitability rule deliberately left unfilled. Retained for the
+   * diagnostic only — it records WHY a slot is empty, which is useful in a trace but is no
+   * longer what decides whether a suggestion is made. See the outcome rule below.
    */
   suppressedFinishingSlots: Array<"shoe" | "bag"> = [],
 ): StyleMeCompletionPiece[] {
   const filledSlots = getFilledClothingSlots(anchor, primaryProduct, additionalItems);
   const missingSlots = getMissingEssentialSlots(filledSlots);
 
-  // Only slots the suitability rule suppressed. A slot that is empty because the closet
-  // simply holds nothing for it is NOT described here — that would change what this
-  // function has always returned for every outfit, and 12 existing contracts pin it.
+  // OUTCOME, not cause. A finishing slot missing from the finished outfit is described,
+  // whatever emptied it.
+  //
+  // This used to intersect with suppressedFinishingSlots, which is populated only inside the
+  // suitability gate — so a suggestion appeared only when a candidate had reached that gate
+  // and been rejected there. ST15 showed the hole: once C1 let the occasion gate honour a
+  // reviewer's "No" for `event`, every bag was excluded BEFORE scoring, the suitability gate
+  // never ran for `bag`, and the "add a small evening bag or clutch" line disappeared — even
+  // though the outfit plainly had no bag. The same silence covered a closet that simply owns
+  // no bags, which is why O4 never got one either.
+  //
+  // From the customer's side those situations are identical: this look needs a bag and she
+  // has no suitable one. Cause belongs in a diagnostic, not in whether she is told.
+  //
+  // Two things keep this narrow. getMissingFinishingSlots reports shoe and bag only, so an
+  // omitted accessory or jewel still disappears cleanly as decided in 015c60c. And the
+  // explicit formalityConditional guard means a casual or default session — which never
+  // asked for a register — accumulates nothing new, which is what preserves the 12
+  // long-standing top/bottom-only contracts of this function.
   const finishingBand = getTargetFormalityRange(session.occasion, session.formalityConditional ?? null);
-  const stillMissing = new Set(getMissingFinishingSlots(
-    anchor?.type === "closet" ? (anchor as NormalizedClosetAnchor).slot as string
-    : anchor?.type === "nadine" ? (anchor as NormalizedNadineAnchor).slot as string
-    : null,
-    additionalItems,
-  ));
-  const finishingSuggestions = suppressedFinishingSlots
-    .filter((slot) => stillMissing.has(slot))
-    .map((slot) => buildFinishingSuggestion(slot, finishingBand));
+  const stillMissing = session.formalityConditional
+    ? getMissingFinishingSlots(
+        anchor?.type === "closet" ? (anchor as NormalizedClosetAnchor).slot as string
+        : anchor?.type === "nadine" ? (anchor as NormalizedNadineAnchor).slot as string
+        : null,
+        additionalItems,
+      )
+    : [];
+  const finishingSuggestions = stillMissing.map((slot) => buildFinishingSuggestion(slot, finishingBand));
 
   if (missingSlots.length === 0) return finishingSuggestions;
 
