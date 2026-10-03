@@ -13,6 +13,7 @@ import {
   extractBuySkipEvidence,
 } from "./taste-extraction.server.js";
 import { SOURCE_BASE_STRENGTH, SUPPRESS_RATIO, CONTEST_RATIO } from "./taste-contract.js";
+import { adaptBuySkipOutcomeFindings } from "./customer-intelligence-buyskip-outcome-adapter.ts";
 
 const T = new Date("2026-09-05T10:00:00Z");
 const CID = "cust_test";
@@ -362,6 +363,23 @@ describe("extractBuySkipEvidence", () => {
       postPurchaseOutcome: null, category: "TOPS", createdAt: T,
     });
     assert.equal(rows.length, 0);
+  });
+
+  it("E.4.6 Phase 4 Shared Intelligence adapters have zero effect on this function's output — same facts, called alongside the new adapters, produce byte-identical TasteEvidence rows", () => {
+    const facts = [
+      { id: "bos1", customerId: CID, postPurchaseOutcome: "LOVE_IT" as const, category: "DRESSES", createdAt: T },
+      { id: "bos2", customerId: CID, postPurchaseOutcome: "RETURNED_IT" as const, category: "TOPS", createdAt: T },
+      { id: "bos3", customerId: CID, postPurchaseOutcome: "ITS_OKAY" as const, category: "TOPS", createdAt: T },
+    ];
+    const before = facts.map((f) => extractBuySkipEvidence(f));
+
+    const sharedFindings = adaptBuySkipOutcomeFindings(
+      facts.map((f) => ({ id: f.id, customerId: f.customerId, category: f.category, decision: "BOUGHT_IT" as const, postPurchaseOutcome: f.postPurchaseOutcome, updatedAt: f.createdAt })),
+    );
+    assert.ok(sharedFindings.length > 0, "sanity: the Phase 4 adapter actually produced something from these facts, including ITS_OKAY which TasteEvidence excludes");
+
+    const after = facts.map((f) => extractBuySkipEvidence(f));
+    assert.deepEqual(after, before, "extractBuySkipEvidence's output must be unchanged whether or not the Phase 4 adapter was also called on the same facts");
   });
 });
 

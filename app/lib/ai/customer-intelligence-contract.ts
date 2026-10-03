@@ -103,7 +103,16 @@ export type ProvenanceRef =
   | { kind: "styleme-demand"; id: string }
   | { kind: "closet-state"; itemIds: string[] }
   | { kind: "taste-tendency"; id: string }
-  | { kind: "buy-skip"; id: string };
+  /** Honest reference to the BuyOrSkipAnalysis row — never a BuySkipOutcome
+   * id. The two are different tables with different id spaces; collapsing
+   * them into one generic "buy-skip" slot was the same ambiguity the two
+   * styleme-outcome-* variants above exist to prevent, so there is no
+   * generic variant here either. */
+  | { kind: "buy-skip-analysis"; id: string }
+  /** Honest reference to the BuySkipOutcome row — never a BuyOrSkipAnalysis
+   * id. Covers the customer's purchase-decision AND post-purchase-outcome
+   * findings, since both are read off the same outcome row. */
+  | { kind: "buy-skip-outcome"; id: string };
 
 // ── Support ──────────────────────────────────────────────────────────────────
 //
@@ -123,22 +132,47 @@ export type ProvenanceRef =
 //               with no native tier (demand, garment-level outcome counts)
 //               simply omits this field — never invent one.
 //   qualifier — an outcome-specific direction, when the source has one:
-//               "positive" | "negative" | "mixed". This is NOT a universal
-//               polarity field — demand counts never set it, because a
-//               request has no direction. It exists on "count" specifically
-//               so outcome evidence can state whether a count is affirming,
-//               contradicting, or genuinely ambiguous, without forcing every
-//               signal class to pretend it has a polarity.
+//               "positive" | "negative" | "mixed" | "neutral". This is NOT a
+//               universal polarity field — demand counts never set it,
+//               because a request has no direction. It exists on "count"
+//               specifically so outcome evidence can state whether a count
+//               is affirming, contradicting, genuinely ambiguous, or
+//               genuinely neutral, without forcing every signal class to
+//               pretend it has a polarity. "neutral" (added for Buy-or-Skip
+//               post-purchase outcome's ITS_OKAY) is deliberately distinct
+//               from omitting qualifier entirely: omitted means "this count
+//               has no polarity dimension at all" (e.g. a purchase-decision
+//               finding — bought/didn't-buy is an action, not a taste
+//               claim); "neutral" means "this source DOES have a polarity
+//               dimension here, and the customer's answer sits in the
+//               middle of it" (she bought it, it was fine either way).
 //
 // IMPORTANT: signalClass "explicit-outcome" alone never implies a positive
-// claim. A "mixed" or "negative" qualifier is exactly as "explicit-outcome"
-// as a "positive" one — a resolver must read support.qualifier before
-// treating any count-shaped outcome finding as affirmative.
+// claim. A "mixed", "negative", or "neutral" qualifier is exactly as
+// "explicit-outcome" as a "positive" one — a resolver must read
+// support.qualifier before treating any count-shaped outcome finding as
+// affirmative.
 export type FindingSupport =
   | { kind: "direct" }
-  | { kind: "count"; value: number; tier?: string; qualifier?: "positive" | "negative" | "mixed" }
+  | { kind: "count"; value: number; tier?: string; qualifier?: "positive" | "negative" | "mixed" | "neutral" }
   | { kind: "structural"; value?: number; label?: string }
   | { kind: "reconciled"; score: number; state?: string };
+
+// ── Subject ──────────────────────────────────────────────────────────────────
+//
+// For findings where `value` IS a decision/outcome state rather than the
+// thing the decision was about (Buy-or-Skip purchase-decision and
+// post-purchase-outcome: value is "BOUGHT_IT" / "LOVE_IT" / etc.), `value`
+// alone loses which item/category the decision was about. Do not encode
+// this by compounding it into `value` as a string (e.g. "dress|bought-it")
+// and do not overload `source` or `dimension` with it either — both of
+// those already mean something specific (where evidence came from; what
+// kind of claim value is). `subject` is the smallest additive fix: an
+// optional, typed "what this finding is about" companion to `value`, left
+// absent for findings (like considered-category, or any Passport/WI
+// finding) where the category/subject already IS `value` and there is
+// nothing else to separate it from.
+export type FindingSubject = { kind: "garment-category"; value: string };
 
 // ── Temporal metadata ────────────────────────────────────────────────────────
 //
@@ -183,6 +217,10 @@ export interface ResolvedFinding {
    * "garment-category" — deliberately left open rather than closed now
    * for sources that don't exist yet. */
   dimension: string;
+  /** What this finding is about, when `value` itself is a decision/outcome
+   * state rather than the subject of that state — see FindingSubject.
+   * Absent for findings where the category/subject already IS `value`. */
+  subject?: FindingSubject;
   provenanceRefs: ProvenanceRef[];
   support: FindingSupport;
   temporal: FindingTemporal;

@@ -14,6 +14,7 @@ import {
   type ProvenanceRef,
   type FindingSupport,
   type FindingTemporal,
+  type FindingSubject,
   type ResolvedFinding,
 } from "./customer-intelligence-contract.ts";
 
@@ -74,9 +75,23 @@ describe("§CIC-3 ProvenanceRef — one real value per variant typechecks", () =
     const ref: ProvenanceRef = { kind: "taste-tendency", id: "tendency-1" };
     assert.equal(ref.id, "tendency-1");
   });
-  it("buy-skip", () => {
-    const ref: ProvenanceRef = { kind: "buy-skip", id: "outcome-1" };
+  it("buy-skip-analysis — the BuyOrSkipAnalysis row, never a BuySkipOutcome id", () => {
+    const ref: ProvenanceRef = { kind: "buy-skip-analysis", id: "analysis-1" };
+    assert.equal(ref.id, "analysis-1");
+  });
+  it("buy-skip-outcome — the BuySkipOutcome row, never a BuyOrSkipAnalysis id", () => {
+    const ref: ProvenanceRef = { kind: "buy-skip-outcome", id: "outcome-1" };
     assert.equal(ref.id, "outcome-1");
+  });
+  it("there is no generic buy-skip variant — the two tables have two different id spaces", () => {
+    // Enforced at the type level: ProvenanceRef's union no longer has a
+    // "buy-skip" member at all, so writing one is a compile error, not a
+    // runtime check. This test exists to document that intent plainly.
+    const refs: ProvenanceRef[] = [
+      { kind: "buy-skip-analysis", id: "analysis-1" },
+      { kind: "buy-skip-outcome", id: "outcome-1" },
+    ];
+    assert.deepEqual(refs.map((r) => r.kind), ["buy-skip-analysis", "buy-skip-outcome"]);
   });
 });
 
@@ -93,13 +108,20 @@ describe("§CIC-4 FindingSupport — not mutually comparable, one shape per kind
     const s: FindingSupport = { kind: "count", value: 3, tier: "strongly-supported" };
     assert.equal(s.tier, "strongly-supported");
   });
-  it("count with an outcome-specific qualifier — positive, negative, and mixed are each distinct", () => {
+  it("count with an outcome-specific qualifier — positive, negative, mixed, and neutral are each distinct", () => {
     const positive: FindingSupport = { kind: "count", value: 3, qualifier: "positive" };
     const negative: FindingSupport = { kind: "count", value: 1, qualifier: "negative" };
     const mixed: FindingSupport = { kind: "count", value: 1, qualifier: "mixed" };
-    assert.notEqual(positive.qualifier, negative.qualifier);
-    assert.notEqual(positive.qualifier, mixed.qualifier);
-    assert.notEqual(negative.qualifier, mixed.qualifier);
+    const neutral: FindingSupport = { kind: "count", value: 1, qualifier: "neutral" };
+    const all = [positive.qualifier, negative.qualifier, mixed.qualifier, neutral.qualifier];
+    assert.equal(new Set(all).size, 4, "all four qualifiers must be pairwise distinct");
+  });
+
+  it("neutral is not the same as omitting qualifier — a purchase-decision finding has no qualifier at all, not a neutral one", () => {
+    const noQualifier: FindingSupport = { kind: "count", value: 1 };
+    const neutral: FindingSupport = { kind: "count", value: 1, qualifier: "neutral" };
+    assert.equal(noQualifier.qualifier, undefined);
+    assert.equal(neutral.qualifier, "neutral");
   });
   it("structural, with optional value/label", () => {
     const s: FindingSupport = { kind: "structural", value: 2, label: "Limited usable work depth" };
@@ -210,6 +232,52 @@ describe("§CIC-7 source identifies WHERE evidence came from; dimension identifi
     };
     assert.equal(formula.source, garment.source);
     assert.notEqual(formula.dimension, garment.dimension);
+  });
+});
+
+describe("§CIC-9 subject carries what a decision/outcome state is about, without compounding it into value", () => {
+  it("FindingSubject, garment-category", () => {
+    const s: FindingSubject = { kind: "garment-category", value: "Dress" };
+    assert.equal(s.value, "Dress");
+  });
+
+  it("purchase-decision: value is the decision state, subject is the category — never a compound string", () => {
+    const f: ResolvedFinding = {
+      value: "BOUGHT_IT", signalClass: "explicit-outcome", source: "buy-skip-outcome", dimension: "purchase-decision",
+      subject: { kind: "garment-category", value: "Dress" },
+      provenanceRefs: [{ kind: "buy-skip-outcome", id: "outcome-1" }],
+      support: { kind: "direct" }, temporal: { kind: "snapshot", observedAt: "2026-10-02" },
+      customerFacingSafe: true, cohortEligible: true,
+    };
+    assert.equal(f.value, "BOUGHT_IT");
+    assert.equal(f.subject?.value, "Dress");
+    assert.ok(!f.value.includes("|"), "value must never be a compound string encoding subject + state");
+  });
+
+  it("subject is absent for findings where the category already IS value (considered-category)", () => {
+    const f: ResolvedFinding = {
+      value: "Dress", signalClass: "explicit-demand", source: "buy-skip-analysis", dimension: "considered-category",
+      provenanceRefs: [{ kind: "buy-skip-analysis", id: "analysis-1" }],
+      support: { kind: "direct" }, temporal: { kind: "snapshot", observedAt: "2026-10-02" },
+      customerFacingSafe: true, cohortEligible: true,
+    };
+    assert.equal(f.subject, undefined);
+  });
+
+  it("post-purchase-outcome: three distinct qualifiers over the same subject", () => {
+    const loveIt: ResolvedFinding = {
+      value: "LOVE_IT", signalClass: "explicit-outcome", source: "buy-skip-outcome", dimension: "post-purchase-outcome",
+      subject: { kind: "garment-category", value: "Dress" },
+      provenanceRefs: [{ kind: "buy-skip-outcome", id: "outcome-1" }],
+      support: { kind: "count", value: 1, qualifier: "positive" }, temporal: { kind: "snapshot", observedAt: "2026-10-02" },
+      customerFacingSafe: true, cohortEligible: true,
+    };
+    const itsOkay: ResolvedFinding = { ...loveIt, value: "ITS_OKAY", support: { kind: "count", value: 1, qualifier: "neutral" } };
+    const returnedIt: ResolvedFinding = { ...loveIt, value: "RETURNED_IT", support: { kind: "count", value: 1, qualifier: "negative" } };
+    assert.equal(loveIt.subject?.value, itsOkay.subject?.value);
+    assert.equal(itsOkay.subject?.value, returnedIt.subject?.value);
+    assert.notEqual((loveIt.support as { qualifier?: string }).qualifier, (itsOkay.support as { qualifier?: string }).qualifier);
+    assert.notEqual((itsOkay.support as { qualifier?: string }).qualifier, (returnedIt.support as { qualifier?: string }).qualifier);
   });
 });
 
