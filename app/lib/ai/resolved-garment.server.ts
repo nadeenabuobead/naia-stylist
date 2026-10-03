@@ -93,13 +93,18 @@ function toClassification(item: EffectiveItem): ClosetClassification {
 }
 
 // Curated GarmentStyleMeProfile uses "heavy"; derived intelligence uses "substantial".
-const CURATED_WEIGHT_MAP: Readonly<Record<string, ResolvedVisualWeight>> = {
+// Exported (Garment Intelligence Phase 2 shadow comparison) so the shadow
+// module can tell whether a StyleMe-visible curated value and the
+// canonical value are talking about the same underlying fact, without
+// redefining this mapping a second time. No behavior change.
+export const CURATED_WEIGHT_MAP: Readonly<Record<string, ResolvedVisualWeight>> = {
   light: "light",
   medium: "medium",
   heavy: "substantial",
 };
 
-const CURATED_STRENGTH_MAP: Readonly<Record<string, ResolvedIntentionStrength>> = {
+// Exported for the same reason as CURATED_WEIGHT_MAP above.
+export const CURATED_STRENGTH_MAP: Readonly<Record<string, ResolvedIntentionStrength>> = {
   Strong: "strong",
   Supporting: "supporting",
   None: "none",
