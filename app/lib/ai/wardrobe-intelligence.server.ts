@@ -17,12 +17,10 @@
 
 import prisma from "~/db.server";
 import { closetItemToSlot } from "~/lib/ai/closet-slot";
-import { getEffectiveClosetItem, type IntelligenceOverrides, type ClosetItemFields } from "~/lib/admin/closet-review.server";
+import { getEffectiveClosetItem, type ClosetItemFields } from "~/lib/admin/closet-review.server";
 import {
-  deriveGarmentStylingIntelligence,
   deriveVisualWeight,
   deriveColourProfile,
-  ALL_INTENTIONS,
   type StylingPassportInput,
 } from "~/lib/admin/garment-intelligence-v1.server";
 import type { ClosetClassification } from "~/lib/admin/closet-intelligence.server";
@@ -56,38 +54,15 @@ import {
 } from "~/lib/ai/wardrobe-feedback-evidence";
 import { demandWindowCutoff, type RawStyleMeDemandFact } from "~/lib/ai/styleme-demand-evidence";
 import { loadRawOutcomeFactsForEvidence } from "~/lib/ai/styleme-intelligence-facts.server";
+import { resolveGarment, type ResolvableClosetItem } from "~/lib/ai/resolved-garment.server";
 
-// db.server is plain JS, so the Prisma client is untyped at this boundary.
-// This row shape is the explicit contract for everything this module reads.
-type ClosetItemRow = ClosetItemFields & {
-  id: string;
-  name: string | null;
-  category: string;
-  analysisStatus: string;
-  garmentRelationships: string[];
-  adminReview: { reviewStatus: string; overrides: unknown; intelligenceOverrides: unknown } | null;
-  styleMeProfile: {
-    profileStatus: string;
-    visualWeight: string | null;
-    intentionPotentials: unknown;
-  } | null;
-};
-
-// Curated GarmentStyleMeProfile uses "heavy"; derived intelligence uses "substantial".
-const CURATED_WEIGHT_MAP: Readonly<Record<string, ResolvedVisualWeight>> = {
-  light: "light",
-  medium: "medium",
-  heavy: "substantial",
-};
-
-const CURATED_STRENGTH_MAP: Readonly<Record<string, ResolvedIntentionStrength>> = {
-  Strong: "strong",
-  Supporting: "supporting",
-  None: "none",
-};
-
-/** Only an approved curated profile is trusted ahead of derived intelligence. */
-const CURATED_APPROVED_STATUS = "approved";
+// Garment Intelligence Phase 1: the per-item resolution this row feeds
+// (getEffectiveClosetItem -> classification -> derive/curate/override) now
+// lives in resolved-garment.server.ts as resolveGarment(). ClosetItemRow is
+// kept as a local alias of that module's ResolvableClosetItem — one
+// canonical row shape, not two copies — since this file still needs the
+// name for its own findMany() return-type annotation.
+type ClosetItemRow = ResolvableClosetItem;
 
 export interface WardrobeIntelligenceBundle {
   intelligence: WardrobeIntelligence;
@@ -156,118 +131,19 @@ export async function loadWardrobeIntelligence(
 
   const passportInput = toStylingPassportInput(options.passport);
 
+  // Garment Intelligence Phase 1: the effective/classification/derive/
+  // curate/override resolution that used to be inline here now lives in
+  // resolveGarment() (resolved-garment.server.ts) — garment-intrinsic
+  // fields only. WardrobeGarment = ResolvedGarment + the WI-specific
+  // fields below (image URL, usage/outcome tallies) that were never part
+  // of that resolution chain — see that module's doc for why they stayed
+  // out of ResolvedGarment.
   const garments: WardrobeGarment[] = items.map((item) => {
-    const effective = getEffectiveClosetItem(item, item.adminReview);
-    const classification = toClassification(effective);
-
-    const derived = deriveGarmentStylingIntelligence(classification, passportInput);
-    const overrides = (item.adminReview?.intelligenceOverrides ?? null) as IntelligenceOverrides | null;
-    const curated =
-      item.styleMeProfile && item.styleMeProfile.profileStatus === CURATED_APPROVED_STATUS
-        ? item.styleMeProfile
-        : null;
-
-    // ── Visual weight ────────────────────────────────────────────────────────
-    let visualWeight: ResolvedVisualWeight | null = derived.visualWeight.value;
-    let source: WardrobeGarment["intelligenceSource"] = visualWeight === null ? "none" : "derived";
-    if (curated?.visualWeight && CURATED_WEIGHT_MAP[curated.visualWeight]) {
-      visualWeight = CURATED_WEIGHT_MAP[curated.visualWeight];
-      source = "curated";
-    }
-    if (overrides && Object.prototype.hasOwnProperty.call(overrides, "visualWeight")) {
-      visualWeight = (overrides.visualWeight ?? null) as ResolvedVisualWeight | null;
-      source = "curated";
-    }
-
-    // ── Colour profile ───────────────────────────────────────────────────────
-    const colourProfile: ResolvedColourProfile = {
-      hueFamily: derived.colourProfile.hueFamily,
-      wardrobeNeutral: derived.colourProfile.wardrobeNeutral,
-      lightDark: derived.colourProfile.lightDark,
-      energyTier: derived.colourProfile.energyTier,
-    };
-    const cpOverride = overrides?.colourProfile;
-    if (cpOverride) {
-      if (Object.prototype.hasOwnProperty.call(cpOverride, "hueFamily")) colourProfile.hueFamily = cpOverride.hueFamily ?? null;
-      if (Object.prototype.hasOwnProperty.call(cpOverride, "wardrobeNeutral")) colourProfile.wardrobeNeutral = cpOverride.wardrobeNeutral ?? false;
-      if (Object.prototype.hasOwnProperty.call(cpOverride, "lightDark")) colourProfile.lightDark = cpOverride.lightDark ?? null;
-      if (Object.prototype.hasOwnProperty.call(cpOverride, "energyTier")) colourProfile.energyTier = cpOverride.energyTier ?? null;
-      source = "curated";
-    }
-
-    // ── Intentions ───────────────────────────────────────────────────────────
-    //
-    // Provenance matters here, not just the value. Phase 3C V2 DERIVED intention
-    // potential is shadow output and stays gated in the engine; a human-reviewed
-    // value (approved curated profile, or an admin correction) is trusted now.
-    // intentionsSource is only "curated" when EVERY one of the 12 intentions came
-    // from a human-reviewed source — a partial mix is treated as derived.
-    const intentions: Record<string, ResolvedIntentionStrength> = {};
-    const humanReviewed = new Set<string>();
-    for (const potential of derived.intentionPotentials) {
-      intentions[potential.intention] = potential.strength;
-    }
-    const curatedIntentions = curated?.intentionPotentials as Record<string, string> | null | undefined;
-    if (curatedIntentions && typeof curatedIntentions === "object") {
-      for (const intention of ALL_INTENTIONS) {
-        const raw = curatedIntentions[intention];
-        if (typeof raw === "string" && CURATED_STRENGTH_MAP[raw]) {
-          intentions[intention] = CURATED_STRENGTH_MAP[raw];
-          humanReviewed.add(intention);
-          source = "curated";
-        }
-      }
-    }
-    if (overrides?.intentions) {
-      for (const [intention, value] of Object.entries(overrides.intentions)) {
-        if (value === null) continue;
-        intentions[intention] = value as ResolvedIntentionStrength;
-        humanReviewed.add(intention);
-        source = "curated";
-      }
-    }
-    const intentionsSource: "curated" | "derived" =
-      ALL_INTENTIONS.every((intention) => humanReviewed.has(intention)) ? "curated" : "derived";
-
-    // Intelligence is only claimed when the garment has actually been read.
-    const hasIntelligence = item.analysisStatus === "ready" || source === "curated";
+    const resolved = resolveGarment(item, passportInput);
 
     return {
-      id: item.id,
-      name: item.name,
-      category: item.category as string,
-      subcategory: effective.subcategory ?? null,
+      ...resolved,
       imageUrl: options.imageUrlById.get(item.id) ?? null,
-      slot: closetItemToSlot(item.category as string, effective.subcategory ?? null),
-
-      primaryColor: effective.primaryColor ?? null,
-      colors: effective.colors ?? [],
-      pattern: effective.pattern ?? null,
-      material: effective.material ?? null,
-      silhouette: effective.silhouette ?? null,
-      fitProfile: effective.fitProfile ?? null,
-      formality: effective.formality ?? null,
-      stylePersonality: effective.stylePersonality ?? null,
-      occasions: effective.occasions ?? [],
-      seasons: effective.seasons ?? [],
-      garmentRelationships: item.garmentRelationships ?? [],
-      analysisStatus: item.analysisStatus,
-
-      visualWeight: hasIntelligence ? visualWeight : null,
-      colourProfile: hasIntelligence ? colourProfile : null,
-      intentions: hasIntelligence ? intentions : null,
-      intentionsSource: hasIntelligence ? intentionsSource : null,
-      intelligenceSource: hasIntelligence ? source : "none",
-
-      // Coverage facts, passed through exactly as stored. These drive the
-      // needs layer's usable-vs-blocked split, so a null here must stay null:
-      // it means "not read", never "complies".
-      sleeveLength: effective.sleeveLength ?? null,
-      necklineCoverage: effective.necklineCoverage ?? null,
-      hemLength: effective.hemLength ?? null,
-      topLength: effective.topLength ?? null,
-      midriffExposed: effective.midriffExposed ?? null,
-      shoulderCoverage: effective.shoulderCoverage ?? null,
 
       outfitAppearances: outfitCounts.get(item.id) ?? 0,
       savedLookAppearances: savedCounts.get(item.id) ?? 0,
