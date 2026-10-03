@@ -53,9 +53,9 @@ import {
 import {
   deriveFormulaEvidence,
   derivePositiveGarmentEvidence,
-  type RawOutcomeFact,
 } from "~/lib/ai/wardrobe-feedback-evidence";
 import { demandWindowCutoff, type RawStyleMeDemandFact } from "~/lib/ai/styleme-demand-evidence";
+import { loadRawOutcomeFactsForEvidence } from "~/lib/ai/styleme-intelligence-facts.server";
 
 // db.server is plain JS, so the Prisma client is untyped at this boundary.
 // This row shape is the explicit contract for everything this module reads.
@@ -394,7 +394,22 @@ async function loadStyleMeSessions(customerId: string): Promise<StyleMeSessionFa
  * fixed value so the 90-day boundary is deterministic, not an inline
  * Date.now().
  */
-async function loadStyleMeDemandFacts(customerId: string, asOf: Date = new Date()): Promise<RawStyleMeDemandFact[]> {
+// Exported (Phase 5, Shared Customer Intelligence resolver): a pure single
+// findMany, no per-item garment resolution — safe for a caller that wants
+// only StyleMe-demand findings to call without paying for the rest of
+// loadWardrobeIntelligence's pipeline. No behavior change to any existing
+// caller — this function's body and every existing call site are untouched.
+//
+// Stayed here rather than moving to styleme-intelligence-facts.server.ts
+// alongside its sibling loadRawOutcomeFactsForEvidence: this function's own
+// OUTPUT shape genuinely depends on WI vocabulary — each fact's `register`
+// is computed via styleMeSessionRegister()/RegisterId, both owned by
+// wardrobe-needs.ts. Moving the loader alone would not remove that
+// dependency, only relocate which WI file it points at; removing it for
+// real would mean relocating RegisterId itself, a larger and riskier move
+// than this phase's scope. The resolver still imports this one directly
+// from here, documented as a known, currently-necessary coupling.
+export async function loadStyleMeDemandFacts(customerId: string, asOf: Date = new Date()): Promise<RawStyleMeDemandFact[]> {
   const cutoff = demandWindowCutoff(asOf);
   const sessions: Array<{
     id: string;
@@ -490,60 +505,12 @@ async function loadOutcomes(customerId: string): Promise<OutcomeFact[]> {
     }));
 }
 
-/**
- * Raw StyleMe-feedback facts for the V1 evidence layer — deliberately NOT
- * the same shape as loadOutcomes() above. That function drops a null
- * closetItemId immediately (`.filter((id): id is string => Boolean(id))`),
- * which is safe for its own purpose (look-level/register-level tallies)
- * but would silently reconstruct a partial historical formula if reused
- * here. This loader keeps every item's closetItemId/itemType/
- * shopifyProductId intact so wardrobe-feedback-evidence.ts can apply its
- * own formula-integrity rule and exclude what it cannot verify.
- */
-async function loadRawOutcomeFactsForEvidence(customerId: string): Promise<RawOutcomeFact[]> {
-  const db = prisma as unknown as {
-    styleMeOutcome: {
-      findMany: (args: unknown) => Promise<Array<{
-        id: string;
-        suggestionId: string;
-        outcomeStatus: string;
-        changeTypes: string[];
-        submittedAt: Date;
-        suggestion: {
-          items: Array<{ closetItemId: string | null; itemType: string; shopifyProductId: string | null }>;
-        } | null;
-      }>>;
-    };
-  };
-
-  const rows = await db.styleMeOutcome.findMany({
-    where: { customerId },
-    select: {
-      id: true,
-      suggestionId: true,
-      outcomeStatus: true,
-      changeTypes: true,
-      submittedAt: true,
-      suggestion: {
-        select: {
-          items: { select: { closetItemId: true, itemType: true, shopifyProductId: true } },
-        },
-      },
-    },
-  });
-
-  const VALID = new Set(["wore-it", "changed-something", "didnt-wear-it"]);
-  return rows
-    .filter((row) => VALID.has(row.outcomeStatus))
-    .map((row) => ({
-      outcomeId: row.id,
-      suggestionId: row.suggestionId,
-      outcomeStatus: row.outcomeStatus as RawOutcomeFact["outcomeStatus"],
-      changeTypes: row.changeTypes,
-      submittedAt: row.submittedAt,
-      items: row.suggestion?.items ?? [],
-    }));
-}
+// loadRawOutcomeFactsForEvidence moved to styleme-intelligence-facts.server.ts
+// (Phase 5 architecture correction) — it had zero functional dependency on
+// anything WI-specific, so it now lives in a neutral module both WI and the
+// Shared Customer Intelligence resolver import from. One canonical loader,
+// not two copies — see that file's own doc for the reasoning, including why
+// its sibling loadStyleMeDemandFacts below did NOT make the same move.
 
 /** Combination keys nAia has already produced — used only to mark a pairing untried. */
 async function loadSeenCombinations(customerId: string): Promise<Set<string>> {

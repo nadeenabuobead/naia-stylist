@@ -18,7 +18,7 @@ import { checkEntitlement } from "../lib/plan/entitlement.server";
 import { moderateImageContent } from "../lib/image-moderation.server";
 import { screenGarmentSuitability } from "../lib/image-suitability.server";
 import { loadWardrobeIntelligence } from "../lib/ai/wardrobe-intelligence.server";
-import { adaptWardrobeFindings } from "../lib/ai/customer-intelligence-wardrobe-adapter";
+import { resolveCustomerIntelligence } from "../lib/ai/customer-intelligence-resolver.server";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -115,6 +115,17 @@ export function toWardrobePassport(profile) {
  * criteria.slot — never recommendation prose, never colour/structure/
  * silhouette/coverage, and never forOccasion or AI-observed silhouette.
  *
+ * Phase 5: takes already-resolved wardrobe-state ResolvedFinding[] (from
+ * resolveCustomerIntelligence's "wardrobe-state" include) rather than raw
+ * DepthFinding[]/RegisterReading[] — Phase 3's own adaptWardrobeFindings
+ * call now happens once, inside the resolver, not duplicated here. Each
+ * finding's `value` is the register (the adapter's own contract); its
+ * `support` already carries the distinctLooks/depthLabel a raw
+ * RegisterReading would have, so no separate registers array is needed
+ * either. recommendations stays raw — WI's recommendation criteria were
+ * never adapted into findings (deliberately, since Phase 3), so they are
+ * read directly here same as before.
+ *
  * Context is surfaced only when ALL of:
  *   1. a real "could use more" finding exists for some register;
  *   2. WI's own recommendations name EXACTLY ONE slot for that register
@@ -126,11 +137,11 @@ export function toWardrobePassport(profile) {
  *      honest way to say which one's gap this item would address, so
  *      neither is surfaced.
  */
-export function resolveWardrobeContext(normalizedCategory, couldUseMore, registers, recommendations) {
+export function resolveWardrobeContext(normalizedCategory, wardrobeStateFindings, recommendations) {
   const coreSlot = BUYSKIP_CORE_SLOT_BY_CATEGORY[normalizedCategory];
-  if (!coreSlot || !couldUseMore || couldUseMore.length === 0) return null;
+  if (!coreSlot || !wardrobeStateFindings || wardrobeStateFindings.length === 0) return null;
 
-  const thinRegisters = new Set(couldUseMore.map((f) => f.register));
+  const thinRegisters = new Set(wardrobeStateFindings.map((f) => f.value));
   const matchedRegisters = [];
   for (const register of thinRegisters) {
     const recommendedSlots = new Set(
@@ -145,10 +156,7 @@ export function resolveWardrobeContext(normalizedCategory, couldUseMore, registe
   if (matchedRegisters.length !== 1) return null;
 
   const [register] = matchedRegisters;
-  const finding = couldUseMore.find((f) => f.register === register);
-  if (!finding) return null;
-  const [resolved] = adaptWardrobeFindings([finding], registers);
-  return resolved ?? null;
+  return wardrobeStateFindings.find((f) => f.value === register) ?? null;
 }
 
 const WARDROBE_CONTEXT_REGISTER_LABEL = {
@@ -456,6 +464,12 @@ async function analyzeItem(request) {
     // Phase 3 — Shared Customer Intelligence, first consumer. Additive only:
     // a failure here must never block the core Buy-or-Skip verdict, so it
     // degrades to "no context" on any error rather than throwing.
+    // Phase 5: the wardrobe-state finding now comes from the shared
+    // resolver instead of calling adaptWardrobeFindings directly — this
+    // route still calls loadWardrobeIntelligence itself (it independently
+    // needs wi.recommendations.recommendations, which the resolver does
+    // not expose), and passes that same bundle into the resolver so WI is
+    // computed exactly once, never duplicated.
     let wardrobeContext = null;
     if (WARDROBE_CONTEXT_ELIGIBLE_CATEGORIES.has(normalizedCategory)) {
       try {
@@ -463,7 +477,12 @@ async function analyzeItem(request) {
           imageUrlById: new Map(),
           passport: toWardrobePassport(styleProfile),
         });
-        wardrobeContext = resolveWardrobeContext(normalizedCategory, wi.needs.couldUseMore, wi.needs.registers, wi.recommendations.recommendations);
+        const wardrobeStateFindings = await resolveCustomerIntelligence({
+          customerId: naiaCustomer.id,
+          include: ["wardrobe-state"],
+          wardrobeIntelligence: wi,
+        });
+        wardrobeContext = resolveWardrobeContext(normalizedCategory, wardrobeStateFindings, wi.recommendations.recommendations);
       } catch (wardrobeContextErr) {
         console.error("[buy-skip] wardrobe intelligence lookup failed (non-fatal):", wardrobeContextErr?.message ?? wardrobeContextErr);
       }
