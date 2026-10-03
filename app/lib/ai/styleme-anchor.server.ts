@@ -11,6 +11,40 @@ import type { NadineAnchorInput, ClosetAnchorInput, AnchorInput } from "./stylem
 import prisma from "../../db.server.js";
 import { buildPrivateDownloadUrl, getCloudinaryConfig } from "../../lib/cloudinary-admin.server.js";
 import { matchesSessionOccasion } from "./styleme-occasion-tokens.js";
+import { getEffectiveClosetItem, type ClosetItemFields } from "../admin/closet-review.server.js";
+
+// Garment Intelligence Phase 4A — narrowly scoped rollback switch for the
+// first live canonical-field migration (colour only). OFF = exactly
+// today's raw ClosetItem.primaryColor/colors reads. ON = the same
+// admin-override-aware effective value WI already uses, via
+// getEffectiveClosetItem() — not the full resolveGarment()/ResolvedGarment
+// pipeline, which also runs garment-intelligence-v1 derivation that
+// colour never needed. getEffectiveClosetItem is the one authoritative
+// precedence implementation (admin override > raw); this reuses it
+// directly rather than duplicating the merge or requiring every caller to
+// carry all 28 ResolvedGarment fields for a two-field need.
+const CANONICAL_STYLEME_COLOUR = process.env.CANONICAL_STYLEME_COLOUR === "true";
+
+/**
+ * Pure decision logic, exported so it can be tested directly without any
+ * process.env manipulation or DB access. The flag itself is read once at
+ * module load (above) and passed in explicitly here — this function never
+ * reads process.env itself, so a test can exercise both branches against
+ * the identical module instance.
+ *
+ * OFF: byte-identical to item.colors/item.primaryColor — zero behavior
+ * change. ON: the same admin-override-aware merge WI already uses
+ * (getEffectiveClosetItem), projected down to only the two colour fields.
+ */
+export function resolveEngineColour(
+  item: ClosetItemFields,
+  adminReview: { reviewStatus: string; overrides: unknown } | null | undefined,
+  canonicalEnabled: boolean,
+): { colors: string[]; primaryColor: string | null } {
+  if (!canonicalEnabled) return { colors: item.colors, primaryColor: item.primaryColor };
+  const effective = getEffectiveClosetItem(item, adminReview);
+  return { colors: effective.colors, primaryColor: effective.primaryColor };
+}
 
 const VALID_HANDLES = new Set(getAllCatalogProducts().map((p) => p.handle));
 
@@ -277,7 +311,7 @@ export async function loadAllClosetItemsForEngine(
     where: { customerId },
     orderBy: { createdAt: "desc" },
     take: 50,
-    include: { styleMeProfile: true },
+    include: { styleMeProfile: true, adminReview: true },
   });
 
   type ClosetDbItem = (typeof items)[number];
@@ -287,6 +321,8 @@ export async function loadAllClosetItemsForEngine(
     if (cfg && item.imagePublicId && item.imageFormat) {
       imageUrl = buildPrivateDownloadUrl(cfg, item.imagePublicId, item.imageFormat, "private");
     }
+    // Phase 4A: colour only. See resolveEngineColour's own doc for the OFF/ON contract.
+    const engineColour = resolveEngineColour(item, item.adminReview, CANONICAL_STYLEME_COLOUR);
     const p = item.styleMeProfile;
     const approvedProfile =
       p?.profileStatus === "approved"
@@ -315,8 +351,8 @@ export async function loadAllClosetItemsForEngine(
       name: item.name ?? null,
       category: item.category,
       subcategory: item.subcategory ?? null,
-      colors: item.colors,
-      primaryColor: item.primaryColor ?? null,
+      colors: engineColour.colors,
+      primaryColor: engineColour.primaryColor ?? null,
       pattern: item.pattern ?? null,
       material: item.material ?? null,
       styleTags: item.styleTags,
