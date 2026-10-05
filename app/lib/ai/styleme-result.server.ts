@@ -1595,13 +1595,38 @@ export function buildNaiaOutfitCandidates(
     return [null, null, null, null, null] as unknown as [OutfitCandidate, OutfitCandidate | null, OutfitCandidate | null, OutfitCandidate | null, OutfitCandidate | null];
   }
 
-  // Pre-filter allItems by dressing requirements for the Candidate E exploration.
-  // selectAdditionalClosetGarments has its own gate; this ensures Candidate E's
-  // slot-swap exploration also respects persistent dressing constraints.
-  // The anchor is no longer exempted — it has already passed the same gate above.
-  const dressingEligibleItems = profile_?.dressingPreferences?.length
-    ? allItems.filter((item) => passesDressingRequirements(item, profile_.dressingPreferences))
-    : allItems;
+  // ── The swap pool for every alternative candidate ─────────────────────────
+  //
+  // selectAdditionalClosetGarments runs four hard gates per item before anything reaches
+  // candidate A. B scanned raw `allItems`, its fallback branch scanned raw `allItems` with
+  // even fewer checks, and E scanned a list filtered by dressing requirements alone — and
+  // not even that when the customer had no dressing preferences. So a garment A had
+  // rejected could re-enter the look through an alternative, and three live QA runs did
+  // exactly that: an approved occasionFit "No" trouser on a Date night, a business-formal
+  // trouser on an Active day, and athletic running shoes on a Polished night out. Each was
+  // offered to the model as selectable; only its choice kept them off the screen.
+  //
+  // The same four gates, in the same order, now produce one pool that B, its fallback and E
+  // all draw from. The invariant is the one already claimed below for suitability: an item
+  // candidate A rejected cannot re-enter through an alternative.
+  //
+  // The anchor is exempt because it is already validated — evaluateAnchorEligibility ran
+  // above and returns all-nulls when it fails, so an ineligible anchor never reaches here.
+  // Keeping it in the pool is what lets B hold the anchor's own slot unchanged.
+  //
+  // Candidate A is unaffected: it is still built by selectAdditionalClosetGarments from its
+  // own gated pool. C is unaffected: it is A minus its outerwear. D inherits the corrected B.
+  // A sparse or lightly-reviewed wardrobe can legitimately yield fewer alternatives — B and E
+  // become null rather than contaminated — and A is unconditional, so the candidate set can
+  // never empty because of this filter.
+  const anchorItemForSwapGates = allItems.find((i) => i.id === anchor.id) ?? null;
+  const swapEligibleItems = allItems.filter((item) =>
+    item.id === anchor.id ||
+    (passesDressingRequirements(item, profile_?.dressingPreferences) &&
+      passesProfileOccasionGate(item, session.occasion) &&
+      passesProfileRegisterGate(item, session.occasion) &&
+      passesRegisterCoherenceWithAnchor(item, anchorItemForSwapGates, session.occasion)),
+  );
 
   const fullSelection = selectAdditionalClosetGarments(
     anchor,
@@ -1720,7 +1745,7 @@ export function buildNaiaOutfitCandidates(
 
     // Score all candidate items for this slot.
     const scoredAlts: Array<{ item: ClosetAnchorInput; score: number; formalityRank: number | null }> = [];
-    for (const item of allItems) {
+    for (const item of swapEligibleItems) {
       if (item.id === anchor.id) continue;
       if (closetItemToSlot(item.category, item.subcategory) !== slot) continue;
       const score = scoreClosetItemForSession(
@@ -1767,11 +1792,14 @@ export function buildNaiaOutfitCandidates(
   } else {
     // No slot had a different best-fit item — fall back to the first slot with any alternative.
     for (const selected of fullSelection.filter((g) => B_SLOTS.has(g.slot))) {
-      const fallbackAlts = allItems
+      // Gated pool, and altSlotSuitable — which this branch never applied, so a shoe the
+      // main scan had rejected on suitability could still arrive here.
+      const fallbackAlts = swapEligibleItems
         .filter((item) =>
           item.id !== anchor.id &&
           item.id !== selected.id &&
           closetItemToSlot(item.category, item.subcategory) === selected.slot &&
+          altSlotSuitable(item, selected.slot as string) &&
           scoreClosetItemForSession(
             { occasions: item.occasions, styleTags: item.styleTags, category: item.category, colors: item.colors, primaryColor: item.primaryColor },
             signals, profile_, item.garmentRelationships,
@@ -1849,8 +1877,8 @@ export function buildNaiaOutfitCandidates(
 
     type TodayTuple = { violations: number; bodyFit: number; intentFit: number };
     const computeTodayTuple = (c: OutfitCandidate): TodayTuple => {
-      const bn = scoreBodyNeedFitForRanking(bodyNeeds_, c, dressingEligibleItems);
-      const inFit = computeIntentionFit(intentions_, c, candidateA, dressingEligibleItems, profile_);
+      const bn = scoreBodyNeedFitForRanking(bodyNeeds_, c, swapEligibleItems);
+      const inFit = computeIntentionFit(intentions_, c, candidateA, swapEligibleItems, profile_);
       return { violations: bn.knownViolationCount, bodyFit: bn.bodyNeedFitScore ?? 0, intentFit: inFit };
     };
     const todayBetter = (trial: TodayTuple, seed: TodayTuple): boolean => {
@@ -1874,7 +1902,7 @@ export function buildNaiaOutfitCandidates(
 
       for (const slot of structuralSlots) {
         if (seed.pieces.some((p) => p.closetId === anchor.id && p.slot === slot)) continue;
-        const eligible = dressingEligibleItems.filter(
+        const eligible = swapEligibleItems.filter(
           (item) => !seedItemIds.has(item.id) && resolveProfileSlot(item, closetItemToSlot(item.category, item.subcategory)) === slot
             && altSlotSuitable(item, slot),
         );
@@ -1896,7 +1924,7 @@ export function buildNaiaOutfitCandidates(
           for (const slot2 of structuralSlots) {
             if (slot2 === slot) continue;
             if (seed.pieces.some((p) => p.closetId === anchor.id && p.slot === slot2)) continue;
-              const eligible2 = dressingEligibleItems.filter(
+              const eligible2 = swapEligibleItems.filter(
               (item) => !trial1Ids.has(item.id) && resolveProfileSlot(item, closetItemToSlot(item.category, item.subcategory)) === slot2
                 && altSlotSuitable(item, slot2),
             );
