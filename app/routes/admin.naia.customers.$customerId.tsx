@@ -7,6 +7,7 @@
 //   A. Identity (name, email, plan, joined)
 //   B. Customer Passport (customer-supplied preferences)
 //   C. Closet Summary (garment counts, category breakdown, link to closet)
+//   D. Buy / Skip Uploads (submission history — explicitly NOT Closet ownership)
 //
 // Auth: requireAdminSession.
 
@@ -20,6 +21,10 @@ import {
   type AdminCustomerDetail,
   type CustomerStylingPassportContext,
 } from "~/lib/admin/closet-intelligence.server";
+import {
+  getAdminCustomerBuySkipUploads,
+  type AdminBuySkipUploadSummary,
+} from "~/lib/admin/buyskip-admin.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   await requireAdminSession(request);
@@ -40,7 +45,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     accountType = "CUSTOMER";
   }
 
-  return Response.json({ customer, accountType });
+  const buySkipUploads = await getAdminCustomerBuySkipUploads(customerId);
+
+  return Response.json({ customer, accountType, buySkipUploads });
 }
 
 /** The account types an operator may set. */
@@ -409,10 +416,118 @@ function ClosetSummarySection({
   );
 }
 
+function verdictStyle(verdict: string): { color: string; background: string; border: string } {
+  const v = verdict.toUpperCase();
+  if (v === "BUY") return { color: "#86efac", background: "#052e16", border: "1px solid #166534" };
+  if (v.startsWith("SKIP")) return { color: "#fca5a5", background: "#2e0a0a", border: "1px solid #7f1d1d" };
+  return { color: "#9ca3af", background: "#1f2937", border: "1px solid #374151" };
+}
+
+function displayDateTime(d: Date | string): string {
+  return new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+// Buy/Skip is a customer-submitted purchase-candidate record, never a Closet
+// item: it is never counted as owned, never written to the Closet, and
+// never used to infer wardrobe gaps. This section is deliberately separate
+// from ClosetSummarySection above — do not merge them.
+function BuySkipUploadsSection({
+  customerId,
+  uploads,
+}: {
+  customerId: string;
+  uploads: AdminBuySkipUploadSummary[];
+}) {
+  return (
+    <div className="na-card">
+      <div className="na-card__header">
+        <h2 className="na-card__title">Buy / Skip Uploads</h2>
+        <span style={{ fontSize: "0.65rem", background: "#1f2937", color: "#9ca3af", border: "1px solid #374151", borderRadius: "3px", padding: "0.05rem 0.35rem" }}>
+          {uploads.length} submission{uploads.length === 1 ? "" : "s"}
+        </span>
+      </div>
+      <div className="na-card__body">
+        <p style={{ fontSize: "0.65rem", color: "#4b5563", marginBottom: "1rem" }}>
+          Purchase-candidate submissions this customer has uploaded. Not Closet ownership — nAia does not treat an upload as something the customer owns.
+        </p>
+        {uploads.length === 0 ? (
+          <p style={{ fontSize: "0.85rem", color: "#6b7280" }}>No Buy/Skip submissions.</p>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+            {uploads.map(u => {
+              const vStyle = verdictStyle(u.displayVerdict);
+              return (
+                <Link
+                  key={u.id}
+                  to={`/admin/naia/customers/${customerId}/buyskip/${u.id}`}
+                  style={{
+                    display: "flex",
+                    gap: "0.75rem",
+                    alignItems: "center",
+                    padding: "0.6rem",
+                    border: "1px solid #1f2937",
+                    borderRadius: "6px",
+                    textDecoration: "none",
+                    color: "inherit",
+                  }}
+                >
+                  <div style={{
+                    width: "48px", height: "48px", borderRadius: "5px", overflow: "hidden",
+                    background: "#111827", border: "1px solid #1f2937", flexShrink: 0,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                  }}>
+                    {u.thumbnailUrl ? (
+                      <img src={u.thumbnailUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    ) : (
+                      <span style={{ fontSize: "0.6rem", color: "#4b5563" }}>No image</span>
+                    )}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "0.2rem" }}>
+                      <span style={{ fontSize: "0.85rem", color: "#e5e7eb", fontWeight: 600 }}>
+                        {u.itemType ?? u.category ?? "Unknown item"}
+                      </span>
+                      <span style={{ fontSize: "0.65rem", padding: "0.05rem 0.4rem", borderRadius: "3px", ...vStyle }}>
+                        {u.displayVerdict}
+                      </span>
+                      {u.verdictOverridden && (
+                        <span title="Verdict was downgraded by a confirmed hard-constraint violation" style={{ fontSize: "0.6rem", color: "#fbbf24" }}>
+                          ⚠ overridden
+                        </span>
+                      )}
+                    </div>
+                    <p style={{ fontSize: "0.75rem", color: "#9ca3af", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {u.reasoning ?? "No reasoning recorded."}
+                    </p>
+                    <div style={{ display: "flex", gap: "0.6rem", marginTop: "0.25rem" }}>
+                      <span style={{ fontSize: "0.65rem", color: "#6b7280" }}>{displayDateTime(u.createdAt)}</span>
+                      {u.outcome && (
+                        <span style={{ fontSize: "0.65rem", color: "#6b7280" }}>
+                          Outcome: {u.outcome.decision.toLowerCase().replace(/_/g, " ")}
+                          {u.outcome.postPurchaseOutcome ? ` · ${u.outcome.postPurchaseOutcome.toLowerCase().replace(/_/g, " ")}` : ""}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <span style={{ fontSize: "0.75rem", color: "#4b5563" }}>View →</span>
+                </Link>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Page ───────────────────────────────────────────────────────────────────
 
 export default function AdminCustomerDetailPage() {
-  const { customer, accountType } = useLoaderData() as { customer: AdminCustomerDetail; accountType: string };
+  const { customer, accountType, buySkipUploads } = useLoaderData() as {
+    customer: AdminCustomerDetail;
+    accountType: string;
+    buySkipUploads: AdminBuySkipUploadSummary[];
+  };
   const typeFetcher = useFetcher<{ ok: boolean; error?: string; accountType?: string }>();
   const currentType = typeFetcher.data?.accountType ?? accountType;
 
@@ -472,6 +587,7 @@ export default function AdminCustomerDetailPage() {
             reviewedItems={customer.reviewedItemCount}
             categoryBreakdown={customer.categoryBreakdown}
           />
+          <BuySkipUploadsSection customerId={customer.id} uploads={buySkipUploads} />
         </div>
 
         {/* Sidebar — identity */}

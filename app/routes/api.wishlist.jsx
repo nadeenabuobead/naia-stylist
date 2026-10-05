@@ -19,6 +19,83 @@ import { moderateImageContent } from "../lib/image-moderation.server";
 import { screenGarmentSuitability } from "../lib/image-suitability.server";
 import { loadWardrobeIntelligence } from "../lib/ai/wardrobe-intelligence.server";
 import { resolveCustomerIntelligence } from "../lib/ai/customer-intelligence-resolver.server";
+import { normalizeDeclaredFacts, mergeVisionFacts } from "../lib/buyskip/product-facts.server";
+import { computeDuplicateEvidence } from "../lib/buyskip/duplicate-evidence.server";
+import { checkHardConstraints, checkColourPreference } from "../lib/buyskip/constraint-evidence.server";
+import { getWardrobeNeedEvidence } from "../lib/buyskip/wardrobe-need.server";
+import { assembleDecisionEvidence, applyHardConstraintVeto } from "../lib/buyskip/decision-evidence.server";
+import {
+  GARMENT_SILHOUETTE_VALUES,
+  FIT_PROFILE_VALUES,
+  GARMENT_FORMALITY_VALUES,
+  SLEEVE_LENGTH_VALUES,
+  NECKLINE_COVERAGE_VALUES,
+  GARMENT_MATERIAL_VALUES,
+  GARMENT_PATTERN_VALUES,
+} from "../lib/ai/garment-intelligence.types";
+
+// B1 — candidate-product vision vocabulary, sourced from canonical Garment
+// Intelligence rather than hand-copied.
+//
+// B1a (pure source convergence — byte-identical rendered output, proven by
+// test): silhouette, formality, sleeveLength. No consumer behavior changes.
+//
+// B1b (genuine output-space changes — each proven safe individually before
+// inclusion; a causal pass found two canonical tokens NOT safe to add here):
+//   - fitProfile gains "n/a". Proven via fixture: duplicate-evidence's
+//     normalize() already treats "n/a" exactly like an unknown value (both
+//     collapse to null before comparison) — byte-identical DuplicateEvidence
+//     output to the pre-B1 "model didn't know" case. Semantically valid for
+//     Buy/Skip's own non-apparel candidate categories (Shoes/Bag/Accessory/
+//     Jewelry), exactly as it already is for the same categories in Closet.
+//     The one real effect: the admin Decision Evidence view now shows a row
+//     ("n/a · inferred") where it previously showed nothing (ProductFactRow
+//     suppresses null values) — a correct, honest improvement, not a bug.
+//   - necklineCoverage gains "shirt-collar" only. Proven via the full
+//     constraint-evidence matrix (chest-neckline-covered, dresses-modestly,
+//     wears-hijab, usually-wears-abayas, kanduras-thobes): shirt-collar
+//     falls through to "satisfied" in every case, correctly — it is
+//     unambiguously high coverage, the same bucket as crew/mock/high.
+//   - "scoop" is DEFERRED, not added. The same causal matrix showed it also
+//     falls through to "satisfied" in every case, identically to crew — but
+//     a scoop neckline is only moderately conservative and is a real,
+//     plausible conflict for a customer who wears hijab/abaya or stated
+//     "dresses modestly". constraint-evidence.server.ts's lowNeckline() has
+//     no notion of "moderate" exposure (only "low"/"off-shoulder" count as
+//     violated); importing "scoop" would silently expose a value the
+//     evaluator does not intentionally understand as non-violating. Left
+//     out of B1; flagged for the constraint-evidence owner, not force-added
+//     here just because canonical offers it.
+//   - pattern: "stripe" corrected to canonical's "stripes" — zero
+//     deterministic consumer anywhere reads pattern (grep-confirmed across
+//     duplicate-evidence/constraint-evidence/decision-evidence/admin/
+//     customer display), zero historical records ever stored either
+//     spelling. The two Buy/Skip-local, non-canonical additions ("textured",
+//     "print") are kept — ambiguous enough (texture/material-like, and
+//     overly generic, respectively) that they are not force-mapped onto any
+//     single canonical token, and removing them would shrink legal model
+//     output, a bigger change than this pass's scope.
+//   - material: kept as a curated, canonical-sourced subset of the SAME
+//     size as before (Option B, not "all 21 canonical tokens") — material
+//     has no deterministic consumer anywhere, so there is no concrete
+//     benefit to enlarging the model's prompt surface, only drift-elimination
+//     risk to avoid. "synthetic" (not canonical) is replaced with
+//     "polyester" (its closest canonical analogue); every other token is
+//     unchanged. Verified by test that every curated token is a real
+//     member of GARMENT_MATERIAL_VALUES, so this can never drift again
+//     without the test catching it.
+const BOS_SILHOUETTE_TOKENS = [...GARMENT_SILHOUETTE_VALUES].join(" / ");
+const BOS_FIT_PROFILE_TOKENS = [...FIT_PROFILE_VALUES].join(" / ");
+const BOS_FORMALITY_TOKENS = [...GARMENT_FORMALITY_VALUES].join(" / ");
+const BOS_SLEEVE_LENGTH_TOKENS = [...SLEEVE_LENGTH_VALUES].join(" / ");
+const BOS_NECKLINE_COVERAGE_TOKENS = [...NECKLINE_COVERAGE_VALUES]
+  .filter(t => t !== "scoop") // deferred — see note above
+  .join(" / ");
+// Curated subset, not the full canonical set — see note above. Every token
+// here must be a real canonical material (enforced by a test), so the one
+// deliberate change ("synthetic" -> "polyester") can never silently drift.
+const BOS_MATERIAL_TOKENS = ["denim", "silk", "cotton", "linen", "leather", "wool", "knit", "polyester", "satin"].join(" / ");
+const BOS_PATTERN_TOKENS = [...GARMENT_PATTERN_VALUES, "textured", "print"].join(" / ");
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -187,6 +264,41 @@ The customer's current Closet has limited usable depth for ${registerLabel} dres
 `;
 }
 
+/**
+ * Applies the deterministic hard-constraint veto (if any) to the AI's raw
+ * analysis, and brings its self-reported confidence in line with whichever
+ * verdict is actually persisted.
+ *
+ * A vetoed BUY→SKIP is a deterministic decision, not an AI judgment — the
+ * AI's confidence number described its own (now-discarded) BUY verdict, so
+ * it no longer describes the verdict being persisted and must not travel
+ * with it. modelConfidence preserves the original value for the record,
+ * mirroring modelVerdict exactly. Both confidence and modelConfidence live
+ * only inside fullAnalysis / the nullable confidence column — no schema
+ * change, no invented score.
+ *
+ * The model's own finalThought/buyIf text was written to justify BUY; once
+ * vetoed it would contradict the persisted SKIP verdict, so it is replaced
+ * rather than shown alongside a verdict it no longer supports.
+ */
+export function applyVerdictOverride(analysis, veto, modelVerdict) {
+  const overridden = veto.vetoed && modelVerdict === "BUY";
+  if (!overridden) {
+    return { ...analysis, verdictOverridden: false, verdictOverrideReason: null, modelVerdict: null, modelConfidence: null };
+  }
+  return {
+    ...analysis,
+    verdict: veto.verdict, // "SKIP"
+    verdictOverridden: true,
+    verdictOverrideReason: veto.vetoReason,
+    modelVerdict,
+    modelConfidence: typeof analysis.confidence === "number" ? analysis.confidence : null,
+    confidence: null,
+    finalThought: veto.vetoReason,
+    buyIf: null,
+  };
+}
+
 function optionLabel(questionId, optionId) {
   // ALL_QUESTIONS covers the live Rev 7 flow plus retired questions, so a stored
   // answer from an older Passport still resolves to real copy instead of a slug.
@@ -197,14 +309,6 @@ function optionLabel(questionId, optionId) {
   if (colour) return colour.name;
   return ALL_OPTION_LABELS[optionId]
     ?? optionId.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
-}
-
-function hashForIndex(str) {
-  let h = 0;
-  for (let i = 0; i < str.length; i++) {
-    h = (Math.imul(31, h) + str.charCodeAt(i)) >>> 0;
-  }
-  return h;
 }
 
 // Magic-byte detection for server-side image format verification.
@@ -459,7 +563,20 @@ async function analyzeItem(request) {
 
     const normalizedCategory = (category || "").trim();
     const compatibleClosetCategories = CLOSET_COMPATIBLE_CATEGORIES[normalizedCategory] || ["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR"];
+    // Pairing candidates: cross-category only (CLOSET_COMPATIBLE_CATEGORIES never
+    // maps a category to itself) — "what would this go with".
     const eligibleClosetItems = closetItems.filter(i => compatibleClosetCategories.includes(i.category));
+    // Duplicate-detection candidates: same declared category — "do you already own
+    // something like this". Deliberately NOT excluded pre-analysis (see
+    // duplicate-evidence.server.ts) — same-slot items are the most important
+    // comparison set for duplication, not noise to filter out.
+    const closetItemCategoryEnum = {
+      Top: "TOPS", Bottom: "BOTTOMS", Dress: "DRESSES", Outerwear: "OUTERWEAR",
+      Shoes: "SHOES", Bag: "BAGS", Accessory: "ACCESSORIES", Jewelry: "JEWELRY",
+    }[normalizedCategory] ?? null;
+    const sameSlotClosetItems = closetItemCategoryEnum
+      ? closetItems.filter(i => i.category === closetItemCategoryEnum)
+      : [];
 
     // Phase 3 — Shared Customer Intelligence, first consumer. Additive only:
     // a failure here must never block the core Buy-or-Skip verdict, so it
@@ -506,6 +623,22 @@ async function analyzeItem(request) {
     const legacyExpressionStr = expressionSplit.legacy
       .map(id => optionLabel("style-expression", id)).join(", ");
 
+    // ── MODEL BOUNDARY ──────────────────────────────────────────────────────────
+    // This single call still produces the draft verdict, explanation copy, and the
+    // vision-only facts (itemType, detectedColor, productSnapshot) — there is no
+    // separate perception step to split it from yet. What changed: the model's
+    // verdict is no longer final. After this call returns, code independently
+    // computes duplicateEvidence (same-slot Closet overlap) and constraintEvidence
+    // (hard dressing-requirement / avoid-colour checks) from the model's own stated
+    // productSnapshot/detectedColor plus data already on file — see
+    // product-facts.server.ts / duplicate-evidence.server.ts / constraint-evidence.server.ts.
+    // A confirmed hard-constraint violation overrides a BUY verdict outright
+    // (applyHardConstraintVeto, below) regardless of what the model argued in its
+    // own explanation text — the model cannot talk its way past deterministic
+    // evidence. Duplication across same-category Closet items is likewise no
+    // longer something the model is trusted to judge on its own; it is computed
+    // in code from the candidates it was never shown here (eligibleClosetItems
+    // below is cross-category pairing material only, never same-slot).
     let analysisResponse;
     try {
       analysisResponse = await fetch("https://api.anthropic.com/v1/messages", {
@@ -710,15 +843,15 @@ Respond ONLY with valid JSON, no markdown:
   "fillsGap": null | "≤20 words — address the customer directly using 'you/your'. Scope strictly to what is visible in the Closet data: e.g. 'Among the pieces you've added, nAia doesn't currently see a similar [type].' FORBIDDEN: 'you lack', 'you don't own', 'your wardrobe is missing', or any absolute ownership claim. nAia only sees what the customer has uploaded — not uploaded ≠ not owned. Set to null if no genuine gap is visible in the Closet data.",
   "occasions": [],
   "productSnapshot": {
-    "observedSilhouette": "token or null — one of: a-line / straight / column / fitted / flared / wrap / shift / oversized / balloon / asymmetric",
-    "observedFitProfile": "token or null — one of: fitted / body-skimming / tailored / structured / relaxed / loose / oversized / flowy",
-    "observedFormality": "token or null — one of: casual / smart-casual / business-casual / business-formal / occasion / evening",
-    "observedSleeveLength": "token or null — one of: full / three-quarter / short / sleeveless / n/a",
-    "observedNecklineCoverage": "token or null — one of: high / crew / mock / cowl-high / v-neck / low / off-shoulder / wrap-variable / n/a",
+    "observedSilhouette": "token or null — one of: ${BOS_SILHOUETTE_TOKENS}",
+    "observedFitProfile": "token or null — one of: ${BOS_FIT_PROFILE_TOKENS}",
+    "observedFormality": "token or null — one of: ${BOS_FORMALITY_TOKENS}",
+    "observedSleeveLength": "token or null — one of: ${BOS_SLEEVE_LENGTH_TOKENS}",
+    "observedNecklineCoverage": "token or null — one of: ${BOS_NECKLINE_COVERAGE_TOKENS}",
     "observedShoulderCoverage": true or false or null,
     "observedMidriffExposed": true or false or null,
-    "observedMaterial": "token or null — e.g. denim / silk / cotton / linen / leather / wool / knit / synthetic / satin",
-    "observedPattern": "token or null — one of: solid / stripe / check / floral / abstract / animal-print / geometric / textured / print",
+    "observedMaterial": "token or null — e.g. ${BOS_MATERIAL_TOKENS}",
+    "observedPattern": "token or null — one of: ${BOS_PATTERN_TOKENS}",
     "observationConfidence": "high — clearly visible / medium — partially visible / low — image quality limits assessment"
   },
   "beforeYouBuy": [
@@ -789,18 +922,49 @@ Respond ONLY with valid JSON, no markdown:
       })
       .filter(p => p !== null && !seen.has(p.name) && seen.add(p.name));
 
-    // Deterministic fallback: when eligible closet items exist but model returned no valid pairing
-    if (analysis.closetPairings.length === 0 && eligibleClosetItems.length > 0) {
-      const namedEligible = eligibleClosetItems.filter(i => i.name != null && i.name.trim() !== "");
-      if (namedEligible.length > 0) {
-        const idx = hashForIndex((publicId || "") + normalizedCategory) % namedEligible.length;
-        const fallbackItem = namedEligible[idx];
-        analysis.closetPairings = [{
-          name: fallbackItem.name,
-          reason: "A complementary piece from your Closet to build this look around."
-        }];
-      }
-    }
+    // No fallback pairing is injected when the model returns zero valid pairings.
+    // A missing pairing is left as an empty list — "no supported pairing", not a
+    // fabricated one. (Previously an arbitrary hash-based pick created false
+    // confidence; removed — see duplicate-evidence.server.ts / decision-evidence.server.ts
+    // for the deterministic evidence that replaces it.)
+
+    // ── 7b. Deterministic decision evidence — computed in code, not by the model ─
+    const declaredFacts = normalizeDeclaredFacts({ category: normalizedCategory, color, brand, size: safeSize });
+    const productFacts = mergeVisionFacts(declaredFacts, {
+      itemType: typeof analysis.itemType === "string" ? analysis.itemType : null,
+      detectedColor: typeof analysis.detectedColor === "string" ? analysis.detectedColor : null,
+      productSnapshot: analysis.productSnapshot ?? null,
+    });
+    const duplicateEvidence = computeDuplicateEvidence(productFacts, sameSlotClosetItems);
+    const constraintEvidence = checkHardConstraints(
+      {
+        dressingPreferences: styleProfile?.dressingPreferences ?? null,
+        dressingRequirementsNote: styleProfile?.dressingRequirementsNote ?? null,
+      },
+      productFacts,
+    );
+    // B2b1 — avoidColors is advisory, not a hard constraint (see the B2b
+    // recon: Passport's own wording is "colours you usually avoid", StyleMe
+    // already treats this field as a soft ranking penalty, and B0 never
+    // shipped). Computed separately from checkHardConstraints so a colour
+    // match can never reach applyHardConstraintVeto.
+    const colourPreferenceEvidence = checkColourPreference(styleProfile?.avoidColors ?? null, productFacts);
+    const wardrobeNeed = getWardrobeNeedEvidence();
+    const decisionEvidence = assembleDecisionEvidence({
+      productFacts,
+      duplicateEvidence,
+      constraintEvidence,
+      colourPreferenceEvidence,
+      wardrobeNeed,
+      computedAt: new Date().toISOString(),
+    });
+
+    // A confirmed hard-constraint violation vetoes a BUY verdict outright — this is
+    // a literal contradiction between a stated customer requirement and the
+    // garment's own observed construction, not left to the model to weigh.
+    const modelVerdict = analysis.verdict;
+    const veto = applyHardConstraintVeto(constraintEvidence);
+    analysis = applyVerdictOverride(analysis, veto, modelVerdict);
 
     // ── 8. Persist analysis (awaited; DB-backed idempotency via unique key) ───
     // Verdict is stated intent only — never a transaction, purchase, or revenue signal.
@@ -828,6 +992,10 @@ Respond ONLY with valid JSON, no markdown:
             schemaVersion: "2.0",
             idempotencyKey,
             // Batch 3 — rich fields
+            // A vetoed verdict has no AI confidence of its own (see applyVerdictOverride) —
+            // the scalar column's own contract is "AI confidence 0-100", which no longer
+            // describes a deterministically-decided verdict, so it is null here, not a
+            // stale number from the discarded BUY.
             confidence:   typeof analysis.confidence === "number" ? analysis.confidence : null,
             category:     normalizedCategory || null,
             colors:       Array.isArray(color) ? color.filter(c => typeof c === "string") : [],
@@ -855,6 +1023,17 @@ Respond ONLY with valid JSON, no markdown:
               skipIf:                typeof analysis.skipIf === "string" && analysis.skipIf.trim() ? analysis.skipIf.trim() : null,
               betterDirection:       typeof analysis.betterDirection === "string" && analysis.betterDirection.trim() ? analysis.betterDirection.trim() : null,
               finalThought:          analysis.finalThought          ?? null,
+              // Code-computed decision evidence (Phase 8 contract) + any deterministic
+              // override applied on top of the model's own verdict. verdictOverridden
+              // distinguishes "model decided BUY and code let it stand" from
+              // "model decided BUY and a confirmed hard-constraint violation vetoed it".
+              // modelConfidence preserves the AI's own confidence in its (now-discarded)
+              // BUY verdict for the record — see applyVerdictOverride.
+              verdictOverridden:     analysis.verdictOverridden,
+              verdictOverrideReason: analysis.verdictOverrideReason,
+              modelVerdict:          analysis.modelVerdict,
+              modelConfidence:       analysis.modelConfidence,
+              decisionEvidence,
               // Phase 3 — Shared Customer Intelligence. Diagnostic only: the
               // one structural WI finding (if any) that was surfaced as
               // context for this analysis. Never itself a verdict signal.
@@ -907,6 +1086,8 @@ Respond ONLY with valid JSON, no markdown:
       analysisId: analysisRecord?.id ?? null,
       closetItemCount: closetItems.length,
       eligibleClosetItemCount: eligibleClosetItems.length,
+      sameSlotClosetItemCount: sameSlotClosetItems.length,
+      decisionEvidence,
       idempotentRepeat: isIdempotentRepeat,
     });
 }

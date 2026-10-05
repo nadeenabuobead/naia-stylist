@@ -228,6 +228,15 @@ export default function BuyOrSkipResult() {
   const betterDirection: string | null = typeof fa?.betterDirection === "string" && fa.betterDirection.trim()
     ? fa.betterDirection.trim() : null;
 
+  // B2b3 — deterministic, BUY-only colour-preference caution. Trigger is the
+  // already-computed B2b2 structured status alone — no re-matching, no prose
+  // inspection, no provenance rendered. See the B2b3 recon: a conflict found
+  // on SKIP is deliberately NOT shown here (risks reading as a skip reason);
+  // "clear"/"unknown"/missing evidence all render nothing, same as a BUY with
+  // no colour conflict at all.
+  const showColourCaution =
+    !skipResult && fa?.decisionEvidence?.colourPreferenceEvidence?.status === "conflict";
+
   const displayType = fa?.itemType ?? analysis.category;
 
   // Customer-selected colours from the form
@@ -426,6 +435,12 @@ export default function BuyOrSkipResult() {
                 {details?.color && (
                   <div className="bos-result-section-row">
                     <strong>Colour</strong>{" — "}{details.color}
+                  </div>
+                )}
+
+                {showColourCaution && (
+                  <div className="bos-result-section-row">
+                    <strong>Worth Keeping in Mind</strong>{" — "}This item includes a colour you usually avoid.
                   </div>
                 )}
 
