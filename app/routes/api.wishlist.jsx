@@ -24,6 +24,78 @@ import { computeDuplicateEvidence } from "../lib/buyskip/duplicate-evidence.serv
 import { checkHardConstraints } from "../lib/buyskip/constraint-evidence.server";
 import { getWardrobeNeedEvidence } from "../lib/buyskip/wardrobe-need.server";
 import { assembleDecisionEvidence, applyHardConstraintVeto } from "../lib/buyskip/decision-evidence.server";
+import {
+  GARMENT_SILHOUETTE_VALUES,
+  FIT_PROFILE_VALUES,
+  GARMENT_FORMALITY_VALUES,
+  SLEEVE_LENGTH_VALUES,
+  NECKLINE_COVERAGE_VALUES,
+  GARMENT_MATERIAL_VALUES,
+  GARMENT_PATTERN_VALUES,
+} from "../lib/ai/garment-intelligence.types";
+
+// B1 — candidate-product vision vocabulary, sourced from canonical Garment
+// Intelligence rather than hand-copied.
+//
+// B1a (pure source convergence — byte-identical rendered output, proven by
+// test): silhouette, formality, sleeveLength. No consumer behavior changes.
+//
+// B1b (genuine output-space changes — each proven safe individually before
+// inclusion; a causal pass found two canonical tokens NOT safe to add here):
+//   - fitProfile gains "n/a". Proven via fixture: duplicate-evidence's
+//     normalize() already treats "n/a" exactly like an unknown value (both
+//     collapse to null before comparison) — byte-identical DuplicateEvidence
+//     output to the pre-B1 "model didn't know" case. Semantically valid for
+//     Buy/Skip's own non-apparel candidate categories (Shoes/Bag/Accessory/
+//     Jewelry), exactly as it already is for the same categories in Closet.
+//     The one real effect: the admin Decision Evidence view now shows a row
+//     ("n/a · inferred") where it previously showed nothing (ProductFactRow
+//     suppresses null values) — a correct, honest improvement, not a bug.
+//   - necklineCoverage gains "shirt-collar" only. Proven via the full
+//     constraint-evidence matrix (chest-neckline-covered, dresses-modestly,
+//     wears-hijab, usually-wears-abayas, kanduras-thobes): shirt-collar
+//     falls through to "satisfied" in every case, correctly — it is
+//     unambiguously high coverage, the same bucket as crew/mock/high.
+//   - "scoop" is DEFERRED, not added. The same causal matrix showed it also
+//     falls through to "satisfied" in every case, identically to crew — but
+//     a scoop neckline is only moderately conservative and is a real,
+//     plausible conflict for a customer who wears hijab/abaya or stated
+//     "dresses modestly". constraint-evidence.server.ts's lowNeckline() has
+//     no notion of "moderate" exposure (only "low"/"off-shoulder" count as
+//     violated); importing "scoop" would silently expose a value the
+//     evaluator does not intentionally understand as non-violating. Left
+//     out of B1; flagged for the constraint-evidence owner, not force-added
+//     here just because canonical offers it.
+//   - pattern: "stripe" corrected to canonical's "stripes" — zero
+//     deterministic consumer anywhere reads pattern (grep-confirmed across
+//     duplicate-evidence/constraint-evidence/decision-evidence/admin/
+//     customer display), zero historical records ever stored either
+//     spelling. The two Buy/Skip-local, non-canonical additions ("textured",
+//     "print") are kept — ambiguous enough (texture/material-like, and
+//     overly generic, respectively) that they are not force-mapped onto any
+//     single canonical token, and removing them would shrink legal model
+//     output, a bigger change than this pass's scope.
+//   - material: kept as a curated, canonical-sourced subset of the SAME
+//     size as before (Option B, not "all 21 canonical tokens") — material
+//     has no deterministic consumer anywhere, so there is no concrete
+//     benefit to enlarging the model's prompt surface, only drift-elimination
+//     risk to avoid. "synthetic" (not canonical) is replaced with
+//     "polyester" (its closest canonical analogue); every other token is
+//     unchanged. Verified by test that every curated token is a real
+//     member of GARMENT_MATERIAL_VALUES, so this can never drift again
+//     without the test catching it.
+const BOS_SILHOUETTE_TOKENS = [...GARMENT_SILHOUETTE_VALUES].join(" / ");
+const BOS_FIT_PROFILE_TOKENS = [...FIT_PROFILE_VALUES].join(" / ");
+const BOS_FORMALITY_TOKENS = [...GARMENT_FORMALITY_VALUES].join(" / ");
+const BOS_SLEEVE_LENGTH_TOKENS = [...SLEEVE_LENGTH_VALUES].join(" / ");
+const BOS_NECKLINE_COVERAGE_TOKENS = [...NECKLINE_COVERAGE_VALUES]
+  .filter(t => t !== "scoop") // deferred — see note above
+  .join(" / ");
+// Curated subset, not the full canonical set — see note above. Every token
+// here must be a real canonical material (enforced by a test), so the one
+// deliberate change ("synthetic" -> "polyester") can never silently drift.
+const BOS_MATERIAL_TOKENS = ["denim", "silk", "cotton", "linen", "leather", "wool", "knit", "polyester", "satin"].join(" / ");
+const BOS_PATTERN_TOKENS = [...GARMENT_PATTERN_VALUES, "textured", "print"].join(" / ");
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -771,15 +843,15 @@ Respond ONLY with valid JSON, no markdown:
   "fillsGap": null | "≤20 words — address the customer directly using 'you/your'. Scope strictly to what is visible in the Closet data: e.g. 'Among the pieces you've added, nAia doesn't currently see a similar [type].' FORBIDDEN: 'you lack', 'you don't own', 'your wardrobe is missing', or any absolute ownership claim. nAia only sees what the customer has uploaded — not uploaded ≠ not owned. Set to null if no genuine gap is visible in the Closet data.",
   "occasions": [],
   "productSnapshot": {
-    "observedSilhouette": "token or null — one of: a-line / straight / column / fitted / flared / wrap / shift / oversized / balloon / asymmetric",
-    "observedFitProfile": "token or null — one of: fitted / body-skimming / tailored / structured / relaxed / loose / oversized / flowy",
-    "observedFormality": "token or null — one of: casual / smart-casual / business-casual / business-formal / occasion / evening",
-    "observedSleeveLength": "token or null — one of: full / three-quarter / short / sleeveless / n/a",
-    "observedNecklineCoverage": "token or null — one of: high / crew / mock / cowl-high / v-neck / low / off-shoulder / wrap-variable / n/a",
+    "observedSilhouette": "token or null — one of: ${BOS_SILHOUETTE_TOKENS}",
+    "observedFitProfile": "token or null — one of: ${BOS_FIT_PROFILE_TOKENS}",
+    "observedFormality": "token or null — one of: ${BOS_FORMALITY_TOKENS}",
+    "observedSleeveLength": "token or null — one of: ${BOS_SLEEVE_LENGTH_TOKENS}",
+    "observedNecklineCoverage": "token or null — one of: ${BOS_NECKLINE_COVERAGE_TOKENS}",
     "observedShoulderCoverage": true or false or null,
     "observedMidriffExposed": true or false or null,
-    "observedMaterial": "token or null — e.g. denim / silk / cotton / linen / leather / wool / knit / synthetic / satin",
-    "observedPattern": "token or null — one of: solid / stripe / check / floral / abstract / animal-print / geometric / textured / print",
+    "observedMaterial": "token or null — e.g. ${BOS_MATERIAL_TOKENS}",
+    "observedPattern": "token or null — one of: ${BOS_PATTERN_TOKENS}",
     "observationConfidence": "high — clearly visible / medium — partially visible / low — image quality limits assessment"
   },
   "beforeYouBuy": [
