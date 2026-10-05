@@ -46,6 +46,23 @@ export function resolveEngineColour(
   return { colors: effective.colors, primaryColor: effective.primaryColor };
 }
 
+// Garment Intelligence Phase 4B — computes the canonical/effective formality
+// value for every garment, UNCONDITIONALLY (no flag here). This coexists
+// alongside the raw `formality` field on ClosetAnchorInput rather than
+// replacing it — autoSelectClosetAnchor (anchor selection) is explicitly
+// excluded from Phase 4B and must keep reading the unchanged raw `formality`
+// field. The Phase-4B flag is applied at the single T2 read-site in
+// styleme-result.server.ts (resolveT2Formality), which chooses between the
+// two coexisting fields — never here. Reuses getEffectiveClosetItem, the
+// same authoritative precedence logic ResolvedGarment.formality itself is a
+// pure pass-through of — not a second, independent precedence implementation.
+export function resolveEffectiveFormality(
+  item: ClosetItemFields,
+  adminReview: { reviewStatus: string; overrides: unknown } | null | undefined,
+): string | null {
+  return getEffectiveClosetItem(item, adminReview).formality ?? null;
+}
+
 const VALID_HANDLES = new Set(getAllCatalogProducts().map((p) => p.handle));
 
 /**
@@ -323,6 +340,10 @@ export async function loadAllClosetItemsForEngine(
     }
     // Phase 4A: colour only. See resolveEngineColour's own doc for the OFF/ON contract.
     const engineColour = resolveEngineColour(item, item.adminReview, CANONICAL_STYLEME_COLOUR);
+    // Phase 4B: formality only. Computed unconditionally — coexists with raw
+    // `formality` below rather than replacing it. See resolveEffectiveFormality's
+    // own doc; the flag is applied only at T2's read-site, not here.
+    const effectiveFormality = resolveEffectiveFormality(item, item.adminReview);
     const p = item.styleMeProfile;
     const approvedProfile =
       p?.profileStatus === "approved"
@@ -360,6 +381,7 @@ export async function loadAllClosetItemsForEngine(
       imageUrl,
       garmentRelationships: item.garmentRelationships,
       formality: item.formality ?? null,
+      effectiveFormality,
       // Garment Intelligence fields
       fitProfile: item.fitProfile ?? null,
       waistShape: item.waistShape ?? null,

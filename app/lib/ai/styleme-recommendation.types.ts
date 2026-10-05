@@ -159,6 +159,13 @@ export interface ClosetAnchorInput {
   subcategory?: string | null;
   garmentRelationships?: string[];
   formality?: string | null; // GarmentFormality token — null when item not yet analyzed
+  // Garment Intelligence Phase 4B — canonical/effective formality, computed
+  // unconditionally alongside the raw `formality` field above (never replacing
+  // it). Only the T2 read-site in evaluateCompleteOutfit chooses between the
+  // two, behind CANONICAL_STYLEME_FORMALITY. autoSelectClosetAnchor and every
+  // other consumer must keep reading `formality` — this field does not exist
+  // for them.
+  effectiveFormality?: string | null;
   // Garment Intelligence fields (Group 3B — optional; null when item not yet analyzed)
   fitProfile?: string | null;
   waistShape?: string | null;
