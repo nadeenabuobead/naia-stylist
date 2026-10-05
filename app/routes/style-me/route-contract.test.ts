@@ -1079,15 +1079,18 @@ describe("StyleMe Rev 3 Pre-QA cleanup — regression tests", () => {
   });
 
   // K. occasion still renders correctly
-  it("K: occasion label renders for Rev 3 sessions using OCCASION_LABELS", () => {
+  it("K: occasion label renders for Rev 3 sessions using occasionDisplayFor", () => {
     const text = src("result.tsx");
     // The Rev 3 branch in the template uses REV3_STATE_LABELS inline — anchor on it
     const templateUsage = text.indexOf("REV3_STATE_LABELS[(loaderData");
     assert.ok(templateUsage !== -1, "REV3_STATE_LABELS must be used in the template");
     const rev3Section = text.slice(templateUsage, templateUsage + 1500);
+    // The local OCCASION_LABELS map was replaced by occasionDisplayFor, which prefers the
+    // wording the customer actually chose and falls back to the questionnaire label for her
+    // canonical answer. The row itself must still render.
     assert.ok(
-      rev3Section.includes("OCCASION_LABELS") && rev3Section.includes("Dressing for"),
-      "Rev 3 branch must render the occasion row using OCCASION_LABELS",
+      rev3Section.includes("occasionDisplayFor") && rev3Section.includes("Dressing for"),
+      "Rev 3 branch must render the occasion row using occasionDisplayFor",
     );
   });
 

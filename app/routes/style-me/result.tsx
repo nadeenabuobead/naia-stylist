@@ -27,6 +27,7 @@ import {
 } from "~/lib/ai/styleme-result.server";
 import { autoSelectClosetAnchor, resolveActionAnchor, loadAllClosetItemsForEngine } from "~/lib/ai/styleme-anchor.server";
 import { parseSuggestionMetadata } from "~/lib/ai/styleme-result.types";
+import { occasionDisplayFor } from "~/lib/styleme/occasion-display";
 import { issueImageToken } from "~/lib/dev-tryon-image-tokens.server";
 import { isTryOnEligible } from "~/lib/ai/tryon-product-eligibility";
 import { TryOnPanel } from "~/components/TryOnPanel";
@@ -383,6 +384,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
         desiredFeelings: feelings ?? [],
         desiredFeeling: feelings?.[0] || null,
         occasion,
+        // Presentation only — the wording she read at the occasion step, so the result can
+        // echo her own phrasing instead of a label written against the canonical ID. Absent
+        // on reload and on a saved look (StylingSession has no column for it), where
+        // occasionDisplayFor falls back to the questionnaire label for the canonical answer.
+        occasionDisplayLabel: (cookieSession.get("styleMeOccasionDisplayLabel") as string | undefined) ?? null,
         bodyNeeds,
         formalityConditional,
         practicalIds,
@@ -1156,11 +1162,6 @@ function isDuplicateOfCompletionSuggestion(
   return layer.some((p) => COMPLETION_SLOT_TO_ITEM_TYPE[p.slot ?? ""] === item.itemType);
 }
 
-const OCCASION_LABELS: Record<string, string> = {
-  "everyday": "Everyday", "work": "Work", "dinner": "Dinner", "date-night": "Date night",
-  "girls-night": "Evening out", "family": "Family gathering", "special-event": "Special event",
-  "travel": "Travel", "not-sure": "Not sure yet", "active": "Active / busy day",
-};
 
 // The loader has several return branches (direct sessionId load, pending-save,
 // error, and the cookie-path fresh-generation branch); only the fresh-generation
@@ -1520,7 +1521,7 @@ export default function StyleMeResult() {
               {loaderData.occasion && (
                 <div>
                   <p className="sm-result-context-label">Dressing for</p>
-                  <p className="sm-result-context-value">{OCCASION_LABELS[loaderData.occasion] ?? loaderData.occasion}</p>
+                  <p className="sm-result-context-value">{occasionDisplayFor((loaderData as { occasionDisplayLabel?: string | null }).occasionDisplayLabel, loaderData.occasion)}</p>
                 </div>
               )}
             </>
@@ -1541,7 +1542,7 @@ export default function StyleMeResult() {
               {loaderData.occasion && (
                 <div>
                   <p className="sm-result-context-label">Dressing For</p>
-                  <p className="sm-result-context-value">{OCCASION_LABELS[loaderData.occasion] ?? loaderData.occasion}</p>
+                  <p className="sm-result-context-value">{occasionDisplayFor((loaderData as { occasionDisplayLabel?: string | null }).occasionDisplayLabel, loaderData.occasion)}</p>
                 </div>
               )}
             </>

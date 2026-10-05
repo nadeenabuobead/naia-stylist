@@ -573,12 +573,15 @@ describe("C. Active occasion", () => {
     assert.ok(lineMatch![1].includes('"active"'), 'skipForOccasions must contain "active"');
   });
 
-  it("C4 OCCASION_LABELS in result.tsx maps 'active' → 'Active / busy day'", () => {
-    const resultSrc = readFileSync(join(ROOT, "app/routes/style-me/result.tsx"), "utf8");
+  it("C4 the Active occasion displays as 'Active / busy day'", () => {
+    // The map moved out of result.tsx into app/lib/styleme/occasion-display.ts when the
+    // result page was changed to echo the questionnaire's own wording. The assertion is the
+    // same one — Active must read as "Active / busy day" — against the new home.
+    const displaySrc = readFileSync(join(ROOT, "app/lib/styleme/occasion-display.ts"), "utf8");
     assert.ok(
-      resultSrc.includes('"active": "Active / busy day"') ||
-      resultSrc.includes("'active': 'Active / busy day'"),
-      "result.tsx OCCASION_LABELS must map active → 'Active / busy day'",
+      displaySrc.includes('"active": "Active / busy day"') ||
+      displaySrc.includes("'active': 'Active / busy day'"),
+      "OCCASION_DISPLAY_LABELS must map active → 'Active / busy day'",
     );
   });
 
