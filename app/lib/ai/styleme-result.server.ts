@@ -798,6 +798,7 @@ function buildMetadataJson(result: StyleMeCustomerResult): string {
   const metadata: StyleMeMetadata = {
     schemaVersion: 1,
     outcome: result.outcome,
+    ...(result.mode !== undefined && { mode: result.mode }),
     primaryHandle: result.primaryProduct?.handle ?? null,
     alternatives: result.alternatives.map((a) => ({
       handle: a.handle,
@@ -5186,7 +5187,10 @@ export async function computeStyleMeResult(
 ): Promise<StyleMeCustomerResult> {
   const recommendation = _runRec(engineInput);
   const { session } = engineInput;
-  const mode: StyleMeMode = engineInput.mode ?? "nadine";
+  // Defaults to naia so an omitted mode cannot silently enable the catalogue. The two
+  // route readers already defaulted to naia; this line used to say "nadine", so any caller
+  // that forgot to pass a mode got the opposite answer from the one the routes give.
+  const mode: StyleMeMode = engineInput.mode ?? "naia";
 
   // Memoised Closet loader — avoids duplicate DB queries when called multiple times.
   let closetItemsCache: ClosetAnchorInput[] | null = null;
@@ -5722,6 +5726,7 @@ export async function computeStyleMeResult(
     song,
     rawRecommendation: recommendation,
     resultDirections,
+    mode,
   };
 }
 

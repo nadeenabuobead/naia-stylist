@@ -1,0 +1,13 @@
+-- StyleMe product context, persisted.
+--
+-- "naia"   style from the customer's own closet; the NADINE catalogue must never leak in
+-- "nadine" the customer's closet plus eligible NADINE pieces
+--
+-- Previously this lived only in the styleMeMode cookie, so a NADINE session whose cookie
+-- expired — and every reload by sessionId — silently became an nAia session.
+--
+-- Additive and nullable: every existing row keeps NULL, and resolveStyleMeMode falls back
+-- to the cookie and then to "naia" (closet-only) for those. No backfill, because we cannot
+-- know retroactively which historical sessions were NADINE, and guessing would be worse
+-- than the safe default.
+ALTER TABLE "StylingSession" ADD COLUMN "styleMeMode" TEXT;

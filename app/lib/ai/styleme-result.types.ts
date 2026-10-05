@@ -100,6 +100,9 @@ export interface StyleMeCustomerResult {
   rawRecommendation: StyleMeRecommendationResult;
   // Rev 3 — Psychology-First result directions (Group 5). Empty array for legacy sessions.
   resultDirections: ResultDirection[];
+  /** Product context this result was generated in. Recorded into the persisted metadata so
+   *  a reloaded suggestion knows its own context instead of re-deriving it from a cookie. */
+  mode?: "naia" | "nadine";
 }
 
 // ── Versioned metadata envelope (stored in OutfitSuggestion.moodDescription) ─
@@ -107,6 +110,9 @@ export interface StyleMeCustomerResult {
 export interface StyleMeMetadata {
   schemaVersion: 1;
   outcome: StyleMeOutcome;
+  /** Product context this suggestion was generated under. Optional: suggestions persisted
+   *  before the field existed carry none, and history must keep rendering them. */
+  mode?: "naia" | "nadine";
   primaryHandle: string | null;
   alternatives: Array<{
     handle: string;

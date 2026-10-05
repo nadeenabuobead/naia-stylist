@@ -27,6 +27,7 @@ import {
 } from "~/lib/ai/styleme-result.server";
 import { autoSelectClosetAnchor, resolveActionAnchor, loadAllClosetItemsForEngine } from "~/lib/ai/styleme-anchor.server";
 import { parseSuggestionMetadata } from "~/lib/ai/styleme-result.types";
+import { resolveStyleMeMode } from "~/lib/styleme/mode-resolution";
 import { occasionDisplayFor } from "~/lib/styleme/occasion-display";
 import { issueImageToken } from "~/lib/dev-tryon-image-tokens.server";
 import { isTryOnEligible } from "~/lib/ai/tryon-product-eligibility";
@@ -349,6 +350,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const adjustVibeSourceId = (cookieSession.get("styleMeAdjustVibeSourceId") as string | undefined) ?? null;
     if (adjustVibeSourceId) cookieSession.unset("styleMeAdjustVibeSourceId");
 
+    // Adjust Vibe skips the source step, which is the only place that stamps the product
+    // context — so a continuation inherits it from the session it continues rather than
+    // relying on the cookie having survived.
+    const parentMode = adjustVibeSourceId
+      ? (await prisma.stylingSession.findUnique({
+          where: { id: adjustVibeSourceId },
+          select: { styleMeMode: true },
+        }))?.styleMeMode ?? null
+      : null;
+    const sessionStyleMeMode = resolveStyleMeMode(parentMode, cookieSession.get("styleMeMode"));
+
     const moodFirst = mood ?? null;
     const stylingSession = await prisma.stylingSession.create({
       data: {
@@ -363,6 +375,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         closetAnchorId: (source === "my-closet" || source === "both") ? (closetAnchorId ?? null) : null,
         anchorProvenance: (source === "my-closet" || source === "both") ? anchorProvenance : null,
         parentSessionId: adjustVibeSourceId,
+        styleMeMode: sessionStyleMeMode,
         // Rev 3 — Psychology-First (Group 5). Wording context only; zero product scoring.
         ...(isRev3Session && {
           state: rev3State,
@@ -558,7 +571,9 @@ export async function action({ request }: ActionFunctionArgs) {
         : bodyNeeds;
 
       const cookieSession = await getSession(request.headers.get("Cookie"));
-      const styleMeMode = (cookieSession.get("styleMeMode") as "naia" | "nadine" | undefined) ?? "naia";
+      // Record first, cookie second. The StylingSession was stamped at creation, so a
+      // generation on an expired cookie keeps the context it started in.
+      const styleMeMode = resolveStyleMeMode(session.styleMeMode, cookieSession.get("styleMeMode"));
       const occasionDisplayLabel = (cookieSession.get("styleMeOccasionDisplayLabel") as string | undefined) ?? null;
 
       const engineInput = buildEngineInput({
@@ -670,7 +685,9 @@ export async function action({ request }: ActionFunctionArgs) {
       }
 
       const regenCookieSession = await getSession(request.headers.get("Cookie"));
-      const regenMode = (regenCookieSession.get("styleMeMode") as "naia" | "nadine" | undefined) ?? "naia";
+      // New Look must not change product context. The session record is authoritative; the
+      // cookie is only a fallback for sessions written before the column existed.
+      const regenMode = resolveStyleMeMode(session.styleMeMode, regenCookieSession.get("styleMeMode"));
       const regenOccasionDisplayLabel = (regenCookieSession.get("styleMeOccasionDisplayLabel") as string | undefined) ?? null;
 
       // Collect handles from the most-recent suggestion so the engine applies a

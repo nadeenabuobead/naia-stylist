@@ -321,6 +321,13 @@ model StylingSession {
   weather         String?
   timeOfDay       String?   // morning, afternoon, evening
 
+  // Product context this session was generated in: "naia" (closet-only) or "nadine"
+  // (closet + eligible NADINE pieces). Nullable because every row written before this
+  // column existed has none — resolveStyleMeMode falls back to the cookie, then to "naia".
+  // Persisted because the cookie is a statement about a browser, not about the session:
+  // once it expired, a NADINE session silently became an nAia one on reload.
+  styleMeMode     String?
+
   // Output
   suggestions     OutfitSuggestion[]
 
