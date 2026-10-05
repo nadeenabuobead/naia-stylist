@@ -86,6 +86,7 @@ function DecisionEvidenceSection({ decisionEvidence }: { decisionEvidence: unkno
   const pf = isRecord(decisionEvidence.productFacts) ? decisionEvidence.productFacts : null;
   const dup = isRecord(decisionEvidence.duplicateEvidence) ? decisionEvidence.duplicateEvidence : null;
   const con = isRecord(decisionEvidence.constraintEvidence) ? decisionEvidence.constraintEvidence : null;
+  const colour = isRecord(decisionEvidence.colourPreferenceEvidence) ? decisionEvidence.colourPreferenceEvidence : null;
   const need = isRecord(decisionEvidence.wardrobeNeed) ? decisionEvidence.wardrobeNeed : null;
 
   return (
@@ -147,6 +148,20 @@ function DecisionEvidenceSection({ decisionEvidence }: { decisionEvidence: unkno
                 A free-text cultural/religious dressing requirement exists on this customer's Passport — deferred to the canonical Passport resolver, not evaluated here.
               </p>
             )}
+          </div>
+        )}
+
+        {colour && (
+          <div>
+            <p style={{ fontSize: "0.7rem", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "0.3rem" }}>
+              Colour Preference {colour.status === "conflict" && <span style={{ color: "#fbbf24" }}>— advisory, not a violation</span>}
+            </p>
+            <p style={{ fontSize: "0.78rem", color: colour.status === "conflict" ? "#fbbf24" : "#9ca3af" }}>
+              {String(colour.reason ?? "")}
+            </p>
+            <p style={{ fontSize: "0.65rem", color: "#6b7280", marginTop: "0.2rem" }}>
+              Never contributes to Hard-Constraint Evidence above and cannot change the verdict on its own — Passport's avoidColors is a stated preference ("colours you usually avoid"), not an exclusion rule.
+            </p>
           </div>
         )}
 

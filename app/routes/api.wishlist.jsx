@@ -21,7 +21,7 @@ import { loadWardrobeIntelligence } from "../lib/ai/wardrobe-intelligence.server
 import { resolveCustomerIntelligence } from "../lib/ai/customer-intelligence-resolver.server";
 import { normalizeDeclaredFacts, mergeVisionFacts } from "../lib/buyskip/product-facts.server";
 import { computeDuplicateEvidence } from "../lib/buyskip/duplicate-evidence.server";
-import { checkHardConstraints } from "../lib/buyskip/constraint-evidence.server";
+import { checkHardConstraints, checkColourPreference } from "../lib/buyskip/constraint-evidence.server";
 import { getWardrobeNeedEvidence } from "../lib/buyskip/wardrobe-need.server";
 import { assembleDecisionEvidence, applyHardConstraintVeto } from "../lib/buyskip/decision-evidence.server";
 import {
@@ -940,15 +940,21 @@ Respond ONLY with valid JSON, no markdown:
       {
         dressingPreferences: styleProfile?.dressingPreferences ?? null,
         dressingRequirementsNote: styleProfile?.dressingRequirementsNote ?? null,
-        avoidColors: styleProfile?.avoidColors ?? null,
       },
       productFacts,
     );
+    // B2b1 — avoidColors is advisory, not a hard constraint (see the B2b
+    // recon: Passport's own wording is "colours you usually avoid", StyleMe
+    // already treats this field as a soft ranking penalty, and B0 never
+    // shipped). Computed separately from checkHardConstraints so a colour
+    // match can never reach applyHardConstraintVeto.
+    const colourPreferenceEvidence = checkColourPreference(styleProfile?.avoidColors ?? null, productFacts);
     const wardrobeNeed = getWardrobeNeedEvidence();
     const decisionEvidence = assembleDecisionEvidence({
       productFacts,
       duplicateEvidence,
       constraintEvidence,
+      colourPreferenceEvidence,
       wardrobeNeed,
       computedAt: new Date().toISOString(),
     });

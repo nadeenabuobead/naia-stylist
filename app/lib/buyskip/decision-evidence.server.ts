@@ -17,7 +17,7 @@
 
 import type { ProductFacts } from "./product-facts.server";
 import type { DuplicateEvidence } from "./duplicate-evidence.server";
-import type { ConstraintEvidence } from "./constraint-evidence.server";
+import type { ConstraintEvidence, ColourPreferenceEvidence } from "./constraint-evidence.server";
 import type { WardrobeNeedEvidence } from "./wardrobe-need.server";
 
 export type BuySkipDecisionState = "BUY" | "LEAN_BUY" | "LEAN_SKIP" | "SKIP" | "INSUFFICIENT_EVIDENCE";
@@ -26,6 +26,8 @@ export interface DecisionEvidence {
   productFacts: ProductFacts;
   duplicateEvidence: DuplicateEvidence;
   constraintEvidence: ConstraintEvidence;
+  /** B2b1 — advisory only. Never read by applyHardConstraintVeto. */
+  colourPreferenceEvidence: ColourPreferenceEvidence;
   wardrobeNeed: WardrobeNeedEvidence;
   passportAlignment: "available" | "deferred_to_resolved_passport";
   tasteEvidence: "unavailable";
@@ -35,12 +37,13 @@ export interface DecisionEvidence {
   };
 }
 
-export const DECISION_EVIDENCE_SCHEMA_VERSION = "buyskip-decision-evidence-v1";
+export const DECISION_EVIDENCE_SCHEMA_VERSION = "buyskip-decision-evidence-v2";
 
 export function assembleDecisionEvidence(input: {
   productFacts: ProductFacts;
   duplicateEvidence: DuplicateEvidence;
   constraintEvidence: ConstraintEvidence;
+  colourPreferenceEvidence: ColourPreferenceEvidence;
   wardrobeNeed: WardrobeNeedEvidence;
   computedAt: string;
 }): DecisionEvidence {
@@ -48,6 +51,7 @@ export function assembleDecisionEvidence(input: {
     productFacts: input.productFacts,
     duplicateEvidence: input.duplicateEvidence,
     constraintEvidence: input.constraintEvidence,
+    colourPreferenceEvidence: input.colourPreferenceEvidence,
     wardrobeNeed: input.wardrobeNeed,
     passportAlignment: input.constraintEvidence.deferredToResolvedPassport ? "deferred_to_resolved_passport" : "available",
     tasteEvidence: "unavailable",
@@ -72,11 +76,15 @@ export interface NoVetoResult {
 
 /**
  * The one place code is allowed to override the model's own verdict outright.
- * A hard dressing-requirement or avoided-colour violation is a literal
- * contradiction between a customer's explicit requirement and the garment's
- * own observed construction — not a judgement call the model should be
- * trusted to make consistently. Soft/unknown evidence never triggers this;
- * only a confirmed "violated" check does.
+ * A hard dressing-requirement violation is a literal contradiction between a
+ * customer's explicit requirement and the garment's own observed
+ * construction — not a judgement call the model should be trusted to make
+ * consistently. Soft/unknown evidence never triggers this; only a confirmed
+ * "violated" check does.
+ *
+ * B2b1 — colourPreferenceEvidence is NOT a ConstraintCheck and is never
+ * passed into this function; an avoid-colour match can never, by itself,
+ * reach this veto. See constraint-evidence.server.ts for why.
  */
 export function applyHardConstraintVeto(constraintEvidence: ConstraintEvidence): VetoResult | NoVetoResult {
   if (!constraintEvidence.hasHardViolation) {

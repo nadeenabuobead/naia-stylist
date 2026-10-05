@@ -3,16 +3,30 @@
 //
 // This is NOT a Passport resolver. It only checks the small set of explicit
 // `dressingPreferences` tokens that map cleanly onto fields the vision model
-// already states (sleeve length, neckline coverage, midriff exposure) plus
-// `avoidColors` against the detected colour. Anything that would require
-// understanding free text (dressingRequirementsNote) or a garment property
-// this flow doesn't observe (hemline/leg coverage, sheerness, open backs) is
-// explicitly deferred — never guessed.
+// already states (sleeve length, neckline coverage, midriff exposure).
+// Anything that would require understanding free text
+// (dressingRequirementsNote) or a garment property this flow doesn't observe
+// (hemline/leg coverage, sheerness, open backs) is explicitly deferred —
+// never guessed.
 //
 // A "violated" result here is strong enough to veto a BUY verdict in code,
 // because it is a direct, literal contradiction between a customer's stated
 // hard requirement and the model's own stated observation of the garment —
 // not a judgement call.
+//
+// B2b1 — avoidColors is NOT a hard requirement and does not belong in this
+// aggregation. The actual Passport wording is "Are there any colours you
+// usually avoid?" — explicitly habitual, not absolute (see the B2b recon);
+// StyleMe already treats the same field as a soft ranking penalty, never an
+// exclusion. checkColourPreference (below) produces separate, non-veto
+// advisory evidence — see decision-evidence.server.ts's
+// `colourPreferenceEvidence`, assembled alongside `constraintEvidence` but
+// never folded into `hasHardViolation`. Colour-matching semantics themselves
+// (substring, no confidence gate) are UNCHANGED from before B2b1 — only
+// their authority changed. A real firm "never show me this colour" concept,
+// if the product ever wants one, belongs in an explicit signal of its own
+// (the architecture already has a name for this: `firmNoColors`, currently
+// unwired anywhere) — not a reinterpretation of this field.
 
 import type { ProductFacts } from "./product-facts.server";
 
@@ -30,6 +44,18 @@ export interface ConstraintEvidence {
   checks: ConstraintCheck[];
   /** true when a free-text dressing requirement exists that this layer cannot evaluate */
   deferredToResolvedPassport: boolean;
+}
+
+// B2b1 — deliberately NOT a ConstraintCheck and NOT "violated"/"satisfied".
+// Those words belong to hard-constraint authority; this is advisory evidence
+// that must never be mistaken for it, in code or in the admin display.
+export type ColourPreferenceStatus = "conflict" | "clear" | "unknown";
+
+export interface ColourPreferenceEvidence {
+  status: ColourPreferenceStatus;
+  detectedColour: string | null;
+  avoidColours: string[];
+  reason: string;
 }
 
 interface DressingRequirementMapping {
@@ -86,31 +112,10 @@ const HARD_REQUIREMENT_MAP: DressingRequirementMapping[] = [
   { id: "kanduras-thobes",        label: "Wears kanduras / thobes",       evaluate: modestyComposite },
 ];
 
-function checkAvoidColors(avoidColors: string[] | null | undefined, facts: ProductFacts): ConstraintCheck | null {
-  if (!avoidColors || avoidColors.length === 0) return null;
-  const detected = facts.detectedColor.value?.toLowerCase().trim() ?? null;
-  if (!detected) {
-    return { requirementId: "avoid-colors", label: "Avoid specified colours", state: "unknown", reason: "No detected colour available to check." };
-  }
-  const violated = avoidColors.some(c => {
-    const avoided = c.toLowerCase().trim();
-    return avoided.length > 0 && (detected.includes(avoided) || avoided.includes(detected));
-  });
-  return {
-    requirementId: "avoid-colors",
-    label: "Avoid specified colours",
-    state: violated ? "violated" : "satisfied",
-    reason: violated
-      ? `Detected colour "${facts.detectedColor.value}" matches an avoided colour.`
-      : "Detected colour does not match any avoided colour.",
-  };
-}
-
 export function checkHardConstraints(
   passport: {
     dressingPreferences?: string[] | null;
     dressingRequirementsNote?: string | null;
-    avoidColors?: string[] | null;
   },
   facts: ProductFacts,
 ): ConstraintEvidence {
@@ -133,14 +138,46 @@ export function checkHardConstraints(
     });
   }
 
-  const colorCheck = checkAvoidColors(passport.avoidColors, facts);
-  if (colorCheck) checks.push(colorCheck);
-
   const hasFreeTextRequirement = typeof passport.dressingRequirementsNote === "string" && passport.dressingRequirementsNote.trim() !== "";
 
   return {
     hasHardViolation: checks.some(c => c.state === "violated"),
     checks,
     deferredToResolvedPassport: hasFreeTextRequirement,
+  };
+}
+
+/**
+ * B2b1 — advisory colour-preference evidence. Never a ConstraintCheck,
+ * never read by applyHardConstraintVeto, never capable of making
+ * hasHardViolation true. Matching semantics (case-insensitive, bidirectional
+ * substring, no confidence gate) are byte-for-byte unchanged from the old
+ * checkAvoidColors — only where the result goes changed in this phase.
+ * Recognition quality (substring vs. family semantics, confidence gating,
+ * customer-declared-vs-vision precedence) is explicitly deferred to B2b2.
+ */
+export function checkColourPreference(
+  avoidColours: string[] | null | undefined,
+  facts: ProductFacts,
+): ColourPreferenceEvidence {
+  const avoidList = avoidColours ?? [];
+  if (avoidList.length === 0) {
+    return { status: "unknown", detectedColour: facts.detectedColor.value ?? null, avoidColours: [], reason: "No avoid-colour preferences on file." };
+  }
+  const detected = facts.detectedColor.value?.toLowerCase().trim() ?? null;
+  if (!detected) {
+    return { status: "unknown", detectedColour: null, avoidColours: avoidList, reason: "No detected colour available to check." };
+  }
+  const matches = avoidList.some(c => {
+    const avoided = c.toLowerCase().trim();
+    return avoided.length > 0 && (detected.includes(avoided) || avoided.includes(detected));
+  });
+  return {
+    status: matches ? "conflict" : "clear",
+    detectedColour: facts.detectedColor.value ?? null,
+    avoidColours: avoidList,
+    reason: matches
+      ? `Detected colour "${facts.detectedColor.value}" appears to be a colour this customer usually avoids. Advisory only — does not affect the verdict on its own.`
+      : "Detected colour does not match any colour this customer usually avoids.",
   };
 }

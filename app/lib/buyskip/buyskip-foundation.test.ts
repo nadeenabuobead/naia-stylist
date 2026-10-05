@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { normalizeDeclaredFacts, mergeVisionFacts } from "./product-facts.server";
 import { computeDuplicateEvidence } from "./duplicate-evidence.server";
-import { checkHardConstraints } from "./constraint-evidence.server";
+import { checkHardConstraints, checkColourPreference } from "./constraint-evidence.server";
 import { getWardrobeNeedEvidence } from "./wardrobe-need.server";
 import { assembleDecisionEvidence, applyHardConstraintVeto } from "./decision-evidence.server";
 
@@ -117,44 +117,48 @@ describe("duplicate-evidence: regression class — same-slot items must stay ava
 
 describe("constraint-evidence: hard requirements (regression class)", () => {
   it("no declared requirements → no checks, no violation", () => {
-    const e = checkHardConstraints({ dressingPreferences: [], dressingRequirementsNote: null, avoidColors: [] }, facts());
+    const e = checkHardConstraints({ dressingPreferences: [], dressingRequirementsNote: null }, facts());
     assert.equal(e.hasHardViolation, false);
     assert.equal(e.checks.length, 0);
   });
 
   it("sleeveless garment violates arms-covered requirement", () => {
     const f = facts({ observedSleeveLength: "sleeveless", observedShoulderCoverage: false });
-    const e = checkHardConstraints({ dressingPreferences: ["arms-covered"], dressingRequirementsNote: null, avoidColors: [] }, f);
+    const e = checkHardConstraints({ dressingPreferences: ["arms-covered"], dressingRequirementsNote: null }, f);
     assert.equal(e.hasHardViolation, true);
     assert.equal(e.checks.find(c => c.requirementId === "arms-covered")?.state, "violated");
   });
 
   it("full-sleeve garment satisfies arms-covered requirement", () => {
-    const e = checkHardConstraints({ dressingPreferences: ["arms-covered"], dressingRequirementsNote: null, avoidColors: [] }, facts());
+    const e = checkHardConstraints({ dressingPreferences: ["arms-covered"], dressingRequirementsNote: null }, facts());
     assert.equal(e.hasHardViolation, false);
     assert.equal(e.checks[0].state, "satisfied");
   });
 
   it("low observation confidence yields unknown, never a false violation (regression #4/#3)", () => {
     const f = facts({ observationConfidence: "low" });
-    const e = checkHardConstraints({ dressingPreferences: ["arms-covered"], dressingRequirementsNote: null, avoidColors: [] }, f);
+    const e = checkHardConstraints({ dressingPreferences: ["arms-covered"], dressingRequirementsNote: null }, f);
     assert.equal(e.checks[0].state, "unknown");
     assert.equal(e.hasHardViolation, false);
   });
 
-  it("avoided colour match is a violation", () => {
-    const e = checkHardConstraints({ dressingPreferences: [], dressingRequirementsNote: null, avoidColors: ["black"] }, facts());
-    assert.equal(e.hasHardViolation, true);
+  it("B2b1: avoided colour match is NO LONGER a hard-constraint violation — avoidColors is advisory, checked separately via checkColourPreference", () => {
+    const e = checkHardConstraints({ dressingPreferences: [], dressingRequirementsNote: null }, facts());
+    assert.equal(e.hasHardViolation, false);
+    assert.equal(e.checks.length, 0, "colour never enters the hard-constraint checks array at all");
+
+    const colour = checkColourPreference(["black"], facts());
+    assert.equal(colour.status, "conflict", "the match is still detected — just not as hard-constraint authority");
   });
 
   it("free-text dressing note is deferred, never guessed (Phase 6 DEFERRED_TO_RESOLVED_PASSPORT)", () => {
-    const e = checkHardConstraints({ dressingPreferences: [], dressingRequirementsNote: "I keep my ankles covered too", avoidColors: [] }, facts());
+    const e = checkHardConstraints({ dressingPreferences: [], dressingRequirementsNote: "I keep my ankles covered too" }, facts());
     assert.equal(e.deferredToResolvedPassport, true);
     assert.equal(e.hasHardViolation, false); // not guessed into a violation
   });
 
   it("unmapped requirement ids (e.g. legs-covered) produce no fabricated check (regression #6)", () => {
-    const e = checkHardConstraints({ dressingPreferences: ["legs-covered", "avoid-shorts"], dressingRequirementsNote: null, avoidColors: [] }, facts());
+    const e = checkHardConstraints({ dressingPreferences: ["legs-covered", "avoid-shorts"], dressingRequirementsNote: null }, facts());
     assert.equal(e.checks.length, 0);
     assert.equal(e.hasHardViolation, false);
   });
@@ -169,14 +173,14 @@ describe("wardrobe-need: explicit unavailable state (Phase 7, regression #5)", (
 
 describe("decision-evidence: assembly + hard-constraint veto (Phase 8, regression #7)", () => {
   it("no violation → no veto, model verdict stands", () => {
-    const constraintEvidence = checkHardConstraints({ dressingPreferences: [], dressingRequirementsNote: null, avoidColors: [] }, facts());
+    const constraintEvidence = checkHardConstraints({ dressingPreferences: [], dressingRequirementsNote: null }, facts());
     const veto = applyHardConstraintVeto(constraintEvidence);
     assert.equal(veto.vetoed, false);
   });
 
   it("confirmed violation vetoes regardless of model's own explanation text (model cannot override deterministic evidence)", () => {
     const f = facts({ observedSleeveLength: "sleeveless", observedShoulderCoverage: false });
-    const constraintEvidence = checkHardConstraints({ dressingPreferences: ["arms-covered"], dressingRequirementsNote: null, avoidColors: [] }, f);
+    const constraintEvidence = checkHardConstraints({ dressingPreferences: ["arms-covered"], dressingRequirementsNote: null }, f);
     const veto = applyHardConstraintVeto(constraintEvidence);
     assert.equal(veto.vetoed, true);
     assert.equal(veto.verdict, "SKIP");
@@ -184,11 +188,12 @@ describe("decision-evidence: assembly + hard-constraint veto (Phase 8, regressio
   });
 
   it("assembleDecisionEvidence marks passportAlignment deferred when free-text note present", () => {
-    const constraintEvidence = checkHardConstraints({ dressingPreferences: [], dressingRequirementsNote: "custom rule", avoidColors: [] }, facts());
+    const constraintEvidence = checkHardConstraints({ dressingPreferences: [], dressingRequirementsNote: "custom rule" }, facts());
     const de = assembleDecisionEvidence({
       productFacts: facts(),
       duplicateEvidence: computeDuplicateEvidence(facts(), []),
       constraintEvidence,
+      colourPreferenceEvidence: checkColourPreference([], facts()),
       wardrobeNeed: getWardrobeNeedEvidence(),
       computedAt: "2026-10-01T00:00:00.000Z",
     });
@@ -197,11 +202,12 @@ describe("decision-evidence: assembly + hard-constraint veto (Phase 8, regressio
   });
 
   it("assembleDecisionEvidence marks passportAlignment available when nothing is deferred", () => {
-    const constraintEvidence = checkHardConstraints({ dressingPreferences: [], dressingRequirementsNote: null, avoidColors: [] }, facts());
+    const constraintEvidence = checkHardConstraints({ dressingPreferences: [], dressingRequirementsNote: null }, facts());
     const de = assembleDecisionEvidence({
       productFacts: facts(),
       duplicateEvidence: computeDuplicateEvidence(facts(), []),
       constraintEvidence,
+      colourPreferenceEvidence: checkColourPreference([], facts()),
       wardrobeNeed: getWardrobeNeedEvidence(),
       computedAt: "2026-10-01T00:00:00.000Z",
     });
