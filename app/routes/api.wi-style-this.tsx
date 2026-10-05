@@ -39,6 +39,11 @@ export async function action({ request }: ActionFunctionArgs) {
   session.unset("styleMeNadineAnchorHandle");
   session.unset("styleMeAnchorMode");
   session.set("styleMeClosetAnchorId", resolved.id);
+  // She tapped this exact garment in Wardrobe Intelligence, so the anchor is MANUAL:
+  // New Look may vary the outfit around it but must never move it. Stated rather than
+  // left to default — an "AUTO" left in the cookie by an earlier session would otherwise
+  // survive and let the reroll replace a piece she explicitly chose.
+  session.set("styleMeAnchorProvenance", "MANUAL");
   session.set("styleMeAnchorLocked", "1");
 
   return redirect("/style-me/state", {

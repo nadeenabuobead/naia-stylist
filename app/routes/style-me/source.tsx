@@ -152,6 +152,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
     session.unset("styleMeAnchorLocked");
     session.unset("styleMeClosetAnchorId");
+    session.unset("styleMeAnchorProvenance");
     return redirect("/style-me/source", {
       headers: { "Set-Cookie": await commitSession(session) },
     });
@@ -329,6 +330,7 @@ export async function action({ request }: ActionFunctionArgs) {
   if (intent === "change-piece") {
     session.unset("styleMeAnchorLocked");
     session.unset("styleMeClosetAnchorId");
+    session.unset("styleMeAnchorProvenance");
     session.set("styleMeAnchorMode", "manual");
     return redirect("/style-me/source", {
       headers: { "Set-Cookie": await commitSession(session) },
