@@ -52,32 +52,35 @@ export const DRESS_REGISTER_RANK: Record<string, number> = {
 
 // Allowed dress register range (inclusive) per session occasion.
 //
-// DEFERRED — OWNED BY THE GARMENT INTELLIGENCE FOUNDATION. DO NOT "FIX" HERE.
+// KEYED ON THE CANONICAL SESSION OCCASION — the value this map is actually looked up
+// with. Three keys used to be spelled in the StyleMe UI vocabulary ("date", "event",
+// "night-out") while passesProfileRegisterGate looked them up as "date-night",
+// "special-event" and "girls-night". Those three lookups missed, and `if (!range)
+// return true` sits ABOVE the athletic and evening blocks — so the gate returned true
+// before any of them ran, and activewear was admitted to a Date night, a Special event
+// and a Girls night with nothing approving it.
 //
-// Three keys below ("date", "event", "night-out") are spelled in the StyleMe UI
-// vocabulary, but this map is looked up with the CANONICAL session occasion, which
-// is "date-night" / "special-event" / "girls-night". Those three lookups miss, and
-// passesProfileRegisterGate returns true before it reaches the athletic and evening
-// blocks — so activewear is admitted to a Date and an evening piece to a Night out.
+// The ranges themselves were never what those occasions lost: with the +/-2 tolerance
+// below they widen to 0-6, 1-8 and 0-8, which blocks nothing on a 0-6 rank scale. The
+// athletic block is the gate that was being skipped.
 //
-// Correcting the keys alone would be a half-fix that changes garment eligibility.
-// This function interleaves two vocabularies:
+// This was previously deferred on the grounds that the keys could not be repaired
+// alone: the gate interleaves this session-side map with the GARMENT-side
+// profile.occasionFit, which is keyed on the UI spelling, and the occasionFit lookup
+// is the escape hatch that lets an approved "Strong" override a blanket register
+// block. Repairing one side without the other would have started blocking garments a
+// human explicitly approved, with no way for the approval to speak.
 //
-//   OCCASION_REGISTER_RANGE[sessionOccasion]   ← session-side (this map)
-//   profile.occasionFit[sessionOccasion]       ← GARMENT-side, keyed on the same UI
-//                                                spelling in GarmentStyleMeProfile
+// That is no longer the situation. The C1 vocabulary bridge made every occasionFit
+// read go through profileOccasionRating, which maps the canonical session occasion to
+// the garment spelling. The escape hatch now speaks for all nine occasions, so the
+// session side can be corrected on its own — which is all this map is.
 //
-// The occasionFit lookup is the escape hatch that lets an approved "Strong" override
-// a blanket register block. Repair the range keys without repairing occasionFit and
-// the gate starts blocking garments a human explicitly approved, with no way for the
-// approval to speak. Both sides must move together, under one canonical occasion
-// resolver, which is what the Garment Intelligence foundation is building.
-//
-// StyleMe call sites that will consume that resolver, and can then delete their local
-// handling: passesProfileOccasionGate, passesProfileRegisterGate,
-// passesRegisterCoherenceWithAnchor, getProfileOccasionTier (all in this file), and
-// styleMeSessionRegister in wardrobe-needs.ts. OCCASION_FORMALITY_TARGET and
-// _OCCASION_MAX_RANK are session-side only and have already been corrected in place.
+// Still owned by the Garment Intelligence foundation: ONE canonical occasion ID set
+// with occasionFit keyed on it, after which this map, CANONICAL_OCCASION_TO_PROFILE_KEY
+// and SESSION_OCCASION_TO_CLOSET_TOKENS all delete in favour of the shared resolver.
+// Correcting these keys does not substitute for that; it stops a gate failing open in
+// the meantime.
 export const OCCASION_REGISTER_RANGE: Record<string, { min: number; max: number }> = {
   "active":    { min: 0, max: 1 },
   "everyday":  { min: 1, max: 3 },
@@ -85,9 +88,9 @@ export const OCCASION_REGISTER_RANGE: Record<string, { min: number; max: number 
   "travel":    { min: 1, max: 3 },
   "work":      { min: 2, max: 4 },
   "dinner":    { min: 2, max: 5 },
-  "date":      { min: 2, max: 4 },
-  "event":     { min: 3, max: 6 },
-  "night-out": { min: 2, max: 6 },
+  "date-night":    { min: 2, max: 4 },
+  "special-event": { min: 3, max: 6 },
+  "girls-night":   { min: 2, max: 6 },
 };
 
 // Non-structural slots excluded from register/statement checks (bags, accessories, jewelry).
