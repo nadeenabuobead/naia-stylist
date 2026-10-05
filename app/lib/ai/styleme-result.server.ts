@@ -4810,12 +4810,38 @@ export function computeNaiaResultDirections(
 
   type ScoredItem = { item: ClosetAnchorInput; score: number };
 
+  // ── Hard eligibility, before anything can be shown ────────────────────────
+  //
+  // This intake loop checked only three things — not the anchor, a resolvable slot, a
+  // positive score — so none of the four gates that protect candidate A ever ran here.
+  // That let a garment a reviewer had rated occasionFit "No" be rendered to the customer
+  // as a labelled alternative look, and it is a worse exposure than the candidate pools
+  // were: a contaminated candidate still had to be chosen by the model, while whatever
+  // reaches these lists is shown directly.
+  //
+  // The cards also reach for precisely the wrong item. MOST LIKE ME takes the best-scoring
+  // piece in each slot; FRESH and PUSH ME index PAST it on purpose, to vary the look. A
+  // rejected garment sitting second in its slot is therefore not an unlikely edge case —
+  // it is exactly what those two cards select, which is how one trouser became both the
+  // FRESH lead and the PUSH ME lead in the same result.
+  //
+  // Same four gates, same order as selectAdditionalClosetGarments and the candidate swap
+  // pool. The anchor keeps its existing `continue` — it is validated upstream and is
+  // deliberately never listed among a direction's pieces, so it needs no gate here.
+  const anchorItemForGates = anchorId
+    ? closetItems.find((i) => i.id === anchorId) ?? null
+    : null;
+
   // Score all non-anchor items and group by slot (best first within each slot).
   const bySlot = new Map<OutfitSlot, ScoredItem[]>();
   for (const item of closetItems) {
     if (item.id === anchorId) continue;
     const slot = closetItemToSlot(item.category, item.subcategory);
     if (slot === "unknown") continue;
+    if (!passesDressingRequirements(item, profile?.dressingPreferences)) continue;
+    if (!passesProfileOccasionGate(item, session.occasion)) continue;
+    if (!passesProfileRegisterGate(item, session.occasion)) continue;
+    if (!passesRegisterCoherenceWithAnchor(item, anchorItemForGates, session.occasion)) continue;
     const score = scoreClosetItemForSession(
       { occasions: item.occasions, styleTags: item.styleTags, category: item.category, colors: item.colors, primaryColor: item.primaryColor },
       signals,

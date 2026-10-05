@@ -322,13 +322,21 @@ describe("CSG-D — a contaminated candidate cannot be offered, selected or pers
     }
   });
 
-  test("CSG-D.2 the selected look carries no rejected garment", async () => {
-    // Scoped to the SELECTED outfit — the "most-you" direction is the candidate the model
-    // chose. Asserting over the whole result object instead caught a SECOND, independent
-    // bypass in computeNaiaResultDirections, which builds the "fresh" and "push-me" cards
-    // straight from the closet array with no hard gates at all. That path is not owned by
-    // this commit and is tracked separately; widening this assertion here would make this
-    // test fail for a defect this fix does not claim to address.
+  test("CSG-D.2 the rejected bottom appears nowhere in the persisted result", async () => {
+    // Whole-object, as originally written. The narrower selected-look-only form was a
+    // temporary scoping while the direction-card bypass in computeNaiaResultDirections was
+    // still open — that path built the "fresh" and "push-me" cards straight from the closet
+    // array with no hard gates, so this assertion failed for a defect the swap-pool commit
+    // did not claim. Both paths are gated now, so the full claim is back: no hard-gate
+    // rejected owned garment appears anywhere in what the customer receives.
+    const { result } = await run();
+    assert.ok(
+      !JSON.stringify(result).includes("d-btm-no"),
+      "a hard-gate-rejected owned garment reached the customer-facing result",
+    );
+  });
+
+  test("CSG-D.3 the selected look specifically carries no rejected garment", async () => {
     const { result } = await run();
     const selected = (result as unknown as { resultDirections?: Array<{ label: string; outfitPieces?: Array<{ id: string }> }> })
       .resultDirections?.find((d) => d.label === "most-you");
