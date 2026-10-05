@@ -1,8 +1,11 @@
-// app/lib/ai/colour-family.no-consumers.test.ts
+// app/lib/ai/colour-family.consumer-boundary.test.ts
 //
-// B2a must not change any live consumer's behavior. Proves it mechanically:
-// a repo-wide import search for colour-family.ts must show only the
-// module itself and its own test files — nothing production-facing.
+// B2a's zero-production-consumer test is now intentionally obsolete — B2b2
+// is the first legitimate production consumer. This replaces that
+// assertion with a narrow ALLOWLIST: exactly which production files may
+// import colour-family.ts, enforced mechanically so a future accidental
+// import (StyleMe, GI, WI, NADINE, or an unrelated API route reaching in
+// directly) fails loudly rather than silently expanding the boundary.
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -10,13 +13,21 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 const REPO_ROOT = new URL("../../../", import.meta.url).pathname;
-const SELF_DIR = new URL(".", import.meta.url).pathname;
 
-const ALLOWED_IMPORTERS = new Set([
+// Test files for colour-family.ts itself are always allowed to import it.
+const ALWAYS_ALLOWED_BASENAMES = new Set([
   "colour-family.ts",
   "colour-family.test.ts",
   "colour-family.parity.test.ts",
-  "colour-family.no-consumers.test.ts",
+  "colour-family.consumer-boundary.test.ts",
+]);
+
+// The ONLY production (non-test) file permitted to import colour-family.ts
+// as of B2b2. Buy/Skip's colour-preference resolution owns this import —
+// nothing else does. Extend this set only in a future phase that
+// deliberately wires a new consumer (B2c for NADINE, etc.), never silently.
+const ALLOWED_PRODUCTION_IMPORTERS = new Set([
+  "app/lib/buyskip/constraint-evidence.server.ts",
 ]);
 
 const SKIP_DIRS = new Set(["node_modules", ".git", "build", "dist", ".vercel"]);
@@ -31,33 +42,57 @@ function walk(dir: string, out: string[]) {
   }
 }
 
-describe("B2a — zero production consumers", () => {
-  it("no file outside colour-family.ts and its own tests imports from it", () => {
+function importsColourFamily(content: string): boolean {
+  return /from\s+["'][^"']*colour-family["']/.test(content) || /require\(["'][^"']*colour-family["']\)/.test(content);
+}
+
+describe("B2b2 — colour-family.ts production-consumer boundary", () => {
+  it("every importer is either an allowed test file or the one approved production consumer — nothing else", () => {
     const files: string[] = [];
     walk(join(REPO_ROOT, "app"), files);
 
-    const importers: string[] = [];
+    const unexpectedImporters: string[] = [];
+    const approvedProductionImportersFound = new Set<string>();
+
     for (const file of files) {
-      const rel = relative(SELF_DIR, file);
       const base = file.split("/").pop()!;
-      if (ALLOWED_IMPORTERS.has(base)) continue;
+      const relPath = relative(REPO_ROOT, file);
+      if (ALWAYS_ALLOWED_BASENAMES.has(base)) continue;
+
       const content = readFileSync(file, "utf8");
-      if (/from\s+["'][^"']*colour-family["']/.test(content) || /require\(["'][^"']*colour-family["']\)/.test(content)) {
-        importers.push(relative(REPO_ROOT, file));
+      if (!importsColourFamily(content)) continue;
+
+      if (ALLOWED_PRODUCTION_IMPORTERS.has(relPath)) {
+        approvedProductionImportersFound.add(relPath);
+      } else {
+        unexpectedImporters.push(relPath);
       }
     }
-    assert.deepEqual(importers, [], `colour-family.ts must have zero production importers in B2a; found: ${importers.join(", ")}`);
+
+    assert.deepEqual(unexpectedImporters, [], `colour-family.ts has an unapproved production importer: ${unexpectedImporters.join(", ")}`);
+    assert.deepEqual([...approvedProductionImportersFound].sort(), [...ALLOWED_PRODUCTION_IMPORTERS].sort(), "the approved consumer must actually be importing it, not just permitted to");
   });
 
-  it("constraint-evidence.server.ts, api.wishlist.jsx, and nadine-product-assessment.ts are completely unmodified from the B1 checkpoint (text-level sanity: no colour-family reference at all)", () => {
-    const targets = [
-      "app/lib/buyskip/constraint-evidence.server.ts",
-      "app/routes/api.wishlist.jsx",
+  it("StyleMe, Garment Intelligence, Wardrobe Intelligence, Shared Customer Intelligence, and NADINE remain untouched — none import colour-family.ts", () => {
+    const forbiddenPaths = [
+      "app/lib/ai/styleme-result.server.ts",
+      "app/lib/ai/styleme-recommendation.ts",
+      "app/lib/ai/styleme-anchor.server.ts",
+      "app/lib/admin/garment-intelligence-v1.server.ts",
+      "app/lib/ai/resolved-garment.server.ts",
+      "app/lib/ai/wardrobe-intelligence.server.ts",
+      "app/lib/ai/wardrobe-recommendations.ts",
+      "app/lib/ai/customer-intelligence-resolver.server.ts",
       "app/lib/ai/nadine-product-assessment.ts",
     ];
-    for (const rel of targets) {
-      const content = readFileSync(join(REPO_ROOT, rel), "utf8");
-      assert.ok(!content.includes("colour-family"), `${rel} must not reference colour-family.ts in B2a`);
+    for (const relPath of forbiddenPaths) {
+      const content = readFileSync(join(REPO_ROOT, relPath), "utf8");
+      assert.ok(!importsColourFamily(content), `${relPath} must not import colour-family.ts`);
     }
+  });
+
+  it("api.wishlist.jsx does not import colour-family.ts directly — it goes through constraint-evidence.server.ts only", () => {
+    const content = readFileSync(join(REPO_ROOT, "app/routes/api.wishlist.jsx"), "utf8");
+    assert.ok(!importsColourFamily(content));
   });
 });

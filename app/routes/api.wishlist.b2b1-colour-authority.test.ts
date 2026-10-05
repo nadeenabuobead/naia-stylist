@@ -142,7 +142,7 @@ describe("B2b1 §9 — verdict causal matrix (the core proof)", () => {
 });
 
 describe("B2b1 §6 — confidence no longer mediates the removed colour veto", () => {
-  it("low-confidence colour match -> advisory evidence exists, but never a veto, regardless", () => {
+  it("low-confidence colour match -> never a veto, regardless of what the advisory reports (B2b2 update: low confidence now correctly reports 'unknown', not 'conflict' — see api.wishlist.b2b2-colour-evidence.test.ts for the confidence-gate fix itself; this test's job is only to re-prove authority stays frozen either way)", () => {
     const lowConfFacts = facts({
       detectedColor: "red",
       observedSleeveLength: "full", observedShoulderCoverage: true, observedMidriffExposed: false,
@@ -151,10 +151,7 @@ describe("B2b1 §6 — confidence no longer mediates the removed colour veto", (
     const constraintEvidence = checkHardConstraints({ dressingPreferences: ["arms-covered"] }, lowConfFacts);
     assert.equal(constraintEvidence.hasHardViolation, false);
     const colour = checkColourPreference(["red"], lowConfFacts);
-    // Matching semantics are deliberately unchanged in B2b1 — checkColourPreference
-    // still has no confidence gate (that's B2b2 debt) — but it is now provably
-    // inert for authority purposes regardless of what it reports.
-    assert.equal(colour.status, "conflict");
+    assert.equal(colour.status, "unknown", "B2b2: low-confidence vision with no declared colour can no longer determine a status at all");
     const veto = applyHardConstraintVeto(constraintEvidence);
     assert.equal(veto.vetoed, false);
   });

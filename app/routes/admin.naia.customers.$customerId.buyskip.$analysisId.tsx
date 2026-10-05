@@ -159,7 +159,25 @@ function DecisionEvidenceSection({ decisionEvidence }: { decisionEvidence: unkno
             <p style={{ fontSize: "0.78rem", color: colour.status === "conflict" ? "#fbbf24" : "#9ca3af" }}>
               {String(colour.reason ?? "")}
             </p>
-            <p style={{ fontSize: "0.65rem", color: "#6b7280", marginTop: "0.2rem" }}>
+            {typeof colour.determinedBy === "string" && colour.determinedBy !== "none" && (
+              <p style={{ fontSize: "0.68rem", color: "#9ca3af", marginTop: "0.25rem" }}>
+                Determined by: <strong>{colour.determinedBy}</strong>
+              </p>
+            )}
+            <table className="na-field-table" style={{ marginTop: "0.3rem" }}>
+              <tbody>
+                <Field label="Declared colour" value={Array.isArray(colour.declaredColours) && colour.declaredColours.length > 0 ? colour.declaredColours.join(", ") : null} />
+                <Field label="Vision colour" value={typeof colour.detectedColour === "string" ? colour.detectedColour : null} />
+                <Field label="Observation confidence" value={typeof colour.observationConfidence === "string" ? colour.observationConfidence : null} />
+                <Field label="Avoid colours" value={Array.isArray(colour.avoidColours) && colour.avoidColours.length > 0 ? colour.avoidColours.join(", ") : null} />
+              </tbody>
+            </table>
+            {colour.disagreement === true && (
+              <p style={{ fontSize: "0.68rem", color: "#93c5fd", marginTop: "0.3rem" }}>
+                Declared and vision colour reads disagree — declared evidence took precedence, vision's read is recorded for reference only.
+              </p>
+            )}
+            <p style={{ fontSize: "0.65rem", color: "#6b7280", marginTop: "0.3rem" }}>
               Never contributes to Hard-Constraint Evidence above and cannot change the verdict on its own — Passport's avoidColors is a stated preference ("colours you usually avoid"), not an exclusion rule.
             </p>
           </div>
