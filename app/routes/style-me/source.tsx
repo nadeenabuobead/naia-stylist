@@ -8,7 +8,7 @@ import { useState } from "react";
 import { commitSession, getSession } from "~/lib/session.server";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import prisma from "~/db.server";
-import { autoSelectClosetAnchor } from "~/lib/ai/styleme-anchor.server";
+import { autoSelectClosetAnchor, resolveClosetAnchor } from "~/lib/ai/styleme-anchor.server";
 import { buildPrivateDownloadUrl, getCloudinaryConfig } from "~/lib/cloudinary-admin.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 
@@ -57,6 +57,12 @@ type PickerItem = {
   imageUrl: string | null;
 };
 
+type LockedAnchorItem = {
+  id: string;
+  name: string | null;
+  imageUrl: string | null;
+};
+
 // ── Loader ────────────────────────────────────────────────────────────────────
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -97,6 +103,28 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const naiaCustomer = await getCurrentNaiaCustomer(request);
   if (!naiaCustomer) {
     return data({ step: "requires-login" as const, source });
+  }
+
+  // Wardrobe Intelligence handoff — the anchor arrived pre-selected. Re-validate
+  // ownership (the item may have been deleted since the handoff) before showing
+  // the "Styling around" confirmation; if it no longer resolves, fail safe by
+  // dropping the lock and falling through to the normal anchor-method flow.
+  const anchorLocked = session.get("styleMeAnchorLocked") === "1";
+  if (anchorLocked) {
+    const closetAnchorId = session.get("styleMeClosetAnchorId") as string | undefined;
+    const resolved = closetAnchorId ? await resolveClosetAnchor(naiaCustomer.id, closetAnchorId) : null;
+    if (resolved) {
+      return data({
+        step: "anchor-locked" as const,
+        source,
+        item: { id: resolved.id, name: resolved.name, imageUrl: resolved.imageUrl } as LockedAnchorItem,
+      });
+    }
+    session.unset("styleMeAnchorLocked");
+    session.unset("styleMeClosetAnchorId");
+    return redirect("/style-me/source", {
+      headers: { "Set-Cookie": await commitSession(session) },
+    });
   }
 
   const anchorMode = session.get("styleMeAnchorMode") as string | undefined;
@@ -251,6 +279,23 @@ export async function action({ request }: ActionFunctionArgs) {
     return data({ error: "Invalid anchor method" }, { status: 400 });
   }
 
+  // ── Wardrobe Intelligence handoff: confirm the pre-selected anchor ───────────
+  if (intent === "confirm-anchor") {
+    return redirect("/style-me/result");
+  }
+
+  // ── Wardrobe Intelligence handoff: "Change piece" — drop the lock, go to the
+  // normal manual closet picker. The customer must never be forced back onto
+  // the same pre-selected piece. ────────────────────────────────────────────
+  if (intent === "change-piece") {
+    session.unset("styleMeAnchorLocked");
+    session.unset("styleMeClosetAnchorId");
+    session.set("styleMeAnchorMode", "manual");
+    return redirect("/style-me/source", {
+      headers: { "Set-Cookie": await commitSession(session) },
+    });
+  }
+
   // ── Manual closet item selection ─────────────────────────────────────────────
   if (intent === "set-anchor") {
     const closetItemId = formData.get("closetItemId") as string;
@@ -336,6 +381,9 @@ export default function StyleMeSource() {
 
       <div className="sm-inner sm-inner--wide">
         {step === "source" && <SourceStep />}
+        {step === "anchor-locked" && (
+          <AnchorLockedStep item={(loaderData as { item: LockedAnchorItem }).item} />
+        )}
         {step === "anchor-method" && (
           <AnchorMethodStep
             source={(loaderData as { source: string }).source}
@@ -396,6 +444,41 @@ function SourceStep() {
             Continue
           </button>
         </div>
+      </Form>
+    </>
+  );
+}
+
+// ── Step: anchor already selected via Wardrobe Intelligence handoff ─────────
+// Shows the pre-selected Closet piece instead of asking the customer to choose
+// it again. "Change piece" drops the lock and opens the normal manual picker.
+
+function AnchorLockedStep({ item }: { item: LockedAnchorItem }) {
+  return (
+    <>
+      <p className="sm-step-label">My Closet</p>
+      <h1 className="sm-heading">Styling around</h1>
+      <div className="sm-anchor-card" style={{ marginBottom: "24px" }}>
+        {item.imageUrl && (
+          <img
+            src={item.imageUrl}
+            alt={item.name ?? "Your closet piece"}
+            style={{ width: "100%", maxWidth: "230px", height: "auto", objectFit: "contain", borderRadius: "4px", marginBottom: "10px", background: "var(--naia-warm)" }}
+          />
+        )}
+        <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "16px", color: "var(--naia-ink)" }}>
+          {item.name ?? "This piece"}
+        </p>
+      </div>
+      <Form method="post">
+        <input type="hidden" name="_action" value="confirm-anchor" />
+        <div className="sm-step-buttons">
+          <button type="submit" className="sm-continue">Continue</button>
+        </div>
+      </Form>
+      <Form method="post" style={{ marginTop: "8px" }}>
+        <input type="hidden" name="_action" value="change-piece" />
+        <button type="submit" className="sm-btn-back">Change piece</button>
       </Form>
     </>
   );
