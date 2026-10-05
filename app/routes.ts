@@ -25,21 +25,6 @@ export default [
   route("style-me/source", "routes/style-me/source.tsx"),
   route("style-me/result", "routes/style-me/result.tsx"),
 
-  // ── QA front door (temporary) ──────────────────────────────────────────────
-  // Thin wrappers over the real /style-me/* modules so the reconciled build can be
-  // manually tested through nadine-storefront.vercel.app, which owns the customer's
-  // Shopify session cookie. No recommendation logic — see app/lib/styleme/qa-prefix.tsx.
-  // Remove this block, app/routes/style-me-qa/ and the harness when QA is done.
-  route("style-me-qa", "routes/style-me-qa/_index.tsx"),
-  route("style-me-qa/state", "routes/style-me-qa/state.tsx"),
-  route("style-me-qa/intention", "routes/style-me-qa/intention.tsx"),
-  route("style-me-qa/physical-need", "routes/style-me-qa/physical-need.tsx"),
-  route("style-me-qa/occasion", "routes/style-me-qa/occasion.tsx"),
-  route("style-me-qa/source", "routes/style-me-qa/source.tsx"),
-  route("style-me-qa/result", "routes/style-me-qa/result.tsx"),
-  route("style-me-qa/mood", "routes/style-me-qa/mood.tsx"),
-  route("style-me-qa/feeling", "routes/style-me-qa/feeling.tsx"),
-  route("style-me-qa/comfort", "routes/style-me-qa/comfort.tsx"),
   route("api/customer-auth", "routes/api.customer-auth.jsx"),
   route("api/closet", "routes/api.closet.jsx"),
   route("api/closet-preview-analyze", "routes/api.closet-preview-analyze.ts"),
