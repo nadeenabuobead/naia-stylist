@@ -63,6 +63,25 @@ export function resolveEffectiveFormality(
   return getEffectiveClosetItem(item, adminReview).formality ?? null;
 }
 
+// Garment Intelligence Phase 4C1 — computes canonical/effective hemLength and
+// topLength for every garment, UNCONDITIONALLY (no flag here). Coexists
+// alongside the raw hemLength/topLength fields on ClosetAnchorInput rather
+// than replacing them — scoreBodyNeedForClosetItem("more-coverage") (T3a/T3b
+// ranking) must keep reading raw hemLength; autoSelectClosetAnchor doesn't
+// read either field at all. The Phase-4C1 flag is applied only inside
+// passesDressingRequirements's hard gate (styleme-result.server.ts,
+// resolveGateLength), which chooses between the two coexisting fields —
+// never here. Reuses getEffectiveClosetItem, the same authoritative
+// precedence logic ResolvedGarment.hemLength/topLength are themselves a pure
+// pass-through of — not a second, independent precedence implementation.
+export function resolveEffectiveLength(
+  item: ClosetItemFields,
+  adminReview: { reviewStatus: string; overrides: unknown } | null | undefined,
+): { hemLength: string | null; topLength: string | null } {
+  const effective = getEffectiveClosetItem(item, adminReview);
+  return { hemLength: effective.hemLength ?? null, topLength: effective.topLength ?? null };
+}
+
 const VALID_HANDLES = new Set(getAllCatalogProducts().map((p) => p.handle));
 
 /**
@@ -344,6 +363,9 @@ export async function loadAllClosetItemsForEngine(
     // `formality` below rather than replacing it. See resolveEffectiveFormality's
     // own doc; the flag is applied only at T2's read-site, not here.
     const effectiveFormality = resolveEffectiveFormality(item, item.adminReview);
+    // Phase 4C1: hemLength/topLength only, for the hard legs-covered/no-cropped-tops
+    // gate. Computed unconditionally — coexists with the raw fields below.
+    const effectiveLength = resolveEffectiveLength(item, item.adminReview);
     const p = item.styleMeProfile;
     const approvedProfile =
       p?.profileStatus === "approved"
@@ -388,7 +410,9 @@ export async function loadAllClosetItemsForEngine(
       sleeveLength: item.sleeveLength ?? null,
       necklineCoverage: item.necklineCoverage ?? null,
       hemLength: item.hemLength ?? null,
+      effectiveHemLength: effectiveLength.hemLength,
       topLength: item.topLength ?? null,
+      effectiveTopLength: effectiveLength.topLength,
       shoulderCoverage: item.shoulderCoverage ?? null,
       midriffExposed: item.midriffExposed ?? null,
       silhouette: item.silhouette ?? null,

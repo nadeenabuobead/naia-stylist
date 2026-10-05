@@ -172,7 +172,16 @@ export interface ClosetAnchorInput {
   sleeveLength?: string | null;
   necklineCoverage?: string | null;
   hemLength?: string | null;
+  // Garment Intelligence Phase 4C1 — canonical/effective hemLength/topLength,
+  // computed unconditionally alongside the raw fields above (never replacing
+  // them). Only the hard legs-covered/no-cropped-tops gate inside
+  // passesDressingRequirements chooses between the two, behind
+  // CANONICAL_STYLEME_LENGTH. scoreBodyNeedForClosetItem ("more-coverage"
+  // T3a/T3b ranking), autoSelectClosetAnchor, and every other consumer must
+  // keep reading the raw fields — these do not exist for them.
+  effectiveHemLength?: string | null;
   topLength?: string | null;
+  effectiveTopLength?: string | null;
   shoulderCoverage?: boolean | null;
   midriffExposed?: boolean | null;
   silhouette?: string | null;
