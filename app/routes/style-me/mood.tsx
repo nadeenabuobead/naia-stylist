@@ -1,81 +1,41 @@
-import { Form, Link } from "react-router";
-import { data, redirect, type ActionFunctionArgs, type LinksFunction } from "react-router";
+// app/routes/style-me/mood.tsx
+// COMPATIBILITY REDIRECT — retired legacy questionnaire step 1.
+//
+// The canonical StyleMe questionnaire is Rev 3: State → Intention → Fit/Comfort
+// → Occasion. This route survives only so stale links, browser history and
+// half-finished legacy sessions are not stranded on a 404.
+//
+// MIGRATION: a session holding legacy answers (styleMeMood / styleMeFeelings)
+// and no styleMeState restarts at State with those answers dropped. We do NOT
+// map old emotional IDs onto the 12 intention IDs — no approved mapping exists,
+// and inventing one would silently change what the customer said. Re-asking is
+// the honest option. Occasion, formality, source, mode and any NADINE handoff
+// anchor are vocabulary-compatible and are preserved across the transition.
 
-export function meta() {
-  return [{ title: "How are you feeling? | nAia Style Me" }];
-}
-import { useState } from "react";
-import { commitSession, getSession } from "~/lib/session.server";
-import { SmPage } from "~/components/style-me/SmPage";
-import { SmContinue } from "~/components/style-me/SmContinue";
-import naiaStyles from "~/styles/naia-design-system.css?url";
+import { redirect, type LoaderFunctionArgs, type ActionFunctionArgs } from "react-router";
+import { getSession, commitSession } from "~/lib/session.server";
+import {
+  CANONICAL_STYLEME_ENTRY,
+  clearLegacyQuestionnaireKeys,
+  hasStrandedLegacySession,
+} from "~/lib/styleme/handoff";
 
-export const links: LinksFunction = () => [
-  { rel: "stylesheet", href: naiaStyles },
-];
-
-const moodOptions = [
-  { id: "confident", label: "I feel confident" },
-  { id: "tired", label: "Tired or low-energy" },
-  { id: "overwhelmed", label: "I feel overwhelmed" },
-  { id: "adventurous", label: "I feel adventurous" },
-  { id: "romantic", label: "I feel romantic" },
-  { id: "powerful", label: "I feel powerful" },
-  { id: "need-reset", label: "I need a reset" },
-  { id: "feel-good", label: "I feel good — just need styling" },
-];
-
-export async function action({ request }: ActionFunctionArgs) {
-  const formData = await request.formData();
-  const mood = formData.get("mood") as string;
-
-  if (!mood) {
-    return data({ error: "Please select how you're feeling" }, { status: 400 });
-  }
-
+async function toCanonicalEntry(request: Request) {
   const session = await getSession(request.headers.get("Cookie"));
-  session.set("styleMeMood", mood);
-  // Starting a new StyleMe flow — clear any stale source/anchor state from a previous run
-  // so the source step always shows fresh rather than resuming an old anchor choice.
-  session.unset("styleMeSource");
-  session.unset("styleMeAnchorMode");
-  session.unset("styleMeClosetAnchorId");
-  session.unset("styleMeNadineAnchorHandle");
-
-  return redirect("/style-me/feeling", {
+  if (!hasStrandedLegacySession(session)) {
+    return redirect(CANONICAL_STYLEME_ENTRY);
+  }
+  clearLegacyQuestionnaireKeys(session);
+  return redirect(CANONICAL_STYLEME_ENTRY, {
     headers: { "Set-Cookie": await commitSession(session) },
   });
 }
 
-export default function StyleMeMood() {
-  const [selected, setSelected] = useState<string | null>(null);
+export async function loader({ request }: LoaderFunctionArgs) {
+  return toCanonicalEntry(request);
+}
 
-  return (
-    <SmPage backTo="/" step={1}>
-      <p className="sm-step-label">Your Mood</p>
-      <h1 className="sm-heading">How are you feeling today?</h1>
-      <p className="sm-sub">Choose the one that feels closest.</p>
-
-      <Form method="post">
-        <div className="sm-pills">
-          {moodOptions.map((m) => (
-            <button
-              key={m.id}
-              type="button"
-              onClick={() => setSelected(selected === m.id ? null : m.id)}
-              className={`sm-pill${selected === m.id ? " sm-pill--on" : ""}`}
-            >
-              {m.label}
-            </button>
-          ))}
-        </div>
-
-        <input type="hidden" name="mood" value={selected || ""} />
-        <div className="sm-step-buttons">
-          <Link to="/style-me" className="sm-btn-back">← Back</Link>
-          <SmContinue disabled={!selected} />
-        </div>
-      </Form>
-    </SmPage>
-  );
+// A stale form POST from a cached legacy page must not 405 — send it onward too.
+export async function action({ request }: ActionFunctionArgs) {
+  return toCanonicalEntry(request);
 }

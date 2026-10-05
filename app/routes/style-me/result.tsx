@@ -4,6 +4,11 @@ import { data, redirect, type LoaderFunctionArgs, type ActionFunctionArgs, type 
 import { useState, useEffect, type Dispatch, type SetStateAction, type CSSProperties } from "react";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import {
+  STYLEME_STATE_LABELS,
+  STYLEME_INTENTION_LABELS,
+  translateIntentionsToEngineSignals,
+} from "~/lib/styleme/session-vocabulary";
+import {
   getCloudinaryConfig,
   validatePublicIdOwnership,
   buildPrivateDownloadUrl,
@@ -11,6 +16,7 @@ import {
 import { loadNaiaModel, computeModelReadinessFromRecord } from "~/lib/ai/my-naia-model.server";
 import { prisma } from "~/lib/prisma.server";
 import { getSession, commitSession, clearStyleMeSession } from "~/lib/session.server";
+import { CANONICAL_STYLEME_ENTRY } from "~/lib/styleme/handoff";
 import { readPendingSave, writePendingSave, clearPendingSave } from "~/lib/pending-save.server";
 import {
   buildEngineInput,
@@ -19,8 +25,9 @@ import {
   buildDbPayload,
   styleSourceToSessionSource,
 } from "~/lib/ai/styleme-result.server";
-import { resolveActionAnchor, loadAllClosetItemsForEngine } from "~/lib/ai/styleme-anchor.server";
+import { autoSelectClosetAnchor, resolveActionAnchor, loadAllClosetItemsForEngine } from "~/lib/ai/styleme-anchor.server";
 import { parseSuggestionMetadata } from "~/lib/ai/styleme-result.types";
+import { occasionDisplayFor } from "~/lib/styleme/occasion-display";
 import { issueImageToken } from "~/lib/dev-tryon-image-tokens.server";
 import { isTryOnEligible } from "~/lib/ai/tryon-product-eligibility";
 import { TryOnPanel } from "~/components/TryOnPanel";
@@ -281,6 +288,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const source = cookieSession.get("styleMeSource");
     const nadineAnchorHandle = (cookieSession.get("styleMeNadineAnchorHandle") as string | undefined) ?? null;
     const closetAnchorId = (cookieSession.get("styleMeClosetAnchorId") as string | undefined) ?? null;
+    // Who chose the anchor. source.tsx records this at both write sites, because
+    // styleMeAnchorMode is unset immediately after a manual pick and by this point the two
+    // flows would otherwise be indistinguishable. Anything unrecognised is treated as
+    // MANUAL — see the regenerate branch.
+    const rawProvenance = cookieSession.get("styleMeAnchorProvenance") as string | undefined;
+    const anchorProvenance: "AUTO" | "MANUAL" | null =
+      rawProvenance === "AUTO" ? "AUTO" : rawProvenance === "MANUAL" ? "MANUAL" : null;
 
     const isRev3Session = !!rev3State;
 
@@ -292,7 +306,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     } else {
       // Legacy path
       if (!mood || !mood.length || !feelings || !feelings.length || !bodyNeeds || !bodyNeeds.length || !occasion || !source) {
-        return redirect("/style-me/mood");
+        // Incomplete legacy session — restart at the canonical Rev 3 entry.
+        return redirect(CANONICAL_STYLEME_ENTRY);
       }
     }
 
@@ -346,6 +361,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         practicalIds,
         styleFrom: source === "my-closet" ? "CLOSET" : source === "naia-piece" ? "NAIA" : "BOTH",
         closetAnchorId: (source === "my-closet" || source === "both") ? (closetAnchorId ?? null) : null,
+        anchorProvenance: (source === "my-closet" || source === "both") ? anchorProvenance : null,
         parentSessionId: adjustVibeSourceId,
         // Rev 3 — Psychology-First (Group 5). Wording context only; zero product scoring.
         ...(isRev3Session && {
@@ -368,6 +384,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
         desiredFeelings: feelings ?? [],
         desiredFeeling: feelings?.[0] || null,
         occasion,
+        // Presentation only — the wording she read at the occasion step, so the result can
+        // echo her own phrasing instead of a label written against the canonical ID. Absent
+        // on reload and on a saved look (StylingSession has no column for it), where
+        // occasionDisplayFor falls back to the questionnaire label for the canonical answer.
+        occasionDisplayLabel: (cookieSession.get("styleMeOccasionDisplayLabel") as string | undefined) ?? null,
         bodyNeeds,
         formalityConditional,
         practicalIds,
@@ -420,9 +441,9 @@ export async function action({ request }: ActionFunctionArgs) {
       const cookieSession = await getSession(request.headers.get("Cookie"));
       cookieSession.set("styleMeAdjustVibe", "true");
       if (sessionId) cookieSession.set("styleMeAdjustVibeSourceId", sessionId);
-      const isRev3 = !!cookieSession.get("styleMeState");
-      const entryPoint = isRev3 ? "/style-me/state" : "/style-me/mood";
-      return redirect(entryPoint, {
+      // Adjust Vibe always re-asks through the canonical Rev 3 questionnaire,
+      // including for a legacy session — the old questionnaire is retired.
+      return redirect(CANONICAL_STYLEME_ENTRY, {
         headers: { "Set-Cookie": await commitSession(cookieSession) },
       });
     }
@@ -449,42 +470,16 @@ export async function action({ request }: ActionFunctionArgs) {
         ? (() => { try { return JSON.parse(rev3IntentionsRawAction); } catch { return []; } })()
         : (session.intentions ?? []);
 
-      // Translate Rev 3 intention IDs to canonical engine signals.
-      // The engine never sees raw Rev 3 intention IDs — only canonical DFM/SMCM/PSM IDs.
-      // feel-like-myself / express-myself → PROFILE_AMPLIFY via "like-myself" mood.
-      // ground-me / give-energy → NO_RECOMMENDATION_EFFECT (wording context only).
-      const INTENTION_DFM_MAP: Record<string, string> = {
-        confidence: "more-confident",
-        "feel-put-together": "more-put-together",
-        "feel-attractive": "more-attractive",
-        "feel-softer": "softer",
-      };
-      const INTENTION_SMCM_MAP: Record<string, string> = {
-        "give-structure": "structured",
-        "feel-less-exposed": "more-coverage",
-      };
-      const INTENTION_PRACTICAL_MAP: Record<string, string> = {
-        "make-it-easy": "quick-to-style",
-      };
-      const PROFILE_AMPLIFY_IDS = new Set(["feel-like-myself", "express-myself"]);
-
-      const translatedDesiredFeelings: string[] = [];
-      const translatedSmcmIds: string[] = [];
-      const translatedPracticalIds: string[] = [];
-      const translatedMoods: string[] = [];
-
-      for (const intentionId of rev3IntentionsAction) {
-        if (PROFILE_AMPLIFY_IDS.has(intentionId)) {
-          translatedMoods.push("like-myself");
-        } else if (INTENTION_DFM_MAP[intentionId]) {
-          translatedDesiredFeelings.push(INTENTION_DFM_MAP[intentionId]);
-        } else if (INTENTION_SMCM_MAP[intentionId]) {
-          translatedSmcmIds.push(INTENTION_SMCM_MAP[intentionId]);
-        } else if (INTENTION_PRACTICAL_MAP[intentionId]) {
-          translatedPracticalIds.push(INTENTION_PRACTICAL_MAP[intentionId]);
-        }
-        // ground-me, give-energy → no engine signal
-      }
+      // Translate intention IDs to canonical engine signals.
+      // The engine never sees a raw intention ID — only canonical DFM/SMCM/PSM tokens.
+      // The mapping itself lives in app/lib/styleme/session-vocabulary.ts so that
+      // "New Look, Same Vibe" can apply the identical translation; see the regenerate
+      // branch below. It used to be inline here and regeneration silently lost it.
+      const translated = translateIntentionsToEngineSignals(rev3IntentionsAction);
+      const translatedDesiredFeelings = translated.desiredFeelings;
+      const translatedSmcmIds = translated.bodyNeeds;
+      const translatedPracticalIds = translated.practicalIds;
+      const translatedMoods = translated.moods;
 
       const isRev3Generate = !!(rev3StateAction ?? session.state);
 
@@ -664,6 +659,10 @@ export async function action({ request }: ActionFunctionArgs) {
       if (!anchorResult.ok) {
         return data({ error: anchorResult.message }, { status: anchorResult.status });
       }
+      // The reroll anchor is resolved further down, once the previous outfit is known —
+      // see "New Look needs a fresh structural centre". This call stays so an invalid or
+      // inaccessible session anchor still fails here, exactly as before.
+      let regenAnchor = anchorResult.anchor;
 
       let journeyCtx = null;
       if (naiaCustomer) {
@@ -711,23 +710,100 @@ export async function action({ request }: ActionFunctionArgs) {
       // Includes the anchor; used by computeStyleMeResult to detect duplicate New Look results.
       const prevOutfitClosetIds = recentlyShownClosetIds.length > 0 ? recentlyShownClosetIds : undefined;
 
+      // ── Same Vibe means the same request ──────────────────────────────────
+      // Regeneration rebuilds engine input from the StylingSession row. In a Rev 3
+      // session currentMood and desiredFeeling are stored as null — there is no mood
+      // or feeling step — and the intention translation was never persisted, so this
+      // branch used to pass moods: [] and desiredFeelings: [] and drop the SMCM and
+      // practical tokens too. The customer pressed "New Look, Same Vibe" and received
+      // a look built from a materially different brief.
+      //
+      // The translation is pure, and StylingSession.intentions IS stored, so it is
+      // recomputed here through the same function the generate branch uses. Occasion,
+      // formality, body needs, practical IDs and the anchor already came from the row.
+      const regenTranslated = translateIntentionsToEngineSignals(session.intentions ?? []);
+      const regenIsRev3 = !!session.state;
+
+      const regenMoods = regenIsRev3
+        ? regenTranslated.moods
+        : (session.currentMood ? [session.currentMood] : []);
+      const regenDesiredFeelings = regenIsRev3
+        ? regenTranslated.desiredFeelings
+        : (session.desiredFeeling ? [session.desiredFeeling] : []);
+      const regenBodyNeeds = regenIsRev3
+        ? [...(session.bodyNeeds ?? []), ...regenTranslated.bodyNeeds]
+        : (session.bodyNeeds ?? []);
+      const regenPracticalIds = regenIsRev3
+        ? [...(session.practicalIds ?? []), ...regenTranslated.practicalIds]
+        : (session.practicalIds ?? []);
+
+      // ── New Look needs a fresh structural centre ──────────────────────────
+      //
+      // The anchor was chosen once at the source step and persisted as
+      // StylingSession.closetAnchorId, so every reroll rebuilt on the SAME garment. The
+      // anchor appears in every candidate, so the core could barely move and a reroll could
+      // only vary finishing pieces — the dominant cause of "New Look" returning the same
+      // look.
+      //
+      // For regenerate only, automatic selection runs again with the previous outfit's ids
+      // as a fail-open diversity preference. Fail-open end to end: if no equally-correct
+      // alternative anchor exists, autoSelectClosetAnchor returns the same garment and
+      // behaviour is unchanged; if it returns nothing at all, the session anchor is kept.
+      //
+      // StylingSession.closetAnchorId is NOT written here. The persisted brief — occasion,
+      // formality, intentions, body needs, anchor — stays exactly as the customer submitted
+      // it; the fresher anchor applies to THIS generated result only.
+      //
+      // PROVENANCE GATE. Only a garment nAia chose may be moved. When the customer picked it
+      // — Style This Piece, or a manual closet selection — that garment is part of the
+      // brief, not a starting point, and New Look varies the outfit AROUND it instead.
+      // null means a session created before provenance was recorded, and is read as MANUAL:
+      // keeping a garment that did not need keeping is a far smaller failure than silently
+      // replacing one the customer asked to style.
+      const anchorIsAuto = session.anchorProvenance === "AUTO";
+      if (anchorIsAuto && sessionSource !== "naia-piece" && naiaCustomer && recentlyShownClosetIds.length > 0) {
+        try {
+          const rerollAnchor = await autoSelectClosetAnchor(naiaCustomer.id, {
+            occasion: session.occasion ?? "everyday",
+            moods: regenMoods,
+            desiredFeelings: regenDesiredFeelings,
+            formalityConditional: session.formalityConditional ?? null,
+            intentions: session.intentions ?? [],
+            bodyNeeds: regenBodyNeeds,
+            dressingPreferences: naiaCustomer.onboardingProfile?.dressingPreferences ?? [],
+            previousOutfitClosetIds: recentlyShownClosetIds,
+          });
+          if (rerollAnchor) {
+            const resolved = await resolveActionAnchor(
+              sessionSource, session.customerId, null, rerollAnchor.id,
+            );
+            if (resolved.ok && resolved.anchor) regenAnchor = resolved.anchor;
+          }
+        } catch {
+          /* graceful: keep the session anchor */
+        }
+      }
+
       const engineInput = buildEngineInput({
-        moods: session.currentMood ? [session.currentMood] : [],
-        desiredFeelings: session.desiredFeeling ? [session.desiredFeeling] : [],
-        bodyNeeds: session.bodyNeeds ?? [],
+        moods: regenMoods,
+        desiredFeelings: regenDesiredFeelings,
+        bodyNeeds: regenBodyNeeds,
         coverageConditional: null,
         occasion: session.occasion ?? "everyday",
         occasionDisplayLabel: regenOccasionDisplayLabel,
         formalityConditional: session.formalityConditional,
         todayColours: { preferred: [], avoid: [] },
-        practicalIds: session.practicalIds ?? [],
+        practicalIds: regenPracticalIds,
         source: sessionSource,
         profile: buildEphemeralContextSignals(buildProfileSignals(naiaCustomer?.onboardingProfile), journeyCtx),
         mode: regenMode,
-        anchor: anchorResult.anchor,
+        anchor: regenAnchor,
         recentlyShownHandles,
         ...(recentlyShownClosetIds.length > 0 && { recentlyShownClosetIds }),
-        ...(prevOutfitClosetIds && { prevOutfitClosetIds }),
+        // Plain property, not a conditional spread: excess-property checking must stay live
+        // here. The spread is what let this field be dropped silently for the life of the
+        // feature. undefined is correct for a first generation — it skips the dedupe.
+        prevOutfitClosetIds,
         // Rev 3 wording context — stored on session, never affects scoring
         ...(session.state && {
           state: session.state,
@@ -1031,32 +1107,10 @@ export function shouldRevalidate({
 const MIN_LOADING_MS = 4800;
 const loadingMessages = ["Reading the runways...", "Reading what you need from the outfit...", "Matching textures and fabrics...", "Finalizing your look..."];
 
-const REV3_STATE_LABELS: Record<string, string> = {
-  "feel-good": "I feel good",
-  "stressed-overloaded": "Stressed / overloaded",
-  "low-energy": "Low-energy",
-  "not-feeling-like-myself": "I don't really feel like myself",
-  "physically-uncomfortable": "Physically uncomfortable",
-  "self-conscious": "Self-conscious",
-  "going-through-change": "I'm going through a change / something",
-  "want-reset": "I want a reset",
-  "nothing-in-particular": "I feel pretty neutral",
-  "other": "Something else",
-};
-const REV3_INTENTION_LABELS: Record<string, string> = {
-  "feel-like-myself": "Help me feel like myself",
-  "confidence":       "Give me confidence",
-  "ground-me":        "Ground me",
-  "give-structure":   "Give me structure",
-  "make-it-easy":     "Make things feel easy",
-  "feel-put-together": "Help me feel put together",
-  "feel-attractive":  "Make me feel attractive",
-  "give-energy":      "Give me energy",
-  "feel-softer":      "Help me feel softer",
-  "feel-sharper":     "Help me feel sharper",
-  "feel-less-exposed": "Help me feel less exposed",
-  "express-myself":   "Let me express myself",
-};
+// Session-summary labels come from the questionnaire vocabulary so the result
+// page can never show wording the customer did not actually read on the screens.
+const REV3_STATE_LABELS = STYLEME_STATE_LABELS;
+const REV3_INTENTION_LABELS = STYLEME_INTENTION_LABELS;
 const MOOD_LABELS: Record<string, string> = {
   "confident": "Confident", "tired": "Low-energy", "overwhelmed": "Overwhelmed",
   "adventurous": "Adventurous", "romantic": "Romantic", "powerful": "Powerful",
@@ -1068,11 +1122,46 @@ const FEELING_LABELS: Record<string, string> = {
   "more-effortless": "More effortless", "more-elevated": "More elevated",
   "more-attractive": "More attractive", "like-myself": "Like myself again",
 };
-const OCCASION_LABELS: Record<string, string> = {
-  "everyday": "Everyday", "work": "Work", "dinner": "Dinner", "date-night": "Date night",
-  "girls-night": "Evening out", "family": "Family gathering", "special-event": "Special event",
-  "travel": "Travel", "not-sure": "Not sure yet",
+// Complete the Look type labels. This was a two-way ternary on `=== "top"`, so every slot
+// that was not a top rendered as "Bottom" — which is how a generated evening-bag
+// recommendation ended up labelled "Bottom". Keyed explicitly so a new slot shows a
+// neutral fallback rather than silently borrowing another slot's name.
+const COMPLETION_SLOT_LABELS: Record<string, string> = {
+  top: "Top",
+  bottom: "Bottom",
+  dress: "Dress",
+  set: "Set",
+  shoe: "Shoes",
+  bag: "Bag",
+  outerwear: "Layer",
+  accessory: "Accessory",
+  jewelry: "Jewellery",
 };
+
+// Complete the Look and Finishing Layer can describe the same gap twice. The engine always
+// emits a SHOES / BAG / ACCESSORY entry in suggestion.items; when an owned piece filled the
+// slot it carries closetItemId, and when nothing did it is generic guidance with
+// closetItemId null. Once the suitability rule began leaving a slot deliberately unfilled,
+// that generic entry and the Complete the Look suggestion became two cards for one missing
+// shoe. Owned pieces are never affected — they always have a closetItemId.
+const COMPLETION_SLOT_TO_ITEM_TYPE: Record<string, string> = {
+  shoe: "SHOES",
+  bag: "BAG",
+  accessory: "ACCESSORY",
+  jewelry: "ACCESSORY",
+};
+
+function isDuplicateOfCompletionSuggestion(
+  item: { itemType?: string; closetItemId?: string | null },
+  completionLayer: unknown,
+): boolean {
+  if (item.closetItemId) return false; // an owned piece always renders
+  const layer = Array.isArray(completionLayer)
+    ? (completionLayer as Array<{ slot?: string }>)
+    : [];
+  return layer.some((p) => COMPLETION_SLOT_TO_ITEM_TYPE[p.slot ?? ""] === item.itemType);
+}
+
 
 // The loader has several return branches (direct sessionId load, pending-save,
 // error, and the cookie-path fresh-generation branch); only the fresh-generation
@@ -1225,6 +1314,41 @@ export default function StyleMeResult() {
             <div className="sm-loading-bar" />
           </div>
           <p className="sm-loading-msg">{loadingMessages[msgIndex]}</p>
+        </div>
+      </div>
+    );
+  }
+
+  // ── No alternative found ─────────────────────────────────────────
+  //
+  // A reroll whose candidates are all core-equivalent to the current look returns
+  // { sameCombination: true } with no suggestion. That is a valid settled outcome, not a
+  // failure, and the engine deliberately skips the model call and persists nothing.
+  //
+  // This must be checked BEFORE the error guard below. That guard treats a falsy
+  // `suggestion` as failure, and when this page was reached through the generation flow
+  // loaderData.suggestion is null — so a correct no-alternative response rendered
+  // "Something went wrong". The guard's own condition is left exactly as it was.
+  //
+  // Scoped with `!suggestion` on purpose: when a previous look IS on screen, `suggestion`
+  // is truthy, the error guard never fires, and the inline message beside the New Look
+  // button already handles it. This covers only the case where there is nothing to show.
+  if (generateFetcher.data?.sameCombination && !suggestion) {
+    return (
+      <div className="sm-loading-wrap">
+        <div style={{ textAlign: "center", maxWidth: "500px", padding: "40px" }}>
+          <h1 style={{ fontFamily: "var(--naia-ff-display)", fontSize: "32px", fontWeight: 900, color: "var(--naia-ink)", marginBottom: "16px" }}>
+            No other look today
+          </h1>
+          <p className="sm-same-combination-msg" style={{ fontFamily: "var(--naia-ff-body)", fontSize: "18px", fontStyle: "italic", color: "var(--naia-muted)", marginBottom: "32px" }}>
+            nAia couldn&rsquo;t find a different combination with your available pieces.
+          </p>
+          <Form method="post">
+            <input type="hidden" name="intent" value="start-over" />
+            <button type="submit" className="sm-result-action-btn sm-result-action-btn--primary">
+              Start Again
+            </button>
+          </Form>
         </div>
       </div>
     );
@@ -1397,7 +1521,7 @@ export default function StyleMeResult() {
               {loaderData.occasion && (
                 <div>
                   <p className="sm-result-context-label">Dressing for</p>
-                  <p className="sm-result-context-value">{OCCASION_LABELS[loaderData.occasion] ?? loaderData.occasion}</p>
+                  <p className="sm-result-context-value">{occasionDisplayFor((loaderData as { occasionDisplayLabel?: string | null }).occasionDisplayLabel, loaderData.occasion)}</p>
                 </div>
               )}
             </>
@@ -1418,7 +1542,7 @@ export default function StyleMeResult() {
               {loaderData.occasion && (
                 <div>
                   <p className="sm-result-context-label">Dressing For</p>
-                  <p className="sm-result-context-value">{OCCASION_LABELS[loaderData.occasion] ?? loaderData.occasion}</p>
+                  <p className="sm-result-context-value">{occasionDisplayFor((loaderData as { occasionDisplayLabel?: string | null }).occasionDisplayLabel, loaderData.occasion)}</p>
                 </div>
               )}
             </>
@@ -1528,13 +1652,13 @@ export default function StyleMeResult() {
           </div>
         )}
 
-        {/* Complete the Look — generic wardrobe guidance for missing essential clothing slots */}
+        {/* Complete the Look — generic wardrobe guidance for missing clothing and finishing slots */}
         {suggestionMeta?.completionLayer && suggestionMeta.completionLayer.length > 0 && (
           <div className="sm-result-section">
             <p className="sm-result-section-head">Complete the Look</p>
             {(suggestionMeta.completionLayer as Array<{ slot: string; description: string }>).map((piece, i) => (
               <div key={i} className="sm-item-card sm-item-card--secondary">
-                <p className="sm-item-type-label">{piece.slot === "top" ? "Top" : "Bottom"}</p>
+                <p className="sm-item-type-label">{COMPLETION_SLOT_LABELS[piece.slot] ?? "Piece"}</p>
                 <p className="sm-item-notes--secondary">{piece.description}</p>
               </div>
             ))}
@@ -1546,6 +1670,8 @@ export default function StyleMeResult() {
           <p className="sm-result-section-head">Finishing Layer</p>
           {suggestion.items?.filter((item: any) => {
             if (!["SHOES", "ACCESSORY", "BAG"].includes(item.itemType)) return false;
+            // Already described under Complete the Look — do not say it twice.
+            if (isDuplicateOfCompletionSuggestion(item, suggestionMeta?.completionLayer)) return false;
             const anchorSlot = suggestionMeta?.anchorSlot ?? null;
             if (anchorSlot) {
               const suppress: Record<string, string> = { shoe: "SHOES", bag: "BAG", accessory: "ACCESSORY", jewelry: "ACCESSORY" };

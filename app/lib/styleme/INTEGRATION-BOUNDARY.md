@@ -1,0 +1,464 @@
+# StyleMe integration boundary
+
+Written during the branch reconciliation on `fix/styleme-authoritative-reconcile`.
+It records what StyleMe keeps, what it must stop owning, and what it is waiting for —
+so the Garment Intelligence, Passport and Taste workstreams can plug in without
+StyleMe being rebuilt a second time.
+
+Nothing in this file is a decision about another workstream's design. Where a
+question belongs to someone else, it is stated as a dependency, not an answer.
+
+---
+
+## 1. What stays authoritative in StyleMe
+
+These are the product's actual styling opinion. They are not garment truth and do
+not belong anywhere else.
+
+| Area | Where it lives |
+|---|---|
+| The T1–T6 decision hierarchy and its comparator | `styleme-result.server.ts` — `CandidateRankKey`, `compareCandidateRankKeys` |
+| Session requirements and their precedence | `compareCandidateRankKeys` + the pre-rank hard gates |
+| Anchor handling and anchor eligibility | `styleme-profile-gate.ts` — `evaluateAnchorEligibility`; `styleme-anchor.server.ts` |
+| Candidate construction (A–E) | `styleme-result.server.ts` — `buildNaiaOutfitCandidates` |
+| Complete-outfit assembly and architecture | `selectAdditionalClosetGarments`, `passesAnchorIntegrityGate`, `buildCompletionLayer` |
+| Outfit-level balance and coherence | `evaluateCompleteOutfit`, statement/layering post-assembly passes |
+| Bounded model selection | `callClaudeForNaiaSelection` + the `isTiedAtT1T4` eligibility guard |
+| Regeneration semantics | `result.tsx` regenerate branch + `translateIntentionsToEngineSignals` |
+| Session vocabulary (state, intention, fit/comfort) | `app/lib/styleme/session-vocabulary.ts` |
+| Wording, grounding rules, explanations | `STYLEME_WORDING_SYSTEM_PROMPT` and rules 8–27 |
+| Outcomes and provenance | `api.styleme-outcome.tsx`, `StyleMeOutcome` |
+
+---
+
+## 2. What StyleMe should stop owning
+
+Each of these is garment truth that StyleMe currently re-derives locally. When the
+shared resolver lands, the listed code is deleted, not adapted.
+
+### 2.1 Occasion normalisation — **blocking**
+
+Two vocabularies are used interchangeably. The UI answer is normalised by
+`REV3_OCCASION_MAP` before storage, so a session only ever carries the canonical
+form; but `GarmentStyleMeProfile.occasionFit` is keyed on the UI form, and its keys
+are validated against `OCCASION_IDS` in `styleme-garment-profile.vocab.ts`.
+
+| Session stores (canonical) | Garment profile is keyed on (UI) | Overlap |
+|---|---|---|
+| `everyday`, `work`, `dinner`, `family`, `travel`, `active` | same | yes |
+| `date-night` | `date` | **no** |
+| `special-event` | `event` | **no** |
+| `girls-night` | `night-out` | **no** |
+| `not-sure` | — | **no** |
+
+For Date, Event and Night out this silently disables approved garment truth:
+an approved `"No"` stops excluding, the register gate returns early so activewear
+is admitted, and T1 falls back to legacy `occasions[]` tags.
+
+**Fixed in this branch** (session-side tables only, because they are keyed on what
+StyleMe itself stores and needed no garment-vocabulary decision):
+
+- `OCCASION_FORMALITY_TARGET` — `styleme-result.server.ts`
+- `_OCCASION_MAX_RANK` — `styleme-anchor.server.ts` *(already corrected by the systemic QA pass)*
+
+**Deferred — Garment Intelligence owns these.** Every call site below looks up the
+garment side with a session-side key, and cannot be corrected in isolation:
+
+| Call site | File |
+|---|---|
+| `passesProfileOccasionGate` | `styleme-profile-gate.ts` |
+| `passesProfileRegisterGate` | `styleme-profile-gate.ts` |
+| `passesRegisterCoherenceWithAnchor` | `styleme-profile-gate.ts` |
+| `getProfileOccasionTier` | `styleme-profile-gate.ts` |
+| `OCCASION_REGISTER_RANGE` | `styleme-profile-gate.ts` |
+| `styleMeSessionRegister` | `wardrobe-needs.ts` |
+| `OCCASION_IDS` + `occasionFit` validation | `styleme-garment-profile.vocab.ts`, `styleme-garment-profile.server.ts` |
+
+Why not half-fix it: `passesProfileRegisterGate` interleaves
+`OCCASION_REGISTER_RANGE[sessionOccasion]` (session side) with
+`profile.occasionFit[sessionOccasion]` (garment side). The `occasionFit` lookup is
+the escape hatch that lets an approved `Strong` override a blanket register block.
+Repairing the range keys alone would start blocking garments a human explicitly
+approved, with no way for the approval to speak. Both sides must move together.
+
+**What StyleMe needs:** one canonical occasion ID set, and `occasionFit` keyed on it
+(with a migration for existing approved profiles). StyleMe then deletes
+`OCCASION_REGISTER_RANGE` and `SESSION_OCCASION_TO_CLOSET_TOKENS` and calls the
+shared resolver.
+
+### 2.2 Coverage from metadata value, not metadata presence
+
+`outfitCoverageScore` (`styleme-result.server.ts`) counts a piece as covering when
+`sleeveLength != null || necklineCoverage != null || shoulderCoverage === true`.
+A sleeveless top with `sleeveLength: "sleeveless"` and `necklineCoverage: "low"`
+therefore scores as full coverage. This is the legacy fallback for
+`feel-less-exposed`, so an unreviewed Closet can return a revealing outfit the
+engine believes satisfies the request.
+
+**Deferred** — coverage semantics are garment truth. StyleMe should consume a
+resolved `coversArms` / `coversNeckline` / `coversShoulders` rather than
+interpreting raw fields. Not duplicated here.
+
+### 2.3 Colour family
+
+StyleMe has two colour paths that do not agree: `COLOR_VOCAB_MAP` in
+`styleme-recommendation.ts` (NADINE catalogue), and raw lowercase string comparison
+in `scoreClosetItemForSession` (`styleme-anchor.server.ts`, favourite `+2` /
+avoid `−4`). Closet colours are never normalised.
+
+**Deferred.** StyleMe should read a resolved colour family off `ResolvedGarment` and
+delete both paths. No new vocabulary was introduced here.
+
+### 2.4 Pairwise compatibility
+
+StyleMe's only pairing signal is `outfitCoherenceScore` — the fraction of piece
+pairs sharing any style tag. `naturalPairings`, `intentionalMix` and
+`avoidInStyleMe` are loaded onto every approved profile and consumed by nothing
+(`PAIRING_GUIDANCE_STATUS = "deferred"`).
+
+**Deferred to the shared `canPair` contract.** No competing implementation was
+built in this branch. StyleMe keeps whole-outfit architecture; pairwise
+compatibility becomes an input to T6.
+
+### 2.5 Sportswear / functional crossover
+
+Enforced only via `dressRegister === "athletic"`, which requires an approved
+profile *and* is unreachable for three occasions (see 2.1). `closetItemToSlot`
+maps `ACTIVEWEAR` into ordinary slots with no functional marker.
+
+**Deferred** — functional context is garment truth.
+
+### 2.6 Closet resolution and the 50-item cap
+
+`loadAllClosetItemsForEngine` and `autoSelectClosetAnchor` both cap at
+`take: 50`, ordered `createdAt DESC`.
+
+- **Why it exists:** no documented reason in the code. It predates garment
+  intelligence and reads as a prompt-size / query-cost guard from when the whole
+  Closet was passed to a model.
+- **What it affects:** anchor auto-selection, candidate construction, every
+  additional-garment slot, and result directions. Beyond 50 garments StyleMe styles
+  from a recency window and says nothing about it.
+- **Is removing it safe?** Not unilaterally. The engine is O(items × slots) with
+  nested exploration in Candidate E, and Wardrobe Intelligence reads the full Closet
+  — so the two features can already disagree about what the customer owns.
+- **Not replaced with another arbitrary limit in this branch.** The future
+  `ResolvedGarment` query should return the full Closet with resolution already
+  applied; the cap is then deleted rather than retuned. Proposed separately.
+
+---
+
+## 3. Passport boundary
+
+StyleMe must not build a second Passport precedence implementation. One resolver
+already exists and is correct: `scoringArchetypesFor` (`styleme-anchor.server.ts`)
+returns `styleDirectionArchetypes` when present and only then falls back to
+`stylePersonalities`.
+
+| Field | Role in StyleMe today | Note |
+|---|---|---|
+| `styleDirections` | **ranking input** — T5 via projected archetypes | correct Rev 7 path |
+| `stylePersonalities` | **legacy** — fallback only | one stale read remains: `buildSessionFingerprint` (`styleme-recommendation.ts`) hashes it directly; tie-break determinism only |
+| `styleExpression` | **contextual** — prompt only | zero numeric weight by design |
+| `explorationLevel` | **contextual** — prompt only | |
+| `dressingPreferences` | **hard constraint** | non-compensable at item + anchor level; compensable at outfit level |
+| `avoidColors` | **ambiguous** | `−4` item penalty, and the prompt says outright it is "not a hard exclusion". Whether it should be hard is a product decision the canonical Passport workstream owns — **not decided here** |
+| `firmNoColors` | **hard constraint, NADINE path only** | `checkHardExclusions` in `styleme-recommendation.ts`; no Closet-side equivalent exists |
+| `fitPreferences`, `fitConcerns` | **contextual** — prompt only | no gate, no score |
+| `preferredCoverage`, `coveragePreferences` | **contextual** — prompt only | the computational coverage path is `dressingPreferences` |
+| `desiredFeelings`, `desiredImpression`, `becoming`, `styleSupport` | **contextual** — prompt only | |
+| `successfulOutfitGives`, `currentGoal` | **contextual** — prompt only | |
+| `lifestyle` | **contextual** — prompt only + fingerprint | |
+| `silhouette`, `structure`, `bodyFocusAreas`, `bodyAvoidAreas` | **contextual** — prompt only | |
+| `gender` | **contextual** — finishing layer only | explicitly zero engine influence |
+
+**T5 is the ceiling.** Passport refines between outfits that are already valid for
+today. It must never override T1–T3. The bounded-model guard enforces the same rule
+on the wording side: the model may only choose among candidates tied through T1–T4,
+and prompt rule 11 states the precedence explicitly.
+
+---
+
+## 4. Learning and outcomes
+
+The evidence rule holds in code today and must be preserved:
+
+> suggested ≠ worn · generated ≠ preference · explicit feedback can become evidence
+
+**What StyleMe already writes correctly**
+
+| Event | Model | Becomes evidence |
+|---|---|---|
+| Look generated | `OutfitSuggestion` | **no** — correct |
+| Wore it / Changed something / Didn't wear | `StyleMeOutcome` | yes, `STYLEME_OUTCOME` strength 0.8 |
+| In-session review | `PostOutfitReview` | yes, `POST_OUTFIT_REVIEW` strength 0.7 |
+
+`extractStyleMeEvidence` is called only from the outcome POST handler, after a
+successful save. A generated result cannot become positive preference evidence.
+
+**Orphaned evidence — written, never read by anything that learns**
+
+| Signal | Model | Read by |
+|---|---|---|
+| love / okay / not-for-me | `RecommendationFeedback` | `feedback-signal`, `journey-context` — never Taste, never WI |
+| Saved look | `SavedLook` | WI appearance counts only; no Taste evidence |
+| Adjust Vibe | `StylingSession.parentSessionId` | nothing — the adjustment delta is discarded |
+| New Look, Same Vibe | — | nothing — a rejection signal with no record |
+
+**Not wired back.** StyleMe does not read `StyleTendency` and this branch does not
+change that. When the shared Taste contract is authoritative, confirmed tendencies
+should enter at **T5**, and negative tendencies should suppress candidates — with
+explicit Passport answers always winning, exactly as the selfie colour signal
+already does in `buildEphemeralContextSignals`.
+
+One asymmetry to resolve when that happens: WI reads only `StyleMeOutcome`, Taste
+reads outcomes + reviews, Trend evidence reads only reviews, and nothing reads
+`RecommendationFeedback` into taste at all.
+
+---
+
+## 5. The `ResolvedGarment` consumer boundary
+
+StyleMe should consume `ResolvedGarment[]` and a pairwise compatibility contract.
+It should not implement either.
+
+**Fields StyleMe consumes today** (everything on `ClosetAnchorInput`, which is the
+shape `ResolvedGarment` needs to satisfy):
+
+- **Identity / slot** — `id`, `name`, `category`, `subcategory`; resolved slot
+  (today: `closetItemToSlot` + approved `exactSlot` via `resolveProfileSlot`)
+- **Register** — `formality`, `occasions[]`, `dressRegister`, `occasionFit`
+- **Coverage / fit** — `sleeveLength`, `necklineCoverage`, `shoulderCoverage`,
+  `hemLength`, `topLength`, `midriffExposed`, `fitProfile`, `waistShape`, `waistComfort`
+- **Construction / character** — `construction`, `silhouetteCharacter`,
+  `fabricBehaviour`, `visualWeight`, `stylingEffort`, `layeringBehaviour`,
+  `statementLevel`, `outfitFunction`
+- **Intention** — `intentionPotentials` (16 keys; **absence ≠ None**)
+- **Presentation** — `colors`, `primaryColor`, `material`, `pattern`, `imageUrl`
+- **Customer relationship** — `garmentRelationships` (closed 8-value set)
+
+**Requirements StyleMe places on the resolver**
+
+1. **Absence must stay distinguishable from a decision.** A missing
+   `intentionPotentials` key means "not reviewed", never "None". Same for unknown
+   coverage metadata, which fails open everywhere in this engine.
+2. **Admin-correction precedence must be applied before StyleMe sees the garment.**
+   StyleMe currently reads `styleMeProfile.profileStatus === "approved"` itself;
+   it should receive already-resolved truth.
+3. **One occasion vocabulary**, canonical, on both session and garment sides.
+4. **Resolved colour family**, not raw strings.
+5. **A functional/sportswear marker** that does not depend on an approved profile.
+6. **The full Closet**, so the 50-item cap can be deleted rather than retuned.
+
+**A note on external garments.** `AnchorInput` is a closed two-member union
+(`NadineAnchorInput | ClosetAnchorInput`), so StyleMe can only style owned pieces.
+A future "style this before you buy" path needs a third member carrying the fields
+above plus a provenance discriminator — and one rule: a hypothetical garment may
+anchor a look but must never count as owned inventory for WI or Taste. Out of scope
+for this branch; recorded so the contract is designed with it in mind.
+
+---
+
+## 6. Intention taxonomy — 16 defined, 12 live
+
+The taxonomy expansion is **recovered and contracted, but not activated.**
+`STYLEME_TAXONOMY_16_ACTIVE` in `session-vocabulary.ts` is `false`, so the Step 2
+questionnaire offers the original twelve. Everything else — the sixteen IDs, the
+labels, `GarmentStyleMeProfile.intentionPotentials`, the admin review surfacing —
+is in place and unchanged.
+
+**Why it is gated.** `wardrobe-intelligence.server.ts` sets
+`intentionsSource = "curated"` only when *every* intention in its list is
+human-reviewed, and three sites gate on that (`wardrobe-intelligence.ts:915`,
+`wardrobe-needs.ts:1180` and `:1237`). Every profile approved before the expansion
+was reviewed against twelve intentions and carries no key for the four new ones.
+The moment WI's list becomes sixteen, those profiles demote to `"derived"` and
+"What your Closet supports best" empties — for wardrobes that genuinely *were*
+reviewed. Curated evidence lost silently.
+
+This has not fired yet only because WI reads a **separate** twelve-item
+`ALL_INTENTIONS` in `app/lib/admin/garment-intelligence-v1.server.ts`. The two
+lists are duplicates, and the obvious tidy-up — point one at the other — is exactly
+the change that fires the bug.
+
+**Semantics StyleMe must consume, not reimplement.** Garment Intelligence commit
+`9a1c31e` holds them: key absence means "not reviewed", a stored `"none"` means a
+human looked and decided none, and a legacy profile is *complete for the taxonomy
+it was authored under* rather than partial. It exposes `intentionIsReviewed()`,
+`intentionStrength()` (null ≠ "none") and `hasReviewedIntentionEvidence()` — the
+gate WI should use in place of `intentionsFullyReviewed`. StyleMe does not copy
+any of this.
+
+### Intended integration order
+
+| # | Step | Owner | Gate |
+|---|---|---|---|
+| 1 | `9a1c31e` review-semantics contract lands on trunk | Garment Intelligence | already committed on their branch |
+| 2 | **D6** — WI stops gating on all-or-nothing review and calls `hasReviewedIntentionEvidence()`; `ALL_INTENTIONS` is retired in favour of the shared vocabulary | Wardrobe Intelligence | must land **at or before** step 4 |
+| 3 | Reviewers rate the four new intentions on the Closet (the admin filter from `d76edd9` exists for exactly this) | product | not a code gate, but an empty taxonomy helps nobody |
+| 4 | Flip `STYLEME_TAXONOMY_16_ACTIVE` to `true` | StyleMe | one constant, no other change |
+
+Steps 1–2 may land together. Step 4 must not precede step 2.
+
+### Two Garment Intelligence integration patches are NOT yet takeable
+
+`8eb7158` (occasion matching) and `444660c` (coverage by value, not presence) are
+labelled for StyleMe cherry-picking and both were attempted here. Both were backed
+out: `8eb7158` imports `~/lib/garment/vocabulary` and `444660c` imports
+`~/lib/garment/coverage`, and `app/lib/garment/` does not exist outside the Garment
+Intelligence worktree. They are correct patches with a hard dependency on the
+foundation module — take them in the same merge as `app/lib/garment/`, not before.
+
+`444660c` is the fix for the coverage defect described in §2.2; that deferral is
+now tracked upstream rather than open-ended.
+
+---
+
+## 7. Deferred — `feel-like-myself` has no T4 identity signal
+
+Found during QA of the Test 2 `feel-sharper` fix on 2026-10-01. **Not investigated and
+not fixed in that pass, by instruction.**
+
+`feel-like-myself` scores a flat `0` at T4 for the QA customer. The legacy path for that
+intention is `outfitIdentityScore`, which returns `0` as soon as
+`scoringArchetypesFor(profile)` is empty — so every candidate ties and the winner falls
+through to the T6 tie-breaks rather than being chosen by the intention. The control arm
+of the A/B therefore proves nothing about identity; it only proves the tie-breaks are
+deterministic.
+
+The cause is upstream of StyleMe: this isolated branch does not resolve canonical Rev 7
+Passport style directions. `buildProfileSignals` projects `styleDirections` onto V3
+archetype tokens via `projectStyleDirectionsToArchetypes`, and `scoringArchetypesFor`
+falls back to the stale legacy `stylePersonalities` when that projection is empty — a
+Rev 7 customer's stored `stylePersonalities` is data the Rev 7 flow never rewrites. For
+a customer whose directions do not project, both arrays end up empty and the signal
+vanishes silently.
+
+**Revisit when StyleMe consumes `resolvePassport()` from the shared Passport
+foundation.** At that point `scoringArchetypesFor` should be deleted rather than
+adapted, and T4 identity should read resolved style directions directly. Until then,
+`feel-like-myself` is honest about having no evidence — it does not fabricate an
+identity signal — but it also cannot differentiate outfits.
+
+Related: §3 records the one stale `stylePersonalities` read that remains
+(`buildSessionFingerprint` in `styleme-recommendation.ts`).
+
+---
+
+## 8. QA notes — Test 6, and three things it exposed
+
+**Test 6: StyleMe PASS — upstream garment metadata defect identified.**
+Dinner + Smart casual, `legs-covered` Passport, 2026-10-01. Every layer of StyleMe
+behaved correctly on the data it was given; the defect is upstream.
+
+### 8.1 Closet / Garment Intelligence metadata correction required
+
+`Burgundy Midi Skirt` (`cmtqxeqdp0011l9047g1yirxc`, BOTTOMS / skirt) is stored with
+raw **`hemLength: "maxi"`**. The name says midi; the hem metadata says floor-length.
+
+Diagnostic evidence from the real run, identical on both entry paths:
+
+```
+hemLengthStored               "maxi"
+hemLengthSeenByGate           "maxi"
+resolvedDressingPreferences   ["legs-covered","no-cropped-tops",
+                               "dresses-modestly","prefer-full-length-trousers"]
+legsCovered                   legs-covered: PASS — hemLength=maxi
+passesDressingRequirements    true
+entry                         logged for BOTH "auto-anchor" and "candidate"
+```
+
+Consequences, all correct given the input: `passesDressingRequirements` accepted it
+because `maxi` is one of the two accepted values; `sanitizeFactualWordingClaims` never
+fired because it is gated on `hemLength === "midi"`; and the wording described "the
+long, covered line" because the model was told the skirt is maxi. Not hallucination.
+
+**Do not patch StyleMe for this.** The correction belongs to the Closet/GI record. A
+midi hem is non-compensable for `legs-covered`, so once the record says `midi` the
+existing gate will exclude the garment with no engine change.
+
+### 8.2 Consumers do not see the same effective garment truth
+
+StyleMe reads **raw `ClosetItem`** via `loadAllClosetItemsForEngine`. Wardrobe
+Intelligence reads the **effective** item via `getEffectiveClosetItem`, which applies
+`ClosetItemAdminReview.overrides`.
+
+So a reviewer correcting this skirt's hem through the admin review path would fix it
+for WI and **not** for StyleMe, which would keep reading `"maxi"` and keep admitting
+the garment. The Closet UI and the engine would disagree, with no error anywhere.
+
+This decides something for the `ResolvedGarment` contract in §5: admin-correction
+precedence must be applied **before** any consumer sees the garment, not per-consumer.
+StyleMe should receive already-resolved truth and delete its raw read. Until then,
+check which correction route actually reaches the engine before trusting a fix.
+
+### 8.3 `prefer-full-length-trousers` reaches StyleMe and is inert
+
+Her Passport carries four dressing requirements. StyleMe implements two:
+`passesDressingRequirements` handles `legs-covered` and `no-cropped-tops`, and
+`passesCandidateDressingRequirements` handles the compensable arms / shoulder /
+neckline set via `arms-covered`, `chest-neckline-covered` and `dresses-modestly`.
+
+**`prefer-full-length-trousers` is read by nothing.** It arrives in
+`profile.dressingPreferences`, reaches both gates, and matches no branch — so it
+neither excludes nor ranks anything.
+
+Separate from §8.1 and deliberately not mixed into Test 6. It is a Passport ↔ StyleMe
+integration gap: the semantics need deciding first — whether it is a hard constraint
+on trouser hem specifically, a preference expressible at T5, or a garment-level
+`ResolvedGarment` concern — and that decision belongs with the canonical Passport
+workstream, not here. Worth auditing the other dressing-preference IDs for the same
+silent inertness at the same time.
+
+---
+
+## 9. DEFERRED_TO_RESOLVED_GARMENT / GI OPACITY
+
+**Test 10: StyleMe PASS on represented garment truth — deferred GI opacity/coverage gap.**
+Date night + Polished + `more-coverage`, 2026-10-01. A `Black Embroidered Mesh Tank Top`
+(TOPS / "sleeveless blouse", the auto-anchor) was accepted with a blazer compensating for
+arm and shoulder coverage. StyleMe reasoned correctly about every attribute it was given.
+No StyleMe patch, and no StyleMe-only `mesh` rule.
+
+### 9.1 `ResolvedGarment` needs a canonical opacity / actual-coverage interpretation
+
+Coverage is currently inferred from **geometry alone** — `sleeveLength`,
+`necklineCoverage`, `shoulderCoverage`, `hemLength`, `midriffExposed`. Those describe
+*where fabric sits*, never whether you can see through it. A sleeveless mesh tank under a
+full-sleeved blazer satisfies `arms-covered` by the letter while the torso stays exposed.
+
+Consumers must not be left to infer coverage from geometry. `ResolvedGarment` should
+expose a resolved coverage verdict — the question "is this body area actually covered" —
+rather than raw fields each consumer re-interprets in its own way.
+
+### 9.2 Material is useful evidence but not a complete opacity model
+
+`GarmentMaterial` in `garment-intelligence.types.ts` already carries five inherently
+sheer or semi-sheer values:
+
+```
+"chiffon" | "georgette" | "lace" | "mesh" | "tulle"
+```
+
+The field exists as `ClosetItem.material`, the Closet AI populates it, and **no coverage
+path reads it** — not `scoreBodyNeedForClosetItem`, not `passesDressingRequirements`, not
+`passesCandidateDressingRequirements`. So the common cases need no new field; they need
+an existing one to be consumed.
+
+But material alone is not sufficient: **lining is not represented anywhere**. A lined lace
+dress is opaque; a heavy knit mesh may not be sheer. Resolving opacity from material
+*plus* a lining signal is the shape of the real answer.
+
+### 9.3 `more-coverage` is a soft signal that can stop discriminating entirely
+
+`more-coverage` is a T3 body need, not a constraint. It produces `knownViolationCount`
+(T3a) and `bodyNeedFitScore` (T3b) — both comparators. Nothing is ever refused for it.
+
+Worse, `scoreBodyNeedFitForRanking` sums violations and averages fit scores across all
+structural pieces, so a covering layer dilutes a violating base into a ratio. And when the
+violating garment is the **anchor** it appears in every candidate, making the violation
+count identical across the pool — so the need cannot even rank, let alone exclude.
+
+This is a product/integration decision, not a Test 10 patch: should a stated coverage
+need ever be a hard constraint, and should an anchor-carried violation be treated
+differently from a replaceable-piece violation? Recorded here, not acted on.

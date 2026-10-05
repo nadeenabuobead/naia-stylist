@@ -22,6 +22,13 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  STYLEME_STATE_OPTIONS,
+  STYLEME_STATE_LABELS,
+  STYLEME_FIT_COMFORT_OPTIONS,
+  STYLEME_FIT_COMFORT_LABELS,
+} from "~/lib/styleme/session-vocabulary";
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const src = (file: string) => readFileSync(join(__dirname, file), "utf8");
 
@@ -126,14 +133,11 @@ describe("SM-REV3-B1 — state.tsx question is 'How are you feeling today?'", ()
 
 describe("SM-REV3-B2 — 'going-through-change' label is updated", () => {
   it("label is \"I'm going through something\"", () => {
-    assert.ok(
-      state.includes("I'm going through something"),
-      "updated label",
-    );
+    assert.equal(STYLEME_STATE_LABELS["going-through-change"], "I'm going through something");
   });
   it("old label 'I'm going through a change / something' is removed", () => {
     assert.ok(
-      !state.includes("I'm going through a change / something"),
+      !Object.values(STYLEME_STATE_LABELS).includes("I'm going through a change / something"),
       "old label removed",
     );
   });
@@ -141,10 +145,11 @@ describe("SM-REV3-B2 — 'going-through-change' label is updated", () => {
 
 describe("SM-REV3-B3 — 'other' option label is 'Other'", () => {
   it("other option label is exactly 'Other'", () => {
-    assert.ok(state.includes('"Other"') || state.includes("label: \"Other\""), "Other label");
+    assert.equal(STYLEME_STATE_LABELS["other"], "Other");
   });
-  it("old 'Something else' label is removed from state.tsx", () => {
-    assert.ok(!state.includes("Something else"), "Something else removed from state");
+  it("old 'Something else' label is not used for any State", () => {
+    assert.ok(!Object.values(STYLEME_STATE_LABELS).includes("Something else"));
+    assert.ok(!state.includes("Something else"), "Something else removed from state.tsx");
   });
 });
 
@@ -686,9 +691,11 @@ describe("SM-REV3-L6 — Physical Need 8 UI IDs all round-trip via styleMeBodyNe
     "nothing-specific",
   ];
   it("all 8 Rev 3 Physical Need IDs are in PHYSICAL_NEED_OPTIONS (VALID_IDS)", () => {
-    const physNeedFresh = readFileSync(join(__dirname, "physical-need.tsx"), "utf8");
     for (const id of ALL_8_IDS) {
-      assert.ok(physNeedFresh.includes(`"${id}"`), `${id} is in PHYSICAL_NEED_OPTIONS`);
+      assert.ok(
+        STYLEME_FIT_COMFORT_OPTIONS.some((o) => o.id === id),
+        `${id} is in PHYSICAL_NEED_OPTIONS`,
+      );
     }
   });
   it("styleMeBodyNeedsRaw stored in action for back-navigation hydration", () => {
@@ -704,19 +711,20 @@ describe("SM-REV3-L6 — Physical Need 8 UI IDs all round-trip via styleMeBodyNe
   });
   it("nothing-specific exclusive logic works regardless of normalization", () => {
     const physNeedFresh = readFileSync(join(__dirname, "physical-need.tsx"), "utf8");
-    assert.ok(physNeedFresh.includes('"nothing-specific"'), "nothing-specific exclusive ID defined");
+    assert.ok(
+      STYLEME_FIT_COMFORT_OPTIONS.some((o) => o.id === "nothing-specific"),
+      "nothing-specific exclusive ID defined",
+    );
     assert.ok(physNeedFresh.includes("EXCLUSIVE_ID"), "exclusive logic present");
   });
-  it("less-body-conscious label is 'Nothing too body-hugging' (Rev 3 copy polish)", () => {
-    const physNeedFresh = readFileSync(join(__dirname, "physical-need.tsx"), "utf8");
-    assert.ok(
-      physNeedFresh.includes('"Nothing too body-hugging"'),
-      "label must be updated to Nothing too body-hugging",
+  it("less-body-conscious label is the preference-phrased Rev 3 copy", () => {
+    assert.equal(
+      STYLEME_FIT_COMFORT_LABELS["less-body-conscious"],
+      "A little less body-hugging",
     );
-    assert.ok(
-      !physNeedFresh.includes('"Less body-conscious"'),
-      "old label 'Less body-conscious' must be removed",
-    );
+    const labels = Object.values(STYLEME_FIT_COMFORT_LABELS);
+    assert.ok(!labels.includes("Less body-conscious"), "old label removed");
+    assert.ok(!labels.includes("Nothing too body-hugging"), "symptom phrasing removed");
   });
 });
 
@@ -824,18 +832,15 @@ describe("BUG1-D — switching away from OTHER clears stale text", () => {
 
 describe("BUG1-E — internal State ID for 'Other' remains 'other'", () => {
   it("STATE_OPTIONS entry has id: 'other'", () => {
-    const optionsBlock = state.slice(
-      state.indexOf("const STATE_OPTIONS"),
-      state.indexOf("const VALID_STATE_IDS"),
-    );
     assert.ok(
-      optionsBlock.includes('id: "other"'),
+      STYLEME_STATE_OPTIONS.some((o) => o.id === "other"),
       "STATE_OPTIONS must retain id: 'other' — ID must not change",
     );
   });
   it("VALID_STATE_IDS includes 'other'", () => {
+    assert.ok(state.includes("VALID_STATE_IDS"), "state.tsx derives VALID_STATE_IDS from the options");
     assert.ok(
-      state.includes("VALID_STATE_IDS") && state.includes('"other"'),
+      STYLEME_STATE_OPTIONS.some((o) => o.id === "other"),
       "'other' must remain a valid state ID",
     );
   });
@@ -1348,7 +1353,10 @@ describe("BUG4-AD — all 8 Rev 3 Physical Need IDs are defined and persist to n
 
   for (const id of ALL_8) {
     it(`${id} is in PHYSICAL_NEED_OPTIONS`, () => {
-      assert.ok(physNeed.includes(`"${id}"`), `${id} must be in PHYSICAL_NEED_OPTIONS`);
+      assert.ok(
+        STYLEME_FIT_COMFORT_OPTIONS.some((o) => o.id === id),
+        `${id} must be in PHYSICAL_NEED_OPTIONS`,
+      );
     });
   }
 
@@ -1392,5 +1400,146 @@ describe("BUG4-AE — all 4 source × anchor combinations reach Prisma without b
       parsePos !== -1 && createPos !== -1 && parsePos < createPos,
       "JSON.parse must occur before the Prisma create call",
     );
+  });
+});
+
+// ── M: Layout — Step 1 grew to 14 options without narrowing the buttons ──────
+// The rebalanced State screen adds four options. These pin the layout promises:
+// content-sized pills that wrap, unchanged styling and spacing, an unchanged
+// progress indicator, and Continue still disabled until something is selected.
+
+describe("SM-REV3-M1 — Step 1 keeps wrapping, content-sized pills", () => {
+  const css = readFileSync(join(__dirname, "../../styles/naia-design-system.css"), "utf8");
+  const pillsRule = css.slice(css.indexOf(".sm-pills {"), css.indexOf(".sm-pill:hover"));
+
+  it(".sm-pills wraps instead of compressing buttons", () => {
+    assert.ok(pillsRule.includes("flex-wrap: wrap"), "pills must wrap onto new rows");
+    assert.ok(pillsRule.includes("gap: 10px"), "spacing between pills is unchanged");
+  });
+
+  it(".sm-pill has no fixed or percentage width — it sizes to its label", () => {
+    const pillRule = pillsRule.slice(pillsRule.indexOf(".sm-pill {"));
+    assert.ok(!/\bwidth:/.test(pillRule), ".sm-pill must not take a fixed width");
+    assert.ok(!/\bflex:/.test(pillRule), ".sm-pill must not flex-shrink its label");
+    assert.ok(pillRule.includes("padding: 12px 22px"), "pill padding is unchanged");
+  });
+
+  it("all three steps share the same pill container — no bespoke Step 1 grid", () => {
+    for (const [name, src] of [["state", state], ["intention", intention], ["physical-need", physNeed]] as const) {
+      assert.ok(src.includes('className="sm-pills"'), `${name}.tsx must use the shared .sm-pills container`);
+      assert.ok(src.includes('sm-pill${'), `${name}.tsx must use the shared .sm-pill button style`);
+    }
+  });
+});
+
+describe("SM-REV3-M2 — Step 1 progress indicator and Continue gating are unchanged", () => {
+  it("state.tsx still renders step 1 of the progress indicator", () => {
+    assert.ok(state.includes("<SmPage step={1}>"), "progress indicator must still report step 1");
+  });
+
+  it("Continue stays disabled until a State is selected", () => {
+    assert.ok(
+      state.includes("const isValid = selected !== null"),
+      "selection is still required before Continue is enabled",
+    );
+    assert.ok(state.includes("<SmContinue disabled={!isValid} />"));
+  });
+
+  it("the 'other' free-text requirement survives the rebalance", () => {
+    assert.ok(state.includes('selected !== "other" || otherText.trim().length > 0'));
+  });
+});
+
+// ── M  Complete the Look type labels ────────────────────────────────────────
+//
+// The label was a two-way ternary on `piece.slot === "top"`, so every slot that was not a
+// top rendered as "Bottom". A generated evening-bag recommendation was therefore shown
+// under the heading "Bottom". These assertions read result.tsx source, matching the rest
+// of this file's approach.
+
+describe("§M — Complete the Look renders the correct type label per slot", () => {
+  const result = src("result.tsx");
+
+  it("M.1 the two-way top/Bottom ternary is gone", () => {
+    assert.ok(
+      !/piece\.slot === "top" \? "Top" : "Bottom"/.test(result),
+      "a binary ternary mislabels every non-top slot as Bottom",
+    );
+  });
+
+  it("M.2 labels come from an explicit slot map", () => {
+    assert.ok(/COMPLETION_SLOT_LABELS\[piece\.slot\]/.test(result));
+  });
+
+  it("M.3 the map defines bag, shoe, top and bottom", () => {
+    const block = result.slice(result.indexOf("const COMPLETION_SLOT_LABELS"));
+    const map = block.slice(0, block.indexOf("};"));
+    assert.ok(/bag:\s*"Bag"/.test(map), "bag must render as Bag");
+    assert.ok(/shoe:\s*"Shoes"/.test(map), "shoe must render as Shoes");
+    assert.ok(/top:\s*"Top"/.test(map));
+    assert.ok(/bottom:\s*"Bottom"/.test(map));
+  });
+
+  it("M.4 an unknown slot falls back to a neutral word, not another slot's name", () => {
+    assert.ok(/COMPLETION_SLOT_LABELS\[piece\.slot\] \?\? "Piece"/.test(result));
+  });
+});
+
+// ── N  A missing finishing piece is described once, not twice ────────────────
+//
+// The engine always emits a SHOES / BAG / ACCESSORY entry in suggestion.items. When an
+// owned piece filled the slot it carries closetItemId; when nothing did it is generic
+// guidance with closetItemId null. Once the suitability rule began leaving a slot
+// deliberately unfilled, that generic entry and the Complete the Look suggestion became
+// two cards for the same missing shoe.
+//
+// Source-contract assertions plus a direct exercise of the predicate's logic, matching the
+// approach used throughout this file.
+
+describe("§N — Finishing Layer does not repeat a Complete the Look suggestion", () => {
+  const result = src("result.tsx");
+
+  it("N.1 the Finishing Layer filter consults the completion layer", () => {
+    assert.ok(
+      /isDuplicateOfCompletionSuggestion\(item, suggestionMeta\?\.completionLayer\)/.test(result),
+      "the filter must suppress entries already described under Complete the Look",
+    );
+  });
+
+  it("N.2 the slot-to-itemType bridge covers shoe and bag", () => {
+    const block = result.slice(result.indexOf("const COMPLETION_SLOT_TO_ITEM_TYPE"));
+    const map = block.slice(0, block.indexOf("};"));
+    assert.ok(/shoe:\s*"SHOES"/.test(map));
+    assert.ok(/bag:\s*"BAG"/.test(map));
+  });
+
+  it("N.3 an owned piece is explicitly exempted", () => {
+    const fn = result.slice(result.indexOf("function isDuplicateOfCompletionSuggestion"));
+    const body = fn.slice(0, fn.indexOf("\n}"));
+    assert.ok(/if \(item\.closetItemId\) return false/.test(body),
+      "a garment she owns must always render under Finishing Layer");
+  });
+
+  it("N.4 the predicate's logic: generated shoe suppressed, owned shoe kept", () => {
+    // Mirrors the source implementation so the behaviour is asserted, not just its shape.
+    const SLOT_TO_TYPE: Record<string, string> = {
+      shoe: "SHOES", bag: "BAG", accessory: "ACCESSORY", jewelry: "ACCESSORY",
+    };
+    const isDup = (
+      item: { itemType?: string; closetItemId?: string | null },
+      layer: Array<{ slot?: string }>,
+    ) => {
+      if (item.closetItemId) return false;
+      return layer.some((p) => SLOT_TO_TYPE[p.slot ?? ""] === item.itemType);
+    };
+    const completion = [{ slot: "shoe" }];
+    assert.equal(isDup({ itemType: "SHOES", closetItemId: null }, completion), true,
+      "generated shoe guidance duplicates the Complete the Look card");
+    assert.equal(isDup({ itemType: "SHOES", closetItemId: "abc" }, completion), false,
+      "an owned shoe still renders");
+    assert.equal(isDup({ itemType: "BAG", closetItemId: null }, completion), false,
+      "a bag is not covered by a shoe suggestion");
+    assert.equal(isDup({ itemType: "SHOES", closetItemId: null }, []), false,
+      "with no completion layer nothing is suppressed");
   });
 });

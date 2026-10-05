@@ -69,6 +69,8 @@ import {
   OCCASION_IDS,
   OCCASION_FIT_RATINGS,
   INTENTION_IDS,
+  NEW_INTENTION_IDS,
+  getIntentionReviewState,
   INTENTION_RATINGS,
   PROFILE_STATUS_VALUES,
   type OccasionId,
@@ -2900,9 +2902,22 @@ function IntentionTable({
         </tr>
       </thead>
       <tbody>
-        {INTENTION_IDS.map((int) => (
-          <tr key={int}>
-            <th style={{ fontWeight: 500 }}>{int}</th>
+        {INTENTION_IDS.map((int) => {
+          const isNew = (NEW_INTENTION_IDS as readonly string[]).includes(int);
+          const isPending = isNew && !values[int];
+          return (
+          <tr key={int} style={isPending ? { background: "#fffbeb" } : undefined}>
+            <th style={{ fontWeight: 500, color: isPending ? "#92400e" : undefined }}>
+              {int}
+              {isPending && (
+                <span
+                  title="Added in the 2026-09 taxonomy expansion — not reviewed yet. This is not the same as None."
+                  style={{ marginLeft: "6px", fontSize: "9px", fontWeight: 700, color: "#b45309", letterSpacing: "0.04em" }}
+                >
+                  NEEDS REVIEW
+                </span>
+              )}
+            </th>
             {ratings.map((r) => {
               const active = values[int] === r;
               return (
@@ -2928,7 +2943,8 @@ function IntentionTable({
               );
             })}
           </tr>
-        ))}
+          );
+        })}
       </tbody>
     </table>
   );
@@ -2974,6 +2990,9 @@ function StyleMeGarmentProfileCard({
     setDraft((prev) => ({ ...prev, [field]: value }));
 
   const profileStatus = draft.profileStatus as string;
+  const intentionReview = getIntentionReviewState(
+    draft.intentionPotentials as Record<string, string> | null,
+  );
 
   // Completeness check — mirrors server-side checkApprovalCompleteness
   const missingForApproval = React.useMemo(() => {
@@ -3017,6 +3036,19 @@ function StyleMeGarmentProfileCard({
         <span className={`na-badge ${PROFILE_STATUS_BADGE[profileStatus] ?? "na-badge--not-analyzed"}`}>
           {PROFILE_STATUS_LABELS[profileStatus] ?? profileStatus.toUpperCase()}
         </span>
+        {/* The 2026-09 expansion added four intention dimensions. A garment
+            approved under the previous taxonomy is still approved — it just has
+            unreviewed dimensions. Show that as its own state rather than letting
+            the whole garment read as unapproved. */}
+        {intentionReview.pendingNew.length > 0 && (
+          <span
+            className="na-badge na-badge--not-analyzed"
+            title={`Not reviewed yet: ${intentionReview.pendingNew.join(", ")}. Unreviewed is not the same as None.`}
+            style={{ background: "#fef3c7", color: "#92400e", borderColor: "#fcd34d" }}
+          >
+            {intentionReview.pendingNew.length} NEW INTENTION{intentionReview.pendingNew.length === 1 ? "" : "S"} NEED REVIEW
+          </span>
+        )}
         {profile?.reviewedBy && (
           <span className="na-card__subtitle" style={{ marginLeft: "auto" }}>
             Saved by {profile.reviewedBy}

@@ -24,6 +24,7 @@ export default [
   route("style-me/occasion", "routes/style-me/occasion.tsx"),
   route("style-me/source", "routes/style-me/source.tsx"),
   route("style-me/result", "routes/style-me/result.tsx"),
+
   route("api/customer-auth", "routes/api.customer-auth.jsx"),
   route("api/closet", "routes/api.closet.jsx"),
   route("api/closet-preview-analyze", "routes/api.closet-preview-analyze.ts"),

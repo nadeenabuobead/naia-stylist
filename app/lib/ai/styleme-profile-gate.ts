@@ -18,6 +18,25 @@
 // that overrides any blanket register exclusion rule.
 
 import type { ClosetAnchorInput, OutfitCandidate, OutfitSlot } from "./styleme-recommendation.types.js";
+import { NEW_INTENTION_IDS } from "../admin/styleme-garment-profile.vocab.js";
+
+// ── Expansion intentions: approved truth only, never derived ──────────────────
+//
+// feel-elevated / stand-out / feel-fun / feel-powerful were added to the taxonomy
+// after the closet was reviewed, so most garments have no rating for them yet.
+//
+// They deliberately have NO heuristic fallback. Every tempting shortcut is wrong:
+// tailored is not powerful, black is not stand-out, polished is not elevated,
+// casual is not fun. Deriving them would also erase the distinction between "a
+// human decided None" and "nobody has looked at this yet", which is the whole
+// point of tracking the expansion separately.
+//
+// So an unreviewed expansion intention contributes the neutral, evidence-free
+// score used elsewhere for outfit-level intentions — never a positive signal, and
+// never as much as an approved Supporting (0.5) or Strong (1.0). Only a human
+// rating in intentionPotentials can move these.
+const NEUTRAL_NO_EVIDENCE = 0.4;
+const EXPANSION_INTENTION_IDS: ReadonlySet<string> = new Set<string>(NEW_INTENTION_IDS);
 
 // ── Dress register rank ────────────────────────────────────────────────────────
 
@@ -32,6 +51,36 @@ export const DRESS_REGISTER_RANK: Record<string, number> = {
 };
 
 // Allowed dress register range (inclusive) per session occasion.
+//
+// KEYED ON THE CANONICAL SESSION OCCASION — the value this map is actually looked up
+// with. Three keys used to be spelled in the StyleMe UI vocabulary ("date", "event",
+// "night-out") while passesProfileRegisterGate looked them up as "date-night",
+// "special-event" and "girls-night". Those three lookups missed, and `if (!range)
+// return true` sits ABOVE the athletic and evening blocks — so the gate returned true
+// before any of them ran, and activewear was admitted to a Date night, a Special event
+// and a Girls night with nothing approving it.
+//
+// The ranges themselves were never what those occasions lost: with the +/-2 tolerance
+// below they widen to 0-6, 1-8 and 0-8, which blocks nothing on a 0-6 rank scale. The
+// athletic block is the gate that was being skipped.
+//
+// This was previously deferred on the grounds that the keys could not be repaired
+// alone: the gate interleaves this session-side map with the GARMENT-side
+// profile.occasionFit, which is keyed on the UI spelling, and the occasionFit lookup
+// is the escape hatch that lets an approved "Strong" override a blanket register
+// block. Repairing one side without the other would have started blocking garments a
+// human explicitly approved, with no way for the approval to speak.
+//
+// That is no longer the situation. The C1 vocabulary bridge made every occasionFit
+// read go through profileOccasionRating, which maps the canonical session occasion to
+// the garment spelling. The escape hatch now speaks for all nine occasions, so the
+// session side can be corrected on its own — which is all this map is.
+//
+// Still owned by the Garment Intelligence foundation: ONE canonical occasion ID set
+// with occasionFit keyed on it, after which this map, CANONICAL_OCCASION_TO_PROFILE_KEY
+// and SESSION_OCCASION_TO_CLOSET_TOKENS all delete in favour of the shared resolver.
+// Correcting these keys does not substitute for that; it stops a gate failing open in
+// the meantime.
 export const OCCASION_REGISTER_RANGE: Record<string, { min: number; max: number }> = {
   "active":    { min: 0, max: 1 },
   "everyday":  { min: 1, max: 3 },
@@ -39,9 +88,9 @@ export const OCCASION_REGISTER_RANGE: Record<string, { min: number; max: number 
   "travel":    { min: 1, max: 3 },
   "work":      { min: 2, max: 4 },
   "dinner":    { min: 2, max: 5 },
-  "date":      { min: 2, max: 4 },
-  "event":     { min: 3, max: 6 },
-  "night-out": { min: 2, max: 6 },
+  "date-night":    { min: 2, max: 4 },
+  "special-event": { min: 3, max: 6 },
+  "girls-night":   { min: 2, max: 6 },
 };
 
 // Non-structural slots excluded from register/statement checks (bags, accessories, jewelry).
@@ -49,6 +98,23 @@ export const OCCASION_REGISTER_RANGE: Record<string, { min: number; max: number 
 // computeHybridIntentionFit — all pieces (including bag/accessory) contribute to
 // candidate-level intention scoring via their approved intentionPotentials.
 export const STRUCTURAL_EXCLUDES = new Set(["bag", "accessory", "jewelry"]);
+
+// Slots a garment must resolve to in order to carry an outfit — the structural half of
+// the wardrobe, as opposed to the finishing half (bag / shoe / accessory / jewelry).
+//
+// This is the product rule "structural garment vs finishing accessory", expressed where
+// it belongs: on the resolved SLOT, not on the raw category. A category allowlist cannot
+// state it — ACTIVEWEAR, LOUNGEWEAR and SETS all resolve to real structural slots via
+// closetItemToSlot, and an allowlist that omits them silently removes whole wardrobes
+// from anchoring. That is exactly what broke Active / busy day sessions.
+export const STRUCTURAL_ANCHOR_SLOTS = new Set<string>([
+  "top", "bottom", "dress", "set", "outerwear",
+]);
+
+/** True when a resolved slot can carry an outfit. Shoes and accessories cannot. */
+export function canSlotAnchorOutfit(slot: string): boolean {
+  return STRUCTURAL_ANCHOR_SLOTS.has(slot);
+}
 
 // Valid OutfitSlot values — used to validate profile exactSlot before casting.
 export const VALID_OUTFIT_SLOTS = new Set<string>([
@@ -74,13 +140,50 @@ export function resolveProfileSlot(
 // Returns false when an APPROVED profile explicitly marks this garment "No" for the occasion.
 // "No" is a hard exclusion — overrides all positive session signals.
 // When no approved profile exists, returns true (legacy logic takes over).
+// ── Canonical occasion → approved-profile occasionFit key (C1) ────────────────
+//
+// StyleMe sessions carry canonical occasion IDs; GarmentStyleMeProfile.occasionFit is
+// stored under the admin's OCCASION_IDS vocabulary. Six of the nine spellings coincide,
+// three do not, and every read indexed occasionFit by the session value directly — so for
+// those three the key simply missed and ALL approved occasion truth was silently discarded:
+// a reviewer's "No" for a night out carried exactly as much weight as no rating at all.
+//
+// Observed before this bridge: ST15, ST16 and O4 all fell through to the legacy occasions[]
+// array for tiering, and O4's uniform occasionTier 0 came from that fallback rather than
+// from anything a reviewer had said.
+//
+// Five call sites read this value — passesProfileOccasionGate, passesProfileRegisterGate,
+// passesRegisterCoherenceWithAnchor, getProfileOccasionTier, and isOccasionCompatible in
+// the anchor. All five go through this resolver, so a "No" cannot be honoured by one gate
+// and ignored by another.
+//
+// A vocabulary bridge and nothing more. No garment metadata is reinterpreted, no canonical
+// session value is renamed, and an occasion with no mapping resolves to itself — so the six
+// already-matching spellings and any unknown occasion behave exactly as before. A missing
+// key still yields undefined, preserving each caller's own fail-open path.
+export const CANONICAL_OCCASION_TO_PROFILE_KEY: Readonly<Record<string, string>> = {
+  "date-night": "date",
+  "special-event": "event",
+  "girls-night": "night-out",
+};
+
+/** The approved occasionFit rating for a canonical session occasion, or undefined. */
+export function profileOccasionRating(
+  occasionFit: Record<string, string> | null | undefined,
+  sessionOccasion: string,
+): string | undefined {
+  if (!occasionFit) return undefined;
+  const key = CANONICAL_OCCASION_TO_PROFILE_KEY[sessionOccasion] ?? sessionOccasion;
+  return occasionFit[key];
+}
+
 export function passesProfileOccasionGate(
   item: ClosetAnchorInput,
   sessionOccasion: string,
 ): boolean {
   const profile = item.approvedProfile;
   if (!profile?.occasionFit) return true;
-  const rating = profile.occasionFit[sessionOccasion];
+  const rating = profileOccasionRating(profile.occasionFit, sessionOccasion);
   return rating !== "No";
 }
 
@@ -116,7 +219,7 @@ export function passesProfileRegisterGate(
   // defer to that authoritative truth rather than applying a blanket register rule.
   // A "No" rating or absent rating falls through to the generic register check below.
   if (profile.occasionFit) {
-    const rating = profile.occasionFit[sessionOccasion];
+    const rating = profileOccasionRating(profile.occasionFit, sessionOccasion);
     if (rating === "Strong" || rating === "Acceptable") return true;
   }
 
@@ -151,8 +254,8 @@ export function passesRegisterCoherenceWithAnchor(
 
   // Shared-occasion approval: both pieces approved for this occasion → bypass register gap.
   if (sessionOccasion) {
-    const anchorRating = anchorItem.approvedProfile.occasionFit?.[sessionOccasion];
-    const itemRating = item.approvedProfile.occasionFit?.[sessionOccasion];
+    const anchorRating = profileOccasionRating(anchorItem.approvedProfile.occasionFit, sessionOccasion);
+    const itemRating = profileOccasionRating(item.approvedProfile.occasionFit, sessionOccasion);
     const anchorApproved = anchorRating === "Strong" || anchorRating === "Acceptable";
     const itemApproved = itemRating === "Strong" || itemRating === "Acceptable";
     if (anchorApproved && itemApproved) return true;
@@ -174,7 +277,7 @@ export function getProfileOccasionTier(
 ): 0 | 1 | 2 | null {
   const profile = item.approvedProfile;
   if (!profile?.occasionFit) return null;
-  const rating = profile.occasionFit[sessionOccasion];
+  const rating = profileOccasionRating(profile.occasionFit, sessionOccasion);
   if (rating === "Strong") return 2;
   if (rating === "Acceptable") return 1;
   if (rating === "No") return 0;
@@ -290,8 +393,17 @@ export function passesLayeringRequirement(
 // Tag sets duplicated here to keep this file standalone (no .server imports).
 // Kept in sync with STRUCTURE_TAGS / FLOW_TAGS in styleme-result.server.ts.
 // "fitted" is intentionally excluded — a fitted silhouette is not a structured garment.
-const GATE_STRUCTURE_TAGS = new Set(["structured", "tailored", "sharp", "polished", "minimalist"]);
-const GATE_FLOW_TAGS = new Set(["flowing", "relaxed", "soft", "loose", "flowy", "oversized"]);
+// Kept in sync with STRUCTURE_TAGS in styleme-result.server.ts, which is itself
+// aligned to GARMENT_STYLE_TAG_VOCAB — the tokens the Closet AI emits. "sharp" and
+// "minimalist" were never in that vocabulary and matched nothing.
+const GATE_STRUCTURE_TAGS = new Set([
+  "structured", "tailored", "polished", "classic",
+  "elevated", "refined", "sophisticated", "minimal", "clean", "understated",
+]);
+const GATE_STRUCTURE_FIT_PROFILES = new Set(["structured", "tailored"]);
+// "soft" intentionally excluded — closet AI uses it for physical fabric softness,
+// not the feel-softer emotional intention. Physical soft ≠ feel-softer emotion.
+const GATE_FLOW_TAGS = new Set(["flowing", "relaxed", "loose", "flowy", "oversized"]);
 
 // Per-piece legacy intention score for UN-PROFILED garments.
 // Uses style tags, fitProfile, and garment attributes — the same signals the outfit-level
@@ -305,7 +417,7 @@ function legacyPieceIntentionScore(item: ClosetAnchorInput, intentionId: string)
     case "give-structure":
     case "feel-sharper": {
       const hasTag = [...GATE_STRUCTURE_TAGS].some((t) => tags.has(t));
-      const hasFit = fp !== null && GATE_STRUCTURE_TAGS.has(fp);
+      const hasFit = fp !== null && GATE_STRUCTURE_FIT_PROFILES.has(fp);
       return Math.min(1.0, (hasTag ? 0.5 : 0) + (hasFit ? 0.5 : 0));
     }
     case "feel-softer": {
@@ -340,6 +452,9 @@ function legacyPieceIntentionScore(item: ClosetAnchorInput, intentionId: string)
     case "feel-put-together":
     case "give-energy":
     default:
+      // Expansion intentions have no legacy tag heuristic either — an un-profiled
+      // garment carries no evidence for elevated / stand-out / fun / powerful.
+      if (EXPANSION_INTENTION_IDS.has(intentionId)) return NEUTRAL_NO_EVIDENCE;
       return 0.4;
   }
 }
@@ -408,6 +523,9 @@ function formCharacterScore(item: ClosetAnchorInput, intentionId: string): numbe
       return 0.4;
     }
     default:
+      // Expansion intentions are approved-truth-only: no construction, colour,
+      // register or silhouette field may stand in for a human rating.
+      if (EXPANSION_INTENTION_IDS.has(intentionId)) return NEUTRAL_NO_EVIDENCE;
       return 0.4;
   }
 }
@@ -494,6 +612,35 @@ export function outfitFunctionPriority(item: ClosetAnchorInput): number {
   }
 }
 
+// ── Register alignment scoring ────────────────────────────────────────────────
+//
+// Replaces the flat +0.5 register bonus in both anchor selection and slot filling.
+//
+// When formalityConditional is absent (hasFormalityConditional=false):
+//   In-target → +1.0 small positive; out-of-target → 0 (no penalty for unspecified formality)
+//
+// When formalityConditional is present (hasFormalityConditional=true):
+//   In-target              → +2.5  (strong preference)
+//   1 rank outside target  → -1.5  (clear penalty)
+//   2 ranks outside        → -3.0
+//   3+ ranks outside       → -4.5  (capped — always preserves sole-candidate fallback)
+//
+// itemRank === null (no approved profile / unknown register) → 0 always (fail-open).
+export function computeRegisterAlignmentScore(
+  itemRank: number | null,
+  targetRange: { min: number; max: number },
+  hasFormalityConditional: boolean,
+): number {
+  if (itemRank === null) return 0;
+  const inTarget = itemRank >= targetRange.min && itemRank <= targetRange.max;
+  if (!hasFormalityConditional) return inTarget ? 1.0 : 0;
+  if (inTarget) return 2.5;
+  const distance = itemRank < targetRange.min
+    ? targetRange.min - itemRank
+    : itemRank - targetRange.max;
+  return Math.max(-4.5, -1.5 * distance);
+}
+
 // ── Statement conflict — extended ─────────────────────────────────────────────
 // Replaces the original hasStatementConflict with extended coverage:
 // counts structural pieces where EITHER statementLevel === "statement" OR
@@ -536,3 +683,302 @@ export function hasStatementConflict(
 // avoidInStyleMe can express nuances (e.g., "avoid with formal trousers") that the gate
 // functions cannot capture without the structured token layer above.
 export const PAIRING_GUIDANCE_STATUS = "deferred" as const;
+
+// ── Dressing-requirement gate for Closet items (item-level, non-compensable only) ─────
+//
+// MOVED here from styleme-result.server.ts so the anchor selector can reach it without
+// the anchor → result → anchor import cycle that previously forced FORMALITY_RANK to be
+// duplicated. styleme-result.server.ts re-exports it, so every existing caller and test
+// keeps its import path.
+//
+// Only applies checks that cannot be satisfied through layering on top of this item.
+// Compensable requirements (arms-covered, chest-neckline-covered, dresses-modestly) are
+// evaluated at the complete-outfit level in passesCandidateDressingRequirements, never
+// rejected at item-selection time.
+//
+// Non-compensable: legs-covered on bottom/dress items.
+//   A midi or mini bottom CANNOT become legs-covered regardless of what is added on top.
+//   "n/a" hemLength → item is a top or outerwear → exempt (does not cover legs at all).
+//   null hemLength → unknown metadata → fail-open (keep the item in the pool).
+export function passesDressingRequirements(
+  item: ClosetAnchorInput,
+  dressingPreferences: readonly string[] | null | undefined,
+): boolean {
+  if (!dressingPreferences || dressingPreferences.length === 0) return true;
+  const prefs = new Set(dressingPreferences);
+
+  // legs-covered — non-compensable for garments that cover the leg zone (hemLength not "n/a")
+  if (prefs.has("legs-covered")) {
+    const hl = item.hemLength;
+    if (hl !== null && hl !== undefined && hl !== "n/a") {
+      if (hl !== "full" && hl !== "maxi") return false;
+    }
+  }
+
+  // no-cropped-tops — non-compensable: a garment explicitly cropped (topLength === "cropped")
+  // cannot become non-cropped through layering. Only applicable where topLength is known.
+  if (prefs.has("no-cropped-tops")) {
+    const tl = item.topLength;
+    if (tl !== null && tl !== undefined && tl !== "n/a") {
+      if (tl === "cropped") return false;
+    }
+  }
+
+  return true;
+}
+
+// ── Anchor eligibility ────────────────────────────────────────────────────────
+//
+// ONE deterministic gate, applied wherever an anchor is chosen — auto-selection,
+// the manual Closet picker, and candidate construction. Before this existed the
+// anchor was exempt from every hard requirement: `buildNaiaOutfitCandidates`
+// filtered the rest of the Closet with `item.id === anchor.id || passesDressingRequirements(...)`,
+// and `autoSelectClosetAnchor` was never handed the Passport at all. A customer who
+// requires legs covered could therefore be anchored to a mini skirt, and every
+// candidate built on that anchor would pass, because the candidate-level gate only
+// covers arms, shoulders and neckline.
+//
+// What this gate enforces, and what it deliberately does not:
+//
+//   T1 occasion   — an APPROVED occasionFit of "No" is a hard exclusion. A human
+//                   reviewer said this garment does not work for this occasion;
+//                   being chosen as the anchor does not overrule that.
+//   T2 formality  — NOT enforced. Formality is a ranking tier in this engine, never
+//                   a hard requirement: a Dressy request against a casual Closet must
+//                   still return the best available answer rather than nothing. The
+//                   existing in-range/out-of-range sort in autoSelectClosetAnchor and
+//                   the T2 comparator remain the only formality authorities.
+//   T3 dressing   — non-compensable requirements only (legs-covered, no-cropped-tops).
+//                   Compensable ones stay at outfit level, where a layer can satisfy them.
+//
+// Unknown metadata never rejects. A garment is refused only on explicit evidence.
+export type AnchorRejectionCode = "dressing-requirement" | "occasion-not-suitable";
+
+export interface AnchorEligibility {
+  eligible: boolean;
+  code?: AnchorRejectionCode;
+  /** Customer-facing sentence. States what happened; never blames, never invents a reason. */
+  message?: string;
+}
+
+const ANCHOR_ELIGIBLE: AnchorEligibility = { eligible: true };
+
+export function evaluateAnchorEligibility(
+  item: ClosetAnchorInput,
+  sessionOccasion: string,
+  dressingPreferences: readonly string[] | null | undefined,
+): AnchorEligibility {
+  if (!passesDressingRequirements(item, dressingPreferences)) {
+    return {
+      eligible: false,
+      code: "dressing-requirement",
+      message:
+        "This piece doesn't meet the coverage you've set in your Style Passport, " +
+        "and no layer can change that. Choose another piece, or update your Passport.",
+    };
+  }
+
+  if (!passesProfileOccasionGate(item, sessionOccasion)) {
+    return {
+      eligible: false,
+      code: "occasion-not-suitable",
+      message:
+        "This piece has been reviewed as not suitable for this occasion. " +
+        "Choose another piece, or change the occasion.",
+    };
+  }
+
+  return ANCHOR_ELIGIBLE;
+}
+
+// ── Diagnostic explainer (NAIA_STYLEME_DIAGNOSTICS only) ─────────────────────
+//
+// Reports WHY passesDressingRequirements reached its answer. Pure, read-only, and
+// called from nothing but the diagnostic log blocks — it must never gate anything.
+// Mirrors the real predicate rather than reimplementing it: the overall verdict is
+// taken from passesDressingRequirements itself, so the two cannot drift.
+export interface DressingGateExplanation {
+  passes: boolean;
+  requirements: string[];
+  legsCoveredPresent: boolean;
+  /** e.g. "legs-covered: PASS — hemLength=full", "legs-covered: FAIL — hemLength=midi" */
+  legsCovered: string | null;
+  noCroppedTops: string | null;
+  hemLength: string | null;
+  topLength: string | null;
+}
+
+export function explainDressingRequirements(
+  item: ClosetAnchorInput,
+  dressingPreferences: readonly string[] | null | undefined,
+): DressingGateExplanation {
+  const prefs = [...(dressingPreferences ?? [])];
+  const hl = item.hemLength ?? null;
+  const tl = item.topLength ?? null;
+
+  let legsCovered: string | null = null;
+  if (prefs.includes("legs-covered")) {
+    if (hl === null || hl === undefined) legsCovered = "legs-covered: PASS-UNKNOWN — hemLength=null (fail-open)";
+    else if (hl === "n/a") legsCovered = "legs-covered: NOT-APPLICABLE — hemLength=n/a (does not cover the leg zone)";
+    else if (hl === "full" || hl === "maxi") legsCovered = `legs-covered: PASS — hemLength=${hl}`;
+    else legsCovered = `legs-covered: FAIL — hemLength=${hl}`;
+  }
+
+  let noCroppedTops: string | null = null;
+  if (prefs.includes("no-cropped-tops")) {
+    if (tl === null || tl === undefined) noCroppedTops = "no-cropped-tops: PASS-UNKNOWN — topLength=null (fail-open)";
+    else if (tl === "n/a") noCroppedTops = "no-cropped-tops: NOT-APPLICABLE — topLength=n/a";
+    else if (tl === "cropped") noCroppedTops = "no-cropped-tops: FAIL — topLength=cropped";
+    else noCroppedTops = `no-cropped-tops: PASS — topLength=${tl}`;
+  }
+
+  return {
+    // Taken from the real predicate so the explanation can never disagree with the gate.
+    passes: passesDressingRequirements(item, dressingPreferences),
+    requirements: prefs,
+    legsCoveredPresent: prefs.includes("legs-covered"),
+    legsCovered,
+    noCroppedTops,
+    hemLength: hl,
+    topLength: tl,
+  };
+}
+
+// ── Occasion × formality target register ──────────────────────────────────────
+//
+// Lives here rather than in styleme-result.server.ts because the anchor needs the
+// same answer, and styleme-result.server.ts imports FROM styleme-anchor.server.ts.
+// One resolver, one pair of tables, three call sites.
+//
+// Keys MUST be canonical session occasion IDs — the values StylingSession.occasion
+// actually holds, after REV3_OCCASION_MAP has normalised the UI answer.
+//
+// girls-night tops out at `occasion` (5), not `evening` (6). A night out and a
+// special event are different rooms: {2,6} spanned the entire scale, which made
+// "Night out + Dressy" and "Special event + Dressy" resolve to the identical band
+// and return the identical outfit.
+export const OCCASION_FORMALITY_TARGET: Record<string, { min: number; max: number }> = {
+  "everyday":      { min: 1, max: 2 },
+  "work":          { min: 2, max: 4 },
+  "dinner":        { min: 2, max: 5 },
+  "date-night":    { min: 2, max: 3 },
+  "special-event": { min: 3, max: 6 },
+  "girls-night":   { min: 2, max: 5 },
+  "family":        { min: 1, max: 2 },
+  "travel":        { min: 1, max: 2 },
+  "active":        { min: 1, max: 2 },
+};
+
+// The register she explicitly asked for.
+export const FORMALITY_CONDITIONAL_ADJUSTMENTS: Record<string, { min: number; max: number }> = {
+  "formality-relaxed": { min: 1, max: 2 },
+  "formality-smart":   { min: 2, max: 3 },
+  "formality-polished":{ min: 3, max: 4 },
+  "formality-occasion":{ min: 4, max: 6 },
+};
+
+/**
+ * Resolves the target formality band for an occasion and an explicit formality answer.
+ *
+ * Intersecting two absolute bands is only meaningful when they overlap. For four
+ * reachable combinations it produced min > max — a band no formality rank can
+ * satisfy, so every candidate scored "outside target", T2 tied at -1 for the whole
+ * pool, and formality was silently switched off. date-night + Dressy resolved to
+ * 4-3; family + Dressy to 4-2.
+ *
+ * Where they do overlap the intersection is kept, unchanged. Where they do not, the
+ * explicit answer owns the direction and the occasion supplies the other edge.
+ */
+export function getTargetFormalityRange(
+  occasion: string,
+  formalityConditional: string | null,
+): { min: number; max: number } {
+  const base = OCCASION_FORMALITY_TARGET[occasion] ?? { min: 1, max: 4 };
+  if (!formalityConditional) return base;
+  const adj = FORMALITY_CONDITIONAL_ADJUSTMENTS[formalityConditional];
+  if (!adj) return base;
+
+  const min = Math.max(base.min, adj.min);
+  const max = Math.min(base.max, adj.max);
+  if (min <= max) return { min, max };
+
+  if (adj.min > base.max) {
+    // She asked to dress above what the occasion expects. The occasion's own
+    // ceiling falls OUTSIDE the band: if it stayed inside, "Dressy at a family
+    // gathering" would count smart-casual as within-target and the occasion would
+    // neutralise the request rather than calibrate it.
+    return { min: base.max + 1, max: adj.min };
+  }
+  // She asked to dress below what the occasion expects. Here the occasion's floor
+  // stays INSIDE the band — deliberately asymmetric with the case above. A special
+  // event has a real external floor in a way a family gathering has no real
+  // ceiling, so dressing down is calibrated more firmly than dressing up.
+  return { min: adj.max, max: base.min };
+}
+
+// ── Finishing-piece suitability ───────────────────────────────────────────────
+//
+// "Best available owned item" is not the same as "good enough to recommend." A bag
+// or shoe that is the highest-scoring option in the closet can still be wrong for the
+// occasion, and offering it is worse than offering nothing: ST15 paired an evening gown
+// with a business tote and block-heel ankle boots, and ST16 paired an evening skirt with
+// the same tote, in both cases because they were the only options and scoring had no
+// opinion about whether they belonged.
+//
+// The test uses FORMALITY_RANK — the scale getTargetFormalityRange already speaks and
+// evaluateCompleteOutfit already scores the outfit register with. No second formality
+// system is introduced, and the approved dressRegister path is left exactly as it is.
+//
+// A finishing piece is UNSUITABLE only when BOTH hold:
+//
+//   1. it sits below the occasion's target register floor, and
+//   2. it sits more than one rank below the outfit's own base register.
+//
+// Requiring both is what makes the rule safe. Condition 1 alone strips a wardrobe that
+// simply owns no formalwear — measured against the real QA runs it removed Omar's penny
+// loafers AND his watch from a Night out, leaving him with no shoes at all, because his
+// closet tops out one rank below the band. Condition 2 scales the judgement to the
+// outfit actually being built: a rank-3 shoe beside rank-4 trousers is proportionate, the
+// same shoe beside a rank-6 gown is not.
+//
+// Unknown formality is always suitable (fail-open) — an absent signal must never remove
+// a garment. An unknown base register is likewise fail-open.
+export const FINISHING_SUITABILITY_MAX_GAP_BELOW_BASE = 1;
+
+// Slots judged on condition 1 alone, because the piece is OPTIONAL: if nothing clears the
+// register floor the slot is simply left out, so there is no risk of leaving the outfit
+// short of something it needs. A shoe is not in this set — an outfit with no shoes is
+// broken, so a shoe is only removed when the mismatch is severe relative to the look
+// (both conditions), which is what keeps a wardrobe owning no formalwear from being left
+// barefoot.
+//
+// `accessory` joined after ST13 recommended a Black Ribbed Knit Beanie (rank 1) against an
+// explicit Smart casual 2-2 target. The register penalty had fired — the beanie scored
+// -1.5 — but a penalty only lowers a score, it never excludes, and the beanie was the only
+// accessory left with a positive total. Omitting it also moves that outfit from
+// underdressed 1.935 to within-target 2.000.
+//
+// `jewelry` is deliberately NOT here. The same argument would apply, but there is no
+// observed case for it yet and widening without evidence is how a narrow rule turns into
+// a blunt one.
+//
+// This asymmetry is the whole reason ST16's tote survived the first version: its outfit's
+// base register was 2, so a rank-3 bag was not "below the base" at all, and the lenient
+// test cleared it even though the band floor was 4.
+export const FINISHING_STRICT_SLOTS = new Set<string>(["bag", "accessory"]);
+
+export function finishingPieceIsSuitable(
+  pieceFormalityRank: number | null,
+  baseRegisterRank: number | null,
+  targetBand: { min: number; max: number },
+  slot?: string,
+): boolean {
+  if (pieceFormalityRank === null) return true;          // unknown → keep
+  const belowBandFloor = pieceFormalityRank < targetBand.min;
+  if (!belowBandFloor) return true;
+  // Optional slots stop here: below the floor is enough to leave it out.
+  if (slot !== undefined && FINISHING_STRICT_SLOTS.has(slot)) return false;
+  if (baseRegisterRank === null) return true;            // nothing to compare against → keep
+  const gapBelowBase = baseRegisterRank - pieceFormalityRank;
+  return gapBelowBase <= FINISHING_SUITABILITY_MAX_GAP_BELOW_BASE;
+}

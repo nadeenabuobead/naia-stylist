@@ -20,6 +20,9 @@ export const SESSION_OCCASION_TO_CLOSET_TOKENS: Record<string, readonly string[]
   "travel":        ["travel"],                                  // AI = session ID
   "family":        ["family"],                                  // no AI equiv — keep session ID as legacy match
   "not-sure":      [],                                          // no meaningful match
+  // Active / busy day — athletic and workout-specific items; general casual items are
+  // treated as versatile (no occasion tags → compatible) and receive no +10 bonus.
+  "active":        ["active", "gym", "athletic", "sport"],
 };
 
 // Returns true when the item's stored occasion tags include at least one token that

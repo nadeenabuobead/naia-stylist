@@ -7,6 +7,7 @@ export function meta() {
 import { useState } from "react";
 import { commitSession, getSession } from "~/lib/session.server";
 import { SESSION_QUESTIONS, SQ } from "~/lib/ai/signal-contract";
+import { CANONICAL_STYLEME_ENTRY } from "~/lib/styleme/handoff";
 import { SmPage } from "~/components/style-me/SmPage";
 import { SmContinue } from "~/components/style-me/SmContinue";
 import naiaStyles from "~/styles/naia-design-system.css?url";
@@ -37,15 +38,16 @@ const REV3_OCCASION_MAP: Record<string, string> = {
   "date": "date-night",
   "event": "special-event",
   "night-out": "girls-night",
-  "active-busy-day": "everyday",
+  "active-busy-day": "active",
   "other": "not-sure",
 };
 
 // Reverse map: canonical engine ID → Rev 3 UI ID (for session hydration on Back navigation).
-// "everyday" is intentionally omitted — it maps to itself AND to active-busy-day, so ambiguous.
+// "everyday" is intentionally omitted — it maps to itself, no ambiguity needed.
 const OCCASION_REVERSE_MAP: Record<string, string> = {
   "date-night": "date",
   "special-event": "event",
+  "active": "active-busy-day",
 };
 
 const formalityOptions = [
@@ -71,10 +73,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const bodyNeeds = session.get("styleMeBodyNeeds");
 
   if (!isRev3 && !isLegacy) {
-    return redirect("/style-me/mood");
+    return redirect(CANONICAL_STYLEME_ENTRY);
   }
   if (!bodyNeeds) {
-    return redirect(isRev3 ? "/style-me/physical-need" : "/style-me/comfort");
+    return redirect(isRev3 ? "/style-me/physical-need" : CANONICAL_STYLEME_ENTRY);
   }
 
   // Hydrate previously selected occasion and formality for Back navigation.
@@ -108,8 +110,9 @@ export async function action({ request }: ActionFunctionArgs) {
 
   const session = await getSession(request.headers.get("Cookie"));
   session.set("styleMeOccasion", occasion);
-  // Store the original UI label before REV3_OCCASION_MAP; used for wording display only.
-  session.set("styleMeOccasionDisplayLabel", rawOccasion);
+  // Store human-readable label (not the raw option ID) for Claude wording and result display.
+  const displayLabel = occasions.find((o) => o.id === rawOccasion)?.label ?? rawOccasion;
+  session.set("styleMeOccasionDisplayLabel", displayLabel);
   if (formalityConditional) {
     session.set("styleMeFormalityConditional", formalityConditional);
   } else {
@@ -139,7 +142,9 @@ export default function StyleMeOccasion() {
   // Normalize Rev 3 UI ID before checking formality occasions (which use canonical IDs).
   const normalizedForFormality = selected ? (REV3_OCCASION_MAP[selected] ?? selected) : null;
   const showFormality = !!normalizedForFormality && FORMALITY_OCCASIONS.has(normalizedForFormality);
-  const backTo = isRev3 ? "/style-me/physical-need" : "/style-me/comfort";
+  // Back always targets the canonical Fit/Comfort step. /style-me/comfort is a
+  // compatibility redirect now and must never be offered as a destination.
+  const backTo = "/style-me/physical-need";
 
   const selectOccasion = (id: string) => {
     setSelected(id);

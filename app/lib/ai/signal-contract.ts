@@ -259,7 +259,7 @@ export const SESSION_QUESTIONS: SessionQuestion[] = [
       "special-event",
       "not-sure",
     ],
-    skipForOccasions: ["everyday", "travel"],
+    skipForOccasions: ["everyday", "travel", "active"],
   },
   {
     id: SQ.TODAY_COLOURS,
@@ -1137,6 +1137,40 @@ export const ANSWER_REGISTRY: readonly AnswerMapping[] = [
     behaviours: [RECOMMENDATION_BEHAVIOURS.CONTEXTUAL],
     rankingWeight: "none",
   },
+  // Positive States (2026-09 rebalance). Deliberately identical in weight to
+  // every other State: contextual wording only, rankingWeight "none".
+  // feel-confident is NOT the `confidence` intention.
+  // feel-energised is NOT the `give-energy` intention.
+  // feel-calm is NOT the `feel-softer` intention.
+  // They must never be translated into an intention, body need or garment field.
+  {
+    id: "feel-confident",
+    questionId: SQ.STATE,
+    activatedFields: [],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.CONTEXTUAL],
+    rankingWeight: "none",
+  },
+  {
+    id: "feel-energised",
+    questionId: SQ.STATE,
+    activatedFields: [],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.CONTEXTUAL],
+    rankingWeight: "none",
+  },
+  {
+    id: "feel-calm",
+    questionId: SQ.STATE,
+    activatedFields: [],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.CONTEXTUAL],
+    rankingWeight: "none",
+  },
+  {
+    id: "feel-social",
+    questionId: SQ.STATE,
+    activatedFields: [],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.CONTEXTUAL],
+    rankingWeight: "none",
+  },
   {
     id: "stressed-overloaded",
     questionId: SQ.STATE,
@@ -1287,6 +1321,38 @@ export const ANSWER_REGISTRY: readonly AnswerMapping[] = [
   },
   {
     id: "express-myself",
+    questionId: SQ.INTENTIONS,
+    activatedFields: [],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.PROFILE_AMPLIFY],
+    rankingWeight: "none",
+  },
+  // Taxonomy expansion (2026-09), 12 → 16. Scored exactly like the original
+  // intentions: through approved GarmentStyleMeProfile.intentionPotentials, via
+  // the shared intention-fit path. No SMCM/desired-feeling translation, and no
+  // State value may activate any of them.
+  {
+    id: "feel-elevated",
+    questionId: SQ.INTENTIONS,
+    activatedFields: [],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.PROFILE_AMPLIFY],
+    rankingWeight: "none",
+  },
+  {
+    id: "stand-out",
+    questionId: SQ.INTENTIONS,
+    activatedFields: [],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.PROFILE_AMPLIFY],
+    rankingWeight: "none",
+  },
+  {
+    id: "feel-fun",
+    questionId: SQ.INTENTIONS,
+    activatedFields: [],
+    behaviours: [RECOMMENDATION_BEHAVIOURS.PROFILE_AMPLIFY],
+    rankingWeight: "none",
+  },
+  {
+    id: "feel-powerful",
     questionId: SQ.INTENTIONS,
     activatedFields: [],
     behaviours: [RECOMMENDATION_BEHAVIOURS.PROFILE_AMPLIFY],

@@ -1,6 +1,8 @@
 // app/routes/style-me/state.tsx
 // Rev 3 Screen 1 — "How are you feeling today?"
-// Single select, 10 IDs. Writes styleMeState to session cookie.
+// Single select. Writes styleMeState to session cookie.
+// Options (IDs + labels) live in ~/lib/styleme/session-vocabulary — single source
+// of truth shared with result.tsx and the model prompt.
 // ZERO product scoring: state is wording context only (never maps to emotion/body/product field).
 // "other" ID: when selected, requires a short text entry (stored as styleMeStateOtherText).
 // The text is context-only and is never scored or mapped to garment rules.
@@ -11,6 +13,7 @@ import { useState } from "react";
 import { getSession, commitSession } from "~/lib/session.server.js";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { SESSION_QUESTIONS, SESSION_QUESTION_IDS as SQ } from "~/lib/ai/signal-contract.js";
+import { STYLEME_STATE_OPTIONS } from "~/lib/styleme/session-vocabulary";
 import { SmPage } from "~/components/style-me/SmPage";
 import { SmContinue } from "~/components/style-me/SmContinue";
 import naiaStyles from "~/styles/naia-design-system.css?url";
@@ -21,18 +24,7 @@ export const links: LinksFunction = () => [
 
 const STATE_QUESTION = SESSION_QUESTIONS.find((q) => q.id === SQ.STATE)!;
 
-const STATE_OPTIONS: Array<{ id: string; label: string }> = [
-  { id: "feel-good",                label: "I feel good" },
-  { id: "stressed-overloaded",      label: "Stressed / overloaded" },
-  { id: "low-energy",               label: "Low-energy" },
-  { id: "not-feeling-like-myself",  label: "I don't really feel like myself" },
-  { id: "physically-uncomfortable", label: "Physically uncomfortable" },
-  { id: "self-conscious",           label: "Self-conscious" },
-  { id: "going-through-change",     label: "I'm going through something" },
-  { id: "want-reset",               label: "I feel like I need a reset" },
-  { id: "nothing-in-particular",    label: "I feel pretty neutral" },
-  { id: "other",                    label: "Other" },
-];
+const STATE_OPTIONS = STYLEME_STATE_OPTIONS;
 
 const VALID_STATE_IDS = new Set(STATE_OPTIONS.map((o) => o.id));
 

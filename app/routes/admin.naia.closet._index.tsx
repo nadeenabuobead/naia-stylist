@@ -12,12 +12,15 @@ import { requireAdminSession } from "~/lib/internal-auth.server";
 import {
   listClosetItems,
   getClosetReviewSummary,
+  getNewIntentionReviewSummary,
   type ClosetItemListFilters,
   type ClosetItemListResult,
   type ClosetAnalysisStatus,
   type ClosetAdminReviewFilter,
   type ClosetItemRow,
   type ClosetReviewSummary,
+  type NewIntentionReviewFilter,
+  type NewIntentionReviewSummary,
 } from "~/lib/admin/closet-intelligence.server";
 import { markItemReviewed, deleteClosetItem, deleteClosetItems } from "~/lib/admin/closet-review.server";
 
@@ -109,23 +112,27 @@ export async function loader({ request }: LoaderFunctionArgs) {
     lowConfidence: url.searchParams.get("lowConfidence") === "1" ? true : undefined,
     missingMetadata: url.searchParams.get("missingMetadata") === "1" ? true : undefined,
     customerId: url.searchParams.get("customerId") || undefined,
+    newIntentionReview:
+      (url.searchParams.get("newIntentionReview") as NewIntentionReviewFilter) || undefined,
   };
 
   const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1", 10));
 
-  const [result, summary] = await Promise.all([
+  const [result, summary, newIntentionSummary] = await Promise.all([
     listClosetItems(filters, page),
     getClosetReviewSummary(),
+    getNewIntentionReviewSummary(),
   ]);
-  return Response.json({ result, filters, page, summary });
+  return Response.json({ result, filters, page, summary, newIntentionSummary });
 }
 
 export default function ClosetIntelligenceList() {
-  const { result, filters, page, summary } = useLoaderData() as {
+  const { result, filters, page, summary, newIntentionSummary } = useLoaderData() as {
     result: ClosetItemListResult;
     filters: ClosetItemListFilters;
     page: number;
     summary: ClosetReviewSummary;
+    newIntentionSummary: NewIntentionReviewSummary;
   };
   const [searchParams] = useSearchParams();
 
@@ -183,7 +190,7 @@ export default function ClosetIntelligenceList() {
   const activeFilterCount = [
     filters.search, filters.category, filters.analysisStatus, filters.reviewStatus,
     filters.formality, filters.occasion, filters.lowConfidence, filters.missingMetadata,
-    filters.customerId,
+    filters.customerId, filters.newIntentionReview,
   ].filter(Boolean).length;
 
   return (
@@ -245,6 +252,14 @@ export default function ClosetIntelligenceList() {
         <span className="na-review-progress__sep" aria-hidden="true">·</span>
         <span className="na-review-progress__chip na-review-progress__chip--corrected">
           CORRECTED BY YOU: {summary.corrected.toLocaleString()}
+        </span>
+        <span className="na-review-progress__sep" aria-hidden="true">·</span>
+        <span
+          className="na-review-progress__chip"
+          title="Garments with a stored rating for all four intentions added in the 2026-09 expansion (feel-elevated, stand-out, feel-fun, feel-powerful). A rating of None counts as reviewed; a missing rating does not."
+          style={{ background: "#fef3c7", color: "#92400e" }}
+        >
+          NEW INTENTIONS REVIEWED: {newIntentionSummary.reviewed.toLocaleString()} / {newIntentionSummary.total.toLocaleString()}
         </span>
       </div>
 
@@ -311,6 +326,22 @@ export default function ClosetIntelligenceList() {
               {REVIEW_STATUS_OPTS.map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
+            </select>
+          </div>
+
+          {/* StyleMe garment profile: progress through the four intentions added
+              in the 2026-09 taxonomy expansion. Completion is key presence only —
+              a stored "None" is a reviewed answer. */}
+          <div className="na-filter-group">
+            <label htmlFor="ci-new-intentions">New intentions</label>
+            <select
+              id="ci-new-intentions"
+              name="newIntentionReview"
+              defaultValue={filters.newIntentionReview ?? ""}
+            >
+              <option value="">All</option>
+              <option value="needs-review">Needs review</option>
+              <option value="complete">Complete</option>
             </select>
           </div>
 
@@ -575,7 +606,16 @@ function ItemRow({
           {item.needsVocabUpdate && (
             <span className="na-badge na-badge--vocab-gap" title="Vocabulary gap flagged">VOCAB GAP</span>
           )}
-          {!item.lowConfidence && !item.missingMetadata && !item.needsVocabUpdate && (
+          {!item.newIntentionsReviewed && (
+            <span
+              className="na-badge"
+              title="StyleMe garment profile: intentions added in the 2026-09 expansion still have no rating. A rating of None counts as reviewed."
+              style={{ background: "#fef3c7", color: "#92400e" }}
+            >
+              {item.pendingNewIntentionCount} NEW INTENTION{item.pendingNewIntentionCount === 1 ? "" : "S"}
+            </span>
+          )}
+          {!item.lowConfidence && !item.missingMetadata && !item.needsVocabUpdate && item.newIntentionsReviewed && (
             <span className="na-null">—</span>
           )}
         </span>

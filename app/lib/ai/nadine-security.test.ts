@@ -16,6 +16,7 @@ import {
   computeTryOnStatus,
 } from "./nadine-product-assessment.ts";
 import { LOCKED_CATALOGUE_HANDLES, VIRTUAL_TRY_ON_ENABLED } from "./naia-product-media.ts";
+import { HANDOFF_ENTRY_PATH } from "../styleme/handoff.js";
 import type {
   CustomerAssessmentProfile,
   ClosetItemSummary,
@@ -183,10 +184,22 @@ describe("§S2 styleme-handoff origin and POST enforcement", () => {
       path.resolve("app/routes/api.styleme-handoff.tsx"),
       "utf8",
     );
-    // The handoff always redirects to /style-me/mood — no dynamic return URL.
+    // The handoff always redirects to the canonical Rev 3 entry — no dynamic
+    // return URL. The destination moved from /style-me/mood to /style-me/state
+    // when the legacy questionnaire was retired; the open-redirect property is
+    // unchanged, and is now pinned to a module constant rather than a literal.
     assert.ok(!routeFile.includes("returnTo"), "must not accept returnTo param");
     assert.ok(!routeFile.includes("return_to"), "must not accept return_to param");
-    assert.ok(routeFile.includes('"/style-me/mood"'), "redirect must be hardcoded to /style-me/mood");
+    assert.ok(
+      routeFile.includes("HANDOFF_ENTRY_PATH") || routeFile.includes("CANONICAL_STYLEME_ENTRY"),
+      "redirect destination must come from a hardcoded constant",
+    );
+    assert.equal(HANDOFF_ENTRY_PATH, "/style-me/state");
+    // No redirect target may be built from request-controlled input.
+    assert.ok(
+      !/redirect\(\s*(?:url|request|formData|searchParams)/.test(routeFile),
+      "redirect target must never derive from the request",
+    );
   });
 
 });

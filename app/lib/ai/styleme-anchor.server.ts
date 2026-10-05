@@ -11,6 +11,8 @@ import type { NadineAnchorInput, ClosetAnchorInput, AnchorInput } from "./stylem
 import prisma from "../../db.server.js";
 import { buildPrivateDownloadUrl, getCloudinaryConfig } from "../../lib/cloudinary-admin.server.js";
 import { matchesSessionOccasion } from "./styleme-occasion-tokens.js";
+import { passesDressingRequirements, evaluateAnchorEligibility, explainDressingRequirements, canSlotAnchorOutfit, getTargetFormalityRange, FORMALITY_CONDITIONAL_ADJUSTMENTS, profileOccasionRating } from "./styleme-profile-gate.js";
+import { closetItemToSlot } from "./closet-slot.js";
 
 const VALID_HANDLES = new Set(getAllCatalogProducts().map((p) => p.handle));
 
@@ -136,7 +138,28 @@ export async function resolveActionAnchor(
 // no Passport profile signals are used here.
 // Ties broken by: anchor-capable category first, then recency (createdAt DESC).
 
+// DEPRECATED as the anchoring rule. Kept only because it is exported.
+//
+// It was the wrong abstraction: a fixed category allowlist cannot express "structural
+// garment vs finishing accessory". ACTIVEWEAR, LOUNGEWEAR and SETS are absent from it,
+// yet closetItemToSlot resolves them to real top / bottom / outerwear / set slots. Using
+// it as a hard gate removed every activewear garment from the anchor pool, which emptied
+// Active / busy day sessions entirely — the one occasion whose valid wardrobe lives in
+// those categories. Use isStructuralAnchorCandidate() instead.
 export const ANCHOR_CAPABLE_CATEGORIES = new Set(["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR"]);
+
+/**
+ * Can this garment carry an outfit?
+ *
+ * Decided on the RESOLVED slot, through the same closetItemToSlot mapping the rest of
+ * the engine uses — so any category that resolves to a structural slot qualifies, and
+ * no second allowlist has to be maintained alongside it. Shoes, bags, accessories and
+ * jewellery resolve to finishing slots and never qualify; SWIMWEAR and OTHER resolve to
+ * "unknown" and are likewise excluded.
+ */
+function isStructuralAnchorCandidate(item: { category: string; subcategory?: string | null }): boolean {
+  return canSlotAnchorOutfit(closetItemToSlot(item.category, item.subcategory ?? null));
+}
 
 export type ClosetScoringProfile = {
   favoriteColors?: string[] | null;
@@ -367,6 +390,19 @@ export type AutoSelectItem = {
   imageUrl: string | null;
   garmentRelationships: string[];
   formality: string | null;
+  waistShape: string | null;
+  // Coverage geometry — required so the anchor is held to the same non-compensable
+  // dressing requirements as every other garment. Before these were selected, the
+  // anchor was the one piece in the outfit nothing checked.
+  hemLength: string | null;
+  topLength: string | null;
+  // more-coverage reads all five coverage signals, not just hem. Selecting only
+  // hem/top length left the anchor scoring blind to sleeves, neckline, shoulders
+  // and midriff — the signals that actually decide whether a piece covers.
+  sleeveLength: string | null;
+  necklineCoverage: string | null;
+  shoulderCoverage: boolean | null;
+  midriffExposed: boolean | null;
   // Approved GarmentStyleMeProfile — for intention- and body-need-aware anchor ranking.
   // null when no approved profile exists.
   styleMeProfile: {
@@ -374,6 +410,9 @@ export type AutoSelectItem = {
     intentionPotentials: Record<string, string> | null;
     occasionFit: Record<string, string> | null;
     construction?: string | null;
+    silhouetteCharacter?: string[] | null;
+    waistComfort?: string | null;
+    fabricBehaviour?: string[] | null;
   } | null;
 };
 
@@ -384,11 +423,18 @@ const _FORMALITY_RANK: Record<string, number> = {
   "business-formal": 4, occasion: 5, evening: 6,
 };
 
-// Maximum formality rank appropriate for an occasion when a formalityConditional is given.
-// Used to soft-penalise over-dressed anchors at auto-select time.
+// Maximum formality rank appropriate for an occasion.
+// Keys must match canonical session occasion IDs (post REV3_OCCASION_MAP normalisation).
 const _OCCASION_MAX_RANK: Record<string, number> = {
-  everyday: 2, "work-office": 3, "casual-social": 2, "dinner-out": 4,
-  "going-out": 4, "formal-event": 6, "active-busy-day": 2,
+  everyday: 2,
+  work: 3,
+  dinner: 4,
+  "date-night": 4,
+  "girls-night": 4,
+  "special-event": 5,
+  travel: 2,
+  family: 2,
+  active: 2,   // athletic/active day — casual through smart-casual; formal/evening excluded
 };
 
 // Construction bonus values for structured-shape / still-want-shape at anchor level.
@@ -403,6 +449,23 @@ const _ANCHOR_CONSTRUCTION_BONUS: Record<string, number> = {
 };
 const _CONSTRUCTION_BODY_NEEDS = new Set(["structured-shape", "still-want-shape"]);
 
+/**
+ * Widens the narrow `styleMeProfile` selection used by autoSelectClosetAnchor to the
+ * shape scoreBodyNeedForClosetItem declares.
+ *
+ * The anchor query deliberately selects only the seven profile columns anchor ranking
+ * needs, not all eighteen. scoreBodyNeedForClosetItem reads four of them — construction,
+ * silhouetteCharacter, waistComfort, fabricBehaviour — and every read is optional-chained,
+ * so a partial object is behaviourally correct; only the declared type disagreed. The
+ * cast is confined here rather than repeated at each of the six call sites.
+ */
+type AnchorScoringProfile = NonNullable<ClosetAnchorInput["approvedProfile"]>;
+function asScoringProfile(
+  profile: AutoSelectItem["styleMeProfile"] | null | undefined,
+): AnchorScoringProfile | undefined {
+  return (profile ?? undefined) as unknown as AnchorScoringProfile | undefined;
+}
+
 export async function autoSelectClosetAnchor(
   customerId: string,
   signals: {
@@ -416,10 +479,23 @@ export async function autoSelectClosetAnchor(
     // Active fit/comfort body needs — used to rank anchor-capable garments by construction.
     // Ranked after occasion/register and before intention (per scoring tier order).
     bodyNeeds?: string[];
+    // Persistent Passport dressing requirements. A garment that cannot satisfy a
+    // non-compensable requirement is not eligible to anchor the session, no matter
+    // how well it scores — the anchor appears in every candidate, so an ineligible
+    // anchor makes every candidate ineligible.
+    dressingPreferences?: readonly string[] | null;
+    /**
+     * New Look, Same Vibe only. Closet ids from the MOST RECENT rendered outfit. Used as a
+     * fail-open preference so a reroll can explore a different structural centre. Only
+     * structural candidates can ever match an id here — a previous bag or shoe id cannot
+     * collide with an anchor candidate — so the raw previous-outfit id list is sufficient
+     * and no slot resolution is needed at this layer.
+     */
+    previousOutfitClosetIds?: readonly string[] | null;
   },
   _fetchItems?: (customerId: string) => Promise<AutoSelectItem[]>,
 ): Promise<{ anchor: ClosetAnchorInput; id: string } | null> {
-  const items: AutoSelectItem[] = _fetchItems
+  const allItems: AutoSelectItem[] = _fetchItems
     ? await _fetchItems(customerId)
     : await prisma.closetItem.findMany({
         where: { customerId },
@@ -429,12 +505,76 @@ export async function autoSelectClosetAnchor(
           id: true, name: true, category: true, subcategory: true,
           colors: true, primaryColor: true, pattern: true, material: true,
           styleTags: true, occasions: true, imageUrl: true,
-          garmentRelationships: true, formality: true,
+          garmentRelationships: true, formality: true, waistShape: true,
+          hemLength: true, topLength: true,
+          sleeveLength: true, necklineCoverage: true,
+          shoulderCoverage: true, midriffExposed: true,
           styleMeProfile: {
-            select: { profileStatus: true, intentionPotentials: true, occasionFit: true, construction: true },
+            select: { profileStatus: true, intentionPotentials: true, occasionFit: true, construction: true, silhouetteCharacter: true, waistComfort: true, fabricBehaviour: true },
           },
         },
       }) as AutoSelectItem[];
+
+  // ── Eligibility, applied BEFORE scoring ───────────────────────────────────
+  //
+  // Scoring cannot rescue a garment that is not eligible to anchor, so an ineligible
+  // piece must never reach the ranking at all.
+  //
+  // 1. Anchor capability is a GATE, not a tiebreak.
+  //
+  //    isStructuralAnchorCandidate decides this on the RESOLVED slot. Capability was
+  //    previously only the third tiebreak, AFTER score, so it could only ever decide an
+  //    exact tie — and the first attempt at a gate used a fixed category allowlist,
+  //    which removed every ACTIVEWEAR garment and emptied Active / busy day. On
+  //    2026-10-01 a bag beat the whole wardrobe for an Everyday "feel sharper"
+  //    session: 12.75 against 12.00 for every garment behind it. The 0.75 was the
+  //    approved-intention bonus (Supporting 0.5 × 1.5), so the margin existed
+  //    precisely because the customer asked for something, and capability never got
+  //    a vote. A bag then held one of the five outfit slots and the look came back
+  //    with no outer layer.
+  //
+  //    An outfit is not built around a handbag. This is a category rule, not a
+  //    score, so it belongs here with the other hard requirements.
+  //
+  //    MANUAL anchoring is untouched. A customer who deliberately picks an accessory
+  //    from her own Closet is making a choice, and source.tsx honours it; this gate
+  //    governs only what nAia selects on her behalf.
+  //
+  // 2. Non-compensable dressing requirements. Unknown metadata fails open — only
+  //    explicit evidence rejects.
+  // DIAGNOSTIC ONLY — emitted for EVERY loaded item, including ones the filter below
+  // removes, so a garment that never reaches ranking is still visible in the logs.
+  // Behaviour unchanged: the filter is still the only thing that decides.
+  if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true") {
+    for (const item of allItems) {
+      const probe = { hemLength: item.hemLength, topLength: item.topLength } as unknown as ClosetAnchorInput;
+      const x = explainDressingRequirements(probe, signals.dressingPreferences);
+      console.log("[nAia-dressing-gate]", JSON.stringify({
+        entry: "auto-anchor",
+        closetId: item.id,
+        name: item.name ?? null,
+        category: item.category,
+        subcategory: item.subcategory ?? null,
+        hemLengthStored: item.hemLength ?? null,
+        topLengthStored: item.topLength ?? null,
+        resolvedDressingPreferences: x.requirements,
+        legsCoveredPresent: x.legsCoveredPresent,
+        legsCovered: x.legsCovered,
+        noCroppedTops: x.noCroppedTops,
+        passesDressingRequirements: x.passes,
+        anchorCapable: isStructuralAnchorCandidate(item),
+      }));
+    }
+  }
+
+  const items: AutoSelectItem[] = allItems.filter(
+    (item) =>
+      isStructuralAnchorCandidate(item) &&
+      passesDressingRequirements(
+        { hemLength: item.hemLength, topLength: item.topLength } as unknown as ClosetAnchorInput,
+        signals.dressingPreferences,
+      ),
+  );
 
   if (items.length === 0) return null;
 
@@ -443,19 +583,66 @@ export async function autoSelectClosetAnchor(
   // Unknown formality (null) is treated as in-range (tier 0) — fail-open.
   // formalityConditional "formality-dressy" raises the ceiling by 2 ranks.
   const targetMaxRank = _OCCASION_MAX_RANK[signals.occasion] ?? 3;
-  const formalityBoost = signals.formalityConditional === "formality-dressy" ? 2 : 0;
-  const effectiveMaxRank = Math.min(6, targetMaxRank + formalityBoost);
+  // "formality-occasion" (Dressy) raises the ceiling by 2 so evening/occasion-wear
+  // anchors can be selected for dressy sessions — but never above the resolved
+  // target band. The flat +2 did not know what the band was: Night out + Dressy
+  // raised the ceiling to 6, so an evening gown was anchor-eligible and then made
+  // every candidate overdressed against a 4-5 band, and because the anchor sits in
+  // every candidate, no amount of ranking could recover.
+  //
+  // Capping rather than replacing keeps this ceiling never LOOSER than before, so
+  // no occasion silently gains eligibility it did not have. Out-of-range items only
+  // sort last here, they are not filtered, so the pool can never empty either.
+  const formalityBoost = signals.formalityConditional === "formality-occasion" ? 2 : 0;
+  const targetBandMax = getTargetFormalityRange(
+    signals.occasion,
+    signals.formalityConditional ?? null,
+  ).max;
+  const effectiveMaxRank = Math.min(6, targetMaxRank + formalityBoost, targetBandMax);
   const isFormallyInRange = (item: AutoSelectItem): boolean => {
     if (!item.formality) return true; // unknown → in-range (fail-open)
     const rank = _FORMALITY_RANK[item.formality] ?? 0;
     return rank <= effectiveMaxRank;
   };
 
-  type ScoredItem = { item: AutoSelectItem; score: number; isAnchorCapable: boolean; inRange: boolean };
+  // ── Lower bound (C3) ───────────────────────────────────────────────────────
+  //
+  // The gate above is a CEILING only. Nothing preferred an anchor that reaches the
+  // band's floor, so ST13 (Family + Smart casual, band 2-2) anchored on rank-1 casual
+  // jeans: once a below-band garment is pinned into a weight-1.0 structural slot, every
+  // candidate inherits it and no later ranking can lift the outfit into the band.
+  //
+  // This is a sort TIER, not a filter, and it sits directly below the ceiling tier so
+  // the ceiling's precedence is untouched. When no candidate reaches the floor every
+  // entry scores false, the tier ties, and selection falls through to score exactly as
+  // before — so a wardrobe with nothing at the band still gets its best anchor rather
+  // than none. Unknown formality counts as satisfying the floor, mirroring the
+  // fail-open treatment the ceiling already gives it.
+  const targetBandMin = getTargetFormalityRange(
+    signals.occasion,
+    signals.formalityConditional ?? null,
+  ).min;
+  const isAtOrAboveBandFloor = (item: AutoSelectItem): boolean => {
+    if (!item.formality) return true; // unknown → fail-open
+    const rank = _FORMALITY_RANK[item.formality] ?? 0;
+    return rank >= targetBandMin;
+  };
+
+  type ScoredItem = {
+    item: AutoSelectItem; score: number; isAnchorCapable: boolean;
+    inRange: boolean; atOrAboveFloor: boolean;
+  };
 
   const activeIntentions = signals.intentions ?? [];
   const activeBodyNeeds = signals.bodyNeeds ?? [];
   const needsConstructionBonus = activeBodyNeeds.some((n) => _CONSTRUCTION_BODY_NEEDS.has(n));
+  const needsLooseBonus = activeBodyNeeds.includes("loose-comfortable");
+  const needsLessBodyConscious = activeBodyNeeds.includes("less-body-conscious");
+  const needsSofterFabrics = activeBodyNeeds.includes("softer-easier-fabrics");
+  const needsWaistDef = activeBodyNeeds.includes("waist-definition");
+  const needsNothingTightWaist = activeBodyNeeds.includes("nothing-tight-waist");
+  const needsMoreCoverage = activeBodyNeeds.includes("more-coverage");
+
 
   const mapped: ScoredItem[] = items.map((item) => {
     const baseScore = scoreClosetItemForSession(
@@ -468,15 +655,111 @@ export async function autoSelectClosetAnchor(
       ? item.styleMeProfile
       : null;
 
-    // Body-need bonus: construction signal for anchor-capable structural needs.
-    // Tier order: occasion → register → body-need → intention.
-    // Applied only to anchor-capable categories (TOPS/BOTTOMS/DRESSES/OUTERWEAR).
+    // Register alignment score: in-target items get +2.5, out-of-target items receive
+    // a distance-based penalty (-1.5 per rank outside, capped at -4.5).
+    // Only fires when a formalityConditional is set and the item has known formality.
+    // Items without known formality always get 0 (fail-open).
+    const registerBonus = (() => {
+      if (!signals.formalityConditional || !item.formality) return 0;
+      const rank = _FORMALITY_RANK[item.formality] ?? null;
+      if (rank === null) return 0;
+      const range = FORMALITY_CONDITIONAL_ADJUSTMENTS[signals.formalityConditional];
+      if (!range) return 0;
+      if (rank >= range.min && rank <= range.max) return 2.5;
+      const distance = rank < range.min ? range.min - rank : rank - range.max;
+      return Math.max(-4.5, -1.5 * distance);
+    })();
+
+    // Body-need bonus/penalty: applied to anchor-capable categories only.
+    // Precedence: occasion eligibility > register > body-need > intention.
+    // A violation penalty (-2.0) ensures a fitted anchor loses to an occasion-valid
+    // relaxed alternative WITHIN the eligible pool, without rescuing occasion-invalid items.
     const bodyNeedBonus = (() => {
-      if (!needsConstructionBonus || !approvedProfile) return 0;
-      if (!ANCHOR_CAPABLE_CATEGORIES.has(item.category)) return 0;
-      const construction = approvedProfile.construction;
-      if (!construction || construction === "N/A") return 0;
-      return _ANCHOR_CONSTRUCTION_BONUS[construction] ?? 0;
+      if (!isStructuralAnchorCandidate(item)) return 0;
+      let bonus = 0;
+
+      // Construction-based needs (structured-shape / still-want-shape)
+      if (needsConstructionBonus && approvedProfile) {
+        const construction = approvedProfile.construction;
+        if (construction && construction !== "N/A") {
+          bonus += _ANCHOR_CONSTRUCTION_BONUS[construction] ?? 0;
+        }
+      }
+
+      // Loose-comfortable: silhouetteCharacter + waistComfort from approved profile
+      if (needsLooseBonus) {
+        const { violation, fitScore } = scoreBodyNeedForClosetItem("loose-comfortable", {
+          fitProfile: null, waistShape: item.waistShape, styleTags: item.styleTags,
+          approvedProfile: asScoringProfile(approvedProfile),
+        });
+        if (violation) {
+          bonus -= 2.0; // fitted/restrictive anchor loses to occasion-valid relaxed alternative
+        } else if (fitScore !== null && fitScore > 0) {
+          bonus += fitScore * 2.0; // max +2.0 for loose + waist support
+        }
+      }
+
+      // Nothing too body-hugging: uses same silhouette evidence as loose-comfortable
+      if (needsLessBodyConscious) {
+        const { violation, fitScore } = scoreBodyNeedForClosetItem("less-body-conscious", {
+          fitProfile: null, waistShape: item.waistShape, styleTags: item.styleTags,
+          approvedProfile: asScoringProfile(approvedProfile),
+        });
+        if (violation) {
+          bonus -= 2.0; // fitted anchor loses to non-cling alternative within eligible pool
+        } else if (fitScore !== null && fitScore > 0) {
+          bonus += fitScore * 1.7; // max +1.7 for clearly relaxed silhouette
+        }
+      }
+
+      // More coverage: the five coverage-geometry signals. Scored at the same
+      // magnitude as less-body-conscious — both are exposure-avoidance needs.
+      if (needsMoreCoverage) {
+        const { violation, fitScore } = scoreBodyNeedForClosetItem("more-coverage", {
+          fitProfile: null, waistShape: item.waistShape, styleTags: item.styleTags,
+          sleeveLength: item.sleeveLength, necklineCoverage: item.necklineCoverage,
+          hemLength: item.hemLength, shoulderCoverage: item.shoulderCoverage,
+          midriffExposed: item.midriffExposed,
+          approvedProfile: asScoringProfile(approvedProfile),
+        });
+        if (violation) {
+          bonus -= 2.0; // exposing anchor loses to a covering alternative in the eligible pool
+        } else if (fitScore !== null && fitScore > 0) {
+          bonus += fitScore * 1.7; // max +1.7 for a fully covering piece
+        }
+      }
+
+      // Softer / easier fabrics: fabricBehaviour from approved profile
+      if (needsSofterFabrics && approvedProfile) {
+        const { fitScore } = scoreBodyNeedForClosetItem("softer-easier-fabrics", {
+          fitProfile: null, waistShape: item.waistShape, styleTags: item.styleTags,
+          approvedProfile: asScoringProfile(approvedProfile),
+        });
+        if (fitScore !== null) bonus += (fitScore - 0.5) * 1.0; // soft→+0.5, rigid→-0.3, neutral→0
+      }
+
+      // Waist definition: explicit waist evidence only
+      if (needsWaistDef) {
+        const { fitScore } = scoreBodyNeedForClosetItem("waist-definition", {
+          fitProfile: null, waistShape: item.waistShape, styleTags: item.styleTags,
+          approvedProfile: asScoringProfile(approvedProfile),
+        });
+        if (fitScore !== null && fitScore > 0) bonus += fitScore * 1.5;
+      }
+
+      // Nothing tight around waist: waistComfort from approved profile
+      if (needsNothingTightWaist) {
+        const { fitScore } = scoreBodyNeedForClosetItem("nothing-tight-waist", {
+          fitProfile: null, waistShape: item.waistShape, styleTags: item.styleTags,
+          approvedProfile: asScoringProfile(approvedProfile),
+        });
+        if (fitScore !== null) {
+          if (fitScore >= 0.8) bonus += 1.0;       // elastic/stretch/drawstring
+          else if (fitScore < 0.2) bonus -= 1.0;   // restrictive waistband
+        }
+      }
+
+      return bonus;
     })();
 
     // Intention bonus: approved intentionPotentials only — no legacy tag fallback.
@@ -490,15 +773,19 @@ export async function autoSelectClosetAnchor(
       : 0;
     return {
       item,
-      score: baseScore + bodyNeedBonus + intentionBonus,
-      isAnchorCapable: ANCHOR_CAPABLE_CATEGORIES.has(item.category),
+      score: baseScore + registerBonus + bodyNeedBonus + intentionBonus,
+      isAnchorCapable: isStructuralAnchorCandidate(item),
       inRange: isFormallyInRange(item),
+      atOrAboveFloor: isAtOrAboveBandFloor(item),
     };
   });
 
   const scored = mapped.sort((a, b) => {
     // Tier 0 (in-range formality) always beats Tier 1 (known out-of-range)
     if (a.inRange !== b.inRange) return a.inRange ? -1 : 1;
+    // C3: an anchor that reaches the band's floor beats one below it. Ties when no
+    // candidate reaches the floor, which is what makes this fail-open.
+    if (a.atOrAboveFloor !== b.atOrAboveFloor) return a.atOrAboveFloor ? -1 : 1;
     if (b.score !== a.score) return b.score - a.score;
     // Tiebreaker: prefer garments that can anchor an outfit
     if (a.isAnchorCapable !== b.isAnchorCapable) return a.isAnchorCapable ? -1 : 1;
@@ -516,7 +803,7 @@ export async function autoSelectClosetAnchor(
     // Approved occasionFit "No" is a hard exclusion — intention cannot rescue it.
     const ap = item.styleMeProfile?.profileStatus === "approved" ? item.styleMeProfile : null;
     if (ap?.occasionFit) {
-      const fit = (ap.occasionFit as Record<string, string>)[signals.occasion];
+      const fit = profileOccasionRating(ap.occasionFit as Record<string, string>, signals.occasion);
       if (fit === "No") return false;
     }
     return matchesSessionOccasion(item.occasions, signals.occasion)  // normalized match
@@ -524,30 +811,151 @@ export async function autoSelectClosetAnchor(
       || !item.garmentRelationships.includes("occasion-only");        // other-occasion tags, no restriction
   };
 
-  const winnerEntry = scored.find(s => s.score > 0 && isOccasionCompatible(s.item));
+  const defaultWinnerEntry = scored.find(s => s.score > 0 && isOccasionCompatible(s.item));
+
+  // ── Single-point band, nothing in it: dressing up beats dressing down ──────
+  //
+  // C3 added a floor tier BELOW the ceiling tier, which is correct whenever something in
+  // the closet reaches the band. It cannot help when the band is one rank wide and the
+  // closet straddles it: Family + Smart casual resolves to 2-2, ST13's closet holds rank 1
+  // and rank 3 and nothing at rank 2, so the ceiling demoted the rank-3 pieces, the floor
+  // demoted the rank-1 pieces, and the ceiling — read first — kept the rank-1 jeans.
+  //
+  // Both misses are one rank, but they are not equally recoverable. A rank-1 bottom pinned
+  // into a weight-1.0 structural slot held the whole ST13 outfit at register 1.045 against
+  // a 2-2 target; the rank-3 alternative lets construction land near 2.33. The outfit can
+  // be dressed down around a slightly-too-smart anchor far more readily than it can be
+  // lifted around a too-casual one.
+  //
+  // Deliberately narrow. Every condition must hold:
+  //   - the customer answered the formality question
+  //   - the band is a single rank
+  //   - no viable anchor sits inside it (unknown formality counts as inside — fail-open)
+  //   - viable anchors exist on BOTH sides
+  //   - the nearest on each side are equally distant from the band
+  // Any in-band anchor, any wider band, any absent formality answer, or an unequal gap and
+  // this does not fire at all. Nothing is filtered: it only changes which viable candidate
+  // is picked, and only in the case where the previous answer was the worse of two misses.
+  const fallbackWinnerEntry = (() => {
+    if (!signals.formalityConditional) return undefined;
+    const band = getTargetFormalityRange(signals.occasion, signals.formalityConditional);
+    if (band.min !== band.max) return undefined;
+
+    const viable = scored.filter(s => s.score > 0 && isOccasionCompatible(s.item));
+    const rankOf = (s: ScoredItem): number | null =>
+      s.item.formality ? (_FORMALITY_RANK[s.item.formality] ?? null) : null;
+
+    // An unknown rank is treated as acceptable, so its presence suppresses the fallback.
+    if (viable.some(s => { const r = rankOf(s); return r === null || r === band.min; })) return undefined;
+
+    const below = viable.filter(s => { const r = rankOf(s); return r !== null && r < band.min; });
+    const above = viable.filter(s => { const r = rankOf(s); return r !== null && r > band.max; });
+    if (below.length === 0 || above.length === 0) return undefined;
+
+    const nearestBelow = Math.max(...below.map(s => rankOf(s) as number));
+    const nearestAbove = Math.min(...above.map(s => rankOf(s) as number));
+    if (band.min - nearestBelow !== nearestAbove - band.max) return undefined;
+
+    // `scored` is already sorted, so this is the best-scoring candidate at that rank.
+    return above.find(s => rankOf(s) === nearestAbove);
+  })();
+
+  // ── Reroll diversity preference ───────────────────────────────────────────
+  //
+  // New Look, Same Vibe must be able to move the structural centre of the outfit. The anchor
+  // appears in every candidate, so while it is fixed the core can barely change and a reroll
+  // can only vary finishing pieces.
+  //
+  // Placement, deliberately the weakest tier that can still do the job:
+  //
+  //   occasion eligibility  >  formality ceiling  >  formality floor
+  //     >  single-point-band fallback  >  THIS  >  score / stable ordering
+  //
+  // It only ever chooses between anchors that are ALREADY equally correct: the candidate
+  // must be viable on exactly the same terms as the default winner (positive score,
+  // occasion-compatible) and tied with it on both the ceiling and floor tiers. It cannot
+  // promote a lower-tier anchor, and it does not run at all when the single-point fallback
+  // has already decided. Correctness is never traded for variety.
+  //
+  // Fail-open throughout: no previous outfit, the default winner already outside the
+  // previous look, or no equally-correct alternative — all keep the existing behaviour, and
+  // an anchor is never withheld to manufacture diversity.
+  const diversityWinnerEntry = (() => {
+    if (fallbackWinnerEntry) return undefined;
+    if (!defaultWinnerEntry) return undefined;
+    const previous = new Set(signals.previousOutfitClosetIds ?? []);
+    if (previous.size === 0) return undefined;
+    if (!previous.has(defaultWinnerEntry.item.id)) return undefined; // already a fresh centre
+    return scored.find((s) =>
+      s.score > 0 &&
+      isOccasionCompatible(s.item) &&
+      s.inRange === defaultWinnerEntry.inRange &&
+      s.atOrAboveFloor === defaultWinnerEntry.atOrAboveFloor &&
+      !previous.has(s.item.id),
+    );
+  })();
+
+  const winnerEntry = fallbackWinnerEntry ?? diversityWinnerEntry ?? defaultWinnerEntry;
   if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true") {
     console.log("[nAia-anchor-rank]", JSON.stringify({
       occasion: signals.occasion,
+      formalityConditional: signals.formalityConditional ?? null,
       intentions: activeIntentions,
       bodyNeeds: activeBodyNeeds,
+      targetBandMin,
+      singlePointBandFallbackUsed: fallbackWinnerEntry !== undefined,
+      rerollDiversityUsed: diversityWinnerEntry !== undefined,
+      previousOutfitCount: (signals.previousOutfitClosetIds ?? []).length,
+      defaultWinnerId: defaultWinnerEntry?.item.id ?? null,
       top10: scored.slice(0, 10).map((s) => {
         const ap2 = s.item.styleMeProfile?.profileStatus === "approved" ? s.item.styleMeProfile : null;
-        const construction2 = ap2?.construction ?? null;
-        const bnBonus = needsConstructionBonus && ap2 && ANCHOR_CAPABLE_CATEGORIES.has(s.item.category) && construction2 && construction2 !== "N/A"
-          ? (_ANCHOR_CONSTRUCTION_BONUS[construction2] ?? 0)
-          : 0;
+        const gfbn = (need: string) => scoreBodyNeedForClosetItem(need, {
+          fitProfile: null, waistShape: s.item.waistShape,
+          styleTags: s.item.styleTags, approvedProfile: asScoringProfile(ap2),
+          sleeveLength: s.item.sleeveLength, necklineCoverage: s.item.necklineCoverage,
+          hemLength: s.item.hemLength, shoulderCoverage: s.item.shoulderCoverage,
+          midriffExposed: s.item.midriffExposed,
+        });
+        const bnDetail: Record<string, unknown> = {};
+        if (needsConstructionBonus && ap2 && isStructuralAnchorCandidate(s.item)) {
+          const c = ap2.construction;
+          bnDetail.construction = c ? (_ANCHOR_CONSTRUCTION_BONUS[c] ?? 0) : 0;
+        }
+        if (needsLooseBonus && isStructuralAnchorCandidate(s.item)) {
+          const r = gfbn("loose-comfortable");
+          bnDetail["loose-comfortable"] = { violation: r.violation, fitScore: r.fitScore, bonus: r.violation ? -2.0 : (r.fitScore ?? 0) * 2.0 };
+        }
+        if (needsLessBodyConscious && isStructuralAnchorCandidate(s.item)) {
+          const r = gfbn("less-body-conscious");
+          bnDetail["less-body-conscious"] = { violation: r.violation, fitScore: r.fitScore, bonus: r.violation ? -2.0 : (r.fitScore ?? 0) * 1.7 };
+        }
+        if (needsSofterFabrics && isStructuralAnchorCandidate(s.item)) {
+          const r = gfbn("softer-easier-fabrics");
+          bnDetail["softer-easier-fabrics"] = { fitScore: r.fitScore };
+        }
+        if (needsMoreCoverage && isStructuralAnchorCandidate(s.item)) {
+          const r = gfbn("more-coverage");
+          bnDetail["more-coverage"] = { violation: r.violation, fitScore: r.fitScore, bonus: r.violation ? -2.0 : (r.fitScore ?? 0) * 1.7 };
+        }
         return {
           id: s.item.id, name: s.item.name, score: s.score,
-          construction: construction2,
-          bodyNeedBonus: bnBonus,
+          formality: s.item.formality ?? null,
+          atOrAboveBandFloor: s.atOrAboveFloor,
+          targetBandMin,
+          construction: ap2?.construction ?? null,
+          silhouetteCharacter: ap2?.silhouetteCharacter ?? null,
+          fabricBehaviour: ap2?.fabricBehaviour ?? null,
+          waistComfort: ap2?.waistComfort ?? null,
+          bodyNeedDetail: bnDetail,
           isAnchorCapable: s.isAnchorCapable, inRange: s.inRange,
           occasions: s.item.occasions,
+          occasionFit: ap2?.occasionFit ?? null,
           intentionPotentials: activeIntentions.length > 0 && ap2?.intentionPotentials
             ? Object.fromEntries(activeIntentions.map((id) => [
                 id,
                 (ap2.intentionPotentials as Record<string, string>)[id] ?? "(missing)",
               ]))
-            : ap2 ? "(approved but no intentions active)" : "(no approved profile)",
+            : ap2 ? "(approved, no intentions active)" : "(no approved profile)",
         };
       }),
       winner: winnerEntry ? { id: winnerEntry.item.id, name: winnerEntry.item.name, score: winnerEntry.score } : null,
@@ -643,6 +1051,19 @@ export function scoreBodyNeedForClosetItem(
     }
 
     case "less-body-conscious": {
+      // PRIMARY: approved silhouetteCharacter — same evidence source as loose-comfortable.
+      const profile = item.approvedProfile;
+      if (profile) {
+        const sils = (profile.silhouetteCharacter ?? []) as string[];
+        const LOOSE_SILS = new Set(["relaxed", "oversized", "voluminous", "wide-leg"]);
+        // fitted is the clear contradiction: body-skimming/cling
+        if (sils.includes("fitted")) return { violation: true, fitScore: 0 };
+        if (sils.some((s) => LOOSE_SILS.has(s))) return { violation: false, fitScore: 1 };
+        // Neutral silhouettes (straight, A-line, column, draped) — not cling, not loose
+        if (sils.length > 0) return { violation: false, fitScore: 0.5 };
+        // No silhouette data on approved profile — fall through to legacy
+      }
+      // LEGACY FALLBACK: fitProfile only
       if (fp !== null && TIGHT_FITS.has(fp)) return { violation: true, fitScore: 0 };
       if (fp !== null && RELAXED_FITS.has(fp)) return { violation: false, fitScore: 1 };
       if (fp !== null && (fp === "tailored" || fp === "structured")) return { violation: false, fitScore: 0.5 };
@@ -650,9 +1071,33 @@ export function scoreBodyNeedForClosetItem(
     }
 
     case "loose-comfortable": {
-      if (fp !== null && RELAXED_FITS.has(fp)) return { violation: false, fitScore: 1 };
+      const profile = item.approvedProfile;
+      if (profile) {
+        // PRIMARY: approvedProfile silhouetteCharacter (String[]) + waistComfort
+        const silhouettes = (profile.silhouetteCharacter ?? []) as string[];
+        const wc = (profile.waistComfort ?? null) as string | null;
+        const LOOSE_SILS = new Set(["relaxed", "oversized", "voluminous", "wide-leg"]);
+        const WAIST_SUPPORT = new Set(["elastic", "drawstring", "stretch"]);
+        const hasLoose = silhouettes.some((s) => LOOSE_SILS.has(s));
+        const hasFitted = silhouettes.includes("fitted");
+        const hasRestrict = wc === "restrictive";
+        const hasWaistSupport = wc !== null && WAIST_SUPPORT.has(wc);
+        // Fitted silhouette: violation even with elastic waist — silhouette dominates
+        if (hasFitted) return { violation: true, fitScore: hasWaistSupport ? 0.1 : 0 };
+        // Restrictive waistband: violation — wide-leg silhouette softens penalty slightly
+        if (hasRestrict) return { violation: true, fitScore: hasLoose ? 0.4 : 0 };
+        // No violation below — score positive contribution
+        if (hasLoose && hasWaistSupport) return { violation: false, fitScore: 1.0 };
+        if (hasLoose) return { violation: false, fitScore: 0.85 };
+        if (hasWaistSupport) return { violation: false, fitScore: 0.6 };
+        return { violation: false, fitScore: null }; // neutral/unread silhouette, no waist info
+      }
+      // LEGACY FALLBACK: fitProfile only — when no approved profile exists
+      const RELAXED_LEGACY = new Set(["relaxed", "loose", "oversized", "flowy"]);
+      const FITTED_LEGACY = new Set(["fitted", "body-skimming"]);
+      if (fp !== null && RELAXED_LEGACY.has(fp)) return { violation: false, fitScore: 1 };
+      if (fp !== null && FITTED_LEGACY.has(fp)) return { violation: true, fitScore: 0 };
       if (fp !== null && (fp === "tailored" || fp === "structured")) return { violation: false, fitScore: 0.3 };
-      if (fp !== null && TIGHT_FITS.has(fp)) return { violation: false, fitScore: 0 };
       return { violation: false, fitScore: fp === null ? null : 0.3 };
     }
 
@@ -716,10 +1161,13 @@ export function scoreBodyNeedForClosetItem(
     }
 
     case "waist-definition": {
-      if (ws === "belted") return { violation: false, fitScore: 1 };
-      if (fp === "body-skimming") return { violation: false, fitScore: 0.7 };
-      if (ws === null && fp === null) return { violation: false, fitScore: null };
-      return { violation: false, fitScore: 0.3 };
+      // Explicit waist-definition evidence only. DO NOT infer from:
+      //   fitted / tailored / structured / body-skimming / high-waist alone.
+      // Schema gap: GarmentStyleMeProfile has no dedicated waist-definition field.
+      // Using legacy waistShape as the strongest available reviewed source.
+      if (ws === "belted" || ws === "tied" || ws === "wrap") return { violation: false, fitScore: 1 };
+      // Any other waistShape value = insufficient evidence
+      return { violation: false, fitScore: null };
     }
 
     case "structured-shape": {
