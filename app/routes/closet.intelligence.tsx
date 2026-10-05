@@ -9,7 +9,7 @@
 // It does not generate outfits (StyleMe) and does not restate the Style Passport.
 
 import { useState } from "react";
-import { Link, useLoaderData } from "react-router";
+import { Form, Link, useLoaderData } from "react-router";
 import { data, redirect, type LoaderFunctionArgs, type LinksFunction } from "react-router";
 import prisma from "../db.server";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
@@ -693,6 +693,12 @@ export default function WardrobeIntelligencePage() {
                               )}
                             </>
                           )}
+                          <Form method="post" action="/api/wi-style-this">
+                            <input type="hidden" name="closetItemId" value={piece.garmentId} />
+                            <button type="submit" className="wi-style-cta">
+                              Style this in StyleMe →
+                            </button>
+                          </Form>
                         </div>
                       </article>
                     ))}
@@ -998,6 +1004,8 @@ const css = `
   .wi-note-why{font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.7;color:rgba(40,21,12,0.6);margin:12px 0 0;max-width:38em}
   .wi-note-action{background:none;border:none;padding:0;margin-top:14px;cursor:pointer;font-family:var(--naia-ff-ui);font-size:9px;letter-spacing:2.5px;text-transform:uppercase;color:var(--naia-ink);text-decoration:underline;text-underline-offset:4px}
   .wi-note-action:hover{color:var(--naia-accent)}
+  .wi-style-cta{background:none;border:none;padding:0;margin-top:14px;cursor:pointer;display:block;font-family:var(--naia-ff-ui);font-size:9px;letter-spacing:2.5px;text-transform:uppercase;color:var(--naia-accent);text-decoration:underline;text-underline-offset:4px}
+  .wi-style-cta:hover{color:var(--naia-ink)}
   .wi-strip{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:16px}
   .wi-strip-more{font-family:var(--naia-ff-ui);font-size:9px;letter-spacing:1.6px;text-transform:uppercase;color:rgba(40,21,12,0.5)}
   /* A discovery is something the customer could not see for herself. It gets the

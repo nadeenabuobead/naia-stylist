@@ -30,6 +30,8 @@ const STYLEME_SESSION_KEYS = [
   "styleMeAnchorMethodPrev",
   "styleMeNadineAnchorHandle",
   "styleMeClosetAnchorId",
+  // Wardrobe Intelligence handoff — anchor pre-selected, skip the picker.
+  "styleMeAnchorLocked",
   // Rev 3 — Psychology-First StyleMe (Group 5)
   "styleMeState",
   "styleMeStateOtherText",
