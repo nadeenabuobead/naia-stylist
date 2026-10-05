@@ -55,18 +55,37 @@ export interface VerifiedMediaEntry {
   reason: string;                   // human-readable; safe to surface in reports/logs
 }
 
-// ── The 11 locked catalogue handles ──────────────────────────────────────────
-
+// ── The PDP handoff allowlist ────────────────────────────────────────────────
+//
+// What a customer may hand off by tapping "Style this piece" on a product page. This is
+// NOT the set the engine may auto-select — see LIVE_NADINE_STYLING_HANDLES in
+// app/lib/styleme/live-nadine-catalogue.ts, which is a strict subset. The two answer
+// different questions, and nadine-hero-selection.test.ts NH-A.4 fails if they are ever
+// made equal: a product can be published and purchasable, so tapping its PDP must work,
+// while sitting outside the curated set nAia chooses from unprompted.
+//
+// Reconciled 2026-10-05:
+//   + oversized-blazer, draped-leather-pants   current products whose PDPs were NOT
+//                                              allowlisted, so "Style this piece" on two
+//                                              of the five live pieces was being rejected
+//   - cropped-top, straight-pants              media entries with no catalogue product, so
+//                                              isValidNadineHandle already rejected them;
+//                                              removing dead config rather than behaviour
+//
+// The six non-live handles are deliberately KEPT. The storefront is password-protected
+// (every product URL returns "Please Log In"), so publish status could not be established
+// from outside, and silently removing a published PDP's handoff is worse than letting an
+// unpublished one resolve — the latter fails closed at the catalogue check anyway.
 export const LOCKED_CATALOGUE_HANDLES = [
   "double-top",
   "collar-shirt",
-  "cropped-top",
   "asymmetrical-pants",
-  "straight-pants",
+  "draped-leather-pants",
   "suede-skirt",
   "trench-coat",
   "kimono-jacket",
   "leather-suede-jacket",
+  "oversized-blazer",
   "midi-dress",
   "dress-set",
 ] as const;

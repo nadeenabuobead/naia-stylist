@@ -26,6 +26,7 @@ import {
   getProductByHandle,
   getRecommendationEligibleProducts,
 } from "./naia-catalog.js";
+import { getLiveNadineStylingProducts } from "../styleme/live-nadine-catalogue.js";
 import type { GeneratedCatalogProduct, ProductItemType } from "./naia-catalog.types.js";
 import type {
   StyleMeEngineInput,
@@ -1734,8 +1735,35 @@ export function runRecommendation(
   // the session-specific tie-break hash.
   const sessionFingerprint = buildSessionFingerprint(session, profile, anchor, recentlyShownHandles);
 
-  // Eligible products
-  const eligible = getRecommendationEligibleProducts();
+  // ── Eligible products ─────────────────────────────────────────────────────
+  //
+  // NADINE + My Closet evaluates ONLY the curated live collection, and only pieces tagged
+  // for the occasion she chose. Two deliberate narrowings:
+  //
+  // 1. THE LIVE SET. getRecommendationEligibleProducts() returns everything not marked
+  //    verified-inactive, which is all eleven catalogue products — a verification axis,
+  //    not a merchandising one. Auto-selecting from it would put historical stock in front
+  //    of customers. LIVE_NADINE_STYLING_HANDLES is the approved five; the PDP handoff
+  //    allowlist stays wider on purpose, because tapping a published product is an
+  //    explicit request rather than a recommendation.
+  //
+  // 2. OCCASION AS A HARD GATE. checkHardExclusions covers self-exclusion, slot
+  //    exclusions, firm-no colours and dressing preferences — not occasion. Occasion was
+  //    only a soft score, so a piece tagged for none of her occasions could still win on
+  //    mood and feeling alone. Across a five-piece collection that is the difference
+  //    between a considered recommendation and pushing whatever exists: nothing in the
+  //    live set carries `family` or `active`, and for those sessions the right answer is
+  //    a closet-led look, not the least-wrong trouser.
+  //
+  // Filtered rather than marked hard-excluded so the pool itself is honest: a piece that
+  // is not for this occasion is not a rejected candidate, it was never a candidate.
+  // Unknown occasions keep every live piece, matching the fail-open the soft score had.
+  const isLiveNadineMode = input.mode === "nadine";
+  const eligible = isLiveNadineMode
+    ? getLiveNadineStylingProducts().filter((p) =>
+        p.parsed.rankings.occasionTags.length === 0 ||
+        p.parsed.rankings.occasionTags.includes(session.occasion))
+    : getRecommendationEligibleProducts();
   const allProducts = getAllCatalogProducts();
 
   const evaluations: ProductEvaluation[] = [];
@@ -1873,6 +1901,12 @@ export function runRecommendation(
     outcome = "nadine-recommendation";
     [primary, ...alternatives] = aboveThreshold;
     alternatives = alternatives.slice(0, THRESHOLDS.MAX_ALTERNATIVES);
+    // NADINE + My Closet is a ONE-hero contract: the rest of the look comes from her own
+    // wardrobe. Alternatives are a second and third NADINE product, which is the opposite
+    // of that, so they are dropped here rather than filtered downstream — the completion
+    // layer and the closet path both read this result, and a suppressed-later alternative
+    // would still have been offered to the model.
+    if (isLiveNadineMode) alternatives = [];
   }
 
   const outfitPlan = buildOutfitPlan(anchor, primary, outcome);
