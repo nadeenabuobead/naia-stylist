@@ -32,6 +32,11 @@ export const STYLEME_SESSION_KEYS = [
   "styleMeAnchorMethodPrev",
   "styleMeNadineAnchorHandle",
   "styleMeClosetAnchorId",
+  // AUTO or MANUAL. Governs whether New Look may move the anchor, so it must not outlive
+  // the anchor it describes: a stale MANUAL pins the next session's reroll to a piece the
+  // customer never chose, and a stale AUTO lets a reroll move one she did. It was missing
+  // from this list, so Start Over left it behind.
+  "styleMeAnchorProvenance",
   // Wardrobe Intelligence handoff — anchor pre-selected, skip the picker.
   "styleMeAnchorLocked",
   // Rev 3 — Psychology-First StyleMe (Group 5)
