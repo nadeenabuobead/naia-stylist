@@ -38,6 +38,25 @@ export const STYLEME_HANDOFF_ORIGIN_KEY = "styleMeHandoffOrigin";
 /** The only recognised handoff origin today: the NADINE product page. */
 export const HANDOFF_ORIGIN_NADINE_PDP = "nadine-pdp";
 
+/**
+ * She arrived from the NADINE context WITHOUT choosing a product.
+ *
+ * The distinction from "nadine-pdp" carries real behaviour. A PDP handoff has already
+ * decided the anchor, so it skips the source screen and sets mode=nadine at entry —
+ * tapping a product IS the request for NADINE merchandise. This origin decides nothing:
+ * it only records the doorway, and unlocks the My Closet / NADINE + My Closet choice on
+ * the source screen. Mode is settled there, by her, not here.
+ *
+ * Every other session has no origin at all, which is what keeps the nAia flow closet-only
+ * through the existing Rev 3 source lock.
+ */
+export const HANDOFF_ORIGIN_NADINE_ENTRY = "nadine-entry";
+
+/** True when the session came through the generic NADINE doorway. */
+export function isNadineEntryOrigin(session: Pick<Session, "get">): boolean {
+  return session.get(STYLEME_HANDOFF_ORIGIN_KEY) === HANDOFF_ORIGIN_NADINE_ENTRY;
+}
+
 /** Where /api/styleme-handoff sends the customer: the canonical Rev 3 entry. */
 export const HANDOFF_ENTRY_PATH = "/style-me/state";
 

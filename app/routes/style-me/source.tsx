@@ -7,7 +7,9 @@ export function meta() {
 import { useState } from "react";
 import { commitSession, getSession } from "~/lib/session.server";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
-import { readNadineHandoff, CANONICAL_STYLEME_ENTRY } from "~/lib/styleme/handoff";
+import { readNadineHandoff, CANONICAL_STYLEME_ENTRY,
+  isNadineEntryOrigin,
+} from "~/lib/styleme/handoff";
 import prisma from "~/db.server";
 import { autoSelectClosetAnchor, resolveClosetAnchor } from "~/lib/ai/styleme-anchor.server";
 import { evaluateAnchorEligibility } from "~/lib/ai/styleme-profile-gate";
@@ -115,7 +117,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
     });
   }
 
-  if (isRev3 && source !== "my-closet") {
+  // ── NADINE entry: the one doorway that offers a source choice ─────────────
+  //
+  // HANDOFF_ORIGIN_NADINE_ENTRY means she came from the NADINE context without picking a
+  // product. Only such a session sees "My Closet" / "NADINE + My Closet"; every other
+  // Rev 3 session has no origin stamp and falls through to the closet-only lock below,
+  // which is what keeps the nAia flow isolated.
+  //
+  // Once she has chosen, the session continues into the normal anchor flow — "both" still
+  // needs a closet anchor, so nothing downstream changes.
+  const isNadineEntry = isRev3 && isNadineEntryOrigin(session);
+  if (isNadineEntry && source !== "my-closet" && source !== "both") {
+    const prevSource = (session.get("styleMeSourcePrev") as string | undefined) ?? null;
+    return data({ step: "source" as const, isRev3, prevSource });
+  }
+
+  // Closet-only lock. Unchanged for every doorway except the NADINE entry, which has
+  // earned the right to carry source="both".
+  if (isRev3 && !isNadineEntry && source !== "my-closet") {
     session.set("styleMeSource", "my-closet");
     session.set("styleMeMode", "naia");
     return redirect("/style-me/source", {
@@ -230,8 +249,12 @@ export async function action({ request }: ActionFunctionArgs) {
       return data({ error: "Please select what we're styling" }, { status: 400 });
     }
     session.set("styleMeSource", source);
-    // All source selections from this page originate from the nAia app.
-    session.set("styleMeMode", "naia");
+    // The mode is HER choice, made here — not inherited from the doorway. "NADINE + My
+    // Closet" is the request that admits the live-five selector; "My Closet" stays
+    // closet-only even though she arrived from the NADINE context, which is the whole
+    // reason the entry route does not set a mode of its own.
+    const fromNadineEntry = isNadineEntryOrigin(session);
+    session.set("styleMeMode", fromNadineEntry && source === "both" ? "nadine" : "naia");
     // Clear stale anchor keys and hydration keys whenever source changes.
     session.unset("styleMeNadineAnchorHandle");
     session.unset("styleMeClosetAnchorId");

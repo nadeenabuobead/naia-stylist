@@ -177,16 +177,24 @@ describe("NH.4 — Rev 3 source lock stays closed for ordinary sessions", () => 
   });
 
   it("source.tsx still forces ordinary Rev 3 sessions to my-closet + naia", () => {
+    // The lock gained ONE exemption in B.2: a session stamped with the NADINE entry
+    // origin, which is the only doorway offering My Closet / NADINE + My Closet. An
+    // ordinary Rev 3 session carries no origin, so !isNadineEntry holds and the force
+    // still fires — the behaviour this test protects is unchanged.
     const sourceSrc = src("source.tsx");
-    assert.ok(sourceSrc.includes('if (isRev3 && source !== "my-closet")'));
+    assert.ok(sourceSrc.includes('if (isRev3 && !isNadineEntry && source !== "my-closet")'),
+      "the closet-only force must survive, exempting only the NADINE entry");
     assert.ok(sourceSrc.includes('session.set("styleMeSource", "my-closet")'));
     assert.ok(sourceSrc.includes('session.set("styleMeMode", "naia")'));
+    // And the exemption must be earned by the recorded origin, not by isRev3 alone.
+    assert.ok(/const isNadineEntry = isRev3 && isNadineEntryOrigin\(session\)/.test(sourceSrc),
+      "the exemption must be conditioned on the session's stamped origin");
   });
 
   it("the handoff exception is evaluated before the closet-only force", () => {
     const sourceSrc = src("source.tsx");
     const exceptionAt = sourceSrc.indexOf("const nadineHandoff = isRev3 ? readNadineHandoff(session)");
-    const forceAt = sourceSrc.indexOf('if (isRev3 && source !== "my-closet")');
+    const forceAt = sourceSrc.indexOf('if (isRev3 && !isNadineEntry && source !== "my-closet")');
     assert.ok(exceptionAt > -1 && forceAt > -1);
     assert.ok(exceptionAt < forceAt, "the exception must be checked before the lock fires");
   });

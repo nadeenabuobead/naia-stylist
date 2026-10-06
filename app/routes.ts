@@ -26,6 +26,11 @@ export default [
   route("style-me/source", "routes/style-me/source.tsx"),
   route("style-me/result", "routes/style-me/result.tsx"),
 
+  // Temporary staging-only QA doorway into the NADINE context. Stamps the entry origin
+  // and nothing else; 404s outside staging. Not the eventual public NADINE StyleMe URL,
+  // and not linked from the storefront. Remove when the real handoff is connected.
+  route("style-me/nadine-preview", "routes/style-me.nadine-preview.tsx"),
+  route("api/styleme-nadine-entry", "routes/api.styleme-nadine-entry.tsx"),
   route("api/customer-auth", "routes/api.customer-auth.jsx"),
   route("api/closet", "routes/api.closet.jsx"),
   route("api/closet-preview-analyze", "routes/api.closet-preview-analyze.ts"),

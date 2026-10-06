@@ -16,7 +16,9 @@ const { getSession, commitSession, destroySession } = createCookieSessionStorage
 
 export { getSession, commitSession, destroySession };
 
-const STYLEME_SESSION_KEYS = [
+// Exported so tests can assert Start Over's coverage: clearStyleMeSession iterates
+// this list, so a key missing from it silently survives into the next questionnaire.
+export const STYLEME_SESSION_KEYS = [
   "styleMeMood",
   "styleMeFeelings",
   "styleMeBodyNeeds",
