@@ -155,6 +155,14 @@ export interface ClosetAnchorInput {
   material: string | null;
   styleTags: string[];
   occasions: string[];
+  // Garment Intelligence Phase 4K1 — canonical/effective occasions, computed
+  // unconditionally alongside the raw `occasions` field above (never replacing
+  // it). Only the T1 legacy fallback inside computeOccasionTier chooses between
+  // the two, behind CANONICAL_STYLEME_OCCASIONS, and only when the approved-
+  // profile occasionFit rating is unavailable for the session's occasion.
+  // autoSelectClosetAnchor and every other consumer must keep reading the raw
+  // `occasions` field — this field does not exist for them.
+  effectiveOccasions?: string[];
   imageUrl: string;
   subcategory?: string | null;
   garmentRelationships?: string[];

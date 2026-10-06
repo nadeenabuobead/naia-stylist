@@ -1419,6 +1419,41 @@ export function computeIntentionFit(
 const OCCASION_CORE_SLOTS = new Set(["top", "bottom", "dress", "set"]);
 const OCCASION_IMPORTANT_SLOTS = new Set(["shoe", "outerwear"]);
 
+// Garment Intelligence Phase 4K1 — narrowly scoped rollback switch for the
+// T1 legacy-fallback occasions read inside computeOccasionTier, below.
+// OFF = exactly today's raw ClosetItem.occasions reads in both fallback
+// branches. ON = the canonical/effective value already computed alongside
+// it by loadAllClosetItemsForEngine (resolveEffectiveOccasions) — not a
+// second precedence implementation. This flag controls ONLY the two
+// fallback branches below, and ONLY when getProfileOccasionTier has
+// already returned null for this piece (no usable approved-profile rating
+// for the session's occasion) — approved occasionFit remains authoritative
+// in both flag states, completely untouched by this flag. autoSelectClosetAnchor
+// keeps reading raw `occasions` unconditionally; it never sees this flag.
+const CANONICAL_STYLEME_OCCASIONS = process.env.CANONICAL_STYLEME_OCCASIONS === "true";
+
+/**
+ * Pure decision logic for the T1 legacy-fallback occasions read, exported so
+ * it can be tested directly without process.env manipulation. OFF:
+ * byte-identical to item.occasions. ON: item.effectiveOccasions — which
+ * already equals raw whenever no admin correction exists, so "flag ON, no
+ * correction" is byte-identical to "flag OFF" by construction.
+ *
+ * Falls back to raw when the effective field is `undefined` (never computed —
+ * true of any ClosetAnchorInput built outside loadAllClosetItemsForEngine,
+ * including every pre-Phase-4K1 test fixture). An explicit canonical `[]`
+ * (the loader resolved it and found no occasions) is trusted as-is, not
+ * overridden — same rule as every prior canonical migration in this file.
+ */
+export function resolveFallbackOccasions(
+  item: { occasions?: string[]; effectiveOccasions?: string[] } | undefined,
+  canonicalEnabled: boolean,
+): string[] {
+  if (!item) return [];
+  if (!canonicalEnabled) return item.occasions ?? [];
+  return item.effectiveOccasions !== undefined ? item.effectiveOccasions : (item.occasions ?? []);
+}
+
 export function computeOccasionTier(
   candidate: OutfitCandidate,
   allItems: ClosetAnchorInput[],
@@ -1431,7 +1466,7 @@ export function computeOccasionTier(
   let hasCoreAcceptableOnly = false;
   for (const piece of candidate.pieces) {
     const item = itemMap.get(piece.closetId);
-    const occasions = item?.occasions ?? [];
+    const occasions = resolveFallbackOccasions(item, CANONICAL_STYLEME_OCCASIONS);
 
     if (OCCASION_CORE_SLOTS.has(piece.slot)) {
       if (item) {

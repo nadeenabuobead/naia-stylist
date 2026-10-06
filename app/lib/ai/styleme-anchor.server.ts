@@ -84,6 +84,23 @@ export function resolveEffectiveLength(
   return { hemLength: effective.hemLength ?? null, topLength: effective.topLength ?? null };
 }
 
+// Garment Intelligence Phase 4K1 — computes canonical/effective occasions for
+// every garment, UNCONDITIONALLY (no flag here). Coexists alongside the raw
+// `occasions` field on ClosetAnchorInput rather than replacing it —
+// autoSelectClosetAnchor doesn't read this field at all, and keeps reading
+// raw `occasions` exactly as before. The Phase 4K1 flag is applied only
+// inside computeOccasionTier's legacy-fallback branches (styleme-result.server.ts),
+// which choose between the two coexisting fields — never here. Reuses
+// getEffectiveClosetItem, the same authoritative precedence logic every
+// other effective field in this file is itself a pure pass-through of — not
+// a second, independent precedence implementation.
+export function resolveEffectiveOccasions(
+  item: ClosetItemFields,
+  adminReview: { reviewStatus: string; overrides: unknown } | null | undefined,
+): string[] {
+  return getEffectiveClosetItem(item, adminReview).occasions ?? [];
+}
+
 const VALID_HANDLES = new Set(getAllCatalogProducts().map((p) => p.handle));
 
 /**
@@ -389,6 +406,9 @@ export async function loadAllClosetItemsForEngine(
     // Phase 4C1: hemLength/topLength only, for the hard legs-covered/no-cropped-tops
     // gate. Computed unconditionally — coexists with the raw fields below.
     const effectiveLength = resolveEffectiveLength(item, item.adminReview);
+    // Phase 4K1: occasions only, for computeOccasionTier's legacy fallback.
+    // Computed unconditionally — coexists with the raw field below.
+    const effectiveOccasions = resolveEffectiveOccasions(item, item.adminReview);
     const p = item.styleMeProfile;
     const approvedProfile =
       p?.profileStatus === "approved"
@@ -423,6 +443,7 @@ export async function loadAllClosetItemsForEngine(
       material: item.material ?? null,
       styleTags: item.styleTags,
       occasions: item.occasions,
+      effectiveOccasions,
       imageUrl,
       garmentRelationships: item.garmentRelationships,
       formality: item.formality ?? null,
