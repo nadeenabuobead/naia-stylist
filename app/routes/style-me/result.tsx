@@ -30,6 +30,10 @@ import { parseSuggestionMetadata } from "~/lib/ai/styleme-result.types";
 import { resolveStyleMeMode } from "~/lib/styleme/mode-resolution";
 import { occasionDisplayFor } from "~/lib/styleme/occasion-display";
 import {
+  NO_NADINE_HERO_NOTE,
+  shouldExplainNoNadineHero,
+} from "~/lib/styleme/nadine-fallback-note";
+import {
   resolveCommerceCtaHref,
   resolveCommerceCtaLabel,
 } from "~/lib/styleme/commerce-cta";
@@ -1668,6 +1672,26 @@ export default function StyleMeResult() {
               <p className="sm-anchor-note">{suggestionMeta.pairingNote}</p>
             )}
           </div>
+        )}
+
+        {/* She asked for NADINE + My Closet and nothing in the live collection qualified.
+            Closet-only was the decision, not a shortfall — so the page says so instead of
+            looking identical to having chosen My Closet. Guard and copy both live in
+            ~/lib/styleme/nadine-fallback-note; this renders, it does not decide. */}
+        {shouldExplainNoNadineHero(suggestionMeta) && (
+          <p
+            className="sm-anchor-note"
+            style={{
+              fontFamily: "var(--naia-ff-body)",
+              fontSize: "15px",
+              fontStyle: "italic",
+              color: "var(--naia-muted)",
+              margin: "0 0 32px",
+              maxWidth: "46em",
+            }}
+          >
+            {NO_NADINE_HERO_NOTE}
+          </p>
         )}
 
         {/* Complete the Look — generic wardrobe guidance for missing clothing and finishing slots */}
