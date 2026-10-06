@@ -20,9 +20,22 @@ export const SESSION_OCCASION_TO_CLOSET_TOKENS: Record<string, readonly string[]
   "travel":        ["travel"],                                  // AI = session ID
   "family":        ["family"],                                  // no AI equiv — keep session ID as legacy match
   "not-sure":      [],                                          // no meaningful match
-  // Active / busy day — athletic and workout-specific items; general casual items are
-  // treated as versatile (no occasion tags → compatible) and receive no +10 bonus.
-  "active":        ["active", "gym", "athletic", "sport"],
+  // Active / busy day — a practical, mobile, on-the-go day: errands, commuting,
+  // appointments, a packed workday, travel, the school run. NOT gym-only.
+  //
+  // It was athletic-only ("active","gym","athletic","sport"), which made every practical
+  // garment in a real wardrobe match nothing: computeOccasionTier returns 0 — invalid —
+  // for a core slot that HAS tags and matches none of them, so a work-tagged shirt scored
+  // the same as a ball gown for a day of errands. Manual QA hit this with a smart-casual
+  // top reviewed [work, casual, weekend, evening, date-night].
+  //
+  // Practical contexts are therefore compatible without anyone re-tagging garments with a
+  // literal "active". Evening-register contexts stay out: a busy day does not make a gown
+  // practical. Any specific garment can still be approved individually through occasionFit,
+  // which this map does not touch.
+  "active":        ["active", "gym", "athletic", "sport",
+                    "casual", "weekend", "everyday",
+                    "work", "travel"],
 };
 
 // Returns true when the item's stored occasion tags include at least one token that

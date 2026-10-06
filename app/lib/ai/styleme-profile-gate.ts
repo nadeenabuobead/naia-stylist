@@ -82,6 +82,14 @@ export const DRESS_REGISTER_RANK: Record<string, number> = {
 // Correcting these keys does not substitute for that; it stops a gate failing open in
 // the meantime.
 export const OCCASION_REGISTER_RANGE: Record<string, { min: number; max: number }> = {
+  // DO NOT "correct" this to { min: 0, max: 3 }. The declared band is deliberately {0,1}:
+  // passesProfileRegisterGate applies a shared +/-2 tolerance at its final range check, so
+  // the EFFECTIVE window for Active / busy day is already ranks 0-3 —
+  //   0 athletic · 1 casual · 2 elevated-casual · 3 smart-casual   pass
+  //   4 polished · 5 dressy · 6 evening                            fail
+  // which is exactly the intended four-band behaviour. Widening the declared band to {0,3}
+  // would make the effective window 0-5 and quietly admit polished and dressy to a day of
+  // errands. Measured and pinned by AOS-D in active-occasion-semantics.test.ts.
   "active":    { min: 0, max: 1 },
   "everyday":  { min: 1, max: 3 },
   "family":    { min: 1, max: 3 },

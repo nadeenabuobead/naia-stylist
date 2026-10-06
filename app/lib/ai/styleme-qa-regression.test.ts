@@ -656,11 +656,24 @@ describe("C. Active occasion", () => {
     assert.equal(result.id, "smart", "rank 1 and rank 2 must be equally top-tier for active: the better-matched rank 2 item wins");
   });
 
-  it("C6 active occasion does not normalize to 'everyday' in token matching", () => {
-    const activeTokens = SESSION_OCCASION_TO_CLOSET_TOKENS["active"] ?? [];
-    const everydayTokens = SESSION_OCCASION_TO_CLOSET_TOKENS["everyday"] ?? [];
-    for (const tok of activeTokens) {
-      assert.ok(!everydayTokens.includes(tok), `token '${tok}' must not appear in both active and everyday`);
+  it("C6 active occasion does not collapse into 'everyday' in token matching", () => {
+    // UPDATED with the Active / busy day taxonomy fix. This asserted the two token sets
+    // were DISJOINT, which held only while active meant gym-only. Active / busy day means
+    // a practical, mobile day, so it legitimately shares casual/weekend/everyday with an
+    // ordinary day — overlap is now correct.
+    //
+    // The test's intent is unchanged and still enforced: the two must remain DISTINCT
+    // occasions, not synonyms. Each keeps tokens the other does not have — active adds
+    // gym/athletic/sport and work/travel; everyday admits none of those.
+    const activeTokens = [...(SESSION_OCCASION_TO_CLOSET_TOKENS["active"] ?? [])];
+    const everydayTokens = [...(SESSION_OCCASION_TO_CLOSET_TOKENS["everyday"] ?? [])];
+    assert.notDeepEqual([...activeTokens].sort(), [...everydayTokens].sort(),
+      "active must not be a synonym for everyday");
+    assert.ok(activeTokens.some((t) => !everydayTokens.includes(t)),
+      "active must carry tokens everyday does not (athletic, work, travel)");
+    for (const athletic of ["active", "gym", "athletic", "sport"]) {
+      assert.ok(activeTokens.includes(athletic), `active must still accept '${athletic}'`);
+      assert.ok(!everydayTokens.includes(athletic), `everyday must not accept '${athletic}'`);
     }
   });
 });
