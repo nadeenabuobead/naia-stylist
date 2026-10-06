@@ -2271,7 +2271,7 @@ export { SESSION_OCCASION_TO_CLOSET_TOKENS } from "./styleme-occasion-tokens.js"
 // existing caller keeps working unchanged.
 export { getTargetFormalityRange, OCCASION_FORMALITY_TARGET, FORMALITY_CONDITIONAL_ADJUSTMENTS } from "./styleme-profile-gate.js";
 import { matchesSessionOccasion } from "./styleme-occasion-tokens.js";
-import { getTargetFormalityRange, finishingPieceIsSuitable } from "./styleme-profile-gate.js";
+import { getTargetFormalityRange, finishingPieceIsSuitable, profileOccasionRating } from "./styleme-profile-gate.js";
 
 // Per-slot formality contribution weight (0 = excluded from register judgment).
 // Outerwear is meaningful but slightly discounted — it can be removed and is often
@@ -4361,28 +4361,62 @@ export function selectAdditionalClosetGarments(
       }));
     }
 
+    // TEMPORARY INSTRUMENTATION — read-only, staging diagnostics. Remove with the other
+    // [nAia-*] probes once catalogue eligibility is understood.
+    //
+    // 34 garments passed the dressing gate and vanished before scoring, and the logs could
+    // not say which gate took them: only survivors emit [nAia-slot-score]. This names the
+    // rejecting gate per item. It reads values and logs — no gate, score or control flow
+    // changes; every `continue` stays exactly where it was.
+    //
+    // REASON VOCABULARY: the brief asked for four reasons, but this path has SEVEN exits
+    // after the dressing gate. Three were missing, and one of them —
+    // slot-covered-by-anchor — is expected to account for most TOPS here: the anchor IS a
+    // top, so every other top is correctly excluded as a duplicate slot, not as an
+    // eligibility failure. Reporting that separately avoids reading a structural exclusion
+    // as a catalogue-data problem.
+    const logDrop = (rejectedBy: string, extra: Record<string, unknown> = {}): void => {
+      if (process.env.NAIA_STYLEME_DIAGNOSTICS !== "true") return;
+      const ap = item.approvedProfile;
+      console.log("[nAia-eligibility-drop]", JSON.stringify({
+        itemId: item.id,
+        itemName: item.name ?? null,
+        slot: resolveProfileSlot(item, closetItemToSlot(item.category, item.subcategory)),
+        category: item.category,
+        rejectedBy,
+        occasionFitForSession: profileOccasionRating(ap?.occasionFit, session.occasion) ?? null,
+        occasionFit: ap?.occasionFit ?? null,
+        occasions: item.occasions,
+        dressRegister: ap?.dressRegister ?? null,
+        anchorDressRegister: anchorClosetItem?.approvedProfile?.dressRegister ?? null,
+        occasionTokenMatch: matchesSessionOccasion(item.occasions, session.occasion),
+        ...extra,
+      }));
+    };
+
     if (!passesDressingRequirements(item, profile?.dressingPreferences)) continue;
 
     // APPROVED profile truth gates — take precedence over all legacy classification.
     // Gate 1: occasion "No" is a hard exclusion from this garment for this occasion.
-    if (!passesProfileOccasionGate(item, session.occasion)) continue;
+    if (!passesProfileOccasionGate(item, session.occasion)) { logDrop("occasion-fit"); continue; }
     // Gate 2: register incompatibility blocks cross-register outfit construction.
     //         Approved occasionFit Strong/Acceptable overrides blanket register rules.
-    if (!passesProfileRegisterGate(item, session.occasion)) continue;
+    if (!passesProfileRegisterGate(item, session.occasion)) { logDrop("profile-register"); continue; }
     // Gate 3: outfit-level register coherence — candidate must be compatible with anchor.
     //         Shared-occasion approval (both approved for this occasion) overrides the gap check.
-    if (!passesRegisterCoherenceWithAnchor(item, anchorClosetItem, session.occasion)) continue;
+    if (!passesRegisterCoherenceWithAnchor(item, anchorClosetItem, session.occasion)) { logDrop("anchor-register-coherence"); continue; }
 
     // Use profile exactSlot when available (authoritative slot override).
     const categorySlot = closetItemToSlot(item.category, item.subcategory);
     const slot = resolveProfileSlot(item, categorySlot);
-    if (slot === "unknown") continue;
+    if (slot === "unknown") { logDrop("slot-unknown"); continue; }
     if (coveredSlots.has(slot)) {
+      logDrop("slot-covered-by-anchor", { coveredSlots: [...coveredSlots] });
       continue;
     }
 
     // Gate 4: outfitFunction gate — "finishing" function pieces must not fill structural clothing slots.
-    if (!passesOutfitFunctionGate(item, slot)) continue;
+    if (!passesOutfitFunctionGate(item, slot)) { logDrop("outfit-function"); continue; }
 
     const baseScore = scoreClosetItemForSession(
       { occasions: item.occasions, styleTags: item.styleTags, category: item.category, colors: item.colors, primaryColor: item.primaryColor },
@@ -4470,7 +4504,7 @@ export function selectAdditionalClosetGarments(
 
     // Gate: total contribution must be positive. Legacy baseScore is no longer the sole
     // gate — approved Fit/Comfort and Intention signals can carry a zero-base item through.
-    if (score <= 0) continue;
+    if (score <= 0) { logDrop("zero-or-negative-score", { scoreBeforeThreshold: score, baseScore, bodyNeedSlotBonus, intentionBonus, registerBonus }); continue; }
 
     const list = candidatesBySlot.get(slot) ?? [];
     list.push({ item, score });
