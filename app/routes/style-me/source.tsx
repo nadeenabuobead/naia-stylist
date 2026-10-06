@@ -1,4 +1,4 @@
-import { Form, Link, useLoaderData } from "react-router";
+import { Form, Link, useActionData, useLoaderData } from "react-router";
 import { data, redirect, type ActionFunctionArgs, type LoaderFunctionArgs, type LinksFunction } from "react-router";
 
 export function meta() {
@@ -469,6 +469,37 @@ export async function action({ request }: ActionFunctionArgs) {
 
 // ── UI ────────────────────────────────────────────────────────────────────────
 
+// ── Action errors ───────────────────────────────────────────────────────────
+//
+// Every refusal this route returns is a 400 carrying an explanation — most importantly
+// the manual-anchor eligibility refusal, which tells her why a piece she chose cannot
+// anchor the look. None of it was rendered: the route never read the action response, so
+// a refusal re-rendered the same screen and CONTINUE appeared to do nothing. Live QA hit
+// it four times in eleven seconds.
+//
+// Display only. The refusal itself is untouched — an ineligible anchor is still refused,
+// and no garment is ever substituted for the one she picked.
+//
+// Styled to match the auto-anchor failure notice the method step already had, which is
+// what made the manual path the odd one out.
+function ActionError() {
+  const actionData = useActionData<typeof action>() as
+    | { error?: string; anchorRejectionCode?: string }
+    | undefined;
+  const message = actionData?.error;
+  if (!message) return null;
+  return (
+    <p
+      className="sm-sub"
+      role="alert"
+      data-anchor-rejection={actionData?.anchorRejectionCode ?? undefined}
+      style={{ fontStyle: "normal", color: "var(--naia-accent)", marginBottom: "12px" }}
+    >
+      {message}
+    </p>
+  );
+}
+
 export default function StyleMeSource() {
   const loaderData = useLoaderData<typeof loader>();
   const { step } = loaderData;
@@ -534,6 +565,7 @@ function SourceStep() {
       <h1 className="sm-heading">What should nAia work with today?</h1>
       <p className="sm-sub">Choose your anchor for today.</p>
       <Form method="post">
+        <ActionError />
         <input type="hidden" name="_action" value="set-source" />
         <div className="sm-source-pills">
           {options.map((option) => (
@@ -611,6 +643,7 @@ function AnchorMethodStep({ source, prevMethod, autoAnchorFail }: { source: stri
           nAia couldn't find a clear starting point for this session — pick a piece yourself to get started.
         </p>
       )}
+      <ActionError />
       <p className="sm-sub">Your anchor is the piece everything else gets styled around.</p>
       <Form method="post">
         <input type="hidden" name="_action" value="set-anchor-method" />
@@ -657,6 +690,7 @@ function ClosetAnchorStep({ source, items }: { source: string; items: PickerItem
       <p className="sm-step-label">{label}</p>
       <h1 className="sm-heading">Which piece are we building around?</h1>
       <p className="sm-sub">Select the item you want nAia to style.</p>
+      <ActionError />
       <Form method="post">
         <input type="hidden" name="_action" value="set-anchor" />
         <div className="sm-item-picker">
