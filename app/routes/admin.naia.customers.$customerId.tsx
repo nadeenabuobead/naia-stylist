@@ -543,8 +543,19 @@ export default function AdminCustomerDetailPage() {
       <h1 className="na-page-heading" style={{ marginBottom: "0.25rem" }}>
         {customerDisplayName(customer)}
       </h1>
-      <p style={{ fontSize: "0.8rem", color: "#6b7280", marginBottom: "1.5rem" }}>
+      <p style={{ fontSize: "0.8rem", color: "#6b7280", marginBottom: "0.75rem" }}>
         What does nAia think it knows about this person?
+      </p>
+
+      {/* Read-only export of THIS customer's Closet. The id comes from the page, so it
+          cannot be aimed at another customer's Closet by mistake. */}
+      <p style={{ marginBottom: "1.5rem" }}>
+        <a
+          href={`/admin/naia/customers/${customer.id}/closet-export`}
+          style={{ fontSize: "0.78rem", color: "#374151", textDecoration: "underline", textUnderlineOffset: "3px" }}
+        >
+          Export Closet JSON
+        </a>
       </p>
 
       {/* ── Account type ───────────────────────────────────────────────────
