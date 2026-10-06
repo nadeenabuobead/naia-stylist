@@ -4,7 +4,7 @@ import { data, redirect, type ActionFunctionArgs, type LoaderFunctionArgs, type 
 export function meta() {
   return [{ title: "Build the look around | nAia Style Me" }];
 }
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { commitSession, getSession } from "~/lib/session.server";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { readNadineHandoff, CANONICAL_STYLEME_ENTRY,
@@ -473,9 +473,26 @@ export async function action({ request }: ActionFunctionArgs) {
 //
 // Every refusal this route returns is a 400 carrying an explanation — most importantly
 // the manual-anchor eligibility refusal, which tells her why a piece she chose cannot
-// anchor the look. None of it was rendered: the route never read the action response, so
-// a refusal re-rendered the same screen and CONTINUE appeared to do nothing. Live QA hit
-// it four times in eleven seconds.
+// anchor the look. None of it was rendered, because the route never read the action
+// response; CONTINUE appeared to do nothing. Live QA hit it four times in eleven seconds.
+//
+// Reading the response was necessary but not sufficient. With the message rendered at the
+// TOP of the step, the second QA pass still reported a dead button — ten POST 400s in
+// seventeen seconds. The loader's closet query is uncapped, so the picker is a two-column
+// grid of every garment she owns; she selects a piece and presses CONTINUE at the bottom
+// of it, and the refusal appeared off-screen a full grid above. An answer she cannot see
+// is the same bug as no answer at all.
+//
+// So it renders beside the control that produced it, and pulls view and focus to itself.
+// Keyed on the response object rather than the text, so pressing CONTINUE again on the
+// same garment re-announces the same reason instead of looking inert.
+//
+// Why the response does reach useActionData: the submission is a plain <Form method="post">
+// (no fetcher), and react-router single fetch throws a 400 .data response to the
+// ErrorBoundary only when X-Remix-Response is missing — the server stamps it on every
+// single-fetch response. Verified live: 400 · text/x-script · x-remix-response: yes,
+// body [{"_1":2},"data",{"_3":4},"error",...]. So this must stay a `return data(...)`;
+// a thrown Response would become an error page instead of an answer.
 //
 // Display only. The refusal itself is untouched — an ineligible anchor is still refused,
 // and no garment is ever substituted for the one she picked.
@@ -487,13 +504,29 @@ function ActionError() {
     | { error?: string; anchorRejectionCode?: string }
     | undefined;
   const message = actionData?.error;
+  const ref = useRef<HTMLParagraphElement | null>(null);
+
+  useEffect(() => {
+    if (!message || !ref.current) return;
+    ref.current.scrollIntoView({ block: "center", behavior: "smooth" });
+    ref.current.focus();
+  }, [actionData, message]);
+
   if (!message) return null;
   return (
     <p
+      ref={ref}
+      tabIndex={-1}
       className="sm-sub"
       role="alert"
+      aria-live="assertive"
       data-anchor-rejection={actionData?.anchorRejectionCode ?? undefined}
-      style={{ fontStyle: "normal", color: "var(--naia-accent)", marginBottom: "12px" }}
+      style={{
+        fontStyle: "normal",
+        color: "var(--naia-accent)",
+        marginBottom: "12px",
+        outline: "none",
+      }}
     >
       {message}
     </p>
@@ -690,7 +723,6 @@ function ClosetAnchorStep({ source, items }: { source: string; items: PickerItem
       <p className="sm-step-label">{label}</p>
       <h1 className="sm-heading">Which piece are we building around?</h1>
       <p className="sm-sub">Select the item you want nAia to style.</p>
-      <ActionError />
       <Form method="post">
         <input type="hidden" name="_action" value="set-anchor" />
         <div className="sm-item-picker">
@@ -714,6 +746,8 @@ function ClosetAnchorStep({ source, items }: { source: string; items: PickerItem
           ))}
         </div>
         <input type="hidden" name="closetItemId" value={selected ?? ""} />
+        {/* Beside CONTINUE, not above the grid — see the note on ActionError. */}
+        <ActionError />
         <div className="sm-step-buttons">
           <button type="submit" disabled={!selected} className="sm-continue">
             Continue
