@@ -56,7 +56,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 // ── UI ────────────────────────────────────────────────────────────────────────
 
 export default function Phase3CQAExportPage() {
-  const { identity } = useLoaderData<typeof loader>();
+  const { identity } = (useLoaderData() ?? {}) as { identity?: { email?: string } };
 
   return (
     <div style={styles.shell}>
@@ -70,7 +70,14 @@ export default function Phase3CQAExportPage() {
           classifications, visual weight, colour profile, and all 12 passport-aware intention
           potentials. Read-only — no database writes, no Phase 3C or StyleMe logic changes.
         </p>
-        <p style={styles.identity}>Signed in as {identity.email}</p>
+        {/* identity comes from session.get("identity"), which is undefined for an
+            authenticated admin session that carries no identity entry — and an
+            undefined dereference here 500s the whole page AFTER auth has already
+            succeeded. Observed on staging as "Application Error":
+              TypeError: Cannot read properties of undefined (reading 'email')
+            This line is a sign-in label; it must never be able to deny access to the
+            export. Pinned by admin.naia.phase3c-export.test.tsx (P3C). */}
+        <p style={styles.identity}>Signed in as {identity?.email ?? "an admin session"}</p>
       </div>
 
       <div style={styles.card}>
