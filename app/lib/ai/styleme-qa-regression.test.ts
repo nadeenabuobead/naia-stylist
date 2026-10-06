@@ -664,7 +664,8 @@ describe("C. Active occasion", () => {
     //
     // The test's intent is unchanged and still enforced: the two must remain DISTINCT
     // occasions, not synonyms. Each keeps tokens the other does not have — active adds
-    // gym/athletic/sport and work/travel; everyday admits none of those.
+    // gym/athletic/sport and travel; everyday admits none of those. (work is NOT an
+    // Active token — work stays a distinct occasion.)
     const activeTokens = [...(SESSION_OCCASION_TO_CLOSET_TOKENS["active"] ?? [])];
     const everydayTokens = [...(SESSION_OCCASION_TO_CLOSET_TOKENS["everyday"] ?? [])];
     assert.notDeepEqual([...activeTokens].sort(), [...everydayTokens].sort(),

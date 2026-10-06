@@ -32,6 +32,7 @@ import {
 } from "../ai/styleme-occasion-tokens.js";
 import {
   OCCASION_REGISTER_RANGE,
+  passesRegisterCoherenceWithAnchor,
   DRESS_REGISTER_RANK,
   passesProfileRegisterGate,
   passesProfileOccasionGate,
@@ -59,9 +60,13 @@ describe("AOS-A — practical, mobile, on-the-go garments qualify", () => {
     assert.equal(matchesSessionOccasion(["everyday"], ACTIVE), true);
   });
 
-  test("AOS-A.2 a work-tagged practical piece qualifies", () => {
-    assert.equal(matchesSessionOccasion(["work"], ACTIVE), true,
-      "a packed workday is an Active / busy day");
+  test("AOS-A.2 a work-only piece does NOT qualify", () => {
+    // A busy day can be a workday, but work-appropriate does not imply practical or
+    // mobile: a tailored suit is work-valid and wrong for the school run. work stays a
+    // distinct occasion, and a garment earns Active / busy day through a practical tag or
+    // through an explicit occasionFit approval — not by being office-appropriate.
+    assert.equal(matchesSessionOccasion(["work"], ACTIVE), false,
+      "work alone must not make a garment Active / busy day");
   });
 
   test("AOS-A.3 a travel-tagged piece qualifies", () => {
@@ -77,11 +82,14 @@ describe("AOS-A — practical, mobile, on-the-go garments qualify", () => {
 
   test("AOS-A.5 the real reviewed tag set from QA qualifies", () => {
     // The Cream Ribbed Knit Tank Top, as actually reviewed on staging.
+    // Qualifies on `casual` + `weekend` — NOT on `work`, which carries no Active weight.
     assert.equal(
       matchesSessionOccasion(["work", "casual", "weekend", "evening", "date-night"], ACTIVE),
       true,
       "a smart-casual top is wearable on a busy day",
     );
+    assert.equal(matchesSessionOccasion(["work", "evening", "date-night"], ACTIVE), false,
+      "strip the practical tags and the same garment no longer qualifies");
   });
 });
 
@@ -113,7 +121,7 @@ describe("AOS-C — a practical core piece is no longer tier 0", () => {
   };
 
   test("AOS-C.1 casual / weekend / work / travel core pieces are not invalid", () => {
-    for (const tags of [["casual"], ["weekend"], ["work"], ["travel"], ["casual", "weekend"]]) {
+    for (const tags of [["casual"], ["weekend"], ["travel"], ["casual", "weekend"]]) {
       assert.notEqual(tier(tags), 0,
         `tier 0 means "invalid for this occasion" — wrong for ${tags.join("+")} on a busy day`);
     }
@@ -126,6 +134,11 @@ describe("AOS-C — a practical core piece is no longer tier 0", () => {
   test("AOS-C.3 an evening-only core piece IS still invalid", () => {
     assert.equal(tier(["evening", "date-night"]), 0,
       "the tier-0 verdict must survive for genuinely unsuitable pieces");
+  });
+
+  test("AOS-C.4 a work-only core piece is still invalid for Active", () => {
+    assert.equal(tier(["work"]), 0,
+      "work is a distinct occasion — office-appropriate is not on-the-go");
   });
 });
 
@@ -263,3 +276,93 @@ describe("AOS-G — the declared Active band must not be 'corrected' to {0,3}", 
     assert.equal(regFor("evening", "everyday"), false, "evening is excluded outright");
   });
 });
+
+// ── AOS-H: widening the pool does not widen what counts as a good outfit ──
+
+describe("AOS-H — occasion eligibility widens the pool; coherence still picks the outfit", () => {
+  // The token map answers one question only: may this piece participate in an Active /
+  // busy day look? It is NOT an outfit-level judgement, and it must never become one.
+  // Cross-piece coherence is decided separately by passesRegisterCoherenceWithAnchor
+  // (|anchorRank - itemRank| <= 2 on approved dressRegister), which never consults
+  // occasion tokens — so broadening `active` cannot bypass it. Pinned here because the
+  // two mechanisms were previously only tested apart, never composed.
+  //
+  // Deliberately NOT asserted: that pieces must share occasion tags. They must not.
+
+  const piece = (id: string, dressRegister: string, occasions: string[],
+                 occasionFit: Record<string, string> | null = null) =>
+    item(id, occasions, { approvedProfile: { dressRegister, occasionFit } });
+
+  const bothEligible = (a: ClosetAnchorInput, b: ClosetAnchorInput) =>
+    matchesSessionOccasion(a.occasions, ACTIVE) && matchesSessionOccasion(b.occasions, ACTIVE);
+
+  test("AOS-H.1 casual + athletic forms a coherent Active look", () => {
+    const top = piece("top", "casual", ["casual"]);
+    const legs = piece("legs", "athletic", ["active"]);
+    assert.equal(bothEligible(top, legs), true);
+    assert.equal(passesRegisterCoherenceWithAnchor(legs, top, ACTIVE), true,
+      "a casual top with leggings is athleisure, not a clash");
+  });
+
+  test("AOS-H.2 athletic + casual forms a coherent Active look (either order)", () => {
+    const sporty = piece("sporty", "athletic", ["active"]);
+    const jeans = piece("jeans", "casual", ["casual"]);
+    assert.equal(bothEligible(sporty, jeans), true);
+    assert.equal(passesRegisterCoherenceWithAnchor(jeans, sporty, ACTIVE), true);
+    assert.equal(passesRegisterCoherenceWithAnchor(sporty, jeans, ACTIVE), true);
+  });
+
+  test("AOS-H.3 an incoherent cross-register pair loses despite both being Active-eligible", () => {
+    // This is the assertion that matters: eligibility true on BOTH sides, coherence false.
+    const technical = piece("tech", "athletic", ["active"]);
+    const dressyTrousers = piece("dressy", "dressy", ["casual"]);
+    assert.equal(bothEligible(technical, dressyTrousers), true,
+      "both pass the widened occasion gate — that is the point of the scenario");
+    assert.equal(passesRegisterCoherenceWithAnchor(dressyTrousers, technical, ACTIVE), false,
+      "a performance top with dressy trousers must not combine on occasion grounds alone");
+
+    const eveningBlouse = piece("evening", "evening", ["casual"]);
+    const compression = piece("comp", "athletic", ["active"]);
+    assert.equal(bothEligible(eveningBlouse, compression), true);
+    assert.equal(passesRegisterCoherenceWithAnchor(compression, eveningBlouse, ACTIVE), false);
+  });
+
+  test("AOS-H.4 token eligibility alone is never sufficient", () => {
+    // Every register gap > 2 is refused regardless of occasion eligibility.
+    const anchor = piece("a", "athletic", ["active"]);
+    for (const [reg, coherent] of [["casual", true], ["elevated-casual", true],
+                                   ["smart-casual", false], ["polished", false],
+                                   ["dressy", false], ["evening", false]] as const) {
+      const cand = piece("c", reg, ["casual"]);
+      assert.equal(bothEligible(anchor, cand), true, `${reg} should pass the occasion gate`);
+      assert.equal(passesRegisterCoherenceWithAnchor(cand, anchor, ACTIVE), coherent,
+        `athletic + ${reg}: coherence must decide this, not the occasion token`);
+    }
+  });
+
+  test("AOS-H.5 coherence never consults occasion tokens", () => {
+    // Same two pieces, same registers, different tags → identical coherence verdict.
+    const a1 = piece("a", "athletic", ["active"]);
+    const a2 = piece("a", "athletic", ["evening", "date-night"]);
+    const c = piece("c", "dressy", ["casual"]);
+    assert.equal(
+      passesRegisterCoherenceWithAnchor(c, a1, ACTIVE),
+      passesRegisterCoherenceWithAnchor(c, a2, ACTIVE),
+      "the register gate is tag-blind; widening the token map cannot move it",
+    );
+  });
+
+  test("AOS-H.6 the only bypass is deliberate human approval of BOTH pieces", () => {
+    // Documented behaviour, pinned so it stays deliberate: explicit occasionFit approval
+    // on both sides overrides the generic register gap. It requires a reviewer to approve
+    // each piece for this occasion — it cannot happen from tags.
+    const blouse = piece("b", "evening", ["casual"], { active: "Acceptable" });
+    const legs = piece("l", "athletic", ["active"], { active: "Acceptable" });
+    assert.equal(passesRegisterCoherenceWithAnchor(legs, blouse, ACTIVE), true,
+      "human-authored paired truth outranks the heuristic");
+    const blouseNoFit = piece("b", "evening", ["casual"], null);
+    assert.equal(passesRegisterCoherenceWithAnchor(legs, blouseNoFit, ACTIVE), false,
+      "one-sided approval is not enough");
+  });
+});
+

@@ -33,9 +33,12 @@ export const SESSION_OCCASION_TO_CLOSET_TOKENS: Record<string, readonly string[]
   // literal "active". Evening-register contexts stay out: a busy day does not make a gown
   // practical. Any specific garment can still be approved individually through occasionFit,
   // which this map does not touch.
+  // `work` is deliberately NOT here. A busy day can be a workday, but work-appropriate
+  // does not imply practical or mobile — a tailored suit is work-valid and wrong for the
+  // school run. work stays a distinct occasion; a garment earns Active / busy day through
+  // a practical tag or an explicit occasionFit approval, never by being office-appropriate.
   "active":        ["active", "gym", "athletic", "sport",
-                    "casual", "weekend", "everyday",
-                    "work", "travel"],
+                    "casual", "weekend", "everyday", "travel"],
 };
 
 // Returns true when the item's stored occasion tags include at least one token that
