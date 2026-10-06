@@ -17,12 +17,10 @@
 
 import prisma from "~/db.server";
 import { closetItemToSlot } from "~/lib/ai/closet-slot";
-import { getEffectiveClosetItem, type IntelligenceOverrides, type ClosetItemFields } from "~/lib/admin/closet-review.server";
+import { getEffectiveClosetItem, type ClosetItemFields } from "~/lib/admin/closet-review.server";
 import {
-  deriveGarmentStylingIntelligence,
   deriveVisualWeight,
   deriveColourProfile,
-  ALL_INTENTIONS,
   type StylingPassportInput,
 } from "~/lib/admin/garment-intelligence-v1.server";
 import type { ClosetClassification } from "~/lib/admin/closet-intelligence.server";
@@ -50,38 +48,21 @@ import {
   computeWardrobeRecommendations,
   type WardrobeRecommendations,
 } from "~/lib/ai/wardrobe-recommendations";
+import {
+  deriveFormulaEvidence,
+  derivePositiveGarmentEvidence,
+} from "~/lib/ai/wardrobe-feedback-evidence";
+import { demandWindowCutoff, type RawStyleMeDemandFact } from "~/lib/ai/styleme-demand-evidence";
+import { loadRawOutcomeFactsForEvidence } from "~/lib/ai/styleme-intelligence-facts.server";
+import { resolveGarment, type ResolvableClosetItem } from "~/lib/ai/resolved-garment.server";
 
-// db.server is plain JS, so the Prisma client is untyped at this boundary.
-// This row shape is the explicit contract for everything this module reads.
-type ClosetItemRow = ClosetItemFields & {
-  id: string;
-  name: string | null;
-  category: string;
-  analysisStatus: string;
-  garmentRelationships: string[];
-  adminReview: { reviewStatus: string; overrides: unknown; intelligenceOverrides: unknown } | null;
-  styleMeProfile: {
-    profileStatus: string;
-    visualWeight: string | null;
-    intentionPotentials: unknown;
-  } | null;
-};
-
-// Curated GarmentStyleMeProfile uses "heavy"; derived intelligence uses "substantial".
-const CURATED_WEIGHT_MAP: Readonly<Record<string, ResolvedVisualWeight>> = {
-  light: "light",
-  medium: "medium",
-  heavy: "substantial",
-};
-
-const CURATED_STRENGTH_MAP: Readonly<Record<string, ResolvedIntentionStrength>> = {
-  Strong: "strong",
-  Supporting: "supporting",
-  None: "none",
-};
-
-/** Only an approved curated profile is trusted ahead of derived intelligence. */
-const CURATED_APPROVED_STATUS = "approved";
+// Garment Intelligence Phase 1: the per-item resolution this row feeds
+// (getEffectiveClosetItem -> classification -> derive/curate/override) now
+// lives in resolved-garment.server.ts as resolveGarment(). ClosetItemRow is
+// kept as a local alias of that module's ResolvableClosetItem — one
+// canonical row shape, not two copies — since this file still needs the
+// name for its own findMany() return-type annotation.
+type ClosetItemRow = ResolvableClosetItem;
 
 export interface WardrobeIntelligenceBundle {
   intelligence: WardrobeIntelligence;
@@ -109,13 +90,30 @@ export async function loadWardrobeIntelligence(
     include: { adminReview: true, styleMeProfile: true },
   });
 
-  const [outfitCounts, savedCounts, seenCombinations, styleMeSessions, outcomes] = await Promise.all([
+  const [outfitCounts, savedCounts, seenCombinations, styleMeSessions, outcomes, rawFeedbackFacts, styleMeDemandFacts] = await Promise.all([
     countOutfitAppearances(customerId),
     countSavedLookAppearances(customerId),
     loadSeenCombinations(customerId),
     loadStyleMeSessions(customerId),
     loadOutcomes(customerId),
+    loadRawOutcomeFactsForEvidence(customerId),
+    // StyleMe-demand V1 — a SEPARATE, 90-day-windowed, uncapped fact set.
+    // Deliberately not derived from styleMeSessions above, which keeps its
+    // own take:200 cap for the older requests/struggles/chosen system. See
+    // styleme-demand-evidence.ts.
+    loadStyleMeDemandFacts(customerId),
   ]);
+
+  // StyleMe-feedback evidence, V1 — see wardrobe-feedback-evidence.ts for the
+  // full scope contract. formulaEvidence may only break an exact tie inside
+  // buildPairings' already-computed ranking; positiveGarmentEvidence may
+  // only adjust rediscovery priority. Neither touches register depth,
+  // repetition, candidate eligibility, or moodboard content.
+  const formulaEvidenceDetail = deriveFormulaEvidence(rawFeedbackFacts);
+  const positiveGarmentEvidence = derivePositiveGarmentEvidence(formulaEvidenceDetail);
+  // buildPairings' tie-break only ever needs the state, not the full
+  // evidence detail — keep the engine's input surface minimal.
+  const formulaEvidence = new Map([...formulaEvidenceDetail].map(([key, ev]) => [key, ev.state] as const));
 
   // Per-garment outcome tallies. A garment inherits the outcome of every look it
   // appeared in — that is a fact about the LOOK, so only look-level and
@@ -133,118 +131,19 @@ export async function loadWardrobeIntelligence(
 
   const passportInput = toStylingPassportInput(options.passport);
 
+  // Garment Intelligence Phase 1: the effective/classification/derive/
+  // curate/override resolution that used to be inline here now lives in
+  // resolveGarment() (resolved-garment.server.ts) — garment-intrinsic
+  // fields only. WardrobeGarment = ResolvedGarment + the WI-specific
+  // fields below (image URL, usage/outcome tallies) that were never part
+  // of that resolution chain — see that module's doc for why they stayed
+  // out of ResolvedGarment.
   const garments: WardrobeGarment[] = items.map((item) => {
-    const effective = getEffectiveClosetItem(item, item.adminReview);
-    const classification = toClassification(effective);
-
-    const derived = deriveGarmentStylingIntelligence(classification, passportInput);
-    const overrides = (item.adminReview?.intelligenceOverrides ?? null) as IntelligenceOverrides | null;
-    const curated =
-      item.styleMeProfile && item.styleMeProfile.profileStatus === CURATED_APPROVED_STATUS
-        ? item.styleMeProfile
-        : null;
-
-    // ── Visual weight ────────────────────────────────────────────────────────
-    let visualWeight: ResolvedVisualWeight | null = derived.visualWeight.value;
-    let source: WardrobeGarment["intelligenceSource"] = visualWeight === null ? "none" : "derived";
-    if (curated?.visualWeight && CURATED_WEIGHT_MAP[curated.visualWeight]) {
-      visualWeight = CURATED_WEIGHT_MAP[curated.visualWeight];
-      source = "curated";
-    }
-    if (overrides && Object.prototype.hasOwnProperty.call(overrides, "visualWeight")) {
-      visualWeight = (overrides.visualWeight ?? null) as ResolvedVisualWeight | null;
-      source = "curated";
-    }
-
-    // ── Colour profile ───────────────────────────────────────────────────────
-    const colourProfile: ResolvedColourProfile = {
-      hueFamily: derived.colourProfile.hueFamily,
-      wardrobeNeutral: derived.colourProfile.wardrobeNeutral,
-      lightDark: derived.colourProfile.lightDark,
-      energyTier: derived.colourProfile.energyTier,
-    };
-    const cpOverride = overrides?.colourProfile;
-    if (cpOverride) {
-      if (Object.prototype.hasOwnProperty.call(cpOverride, "hueFamily")) colourProfile.hueFamily = cpOverride.hueFamily ?? null;
-      if (Object.prototype.hasOwnProperty.call(cpOverride, "wardrobeNeutral")) colourProfile.wardrobeNeutral = cpOverride.wardrobeNeutral ?? false;
-      if (Object.prototype.hasOwnProperty.call(cpOverride, "lightDark")) colourProfile.lightDark = cpOverride.lightDark ?? null;
-      if (Object.prototype.hasOwnProperty.call(cpOverride, "energyTier")) colourProfile.energyTier = cpOverride.energyTier ?? null;
-      source = "curated";
-    }
-
-    // ── Intentions ───────────────────────────────────────────────────────────
-    //
-    // Provenance matters here, not just the value. Phase 3C V2 DERIVED intention
-    // potential is shadow output and stays gated in the engine; a human-reviewed
-    // value (approved curated profile, or an admin correction) is trusted now.
-    // intentionsSource is only "curated" when EVERY one of the 12 intentions came
-    // from a human-reviewed source — a partial mix is treated as derived.
-    const intentions: Record<string, ResolvedIntentionStrength> = {};
-    const humanReviewed = new Set<string>();
-    for (const potential of derived.intentionPotentials) {
-      intentions[potential.intention] = potential.strength;
-    }
-    const curatedIntentions = curated?.intentionPotentials as Record<string, string> | null | undefined;
-    if (curatedIntentions && typeof curatedIntentions === "object") {
-      for (const intention of ALL_INTENTIONS) {
-        const raw = curatedIntentions[intention];
-        if (typeof raw === "string" && CURATED_STRENGTH_MAP[raw]) {
-          intentions[intention] = CURATED_STRENGTH_MAP[raw];
-          humanReviewed.add(intention);
-          source = "curated";
-        }
-      }
-    }
-    if (overrides?.intentions) {
-      for (const [intention, value] of Object.entries(overrides.intentions)) {
-        if (value === null) continue;
-        intentions[intention] = value as ResolvedIntentionStrength;
-        humanReviewed.add(intention);
-        source = "curated";
-      }
-    }
-    const intentionsSource: "curated" | "derived" =
-      ALL_INTENTIONS.every((intention) => humanReviewed.has(intention)) ? "curated" : "derived";
-
-    // Intelligence is only claimed when the garment has actually been read.
-    const hasIntelligence = item.analysisStatus === "ready" || source === "curated";
+    const resolved = resolveGarment(item, passportInput);
 
     return {
-      id: item.id,
-      name: item.name,
-      category: item.category as string,
-      subcategory: effective.subcategory ?? null,
+      ...resolved,
       imageUrl: options.imageUrlById.get(item.id) ?? null,
-      slot: closetItemToSlot(item.category as string, effective.subcategory ?? null),
-
-      primaryColor: effective.primaryColor ?? null,
-      colors: effective.colors ?? [],
-      pattern: effective.pattern ?? null,
-      material: effective.material ?? null,
-      silhouette: effective.silhouette ?? null,
-      fitProfile: effective.fitProfile ?? null,
-      formality: effective.formality ?? null,
-      stylePersonality: effective.stylePersonality ?? null,
-      occasions: effective.occasions ?? [],
-      seasons: effective.seasons ?? [],
-      garmentRelationships: item.garmentRelationships ?? [],
-      analysisStatus: item.analysisStatus,
-
-      visualWeight: hasIntelligence ? visualWeight : null,
-      colourProfile: hasIntelligence ? colourProfile : null,
-      intentions: hasIntelligence ? intentions : null,
-      intentionsSource: hasIntelligence ? intentionsSource : null,
-      intelligenceSource: hasIntelligence ? source : "none",
-
-      // Coverage facts, passed through exactly as stored. These drive the
-      // needs layer's usable-vs-blocked split, so a null here must stay null:
-      // it means "not read", never "complies".
-      sleeveLength: effective.sleeveLength ?? null,
-      necklineCoverage: effective.necklineCoverage ?? null,
-      hemLength: effective.hemLength ?? null,
-      topLength: effective.topLength ?? null,
-      midriffExposed: effective.midriffExposed ?? null,
-      shoulderCoverage: effective.shoulderCoverage ?? null,
 
       outfitAppearances: outfitCounts.get(item.id) ?? 0,
       savedLookAppearances: savedCounts.get(item.id) ?? 0,
@@ -265,6 +164,8 @@ export async function loadWardrobeIntelligence(
     passport: options.passport,
     seenCombinations,
     flags: options.flags ?? DEFAULT_FLAGS,
+    formulaEvidence,
+    positiveGarmentEvidence,
   });
 
   const needs = computeWardrobeNeeds({
@@ -272,6 +173,7 @@ export async function loadWardrobeIntelligence(
     passport: options.passport,
     styleMeSessions,
     outcomes,
+    styleMeDemandFacts,
   });
 
   const recommendations = computeWardrobeRecommendations({
@@ -357,6 +259,73 @@ async function loadStyleMeSessions(customerId: string): Promise<StyleMeSessionFa
 }
 
 /**
+ * StyleMe-demand V1 — a SEPARATE fact set from loadStyleMeSessions() above.
+ * Deliberately 90-day windowed rather than row-capped (see
+ * styleme-demand-evidence.ts for why), and loads only the scalar fields
+ * RawStyleMeDemandFact needs — no `suggestions`/items relation, which
+ * loadStyleMeSessions() only carries for the unrelated garmentIds/
+ * "reachedFor" feature and demand has no use for.
+ *
+ * `asOf` defaults to the real current time in production; tests supply a
+ * fixed value so the 90-day boundary is deterministic, not an inline
+ * Date.now().
+ */
+// Exported (Phase 5, Shared Customer Intelligence resolver): a pure single
+// findMany, no per-item garment resolution — safe for a caller that wants
+// only StyleMe-demand findings to call without paying for the rest of
+// loadWardrobeIntelligence's pipeline. No behavior change to any existing
+// caller — this function's body and every existing call site are untouched.
+//
+// Stayed here rather than moving to styleme-intelligence-facts.server.ts
+// alongside its sibling loadRawOutcomeFactsForEvidence: this function's own
+// OUTPUT shape genuinely depends on WI vocabulary — each fact's `register`
+// is computed via styleMeSessionRegister()/RegisterId, both owned by
+// wardrobe-needs.ts. Moving the loader alone would not remove that
+// dependency, only relocate which WI file it points at; removing it for
+// real would mean relocating RegisterId itself, a larger and riskier move
+// than this phase's scope. The resolver still imports this one directly
+// from here, documented as a known, currently-necessary coupling.
+export async function loadStyleMeDemandFacts(customerId: string, asOf: Date = new Date()): Promise<RawStyleMeDemandFact[]> {
+  const cutoff = demandWindowCutoff(asOf);
+  const sessions: Array<{
+    id: string;
+    createdAt: Date;
+    occasion: string | null;
+    formalityConditional: string | null;
+    intentions: string[];
+    desiredFeeling: string | null;
+    closetAnchorId: string | null;
+    styleFrom: string;
+  }> = await prisma.stylingSession.findMany({
+    where: { customerId, createdAt: { gte: cutoff } },
+    select: {
+      id: true,
+      createdAt: true,
+      occasion: true,
+      formalityConditional: true,
+      intentions: true,
+      desiredFeeling: true,
+      closetAnchorId: true,
+      styleFrom: true,
+    },
+    orderBy: { createdAt: "desc" },
+    // No take: N — the 90-day window is the bound, not a row count.
+  });
+
+  return sessions.map((session) => ({
+    sessionId: session.id,
+    createdAt: session.createdAt,
+    occasion: session.occasion,
+    register: styleMeSessionRegister(session.occasion, session.formalityConditional),
+    formalityConditional: session.formalityConditional,
+    intentions: session.intentions ?? [],
+    desiredFeeling: session.desiredFeeling,
+    closetAnchorId: session.closetAnchorId,
+    styleFrom: session.styleFrom,
+  }));
+}
+
+/**
  * Recorded StyleMeOutcome rows — the only wear behaviour nAia actually holds.
  *
  * The customer told us what happened after the look: wore it, changed something,
@@ -411,6 +380,13 @@ async function loadOutcomes(customerId: string): Promise<OutcomeFact[]> {
         .filter((id): id is string => Boolean(id)),
     }));
 }
+
+// loadRawOutcomeFactsForEvidence moved to styleme-intelligence-facts.server.ts
+// (Phase 5 architecture correction) — it had zero functional dependency on
+// anything WI-specific, so it now lives in a neutral module both WI and the
+// Shared Customer Intelligence resolver import from. One canonical loader,
+// not two copies — see that file's own doc for the reasoning, including why
+// its sibling loadStyleMeDemandFacts below did NOT make the same move.
 
 /** Combination keys nAia has already produced — used only to mark a pairing untried. */
 async function loadSeenCombinations(customerId: string): Promise<Set<string>> {

@@ -101,7 +101,7 @@ export async function action({ request }: ActionFunctionArgs) {
   // ── create (default) ──────────────────────────────────────────────────────
 
   const {
-    sessionId, suggestionId, target, shopifyProductId, closetItemId,
+    sessionId, suggestionId, target, shopifyProductId, shopifyVariantId, sizeLabel, closetItemId,
     rating, reasonCodes, vtoAspects, note,
   } = body as Record<string, unknown>;
 
@@ -118,6 +118,10 @@ export async function action({ request }: ActionFunctionArgs) {
       suggestionId:    typeof suggestionId === "string" ? suggestionId : null,
       closetItemId:    typeof closetItemId === "string" ? closetItemId : null,
       shopifyProductId: typeof shopifyProductId === "string" ? shopifyProductId : null,
+      // Carried through only when the caller actually had them. Absent stays
+      // absent — see RecommendationFeedbackRecord.
+      shopifyVariantId: typeof shopifyVariantId === "string" && shopifyVariantId !== "" ? shopifyVariantId : null,
+      sizeLabel:        typeof sizeLabel === "string" && sizeLabel !== "" ? sizeLabel.slice(0, 40) : null,
       target,
       rating,
       reasonCodes: sanitisedReasons,

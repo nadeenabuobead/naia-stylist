@@ -39,6 +39,7 @@ import {
   deleteCustomerBosImages,
   customerHasBosImages,
 } from "~/lib/buy-or-skip-privacy.server";
+import { recordDesignResearchConsent, CONSENT_VERSION } from "~/lib/ai/design-signal.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 
@@ -74,7 +75,26 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const hasFace     = modelRecord !== null && modelRecord.facePublicId !== null;
   const hasBody     = modelRecord !== null && modelRecord.bodyPublicId !== null;
 
+  // Guarded: the column arrives with the Wardrobe Intelligence revision's
+  // migration, and an un-migrated database should still render this page.
+  let designResearch = { granted: false, current: false };
+  try {
+    const row = await (prisma as unknown as {
+      customer: { findUnique(a: unknown): Promise<{ designResearchConsent: boolean; designResearchConsentVersion: string | null } | null> };
+    }).customer.findUnique({
+      where: { id: customer.id },
+      select: { designResearchConsent: true, designResearchConsentVersion: true },
+    });
+    designResearch = {
+      granted: row?.designResearchConsent === true,
+      current: row?.designResearchConsentVersion === CONSENT_VERSION,
+    };
+  } catch {
+    designResearch = { granted: false, current: false };
+  }
+
   return data({
+    designResearch,
     firstName:     customer.firstName,
     lastName:      customer.lastName,
     email:         customer.email,
@@ -88,6 +108,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 // ── Action ────────────────────────────────────────────────────────────────────
 
 const VALID_INTENTS = new Set([
+  "design-research-opt-in",
+  "design-research-opt-out",
   "delete-selfie-photo",
   "delete-selfie-analysis",
   "delete-selfie-both",
@@ -98,7 +120,13 @@ const VALID_INTENTS = new Set([
   "delete-bos-images",
 ]);
 
-type Intent =
+/**
+ * Turning design-research sharing on or off. Reversible and non-destructive,
+ * so it is kept out of DestructiveIntent and never opens a confirm dialog.
+ */
+type ConsentIntent = "design-research-opt-in" | "design-research-opt-out";
+
+type DestructiveIntent =
   | "delete-selfie-photo"
   | "delete-selfie-analysis"
   | "delete-selfie-both"
@@ -108,7 +136,13 @@ type Intent =
   | "delete-vto-results"
   | "delete-bos-images";
 
+type Intent = ConsentIntent | DestructiveIntent;
+
 const SUCCESS_MESSAGES: Record<Intent, string> = {
+  "design-research-opt-in":
+    "Thank you. Your wardrobe patterns can now help NADINE understand what its customers need.",
+  "design-research-opt-out":
+    "Done. Your wardrobe is used only to style you.",
   "delete-selfie-photo":    "Your selfie photo has been permanently removed.",
   "delete-selfie-analysis": "Your Selfie Style Analysis has been permanently removed.",
   "delete-selfie-both":     "Your selfie photo and Selfie Style Analysis have both been permanently removed.",
@@ -131,6 +165,16 @@ export async function action({ request }: ActionFunctionArgs) {
   const typed = intent as Intent;
 
   switch (typed) {
+    // Optional, and separate from everything the styling service needs. Saying
+    // no here changes nothing about nAia.
+    case "design-research-opt-in": {
+      await recordDesignResearchConsent({ customerId: customer.id, granted: true });
+      break;
+    }
+    case "design-research-opt-out": {
+      await recordDesignResearchConsent({ customerId: customer.id, granted: false });
+      break;
+    }
     case "delete-selfie-photo": {
       const r = await deleteSelfiePhoto(customer.id);
       if (!r.ok) return data({ ok: false as const, error: "Could not remove your selfie photo. Please try again." }, { status: 500 });
@@ -180,7 +224,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
 // ── Confirmation specs ────────────────────────────────────────────────────────
 
-const CONFIRM: Record<Intent, { title: string; body: string; cta: string }> = {
+const CONFIRM: Record<DestructiveIntent, { title: string; body: string; cta: string }> = {
   "delete-selfie-photo": {
     title: "Remove selfie photo",
     body:  "Your uploaded selfie will be permanently deleted. Your existing Selfie Style Analysis is kept and will continue to personalise your experience.",
@@ -232,11 +276,11 @@ function ControlRow({
   buttonLabel,
   onOpen,
 }: {
-  intent: Intent;
+  intent: DestructiveIntent;
   label: string;
   description: string;
   buttonLabel: string;
-  onOpen: (k: Intent) => void;
+  onOpen: (k: DestructiveIntent) => void;
 }) {
   return (
     <div className="set-control-row">
@@ -254,10 +298,12 @@ function ControlRow({
 // ── Component ────────────────────────────────────────────────────────────────
 
 export default function Settings() {
-  const { firstName, lastName, email, selfie, model, hasVtoResults, hasBosImages } = useLoaderData<typeof loader>();
+  const { firstName, lastName, email, selfie, model, hasVtoResults, hasBosImages, designResearch } = useLoaderData<typeof loader>();
   const fetcher     = useFetcher<typeof action>();
   const revalidator = useRevalidator();
-  const [pending, setPending] = useState<Intent | null>(null);
+  // Only destructive actions open the confirmation modal; consent is
+  // reversible and applies immediately.
+  const [pending, setPending] = useState<DestructiveIntent | null>(null);
 
   const fullName    = [firstName, lastName].filter(Boolean).join(" ") || null;
   const isSubmitting = fetcher.state !== "idle";
@@ -484,6 +530,49 @@ export default function Settings() {
           >
             Request account deletion
           </a>
+        </div>
+      </section>
+
+      {/* ── Optional: helping NADINE design ────────────────────────────────
+          Entirely separate from the styling service. nAia behaves identically
+          whether this is on or off, and it is off until it is turned on. */}
+      <section className="bos-section">
+        <div className="set-section-eyebrow">Optional</div>
+        <h2 className="set-section-title">Helping NADINE design</h2>
+        <p className="set-control-desc">
+          NADINE&rsquo;s designers can learn a great deal from what customers actually need &mdash;
+          which kinds of dressing are hard to cover, which requirements keep coming up. Turn this on
+          and your wardrobe patterns can be counted alongside other customers&rsquo; to help shape
+          what gets designed.
+        </p>
+        <p className="set-control-desc">
+          It is always grouped with other people, never shown as your profile, and never includes
+          your Closet photographs. Leaving it off changes nothing about how nAia styles you.
+        </p>
+
+        <div className="set-control-row">
+          <div>
+            <div className="set-control-title">
+              {designResearch.granted && designResearch.current
+                ? "You're helping NADINE design"
+                : "Not currently sharing"}
+            </div>
+            <p className="set-control-desc">
+              {designResearch.granted && designResearch.current
+                ? "You can turn this off whenever you like."
+                : "You can turn this on whenever you like."}
+            </p>
+          </div>
+          <fetcher.Form method="post">
+            <input
+              type="hidden"
+              name="intent"
+              value={designResearch.granted && designResearch.current ? "design-research-opt-out" : "design-research-opt-in"}
+            />
+            <button type="submit" className="sp-btn-outline" disabled={isSubmitting}>
+              {designResearch.granted && designResearch.current ? "Turn off" : "Turn on"}
+            </button>
+          </fetcher.Form>
         </div>
       </section>
 

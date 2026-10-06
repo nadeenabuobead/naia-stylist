@@ -40,6 +40,7 @@ import {
   computePaletteCoverage,
   garmentRegister,
   classifyUsability,
+  gapResolvingClasses,
   outfitClassKey,
   type RegisterId,
   type RegisterReading,
@@ -48,6 +49,8 @@ import {
 } from "~/lib/ai/wardrobe-needs";
 import {
   scorePair,
+  STRUCTURED_FITS,
+  SOFT_FITS,
   PASSPORT_COLOUR_FAMILIES,
   norm,
   ev,
@@ -56,6 +59,7 @@ import {
   BOTTOM_SLOTS,
   ONE_PIECE_SLOTS,
   MIN_WARDROBE_SIZE,
+  SILHOUETTE_LABELS,
   type WardrobeGarment,
   type WardrobePassport,
   type Evidence,
@@ -93,6 +97,14 @@ export interface RecommendationCriteria {
   colourFamilies: string[];
   /** "structured" | "soft" | null — the fit family that would add contrast. */
   structure: string | null;
+  /**
+   * Silhouettes that, with that fit, actually lift this register past the
+   * distinct-looks threshold. Derived by simulating a candidate against the
+   * same rule the finding uses — never asserted, and never a universal answer:
+   * these are the classes THIS Closet is missing, filtered by HER stated
+   * dressing preferences.
+   */
+  resolvingSilhouettes: string[];
   /** Coverage tokens from her stated dressing preferences that must be met. */
   coverage: string[];
 }
@@ -176,7 +188,7 @@ const STRUCTURE_LABEL: Readonly<Record<string, string>> = {
  * full-length trousers was recommended "a work bottom" with no length at all.
  */
 const COVERAGE_RULES: Readonly<
-  Record<string, { label: string; slots: readonly string[]; adjective?: string }>
+  Record<string, { label: string; slots: readonly string[]; adjective?: string; noun?: string }>
 > = {
   "arms-covered":               { label: "sleeves",            slots: ["top", "dress", "outerwear"], adjective: "sleeved" },
   "avoid-sleeveless":           { label: "sleeves",            slots: ["top", "dress", "outerwear"], adjective: "sleeved" },
@@ -185,9 +197,24 @@ const COVERAGE_RULES: Readonly<
   "longer-tops":                { label: "a longer cut",       slots: ["top"], adjective: "longer" },
   "no-cropped-tops":            { label: "not cropped",        slots: ["top"] },
   "legs-covered":               { label: "full length",        slots: ["bottom", "dress"], adjective: "full-length" },
-  "prefer-full-length-trousers":{ label: "full length",        slots: ["bottom"], adjective: "full-length" },
+  // A garment-TYPE preference, not just a length one. Same length adjective as
+  // legs-covered (so they collapse to one line on a bottom), but `noun`
+  // lets the title say "trousers" instead of the generic slot noun — the
+  // one piece of real evidence anywhere in this vocabulary that names an
+  // actual garment type, not just a shape or a length.
+  "prefer-full-length-trousers":{ label: "full length",        slots: ["bottom"], adjective: "full-length", noun: "trousers" },
   "looser-fitting":             { label: "an easier fit",      slots: ["top", "bottom", "dress", "outerwear"], adjective: "looser" },
 };
+
+/**
+ * Silhouettes that are genuinely trouser directions. "a-line" and "oversized"
+ * are real tokens in CANDIDATE_SILHOUETTES (wardrobe-needs.ts) but describe a
+ * skirt/dress shape and a fit family respectively, not a trouser leg — naming
+ * either as a trouser recommendation would assert a garment that isn't one.
+ * Keyed to the "trousers" noun specifically; every other coverage noun keeps
+ * the full, unfiltered candidate set.
+ */
+const TROUSER_VALID_SILHOUETTES: ReadonlySet<string> = new Set(["straight", "flared", "wide-leg", "fitted"]);
 
 // ── Candidate construction ────────────────────────────────────────────────────
 
@@ -200,7 +227,7 @@ const COVERAGE_RULES: Readonly<
 function candidateGarment(
   register: RegisterId,
   slot: string,
-  opts: { neutral?: boolean; hueFamily?: string | null; fit?: string | null } = {},
+  opts: { neutral?: boolean; hueFamily?: string | null; fit?: string | null; silhouette?: string | null } = {},
 ): WardrobeGarment {
   return {
     id: "__candidate__",
@@ -213,7 +240,7 @@ function candidateGarment(
     colors: [],
     pattern: "solid",
     material: null,
-    silhouette: null,
+    silhouette: opts.silhouette ?? null,
     fitProfile: opts.fit ?? null,
     formality: REGISTER_FORMALITY[register],
     stylePersonality: null,
@@ -266,6 +293,86 @@ function unlocks(candidate: WardrobeGarment, pool: WardrobeGarment[]): WardrobeG
       : (candidateTop && gBottom) || (candidateBottom && gTop);
     return complementary && scorePair(candidate, g).compatible;
   });
+}
+
+/**
+ * Breaks a tie between candidate silhouettes that scored identically on the
+ * primary distinct-looks simulation, using only evidence that already exists
+ * elsewhere in this engine — never a fashion-convention guess.
+ *
+ * Criteria, in order, each applied only while more than one candidate
+ * remains:
+ *   1. Stated Passport silhouette preference (exact machinery
+ *      passportAlignmentFor uses: substring match against passport.silhouette).
+ *   2. Compatibility with her real, usable pieces on the OTHER side of the
+ *      outfit (partnerPool) — the same unlocks() check every recommendation
+ *      is already judged by, just per silhouette instead of per proposal.
+ *   3. Novelty — how many pieces she already owns, anywhere in the Closet,
+ *      in that silhouette. Fewer (zero, ideally) wins: the point of the
+ *      recommendation is a shape she doesn't already have.
+ *   4. Reviewed engagement — for silhouettes she does own elsewhere, real
+ *      outfitAppearances/savedLookAppearances/outcomeKept on those pieces.
+ *      Only ever a final tiebreak among what's left, and only meaningful
+ *      when such pieces exist.
+ *
+ * There is no formality/register-suitability step: no field anywhere in the
+ * engine says whether a silhouette token reads as more or less work-
+ * appropriate, and inventing one here would be exactly the fashion-rule
+ * guess this file exists to refuse. If ties survive every real criterion,
+ * up to two silhouettes are returned rather than one asserted winner.
+ */
+function breakSilhouetteTie(
+  candidates: readonly string[],
+  input: { passport: WardrobePassport | null; partnerPool: WardrobeGarment[]; items: WardrobeGarment[]; register: RegisterId; slot: string; fit: string | null },
+): string[] {
+  let pool = [...candidates];
+  if (pool.length <= 1) return pool;
+
+  // 1. Stated Passport silhouette preference.
+  const passportPreferred = pool.filter((s) =>
+    (input.passport?.silhouette ?? []).some((sp) => norm(sp)?.includes(s)),
+  );
+  if (passportPreferred.length > 0 && passportPreferred.length < pool.length) pool = passportPreferred;
+  if (pool.length <= 1) return pool;
+
+  // 2. Compatibility with what's on the other side of the outfit.
+  const unlockCounts = new Map(
+    pool.map((s) => [
+      s,
+      unlocks(candidateGarment(input.register, input.slot, { fit: input.fit, silhouette: s }), input.partnerPool).length,
+    ]),
+  );
+  const bestUnlocks = Math.max(...pool.map((s) => unlockCounts.get(s)!));
+  const byUnlocks = pool.filter((s) => unlockCounts.get(s) === bestUnlocks);
+  if (byUnlocks.length < pool.length) pool = byUnlocks;
+  if (pool.length <= 1) return pool;
+
+  // 3. Novelty — least (ideally zero) already owned in this silhouette.
+  const ownedCounts = new Map(
+    pool.map((s) => [s, input.items.filter((g) => norm(g.silhouette) === s).length]),
+  );
+  const fewestOwned = Math.min(...pool.map((s) => ownedCounts.get(s)!));
+  const byNovelty = pool.filter((s) => ownedCounts.get(s) === fewestOwned);
+  if (byNovelty.length < pool.length) pool = byNovelty;
+  if (pool.length <= 1) return pool;
+
+  // 4. Reviewed engagement on pieces she already owns in that silhouette —
+  // only discriminates when at least one candidate has real signal.
+  const engagement = new Map(
+    pool.map((s) => [
+      s,
+      input.items
+        .filter((g) => norm(g.silhouette) === s)
+        .reduce((sum, g) => sum + g.outfitAppearances + g.savedLookAppearances + (g.outcomeKept ?? 0), 0),
+    ]),
+  );
+  const mostEngaged = Math.max(...pool.map((s) => engagement.get(s)!));
+  if (mostEngaged > 0) {
+    const byEngagement = pool.filter((s) => engagement.get(s) === mostEngaged);
+    if (byEngagement.length < pool.length) pool = byEngagement;
+  }
+
+  return pool.slice(0, 2);
 }
 
 // ── Evidence gathering ────────────────────────────────────────────────────────
@@ -332,9 +439,17 @@ function statedCoverage(passport: WardrobePassport | null, slot: string): string
   const prefs = (passport?.dressingPreferences ?? []).filter(
     (p) => COVERAGE_RULES[p]?.slots.includes(slot),
   );
+  // A garment-type-specific preference ("full-length trousers") says more
+  // than a same-length generic one ("legs covered") and must survive the
+  // label dedup below even when she stated the generic one first in her
+  // Passport answers — order noun-bearing preferences first, everything
+  // else keeps her stated order.
+  const ordered = [...prefs].sort(
+    (a, b) => (COVERAGE_RULES[a].noun ? 0 : 1) - (COVERAGE_RULES[b].noun ? 0 : 1),
+  );
   // Collapse duplicates that mean the same thing on a garment ("sleeves").
   const seenLabels = new Set<string>();
-  return prefs.filter((p) => {
+  return ordered.filter((p) => {
     const label = COVERAGE_RULES[p].label;
     if (seenLabels.has(label)) return false;
     seenLabels.add(label);
@@ -457,7 +572,7 @@ function buildRecommendation(
   ];
 
   // ── Rung 1: direction ────────────────────────────────────────────────────
-  const slot = constrainedSlot(registerPool, items, register, finding.kind, passport);
+  let slot = constrainedSlot(registerPool, items, register, finding.kind, passport);
   if (!slot) {
     return {
       id: `rec-${register}`,
@@ -467,13 +582,27 @@ function buildRecommendation(
       attributes: [],
       body: `nAia can see that ${REGISTER_WORD[register]} dressing is the thinner side of your wardrobe, but not yet which kind of piece would fix it. A few more pieces read, or a little more StyleMe history, and it will be able to say.`,
       unlocksIds: [],
-      criteria: { register, slot: null, colourFamilies: [], structure: null, coverage: [] },
+      criteria: { register, slot: null, colourFamilies: [], structure: null, resolvingSilhouettes: [], coverage: [] },
       evidence,
       strength: "emerging",
     };
   }
 
   // ── Rung 2: slot ─────────────────────────────────────────────────────────
+  //
+  // For a REPETITION gap the slot has to be one that can actually close it.
+  // Distinct looks are top-bottom pairs between classes, so a layer — however
+  // useful — cannot lift the number. If the chosen slot has no class that
+  // resolves the gap and a structural slot does, prefer the one that works.
+  if (finding.kind === "repetition" && gapResolvingClasses({ pool: registerPool, passport, slot, register }).length === 0) {
+    const better = ["bottom", "top"].find(
+      (candidate) =>
+        candidate !== slot &&
+        gapResolvingClasses({ pool: registerPool, passport, slot: candidate, register }).length > 0,
+    );
+    if (better) slot = better;
+  }
+
   // The broad candidate is the baseline every attribute is measured against.
   const broad = candidateGarment(register, slot);
   const broadUnlocks = unlocks(broad, partnerPool.length > 0 ? partnerPool : items);
@@ -496,8 +625,118 @@ function buildRecommendation(
   const attributes: RecommendationAttribute[] = [];
   let colourLead: string | null = null;
   let colourAlternatives: string[] = [];
-  const criteria: RecommendationCriteria = { register, slot, colourFamilies: [], structure: null, coverage: [] };
+  const criteria: RecommendationCriteria = {
+    register, slot, colourFamilies: [], structure: null, resolvingSilhouettes: [], coverage: [],
+  };
   let best = broadUnlocks;
+  // Set only when a real garment type (from a stated Passport preference, not
+  // a guess) resolves a genuine silhouette winner (or up to two, if every
+  // real tiebreak criterion still ties) — see breakSilhouetteTie() and the
+  // repetition/shape branch below. When set, the title names the actual
+  // garment type and the actual winning silhouette(s) instead of the
+  // generic slot noun.
+  let shapeWinnerAdjective: string | null = null;
+  let shapeWinnerWhy: string | null = null;
+
+  // ── What would actually CLOSE this gap ───────────────────────────────────
+  //
+  // A repetition finding is judged on distinct looks, not on partner count, so
+  // the attributes proposed for it have to be derived from that same measure.
+  // gapResolvingClasses simulates a candidate against the real rule and returns
+  // only the classes that lift the register past the threshold — and only those
+  // that satisfy her stated dressing preferences.
+  //
+  // Nothing here is a universal answer. These are the classes THIS Closet is
+  // missing; another customer with the same gap can need the opposite.
+  if (finding.kind === "repetition") {
+    const resolving = gapResolvingClasses({ pool: registerPool, passport, slot, register });
+    const leadFamily = resolving[0]?.fitFamily ?? null;
+    if (leadFamily) {
+      const silhouettes = [...new Set(
+        resolving.filter((r) => r.fitFamily === leadFamily).map((r) => r.silhouette),
+      )].slice(0, 3);
+      // silhouettes stays the raw vocabulary (CANDIDATE_SILHOUETTES tokens) — it
+      // feeds criteria.resolvingSilhouettes, which real garments are matched
+      // against. Customer-facing text uses the plain-language label instead.
+      const plainSilhouettes = silhouettes.map((s) => SILHOUETTE_LABELS[s] ?? s);
+
+      // Name only what actually DIFFERS from what she owns. Her work bottoms
+      // are already tailored, so "more structured" would describe the problem
+      // rather than the answer — the class she is missing is a different
+      // SHAPE. The fit family is mentioned only when it is itself the change.
+      const ownFits = new Set(
+        registerPool.filter((g) => g.slot === slot).map((g) => {
+          const f = norm(g.fitProfile);
+          return f && STRUCTURED_FITS.has(f) ? "structured" : f && SOFT_FITS.has(f) ? "soft" : "unknown";
+        }),
+      );
+      const fitIsTheChange = !ownFits.has(leadFamily as "structured" | "soft" | "unknown");
+
+      criteria.structure = fitIsTheChange ? leadFamily : null;
+      criteria.resolvingSilhouettes = silhouettes;
+
+      // Do the tested silhouettes actually differ from one another, or did
+      // they all clear the threshold together? gapResolvingClasses returns
+      // every candidate that clears it, sorted by distinctLooks then name —
+      // when the top candidates score identically, naming one specific
+      // silhouette ("A-line") would assert a winner the simulation never
+      // produced; it would just be the alphabetically-first tied name.
+      const topScore = resolving[0]?.distinctLooks;
+      const tied = resolving.filter((r) => r.distinctLooks === topScore).length > 1;
+
+      // A real garment-type preference (not a guess) lets the title name what
+      // she'd actually be shopping for. Only trousers carries one today.
+      const coverageForNoun = statedCoverage(passport, slot);
+      const coverageNoun = coverageForNoun.length > 0 ? COVERAGE_RULES[coverageForNoun[0]].noun : undefined;
+
+      if (tied && coverageNoun === "trousers") {
+        const ownSilhouettes = new Set(
+          registerPool.filter((g) => g.slot === slot).map((g) => norm(g.silhouette)).filter((s): s is string => s !== null),
+        );
+        const validCandidates = [...new Set(resolving.map((r) => r.silhouette))]
+          .filter((s) => TROUSER_VALID_SILHOUETTES.has(s) && !ownSilhouettes.has(s));
+        const winners = breakSilhouetteTie(validCandidates, {
+          passport, partnerPool, items, register, slot,
+          fit: fitIsTheChange ? (leadFamily === "structured" ? STRUCTURED_FIT : SOFT_FIT) : null,
+        });
+        if (winners.length > 0) {
+          const winnerLabels = winners.map((s) => (SILHOUETTE_LABELS[s] ?? s).toLowerCase());
+          shapeWinnerAdjective = joinOr(winnerLabels);
+          criteria.resolvingSilhouettes = winners;
+          // Real comparison, not an asserted claim: the winner's own unlocks
+          // count against her usable work tops, named plainly.
+          const bestCount = Math.max(
+            ...winners.map((s) => unlocks(
+              candidateGarment(register, slot, { silhouette: s, fit: fitIsTheChange ? (leadFamily === "structured" ? STRUCTURED_FIT : SOFT_FIT) : null }),
+              partnerPool,
+            ).length),
+          );
+          shapeWinnerWhy = `A ${joinOr(winnerLabels)} shape would work with ${bestCount} of your work pieces — your current work trousers are both straight, so this adds a genuinely different option rather than another version of what you own.`;
+        }
+      }
+
+      // A resolved winner is named directly in the title below — no separate
+      // attribute chip repeats it. Every other case is unchanged.
+      if (!shapeWinnerAdjective) {
+        attributes.push({
+          kind: "structure",
+          values: fitIsTheChange ? [leadFamily, ...silhouettes] : silhouettes,
+          label: fitIsTheChange
+            ? `${STRUCTURE_LABEL[leadFamily] ?? leadFamily}, in ${joinOr(plainSilhouettes)}`
+            : `a different shape — ${joinOr(plainSilhouettes)}`,
+          source: "closet",
+        });
+      }
+      evidence.push(
+        ev(
+          "garment-fact",
+          "distinct-looks simulation",
+          `A ${leadFamily === "soft" ? "looser" : "more structured"} ${SLOT_NOUN[slot] ?? slot} in ${joinOr(plainSilhouettes)} would give you more ways to put ${REGISTER_WORD[register]} looks together.`,
+          [],
+        ),
+      );
+    }
+  }
 
   // Structure — proposed only when contrast demonstrably BUYS something.
   //
@@ -583,7 +822,12 @@ function buildRecommendation(
 
   const specificity: Specificity =
     attributes.length > 0 || coverageAdjective !== null ? "detailed" : "slot";
-  const noun = SLOT_NOUN[slot] ?? slot;
+  // A stated coverage preference can name the actual garment type ("trousers")
+  // — real evidence, not a guess — and that's always a better noun than the
+  // generic slot word when it's there, independent of the shape-contrast case
+  // below.
+  const coverageNounForTitle = coverage.length > 0 ? COVERAGE_RULES[coverage[0]].noun : undefined;
+  const noun = coverageNounForTitle ?? SLOT_NOUN[slot] ?? slot;
   const structureWord = criteria.structure === "structured" ? "structured " : criteria.structure === "soft" ? "softer " : "";
   // When the gap is that her own coverage rules rule pieces out, say so in the
   // title: "an occasion dress with more coverage" is the actual answer, where
@@ -596,8 +840,20 @@ function buildRecommendation(
       ? " with more coverage"
       : "";
   const coveragePrefix = coverageAdjective ? `${coverageAdjective} ` : "";
-  const phrase = `${coveragePrefix}${structureWord}${REGISTER_WORD[register]} ${noun}${coverageSuffix}`;
-  const title = `${/^[aeiou]/i.test(phrase) ? "An" : "A"} ${phrase}`;
+  let title: string;
+  if (shapeWinnerAdjective) {
+    // The deterministic tie-break resolved a real winner (or, when every
+    // criterion still tied, up to two) — named directly, never left as "a
+    // different shape". "Look for full-length bootcut work trousers." /
+    // "Look for full-length flared or wide-leg work trousers."
+    title = `Look for ${coveragePrefix}${shapeWinnerAdjective} ${REGISTER_WORD[register]} ${noun}.`;
+  } else {
+    const phrase = `${coveragePrefix}${structureWord}${REGISTER_WORD[register]} ${noun}${coverageSuffix}`;
+    // "One option to explore" rather than a directive. The engine has
+    // evidence for a gap; it does not have evidence that buying is the only
+    // answer.
+    title = `One option to explore: ${/^[aeiou]/i.test(phrase) ? "an" : "a"} ${phrase}`;
+  }
 
   // The body explains what it would DO, not what it is. The reason to buy is
   // the combinations it creates, and that number is measured, not asserted.
@@ -608,13 +864,16 @@ function buildRecommendation(
         ? `You own ${REGISTER_WORD[register]} pieces, but fewer of them meet the way you've told nAia you prefer to dress.`
         : `Your ${REGISTER_WORD[register]} dressing is the thinner side of your wardrobe.`;
 
-  // Colour is a ranked suggestion, not a specification. The lead is the colour
-  // she named that she owns least of, so it adds an option she does not have;
-  // the others are simply also inside her palette.
+  // Colour is a preference, never a reason.
+  //
+  // This used to say a colour "would add the most" because it was the named
+  // colour she owned least of. That is an overclaim: underrepresentation can
+  // refine a need that already exists, but it cannot create one or prove one.
+  // The wardrobe gap is the reason; colour only narrows what to look for.
   const colourNote = colourLead
-    ? ` ${capitaliseFirst(colourLead)} would add the most — it's the colour you named that your Closet has least of.${
+    ? ` ${capitaliseFirst(colourLead)} is a colour you said you like.${
         colourAlternatives.length > 0
-          ? ` ${capitaliseFirst(joinOr(colourAlternatives))} would also sit within the palette you told nAia you like.`
+          ? ` ${capitaliseFirst(joinOr(colourAlternatives))} are also within the palette you described.`
           : ""
       }`
     : "";
@@ -625,9 +884,11 @@ function buildRecommendation(
     specificity,
     title,
     attributes,
-    body: selfSufficient
-      ? `${reasonForGap} A piece like this is a complete look on its own, so it adds an option you can wear without needing anything else to work with it.${colourNote}`
-      : `${reasonForGap} A piece like this would work with ${best.length} of the pieces you already own, so it adds new ways to dress rather than another version of something you have.${colourNote}`,
+    body: shapeWinnerWhy
+      ? `${shapeWinnerWhy}${colourNote}`
+      : selfSufficient
+        ? `${reasonForGap} A piece like this is a complete look on its own, so it adds an option you can wear without needing anything else to work with it.${colourNote}`
+        : `${reasonForGap} A piece like this could pair with ${best.length} ${best.length === 1 ? "piece" : "pieces"} already in your Closet, so it adds ways to dress rather than another version of something you have.${colourNote}`,
     unlocksIds: best.slice(0, 6).map((g) => g.id),
     criteria,
     evidence,
@@ -654,7 +915,7 @@ function buildNotAPriority(needs: WardrobeNeeds): NotAPriority[] {
     {
       id: `not-priority-${enough.register}`,
       title: `Another of your ${subject}`,
-      body: `You already have strong depth here. A similar piece would add very little compared with strengthening your ${thinWord} wardrobe.`,
+      body: `Your ${thinWord} wardrobe is where more variety would help.`,
     },
   ];
 }

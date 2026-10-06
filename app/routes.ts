@@ -14,6 +14,9 @@ export default [
   route("closet", "routes/closet._index.tsx"),
   route("closet/intelligence", "routes/closet.intelligence.tsx"),
   route("api/wi-style-this", "routes/api.wi-style-this.tsx"),
+  // Presentation preview only — not linked from navigation, makes no writes.
+  // See app/routes/closet.intelligence-preview.tsx.
+  route("closet/intelligence-preview", "routes/closet.intelligence-preview.tsx"),
   route("style-me", "routes/style-me/_index.tsx"),
   // Rev 3 — Psychology-First StyleMe (Group 5)
   route("style-me/state", "routes/style-me/state.tsx"),
@@ -123,6 +126,7 @@ export default [
       route("closet/:itemId", "routes/admin.naia.closet.$itemId.tsx"),
       route("customers", "routes/admin.naia.customers._index.tsx"),
       route("customers/:customerId", "routes/admin.naia.customers.$customerId.tsx"),
+      route("customers/:customerId/buyskip/:analysisId", "routes/admin.naia.customers.$customerId.buyskip.$analysisId.tsx"),
       route("phase3c-export", "routes/admin.naia.phase3c-export.tsx"),
     ]),
     route("nadine", "routes/admin.nadine.tsx", [

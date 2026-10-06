@@ -17,6 +17,10 @@ import {
   CLOSET_COLOUR_FAMILY,
   closetColourFamily,
   combinationKey,
+  scorePair,
+  functionCompatible,
+  isCrossoverLayer,
+  wornBeyondSport,
   DEFAULT_FLAGS,
   MIN_WARDROBE_SIZE,
   wardrobeCharacterLine,
@@ -27,6 +31,8 @@ import {
   type WardrobeIntelligenceFlags,
   type WardrobePassport,
 } from "./wardrobe-intelligence.ts";
+import type { FormulaSupportState, GarmentPositiveEvidence, FormulaEvidence } from "./wardrobe-feedback-evidence.ts";
+import { adaptStyleMeOutcomeFormulaFindings, adaptStyleMeOutcomeGarmentFindings } from "./customer-intelligence-styleme-outcome-adapter.ts";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -71,6 +77,8 @@ function run(
     passport?: WardrobePassport | null;
     seen?: Set<string>;
     flags?: WardrobeIntelligenceFlags;
+    formulaEvidence?: ReadonlyMap<string, FormulaSupportState> | null;
+    positiveGarmentEvidence?: ReadonlyMap<string, GarmentPositiveEvidence> | null;
   } = {},
 ): WardrobeIntelligence {
   return computeWardrobeIntelligence({
@@ -78,6 +86,8 @@ function run(
     passport: opts.passport ?? null,
     seenCombinations: opts.seen ?? new Set<string>(),
     flags: opts.flags,
+    formulaEvidence: opts.formulaEvidence ?? null,
+    positiveGarmentEvidence: opts.positiveGarmentEvidence ?? null,
   });
 }
 
@@ -347,7 +357,9 @@ describe("§WI-4 self-reported wardrobe signals", () => {
 
   it("attributes every low-use statement to the customer's own marking", () => {
     // Both apostrophe forms — nAia's copy uses the typographic one.
-    const provenance = /you['\u2019]ve (marked|said|told)|pieces you['\u2019]ve|ones you/i;
+    // Accepts both "You've marked" and the plainer "You marked" — the point is
+    // that the statement names HER as the source, not which tense it uses.
+    const provenance = /you['\u2019]?(ve)? ?(marked|said|told)|pieces you['\u2019]ve|ones you/i;
     // Use language only — "rarely limits what it goes with" is about colour.
     const lowUse = /rarely (wear|worn|reach)|rarely reached|reach for|difficult to style|struggle to style/i;
     const items = neutralWardrobe().map((g, i) => (i < 2 ? { ...g, garmentRelationships: ["rarely-wear"] } : g));
@@ -513,6 +525,48 @@ describe("§WI-6 what works well together", () => {
         used.add(id);
       }
     }
+  });
+
+  it("tags a pairing with the register its formality reads at", () => {
+    const workTop = makeGarment({ id: "wt", slot: "top", formality: "business-casual" });
+    const workBottom = makeGarment({ id: "wb", category: "BOTTOMS", slot: "bottom", formality: "business-casual" });
+    const everydayTop = makeGarment({ id: "et", slot: "top", formality: "casual" });
+    const everydayBottom = makeGarment({ id: "eb", category: "BOTTOMS", slot: "bottom", formality: "casual" });
+    const filler = makeGarment({ id: "filler", category: "DRESSES", slot: "dress" }); // padding past MIN_WARDROBE_SIZE only
+    const result = run([workTop, workBottom, everydayTop, everydayBottom, filler]);
+
+    const work = result.pairings.pairings.find((p) => p.garmentIds.includes("wt"));
+    const everyday = result.pairings.pairings.find((p) => p.garmentIds.includes("et"));
+    assert.equal(work?.register, "work");
+    assert.equal(everyday?.register, "everyday");
+  });
+
+  it("bestByRegister surfaces a register's own best candidate even when it loses every seat in the capped top-4", () => {
+    // Three occasion-tagged work pairs (weight-8 bonus each) crowd out the
+    // capped pairings.pairings list entirely; a plain everyday pair with only
+    // generic reasons (weight 2-3) never wins a seat there, despite being a
+    // real, valid, eligible candidate — reproducing the exact contradiction
+    // this field exists to fix: strong depth, zero shown combination.
+    const items = [
+      makeGarment({ id: "wt1", slot: "top", formality: "business-casual", occasions: ["Work"] }),
+      makeGarment({ id: "wb1", category: "BOTTOMS", slot: "bottom", formality: "business-casual", occasions: ["Work"] }),
+      makeGarment({ id: "wt2", slot: "top", formality: "business-casual", occasions: ["Work"] }),
+      makeGarment({ id: "wb2", category: "BOTTOMS", slot: "bottom", formality: "business-casual", occasions: ["Work"] }),
+      makeGarment({ id: "wt3", slot: "top", formality: "business-casual", occasions: ["Work"] }),
+      makeGarment({ id: "wb3", category: "BOTTOMS", slot: "bottom", formality: "business-casual", occasions: ["Work"] }),
+      makeGarment({ id: "wt4", slot: "top", formality: "business-casual", occasions: ["Work"] }),
+      makeGarment({ id: "wb4", category: "BOTTOMS", slot: "bottom", formality: "business-casual", occasions: ["Work"] }),
+      makeGarment({ id: "et", slot: "top", formality: "casual" }),
+      makeGarment({ id: "eb", category: "BOTTOMS", slot: "bottom", formality: "casual" }),
+    ];
+    const result = run(items);
+
+    const shownEveryday = result.pairings.pairings.filter((p) => p.register === "everyday");
+    assert.equal(shownEveryday.length, 0, "the plain everyday pair genuinely loses the capped ranking");
+
+    const bestEveryday = result.pairings.bestByRegister.everyday ?? [];
+    assert.ok(bestEveryday.length > 0, "but it is not simply absent from the data — bestByRegister still has it");
+    assert.ok(bestEveryday[0].garmentIds.includes("et") && bestEveryday[0].garmentIds.includes("eb"));
   });
 });
 
@@ -877,14 +931,30 @@ describe("§WI-9 wardrobe opportunities", () => {
     assert.equal(new Set(bodies.map((b) => b.slice(0, 40))).size, bodies.length, "each reason should reflect its own signal");
   });
 
-  it("does not repeat the same preamble when pieces share one signal", () => {
+  it("every card stands on its own, with no reference to another card", () => {
+    // These openers used to vary by position — "Another…", "A third you've
+    // marked as hard to style" — which reads well in a list and falls apart the
+    // moment a card is read alone or moved to another section. Identical,
+    // self-contained wording is the requirement now; each card carries its own
+    // evidence and its own count.
     const items = richWardrobe().map((g, i) =>
       i < 3 ? { ...g, garmentRelationships: ["love-style-struggle"] } : g,
     );
     const bodies = run(items, { passport: FIT_PASSPORT }).opportunities.rediscover.map((r) => r.body);
     assert.ok(bodies.length >= 2);
-    const openers = bodies.map((b) => b.split(".")[0]);
-    assert.equal(new Set(openers).size, openers.length, `repeated opener: ${openers.join(" | ")}`);
+
+    for (const body of bodies) {
+      // Only cross-card references are forbidden. "It also matches your
+      // Passport" adds a second fact WITHIN the card and is fine.
+      assert.doesNotMatch(body, /\b(another|a third|a second|as well)\b/i,
+        `a card must not depend on a neighbour: "${body}"`);
+      assert.doesNotMatch(body, /^\s*(also|and)\b/i,
+        `a card must not open as a continuation: "${body}"`);
+      assert.match(body, /You marked this as difficult to style\./,
+        "each card states its own evidence");
+      assert.match(body, /nAia found \d+ potential matching (piece|pieces)/,
+        "each card states its own count");
+    }
   });
 
   it("never phrases an opportunity as a shopping instruction", () => {
@@ -1104,7 +1174,7 @@ describe("§WI-13 hero eligibility by category", () => {
       makeGarment({ id: "b1", category: "BOTTOMS", slot: "bottom" }),
       makeGarment({ id: "b2", category: "BOTTOMS", slot: "bottom" }),
       makeGarment({ id: "b3", category: "BOTTOMS", slot: "bottom" }),
-      makeGarment({ id: "track", name: "Track Jacket", category: "ACTIVEWEAR", slot: "outerwear" }),
+      makeGarment({ id: "track", name: "Track Jacket", subcategory: "track jacket", category: "ACTIVEWEAR", slot: "outerwear", formality: "casual", occasions: ["casual", "weekend", "gym"] }),
     ];
     const versatile = run(items).heroes.heroes.find((h) => h.label === "most-versatile");
     assert.ok(versatile);
@@ -1116,9 +1186,35 @@ describe("§WI-13 hero eligibility by category", () => {
     // activewear is a footnote rather than a way of life.
     const items = [
       ...richWardrobe(),
-      makeGarment({ id: "track", name: "Track Jacket", category: "ACTIVEWEAR", slot: "outerwear" }),
+      makeGarment({ id: "track", name: "Track Jacket", subcategory: "track jacket", category: "ACTIVEWEAR", slot: "outerwear", formality: "casual", occasions: ["casual", "weekend", "gym"] }),
     ];
     const versatile = run(items).heroes.heroes.find((h) => h.label === "most-versatile");
+    assert.notEqual(versatile?.garmentId, "track");
+  });
+
+  it("an activewear layer she only wears to the gym does not cross over", () => {
+    // Same slot, same subcategory, same level of dress as the crossover case
+    // below. The only difference is that nothing says she wears it as clothing.
+    const items = [
+      ...richWardrobe().filter((g) => g.id !== "o1"),
+      makeGarment({ id: "track", name: "Track Jacket", subcategory: "track jacket", category: "ACTIVEWEAR", slot: "outerwear", formality: "casual", occasions: ["travel", "gym"] }),
+    ];
+    const active: WardrobePassport = { ...PASSPORT, lifestyle: ["active-busy-days"] };
+    const versatile = run(items, { passport: active }).heroes.heroes.find((h) => h.label === "most-versatile");
+    assert.notEqual(versatile?.garmentId, "track");
+  });
+
+  it("an activewear layer with no recorded subcategory does not cross over", () => {
+    // Crossover has to be EARNED from the taxonomy. A piece merely named
+    // "Track Jacket", with nothing in subcategory, is not established as a
+    // layer worn over ordinary clothes — so it stays inside the functional
+    // wardrobe rather than being credited with connectivity it cannot claim.
+    const items = [
+      ...richWardrobe().filter((g) => g.id !== "o1"),
+      makeGarment({ id: "track", name: "Track Jacket", category: "ACTIVEWEAR", slot: "outerwear", formality: "casual" }),
+    ];
+    const active: WardrobePassport = { ...PASSPORT, lifestyle: ["active-busy-days"] };
+    const versatile = run(items, { passport: active }).heroes.heroes.find((h) => h.label === "most-versatile");
     assert.notEqual(versatile?.garmentId, "track");
   });
 
@@ -1127,7 +1223,7 @@ describe("§WI-13 hero eligibility by category", () => {
     // the wardrobe. Whether it may say so depends entirely on relevance.
     const items = [
       ...richWardrobe().filter((g) => g.id !== "o1"),
-      makeGarment({ id: "track", name: "Track Jacket", category: "ACTIVEWEAR", slot: "outerwear" }),
+      makeGarment({ id: "track", name: "Track Jacket", subcategory: "track jacket", category: "ACTIVEWEAR", slot: "outerwear", formality: "casual", occasions: ["casual", "weekend", "gym"] }),
     ];
     const withoutLifestyle = run(items).heroes.heroes.find((h) => h.label === "most-versatile");
     assert.notEqual(withoutLifestyle?.garmentId, "track");
@@ -1181,6 +1277,28 @@ describe("§WI-14 contradiction insights", () => {
   });
 
   it("surfaces a favourite with unusually few partners", () => {
+    // A TOP with almost nothing to wear it with — a fair comparison, because
+    // tops and bottoms share the same structural ceiling.
+    const items = [
+      ...richWardrobe().map((g) =>
+        ["t1", "b1", "o1"].includes(g.id) ? { ...g, garmentRelationships: ["favourite"] } : g,
+      ),
+      makeGarment({
+        id: "lonely", name: "Burgundy Evening Blouse", category: "TOPS", slot: "top",
+        formality: "evening", garmentRelationships: ["favourite"],
+        colourProfile: { hueFamily: "red", wardrobeNeutral: false, lightDark: "dark", energyTier: "high-energy" },
+      }),
+    ];
+    const contradiction = run(items).observations.find((o) => o.kind === "contradiction-favourite-isolated");
+    assert.ok(contradiction);
+    assert.equal(contradiction!.garmentIds[0], "lonely");
+  });
+
+  it("never ranks a one-piece garment down for having fewer structural partners", () => {
+    // A dress pairs ONLY with outerwear; a top pairs with bottoms AND
+    // outerwear. On the real 46-piece Closet that is a ceiling of 6 against 17,
+    // so measuring a gown against a median drawn from tops and bottoms reports
+    // the shape of the slot graph as if it were a finding about the garment.
     const items = [
       ...richWardrobe().map((g) =>
         ["t1", "b1", "o1"].includes(g.id) ? { ...g, garmentRelationships: ["favourite"] } : g,
@@ -1192,8 +1310,26 @@ describe("§WI-14 contradiction insights", () => {
       }),
     ];
     const contradiction = run(items).observations.find((o) => o.kind === "contradiction-favourite-isolated");
-    assert.ok(contradiction);
-    assert.equal(contradiction!.garmentIds[0], "gown");
+    assert.notEqual(contradiction?.garmentIds[0], "gown",
+      "an occasion dress with few partners is behaving as an occasion dress should");
+  });
+
+  it("a one-piece garment does not drag the comparison median down either", () => {
+    // Excluding dresses from the candidate pool is not enough — they must also
+    // be out of the median, or every other piece is measured against a number
+    // the slot graph deflated.
+    const withDresses = [
+      ...richWardrobe().map((g) => (["t1", "b1", "o1"].includes(g.id) ? { ...g, garmentRelationships: ["favourite"] } : g)),
+      makeGarment({ id: "d2", category: "DRESSES", slot: "dress", formality: "smart-casual" }),
+      makeGarment({ id: "d3", category: "DRESSES", slot: "dress", formality: "smart-casual" }),
+      makeGarment({
+        id: "lonely", name: "Burgundy Evening Blouse", category: "TOPS", slot: "top",
+        formality: "evening", garmentRelationships: ["favourite"],
+        colourProfile: { hueFamily: "red", wardrobeNeutral: false, lightDark: "dark", energyTier: "high-energy" },
+      }),
+    ];
+    const found = run(withDresses).observations.find((o) => o.kind === "contradiction-favourite-isolated");
+    assert.equal(found?.garmentIds[0], "lonely", "the top is still the finding, not a dress");
   });
 
   it("does not force a contradiction when nothing contradicts", () => {
@@ -1425,6 +1561,21 @@ describe("§WI-19 display discipline", () => {
     assert.ok(shapes.includes("Straight"));
   });
 
+  it("ranks shapes by count across BOTH silhouette and fit fields together, not silhouette-then-fit", () => {
+    // Straight (silhouette, 5) > Relaxed (fitProfile, 4) > Fitted (silhouette, 3).
+    // Filling silhouette slots first and only then topping up from fitProfile
+    // would place Fitted (3) ahead of Relaxed (4) — a lower count outranking
+    // a higher one just because it came from the other field.
+    const items = richWardrobe().flatMap((g, i) => [
+      { ...g, id: `${g.id}-a`, silhouette: i < 5 ? "straight" : "fitted", fitProfile: i < 4 ? "relaxed" : "tailored" },
+      // Padding so every count clears minRecurrence (3) against a bigger core.
+      { ...g, id: `${g.id}-b`, silhouette: i < 5 ? "straight" : "fitted", fitProfile: i < 4 ? "relaxed" : "tailored" },
+    ]);
+    const shapes = run(items).dna.shapes.map((sh) => sh.label);
+    const order = shapes.filter((s) => ["Straight", "Relaxed", "Fitted"].includes(s));
+    assert.deepEqual(order, ["Straight", "Relaxed", "Fitted"], `expected count order, got: ${order.join(", ")}`);
+  });
+
   it("marks contradictions as discoveries and everything else as patterns", () => {
     const items = richWardrobe().map((g) =>
       g.id === "t1" ? { ...g, garmentRelationships: ["love-style-struggle"] } : g,
@@ -1444,5 +1595,519 @@ describe("§WI-19 display discipline", () => {
     assert.match(note, /Nothing obvious is missing right now/);
     assert.match(note, /already represented/);
     assert.doesNotMatch(note, /complete|everything you need/i);
+  });
+});
+
+// ── §WI-20 ────────────────────────────────────────────────────────────────────
+// Sportswear stays sportswear. The functional wardrobe (activewear, swimwear,
+// loungewear) is its own world; only a layer genuinely worn OVER ordinary
+// clothes crosses into it, and only into casual company. Generic similarity —
+// a shared occasion tag, a neutral colour, adjacent levels of dress, balanced
+// weight — must never be enough to bridge the two.
+
+const activewear = (sub: string, slot: string, over: Partial<WardrobeGarment> = {}) =>
+  makeGarment({ category: "ACTIVEWEAR", subcategory: sub, slot, formality: "casual", occasions: ["gym"], ...over });
+
+/** A layer she has tagged for ordinary life, not only for sport. */
+const crossoverLayer = (sub: string, over: Partial<WardrobeGarment> = {}) =>
+  activewear(sub, "outerwear", { occasions: ["casual", "weekend", "gym"], ...over });
+
+describe("§WI-20 functional-wardrobe crossover", () => {
+  it("§WI-20a activewear pairs within its OWN category", () => {
+    const leggings = activewear("leggings", "bottom");
+    const hoodie = activewear("hoodie", "outerwear");
+    assert.equal(functionCompatible(leggings, hoodie), true);
+    assert.equal(scorePair(leggings, hoodie).compatible, true);
+  });
+
+  it("§WI-20j the three functional wardrobes are not interchangeable", () => {
+    // "Not ordinary clothing" is not a wardrobe. A sports bra and a swim
+    // cover-up have nothing to do with each other, and membership in
+    // FUNCTIONAL_CATEGORIES must never be what establishes compatibility.
+    const active = activewear("leggings", "bottom");
+    const swim = makeGarment({ category: "SWIMWEAR", subcategory: "cover-up", slot: "outerwear", formality: "casual" });
+    const lounge = makeGarment({ category: "LOUNGEWEAR", subcategory: "hoodie", slot: "outerwear", formality: "casual" });
+
+    assert.equal(functionCompatible(active, swim), false);
+    assert.equal(functionCompatible(active, lounge), false);
+    assert.equal(functionCompatible(swim, lounge), false);
+    assert.equal(scorePair(active, swim).compatible, false);
+
+    // …but each still pairs inside its own category.
+    const swimBottom = makeGarment({ category: "SWIMWEAR", subcategory: "bikini bottom", slot: "bottom", formality: "casual" });
+    const loungeBottom = makeGarment({ category: "LOUNGEWEAR", subcategory: "joggers", slot: "bottom", formality: "casual" });
+    assert.equal(functionCompatible(swim, swimBottom), true);
+    assert.equal(functionCompatible(lounge, loungeBottom), true);
+  });
+
+  it("§WI-20k crossover needs evidence the piece is worn beyond sport", () => {
+    const jeans = makeGarment({ category: "BOTTOMS", subcategory: "jeans", slot: "bottom", formality: "casual" });
+
+    // Both are eligible layers in the outerwear slot. Only one has evidence.
+    const hoodie = crossoverLayer("hoodie");                                  // casual, weekend, gym
+    const trackJacket = activewear("track jacket", "outerwear", { occasions: ["travel", "gym"] });
+
+    assert.equal(wornBeyondSport(hoodie), true);
+    assert.equal(wornBeyondSport(trackJacket), false);
+    assert.equal(functionCompatible(jeans, hoodie), true);
+    assert.equal(functionCompatible(jeans, trackJacket), false,
+      "a track jacket tagged only for travel and the gym has no evidence behind it");
+  });
+
+  it("§WI-20l travel and loungewear are not evidence of ordinary wear", () => {
+    // Activewear is tagged for travel because it is comfortable to sit in, and
+    // for loungewear because it is comfortable at home. Neither says it reads
+    // as clothing in a put-together outfit.
+    for (const occasions of [["travel"], ["loungewear"], ["gym"], ["travel", "loungewear", "gym"]]) {
+      assert.equal(wornBeyondSport(activewear("hoodie", "outerwear", { occasions })), false, occasions.join("+"));
+    }
+    assert.equal(wornBeyondSport(activewear("hoodie", "outerwear", { occasions: ["weekend"] })), true);
+  });
+
+  it("§WI-20m an everyday tag alone still does not bridge the wardrobes", () => {
+    // The tag is necessary, never sufficient: it qualifies a piece that is
+    // ALREADY a crossover layer. Leggings tagged "weekend" are still leggings.
+    const jeans = makeGarment({ category: "BOTTOMS", subcategory: "jeans", slot: "bottom", formality: "casual" });
+    for (const [sub, slot] of [["leggings", "bottom"], ["sports bra", "top"], ["performance t-shirt", "top"]] as const) {
+      const piece = activewear(sub, slot, { occasions: ["casual", "weekend"] });
+      assert.equal(wornBeyondSport(piece), true, "it has the tag");
+      assert.equal(functionCompatible(jeans, piece), false, `${sub} is not a layer worn over anything`);
+    }
+  });
+
+  it("§WI-20b an activewear BOTTOM never reaches ordinary clothes", () => {
+    const tank = makeGarment({ category: "TOPS", subcategory: "sleeveless top", slot: "top", formality: "smart-casual" });
+    for (const sub of ["leggings", "flare leggings", "athletic shorts"]) {
+      const piece = activewear(sub, "bottom");
+      assert.equal(functionCompatible(tank, piece), false, sub);
+      assert.equal(scorePair(tank, piece).compatible, false, sub);
+    }
+  });
+
+  it("§WI-20c an activewear TOP is not a crossover layer", () => {
+    const jeans = makeGarment({ category: "BOTTOMS", subcategory: "jeans", slot: "bottom", formality: "casual" });
+    for (const sub of ["sports bra", "performance t-shirt", "tank top"]) {
+      assert.equal(isCrossoverLayer(activewear(sub, "top")), false, sub);
+      assert.equal(functionCompatible(jeans, activewear(sub, "top")), false, sub);
+    }
+  });
+
+  it("§WI-20d an eligible layer with evidence crosses into casual company", () => {
+    const jeans = makeGarment({ category: "BOTTOMS", subcategory: "jeans", slot: "bottom", formality: "casual" });
+    for (const sub of ["track jacket", "hoodie", "zip-up hoodie", "sweatshirt", "windbreaker"]) {
+      assert.equal(functionCompatible(jeans, crossoverLayer(sub)), true, sub);
+      // …and the same garment without the evidence does not.
+      assert.equal(functionCompatible(jeans, activewear(sub, "outerwear")), false, `${sub} without evidence`);
+    }
+  });
+
+  it("§WI-20e an eligible layer stops at business dressing and above", () => {
+    const hoodie = crossoverLayer("hoodie");
+    for (const formality of ["business-casual", "business-formal", "occasion", "evening"]) {
+      const piece = makeGarment({ category: "BOTTOMS", subcategory: "trousers", slot: "bottom", formality });
+      assert.equal(functionCompatible(piece, hoodie), false, formality);
+    }
+  });
+
+  it("§WI-20f swimwear and loungewear never cross over", () => {
+    const jeans = makeGarment({ category: "BOTTOMS", subcategory: "jeans", slot: "bottom", formality: "casual" });
+    const swim = makeGarment({ category: "SWIMWEAR", subcategory: "cover-up", slot: "outerwear", formality: "casual" });
+    const lounge = makeGarment({ category: "LOUNGEWEAR", subcategory: "hoodie", slot: "outerwear", formality: "casual" });
+    assert.equal(functionCompatible(jeans, swim), false);
+    assert.equal(functionCompatible(jeans, lounge), false);
+  });
+
+  it("§WI-20g a shared occasion tag alone does not bridge the two wardrobes", () => {
+    const tank = makeGarment({
+      category: "TOPS", subcategory: "sleeveless top", slot: "top",
+      formality: "casual", occasions: ["Weekend"],
+    });
+    const leggings = activewear("leggings", "bottom", { occasions: ["Weekend"] });
+    assert.equal(functionCompatible(tank, leggings), false);
+    assert.equal(scorePair(tank, leggings).compatible, false);
+  });
+
+  it("§WI-20h unknown formality refuses the crossover rather than guessing", () => {
+    const unknown = makeGarment({ category: "BOTTOMS", subcategory: "jeans", slot: "bottom", formality: null });
+    assert.equal(functionCompatible(unknown, crossoverLayer("hoodie")), false);
+  });
+
+  it("§WI-20i ordinary clothes are completely unaffected by the gate", () => {
+    const tank = makeGarment({ category: "TOPS", slot: "top", formality: "smart-casual" });
+    const blazer = makeGarment({ category: "OUTERWEAR", subcategory: "blazer", slot: "outerwear", formality: "business-casual" });
+    assert.equal(functionCompatible(tank, blazer), true);
+    assert.equal(scorePair(tank, blazer).compatible, true);
+  });
+});
+
+// ── §WI-21 ────────────────────────────────────────────────────────────────────
+// Combinations must obey the same Coverage-section usability rule, per garment.
+// A garment that fails a stated requirement with no genuine rescue must never
+// appear in "Combinations to try" — not alone, and not carried in on someone
+// else's layer. A garment that only clears its requirement WITH a layer may
+// appear only alongside that exact layer.
+
+describe("§WI-21 combination eligibility matches the Coverage section", () => {
+  // computeWardrobeIntelligence goes quiet below MIN_WARDROBE_SIZE regardless of
+  // pairing logic, so every fixture below pads with inert one-piece filler —
+  // no outerwear exists alongside it, so it can never form a candidate itself.
+  const filler = (n: number) =>
+    Array.from({ length: n }, (_, i) => makeGarment({ id: `filler-${i}`, name: `Filler ${i}`, category: "DRESSES", slot: "dress" }));
+
+  it("§WI-21a a Black A-Line Mini Skirt never enters a combination for a legs-covered customer", () => {
+    const passport: WardrobePassport = { ...PASSPORT, dressingPreferences: ["legs-covered"] };
+    const shirt = makeGarment({ id: "shirt", name: "Black Tailored Shirt", category: "TOPS", slot: "top", formality: "smart-casual" });
+    const skirt = makeGarment({
+      id: "mini-skirt", name: "Black A-Line Mini Skirt", category: "BOTTOMS", slot: "bottom",
+      formality: "smart-casual", hemLength: "mini",
+    });
+    const trousers = makeGarment({
+      id: "trousers", name: "Black Tailored Trousers", category: "BOTTOMS", slot: "bottom",
+      formality: "smart-casual", hemLength: "full",
+    });
+
+    const result = run([shirt, skirt, trousers, ...filler(2)], { passport });
+
+    // A hem that does not cover legs has no rescue — a layer cannot lengthen it —
+    // so the skirt must be absent from every combination, not just unranked.
+    const allIds = new Set(result.pairings.pairings.flatMap((p) => p.garmentIds));
+    assert.equal(allIds.has(skirt.id), false);
+    // The gate removes the one invalid bottom; it does not silence the section —
+    // a genuinely valid combination still forms from what is left.
+    assert.equal(allIds.has(trousers.id), true);
+  });
+
+  it("§WI-21b a Black Bubble Hem Skirt never enters a combination for a legs-covered customer", () => {
+    const passport: WardrobePassport = { ...PASSPORT, dressingPreferences: ["legs-covered"] };
+    const shirt = makeGarment({ id: "shirt", name: "Black Tailored Shirt", category: "TOPS", slot: "top", formality: "smart-casual" });
+    const skirt = makeGarment({
+      id: "bubble-skirt", name: "Black Bubble Hem Skirt", category: "BOTTOMS", slot: "bottom",
+      formality: "smart-casual", hemLength: "bubble",
+    });
+
+    const result = run([shirt, skirt, ...filler(3)], { passport });
+
+    // No usable bottom is left at all — the section must go quiet, never propose
+    // the blocked skirt as the only way to fill it.
+    const allIds = new Set(result.pairings.pairings.flatMap((p) => p.garmentIds));
+    assert.equal(allIds.has(skirt.id), false);
+    assert.equal(result.pairings.pairings.length, 0);
+  });
+
+  it("§WI-21c a Mauve Sports Bra enters only alongside the Black Nike Zip-Up Hoodie that resolves it", () => {
+    const passport: WardrobePassport = { ...PASSPORT, dressingPreferences: ["no-cropped-tops"] };
+    const sportsBra = makeGarment({
+      id: "sports-bra", name: "Mauve Lululemon Sports Bra", category: "ACTIVEWEAR", slot: "top",
+      primaryColor: "Mauve", formality: "casual", occasions: ["gym"], topLength: "cropped",
+    });
+    const leggings = makeGarment({
+      id: "leggings", name: "Black Leggings", category: "ACTIVEWEAR", slot: "bottom",
+      formality: "casual", occasions: ["gym"],
+    });
+    const hoodie = makeGarment({
+      id: "hoodie", name: "Black Nike Zip-Up Hoodie", category: "ACTIVEWEAR", slot: "outerwear",
+      formality: "casual", occasions: ["gym"],
+    });
+
+    const result = run([sportsBra, leggings, hoodie, ...filler(2)], { passport });
+
+    const withBra = result.pairings.pairings.find((p) => p.garmentIds.includes(sportsBra.id));
+    assert.ok(withBra, "a combination with the sports bra should exist once its resolving layer is present");
+    assert.ok(
+      withBra!.garmentIds.includes(hoodie.id),
+      "the sports bra may only appear alongside the layer that actually resolves the cropped-top preference",
+    );
+  });
+
+  it("§WI-21d removing the resolving hoodie makes the sports-bra combination invalid, not layer-free", () => {
+    const passport: WardrobePassport = { ...PASSPORT, dressingPreferences: ["no-cropped-tops"] };
+    const sportsBra = makeGarment({
+      id: "sports-bra", name: "Mauve Lululemon Sports Bra", category: "ACTIVEWEAR", slot: "top",
+      primaryColor: "Mauve", formality: "casual", occasions: ["gym"], topLength: "cropped",
+    });
+    const leggings = makeGarment({
+      id: "leggings", name: "Black Leggings", category: "ACTIVEWEAR", slot: "bottom",
+      formality: "casual", occasions: ["gym"],
+    });
+
+    // Same two pieces, no hoodie in the Closet at all.
+    const result = run([sportsBra, leggings, ...filler(3)], { passport });
+
+    const allIds = new Set(result.pairings.pairings.flatMap((p) => p.garmentIds));
+    assert.equal(allIds.has(sportsBra.id), false);
+    assert.equal(result.pairings.pairings.length, 0);
+  });
+
+  it("§WI-21e an all-activewear top+bottom+layer combination never represents Everyday, even though it is a valid pairing", () => {
+    // The exact shape of a real bug: three activewear pieces pair freely
+    // with each other (functionCompatible allows same-category pairing —
+    // correct, sportswear stays sportswear), and the hoodie is even a
+    // genuine crossover-eligible layer. But the top and bottom are still
+    // activewear, not ordinary clothing, and a shared "casual" formality
+    // does not change that. pairingRegister must not label this set
+    // "everyday" — a formality bucket cannot distinguish a Nike hoodie's
+    // "casual" from a cardigan's.
+    const passport: WardrobePassport = { ...PASSPORT, dressingPreferences: [] };
+    const hoodie = makeGarment({
+      id: "hoodie", name: "Black Nike Zip-Up Hoodie", category: "ACTIVEWEAR", slot: "outerwear",
+      formality: "casual", occasions: ["casual", "weekend", "travel", "gym"], subcategory: "zip-up hoodie",
+    });
+    const driFit = makeGarment({
+      id: "dri-fit", name: "Light Blue Nike Dri-FIT T-Shirt", category: "ACTIVEWEAR", slot: "top",
+      formality: "casual", occasions: ["travel", "gym"],
+    });
+    const leggings = makeGarment({
+      id: "flare-leggings", name: "Charcoal Flare Leggings", category: "ACTIVEWEAR", slot: "bottom",
+      formality: "casual", occasions: ["travel", "gym"],
+    });
+
+    const result = run([hoodie, driFit, leggings, ...filler(3)], { passport });
+
+    const everydayCombos = result.pairings.bestByRegister.everyday ?? [];
+    const allActivewearSet = new Set([hoodie.id, driFit.id, leggings.id]);
+    for (const combo of everydayCombos) {
+      const comboSet = new Set(combo.garmentIds);
+      const isAllActivewear = combo.garmentIds.every((id) => allActivewearSet.has(id));
+      assert.ok(!isAllActivewear, `an all-activewear set must never be the Everyday register's representative combination: ${[...comboSet].join(", ")}`);
+    }
+  });
+
+  it("§WI-21f a genuinely eligible crossover layer paired with ORDINARY pieces still represents Everyday", () => {
+    // The permitted case, preserved: the same crossover-eligible hoodie,
+    // this time layered over ordinary (non-functional) jeans and a top —
+    // the settled crossover rule exists precisely to let this combination
+    // register as Everyday.
+    const passport: WardrobePassport = { ...PASSPORT, dressingPreferences: [] };
+    const hoodie = makeGarment({
+      id: "hoodie", name: "Black Nike Zip-Up Hoodie", category: "ACTIVEWEAR", slot: "outerwear",
+      formality: "casual", occasions: ["casual", "weekend", "travel", "gym"], subcategory: "zip-up hoodie",
+    });
+    const jeans = makeGarment({
+      id: "jeans", name: "Medium Blue Wash Jeans", category: "BOTTOMS", slot: "bottom",
+      formality: "casual",
+    });
+    const tee = makeGarment({
+      id: "tee", name: "White Cotton Tee", category: "TOPS", slot: "top",
+      formality: "casual",
+    });
+
+    const result = run([hoodie, jeans, tee, ...filler(3)], { passport });
+
+    const everydayCombos = result.pairings.bestByRegister.everyday ?? [];
+    const found = everydayCombos.some((combo) =>
+      combo.garmentIds.includes(hoodie.id) && combo.garmentIds.includes(jeans.id) && combo.garmentIds.includes(tee.id),
+    );
+    assert.ok(found, "a crossover-eligible layer over genuinely ordinary pieces must still be able to represent Everyday");
+  });
+});
+
+// ── StyleMe-feedback evidence wiring — V1 ───────────────────────────────────
+//
+// wardrobe-feedback-evidence.test.ts proves the evidence DERIVATION in
+// isolation. These tests prove the two WIRING points in this engine never
+// exceed the locked V1 contract: the primary pairing score is untouched and
+// evidence may only break an exact tie; every other computation this engine
+// produces is byte-identical whether or not evidence is supplied.
+
+describe("§FB-W structural independence: feedback never touches anything but pairings order and rediscover priority", () => {
+  it("coverage, dna, heroes, snapshot and recommendations are identical with and without feedback evidence", () => {
+    const items = neutralWardrobe();
+    const withoutEvidence = run(items, { passport: PASSPORT });
+    const strongEvidence: ReadonlyMap<string, FormulaSupportState> = new Map([
+      [combinationKey(["top-black", "bottom-black"]), "strongly-supported"],
+    ]);
+    const strongGarmentEvidence: ReadonlyMap<string, GarmentPositiveEvidence> = new Map([
+      ["top-black", { closetItemId: "top-black", positiveDates: ["2026-09-01", "2026-09-10", "2026-09-19"] }],
+    ]);
+    const withEvidence = run(items, { passport: PASSPORT, formulaEvidence: strongEvidence, positiveGarmentEvidence: strongGarmentEvidence });
+
+    assert.deepEqual(withEvidence.coverage, withoutEvidence.coverage);
+    assert.deepEqual(withEvidence.dna, withoutEvidence.dna);
+    assert.deepEqual(withEvidence.heroes, withoutEvidence.heroes);
+    assert.deepEqual(withEvidence.snapshot, withoutEvidence.snapshot);
+    assert.deepEqual(withEvidence.signalAvailability, withoutEvidence.signalAvailability);
+    // passportView and observations both read pairings/opportunities only
+    // by STATE/COUNT (pairings.state, pairings.totalFound) — never by
+    // order or membership — so they must be identical too. This closes the
+    // one gap in "feedback touches nothing but the two approved points":
+    // Passport structural truth is never overwritten by feedback.
+    assert.deepEqual(withEvidence.passportView, withoutEvidence.passportView);
+    assert.deepEqual(withEvidence.observations, withoutEvidence.observations);
+  });
+
+  it("an empty evidence map produces byte-identical output to no evidence at all (the pre-V1 default path)", () => {
+    // formulaEvidence/positiveGarmentEvidence default to null — the exact
+    // pre-V1 behavior. An empty (but non-null) map exercises the new code
+    // path's lookups while supplying zero real evidence, and must produce
+    // the identical result: the tie-break/priority-adjustment terms must
+    // be true no-ops when there is genuinely nothing to cite.
+    const items = neutralWardrobe();
+    const withNull = run(items, { passport: PASSPORT, formulaEvidence: null, positiveGarmentEvidence: null });
+    const withEmpty = run(items, {
+      passport: PASSPORT,
+      formulaEvidence: new Map<string, FormulaSupportState>(),
+      positiveGarmentEvidence: new Map<string, GarmentPositiveEvidence>(),
+    });
+    assert.deepEqual(withEmpty, withNull, "no feedback — null or empty — must produce the exact pre-V1 result, including pairing and rediscovery order");
+  });
+});
+
+describe("§FB-W tie-break-only: feedback never overtakes a higher-ranked pairing, and is a no-op absent a genuine tie", () => {
+  // Shared attribute set for both tests below — only occasions/colour differ
+  // between candidates, so any score difference is attributable to a single,
+  // known, explicit lever (scorePair's shared-occasions bonus, weight 8),
+  // not an unexplained emergent effect of the real scoring function.
+  const twinAttrs = {
+    pattern: "solid" as const, material: "wool", silhouette: "straight",
+    fitProfile: "tailored", formality: "smart-casual", visualWeight: "medium" as const,
+    colourProfile: { hueFamily: null, wardrobeNeutral: true, lightDark: "dark" as const, energyTier: "neutral-versatile" as const },
+  };
+
+  it("feedback cannot overtake a candidate with a genuinely, explicitly higher primary score", () => {
+    // high-top/high-bottom share an occasion tag (scorePair's +8 bonus);
+    // low-top/low-bottom share none — a real, known, substantial score gap,
+    // not a guess about emergent engine behaviour.
+    const items: WardrobeGarment[] = [
+      makeGarment({ id: "high-top", slot: "top", primaryColor: "Navy", occasions: ["work"], ...twinAttrs }),
+      makeGarment({ id: "high-bottom", category: "BOTTOMS", slot: "bottom", primaryColor: "Navy", occasions: ["work"], ...twinAttrs }),
+      makeGarment({ id: "low-top", slot: "top", primaryColor: "Grey", occasions: [], ...twinAttrs }),
+      makeGarment({ id: "low-bottom", category: "BOTTOMS", slot: "bottom", primaryColor: "Grey", occasions: [], ...twinAttrs }),
+      makeGarment({ id: "filler-dress", category: "DRESSES", slot: "dress", primaryColor: "Black" }),
+    ];
+    const highKey = combinationKey(["high-top", "high-bottom"]);
+    const lowKey = combinationKey(["low-top", "low-bottom"]);
+
+    const base = run(items, { passport: null });
+    const baseIds = base.pairings.pairings.map((p) => p.id);
+    assert.deepEqual(baseIds, [highKey, lowKey], "the occasion-matched pair must rank first on primary score alone");
+
+    // Give the LOWER-scoring pair the strongest possible evidence tier.
+    const evidence: ReadonlyMap<string, FormulaSupportState> = new Map([[lowKey, "strongly-supported"]]);
+    const withEvidence = run(items, { passport: null, formulaEvidence: evidence });
+    const withIds = withEvidence.pairings.pairings.map((p) => p.id);
+
+    assert.deepEqual(withIds, [highKey, lowKey], "strongly-supported evidence on the lower-scored pair must never move it ahead of a genuinely higher-scored one");
+  });
+
+  it("feedback breaks a genuine exact tie between two symmetric, non-overlapping candidates — without changing which candidates are selected", () => {
+    // Two structurally-identical twin pairs (same attributes, different ids,
+    // no shared garments) — the primary score, a pure function of garment
+    // attributes, MUST be identical for both by construction. This is a
+    // real, engineered tie, not an assumption about the scoring formula.
+    const items: WardrobeGarment[] = [
+      makeGarment({ id: "twin-top-1", slot: "top", primaryColor: "Navy", ...twinAttrs }),
+      makeGarment({ id: "twin-bottom-1", category: "BOTTOMS", slot: "bottom", primaryColor: "Navy", ...twinAttrs }),
+      makeGarment({ id: "twin-top-2", slot: "top", primaryColor: "Navy", ...twinAttrs }),
+      makeGarment({ id: "twin-bottom-2", category: "BOTTOMS", slot: "bottom", primaryColor: "Navy", ...twinAttrs }),
+      makeGarment({ id: "filler-dress2", category: "DRESSES", slot: "dress", primaryColor: "Black" }),
+    ];
+
+    const base = run(items, { passport: null });
+    const pair1Key = combinationKey(["twin-top-1", "twin-bottom-1"]);
+    const pair2Key = combinationKey(["twin-top-2", "twin-bottom-2"]);
+    const baseIds = base.pairings.pairings.map((p) => p.id);
+    assert.ok(baseIds.includes(pair1Key) && baseIds.includes(pair2Key), "both twin pairs must be real, selected candidates");
+    // With no StyleMe outcome evidence at all, the existing deterministic
+    // fallback (alphabetical on the combination key) must choose pair1
+    // ("candidate A") first — this is the baseline the evidence tie-break
+    // is about to flip, asserted explicitly rather than assumed.
+    assert.ok(baseIds.indexOf(pair1Key) < baseIds.indexOf(pair2Key), "absent evidence, the alphabetical fallback must rank pair1 ahead of pair2");
+
+    const evidence: ReadonlyMap<string, FormulaSupportState> = new Map([[pair2Key, "strongly-supported"]]);
+    const withEvidence = run(items, { passport: null, formulaEvidence: evidence });
+    const withIds = withEvidence.pairings.pairings.map((p) => p.id);
+
+    // Same two candidates selected either way — evidence changed order, not membership.
+    assert.deepEqual([...baseIds].sort(), [...withIds].sort());
+    // pair2 (the one with evidence) now sorts strictly ahead of pair1.
+    assert.ok(withIds.indexOf(pair2Key) < withIds.indexOf(pair1Key), "evidence must move the supported twin ahead of its exact-tied sibling");
+  });
+});
+
+describe("§FB-W rediscovery priority: positive evidence deprioritizes without rewriting the structural tag", () => {
+  it("a garment with verified positive evidence ranks below an otherwise-identical garment without it", () => {
+    const struggleAttrs = { category: "TOPS", slot: "top" as const, garmentRelationships: ["love-style-struggle"] };
+    const partners = [
+      makeGarment({ id: "p1", slot: "bottom", category: "BOTTOMS" }),
+      makeGarment({ id: "p2", slot: "bottom", category: "BOTTOMS" }),
+      makeGarment({ id: "p3", slot: "bottom", category: "BOTTOMS" }),
+      makeGarment({ id: "p4", slot: "bottom", category: "BOTTOMS" }),
+    ];
+    const items: WardrobeGarment[] = [
+      makeGarment({ id: "struggle-a", name: "A", ...struggleAttrs }),
+      makeGarment({ id: "struggle-b", name: "B", ...struggleAttrs }),
+      ...partners,
+    ];
+
+    const base = run(items);
+    const baseIds = base.opportunities.rediscover.map((r) => r.garmentId);
+    assert.ok(baseIds.includes("struggle-a") && baseIds.includes("struggle-b"), "both must qualify for rediscovery structurally");
+
+    const positiveEvidence: ReadonlyMap<string, GarmentPositiveEvidence> = new Map([
+      ["struggle-a", { closetItemId: "struggle-a", positiveDates: ["2026-09-01", "2026-09-10", "2026-09-19"] }],
+    ]);
+    const withEvidence = run(items, { positiveGarmentEvidence: positiveEvidence });
+    const withIds = withEvidence.opportunities.rediscover.map((r) => r.garmentId);
+
+    // Still structurally eligible — feedback adjusts priority, not eligibility.
+    assert.ok(withIds.includes("struggle-a") && withIds.includes("struggle-b"));
+    // struggle-b (no evidence) now ranks ahead of struggle-a (verified worn).
+    assert.ok(withIds.indexOf("struggle-b") < withIds.indexOf("struggle-a"), "verified positive evidence must deprioritize, never exclude");
+  });
+
+  it("feedback can never make a structurally ineligible garment eligible", () => {
+    // No low-use/struggle/unsure tag, and this specific garment's own
+    // outfitAppearances is nonzero — so it fails BOTH underuse signals
+    // (statedAs() and the hasInteractionHistory/zero-appearances check) by
+    // construction. buildRediscover's eligibility test (`!underused`) runs
+    // and returns null BEFORE positiveGarmentEvidence is ever read, so no
+    // amount of evidence can reach it.
+    const notUnderused = makeGarment({ id: "not-underused", slot: "top", garmentRelationships: [], outfitAppearances: 1 });
+    const partners = [
+      makeGarment({ id: "p1", slot: "bottom", category: "BOTTOMS" }),
+      makeGarment({ id: "p2", slot: "bottom", category: "BOTTOMS" }),
+      makeGarment({ id: "p3", slot: "bottom", category: "BOTTOMS" }),
+    ];
+    const items: WardrobeGarment[] = [notUnderused, ...partners];
+
+    const base = run(items);
+    assert.ok(!base.opportunities.rediscover.some((r) => r.garmentId === "not-underused"), "a non-underused garment must not appear without evidence either — sanity check on the fixture");
+
+    const strongestPossibleEvidence: ReadonlyMap<string, GarmentPositiveEvidence> = new Map([
+      ["not-underused", { closetItemId: "not-underused", positiveDates: ["2026-09-01", "2026-09-10", "2026-09-19"] }],
+    ]);
+    const withEvidence = run(items, { positiveGarmentEvidence: strongestPossibleEvidence });
+    assert.ok(!withEvidence.opportunities.rediscover.some((r) => r.garmentId === "not-underused"), "evidence must never grant rediscovery eligibility to a structurally ineligible garment");
+  });
+});
+
+describe("§CIA-WI Phase 2 shared-intelligence adapters have zero effect on WI's own output", () => {
+  it("running the StyleMe-outcome adapter alongside WI, on the same evidence, never changes what WI computes", () => {
+    const items = neutralWardrobe();
+    const formulaEvidence: ReadonlyMap<string, FormulaSupportState> = new Map([
+      [combinationKey(["top-black", "bottom-black"]), "strongly-supported"],
+    ]);
+    const formulaEvidenceDetail: ReadonlyMap<string, FormulaEvidence> = new Map([
+      [combinationKey(["top-black", "bottom-black"]), {
+        formulaKey: combinationKey(["top-black", "bottom-black"]), garmentIds: ["top-black", "bottom-black"],
+        positiveDates: ["2026-09-01", "2026-09-10", "2026-09-19"], negativeDates: [], mixedDates: [],
+        state: "strongly-supported", hasNegativeEvidence: false,
+      }],
+    ]);
+    const positiveGarmentEvidence: ReadonlyMap<string, GarmentPositiveEvidence> = new Map([
+      ["top-black", { closetItemId: "top-black", positiveDates: ["2026-09-01", "2026-09-10", "2026-09-19"] }],
+    ]);
+
+    const withoutAdapterCall = run(items, { passport: PASSPORT, formulaEvidence, positiveGarmentEvidence });
+
+    // Also run the Phase 2 adapters on the exact same evidence objects WI consumed.
+    const findings = [
+      ...adaptStyleMeOutcomeFormulaFindings(formulaEvidenceDetail),
+      ...adaptStyleMeOutcomeGarmentFindings(positiveGarmentEvidence),
+    ];
+    assert.ok(findings.length > 0, "sanity: the adapter actually produced something from this fixture");
+
+    const withAdapterCall = run(items, { passport: PASSPORT, formulaEvidence, positiveGarmentEvidence });
+    assert.deepEqual(withAdapterCall, withoutAdapterCall, "WI's output must be byte-identical whether or not the Phase 2 adapter was also called on the same evidence");
   });
 });

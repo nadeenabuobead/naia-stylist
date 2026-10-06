@@ -24,6 +24,7 @@ import {
   matchDimension,
   lifestyleMatch,
   visibleObservations,
+  summaryEntries,
   type RegisterDisplay,
 } from "./wardrobe-copy.ts";
 import type { RegisterReading } from "./wardrobe-needs.ts";
@@ -36,7 +37,7 @@ function makeRegister(overrides: Partial<RegisterReading> = {}): RegisterReading
     label: "everyday and casual",
     depthLabel: "Strong everyday depth",
     depthNote: "You already have plenty of usable combinations here.",
-    rawCount: 12, usableCount: 12, blockedCount: 0, unknownCount: 0,
+    rawCount: 12, usableCount: 12, blockedCount: 0, blockedPieces: [], unknownCount: 0,
     distinctLooks: 9, combinations: 144,
     needed: true, needSource: "lifestyle", needPhrase: "everyday dressing",
     ...overrides,
@@ -48,9 +49,9 @@ function makeRegister(overrides: Partial<RegisterReading> = {}): RegisterReading
 describe("§WC-1 register depth becomes plain language", () => {
   it("1 — each engine depth state maps to a customer-facing state", () => {
     const cases: Array<[string, string]> = [
-      ["Strong everyday depth", "Strong"],
-      ["Workable work depth", "Covered, with limited variety"],
-      ["Limited usable work depth", "Needs more range"],
+      ["Strong everyday depth", "Plenty of options"],
+      ["Workable work depth", "Covered, but less variety"],
+      ["Limited usable work depth", "Fewer combinations"],
       ["Your occasion wardrobe looks bigger than it really is", "Smaller than it looks"],
       ["Nothing here yet", "Nothing here yet"],
       ["Not enough evidence yet", "Still learning"],
@@ -106,8 +107,8 @@ describe("§WC-2 pairing reasons lose the jargon, not the meaning", () => {
        /structured piece balances the softer one/],
       ["Both sit in the same purple family.", /Both are purple tones/],
       ["The charcoal anchors the mauve.", /charcoal is the calmer colour and balances the mauve/],
-      ["One of them is a wardrobe neutral, so the pairing stays easy.", /goes with almost anything/],
-      ["Both are wardrobe neutrals, so nothing competes.", /plain colours that go with almost anything/],
+      ["One of them is a wardrobe neutral, so the pairing stays easy.", /an easy colour, which keeps the combination simple/],
+      ["Both are wardrobe neutrals, so nothing competes.", /colours here are all easy ones/],
       ["A fitted shape against an oversized one keeps the proportions clear.",
        /fitted piece balances the fuller oversized one/],
       ["One carries more visual weight than the other, which stops the pairing flattening.",
@@ -129,7 +130,7 @@ describe("§WC-2 pairing reasons lose the jargon, not the meaning", () => {
     const engine = "You've tagged these for weekend. One is tailored and the other relaxed — the structure is what makes it read deliberate.";
     const out = plainPairReason(engine);
 
-    assert.match(out, /tagged both of these for weekend, so they're meant for the same kind of day\./);
+    assert.match(out, /tagged both of these for weekend\./);
     assert.match(out, /The structured piece balances the softer one, so the outfit still feels put together\./);
     // The bug this test exists for: the occasion clause swallowing the second
     // reason and inventing "…deliberate, so they're meant for the same day".
@@ -245,7 +246,7 @@ describe("§WC-2 pairing reasons lose the jargon, not the meaning", () => {
 
 describe("§WC-3 labels describe what a thing does", () => {
   it("3 — hero labels say what the piece does for her", () => {
-    assert.equal(heroLabel("closet-connector", "Closet connector"), "Works with the most");
+    assert.equal(heroLabel("closet-connector", "Works across relaxed and polished looks"), "Works across relaxed and polished looks");
     assert.equal(heroLabel("passport-match", "Passport match"), "Matches your style");
     assert.equal(heroLabel("your-favourite", "Your favourite"), "Your favourite");
     assert.equal(heroLabel("most-versatile", "Most versatile"), "Most versatile");
@@ -388,11 +389,19 @@ describe("§WC-6d one garment story, told once", () => {
 // ── §WC-7 Passport match dimensions ───────────────────────────────────────────
 
 describe("§WC-7 Closet-to-Passport match", () => {
-  it("7-uneven — alignment without coverage is never reported as a strong match", () => {
+  it("7-uneven — alignment without representation is never reported as a strong match", () => {
     const m = matchDimension({ id: "synth-colour", kind: "uneven", reading: "Part of it is barely there." });
     assert.equal(m.dimension, "Colour");
-    assert.equal(m.stateText, "Strong alignment, uneven coverage");
+    assert.equal(m.stateText, "Mostly in the colours you like");
     assert.notEqual(m.stateText, "Strong match");
+  });
+
+  it("7-uneven-2 — a thin colour is named, not left as a vague 'some of it'", () => {
+    const m = matchDimension({
+      id: "synth-colour", kind: "uneven", reading: "Part of it is barely there.", thinLabel: "Grey",
+    });
+    assert.match(m.stateText, /^Mostly in the colours you like; grey appears less often$/);
+    assert.doesNotMatch(m.stateText, /some of it, not all of it/i);
   });
 
   it("7 — each synthesis line becomes a named dimension with a state", () => {
@@ -419,6 +428,50 @@ describe("§WC-7 Closet-to-Passport match", () => {
     );
     assert.equal(lifestyleMatch([strong("Everyday"), strong("Work")])!.stateText, "Strong match");
     assert.equal(lifestyleMatch([strong("Everyday"), weak("Work")])!.stateText, "Partial match");
-    assert.match(lifestyleMatch([strong("Everyday"), weak("Work")])!.reading, /Everyday is well covered/);
+    // "Covered" is avoided deliberately — WI also uses coverage for a stated
+    // dressing/coverage preference, and the ambiguity was flagged.
+    const reading = lifestyleMatch([strong("Everyday"), weak("Work")])!.reading;
+    assert.match(reading, /plenty of everyday options/i);
+    assert.doesNotMatch(reading, /\bcovered\b/i);
+  });
+});
+
+// ── §WC-7b the opening summary names the actual thin colour ───────────────────
+
+describe("§WC-7b the palette headline names the actual colour, not a vague fraction", () => {
+  it("names Grey directly instead of 'part of your palette is barely there'", () => {
+    const needs = {
+      couldUseMore: [],
+      enough: [],
+      synthesis: {
+        lines: [
+          {
+            id: "synth-colour", kind: "uneven",
+            passportSays: "the colours you said you love", closetShows: "x",
+            reading: "Your Closet stays closely within the colours you told nAia you like, but Grey appears much less often.",
+            evidence: [], thinLabel: "Grey",
+          },
+        ],
+      },
+      headlines: [{ id: "synth-colour", text: "x", source: "synthesis", evidence: [] }],
+    } as never;
+    const entries = summaryEntries(needs);
+    const colour = entries.find((e) => e.id === "synth-colour")!;
+    assert.ok(colour, "the synthesis headline is surfaced in the opening summary");
+    assert.equal(colour.headline, "Grey appears less often in your wardrobe");
+    assert.doesNotMatch(colour.headline, /barely there/i);
+    assert.doesNotMatch(colour.headline, /part of your palette/i);
+  });
+});
+
+// The colour reading sat directly above COVERAGE — PARTIAL MATCH, where
+// "coverage" means how much of the body she wants covered. Two meanings, one
+// word, one line apart.
+describe("§WC-8 colour language", () => {
+  it("§WC-8a the palette reading never borrows the word \"coverage\"", () => {
+    for (const kind of ["alignment", "uneven", "tension", "unclear"] as const) {
+      const m = matchDimension({ id: "synth-colour", kind, reading: "x" });
+      assert.doesNotMatch(m.stateText, /coverage/i);
+    }
   });
 });

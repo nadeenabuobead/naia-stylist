@@ -21,8 +21,11 @@ import {
   type OutcomeFact,
   type StyleMeSessionFact,
   type WardrobeNeeds,
+  IDENTITY_INTENTIONS,
 } from "./wardrobe-needs.ts";
 import type { WardrobeGarment, WardrobePassport } from "./wardrobe-intelligence.ts";
+import type { RawStyleMeDemandFact } from "./styleme-demand-evidence.ts";
+import { adaptWardrobeFindings } from "./customer-intelligence-wardrobe-adapter.ts";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -146,6 +149,7 @@ function run(
     passport?: WardrobePassport | null;
     sessions?: StyleMeSessionFact[] | null;
     outcomes?: OutcomeFact[] | null;
+    demandFacts?: RawStyleMeDemandFact[] | null;
   } = {},
 ): WardrobeNeeds {
   return computeWardrobeNeeds({
@@ -153,6 +157,7 @@ function run(
     passport: opts.passport ?? null,
     styleMeSessions: opts.sessions ?? null,
     outcomes: opts.outcomes ?? null,
+    styleMeDemandFacts: opts.demandFacts ?? null,
   });
 }
 
@@ -172,13 +177,16 @@ describe("§WN-1 depth that is already sufficient", () => {
     assert.ok(everyday.distinctLooks >= 6, `expected deep everyday coverage, got ${everyday.distinctLooks}`);
     assert.ok(!moreIds(needs).includes("everyday"), "a well-covered everyday register must never be a gap");
     assert.ok(needs.enough.length > 0, "deep neutral everyday depth should register as enough");
-    assert.match(enoughText(needs), /Another similar piece is unlikely to materially expand what you can wear/);
+    assert.match(enoughText(needs), /Another similar one probably wouldn't give you many new options/);
     // Where a thinner register exists, the alternative is offered positively
     // rather than as a comparison the customer has to unpack.
     assert.doesNotMatch(enoughText(needs), /, where .* would\./);
   });
 
-  it("1a-2 — a thinner register is named as something to strengthen, not as a comparison", () => {
+  it("1a-2 — the enough claim stays scoped to its own cluster, even with a thinner register elsewhere", () => {
+    // Naming the thinner register as something worth strengthening is the
+    // recommendations layer's job (see §WR-4) — the needs layer's own "enough"
+    // claim never mentions another register at all.
     const items = [
       ...variedLooks("casual", 5),
       makeGarment({ slot: "top", formality: "business-casual" }),
@@ -186,7 +194,8 @@ describe("§WN-1 depth that is already sufficient", () => {
     ];
     const needs = run(items, { passport: makePassport({ lifestyle: ["everyday-casual", "work-office"] }) });
     assert.ok(needs.enough.length > 0, "everyday should still read as enough");
-    assert.match(enoughText(needs), /strengthening your work options would add more\./);
+    assert.match(enoughText(needs), /Another similar one probably wouldn't give you many new options/);
+    assert.doesNotMatch(enoughText(needs), /your work (options|wardrobe)/i, "the needs layer's own claim must not name another register");
   });
 
   it("1b — the enough claim names the cluster, not the whole wardrobe", () => {
@@ -221,10 +230,10 @@ describe("§WN-1c depth is not a cross product", () => {
     const finding = needs.couldUseMore.find((f) => f.register === "everyday");
     assert.ok(finding, "26 near-identical pieces serving a stated life is a real finding");
     assert.equal(finding!.kind, "repetition");
-    assert.match(finding!.body, /same outfit/);
-    assert.match(finding!.body, /wouldn't widen what you can wear/);
-    // The one thing it must never do is recommend more of the same.
-    assert.doesNotMatch(finding!.body, /you could use more of|buy more like/i);
+    assert.match(finding!.body, /create similar combinations/);
+    // The wardrobe fact only — what to do about it belongs to the shopping
+    // section exclusively, never restated here.
+    assert.doesNotMatch(finding!.body, /you could use more of|buy more like|buying more|wouldn't widen|contrast/i);
   });
 
   it("1e — the page never says 'enough' and 'need more' about one register", () => {
@@ -864,5 +873,200 @@ describe("§WN-11 structural guards", () => {
         assert.ok(e.signal && e.field && e.detail, `${finding.id} has a hollow evidence row`);
       }
     }
+  });
+});
+
+// ── §WN-9 — identity claims need identity evidence ────────────────────────────
+//
+// Stated as an EVIDENCE requirement, not as a forbidden phrase. Renaming the
+// row would satisfy a wording test and change nothing about the claim.
+
+describe("§WN-9 identity intentions", () => {
+  const rated = (intention: string, n: number) =>
+    Array.from({ length: n }, (_u, i) =>
+      makeGarment({
+        id: `g-${intention}-${i}`,
+        intentionsSource: "curated",
+        intentions: { [intention]: "strong" } as never,
+      }),
+    );
+
+  it("§WN-9a a garment rating never evidences a claim about the customer", () => {
+    // Every identity intention, rated strongly on many garments, and none of
+    // them may reach the page — because nothing here was compared to HER.
+    for (const intention of IDENTITY_INTENTIONS) {
+      const needs = run(rated(intention, 12), { passport: makePassport() });
+      const shown = needs.intentions.closetStrengths.map((c) => c.intention);
+      assert.ok(
+        !shown.includes(intention),
+        `${intention} is a claim about the customer and has only garment ratings behind it`,
+      );
+    }
+  });
+
+  it("§WN-9b capability intentions are still reported, with their counts", () => {
+    const needs = run(rated("feel-put-together", 9), { passport: makePassport() });
+    const row = needs.intentions.closetStrengths.find((c) => c.intention === "feel-put-together");
+    assert.ok(row, "what a garment can support is a fact about the garment");
+    assert.equal(row!.strong, 9, "the count is the number of pieces rated, nothing else");
+  });
+
+  it("§WN-9c suppression does not touch what SHE chose", () => {
+    // Her own StyleMe selections are her evidence about herself, and are
+    // counted from sessions alone — never from a garment rating.
+    const sessions = Array.from({ length: 5 }, (_u, i) => ({
+      id: `s${i}`, register: "everyday", garmentIds: [], intentions: ["feel-like-myself"],
+    }));
+    const needs = run(rated("feel-like-myself", 12), { passport: makePassport(), sessions: sessions as never });
+    assert.ok(
+      needs.intentions.chosen.some((c) => c.intention === "feel-like-myself"),
+      "her own choice survives; only the garment-rated claim is suppressed",
+    );
+    assert.ok(!needs.intentions.closetStrengths.some((c) => c.intention === "feel-like-myself"));
+  });
+});
+
+// ── §WN-12 Repetition evidence shows the actual repeated pieces ────────────────
+
+describe("§WN-12 a repetition finding's evidence is the tops and bottoms, not accessories", () => {
+  const repetitiveWork = () => {
+    const out: WardrobeGarment[] = [];
+    const topShapes = [
+      { silhouette: "straight", fitProfile: "tailored" },
+      { silhouette: "fitted", fitProfile: "relaxed" },
+    ];
+    for (let i = 0; i < 6; i++) {
+      out.push(makeGarment({
+        slot: "top", category: "TOPS", formality: "business-casual",
+        topLength: "hip-length", hemLength: "n/a", ...topShapes[i % topShapes.length],
+      }));
+    }
+    for (let i = 0; i < 5; i++) {
+      out.push(makeGarment({
+        slot: "bottom", category: "BOTTOMS", formality: "business-casual",
+        topLength: "n/a", hemLength: "full", fitProfile: "tailored", silhouette: "straight",
+      }));
+    }
+    // Same register, but neither an accessory nor a shoe demonstrates "these
+    // combinations repeat the same formula" — only the tops and bottoms do.
+    out.push(makeGarment({ slot: "bag", category: "ACCESSORIES", formality: "business-casual" }));
+    out.push(makeGarment({ slot: "shoes", category: "SHOES", formality: "business-casual" }));
+    out.push(makeGarment({ slot: "outerwear", category: "OUTERWEAR", formality: "business-casual" }));
+    return out;
+  };
+
+  it("§WN-12a the finding names the wardrobe fact, not the internal register word", () => {
+    const needs = run(repetitiveWork(), { passport: makePassport({ lifestyle: ["work-office"] }) });
+    const finding = needs.couldUseMore.find((f) => f.kind === "repetition" && f.register === "work")!;
+    assert.ok(finding, "the repetition gap is open");
+    assert.match(finding.title, /you have work pieces, but fewer ways to combine them/i);
+    assert.doesNotMatch(finding.title, /offer limited outfit variety/i);
+  });
+
+  it("§WN-12b the finding's garmentIds are drawn only from tops, bottoms and one-pieces", () => {
+    const items = repetitiveWork();
+    const needs = run(items, { passport: makePassport({ lifestyle: ["work-office"] }) });
+    const finding = needs.couldUseMore.find((f) => f.kind === "repetition" && f.register === "work")!;
+    assert.ok(finding.garmentIds.length > 0);
+    const bySlot = new Map(items.map((g) => [g.id, g.slot]));
+    for (const id of finding.garmentIds) {
+      assert.ok(["top", "bottom", "dress", "set"].includes(bySlot.get(id)!), `unexpected slot for ${id}: ${bySlot.get(id)}`);
+    }
+    const accessoryIds = items.filter((g) => ["bag", "shoes", "outerwear"].includes(g.slot)).map((g) => g.id);
+    for (const id of accessoryIds) assert.ok(!finding.garmentIds.includes(id), `${id} should never be repetition evidence`);
+  });
+});
+
+// ── §WN-13 StyleMe-demand V1 — a separate, 90-day-windowed, additive input ──
+
+function demandFact(partial: Partial<RawStyleMeDemandFact> & { sessionId: string; createdAt: Date }): RawStyleMeDemandFact {
+  return {
+    occasion: "everyday", register: "everyday", formalityConditional: null,
+    intentions: [], desiredFeeling: null, closetAnchorId: "anchor-1", styleFrom: "CLOSET",
+    ...partial,
+  };
+}
+
+describe("§WN-13 StyleMe-demand V1 wiring", () => {
+  it("13a — styleMeDemandFacts is additive: supplying it changes nothing but needs.demand", () => {
+    const items = makeLook("casual", 5);
+    const sessions: StyleMeSessionFact[] = [{ id: "s1", register: "everyday", intentions: ["feel-like-myself"], garmentIds: [] }];
+    const withoutDemand = run(items, { sessions });
+    const withDemand = run(items, {
+      sessions,
+      demandFacts: [demandFact({ sessionId: "d1", createdAt: new Date("2026-09-01T10:00:00.000Z") })],
+    });
+
+    assert.deepEqual(withDemand.registers, withoutDemand.registers);
+    assert.deepEqual(withDemand.enough, withoutDemand.enough);
+    assert.deepEqual(withDemand.couldUseMore, withoutDemand.couldUseMore);
+    assert.deepEqual(withDemand.synthesis, withoutDemand.synthesis);
+    assert.deepEqual(withDemand.styleMe, withoutDemand.styleMe);
+    assert.deepEqual(withDemand.outcomes, withoutDemand.outcomes);
+    assert.deepEqual(withDemand.intentions, withoutDemand.intentions);
+    assert.deepEqual(withDemand.headlines, withoutDemand.headlines);
+    // The new field itself DOES legitimately differ (learning vs available) —
+    // that's the one place demand is allowed to show up.
+    assert.notDeepEqual(withDemand.demand, withoutDemand.demand);
+  });
+
+  it("13b — registerDemand reuses the existing register's distinctLooks/depthLabel verbatim, never recomputing them", () => {
+    const items = makeLook("casual", 5);
+    const needs = run(items, {
+      demandFacts: [demandFact({ sessionId: "d1", createdAt: new Date("2026-09-01T10:00:00.000Z") })],
+    });
+    const everydayRegister = needs.registers.find((r) => r.register === "everyday")!;
+    const everydayDemand = needs.demand.registerDemand.find((d) => d.register === "everyday")!;
+    assert.equal(everydayDemand.closetDistinctLooks, everydayRegister.distinctLooks);
+    assert.equal(everydayDemand.closetDepthLabel, everydayRegister.depthLabel);
+    assert.equal(everydayDemand.demandEventCount, 1);
+  });
+
+  it("13c — many repeated demand events for a register never change that register's structural reading", () => {
+    const items = makeLook("casual", 5);
+    const noDemand = run(items, {});
+    const heavyDemand = run(items, {
+      demandFacts: Array.from({ length: 20 }, (_, i) =>
+        demandFact({ sessionId: `d${i}`, createdAt: new Date(Date.parse("2026-09-01T10:00:00.000Z") + i * 3_600_000), intentions: ["feel-like-myself"] })),
+    });
+    assert.deepEqual(heavyDemand.registers, noDemand.registers, "20 repeated demand events must not alter the structural register reading at all");
+    assert.deepEqual(heavyDemand.enough, noDemand.enough);
+    assert.deepEqual(heavyDemand.couldUseMore, noDemand.couldUseMore);
+    assert.equal(heavyDemand.demand.registerDemand.find((d) => d.register === "everyday")!.demandEventCount, 20);
+  });
+
+  it("13d — demand is derived only from styleMeDemandFacts, never from styleMeSessions, even when the two disagree", () => {
+    const items = makeLook("casual", 5);
+    const needs = run(items, {
+      sessions: [{ id: "old1", register: "work", intentions: ["confidence"], garmentIds: [] }],
+      demandFacts: [demandFact({
+        sessionId: "new1", createdAt: new Date("2026-09-01T10:00:00.000Z"),
+        occasion: "everyday", register: "everyday", intentions: ["feel-attractive"],
+      })],
+    });
+
+    // The OLD system (styleMe.requests) must read only styleMeSessions.
+    assert.equal(needs.styleMe.requests.find((r) => r.register === "work")?.sessions, 1, "the old raw system must still see the work request");
+    assert.equal(needs.styleMe.requests.some((r) => r.register === "everyday"), false, "the old raw system must never pick up a demandFacts-only register");
+
+    // The NEW system (demand.registerDemand) must read only styleMeDemandFacts.
+    assert.equal(needs.demand.registerDemand.find((d) => d.register === "everyday")?.demandEventCount, 1, "demand must see the everyday demand fact");
+    assert.equal(needs.demand.registerDemand.some((d) => d.register === "work"), false, "demand must never pick up a styleMeSessions-only register");
+  });
+});
+
+describe("§CIA-WI-7 Phase 3 wardrobe adapter has zero effect on WI's own output", () => {
+  it("calling adaptWardrobeFindings alongside computeWardrobeNeeds, on the same output, never changes what WI computes", () => {
+    const items = makeLook("casual", 13);
+    const passport = makePassport({ lifestyle: ["everyday-casual"] });
+
+    const before = run(items, { passport });
+    assert.ok(before.couldUseMore.length > 0, "sanity: this fixture produces a real couldUseMore finding");
+
+    const findings = adaptWardrobeFindings(before.couldUseMore, before.registers);
+    assert.ok(findings.length > 0, "sanity: the adapter actually produced something from this fixture");
+
+    const after = run(items, { passport });
+    assert.deepEqual(after, before, "WI's output must be byte-identical whether or not the Phase 3 adapter was also called on its output");
   });
 });

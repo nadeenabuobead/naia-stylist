@@ -40,6 +40,8 @@
 //   3. Every block declares its own availability. When the data is too thin, the
 //      block returns state "learning" with an honest reason — never a placeholder.
 
+import { evidenceTierRank, type FormulaSupportState, type GarmentPositiveEvidence } from "~/lib/ai/wardrobe-feedback-evidence";
+
 // ── Signal model ──────────────────────────────────────────────────────────────
 
 export type SignalType =
@@ -309,6 +311,13 @@ export interface WardrobePairing {
   reason: string;
   untried: boolean;
   evidence: Evidence[];
+  /**
+   * The register most of this combination's pieces read at, by formality —
+   * majority vote, not a new judgement. Lets the page place a register's own
+   * combination alongside that register's gap, instead of it only ever
+   * living in a general list. Null when nothing resolves to a register.
+   */
+  register: "everyday" | "work" | "occasion" | null;
 }
 
 /**
@@ -337,6 +346,20 @@ export interface WardrobePairings {
   untriedPresentation: UntriedPresentation;
   /** Section-level wording. Non-null only when presentation is "section". */
   untriedNote: string | null;
+  /**
+   * The strongest valid candidates for each register (ranked, a handful
+   * each), independent of the global top-N cap and cross-register "no
+   * garment twice" dedup that `pairings` above is subject to. A register with
+   * genuine depth can still lose every seat in that competition to
+   * occasion-tagged pairs elsewhere — this is the same scored, eligible
+   * candidate pool, read a second way, so a per-register presentation always
+   * has its own real example(s) to choose from when any exist. A caller that
+   * needs to skip a candidate for a presentation-level reason (e.g. one whose
+   * evidence is specifically for a declared activity, not this generic
+   * register) can fall to the next one rather than have none at all. Empty
+   * ({}) whenever no candidates exist at all.
+   */
+  bestByRegister: Partial<Record<"everyday" | "work" | "occasion", WardrobePairing[]>>;
 }
 
 export type ObservationKind =
@@ -521,6 +544,7 @@ const SILHOUETTE_LABELS: Readonly<Record<string, string>> = {
   relaxed: "Relaxed", flared: "Flared", tapered: "Tapered", wrap: "Wrap",
   balloon: "Balloon", asymmetric: "Asymmetric", column: "Column", boxy: "Boxy",
   cropped: "Cropped", empire: "Empire", shift: "Shift", bodycon: "Body-skimming",
+  "wide-leg": "Wide-leg",
 };
 
 const FIT_LABELS: Readonly<Record<string, string>> = {
@@ -781,6 +805,118 @@ function slotsPair(a: string, b: string): boolean {
 const FUNCTIONAL_CATEGORIES: ReadonlySet<string> = new Set([
   "ACTIVEWEAR", "SWIMWEAR", "LOUNGEWEAR",
 ]);
+
+// ── Functional-wardrobe crossover ────────────────────────────────────────────
+// Sportswear stays sportswear by default.
+//
+// Activewear, swimwear and loungewear are not one wardrobe — they are three,
+// and they are not interchangeable with each other either. Sharing the property
+// "not ordinary clothing" says nothing about whether a sports bra belongs with
+// a swim cover-up. Membership in FUNCTIONAL_CATEGORIES therefore establishes
+// nothing on its own; pieces pair within their OWN category.
+//
+// Crossing into ordinary clothes has to be earned, and earned from evidence
+// about the specific garment rather than from the kind of thing it is. Three
+// conditions, all required:
+//
+//   1. it is a layer worn OVER something — outerwear slot, on an explicit
+//      crossover subcategory list;
+//   2. SHE has tagged it for a context outside sport and transit;
+//   3. the ordinary piece is casual enough to receive it.
+//
+// Condition 2 is necessary, never sufficient. A shared occasion tag on its own
+// does not bridge the two wardrobes — leggings tagged "weekend" are still
+// leggings. It only says that a garment which already qualifies as a crossover
+// layer is genuinely worn as clothing rather than only as kit.
+//
+// Worked example from a real Closet: a zip-up hoodie tagged casual, weekend,
+// travel, gym and loungewear crosses over. A track jacket tagged only travel
+// and gym does not — same slot, both on the subcategory list, and the second
+// has no evidence behind it.
+const CROSSOVER_ELIGIBLE_SUBCATEGORIES: ReadonlySet<string> = new Set([
+  "track jacket", "athletic jacket", "varsity jacket", "bomber jacket",
+  "zip-up jacket", "zip up jacket", "windbreaker", "anorak",
+  "hoodie", "zip-up hoodie", "zip up hoodie",
+  "sweatshirt", "pullover", "fleece",
+]);
+
+/**
+ * Contexts that are ordinary dressing rather than sport or transit.
+ *
+ * "travel" is deliberately absent. Activewear is tagged for travel constantly
+ * because it is comfortable to sit in, which is not evidence that it reads as
+ * clothing in a put-together outfit. "loungewear" is absent for the same
+ * reason: at home is not an outfit.
+ */
+const EVERYDAY_OCCASIONS: ReadonlySet<string> = new Set([
+  "casual", "weekend", "everyday", "errands", "shopping", "brunch",
+  "school run", "school-run", "date", "date night", "date-night",
+  "work", "smart casual", "smart-casual", "dinner", "drinks",
+]);
+
+/** Levels of dress a functional layer can join. */
+const CROSSOVER_CONTEXT_FORMALITY: ReadonlySet<string> = new Set([
+  "casual", "smart-casual",
+]);
+
+function isFunctionalGarment(g: WardrobeGarment): boolean {
+  return FUNCTIONAL_CATEGORIES.has(g.category);
+}
+
+/** Is this the kind of piece worn over ordinary clothes? */
+function isCrossoverLayer(g: WardrobeGarment): boolean {
+  // Swimwear and loungewear never cross over, whatever they are called.
+  if (g.category !== "ACTIVEWEAR") return false;
+  // It has to be worn OVER something. A performance tee is still sportswear.
+  if (g.slot !== "outerwear") return false;
+  const sub = norm(g.subcategory);
+  if (sub === null) return false;
+  for (const token of CROSSOVER_ELIGIBLE_SUBCATEGORIES) {
+    if (sub === token || sub.includes(token)) return true;
+  }
+  return false;
+}
+
+/**
+ * Has she actually worn this outside sport?
+ *
+ * Read from her own occasion tags. Necessary for crossover, never sufficient on
+ * its own — see the note above.
+ */
+function wornBeyondSport(g: WardrobeGarment): boolean {
+  for (const occasion of g.occasions ?? []) {
+    const o = norm(occasion);
+    if (o !== null && EVERYDAY_OCCASIONS.has(o)) return true;
+  }
+  return false;
+}
+
+/**
+ * May these two pieces meet at all?
+ *
+ * Ordinary clothes: yes, the usual gates decide. Two functional pieces: only
+ * within the same functional category. Across the divide: only an eligible
+ * layer, with evidence it is worn beyond sport, into casual company. Unknown
+ * formality reads as "not established" and refuses — the default has to be
+ * that sportswear stays sportswear.
+ */
+function functionCompatible(a: WardrobeGarment, b: WardrobeGarment): boolean {
+  const fa = isFunctionalGarment(a);
+  const fb = isFunctionalGarment(b);
+
+  if (!fa && !fb) return true;
+  // Activewear with swimwear, or swimwear with loungewear, is not a wardrobe.
+  if (fa && fb) return a.category === b.category;
+
+  const functional = fa ? a : b;
+  const core = fa ? b : a;
+
+  if (!isCrossoverLayer(functional)) return false;
+  if (!wornBeyondSport(functional)) return false;
+
+  const coreFormality = norm(core.formality);
+  return coreFormality !== null && CROSSOVER_CONTEXT_FORMALITY.has(coreFormality);
+}
 
 // Finishing slots. A black tote is compatible with almost everything by
 // construction, so connectivity says nothing about it — but a favourite pair of
@@ -1074,6 +1210,9 @@ const CLOSE_SILHOUETTES = new Set(["fitted", "column", "straight", "tapered"]);
  * thing it can say about each pair, rather than repeating the same sentence.
  */
 function scorePair(a: WardrobeGarment, b: WardrobeGarment): PairScore {
+  // Runs first: the two wardrobes must be allowed to meet before anything about
+  // colour or level of dress is worth asking.
+  if (!functionCompatible(a, b)) return { compatible: false, reasons: [] };
   if (!weightBalanced(a, b)) return { compatible: false, reasons: [] };
 
   const fd = formalityDistance(norm(a.formality), norm(b.formality));
@@ -1291,21 +1430,27 @@ function buildDna(items: WardrobeGarment[], coverage: WardrobeCoverage): Wardrob
     const coreCount = items.filter((i) => CORE_SLOTS.has(i.slot)).length;
     const minRecurrence = Math.max(3, Math.ceil(coreCount * 0.15));
 
+    // Silhouette and fit are two different fields, but the customer reads one
+    // ranked list of shapes — so both are gathered as candidates and ranked
+    // together BY COUNT before taking the top MAX_SHAPES. Filling silhouette
+    // slots first and only then topping up from fitProfile (the previous
+    // approach) let a lower-count silhouette outrank a higher-count fit —
+    // "fitted (9) and relaxed (10)" instead of "relaxed (10) and fitted (9)".
     const silCounts = countBy(items, (i) => norm(i.silhouette));
-    for (const [token, count] of topEntries(silCounts, MAX_SHAPES)) {
+    const fitCounts = countBy(items, (i) => norm(i.fitProfile));
+    const candidates: WardrobeShape[] = [];
+    for (const [token, count] of silCounts) {
       if (count < minRecurrence) continue;
-      shapes.push({ label: SILHOUETTE_LABELS[token] ?? titleCase(token), count, field: "silhouette" });
+      candidates.push({ label: SILHOUETTE_LABELS[token] ?? titleCase(token), count, field: "silhouette" });
     }
-    if (shapes.length < MAX_SHAPES) {
-      const fitCounts = countBy(items, (i) => norm(i.fitProfile));
-      for (const [token, count] of topEntries(fitCounts, MAX_SHAPES)) {
-        if (count < minRecurrence) continue;
-        const label = FIT_LABELS[token] ?? titleCase(token);
-        if (shapes.some((sh) => sh.label === label)) continue;
-        shapes.push({ label, count, field: "fitProfile" });
-        if (shapes.length >= MAX_SHAPES) break;
-      }
+    for (const [token, count] of fitCounts) {
+      if (count < minRecurrence) continue;
+      const label = FIT_LABELS[token] ?? titleCase(token);
+      if (candidates.some((c) => c.label === label)) continue;
+      candidates.push({ label, count, field: "fitProfile" });
     }
+    candidates.sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+    shapes.push(...candidates.slice(0, MAX_SHAPES));
     // Counts stay in the data as evidence; the customer reads the shape, not the tally.
     if (shapes.length > 1) {
       shapesReading = `${capitalise(shapes[0].label.toLowerCase())} shapes recur most, with ${joinList(shapes.slice(1, 3).map((sh) => sh.label.toLowerCase()))} close behind.`;
@@ -1458,16 +1603,201 @@ function formalityBuckets(items: WardrobeGarment[]): Map<string, number> {
   });
 }
 
+// ── Usability ─────────────────────────────────────────────────────────────────
+//
+// Lives here, not in the needs layer above, because buildPairings() below needs
+// it too and this file may not depend upward on wardrobe-needs.ts. The needs
+// layer imports and re-exports these so every existing consumer is unaffected.
+
+type Usability = "usable" | "blocked" | "unknown";
+
+/**
+ * Does this garment contradict something the customer has told nAia?
+ *
+ * The coverage rules mirror the shipped StyleMe exclusion semantics exactly
+ * (see the dressing-preference block in styleme-recommendation.ts) so a piece
+ * StyleMe will refuse to use is never counted here as usable depth.
+ *
+ * ONE DELIBERATE DIFFERENCE. StyleMe fails CLOSED on absent metadata: it would
+ * rather drop a garment than risk dressing her wrongly. Doing that here would
+ * turn an unanalysed closet into a wardrobe of "blocked" pieces and report a gap
+ * that does not exist. So absent metadata resolves to "unknown", which is
+ * counted and shown but never used as evidence of a gap.
+ */
+// Blocked reasons are written as gerund phrases ("keeping your arms covered")
+// because they are consumed inside a sentence: "…only 2 currently meet your
+// stated coverage preferences — including keeping your arms covered."
+function classifyUsability(
+  garment: WardrobeGarment,
+  passport: WardrobePassport | null,
+): { usability: Usability; reason: string | null } {
+  const read = garment.analysisStatus === "ready" || garment.intelligenceSource === "curated";
+  if (!read) return { usability: "unknown", reason: "not read yet" };
+  if (!passport) return { usability: "usable", reason: null };
+
+  // Colours she asked nAia to avoid.
+  if (passport.avoidColors.length > 0) {
+    const family = closetColourFamily(garment.primaryColor);
+    if (family) {
+      for (const token of passport.avoidColors) {
+        const families = PASSPORT_COLOUR_FAMILIES[norm(token) ?? ""] ?? [];
+        if (families.includes(family)) {
+          return { usability: "blocked", reason: `avoiding colours you asked nAia to leave out` };
+        }
+      }
+    }
+  }
+
+  const prefs = new Set(passport.dressingPreferences ?? []);
+  const isTopLike = TOP_SLOTS.has(garment.slot) || garment.slot === "set";
+  // What actually covers her legs is what she wears ON them. A coat is worn
+  // OVER an outfit and cannot uncover anything, so judging its hem against a
+  // leg-coverage preference is a false negative — it was marking a full-length
+  // trench coat unusable, and inflating the customer-facing count of pieces
+  // that "don't meet" her preferences.
+  const coversLegs = BOTTOM_SLOTS.has(garment.slot) || ONE_PIECE_SLOTS.has(garment.slot);
+
+  // Each check: "n/a" means the field does not apply to this garment type and is
+  // exempt. A null value on an otherwise-read garment is unknown, not blocked.
+  const check = (
+    active: boolean,
+    value: string | null | undefined,
+    safe: (v: string) => boolean,
+    reason: string,
+  ): { usability: Usability; reason: string | null } | null => {
+    if (!active) return null;
+    if (value === undefined || value === null) return { usability: "unknown", reason: "coverage not read yet" };
+    if (value === "n/a") return null;
+    return safe(value) ? null : { usability: "blocked", reason };
+  };
+
+  const checks = [
+    check(
+      prefs.has("arms-covered"),
+      garment.sleeveLength,
+      (v) => v === "full" || v === "three-quarter",
+      "keeping your arms covered",
+    ),
+    check(
+      prefs.has("avoid-sleeveless") && !prefs.has("arms-covered"),
+      garment.sleeveLength,
+      (v) => v !== "sleeveless",
+      "avoiding sleeveless styles",
+    ),
+    check(
+      prefs.has("chest-neckline-covered") || prefs.has("prefer-higher-necklines"),
+      garment.necklineCoverage,
+      (v) => v === "high" || v === "crew" || v === "mock" || v === "cowl-high",
+      "keeping your neckline covered",
+    ),
+    check(
+      prefs.has("legs-covered") && coversLegs,
+      garment.hemLength,
+      (v) => v === "full" || v === "maxi",
+      "keeping your legs covered",
+    ),
+    check(
+      prefs.has("longer-tops") && isTopLike,
+      garment.topLength,
+      (v) => v === "hip-length" || v === "longline" || v === "tunic",
+      "preferring longer tops",
+    ),
+    check(
+      prefs.has("no-cropped-tops") && isTopLike,
+      garment.topLength,
+      (v) => v !== "cropped",
+      "avoiding cropped tops",
+    ),
+    check(
+      prefs.has("looser-fitting"),
+      garment.fitProfile,
+      (v) => v === "relaxed" || v === "loose" || v === "oversized" || v === "flowy",
+      "preferring looser-fitting clothes",
+    ),
+  ].filter(Boolean) as Array<{ usability: Usability; reason: string | null }>;
+
+  const blocked = checks.find((c) => c.usability === "blocked");
+  if (blocked) return blocked;
+  const unknown = checks.find((c) => c.usability === "unknown");
+  if (unknown) return unknown;
+  return { usability: "usable", reason: null };
+}
+
+/**
+ * Layers she owns that genuinely resolve why a piece is blocked.
+ *
+ * Deliberately narrow. A layer can cover a cropped top, a bare neckline or bare
+ * arms, because it is worn over them. It cannot make a short hem long: legs are
+ * covered by what is worn ON them, so a leg-coverage failure is never rescued.
+ * The layer must also be compatible with the piece and pass the same check
+ * itself — otherwise the suggestion just moves the problem.
+ */
+const LAYER_RESOLVABLE = /arms covered|sleeveless|neckline|cropped tops|longer tops/i;
+
+function layersThatResolve(
+  garment: WardrobeGarment,
+  items: readonly WardrobeGarment[],
+  passport: WardrobePassport | null,
+): WardrobeGarment[] {
+  const own = classifyUsability(garment, passport);
+  if (own.usability !== "blocked" || own.reason === null) return [];
+  if (!LAYER_RESOLVABLE.test(own.reason)) return [];
+
+  return items.filter(
+    (layer) =>
+      layer.id !== garment.id &&
+      layer.slot === "outerwear" &&
+      classifyUsability(layer, passport).usability === "usable" &&
+      scorePair(garment, layer).compatible,
+  );
+}
+
+/**
+ * Whether a garment may appear in a proposed combination at all, and — if it
+ * only clears its stated requirements with help — which specific layers in
+ * THIS Closet would genuinely do that.
+ *
+ * A blocked garment with no resolving layer must never be proposed, in any
+ * combination, full stop. A blocked garment WITH a resolving layer may only be
+ * proposed alongside one of those exact layers — never alone, and never with a
+ * different layer that happens to be handy. This is the same rule the Coverage
+ * section already applies per-garment; combinations must not relax it.
+ */
+function pairingEligibility(
+  garment: WardrobeGarment,
+  items: readonly WardrobeGarment[],
+  passport: WardrobePassport | null,
+): { eligible: boolean; requiresLayerFrom: ReadonlySet<string> | null } {
+  const { usability } = classifyUsability(garment, passport);
+  if (usability !== "blocked") return { eligible: true, requiresLayerFrom: null };
+  const rescuers = layersThatResolve(garment, items, passport);
+  if (rescuers.length === 0) return { eligible: false, requiresLayerFrom: null };
+  return { eligible: true, requiresLayerFrom: new Set(rescuers.map((r) => r.id)) };
+}
+
 // ── Pairings ──────────────────────────────────────────────────────────────────
 
 function buildPairings(
   items: WardrobeGarment[],
   seenCombinations: ReadonlySet<string>,
+  passport: WardrobePassport | null,
+  formulaEvidence: ReadonlyMap<string, FormulaSupportState> | null = null,
 ): WardrobePairings {
-  const tops = items.filter((i) => TOP_SLOTS.has(i.slot));
-  const bottoms = items.filter((i) => BOTTOM_SLOTS.has(i.slot));
-  const onePieces = items.filter((i) => ONE_PIECE_SLOTS.has(i.slot));
-  const outer = items.filter((i) => i.slot === "outerwear");
+  // The same per-garment rule the Coverage section applies: a garment that
+  // fails a stated requirement with no genuine rescue never appears here, full
+  // stop. One that only clears it with help may appear only alongside the
+  // specific layer that actually does that — never alone, never with a
+  // different layer that merely happens to be free.
+  const eligibility = new Map(items.map((i) => [i.id, pairingEligibility(i, items, passport)]));
+  const eligible = (i: WardrobeGarment) => eligibility.get(i.id)!.eligible;
+  const byId = new Map(items.map((i) => [i.id, i]));
+
+  const tops = items.filter((i) => TOP_SLOTS.has(i.slot) && eligible(i));
+  const bottoms = items.filter((i) => BOTTOM_SLOTS.has(i.slot) && eligible(i));
+  const onePieces = items.filter((i) => ONE_PIECE_SLOTS.has(i.slot) && eligible(i));
+  // A layer that itself fails a stated requirement is not a valid layer —
+  // nothing in this combination-building step lets a second layer rescue it.
+  const outer = items.filter((i) => i.slot === "outerwear" && classifyUsability(i, passport).usability !== "blocked");
 
   const hasCore = (tops.length > 0 && bottoms.length > 0) || onePieces.length > 0;
   if (!hasCore) {
@@ -1478,6 +1808,7 @@ function buildPairings(
       totalFound: 0,
       untriedPresentation: "none",
       untriedNote: null,
+      bestByRegister: {},
     };
   }
 
@@ -1487,13 +1818,28 @@ function buildPairings(
     for (const bottom of bottoms) {
       const pair = scorePair(top, bottom);
       if (!pair.compatible) continue;
-      let ids = [top.id, bottom.id];
-      const reasons = [...pair.reasons];
+
+      // Neither garment is unconditionally usable — a resolving layer is
+      // required, not optional, and it must be one of the layers that
+      // genuinely resolves whichever of the two needs it.
+      const requiredSets = [top, bottom]
+        .map((g) => eligibility.get(g.id)!.requiresLayerFrom)
+        .filter((s): s is ReadonlySet<string> => s !== null);
+      const layerRequired = requiredSets.length > 0;
 
       const layer = outer.find((o) => {
         if (o.id === top.id || o.id === bottom.id) return false;
-        return scorePair(o, top).compatible && scorePair(o, bottom).compatible;
+        if (!scorePair(o, top).compatible || !scorePair(o, bottom).compatible) return false;
+        return layerRequired ? requiredSets.every((set) => set.has(o.id)) : true;
       });
+
+      // A resolving layer was required but none of the ones that would
+      // genuinely resolve it also works stylistically with both halves —
+      // this pair cannot be honestly proposed at all, layer or no layer.
+      if (layerRequired && !layer) continue;
+
+      let ids = [top.id, bottom.id];
+      const reasons = [...pair.reasons];
       if (layer) {
         ids = [layer.id, top.id, bottom.id];
         reasons.push({ text: "The layer works over both halves, so it holds as one outfit.", weight: 6 });
@@ -1504,7 +1850,11 @@ function buildPairings(
   }
 
   for (const piece of onePieces) {
-    const layer = outer.find((o) => scorePair(o, piece).compatible);
+    const requiresLayerFrom = eligibility.get(piece.id)!.requiresLayerFrom;
+    const layer = outer.find((o) => {
+      if (!scorePair(o, piece).compatible) return false;
+      return requiresLayerFrom ? requiresLayerFrom.has(o.id) : true;
+    });
     if (layer) {
       const pair = scorePair(layer, piece);
       const reasons = [
@@ -1524,17 +1874,76 @@ function buildPairings(
       totalFound: 0,
       untriedPresentation: "none",
       untriedNote: null,
+      bestByRegister: {},
     };
   }
 
+  // Feedback evidence tie-break — locked scope: this comparator term can
+  // only ever matter when b.score - a.score is exactly 0. It replaces what
+  // was previously an arbitrary alphabetical-only tiebreak with a more
+  // meaningful one for candidates that are already equally ranked; it can
+  // never move a candidate ahead of (or behind) one with a different
+  // score, and never changes which candidates exist in `candidates` to
+  // begin with. See wardrobe-feedback-evidence.ts for how the evidence
+  // itself is derived — StyleMe activity/generation only, never a
+  // historical look resurfacing as moodboard content.
+  const evidenceRank = (ids: string[]): number =>
+    evidenceTierRank(formulaEvidence?.get(combinationKey(ids)) ?? "none");
+
   const ranked = candidates
     .map((c) => ({ ...c, untried: !seenCombinations.has(combinationKey(c.ids)) }))
-    .sort((a, b) => b.score - a.score || combinationKey(a.ids).localeCompare(combinationKey(b.ids)));
+    .sort((a, b) =>
+      b.score - a.score
+      || evidenceRank(b.ids) - evidenceRank(a.ids)
+      || combinationKey(a.ids).localeCompare(combinationKey(b.ids)));
 
   // Lead each relationship with the most specific TRUE thing not already said in
   // this section. Nothing is invented — a reason is only skipped, never made up.
   const usedReasons = new Set<string>();
   const used = new Set<string>();
+
+  // Majority vote over formality, not a new judgement — the same bucket
+  // classifyUsability's caller already relies on elsewhere. Ties/absence
+  // resolve to null rather than guessing a register.
+  //
+  // A combination where EVERY piece is activewear/swimwear/loungewear is a
+  // legitimate pairing within its own functional wardrobe — functionCompatible
+  // already allows it — but it is not evidence of ordinary Everyday, Work or
+  // Occasion dressing, and formality alone cannot tell the two apart (a Nike
+  // hoodie's own formality reads "casual" the same as a cardigan's). The
+  // crossover rule governs whether a functional LAYER may join ordinary
+  // pieces; it was never meant to let an all-activewear top+bottom (+layer)
+  // set stand in for what "Everyday" means. So: register classification
+  // requires at least one genuinely ordinary piece in the set — an
+  // all-functional combination gets no register at all, the same honest
+  // null this function already returns for a tie.
+  const pairingRegister = (ids: string[]): "everyday" | "work" | "occasion" | null => {
+    const hasOrdinaryPiece = ids.some((id) => {
+      const g = byId.get(id);
+      return g !== undefined && !FUNCTIONAL_CATEGORIES.has(g.category);
+    });
+    if (!hasOrdinaryPiece) return null;
+    const counts = new Map<"everyday" | "work" | "occasion", number>();
+    for (const id of ids) {
+      const g = byId.get(id);
+      const f = g && norm(g.formality);
+      const bucket = f ? FORMALITY_BUCKET[f] : undefined;
+      if (bucket) counts.set(bucket, (counts.get(bucket) ?? 0) + 1);
+    }
+    // A true tie between two buckets (e.g. one garment reads "work", the
+    // other "occasion") must return null, not silently default to whichever
+    // bucket's garment happened to be listed first in `ids` — that ordering
+    // is an artifact of how the candidate was built (a layer is always
+    // listed before the one-piece it's worn over), not a real majority.
+    let best: "everyday" | "work" | "occasion" | null = null;
+    let bestCount = 0;
+    let tied = false;
+    for (const [bucket, count] of counts) {
+      if (count > bestCount) { best = bucket; bestCount = count; tied = false; }
+      else if (count === bestCount && bestCount > 0) { tied = true; }
+    }
+    return tied ? null : best;
+  };
 
   const toPairing = (candidate: (typeof ranked)[number]): WardrobePairing => {
     const lead = candidate.reasons.find((r) => !usedReasons.has(r.text)) ?? candidate.reasons[0];
@@ -1546,6 +1955,7 @@ function buildPairings(
       garmentIds: candidate.ids,
       reason: second ? `${lead.text} ${second.text}` : lead.text,
       untried: candidate.untried,
+      register: pairingRegister(candidate.ids),
       evidence: [
         ev("garment-fact", "formality/colourProfile/visualWeight/silhouette/occasions",
            candidate.reasons.map((r) => r.text).join(" "), candidate.ids),
@@ -1579,6 +1989,46 @@ function buildPairings(
   const presentation: UntriedPresentation =
     novel === 0 ? "none" : novel === pairings.length ? "section" : "per-item";
 
+  // The register with the most raw depth is not always the register that wins
+  // the global top-4: an occasion-tag bonus (weight 8) routinely outscores a
+  // plain everyday pair with only generic reasons, so a register with genuine
+  // depth can still get zero seats above. A per-register presentation needs
+  // its OWN strongest valid example, not whatever survived that competition —
+  // this is the exact same `ranked` list, just read a second way, with its own
+  // reason ledger so it never competes with (or repeats) the top-4's wording.
+  const perRegisterLedger = new Set<string>();
+  const toPairingWithLedger = (candidate: (typeof ranked)[number], ledger: Set<string>): WardrobePairing => {
+    const lead = candidate.reasons.find((r) => !ledger.has(r.text)) ?? candidate.reasons[0];
+    ledger.add(lead.text);
+    const second = candidate.reasons.find((r) => r.text !== lead.text && !ledger.has(r.text));
+    if (second) ledger.add(second.text);
+    return {
+      id: combinationKey(candidate.ids),
+      garmentIds: candidate.ids,
+      reason: second ? `${lead.text} ${second.text}` : lead.text,
+      untried: candidate.untried,
+      register: pairingRegister(candidate.ids),
+      evidence: [
+        ev("garment-fact", "formality/colourProfile/visualWeight/silhouette/occasions",
+           candidate.reasons.map((r) => r.text).join(" "), candidate.ids),
+        ...(candidate.untried
+          ? [ev("naia-interaction", "OutfitItem", "This combination has not appeared in a look nAia generated.", candidate.ids)]
+          : []),
+      ],
+    };
+  };
+  // Top few, not just one: a presentation-level exclusion (e.g. a pairing
+  // whose evidence is specifically for a declared activity, not a generic
+  // register) may need to skip past the single best to the next genuinely
+  // valid one for that register — this stays an engine-neutral list either
+  // way, ranked purely by the same score used everywhere else on this page.
+  const BEST_PER_REGISTER = 5;
+  const bestByRegister: Partial<Record<"everyday" | "work" | "occasion", WardrobePairing[]>> = {};
+  for (const register of ["everyday", "work", "occasion"] as const) {
+    const top = ranked.filter((c) => pairingRegister(c.ids) === register).slice(0, BEST_PER_REGISTER);
+    if (top.length > 0) bestByRegister[register] = top.map((c) => toPairingWithLedger(c, perRegisterLedger));
+  }
+
   return {
     state: "available",
     pairings,
@@ -1588,6 +2038,7 @@ function buildPairings(
       presentation === "section"
         ? "These are strong connections nAia hasn't put together in one of your looks yet."
         : null,
+    bestByRegister,
   };
 }
 
@@ -2150,12 +2601,31 @@ function buildObservations(
   }
 
   // 3. FAVOURITE + ISOLATED.
+  //
+  // One-piece garments are excluded, and the exclusion is the whole point of
+  // this block being correct. A dress pairs only with outerwear; a top pairs
+  // with bottoms AND outerwear. In a real 46-piece Closet that is a structural
+  // ceiling of 6 partners for a dress against 17 for a top — so measuring a
+  // gown against a median drawn from tops and bottoms says nothing about the
+  // gown. It reports the shape of the slot graph as if it were a finding.
+  //
+  // An occasion dress with few partners is behaving exactly as an occasion
+  // dress should. If there is a genuine insight about such a piece it has to
+  // come from its role — occasion coverage, or the layers and shoes that
+  // finish it — not from a partner count it can never win.
   const favourites = coreGarments
+    .filter((g) => !ONE_PIECE_SLOTS.has(g.slot))
     .filter((g) => g.id !== contradictionStruggle?.id)
     .filter((g) => statedAs(g, STATED_REGULAR));
-  if (favourites.length >= 3 && medianPartners >= 3) {
+  const comparableCounts = coreGarments
+    .filter((g) => !ONE_PIECE_SLOTS.has(g.slot))
+    .map((g) => partnerCounts.get(g.id) ?? 0)
+    .sort((a, b) => a - b);
+  const medianComparable =
+    comparableCounts.length > 0 ? comparableCounts[Math.floor(comparableCounts.length / 2)] : 0;
+  if (favourites.length >= 3 && medianComparable >= 3) {
     const isolated = favourites
-      .filter((g) => (partnerCounts.get(g.id) ?? 0) <= Math.max(1, Math.floor(medianPartners / 3)))
+      .filter((g) => (partnerCounts.get(g.id) ?? 0) <= Math.max(1, Math.floor(medianComparable / 3)))
       .sort((a, b) => (partnerCounts.get(a.id) ?? 0) - (partnerCounts.get(b.id) ?? 0) || a.id.localeCompare(b.id))[0];
     if (isolated) {
       const count = partnerCounts.get(isolated.id) ?? 0;
@@ -2168,7 +2638,7 @@ function buildObservations(
         garmentIds: [isolated.id],
         evidence: [
           ev("self-reported-wardrobe", "garmentRelationships", `Marked as ${describeRelationships(isolated.garmentRelationships)}.`, [isolated.id]),
-          ev("garment-fact", "compatibility graph", `${count} compatible ${count === 1 ? "partner" : "partners"} against a wardrobe median of ${medianPartners}.`, [isolated.id]),
+          ev("garment-fact", "compatibility graph", `${count} compatible ${count === 1 ? "partner" : "partners"} against a median of ${medianComparable} for pieces of the same kind.`, [isolated.id]),
         ],
         action: { label: "See pieces", kind: "see-pieces" },
         gated: false,
@@ -2636,8 +3106,9 @@ function slotPlural(slot: string): string {
 function buildOpportunities(
   items: WardrobeGarment[],
   passport: WardrobePassport | null,
+  positiveGarmentEvidence: ReadonlyMap<string, GarmentPositiveEvidence> | null,
 ): WardrobeOpportunities {
-  const rediscover = buildRediscover(items, passport);
+  const rediscover = buildRediscover(items, passport, positiveGarmentEvidence);
 
   const worthConsidering = findGaps(items, passport);
   const anything = rediscover.length > 0 || worthConsidering.length > 0;
@@ -2664,35 +3135,37 @@ function buildOpportunities(
  * A piece only qualifies if it carries at least one underuse signal AND is
  * demonstrably usable with what she already owns.
  */
-function buildRediscover(items: WardrobeGarment[], passport: WardrobePassport | null): RediscoverPiece[] {
+/** A verified wore-it signal proves a garment is not neglected — its
+ * rediscovery PRIORITY drops among already-eligible candidates. The
+ * underlying structural "difficult to style"/"rarely reach for" relationship
+ * tag itself is never touched; a garment can still legitimately appear here
+ * with this evidence present, just lower in the ranking. */
+const REDISCOVER_POSITIVE_EVIDENCE_PENALTY = 4;
+
+function buildRediscover(
+  items: WardrobeGarment[],
+  passport: WardrobePassport | null,
+  positiveGarmentEvidence: ReadonlyMap<string, GarmentPositiveEvidence> | null = null,
+): RediscoverPiece[] {
   const hasInteractionHistory = items.some((g) => g.outfitAppearances > 0 || g.savedLookAppearances > 0);
   const activeRelevant = isActiveRelevant(items, passport);
 
   // When several pieces qualify on the same signal, only the first states it in
   // full. Repeating the preamble three times makes one finding look like three.
-  const signalUses = new Map<string, number>();
-  const REDISCOVER_COPY: Readonly<Record<string, ReadonlyArray<(count: string) => string>>> = {
-    rarely: [
-      (c) => `You've said you rarely reach for this piece. nAia can see ${c} in your Closet it sits with comfortably.`,
-      (c) => `Another you've said you rarely reach for — ${c} you own work with it.`,
-      (c) => `Also rarely reached for, and also better connected than it looks: ${c} sit with it.`,
-    ],
-    struggle: [
-      (c) => `You've marked this as one you love but struggle to style. The connections are already there — ${c} you own work with it.`,
-      (c) => `Also marked difficult to style, though ${c} in your Closet meet it comfortably.`,
-      (c) => `A third you've marked as hard to style. ${capitalise(c)} work with it.`,
-    ],
-    unstyled: [
-      (c) => `This hasn't appeared in one of your nAia looks yet, though it works with ${c} you already own.`,
-      (c) => `Another that hasn't reached one of your nAia looks — ${c} you own work with it.`,
-      (c) => `Also absent from your nAia looks so far, despite ${c} that work with it.`,
-    ],
+  // One self-contained sentence per signal.
+  //
+  // These used to vary by position — "Another…", "A third you've marked as hard
+  // to style" — so a card only made sense after the ones above it. Read on its
+  // own, or moved to another section, it referred to nothing. Each card now
+  // states its own evidence and its own count.
+  const REDISCOVER_COPY: Readonly<Record<string, (count: string) => string>> = {
+    rarely: (c) => `You said you rarely reach for this piece. nAia found ${c}.`,
+    struggle: (c) => `You marked this as difficult to style. nAia found ${c}.`,
+    unstyled: (c) => `This hasn't appeared in one of your nAia looks yet. nAia found ${c}.`,
   };
   const rediscoverBody = (lead: string, count: string, passportClause: string): string => {
-    const seen = signalUses.get(lead) ?? 0;
-    signalUses.set(lead, seen + 1);
-    const variants = REDISCOVER_COPY[lead] ?? REDISCOVER_COPY.unstyled;
-    return `${variants[Math.min(seen, variants.length - 1)](count)}${passportClause}`;
+    const line = REDISCOVER_COPY[lead] ?? REDISCOVER_COPY.unstyled;
+    return `${line(count)}${passportClause}`;
   };
 
   const scored = items
@@ -2734,6 +3207,11 @@ function buildRediscover(items: WardrobeGarment[], passport: WardrobePassport | 
       // Ranked down only when activewear is incidental to this customer's life.
       if (!activeRelevant && FUNCTIONAL_CATEGORIES.has(garment.category)) score -= 6;
 
+      // Ranked down, never excluded, when the customer has told nAia she
+      // actually wore this piece — priority only, the structural
+      // "underused" signal above is never rewritten by feedback.
+      if (positiveGarmentEvidence?.has(garment.id)) score -= REDISCOVER_POSITIVE_EVIDENCE_PENALTY;
+
       const alignment = passportAlignmentFor(garment, passport);
       const matches = alignment.dimensions;
       if (alignment.score > 0) {
@@ -2745,7 +3223,7 @@ function buildRediscover(items: WardrobeGarment[], passport: WardrobePassport | 
       // rediscoveries do not read as three copies of one template. The provenance
       // wording is load-bearing: a self-report says "you've said", nAia history
       // says "hasn't appeared in one of your nAia looks" — never "not worn".
-      const count = `${partners.length} ${partners.length === 1 ? "piece" : "pieces"}`;
+      const count = `${partners.length} potential matching ${partners.length === 1 ? "piece" : "pieces"}`;
       const passportClause = matches.length > 0
         ? ` It also matches your Passport on ${joinList(matches)}.`
         : "";
@@ -2759,7 +3237,11 @@ function buildRediscover(items: WardrobeGarment[], passport: WardrobePassport | 
         count,
         passportClause,
         body: "",
-        worksWithIds: partners.slice(0, 6).map((p) => p.id),
+        // The FULL partner list, not a sample. It used to be capped at six
+        // while the headline claimed a different, larger number, so the two
+        // could not be reconciled by anyone reading the page. Presentation
+        // decides how many to show at once; the data carries all of them.
+        worksWithIds: partners.map((p) => p.id),
         evidence,
         strength: gradeStrength(evidence, partners.length),
         score,
@@ -3110,10 +3592,23 @@ export interface WardrobeIntelligenceInput {
    */
   seenCombinations: ReadonlySet<string>;
   flags?: WardrobeIntelligenceFlags;
+  /**
+   * StyleMe-feedback evidence, V1 — see wardrobe-feedback-evidence.ts for
+   * how this is derived and the full scope contract. Locked here too:
+   * `formulaEvidence` may only break an exact tie in buildPairings' already-
+   * computed primary ranking; `positiveGarmentEvidence` may only adjust
+   * rediscovery priority among already-eligible pieces. Neither ever
+   * changes pairing eligibility, register depth, repetition, or candidate
+   * generation, and neither resurfaces a historical StyleMe look as
+   * moodboard content. Both default to null (no-op) so every existing
+   * caller is unaffected.
+   */
+  formulaEvidence?: ReadonlyMap<string, FormulaSupportState> | null;
+  positiveGarmentEvidence?: ReadonlyMap<string, GarmentPositiveEvidence> | null;
 }
 
 export function computeWardrobeIntelligence(input: WardrobeIntelligenceInput): WardrobeIntelligence {
-  const { items, passport, seenCombinations } = input;
+  const { items, passport, seenCombinations, formulaEvidence = null, positiveGarmentEvidence = null } = input;
   const flags = input.flags ?? DEFAULT_FLAGS;
   const coverage = computeCoverage(items, flags);
   const signalAvailability = buildSignalAvailability(items, coverage, passport);
@@ -3139,7 +3634,7 @@ export function computeWardrobeIntelligence(input: WardrobeIntelligenceInput): W
         palette: [], paletteReading: "", shapes: [], shapesReading: "", traits: [],
       },
       heroes: { state: "learning", learningNote: "Heroes appear once nAia can see how your pieces connect.", heroes: [] },
-      pairings: { state: "learning", learningNote: "Add a few more pieces and nAia can start showing how they connect.", pairings: [], totalFound: 0, untriedPresentation: "none", untriedNote: null },
+      pairings: { state: "learning", learningNote: "Add a few more pieces and nAia can start showing how they connect.", pairings: [], totalFound: 0, untriedPresentation: "none", untriedNote: null, bestByRegister: {} },
       observations: [],
       opportunities: {
         state: "learning",
@@ -3155,11 +3650,11 @@ export function computeWardrobeIntelligence(input: WardrobeIntelligenceInput): W
     };
   }
 
-  const pairings = buildPairings(items, seenCombinations);
+  const pairings = buildPairings(items, seenCombinations, passport, formulaEvidence);
   const dna = buildDna(items, coverage);
   const passportView = buildPassportView(items, coverage, passport);
   const passportDimensionsShown = new Set(passportView.comparisons.map((c) => c.id));
-  const opportunities = buildOpportunities(items, passport);
+  const opportunities = buildOpportunities(items, passport, positiveGarmentEvidence);
 
   return {
     ready: true,
@@ -3229,6 +3724,9 @@ export {
   STATED_FRICTION,
   scorePair,
   partnersOf,
+  functionCompatible,
+  isCrossoverLayer,
+  wornBeyondSport,
   STRUCTURED_FITS,
   SOFT_FITS,
   statedAs,
@@ -3240,5 +3738,10 @@ export {
   capitalise,
   ev,
   gradeStrength,
+  classifyUsability,
+  layersThatResolve,
+  pairingEligibility,
+  SILHOUETTE_LABELS,
+  isActiveRelevant,
 };
-export type { PairScore };
+export type { PairScore, Usability };

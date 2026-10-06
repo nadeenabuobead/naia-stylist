@@ -50,12 +50,23 @@ import {
   gradeStrength,
   MIN_WARDROBE_SIZE,
   INTENTION_LABELS,
+  classifyUsability,
+  layersThatResolve,
   type WardrobeGarment,
   type WardrobePassport,
   type Evidence,
   type EvidenceStrength,
   type BlockState,
+  type Usability,
 } from "~/lib/ai/wardrobe-intelligence";
+import { MIN_OUTCOMES_FOR_CLAIM } from "~/lib/ai/wardrobe-feedback-evidence";
+import { deriveStyleMeDemand, type RawStyleMeDemandFact } from "~/lib/ai/styleme-demand-evidence";
+
+// classifyUsability/layersThatResolve/Usability now live in wardrobe-intelligence.ts
+// so buildPairings can gate combinations with the same rule — re-exported here so
+// every existing consumer of this module is unaffected.
+export { classifyUsability, layersThatResolve };
+export type { Usability };
 
 // ── Registers ─────────────────────────────────────────────────────────────────
 
@@ -64,6 +75,13 @@ export type RegisterId = "everyday" | "work" | "occasion";
 export const REGISTER_IDS: readonly RegisterId[] = ["everyday", "work", "occasion"];
 
 /** Short noun the copy uses: "your everyday dressing". */
+/** The register as a bare adjective: "work", not "work dressing". */
+const REGISTER_BARE: Readonly<Record<RegisterId, string>> = {
+  everyday: "everyday",
+  work: "work",
+  occasion: "occasion",
+};
+
 const REGISTER_NOUN: Readonly<Record<RegisterId, string>> = {
   everyday: "everyday dressing",
   work: "work dressing",
@@ -75,13 +93,6 @@ const DEPTH_PHRASE: Readonly<Record<RegisterId, string>> = {
   everyday: "everyday, casual",
   work: "polished, work-ready",
   occasion: "occasion and evening",
-};
-
-/** Bare register word for possessive copy: "your work options". */
-const DEPTH_SHORT: Readonly<Record<RegisterId, string>> = {
-  everyday: "everyday",
-  work: "work",
-  occasion: "occasion",
 };
 
 /** Closet `occasions` tags → register. Only used when formality is unreadable. */
@@ -143,7 +154,7 @@ export function styleMeSessionRegister(
 // unwearable-together items read as thin.
 
 /** At or below this many DISTINCT looks a needed register is under-served. */
-const THIN_LOOKS = 2;
+export const THIN_LOOKS = 2;
 /** At or above this many DISTINCT looks, a register has real working depth. */
 const DEEP_LOOKS = 4;
 /** Usable pieces that make a register redundant rather than simply deep. */
@@ -154,8 +165,10 @@ const ENOUGH_CLUSTER = 5;
 const EFFECTIVE_DEPTH_MIN_RAW = 6;
 /** Blocked share at which raw depth stops translating into usable depth. */
 const EFFECTIVE_DEPTH_BLOCKED_SHARE = 0.5;
-/** Outcomes needed before feedback may drive a conclusion. */
-const MIN_OUTCOMES_FOR_CLAIM = 3;
+// MIN_OUTCOMES_FOR_CLAIM now lives in wardrobe-feedback-evidence.ts (the
+// evidence layer's canonical threshold) and is imported below, so this
+// headline-copy gate and that layer's STRONGLY_SUPPORTED gate can never
+// silently drift to two different numbers.
 /** Generated appearances needed before "nAia repeatedly reaches for" is fair. */
 const MIN_APPEARANCES_FOR_REACH = 3;
 
@@ -193,11 +206,34 @@ export interface WardrobeNeedsInput {
   styleMeSessions: StyleMeSessionFact[] | null;
   /** null = outcomes were not queried; [] = queried, none recorded. */
   outcomes: OutcomeFact[] | null;
+  /**
+   * StyleMe-demand V1 — a SEPARATE fact set from styleMeSessions above, on
+   * its own 90-day rolling window with no row cap (see
+   * styleme-demand-evidence.ts / loadStyleMeDemandFacts()). Deliberately
+   * not derived from styleMeSessions, and does not feed or alter
+   * styleMe/intentions below. Optional so every existing caller keeps
+   * compiling and behaving unchanged — null means "not supplied", same as
+   * omitting it, and produces a "learning" demand reading.
+   */
+  styleMeDemandFacts?: RawStyleMeDemandFact[] | null;
 }
 
 // ── Outputs ───────────────────────────────────────────────────────────────────
 
-export type Usability = "usable" | "blocked" | "unknown";
+/**
+ * A piece that does not meet a stated preference on its own.
+ *
+ * `rescuedBy` is only populated where the evidence genuinely supports it: a
+ * layer she owns, compatible with this piece, that passes the very check this
+ * piece fails. Leg coverage can never be rescued this way — a jacket does not
+ * lengthen a skirt — so those stay unrescued rather than being given a
+ * hopeful-sounding caveat.
+ */
+export interface BlockedPiece {
+  garmentId: string;
+  reason: string;
+  rescuedBy: string[];
+}
 
 export interface RegisterReading {
   register: RegisterId;
@@ -218,6 +254,12 @@ export interface RegisterReading {
   usableCount: number;
   /** Read, and contradicts something she has told nAia. */
   blockedCount: number;
+  /**
+   * The pieces that contradict a stated dressing preference, each with the
+   * reason and whether something she owns can genuinely resolve it. Carried so
+   * the page can SHOW them rather than asking her to take a count on trust.
+   */
+  blockedPieces: BlockedPiece[];
   /** Not analysed yet — counted separately, never treated as blocked. */
   unknownCount: number;
   /** Supported pairs between interchangeability classes. Decides thinness. */
@@ -264,6 +306,13 @@ export interface SynthesisLine {
   /** The single sentence nAia is willing to stand behind. */
   reading: string;
   evidence: Evidence[];
+  /**
+   * Plain name of the specific colour(s) this line is actually about — e.g.
+   * "Grey" — when the finding is specific enough to name one. Lets a headline
+   * say "Grey appears less often" instead of the vaguer "part of your
+   * palette", without changing what was measured.
+   */
+  thinLabel?: string;
 }
 
 export interface PassportSynthesis {
@@ -313,6 +362,17 @@ export interface OutcomeReading {
  * Neither is ever derived from the other. `chosen` never reads a garment and
  * `closetStrengths` never reads a session.
  */
+/**
+ * Intentions that assert something about the customer rather than about a
+ * garment. A curated garment rating cannot evidence any of these.
+ */
+export const IDENTITY_INTENTIONS: ReadonlySet<string> = new Set([
+  "feel-like-myself",
+  "express-myself",
+  "feel-attractive",
+  "confidence",
+]);
+
 export interface IntentionReading {
   state: BlockState;
   learningNote?: string;
@@ -320,6 +380,79 @@ export interface IntentionReading {
   chosen: Array<{ intention: string; label: string; sessions: number }>;
   /** Curated garment ratings, strongest first. Closet capability. */
   closetStrengths: Array<{ intention: string; label: string; strong: number }>;
+}
+
+/**
+ * StyleMe-demand evidence, V1 — runs in PARALLEL to StyleMeReading.requests/
+ * .struggles and IntentionReading.chosen above, which this does not replace,
+ * alter, or feed into. Those remain raw, undeduped session counts; this is
+ * the deduped, event-identity-aware layer (see styleme-demand-evidence.ts)
+ * that a later pass may migrate the page onto, after comparing outputs.
+ *
+ * `closetDistinctLooks`/`closetDepthLabel` are the existing RegisterReading
+ * fields, reused verbatim — demand never recomputes or mutates them.
+ */
+export interface RegisterDemandComparison {
+  register: RegisterId;
+  demandEventCount: number;
+  demandFirstSeen: string;
+  demandLastSeen: string;
+  closetDistinctLooks: number | null;
+  closetDepthLabel: string | null;
+}
+
+export interface StyleMeDemandReading {
+  state: BlockState;
+  learningNote?: string;
+  /** Raw rows excluded as a synthetic exact-timestamp collision group. */
+  syntheticExcludedCount: number;
+  /** Raw rows absorbed into an earlier event by the 2-minute retry window. */
+  retriesCollapsedCount: number;
+  registerDemand: RegisterDemandComparison[];
+  intentionDemand: Array<{ intention: string; eventCount: number; firstSeen: string; lastSeen: string }>;
+}
+
+/**
+ * Consumes the SEPARATE, 90-day-windowed `styleMeDemandFacts` input —
+ * never the (differently-capped) `styleMeSessions` that
+ * StyleMeReading/IntentionReading above read. See WardrobeNeedsInput.
+ */
+function buildStyleMeDemandReading(
+  demandFacts: RawStyleMeDemandFact[] | null | undefined,
+  registers: RegisterReading[],
+): StyleMeDemandReading {
+  const emptyReading = (learningNote: string): StyleMeDemandReading => ({
+    state: "learning", learningNote,
+    syntheticExcludedCount: 0, retriesCollapsedCount: 0,
+    registerDemand: [], intentionDemand: [],
+  });
+  if (demandFacts === null || demandFacts === undefined) {
+    return emptyReading("nAia hasn't read your StyleMe history into this page yet.");
+  }
+  if (demandFacts.length === 0) {
+    return emptyReading("Once you've used StyleMe a few times, nAia can compare what you ask for against what your Closet supports.");
+  }
+
+  const derived = deriveStyleMeDemand(demandFacts);
+  const registerDemand: RegisterDemandComparison[] = derived.registerDemand.map((d) => {
+    const reading = registers.find((r) => r.register === d.register);
+    return {
+      register: d.register as RegisterId,
+      demandEventCount: d.eventCount,
+      demandFirstSeen: d.firstSeen,
+      demandLastSeen: d.lastSeen,
+      closetDistinctLooks: reading?.distinctLooks ?? null,
+      closetDepthLabel: reading?.depthLabel ?? null,
+    };
+  });
+
+  return {
+    state: "available",
+    syntheticExcludedCount: derived.syntheticExcludedCount,
+    retriesCollapsedCount: derived.retriesCollapsedCount,
+    registerDemand,
+    intentionDemand: derived.intentionDemand,
+  };
 }
 
 export interface Headline {
@@ -342,6 +475,9 @@ export interface WardrobeNeeds {
   outcomes: OutcomeReading;
   /** What she asks to feel, and what her Closet can support — kept apart. */
   intentions: IntentionReading;
+  /** Deduped StyleMe-demand evidence, V1 — additive only. Runs parallel to
+   * `styleMe`/`intentions` above; does not replace or feed either one. */
+  demand: StyleMeDemandReading;
   headlines: Headline[];
 }
 
@@ -489,114 +625,6 @@ export function computePaletteCoverage(
   return { families: rows, colourReadable: readable.length, unknown, insidePalette: inside };
 }
 
-// ── Usability ───// ── Usability ─────────────────────────────────────────────────────────────────
-
-/**
- * Does this garment contradict something the customer has told nAia?
- *
- * The coverage rules mirror the shipped StyleMe exclusion semantics exactly
- * (see the dressing-preference block in styleme-recommendation.ts) so a piece
- * StyleMe will refuse to use is never counted here as usable depth.
- *
- * ONE DELIBERATE DIFFERENCE. StyleMe fails CLOSED on absent metadata: it would
- * rather drop a garment than risk dressing her wrongly. Doing that here would
- * turn an unanalysed closet into a wardrobe of "blocked" pieces and report a gap
- * that does not exist. So absent metadata resolves to "unknown", which is
- * counted and shown but never used as evidence of a gap.
- */
-// Blocked reasons are written as gerund phrases ("keeping your arms covered")
-// because they are consumed inside a sentence: "…only 2 currently meet your
-// stated coverage preferences — including keeping your arms covered."
-export function classifyUsability(
-  garment: WardrobeGarment,
-  passport: WardrobePassport | null,
-): { usability: Usability; reason: string | null } {
-  const read = garment.analysisStatus === "ready" || garment.intelligenceSource === "curated";
-  if (!read) return { usability: "unknown", reason: "not read yet" };
-  if (!passport) return { usability: "usable", reason: null };
-
-  // Colours she asked nAia to avoid.
-  if (passport.avoidColors.length > 0) {
-    const family = closetColourFamily(garment.primaryColor);
-    if (family) {
-      for (const token of passport.avoidColors) {
-        const families = PASSPORT_COLOUR_FAMILIES[norm(token) ?? ""] ?? [];
-        if (families.includes(family)) {
-          return { usability: "blocked", reason: `avoiding colours you asked nAia to leave out` };
-        }
-      }
-    }
-  }
-
-  const prefs = new Set(passport.dressingPreferences ?? []);
-  const isTopLike = TOP_SLOTS.has(garment.slot) || garment.slot === "set";
-
-  // Each check: "n/a" means the field does not apply to this garment type and is
-  // exempt. A null value on an otherwise-read garment is unknown, not blocked.
-  const check = (
-    active: boolean,
-    value: string | null | undefined,
-    safe: (v: string) => boolean,
-    reason: string,
-  ): { usability: Usability; reason: string | null } | null => {
-    if (!active) return null;
-    if (value === undefined || value === null) return { usability: "unknown", reason: "coverage not read yet" };
-    if (value === "n/a") return null;
-    return safe(value) ? null : { usability: "blocked", reason };
-  };
-
-  const checks = [
-    check(
-      prefs.has("arms-covered"),
-      garment.sleeveLength,
-      (v) => v === "full" || v === "three-quarter",
-      "keeping your arms covered",
-    ),
-    check(
-      prefs.has("avoid-sleeveless") && !prefs.has("arms-covered"),
-      garment.sleeveLength,
-      (v) => v !== "sleeveless",
-      "avoiding sleeveless styles",
-    ),
-    check(
-      prefs.has("chest-neckline-covered") || prefs.has("prefer-higher-necklines"),
-      garment.necklineCoverage,
-      (v) => v === "high" || v === "crew" || v === "mock" || v === "cowl-high",
-      "keeping your neckline covered",
-    ),
-    check(
-      prefs.has("legs-covered"),
-      garment.hemLength,
-      (v) => v === "full" || v === "maxi",
-      "keeping your legs covered",
-    ),
-    check(
-      prefs.has("longer-tops") && isTopLike,
-      garment.topLength,
-      (v) => v === "hip-length" || v === "longline" || v === "tunic",
-      "preferring longer tops",
-    ),
-    check(
-      prefs.has("no-cropped-tops") && isTopLike,
-      garment.topLength,
-      (v) => v !== "cropped",
-      "avoiding cropped tops",
-    ),
-    check(
-      prefs.has("looser-fitting"),
-      garment.fitProfile,
-      (v) => v === "relaxed" || v === "loose" || v === "oversized" || v === "flowy",
-      "preferring looser-fitting clothes",
-    ),
-  ].filter(Boolean) as Array<{ usability: Usability; reason: string | null }>;
-
-  const blocked = checks.find((c) => c.usability === "blocked");
-  if (blocked) return blocked;
-  const unknown = checks.find((c) => c.usability === "unknown");
-  if (unknown) return unknown;
-  return { usability: "usable", reason: null };
-}
-
 // ── Register depth ────────────────────────────────────────────────────────────
 
 /** The register a garment dresses for. Formality first, occasion tags second. */
@@ -704,6 +732,75 @@ function countDistinctLooks(pool: WardrobeGarment[]): number {
  * Raw supported combinations across instances. Kept for diagnostics and tests
  * only — it is never a customer-facing number and never decides a conclusion.
  */
+/**
+ * DISTINCT LOOKS — the measure a gap is judged on.
+ *
+ * Not a count of garments, and not every pairing. The pool is first reduced to
+ * one representative per interchangeability class, where a class is
+ * `slot | register | colour band | fit family | silhouette` (outfitClassKey).
+ * Two tailored straight grey work trousers are one class: owning both does not
+ * give you two looks. Distinct looks is then the number of SUPPORTED top-bottom
+ * pairs between those representatives, plus one class per one-piece garment.
+ *
+ * GAP-CLOSURE RULE: a register is reported as needing something only while
+ * `needed && distinctLooks <= THIN_LOOKS` (2). So a gap closes when a new piece
+ * introduces a class that is not already represented AND that class pairs with
+ * what she owns. Another near-copy changes nothing, which is exactly what the
+ * repetition finding says.
+ */
+export interface GapResolvingClass {
+  /** "structured" | "soft" — the fit family that adds a new class. */
+  fitFamily: string;
+  /** A silhouette that, with that fit, lifts distinct looks past the threshold. */
+  silhouette: string;
+  /** Distinct looks this candidate would produce. */
+  distinctLooks: number;
+}
+
+/** Silhouettes worth proposing. Drawn from the engine's own vocabulary. */
+const CANDIDATE_SILHOUETTES = ["straight", "flared", "a-line", "wide-leg", "fitted", "oversized"] as const;
+const CANDIDATE_FITS: Readonly<Record<string, string>> = { structured: "tailored", soft: "relaxed" };
+
+/**
+ * Which garment attributes would actually close this register's gap.
+ *
+ * Derived by SIMULATION against the same rule the finding uses, rather than
+ * asserted: a hypothetical piece is added to the usable pool and distinct looks
+ * is recomputed. Only candidates that clear THIN_LOOKS are returned, and only
+ * those that satisfy her stated dressing preferences — a proposal that
+ * contradicts her Passport is not a solution, however many looks it unlocks.
+ */
+export function gapResolvingClasses(input: {
+  pool: WardrobeGarment[];
+  passport: WardrobePassport | null;
+  slot: string;
+  register: RegisterId;
+}): GapResolvingClass[] {
+  const { pool, passport, slot, register } = input;
+  const template = pool.find((g) => g.slot === slot) ?? pool[0];
+  if (!template) return [];
+
+  const out: GapResolvingClass[] = [];
+  for (const [fitFamily, fitProfile] of Object.entries(CANDIDATE_FITS)) {
+    for (const silhouette of CANDIDATE_SILHOUETTES) {
+      const candidate: WardrobeGarment = {
+        ...template,
+        id: `__candidate__${fitFamily}__${silhouette}`,
+        name: "candidate",
+        slot,
+        fitProfile,
+        silhouette,
+        garmentRelationships: [],
+      };
+      // A candidate that contradicts a stated preference is not an answer.
+      if (classifyUsability(candidate, passport).usability === "blocked") continue;
+      const looks = countDistinctLooks([...pool, candidate]);
+      if (looks > THIN_LOOKS) out.push({ fitFamily, silhouette, distinctLooks: looks });
+    }
+  }
+  return out.sort((a, b) => b.distinctLooks - a.distinctLooks || a.silhouette.localeCompare(b.silhouette));
+}
+
 function countCombinations(pool: WardrobeGarment[]): number {
   const tops = pool.filter((g) => TOP_SLOTS.has(g.slot));
   const bottoms = pool.filter((g) => BOTTOM_SLOTS.has(g.slot));
@@ -764,7 +861,7 @@ function readRegisters(
       depthLabel = `Limited usable ${shortNoun} depth`;
       depthNote =
         usable.length >= REDUNDANT_PIECES
-          ? `You own a lot that reads this way, but the pieces are close enough to each other that they mostly make the same outfit.`
+          ? `You own a lot that reads this way, but their combinations tend to repeat the same formula.`
           : `You currently have limited depth for ${DEPTH_PHRASE[register]} dressing.`;
     } else {
       depthLabel = `Workable ${shortNoun} depth`;
@@ -779,6 +876,11 @@ function readRegisters(
       rawCount: pool.length,
       usableCount: usable.length,
       blockedCount: blocked.length,
+      blockedPieces: blocked.map((g) => ({
+        garmentId: g.id,
+        reason: classifyUsability(g, passport).reason ?? "does not meet a stated preference",
+        rescuedBy: layersThatResolve(g, items, passport).map((l) => l.id),
+      })),
       unknownCount: unknown.length,
       distinctLooks,
       combinations: countCombinations(usable),
@@ -884,10 +986,19 @@ function buildFindings(
         id: `need-${r.register}-repetition`,
         kind: "repetition",
         register: r.register,
-        title: `Your ${REGISTER_NOUN[r.register]} repeats one formula`,
-        body: `You own ${r.usableCount} pieces that work for ${REGISTER_NOUN[r.register]}, but they're close enough to each other that they mostly make the same outfit. Buying more like them wouldn't widen what you can wear — a piece that contrasts with what you already own would.`,
+        title: `You have ${REGISTER_BARE[r.register]} pieces, but fewer ways to combine them`,
+        // States the wardrobe fact only. What to do about it — buy, or don't
+        // — belongs exclusively to the shopping section; saying it here too
+        // turned a description of the Closet into a sales pitch.
+        body: `Many of your ${REGISTER_BARE[r.register]} tops and bottoms create similar combinations.`,
+        // A top-bottom repetition finding is demonstrated by tops, bottoms and
+        // one-pieces — not by an outerwear layer, bag or shoes that happen to
+        // register-match. Those don't show the thing being claimed.
         garmentIds: items
-          .filter((g) => garmentRegister(g) === r.register && classifyUsability(g, passport).usability === "usable")
+          .filter((g) =>
+            garmentRegister(g) === r.register &&
+            classifyUsability(g, passport).usability === "usable" &&
+            (TOP_SLOTS.has(g.slot) || BOTTOM_SLOTS.has(g.slot) || ONE_PIECE_SLOTS.has(g.slot)))
           .slice(0, 6)
           .map((g) => g.id),
         evidence: [
@@ -934,7 +1045,6 @@ function buildFindings(
     const r = byId.get(c.register);
     if (!r || r.distinctLooks < DEEP_LOOKS) continue;
 
-    const thinnerAlternative = thinNeeded.find((t) => t.register !== c.register);
     const description = describeCluster(c);
 
     enough.push({
@@ -942,9 +1052,7 @@ function buildFindings(
       kind: "enough",
       register: c.register,
       title: `You already have enough ${description}`,
-      body: `You own ${c.items.length} of these that work with the rest of your Closet, and your ${REGISTER_NOUN[c.register]} already has real range. Another similar piece is unlikely to materially expand what you can wear${
-        thinnerAlternative ? `; strengthening your ${DEPTH_SHORT[thinnerAlternative.register]} options would add more` : ""
-      }.`,
+      body: `You already have ${c.items.length} ${description} that work well with the rest of your Closet. Another similar one probably wouldn't give you many new options.`,
       garmentIds: c.items.slice(0, 6).map((g) => g.id),
       evidence: [
         ev("garment-fact", "slot + colour + formality", `${c.items.length} usable ${description}.`, c.items.map((g) => g.id)),
@@ -1039,6 +1147,7 @@ function buildSynthesis(
             thin.length === 1 ? "appears" : "appear"
           } much less often.`,
           evidence: [statedEvidence, coverageEvidence],
+          thinLabel: namesOf(thin),
         });
       } else if (share <= 0.25) {
         lines.push({
@@ -1219,6 +1328,11 @@ function buildIntentionReading(
   items: WardrobeGarment[],
   sessions: StyleMeSessionFact[] | null,
 ): IntentionReading {
+  // No Passport comparison exists for garment intention ratings in this
+  // version, so identity claims have no evidence to stand on. Kept as a named
+  // flag rather than an inline `false` so that adding one later is a single,
+  // visible change — and so the test can state the requirement, not the wording.
+  const hasIdentityEvidence = false;
   // ── what she asks for: sessions only ──
   const chosenCounts = new Map<string, number>();
   for (const session of sessions ?? []) {
@@ -1241,6 +1355,19 @@ function buildIntentionReading(
   }
   const closetStrengths = [...strongCounts.entries()]
     .filter(([intention]) => INTENTION_LABELS[intention])
+    // Identity claims need identity evidence.
+    //
+    // These counts come from a rating held against each GARMENT; nothing in
+    // them is compared to this customer. For a capability — "put-together
+    // looks", "easy dressing" — that is a complete and honest statement about
+    // her Closet. For an intention that asserts something about HER, like
+    // looking or feeling like herself, a garment rating is the wrong kind of
+    // evidence entirely, and no amount of rewording fixes that. Until a
+    // Passport comparison exists to support it, the row is suppressed.
+    //
+    // The underlying StyleMe intention is untouched: she may still CHOOSE it,
+    // and her own choices are reported separately in `chosen`.
+    .filter(([intention]) => !IDENTITY_INTENTIONS.has(intention) || hasIdentityEvidence)
     .map(([intention, count]) => ({ intention, label: INTENTION_LABELS[intention], strong: count }))
     .sort((a, b) => b.strong - a.strong);
 
@@ -1344,7 +1471,7 @@ function buildHeadlines(
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 export function computeWardrobeNeeds(input: WardrobeNeedsInput): WardrobeNeeds {
-  const { items, passport, styleMeSessions, outcomes } = input;
+  const { items, passport, styleMeSessions, outcomes, styleMeDemandFacts } = input;
 
   const empty: WardrobeNeeds = {
     state: "learning",
@@ -1354,6 +1481,7 @@ export function computeWardrobeNeeds(input: WardrobeNeedsInput): WardrobeNeeds {
     styleMe: { state: "learning", learningNote: "StyleMe history appears here once you've used it.", reachedFor: [], requests: [], struggles: [], strongIntentions: [], thinIntentions: [] },
     outcomes: buildOutcomeReading(outcomes),
     intentions: buildIntentionReading(items, styleMeSessions),
+    demand: buildStyleMeDemandReading(styleMeDemandFacts, []),
     headlines: [],
   };
   if (items.length < MIN_WARDROBE_SIZE) return empty;
@@ -1379,6 +1507,7 @@ export function computeWardrobeNeeds(input: WardrobeNeedsInput): WardrobeNeeds {
     registers, enough, couldUseMore, noUrgentNeed,
     synthesis, styleMe, outcomes: outcomeReading,
     intentions: buildIntentionReading(items, styleMeSessions),
+    demand: buildStyleMeDemandReading(styleMeDemandFacts, registers),
   };
 
   return { ...withoutHeadlines, headlines: buildHeadlines(withoutHeadlines) };

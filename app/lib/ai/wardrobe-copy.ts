@@ -19,6 +19,7 @@
 import type {
   HeroLabel,
   WardrobeTrait,
+  PaletteColour,
 } from "~/lib/ai/wardrobe-intelligence";
 import type { RegisterId, RegisterReading, WardrobeNeeds, SynthesisLine } from "~/lib/ai/wardrobe-needs";
 
@@ -54,9 +55,9 @@ function depthStateOf(depthLabel: string): DepthState {
 }
 
 const DEPTH_STATE_TEXT: Readonly<Record<DepthState, string>> = {
-  strong: "Strong",
-  "limited-variety": "Covered, with limited variety",
-  "needs-range": "Needs more range",
+  strong: "Plenty of options",
+  "limited-variety": "Covered, but less variety",
+  "needs-range": "Fewer combinations",
   "less-than-it-looks": "Smaller than it looks",
   empty: "Nothing here yet",
   learning: "Still learning",
@@ -76,11 +77,12 @@ export function registerDisplay(r: RegisterReading): RegisterDisplay {
 
   // The engine's depthNote is already written for the customer in four of the
   // six states, so it is used as-is rather than paraphrased into something
-  // less precise. Only "strong" and "limited-variety" are restated, because
-  // their engine wording leans on "usable combinations" and "range".
+  // less precise. "Strong" needs no separate sentence — the badge already says
+  // it — and "limited-variety" is restated because the engine wording leans on
+  // "usable combinations" and "range".
   const plain =
     state === "strong"
-      ? "Plenty of useful options."
+      ? ""
       : state === "limited-variety"
         ? "You can dress for this, but there's less room to vary the look."
         : r.depthNote;
@@ -99,11 +101,41 @@ export function registerDisplay(r: RegisterReading): RegisterDisplay {
 /** Hero labels as a description of what the piece DOES, not what we call it. */
 const HERO_LABEL_PLAIN: Readonly<Record<HeroLabel, string>> = {
   "most-versatile": "Most versatile",
-  "closet-connector": "Works with the most",
+  "closet-connector": "Works across relaxed and polished looks",
   "passport-match": "Matches your style",
   "your-favourite": "Your favourite",
   "untapped-hero": "Underused",
 };
+
+/**
+ * Intention labels re-voiced as GARMENT capability.
+ *
+ * INTENTION_LABELS is written for the customer's own choice — "feel like
+ * yourself" — which is right when she picked it. These same keys are also used
+ * to count approved garment ratings, where nothing has been matched to her, so
+ * the second-person feeling would be a claim the data cannot make.
+ */
+const CAPABILITY_LABELS: Readonly<Record<string, string>> = {
+  "feel-like-myself":  "looking like yourself",
+  "confidence":        "confidence",
+  "ground-me":         "feeling grounded",
+  "give-structure":    "structure",
+  "make-it-easy":      "Easy everyday outfits",
+  "feel-put-together": "Looking put-together",
+  "feel-attractive":   "feeling attractive",
+  "give-energy":       "energy",
+  "feel-softer":       "softer looks",
+  "feel-sharper":      "sharper looks",
+  // NOT "more coverage": the same page carries a Coverage row that reports
+  // whether pieces meet the coverage preferences she actually stated. A curated
+  // assessment of a garment must not be mistaken for that comparison.
+  "feel-less-exposed": "More covered-up looks",
+  "express-myself":    "self-expression",
+};
+
+export function capabilityLabel(intention: string, fallback: string): string {
+  return CAPABILITY_LABELS[intention] ?? fallback;
+}
 
 export function heroLabel(label: HeroLabel, fallback: string): string {
   return HERO_LABEL_PLAIN[label] ?? fallback;
@@ -137,6 +169,35 @@ export function traitLabel(trait: WardrobeTrait): string {
   return trait.label;
 }
 
+const REGISTER_LIFE: Readonly<Record<string, string>> = {
+  "register-everyday": "everyday",
+  "register-work": "work",
+  "register-occasion": "occasion",
+};
+
+/**
+ * The one-sentence hero read, in plain language — "Mostly everyday pieces in
+ * neutral colours, especially black." Built from the same trait/palette data
+ * the engine's own `snapshotReading` sentence uses, not a new computation.
+ *
+ * Returns null when there isn't enough to say either half of the sentence
+ * confidently — the caller falls back to the engine's own reading rather than
+ * printing a half-sentence.
+ */
+export function heroReading(traits: readonly WardrobeTrait[], palette: readonly PaletteColour[]): string | null {
+  const registerTrait = traits.find((t) => t.id in REGISTER_LIFE);
+  const topColour = palette[0];
+  if (!registerTrait || !topColour) return null;
+
+  const life = REGISTER_LIFE[registerTrait.id];
+  const colourTrait = traits.find((t) => t.id === "neutral-led" || t.id === "colour-led");
+  const colourPhrase = colourTrait?.id === "neutral-led" ? "neutral colours" : colourTrait?.id === "colour-led" ? "colour" : null;
+
+  return colourPhrase
+    ? `Mostly ${life} pieces in ${colourPhrase}, especially ${topColour.colour.toLowerCase()}.`
+    : `Mostly ${life} pieces, especially in ${topColour.colour.toLowerCase()}.`;
+}
+
 // ── Pairing explanations ──────────────────────────────────────────────────────
 
 /**
@@ -156,7 +217,7 @@ const PAIR_REWRITES: ReadonlyArray<[RegExp, (m: RegExpExecArray) => string]> = [
     /^You've tagged these for (.+)\.$/,
     // "both" is filled in by plainPairReason once it knows how many pieces the
     // row actually shows — saying "both" over three images contradicts them.
-    (m) => `You've tagged ${PIECE_SUBJECT} for ${m[1]}, so they're meant for the same kind of day.`,
+    (m) => `You've tagged ${PIECE_SUBJECT} for ${m[1]}.`,
   ],
   [
     /^One is tailored and the other relaxed — the structure is what makes it read deliberate\.$/,
@@ -168,15 +229,16 @@ const PAIR_REWRITES: ReadonlyArray<[RegExp, (m: RegExpExecArray) => string]> = [
   ],
   [
     /^The (.+) anchors the (.+)\.$/,
-    (m) => `The ${m[1]} is the calmer colour and balances the ${m[2]}, so the two are easy to wear together.`,
+    (m) => `The ${m[1]} is the calmer colour and balances the ${m[2]}.`,
   ],
   [
     /^One of them is a wardrobe neutral, so the pairing stays easy\.$/,
-    () => "One of them is a plain colour that goes with almost anything, which makes this an easy pairing.",
+    () => "One of these is an easy colour, which keeps the combination simple.",
   ],
   [
     /^Both are wardrobe neutrals, so nothing competes\.$/,
-    () => "Both are plain colours that go with almost anything, so neither one fights the other.",
+    // Kept count-agnostic: this can land on a three-piece row.
+    () => `The colours here are all easy ones, so nothing competes.`,
   ],
   [
     /^A (.+) shape against an? (.+) one keeps the proportions clear\.$/,
@@ -214,14 +276,28 @@ function rewriteOneReason(sentence: string): string {
  * @param pieceCount how many garments the row shows. The copy must never
  *   contradict the images beside it: "both" over three thumbnails is wrong.
  */
+/**
+ * Sentences that say nothing specific about THESE pieces.
+ *
+ * "The colours here are all easy ones" is true of half a neutral wardrobe. Next
+ * to a real observation about structure or proportion it is padding, and the
+ * feedback asked for it to go wherever structured evidence exists. It survives
+ * only when it is the only thing the engine could say.
+ */
+const GENERIC_PAIR_SENTENCE = /colours here are all easy ones|an easy colour, which keeps/i;
+
 export function plainPairReason(reason: string, pieceCount = 2): string {
   const subject =
     pieceCount <= 2 ? "both of these" : pieceCount === 3 ? "all three of these" : "these pieces";
   const sentences = reason.match(/[^.]+\./g);
   const rewritten = sentences
-    ? sentences.map((sentence) => rewriteOneReason(sentence.trim())).join(" ")
-    : rewriteOneReason(reason.trim());
-  return rewritten.split(PIECE_SUBJECT).join(subject);
+    ? sentences.map((sentence) => rewriteOneReason(sentence.trim()))
+    : [rewriteOneReason(reason.trim())];
+
+  const specific = rewritten.filter((t) => !GENERIC_PAIR_SENTENCE.test(t));
+  const kept = specific.length > 0 ? specific : rewritten;
+
+  return kept.join(" ").split(PIECE_SUBJECT).join(subject);
 }
 
 // ── Sentence-level rewrites used across several sections ──────────────────────
@@ -348,7 +424,9 @@ export type MatchState = "strong" | "uneven" | "partial" | "gap" | "unclear";
 const MATCH_STATE_TEXT: Readonly<Record<MatchState, string>> = {
   strong: "Strong match",
   // Inside the palette, but not all of it is there. Deliberately not "strong".
-  uneven: "Strong alignment, uneven coverage",
+  // Never "coverage" here: one line below, COVERAGE means how much of the body
+  // she wants covered, and the two readings sat next to each other.
+  uneven: "Mostly in the colours you like",
   partial: "Partial match",
   gap: "Where there's a gap",
   unclear: "Not yet clear",
@@ -372,18 +450,23 @@ const SYNTH_DIMENSION: Readonly<Record<string, string>> = {
 };
 
 export function matchDimension(
-  line: { id: string; kind: "alignment" | "uneven" | "tension" | "unclear"; reading: string },
+  line: { id: string; kind: "alignment" | "uneven" | "tension" | "unclear"; reading: string; thinLabel?: string },
 ): MatchDimension {
   const state: MatchState =
     line.kind === "alignment" ? "strong"
       : line.kind === "uneven" ? "uneven"
       : line.kind === "tension" ? "gap"
       : "unclear";
+  // The generic "some of it, not all of it" left Grey unnamed even though the
+  // engine already knows exactly which colour is thin — name it instead.
+  const stateText = state === "uneven" && line.thinLabel
+    ? `Mostly in the colours you like; ${line.thinLabel.toLowerCase()} ${/ and /.test(line.thinLabel) ? "appear" : "appears"} less often`
+    : MATCH_STATE_TEXT[state];
   return {
     id: line.id,
     dimension: SYNTH_DIMENSION[line.id] ?? "Style",
     state,
-    stateText: MATCH_STATE_TEXT[state],
+    stateText,
     reading: plainText(line.reading),
   };
 }
@@ -402,13 +485,16 @@ export function lifestyleMatch(displays: RegisterDisplay[]): MatchDimension | nu
     .filter((d) => d.state === "needs-range" || d.state === "less-than-it-looks" || d.state === "empty")
     .map((d) => d.heading.toLowerCase());
 
+  // "Covered" is avoided throughout: WI also uses coverage for a stated
+  // dressing/coverage preference, and the same word meaning two different
+  // things one screen apart is exactly the ambiguity that got flagged.
   if (strong.length > 0 && weak.length > 0) {
     return {
       id: "match-lifestyle",
       dimension: "Lifestyle",
       state: "partial",
       stateText: MATCH_STATE_TEXT.partial,
-      reading: `${sentenceCase(joinPlain(strong))} ${strong.length === 1 ? "is" : "are"} well covered. ${sentenceCase(joinPlain(weak))} ${weak.length === 1 ? "has" : "have"} less variety.`,
+      reading: `You have plenty of ${joinPlain(strong)} options. Your ${joinPlain(weak)} wardrobe ${weak.length === 1 ? "has" : "have"} fewer ways to combine.`,
     };
   }
   if (weak.length === 0) {
@@ -417,7 +503,7 @@ export function lifestyleMatch(displays: RegisterDisplay[]): MatchDimension | nu
       dimension: "Lifestyle",
       state: "strong",
       stateText: MATCH_STATE_TEXT.strong,
-      reading: "Every kind of dressing you told nAia about is covered by what you own.",
+      reading: "You have what you need for every kind of dressing you told nAia about.",
     };
   }
   return {
@@ -425,7 +511,7 @@ export function lifestyleMatch(displays: RegisterDisplay[]): MatchDimension | nu
     dimension: "Lifestyle",
     state: "gap",
     stateText: MATCH_STATE_TEXT.gap,
-    reading: `${sentenceCase(joinPlain(weak))} ${weak.length === 1 ? "has" : "have"} less variety than the life you described.`,
+    reading: `Your ${joinPlain(weak)} wardrobe ${weak.length === 1 ? "has" : "have"} fewer ways to combine than the life you described.`,
   };
 }
 
@@ -577,7 +663,9 @@ function synthHeadline(line: SynthesisLine): string {
       return line.kind === "alignment"
         ? "Your colours match your Passport"
         : line.kind === "uneven"
-          ? "Part of your palette is barely there"
+          ? line.thinLabel
+            ? `${line.thinLabel} ${/ and /.test(line.thinLabel) ? "appear" : "appears"} less often in your wardrobe`
+            : "Part of your palette appears less often in your wardrobe"
           : "Your colours and your Passport differ";
     case "synth-neutral":
       return line.kind === "alignment"
@@ -659,10 +747,27 @@ export interface EnoughGroup {
   title: string;
   body: string;
   garmentIds: string[];
+  /**
+   * The full cluster membership, untruncated. `garmentIds` is capped for the
+   * always-visible strip; this is what a "see all N" reveal shows. Equal to
+   * `garmentIds` when the finding carried no fuller list.
+   */
+  fullGarmentIds: string[];
+  /**
+   * The register the group speaks for. Carried through because the page model
+   * keys the "you have enough of this" claim on it, so the matching "another
+   * one is not a priority" entry can be recognised as the same finding.
+   * Members of a group always share a register — they are two halves of one
+   * outfit ("tops and bottoms"), never two different kinds of dressing.
+   */
+  register: string;
 }
 
 export function groupEnough(
-  findings: ReadonlyArray<{ id: string; title: string; body: string; garmentIds: string[] }>,
+  findings: ReadonlyArray<{
+    id: string; title: string; body: string; garmentIds: string[];
+    fullGarmentIds?: string[]; register?: string;
+  }>,
 ): EnoughGroup[] {
   const byBody = new Map<string, typeof findings[number][]>();
   for (const f of findings) {
@@ -672,7 +777,14 @@ export function groupEnough(
 
   return [...byBody.entries()].map(([body, group]) => {
     if (group.length === 1) {
-      return { id: group[0].id, title: group[0].title, body, garmentIds: group[0].garmentIds };
+      return {
+        id: group[0].id,
+        title: group[0].title,
+        body,
+        garmentIds: group[0].garmentIds,
+        fullGarmentIds: group[0].fullGarmentIds ?? group[0].garmentIds,
+        register: group[0].register ?? "",
+      };
     }
     // "You already have enough everyday neutral tops" + "…bottoms"
     //   → "You already have enough everyday neutral tops and bottoms"
@@ -682,6 +794,8 @@ export function groupEnough(
       title: `You already have enough ${joinPlain(subjects)}`,
       body,
       garmentIds: group.flatMap((f) => f.garmentIds),
+      fullGarmentIds: group.flatMap((f) => f.fullGarmentIds ?? f.garmentIds),
+      register: group[0].register ?? "",
     };
   });
 }

@@ -700,16 +700,39 @@ export const PAIRING_GUIDANCE_STATUS = "deferred" as const;
 //   A midi or mini bottom CANNOT become legs-covered regardless of what is added on top.
 //   "n/a" hemLength → item is a top or outerwear → exempt (does not cover legs at all).
 //   null hemLength → unknown metadata → fail-open (keep the item in the pool).
+// Garment Intelligence Phase 4C1 — narrowly scoped rollback switch for the hard
+// length gate below. OFF = exactly the raw ClosetItem.hemLength/topLength reads.
+// ON = the canonical/effective values computed alongside them by
+// loadAllClosetItemsForEngine (resolveEffectiveLength) — not a second precedence
+// implementation. Lives here, with the gate it controls, because StyleMe moved
+// passesDressingRequirements into this module so the anchor selector could reach
+// it without an import cycle; styleme-result.server.ts re-exports both so the
+// Garment Intelligence tests keep their original import path.
+const CANONICAL_STYLEME_LENGTH = process.env.CANONICAL_STYLEME_LENGTH === "true";
+
+export function resolveGateLength(
+  item: { hemLength?: string | null; effectiveHemLength?: string | null; topLength?: string | null; effectiveTopLength?: string | null } | undefined,
+  canonicalEnabled: boolean,
+): { hemLength: string | null; topLength: string | null } {
+  if (!item) return { hemLength: null, topLength: null };
+  if (!canonicalEnabled) return { hemLength: item.hemLength ?? null, topLength: item.topLength ?? null };
+  return {
+    hemLength: item.effectiveHemLength !== undefined ? item.effectiveHemLength : (item.hemLength ?? null),
+    topLength: item.effectiveTopLength !== undefined ? item.effectiveTopLength : (item.topLength ?? null),
+  };
+}
+
 export function passesDressingRequirements(
   item: ClosetAnchorInput,
   dressingPreferences: readonly string[] | null | undefined,
 ): boolean {
   if (!dressingPreferences || dressingPreferences.length === 0) return true;
   const prefs = new Set(dressingPreferences);
+  const gateLength = resolveGateLength(item, CANONICAL_STYLEME_LENGTH);
 
   // legs-covered — non-compensable for garments that cover the leg zone (hemLength not "n/a")
   if (prefs.has("legs-covered")) {
-    const hl = item.hemLength;
+    const hl = gateLength.hemLength;
     if (hl !== null && hl !== undefined && hl !== "n/a") {
       if (hl !== "full" && hl !== "maxi") return false;
     }
@@ -718,7 +741,7 @@ export function passesDressingRequirements(
   // no-cropped-tops — non-compensable: a garment explicitly cropped (topLength === "cropped")
   // cannot become non-cropped through layering. Only applicable where topLength is known.
   if (prefs.has("no-cropped-tops")) {
-    const tl = item.topLength;
+    const tl = gateLength.topLength;
     if (tl !== null && tl !== undefined && tl !== "n/a") {
       if (tl === "cropped") return false;
     }

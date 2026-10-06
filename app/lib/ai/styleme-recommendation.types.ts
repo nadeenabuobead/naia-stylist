@@ -159,13 +159,29 @@ export interface ClosetAnchorInput {
   subcategory?: string | null;
   garmentRelationships?: string[];
   formality?: string | null; // GarmentFormality token — null when item not yet analyzed
+  // Garment Intelligence Phase 4B — canonical/effective formality, computed
+  // unconditionally alongside the raw `formality` field above (never replacing
+  // it). Only the T2 read-site in evaluateCompleteOutfit chooses between the
+  // two, behind CANONICAL_STYLEME_FORMALITY. autoSelectClosetAnchor and every
+  // other consumer must keep reading `formality` — this field does not exist
+  // for them.
+  effectiveFormality?: string | null;
   // Garment Intelligence fields (Group 3B — optional; null when item not yet analyzed)
   fitProfile?: string | null;
   waistShape?: string | null;
   sleeveLength?: string | null;
   necklineCoverage?: string | null;
   hemLength?: string | null;
+  // Garment Intelligence Phase 4C1 — canonical/effective hemLength/topLength,
+  // computed unconditionally alongside the raw fields above (never replacing
+  // them). Only the hard legs-covered/no-cropped-tops gate inside
+  // passesDressingRequirements chooses between the two, behind
+  // CANONICAL_STYLEME_LENGTH. scoreBodyNeedForClosetItem ("more-coverage"
+  // T3a/T3b ranking), autoSelectClosetAnchor, and every other consumer must
+  // keep reading the raw fields — these do not exist for them.
+  effectiveHemLength?: string | null;
   topLength?: string | null;
+  effectiveTopLength?: string | null;
   shoulderCoverage?: boolean | null;
   midriffExposed?: boolean | null;
   silhouette?: string | null;

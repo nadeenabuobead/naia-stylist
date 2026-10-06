@@ -7,11 +7,13 @@
 //   A. Identity (name, email, plan, joined)
 //   B. Customer Passport (customer-supplied preferences)
 //   C. Closet Summary (garment counts, category breakdown, link to closet)
+//   D. Buy / Skip Uploads (submission history — explicitly NOT Closet ownership)
 //
 // Auth: requireAdminSession.
 
-import { Link, useLoaderData } from "react-router";
-import type { LoaderFunctionArgs } from "react-router";
+import { Link, useLoaderData, useFetcher } from "react-router";
+import { data, type LoaderFunctionArgs, type ActionFunctionArgs } from "react-router";
+import prisma from "~/db.server";
 import { requireAdminSession } from "~/lib/internal-auth.server";
 import { splitStyleExpression } from "~/lib/passport/rev7-vocabulary";
 import {
@@ -19,6 +21,10 @@ import {
   type AdminCustomerDetail,
   type CustomerStylingPassportContext,
 } from "~/lib/admin/closet-intelligence.server";
+import {
+  getAdminCustomerBuySkipUploads,
+  type AdminBuySkipUploadSummary,
+} from "~/lib/admin/buyskip-admin.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   await requireAdminSession(request);
@@ -26,7 +32,56 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   if (!customerId) throw new Response("Not found", { status: 404 });
   const customer = await getAdminCustomerDetail(customerId);
   if (!customer) throw new Response("Customer not found", { status: 404 });
-  return Response.json({ customer });
+
+  // Read separately and defensively: the column arrives with the Wardrobe
+  // Intelligence migration, and this page must not break before it runs.
+  let accountType = "CUSTOMER";
+  try {
+    const row = await (prisma as unknown as {
+      customer: { findUnique(a: unknown): Promise<{ accountType: string } | null> };
+    }).customer.findUnique({ where: { id: customerId }, select: { accountType: true } });
+    accountType = row?.accountType ?? "CUSTOMER";
+  } catch {
+    accountType = "CUSTOMER";
+  }
+
+  const buySkipUploads = await getAdminCustomerBuySkipUploads(customerId);
+
+  return Response.json({ customer, accountType, buySkipUploads });
+}
+
+/** The account types an operator may set. */
+const ACCOUNT_TYPES = ["CUSTOMER", "TEST", "DEMO", "QA"] as const;
+
+/**
+ * Marking an account as ours.
+ *
+ * Deliberately a written column rather than an email-pattern rule: patterns
+ * drift, and the day one stops matching is the day test activity starts
+ * counting as customer demand. Owner-only, because misclassifying a real
+ * customer silently removes them from every aggregate.
+ */
+export async function action({ request, params }: ActionFunctionArgs) {
+  const session = await requireAdminSession(request);
+  if (session.identity.role !== "owner") {
+    return data({ ok: false, error: "Only an owner can change an account type." }, { status: 403 });
+  }
+
+  const { customerId } = params;
+  if (!customerId) return data({ ok: false, error: "Missing customer." }, { status: 400 });
+
+  const form = await request.formData();
+  const next = String(form.get("accountType") ?? "");
+  if (!ACCOUNT_TYPES.includes(next as (typeof ACCOUNT_TYPES)[number])) {
+    return data({ ok: false, error: "Unknown account type." }, { status: 400 });
+  }
+
+  await (prisma as unknown as { customer: { update(a: unknown): Promise<unknown> } }).customer.update({
+    where: { id: customerId },
+    data: { accountType: next },
+  });
+
+  return data({ ok: true, accountType: next });
 }
 
 // ── Label maps (same as closet detail page) ────────────────────────────────
@@ -361,10 +416,120 @@ function ClosetSummarySection({
   );
 }
 
+function verdictStyle(verdict: string): { color: string; background: string; border: string } {
+  const v = verdict.toUpperCase();
+  if (v === "BUY") return { color: "#86efac", background: "#052e16", border: "1px solid #166534" };
+  if (v.startsWith("SKIP")) return { color: "#fca5a5", background: "#2e0a0a", border: "1px solid #7f1d1d" };
+  return { color: "#9ca3af", background: "#1f2937", border: "1px solid #374151" };
+}
+
+function displayDateTime(d: Date | string): string {
+  return new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+// Buy/Skip is a customer-submitted purchase-candidate record, never a Closet
+// item: it is never counted as owned, never written to the Closet, and
+// never used to infer wardrobe gaps. This section is deliberately separate
+// from ClosetSummarySection above — do not merge them.
+function BuySkipUploadsSection({
+  customerId,
+  uploads,
+}: {
+  customerId: string;
+  uploads: AdminBuySkipUploadSummary[];
+}) {
+  return (
+    <div className="na-card">
+      <div className="na-card__header">
+        <h2 className="na-card__title">Buy / Skip Uploads</h2>
+        <span style={{ fontSize: "0.65rem", background: "#1f2937", color: "#9ca3af", border: "1px solid #374151", borderRadius: "3px", padding: "0.05rem 0.35rem" }}>
+          {uploads.length} submission{uploads.length === 1 ? "" : "s"}
+        </span>
+      </div>
+      <div className="na-card__body">
+        <p style={{ fontSize: "0.65rem", color: "#4b5563", marginBottom: "1rem" }}>
+          Purchase-candidate submissions this customer has uploaded. Not Closet ownership — nAia does not treat an upload as something the customer owns.
+        </p>
+        {uploads.length === 0 ? (
+          <p style={{ fontSize: "0.85rem", color: "#6b7280" }}>No Buy/Skip submissions.</p>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+            {uploads.map(u => {
+              const vStyle = verdictStyle(u.displayVerdict);
+              return (
+                <Link
+                  key={u.id}
+                  to={`/admin/naia/customers/${customerId}/buyskip/${u.id}`}
+                  style={{
+                    display: "flex",
+                    gap: "0.75rem",
+                    alignItems: "center",
+                    padding: "0.6rem",
+                    border: "1px solid #1f2937",
+                    borderRadius: "6px",
+                    textDecoration: "none",
+                    color: "inherit",
+                  }}
+                >
+                  <div style={{
+                    width: "48px", height: "48px", borderRadius: "5px", overflow: "hidden",
+                    background: "#111827", border: "1px solid #1f2937", flexShrink: 0,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                  }}>
+                    {u.thumbnailUrl ? (
+                      <img src={u.thumbnailUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    ) : (
+                      <span style={{ fontSize: "0.6rem", color: "#4b5563" }}>No image</span>
+                    )}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "0.2rem" }}>
+                      <span style={{ fontSize: "0.85rem", color: "#e5e7eb", fontWeight: 600 }}>
+                        {u.itemType ?? u.category ?? "Unknown item"}
+                      </span>
+                      <span style={{ fontSize: "0.65rem", padding: "0.05rem 0.4rem", borderRadius: "3px", ...vStyle }}>
+                        {u.displayVerdict}
+                      </span>
+                      {u.verdictOverridden && (
+                        <span title="Verdict was downgraded by a confirmed hard-constraint violation" style={{ fontSize: "0.6rem", color: "#fbbf24" }}>
+                          ⚠ overridden
+                        </span>
+                      )}
+                    </div>
+                    <p style={{ fontSize: "0.75rem", color: "#9ca3af", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {u.reasoning ?? "No reasoning recorded."}
+                    </p>
+                    <div style={{ display: "flex", gap: "0.6rem", marginTop: "0.25rem" }}>
+                      <span style={{ fontSize: "0.65rem", color: "#6b7280" }}>{displayDateTime(u.createdAt)}</span>
+                      {u.outcome && (
+                        <span style={{ fontSize: "0.65rem", color: "#6b7280" }}>
+                          Outcome: {u.outcome.decision.toLowerCase().replace(/_/g, " ")}
+                          {u.outcome.postPurchaseOutcome ? ` · ${u.outcome.postPurchaseOutcome.toLowerCase().replace(/_/g, " ")}` : ""}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <span style={{ fontSize: "0.75rem", color: "#4b5563" }}>View →</span>
+                </Link>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Page ───────────────────────────────────────────────────────────────────
 
 export default function AdminCustomerDetailPage() {
-  const { customer } = useLoaderData() as { customer: AdminCustomerDetail };
+  const { customer, accountType, buySkipUploads } = useLoaderData() as {
+    customer: AdminCustomerDetail;
+    accountType: string;
+    buySkipUploads: AdminBuySkipUploadSummary[];
+  };
+  const typeFetcher = useFetcher<{ ok: boolean; error?: string; accountType?: string }>();
+  const currentType = typeFetcher.data?.accountType ?? accountType;
 
   return (
     <div className="na-page">
@@ -382,6 +547,35 @@ export default function AdminCustomerDetailPage() {
         What does nAia think it knows about this person?
       </p>
 
+      {/* ── Account type ───────────────────────────────────────────────────
+          Ours or theirs. Written deliberately rather than inferred from an
+          email pattern, because the day a pattern stops matching is the day
+          test activity starts counting as customer demand. Only accounts
+          marked CUSTOMER are eligible for aggregated design research. */}
+      <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap",
+                    border: "1px solid #e5e7eb", borderRadius: "6px", padding: "0.75rem 1rem", marginBottom: "1.5rem" }}>
+        <span style={{ fontSize: "0.72rem", letterSpacing: "0.08em", textTransform: "uppercase", color: "#6b7280" }}>
+          Account type
+        </span>
+        <strong style={{ fontSize: "0.85rem" }}>{currentType}</strong>
+        <span style={{ fontSize: "0.75rem", color: "#9ca3af" }}>
+          {currentType === "CUSTOMER"
+            ? "Counts towards aggregated design research when they have opted in."
+            : "Excluded from every aggregate, whatever their consent says."}
+        </span>
+        <typeFetcher.Form method="post" style={{ marginLeft: "auto", display: "flex", gap: "0.5rem" }}>
+          <select name="accountType" defaultValue={currentType} style={{ fontSize: "0.8rem", padding: "0.3rem 0.5rem" }}>
+            {["CUSTOMER", "TEST", "DEMO", "QA"].map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+          <button type="submit" className="na-btn" disabled={typeFetcher.state !== "idle"}>
+            {typeFetcher.state !== "idle" ? "Saving…" : "Set"}
+          </button>
+        </typeFetcher.Form>
+        {typeFetcher.data?.error && (
+          <span style={{ fontSize: "0.75rem", color: "#b91c1c", width: "100%" }}>{typeFetcher.data.error}</span>
+        )}
+      </div>
+
       <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: "1.25rem", alignItems: "start" }}>
 
         {/* Main column */}
@@ -393,6 +587,7 @@ export default function AdminCustomerDetailPage() {
             reviewedItems={customer.reviewedItemCount}
             categoryBreakdown={customer.categoryBreakdown}
           />
+          <BuySkipUploadsSection customerId={customer.id} uploads={buySkipUploads} />
         </div>
 
         {/* Sidebar — identity */}

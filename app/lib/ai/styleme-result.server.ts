@@ -77,6 +77,7 @@ import {
   passesDressingRequirements,
   evaluateAnchorEligibility,
   explainDressingRequirements,
+  resolveGateLength,
 } from "./styleme-profile-gate.js";
 
 // ── Passport option label resolver ───────────────────────────────────────────
@@ -2294,6 +2295,42 @@ const PIECE_FORMALITY_WEIGHT: Record<string, number> = {
   unknown: 0,
 };
 
+// Garment Intelligence Phase 4B — narrowly scoped rollback switch for the
+// second live canonical-field migration (formality, T2 only). OFF = exactly
+// today's raw ClosetItem.formality read, here in evaluateCompleteOutfit's
+// per-piece formality lookup. ON = the canonical/effective formality value
+// already computed alongside it by loadAllClosetItemsForEngine
+// (resolveEffectiveFormality) — not a second precedence implementation.
+// This flag controls ONLY this one read-site. autoSelectClosetAnchor keeps
+// reading raw `item.formality` unconditionally; it never sees this flag.
+const CANONICAL_STYLEME_FORMALITY = process.env.CANONICAL_STYLEME_FORMALITY === "true";
+
+/**
+ * Pure decision logic for the T2 formality read-site, exported so it can be
+ * tested directly without process.env manipulation. OFF: byte-identical to
+ * item.formality. ON: item.effectiveFormality — which already equals raw
+ * formality whenever no admin correction exists, so "flag ON, no correction"
+ * is byte-identical to "flag OFF" by construction, not by a fallback here.
+ *
+ * Falls back to raw `formality` when `effectiveFormality` is `undefined`
+ * (the field was never computed — true of any ClosetAnchorInput built
+ * outside loadAllClosetItemsForEngine, including every pre-Phase-4B test
+ * fixture). This is distinct from `effectiveFormality` being explicitly
+ * `null`, which means the loader DID resolve it and found no value — that
+ * case is trusted as-is, not overridden. Without this distinction, flipping
+ * the flag ON would silently blank out formality for every object that
+ * never passed through the loader, which is exactly what broke the full
+ * regression suite before this fallback was added.
+ */
+export function resolveT2Formality(
+  item: { formality?: string | null; effectiveFormality?: string | null } | undefined,
+  canonicalEnabled: boolean,
+): string | null {
+  if (!item) return null;
+  if (!canonicalEnabled) return item.formality ?? null;
+  return item.effectiveFormality !== undefined ? item.effectiveFormality : (item.formality ?? null);
+}
+
 // Whole-outfit suitability evaluation: formality register + occasion coverage.
 // This is the single shared ranker used for candidate pre-sorting, model evidence,
 // deterministic fallback, and diagnostics. No garment-name exceptions.
@@ -2307,6 +2344,16 @@ export interface OutfitSuitabilityScore {
   formalityFit: "within-target" | "overdressed" | "underdressed" | "unknown";
   // Weighted-average distance from nearest target edge (0 = within; + = steps above; − = steps below)
   formalityOvershoot: number;
+  // Garment Intelligence Phase 4B — T2 ONLY. The canonical-aware classification
+  // consumed exclusively by formalityFitPriority (T2) at its one call site.
+  // Equals `formalityFit` exactly when CANONICAL_STYLEME_FORMALITY is OFF.
+  // Every OTHER field on this interface — formalityFit, formalityOvershoot
+  // (and therefore T6a's formalityOvershootAbs), compositeScore, reasons,
+  // pieceFormalities, outfitFormalityRank — remains raw-formality-based
+  // UNCONDITIONALLY, regardless of the flag. Phase 4B's approved boundary is
+  // T2 only; this split is what enforces that boundary structurally rather
+  // than by convention.
+  t2FormalityFit: "within-target" | "overdressed" | "underdressed" | "unknown";
   // Occasion coverage (mirrors existing per-candidate evidence)
   occasionCoverageRatio: number;
   explicitNonMatchCount: number;
@@ -2317,70 +2364,30 @@ export interface OutfitSuitabilityScore {
   reasons: string[];
 }
 
-export function evaluateCompleteOutfit(
-  candidate: OutfitCandidate,
-  allItems: ClosetAnchorInput[],
-  // "intentions" is optional on StyleMeSessionInput, so existing callers and fixtures
-  // that omit it keep working; it is read only to tell a working layer from a burden.
-  session: Pick<StyleMeSessionInput, "occasion" | "formalityConditional" | "moods" | "desiredFeelings" | "intentions">,
-): OutfitSuitabilityScore {
-  const itemMap = new Map(allItems.map((i) => [i.id, i]));
-  const targetFormalityRange = getTargetFormalityRange(
-    session.occasion,
-    session.formalityConditional ?? null,
-  );
-
+export function classifyOutfitFormality(
+  pieces: OutfitCandidate["pieces"],
+  itemMap: Map<string, ClosetAnchorInput>,
+  targetFormalityRange: { min: number; max: number },
+  formalityOf: (item: ClosetAnchorInput | undefined) => string | null,
+): {
+  pieceFormalities: Array<{ slot: string; formality: string | null; weight: number }>;
+  optionalPieceCount: number;
+  outfitFormalityRank: number | null;
+  normalizedFormalityPenalty: number;
+  formalityFit: OutfitSuitabilityScore["formalityFit"];
+  formalityOvershoot: number;
+} {
   // Build per-piece formality data for all contributing slots.
-  const pieceFormalities = candidate.pieces.map((p) => {
+  const pieceFormalities = pieces.map((p) => {
     const item = itemMap.get(p.closetId);
     const weight = PIECE_FORMALITY_WEIGHT[p.slot] ?? 0;
-    return { slot: p.slot, formality: item?.formality ?? null, weight };
+    return { slot: p.slot, formality: formalityOf(item), weight };
   });
 
-  // "Optional burden" for the T6c tie-break: pieces the outfit could shed without
-  // losing anything. Bags, accessories and jewellery always qualify.
-  //
-  // An outer layer qualifies only when it is NOT doing work. Counting every layer as
-  // burden made T6c mechanically prefer the no-layer twin of any otherwise-tied
-  // outfit, which is right for a gratuitous jacket and wrong for a coat that is
-  // carrying the look. T6c is still free to prefer simplicity — it just no longer
-  // treats "has a layer" as itself a reason to lose.
-  //
-  // A layer is doing work when a human reviewer rated it Strong or Supporting for
-  // one of today's intentions, or when it carries the register the occasion asked for
-  // while the base pieces do not. Both are evidence, not heuristics: an unrated layer
-  // on a casual base is still burden and can still be dropped.
-  const targetBand = targetFormalityRange;
-  const baseCarriesRegister = candidate.pieces.some((p) => {
-    if (!BASE_CLOTHING_SLOTS.has(p.slot)) return false;
-    const f = itemMap.get(p.closetId)?.formality;
-    const r = f ? (FORMALITY_RANK[f] ?? 0) : 0;
-    return r >= targetBand.min;
-  });
-  const layerIsWorking = (closetId: string): boolean => {
-    const item = itemMap.get(closetId);
-    if (!item) return false;
-    const ratings = item.approvedProfile?.intentionPotentials as Record<string, string> | null | undefined;
-    const activeIntentions = session.intentions ?? [];
-    if (ratings && activeIntentions.some((id) => ratings[id] === "Strong" || ratings[id] === "Supporting")) {
-      return true;
-    }
-    if (!baseCarriesRegister && item.formality) {
-      const r = FORMALITY_RANK[item.formality] ?? 0;
-      if (r >= targetBand.min && r <= targetBand.max) return true;
-    }
-    return false;
-  };
-  // Piece ROLE, read from the slot directly. This used to ask whether the slot's
-  // formality weight was 0, which happened to be true of exactly bag/accessory/jewelry
-  // — until RC-D gave them a non-zero weight and the proxy quietly stopped identifying
-  // them. Burden is a question about what a piece does in the outfit, not about how much
-  // it contributes to the register, so the two must not share a signal.
-  const optionalPieceCount = candidate.pieces.filter((p) => {
-    if (BASE_CLOTHING_SLOTS.has(p.slot) || SHOE_SLOTS.has(p.slot)) return false; // never burden
-    if (p.slot !== "outerwear") return true;            // bag / accessory / jewelry / unknown
-    return !layerIsWorking(p.closetId);
-  }).length;
+  // Outerwear and zero-weight pieces (bag, accessory, jewelry) count as "optional burden"
+  // for compositeScore tie-breaking. Outerwear is removable and should not tip a close
+  // comparison over a cleaner base outfit, even when it contributes to formality register.
+  const optionalPieceCount = pieceFormalities.filter((p) => p.slot === "outerwear" || p.weight === 0).length;
 
   // Per-piece weighted formality penalty — normalized so piece count alone does not
   // inflate the penalty. Each piece with known formality contributes independently:
@@ -2427,6 +2434,95 @@ export function evaluateCompleteOutfit(
       formalityOvershoot = -(targetFormalityRange.min - outfitFormalityRank);
     }
   }
+
+  return { pieceFormalities, optionalPieceCount, outfitFormalityRank, normalizedFormalityPenalty, formalityFit, formalityOvershoot };
+}
+
+export function evaluateCompleteOutfit(
+  candidate: OutfitCandidate,
+  allItems: ClosetAnchorInput[],
+  // "intentions" is optional on StyleMeSessionInput, so existing callers and fixtures
+  // that omit it keep working; it is read only to tell a working layer from a burden.
+  session: Pick<StyleMeSessionInput, "occasion" | "formalityConditional" | "moods" | "desiredFeelings" | "intentions">,
+): OutfitSuitabilityScore {
+  const itemMap = new Map(allItems.map((i) => [i.id, i]));
+  const targetFormalityRange = getTargetFormalityRange(
+    session.occasion,
+    session.formalityConditional ?? null,
+  );
+
+  // MERGE NOTE (release/naia-final-integration). Two lanes changed this function:
+  // StyleMe added `intentions` to the signature and replaced how optional burden is
+  // counted; Garment Intelligence extracted the formality maths into
+  // classifyOutfitFormality and added the T2-only canonical pass. Both are kept.
+  //
+  // The one field where both sides CANNOT both be preserved is optionalPieceCount.
+  // classifyOutfitFormality still returns its own (slot === "outerwear" || weight === 0),
+  // which is the pre-RC-D proxy: once RC-D gave bags/accessories a non-zero weight that
+  // test stopped identifying them, and it counted every layer as burden, which made T6c
+  // mechanically prefer the no-layer twin of any tied outfit. StyleMe replaced it with a
+  // role-based count that asks whether a layer is doing work. That newer rule is the one
+  // QA Tests 2/3 certified (the blazer has to survive), so it wins here and the helper's
+  // field is deliberately NOT destructured. Every other field comes from the helper.
+  // Raw formality — UNCONDITIONAL, drives every field below except
+  // t2FormalityFit. This is byte-for-byte the pre-Phase-4B computation.
+  const {
+    pieceFormalities, outfitFormalityRank,
+    normalizedFormalityPenalty, formalityFit, formalityOvershoot,
+  } = classifyOutfitFormality(candidate.pieces, itemMap, targetFormalityRange, (item) => item?.formality ?? null);
+
+
+  // "Optional burden" for the T6c tie-break: pieces the outfit could shed without
+  // losing anything. Bags, accessories and jewellery always qualify.
+  //
+  // An outer layer qualifies only when it is NOT doing work. Counting every layer as
+  // burden made T6c mechanically prefer the no-layer twin of any otherwise-tied
+  // outfit, which is right for a gratuitous jacket and wrong for a coat that is
+  // carrying the look. T6c is still free to prefer simplicity — it just no longer
+  // treats "has a layer" as itself a reason to lose.
+  //
+  // A layer is doing work when a human reviewer rated it Strong or Supporting for
+  // one of today's intentions, or when it carries the register the occasion asked for
+  // while the base pieces do not. Both are evidence, not heuristics: an unrated layer
+  // on a casual base is still burden and can still be dropped.
+  const targetBand = targetFormalityRange;
+  const baseCarriesRegister = candidate.pieces.some((p) => {
+    if (!BASE_CLOTHING_SLOTS.has(p.slot)) return false;
+    const f = itemMap.get(p.closetId)?.formality;
+    const r = f ? (FORMALITY_RANK[f] ?? 0) : 0;
+    return r >= targetBand.min;
+  });
+  const layerIsWorking = (closetId: string): boolean => {
+    const item = itemMap.get(closetId);
+    if (!item) return false;
+    const ratings = item.approvedProfile?.intentionPotentials as Record<string, string> | null | undefined;
+    const activeIntentions = session.intentions ?? [];
+    if (ratings && activeIntentions.some((id) => ratings[id] === "Strong" || ratings[id] === "Supporting")) {
+      return true;
+    }
+    if (!baseCarriesRegister && item.formality) {
+      const r = FORMALITY_RANK[item.formality] ?? 0;
+      if (r >= targetBand.min && r <= targetBand.max) return true;
+    }
+    return false;
+  };
+  // Piece ROLE, read from the slot directly. This used to ask whether the slot's
+  // formality weight was 0, which happened to be true of exactly bag/accessory/jewelry
+  // — until RC-D gave them a non-zero weight and the proxy quietly stopped identifying
+  // them. Burden is a question about what a piece does in the outfit, not about how much
+  // it contributes to the register, so the two must not share a signal.
+  const optionalPieceCount = candidate.pieces.filter((p) => {
+    if (BASE_CLOTHING_SLOTS.has(p.slot) || SHOE_SLOTS.has(p.slot)) return false; // never burden
+    if (p.slot !== "outerwear") return true;            // bag / accessory / jewelry / unknown
+    return !layerIsWorking(p.closetId);
+  }).length;
+
+  // T2-only canonical classification. OFF: identical to formalityFit above,
+  // reused directly rather than re-computed. ON: a second pass of the SAME
+  // algorithm, fed canonical formality — never affects any field above.
+  const t2FormalityFit = !CANONICAL_STYLEME_FORMALITY
+    ? formalityFit
+    : classifyOutfitFormality(candidate.pieces, itemMap, targetFormalityRange, (item) => resolveT2Formality(item, true)).formalityFit;
 
   // Occasion coverage — replicates buildCandidateOccasionEvidence logic for the
   // composite score; both systems share a definition of "match"/"not-listed".
@@ -2489,7 +2585,7 @@ export function evaluateCompleteOutfit(
 
   return {
     pieceFormalities, outfitFormalityRank, targetFormalityRange,
-    formalityFit, formalityOvershoot,
+    formalityFit, formalityOvershoot, t2FormalityFit,
     occasionCoverageRatio, explicitNonMatchCount, baseAndShoeOccasionMatchCount,
     optionalPieceCount, compositeScore, reasons,
   };
@@ -3970,7 +4066,7 @@ export function buildProfileHint(profile?: StyleMeProfileSignals): string {
 // Re-exported here so every existing caller and test keeps its import path unchanged.
 //
 // The anchor is NO LONGER exempt from this gate — see evaluateAnchorEligibility.
-export { passesDressingRequirements };
+export { passesDressingRequirements, resolveGateLength };
 
 // Candidate-level dressing gate for compensable upper-body requirements.
 // Runs AFTER candidates are assembled so that legitimate layering (outerwear covering
@@ -5479,9 +5575,11 @@ export async function computeStyleMeResult(
         const bnFit = scoreBodyNeedFitForRanking(session.bodyNeeds ?? [], c, allItems);
         const inFit = computeIntentionFit(session.intentions ?? [], c, candidateA, allItems, profile_);
         const passport = computePassportAlignment(c, allItems, profile_);
+        // Phase 4B: T2 reads t2FormalityFit (canonical-aware), not formalityFit
+        // (raw, used by T6a/formalityOvershootAbs below and by diagnostics).
         const formalityFitPriority =
-          suit.formalityFit === "within-target" ? 1 :
-          suit.formalityFit === "unknown" ? 0 : -1;
+          suit.t2FormalityFit === "within-target" ? 1 :
+          suit.t2FormalityFit === "unknown" ? 0 : -1;
         rankKeys.set(c.id, {
           occasionTier: computeOccasionTier(c, allItems, session.occasion),
           formalityFitPriority,

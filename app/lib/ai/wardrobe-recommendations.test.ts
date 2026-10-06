@@ -13,7 +13,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { computeWardrobeRecommendations } from "./wardrobe-recommendations.ts";
-import { computeWardrobeNeeds } from "./wardrobe-needs.ts";
+import { computeWardrobeNeeds, classifyUsability } from "./wardrobe-needs.ts";
 import type { WardrobeGarment, WardrobePassport } from "./wardrobe-intelligence.ts";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -418,7 +418,7 @@ describe("§WR-2n the ladder uses every signal it already has", () => {
       dressingPreferences: ["arms-covered"],
     }));
     for (const rec of recs.recommendations) {
-      assert.doesNotMatch(rec.title, /^A [aeiou]/i, `article disagrees: "${rec.title}"`);
+      assert.doesNotMatch(rec.title, /^One option to explore: a [aeiou]/i, `article disagrees: "${rec.title}"`);
     }
   });
 });
@@ -525,8 +525,10 @@ describe("§WR-2q colour reads as a choice, not a requirement", () => {
     }));
     const work = recs.recommendations.find((r) => r.register === "work");
     assert.ok(work);
-    assert.match(work!.body, /would add the most — it's the colour you named that your Closet has least of/);
-    assert.match(work!.body, /would also sit within the palette you told nAia you like/);
+    assert.match(work!.body, /is a colour you said you like\./);
+    // Underrepresentation may refine a need; it never creates or proves one.
+    assert.doesNotMatch(work!.body, /would add the most|colour you named that your Closet has least of/);
+    assert.match(work!.body, /are also within the palette you described/);
     // Alternatives are offered with "or", and only the sentence start is capitalised.
     assert.doesNotMatch(work!.body, /\bor [A-Z]/, "mid-sentence capital in the alternatives");
   });
@@ -563,7 +565,10 @@ describe("§WR-2r coverage belongs in the name, not beside it", () => {
     }));
     const work = recs.recommendations.find((r) => r.register === "work");
     assert.ok(work);
-    assert.match(work!.title, /^A full-length work bottom$/);
+    // She stated BOTH the generic length preference and the garment-type one.
+    // The garment-type preference is strictly more informative on a bottom —
+    // "trousers" survives the collision, not the generic "bottom" noun.
+    assert.match(work!.title, /^One option to explore: a full-length work trousers$/);
     // The attributes line carries the colour alone — the name already says the
     // rest, and "grey · full length" read as two equal tags for one garment.
     assert.ok(!work!.attributes.some((a) => a.kind === "coverage"), "coverage should not be repeated beside the name");
@@ -578,7 +583,10 @@ describe("§WR-2r coverage belongs in the name, not beside it", () => {
     }));
     const work = recs.recommendations.find((r) => r.register === "work");
     assert.ok(work);
-    assert.ok(work!.criteria.coverage.includes("legs-covered"), "moving it into the name must not drop it from criteria");
+    // The more specific, garment-type-bearing preference is the one that
+    // survives the dedup and lands in criteria — not the generic one it
+    // collapsed with.
+    assert.ok(work!.criteria.coverage.includes("prefer-full-length-trousers"), "the specific preference must survive the dedup");
     assert.equal(work!.specificity, "detailed", "a named requirement is still specificity");
   });
 
@@ -630,7 +638,7 @@ describe("§WR-3 the proposal has to work with what she owns", () => {
     const work = recs.recommendations.find((r) => r.register === "work");
     assert.ok(work);
     assert.ok(work!.unlocksIds.length > 0, "a recommendation must show what it unlocks");
-    assert.match(work!.body, /would work with \d+ of the pieces you already own/);
+    assert.match(work!.body, /could pair with \d+ pieces? already in your Closet/);
   });
 
   it("3b — nothing is recommended that would barely combine with anything", () => {
@@ -663,7 +671,7 @@ describe("§WR-4 the counter-recommendation", () => {
 
     if (needs.enough.length > 0 && needs.couldUseMore.length > 0) {
       assert.equal(recs.notAPriority.length, 1);
-      assert.match(recs.notAPriority[0].body, /add very little compared with strengthening your/);
+      assert.match(recs.notAPriority[0].body, /is where more variety would help/);
     }
   });
 
@@ -751,7 +759,246 @@ describe("§WR-6 nAia does not invent reasons", () => {
     ];
     const { recs } = run(items, makePassport({ lifestyle: ["everyday-casual", "work-office"] }));
     for (const rec of recs.recommendations.filter((r) => r.specificity !== "direction")) {
-      assert.match(rec.body, /adds new ways to dress rather than another version of something you have/);
+      assert.match(rec.body, /adds ways to dress rather than another version of something you have/);
     }
+  });
+});
+
+// ── §WR-9 — the recommendation must actually resolve the gap it cites ─────────
+//
+// An integration assertion, not a copy check. The attributes the engine emits
+// are instantiated as a real garment, put back through the SAME pipeline, and
+// the gap has to close. If the proposal cannot do that, it is not a proposal.
+
+describe("§WR-9 emitted attributes resolve the tested outcome", () => {
+  /**
+   * A work wardrobe whose BOTTOMS are near-copies: plenty of pieces, few looks.
+   *
+   * Two distinct top classes and one bottom class gives exactly 2 distinct
+   * looks — at the threshold, so the gap is open — and a second bottom class
+   * would take it to 4. That is the shape of the real Closet this came from.
+   */
+  const repetitiveWork = () => {
+    const out: WardrobeGarment[] = [];
+    const topShapes = [
+      { silhouette: "straight", fitProfile: "tailored" },
+      { silhouette: "fitted", fitProfile: "relaxed" },
+    ];
+    for (let i = 0; i < 6; i++) {
+      out.push(makeGarment({
+        slot: "top", category: "TOPS", formality: "business-casual",
+        topLength: "hip-length", hemLength: "n/a", ...topShapes[i % topShapes.length],
+      }));
+    }
+    for (let i = 0; i < 5; i++) {
+      out.push(makeGarment({
+        slot: "bottom", category: "BOTTOMS", formality: "business-casual",
+        topLength: "n/a", hemLength: "full", fitProfile: "tailored", silhouette: "straight",
+      }));
+    }
+    return out;
+  };
+  const passport = () => makePassport({
+    lifestyle: ["work-office"],
+    dressingPreferences: ["legs-covered"],
+  });
+
+  it("§WR-9a the gap exists, and the proposal names attributes derived from it", () => {
+    const { needs, recs } = run(repetitiveWork(), passport());
+    const work = needs.registers.find((r) => r.register === "work")!;
+    assert.ok(needs.couldUseMore.some((f) => f.register === "work"), "the gap is open");
+    assert.ok(work.distinctLooks <= 2, `distinct looks ${work.distinctLooks} is at or under the threshold`);
+
+    const rec = recs.recommendations.find((r) => r.register === "work");
+    assert.ok(rec, "a recommendation is made");
+    assert.ok(
+      rec!.criteria.resolvingSilhouettes.length > 0,
+      "it names the shapes that would resolve the gap, not just a slot and a colour",
+    );
+  });
+
+  it("§WR-9h the structure attribute's label is plain language, never a raw classification token", () => {
+    const { recs } = run(repetitiveWork(), passport());
+    const rec = recs.recommendations.find((r) => r.register === "work")!;
+    const structure = rec.attributes.find((a) => a.kind === "structure");
+    assert.ok(structure, "a structure attribute is proposed");
+    // criteria.resolvingSilhouettes stays the raw vocabulary — real garments
+    // are matched against it — but the customer-facing label must not leak
+    // that vocabulary verbatim (e.g. "a-line", "wide-leg" unexplained).
+    for (const raw of rec.criteria.resolvingSilhouettes) {
+      assert.doesNotMatch(structure!.label, new RegExp(`\\b${raw}\\b`), `raw token "${raw}" leaked into the label`);
+    }
+  });
+
+  it("§WR-9b instantiating those attributes CLOSES the gap", () => {
+    const base = repetitiveWork();
+    const p = passport();
+    const rec = run(base, p).recs.recommendations.find((r) => r.register === "work")!;
+
+    const proposed = makeGarment({
+      slot: rec.criteria.slot ?? "bottom",
+      category: "BOTTOMS",
+      formality: "business-casual",
+      topLength: "n/a",
+      hemLength: "full",
+      fitProfile: rec.criteria.structure === "soft" ? "relaxed" : "tailored",
+      silhouette: rec.criteria.resolvingSilhouettes[0],
+    });
+
+    const after = run([...base, proposed], p);
+    assert.ok(
+      !after.needs.couldUseMore.some((f) => f.register === "work"),
+      "the piece the engine described actually resolves the gap it described",
+    );
+  });
+
+  it("§WR-9c another near-copy does NOT close it", () => {
+    // The counterpart assertion. Without it, §WR-9b could pass for a
+    // recommendation that named nothing useful.
+    const base = repetitiveWork();
+    const p = passport();
+    const nearCopy = makeGarment({
+      slot: "bottom", category: "BOTTOMS", formality: "business-casual",
+      topLength: "n/a", hemLength: "full", fitProfile: "tailored", silhouette: "straight",
+    });
+    const after = run([...base, nearCopy], p);
+    assert.ok(
+      after.needs.couldUseMore.some((f) => f.register === "work"),
+      "more of the same must not satisfy a repetition finding",
+    );
+  });
+
+  it("§WR-9d no proposal contradicts a stated dressing preference", () => {
+    // "legs-covered" is stated, so a mini is never among the resolving shapes
+    // however many looks it would unlock.
+    const { recs } = run(repetitiveWork(), passport());
+    const rec = recs.recommendations.find((r) => r.register === "work")!;
+    for (const silhouette of rec.criteria.resolvingSilhouettes) {
+      const candidate = makeGarment({
+        slot: "bottom", category: "BOTTOMS", formality: "business-casual",
+        topLength: "n/a", hemLength: "full", silhouette,
+        fitProfile: rec.criteria.structure === "soft" ? "relaxed" : "tailored",
+      });
+      assert.notEqual(
+        classifyUsability(candidate, passport()).usability,
+        "blocked",
+        `${silhouette} would contradict a preference she stated`,
+      );
+    }
+  });
+
+  it("§WR-9e the resolving shapes are this Closet's, not a fixed answer", () => {
+    // A wardrobe already full of flared bottoms must not be told to buy flared.
+    const flared = repetitiveWork().map((g) =>
+      g.slot === "bottom" ? { ...g, silhouette: "flared", fitProfile: "relaxed" } : g,
+    );
+    const { recs } = run(flared, passport());
+    const rec = recs.recommendations.find((r) => r.register === "work");
+    if (rec && rec.criteria.resolvingSilhouettes.length > 0) {
+      assert.ok(
+        !rec.criteria.resolvingSilhouettes.every((s) => s === "flared"),
+        "the proposal must differ from what she already owns",
+      );
+    }
+  });
+
+  it("§WR-9i a stated garment-type preference resolves a real silhouette winner via the deterministic tie-break", () => {
+    // Same tied-bottom fixture as §WR-9a, but she has also stated
+    // prefer-full-length-trousers — real evidence for an actual garment
+    // type. The primary distinct-looks simulation still ties every
+    // candidate silhouette (all her bottoms are identical), but the
+    // secondary tie-break must still resolve to one or two real,
+    // trouser-valid silhouettes — never a vague "different shape" fallback,
+    // and never an invalid trouser term.
+    const { recs } = run(
+      repetitiveWork(),
+      makePassport({ lifestyle: ["work-office"], dressingPreferences: ["legs-covered", "prefer-full-length-trousers"] }),
+    );
+    const rec = recs.recommendations.find((r) => r.register === "work")!;
+    assert.ok(rec, "a recommendation is made");
+    assert.match(rec.title, /trousers/, "the stated garment type names itself in the title");
+    assert.doesNotMatch(rec.title, /different from the straight pairs|a different shape/i, "must name a real winner, not the vague fallback");
+    assert.ok(rec.criteria.resolvingSilhouettes.length >= 1 && rec.criteria.resolvingSilhouettes.length <= 2, "one winner, or at most two if every real criterion still ties");
+    for (const s of rec.criteria.resolvingSilhouettes) {
+      assert.ok(["straight", "flared", "wide-leg", "fitted"].includes(s), `"${s}" is not a valid trouser silhouette`);
+    }
+    for (const banned of ["a-line", "oversized"]) {
+      assert.doesNotMatch(rec.title, new RegExp(banned, "i"), `invalid trouser term should never be asserted: found "${banned}"`);
+    }
+    assert.match(rec.body, /would work with \d+ of your work pieces/, "the body explains why in one sentence, with a real count");
+  });
+
+  it("§WR-9j the trouser-silhouette tie-break never proposes a-line or oversized even when they would otherwise tie or win", () => {
+    // a-line and oversized are real CANDIDATE_SILHOUETTES tokens and could
+    // easily win a naive tie-break (they're valid for other slots/garment
+    // types) — they must never surface for a trousers-typed recommendation.
+    const { recs } = run(
+      repetitiveWork(),
+      makePassport({ lifestyle: ["work-office"], dressingPreferences: ["legs-covered", "prefer-full-length-trousers"] }),
+    );
+    const rec = recs.recommendations.find((r) => r.register === "work")!;
+    assert.ok(rec);
+    assert.ok(!rec.criteria.resolvingSilhouettes.includes("a-line"));
+    assert.ok(!rec.criteria.resolvingSilhouettes.includes("oversized"));
+  });
+
+  it("§WR-9k novelty breaks the tie toward a silhouette she does not already own elsewhere in the Closet", () => {
+    // She owns a flared skirt elsewhere (a different slot, so it never
+    // enters the work-bottom pool) — the novelty criterion must prefer the
+    // silhouette she owns NONE of over one she already has, even off-slot.
+    const withFlaredSkirt = [
+      ...repetitiveWork(),
+      makeGarment({ slot: "bottom", category: "BOTTOMS", subcategory: "skirt", formality: "casual", topLength: "n/a", hemLength: "full", silhouette: "flared", fitProfile: "flowy" }),
+    ];
+    const { recs } = run(
+      withFlaredSkirt,
+      makePassport({ lifestyle: ["work-office"], dressingPreferences: ["legs-covered", "prefer-full-length-trousers"] }),
+    );
+    const rec = recs.recommendations.find((r) => r.register === "work")!;
+    assert.ok(rec);
+    // flared is no longer novel (she owns one), so it must not be the sole
+    // winner while wide-leg (still unowned) is available.
+    if (rec.criteria.resolvingSilhouettes.length === 1) {
+      assert.notEqual(rec.criteria.resolvingSilhouettes[0], "flared", "flared is already owned elsewhere and should lose to a genuinely novel silhouette");
+    }
+  });
+
+  it("§WR-9f a wardrobe where nothing resolves the gap gets no shape claim", () => {
+    // The ORIGINAL fixture, kept deliberately. Every piece — tops AND bottoms —
+    // is one class, so a second bottom class still yields only 2 combinations
+    // and cannot clear the threshold. The engine must say nothing about shape
+    // rather than name one that would not help.
+    const uniform: WardrobeGarment[] = [];
+    for (let i = 0; i < 6; i++) {
+      uniform.push(makeGarment({
+        slot: "top", category: "TOPS", formality: "business-casual",
+        topLength: "hip-length", hemLength: "n/a", fitProfile: "tailored", silhouette: "straight",
+      }));
+    }
+    for (let i = 0; i < 5; i++) {
+      uniform.push(makeGarment({
+        slot: "bottom", category: "BOTTOMS", formality: "business-casual",
+        topLength: "n/a", hemLength: "full", fitProfile: "tailored", silhouette: "straight",
+      }));
+    }
+    const { recs } = run(uniform, makePassport({ lifestyle: ["work-office"], dressingPreferences: ["legs-covered"] }));
+    const rec = recs.recommendations.find((r) => r.register === "work");
+    if (rec) {
+      assert.deepEqual(
+        rec.criteria.resolvingSilhouettes,
+        [],
+        "no shape is claimed when no shape would clear the threshold",
+      );
+    }
+  });
+
+  it("§WR-9g crossing the threshold is never described as a complete wardrobe", () => {
+    const { recs } = run(repetitiveWork(), passport());
+    const rec = recs.recommendations.find((r) => r.register === "work")!;
+    const text = [rec.title, rec.body, ...rec.evidence.map((e) => e.detail)].join(" ");
+    assert.doesNotMatch(text, /complete (outfit|look|wardrobe)|fully covered|nothing more you need/i);
+    // Distinct looks are supported COMBINATIONS between representatives, not
+    // finished outfits — the evidence line has to say so.
+    assert.doesNotMatch(text, /\b\d+ outfits?\b/i);
   });
 });
