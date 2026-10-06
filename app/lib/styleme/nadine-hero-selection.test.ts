@@ -34,10 +34,17 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { runRecommendation } from "../ai/styleme-recommendation.js";
 import { getProductByHandle } from "../ai/naia-catalog.js";
 import { LOCKED_CATALOGUE_HANDLES } from "../ai/naia-product-media.js";
+import {
+  CANONICAL_REGISTER_BANDS,
+  FORMALITY_CONDITIONAL_ADJUSTMENTS,
+  resolveCanonicalRegisterBand,
+} from "../ai/styleme-profile-gate.js";
 import {
   LIVE_NADINE_STYLING_HANDLES,
   getLiveNadineStylingProducts,
@@ -301,5 +308,106 @@ describe("NH-G — no qualifying live piece means closet-led, not forced merchan
     } as unknown as StyleMeEngineInput);
     assert.equal(r.primary, null, "no live piece is tagged family, so none may be forced");
     assert.ok(r.anchor, "her own anchor must still lead the look");
+  });
+});
+
+// ── NH-R: register is a PERMISSION, not a score ───────────────────────────
+//
+// Register had no eligibility rule at all. checkHardExclusions covers self-exclusion,
+// slot, firm-no colours and dressing preferences; formality was soft points only, and
+// MIN_TOTAL_SCORE of 2 cannot stand in for a gate against scores of ~30. Proven before
+// the fix: `work` + formality-relaxed selected a rank-4 trouser against its band.
+//
+// The cause was two tables. The catalogue scorer read relaxed {1,3} / smart {2,4} /
+// polished {3,5} / occasion {4,5}; the closet path read {1,2} / {2,3} / {3,4} / {4,6}.
+// One answer, two meanings, in the same session.
+//
+// ELIGIBILITY AND SCORING ARE NOW DELIBERATELY DIFFERENT NUMBERS. Permission comes from
+// CANONICAL_REGISTER_BANDS, shared with the closet path. Ranking affinity keeps the wider
+// catalogue windows, because narrowing those would silently re-rank all eleven products
+// and change a legacy path this feature has no business touching. NH-R.8 asserts the two
+// are not equal, so nobody "tidies" them back together.
+//
+// The live collection is ranks 3-4, which is what makes these assertions bite.
+
+describe("NH-R — canonical register eligibility", () => {
+  const band = (f: string | null) => S({ occasion: "dinner", formalityConditional: f } as never);
+  const rank = (h: string) => getProductByHandle(h)!.parsed.scalars.formalityScore;
+  const pool = (f: string | null) =>
+    mixed(band(f)).evaluatedProducts.filter((e) => !e.isHardExcluded).map((e) => e.handle).sort();
+
+  test("NH-R.1 explicit Relaxed {1,2} yields no live hero — closet-only", () => {
+    const r = mixed(band("formality-relaxed"));
+    assert.equal(r.primary, null,
+      "the live collection is ranks 3-4; nothing is inside {1,2}, and her request must " +
+      "not be widened to manufacture a hero");
+    assert.deepEqual(pool("formality-relaxed"), []);
+  });
+
+  test("NH-R.2 explicit Smart {2,3} admits only the rank-3 pieces", () => {
+    assert.deepEqual(pool("formality-smart"), ["draped-leather-pants", "leather-suede-jacket"]);
+    for (const h of pool("formality-smart")) assert.equal(rank(h), 3);
+  });
+
+  test("NH-R.3 explicit Polished {3,4} admits rank 3 and rank 4", () => {
+    assert.equal(pool("formality-polished").length, 5, "every live piece is rank 3 or 4");
+  });
+
+  test("NH-R.4 explicit Dressy {4,6} admits only the rank-4 pieces", () => {
+    assert.deepEqual(pool("formality-occasion"),
+      ["asymmetrical-pants", "double-top", "oversized-blazer"]);
+    for (const h of pool("formality-occasion")) assert.equal(rank(h), 4);
+  });
+
+  test("NH-R.5 an out-of-band piece cannot win on stronger soft signals", () => {
+    // double-top is the only piece carrying more-feminine and romantic, and it is rank 4.
+    // Under Smart {2,3} it is out of band, so no amount of signal may elect it — this is
+    // the assertion that distinguishes a gate from a heavy penalty.
+    const r = mixed(S({
+      occasion: "dinner", formalityConditional: "formality-smart",
+      desiredFeelings: ["more-feminine", "more-attractive"], moods: ["romantic"],
+    } as never));
+    assert.notEqual(r.primary?.handle, "double-top",
+      "a rank-4 piece must not win a Smart brief however well it matches on feeling");
+    if (r.primary) assert.equal(rank(r.primary.handle), 3);
+  });
+
+  test("NH-R.6 no explicit formality → no hard register exclusion", () => {
+    // everyday maps to an implicit relaxed for SCORING. That inference must not become a
+    // hidden veto: occasion is already a hard gate, and an assumption she never made must
+    // not remove garments. Rank-4 pieces therefore stay eligible here.
+    const r = mixed(S({ occasion: "everyday", formalityConditional: null } as never));
+    const survivors = r.evaluatedProducts.filter((e) => !e.isHardExcluded).map((e) => e.handle);
+    assert.ok(survivors.length > 0, "an unanswered dressiness must not empty the pool");
+    assert.ok(survivors.some((h) => rank(h) === 4),
+      `implicit relaxed must not exclude rank-4 pieces; survivors ${survivors.join(",")}`);
+    assert.equal(resolveCanonicalRegisterBand(null), null);
+    assert.equal(resolveCanonicalRegisterBand(undefined), null);
+    assert.equal(resolveCanonicalRegisterBand(""), null);
+  });
+
+  test("NH-R.7 closet and NADINE eligibility read the SAME canonical definition", () => {
+    // Identity, not equality — the drift guard. If the NADINE side ever grows its own
+    // permission table again, this fails.
+    assert.equal(CANONICAL_REGISTER_BANDS, FORMALITY_CONDITIONAL_ADJUSTMENTS,
+      "permission semantics must be one object, shared by both paths");
+    assert.deepEqual(resolveCanonicalRegisterBand("formality-relaxed"), { min: 1, max: 2 });
+    assert.deepEqual(resolveCanonicalRegisterBand("formality-smart"), { min: 2, max: 3 });
+    assert.deepEqual(resolveCanonicalRegisterBand("formality-polished"), { min: 3, max: 4 });
+    assert.deepEqual(resolveCanonicalRegisterBand("formality-occasion"), { min: 4, max: 6 });
+  });
+
+  test("NH-R.8 the scoring window is deliberately NOT the permission window", () => {
+    // Eligibility = what she may be shown. Scoring = how the allowed items rank. Keeping
+    // them equal would collapse "allowed" into "well matched", and narrowing the scoring
+    // table would re-rank all eleven catalogue products. Asserted so a future tidy-up of
+    // the two tables into one is a deliberate decision rather than an accident.
+    const src = readFileSync(join(process.cwd(), "app/lib/ai/styleme-recommendation.ts"), "utf8");
+    assert.ok(src.includes("CATALOGUE_FORMALITY_SCORING_RANGES"),
+      "the soft-score table must be named for what it is");
+    assert.ok(/"formality-relaxed": \{ target: 2, min: 1, max: 3 \}/.test(src),
+      "the catalogue scoring window stays wider than the canonical {1,2}");
+    assert.ok(!/const range = FORMALITY_RANGES\[/.test(src),
+      "scoring must read the scoring table by its explicit name");
   });
 });

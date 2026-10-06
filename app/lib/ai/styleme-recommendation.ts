@@ -28,6 +28,7 @@ import {
 } from "./naia-catalog.js";
 import { getLiveNadineStylingProducts } from "../styleme/live-nadine-catalogue.js";
 import type { GeneratedCatalogProduct, ProductItemType } from "./naia-catalog.types.js";
+import { resolveCanonicalRegisterBand } from "./styleme-profile-gate.js";
 import type {
   StyleMeEngineInput,
   StyleMeProfileSignals,
@@ -67,9 +68,45 @@ export const SCORING_WEIGHTS = {
   STYLING_EFFORT_HIGH: -2,
 } as const;
 
+// ─── Register eligibility for auto-selected NADINE heroes ───────────────────
+//
+// How far outside the session's register band a live NADINE piece may sit and still be
+// offered as the hero. Measured in ranks from the nearest edge of FORMALITY_RANGES below.
+//
+//   0 ranks out   in band        scored STRONG_RANK
+//   1 rank out    "adjacent"     scored RANK (+2) — a stylistic stretch, not an error
+//   2+ ranks out  "mismatch"     scored DEPRIORITISE (-3)
+//
+// 0 — STRICT IN-BAND. A piece outside the band she selected is not offered, and her
+// request is never widened to manufacture a hero: if nothing qualifies, the already
+// supported closet-led result stands. With the live collection at ranks 3-4 and the
+// canonical bands below, that means Relaxed yields no NADINE hero at all, which is the
+// correct answer rather than a gap to paper over.
+//
+// This exists because register was NOT an eligibility rule anywhere. checkHardExclusions
+// covers self-exclusion, slot, firm-no colours and dressing preferences; formality was a
+// soft score only, and the MIN_TOTAL_SCORE of 2 cannot act as a proxy — a DEPRIORITISE of
+// -3 is nothing against the scores of ~30 these products reach. Verified: `work` +
+// formality-relaxed selected a rank-4 trouser against a {1,3} band, scoring 28.
+export const MAX_REGISTER_RANKS_OUTSIDE_BAND = 0;
+
 // ─── Formality ranges ─────────────────────────────────────────────────────────
 
-export const FORMALITY_RANGES: Readonly<
+// ─── Catalogue SOFT-SCORE affinity windows ──────────────────────────────────
+//
+// SCORING ONLY. These windows decide how many ranking points a product earns for sitting
+// near the session's register — they do NOT decide whether it is permitted. Permission is
+// CANONICAL_REGISTER_BANDS in styleme-profile-gate.ts, which is narrower, shared with the
+// owned-closet path, and the only thing consulted for eligibility.
+//
+// Renamed from FORMALITY_RANGES because that name read like the authoritative definition,
+// and for a while it was being used as one — a rank-4 trouser was offered for a Relaxed
+// brief because this table says relaxed reaches rank 3 while the canonical table stops at
+// 2. Kept deliberately wider: an affinity window that matches the permission window
+// exactly would collapse the distinction between "allowed" and "well matched", and
+// narrowing it here would silently re-rank all eleven catalogue products, changing the
+// legacy path this feature has no business touching.
+const CATALOGUE_FORMALITY_SCORING_RANGES: Readonly<
   Record<string, { target: number; min: number; max: number }>
 > = {
   "formality-relaxed": { target: 2, min: 1, max: 3 },
@@ -77,6 +114,9 @@ export const FORMALITY_RANGES: Readonly<
   "formality-polished": { target: 4, min: 3, max: 5 },
   "formality-occasion": { target: 5, min: 4, max: 5 },
 } as const;
+
+/** @deprecated Use CANONICAL_REGISTER_BANDS for permission; this is soft-score affinity. */
+export const FORMALITY_RANGES = CATALOGUE_FORMALITY_SCORING_RANGES;
 
 // Occasions that skip the explicit formality question get an implicit formality
 // floor applied during scoring so high-formality products are still downgraded.
@@ -1002,7 +1042,7 @@ function scoreProduct(
   const effectiveFormalityId =
     session.formalityConditional ?? OCCASION_IMPLICIT_FORMALITY[session.occasion] ?? null;
   if (effectiveFormalityId !== null) {
-    const range = FORMALITY_RANGES[effectiveFormalityId];
+    const range = CATALOGUE_FORMALITY_SCORING_RANGES[effectiveFormalityId];
     if (range !== undefined) {
       const fs = scalars.formalityScore;
       let points: number;
@@ -1759,10 +1799,32 @@ export function runRecommendation(
   // is not for this occasion is not a rejected candidate, it was never a candidate.
   // Unknown occasions keep every live piece, matching the fail-open the soft score had.
   const isLiveNadineMode = input.mode === "nadine";
+  // 3. REGISTER AS AN ELIGIBILITY RULE, not a score. A piece more than
+  //    MAX_REGISTER_RANKS_OUTSIDE_BAND ranks outside the session's band is not offered as
+  //    the hero. Reads CANONICAL_REGISTER_BANDS via resolveCanonicalRegisterBand — the
+  //    same definition the owned-closet path uses — so one customer answer means one thing
+  //    for her clothes and for the catalogue. The catalogue SCORING windows are wider and
+  //    are never consulted here; conflating them is what let a rank-4 trouser be offered
+  //    for a Relaxed brief.
+  // EXPLICIT answers only. resolveCanonicalRegisterBand returns null when she did not
+  // choose a dressiness, and OCCASION_IMPLICIT_FORMALITY is deliberately NOT consulted
+  // here: an inferred assumption must not become a hidden exclusion. Occasion is already
+  // a hard gate, and the implicit value still shapes soft ranking — it removes nothing.
+  const heroRegisterBand = resolveCanonicalRegisterBand(session.formalityConditional);
+  const withinHeroRegister = (p: GeneratedCatalogProduct): boolean => {
+    if (heroRegisterBand === null) return true;
+    const fs = p.parsed.scalars.formalityScore;
+    if (!Number.isFinite(fs)) return true;                      // unknown → fail open
+    const gap = fs < heroRegisterBand.min ? heroRegisterBand.min - fs
+              : fs > heroRegisterBand.max ? fs - heroRegisterBand.max
+              : 0;
+    return gap <= MAX_REGISTER_RANKS_OUTSIDE_BAND;
+  };
   const eligible = isLiveNadineMode
     ? getLiveNadineStylingProducts().filter((p) =>
-        p.parsed.rankings.occasionTags.length === 0 ||
-        p.parsed.rankings.occasionTags.includes(session.occasion))
+        (p.parsed.rankings.occasionTags.length === 0 ||
+         p.parsed.rankings.occasionTags.includes(session.occasion)) &&
+        withinHeroRegister(p))
     : getRecommendationEligibleProducts();
   const allProducts = getAllCatalogProducts();
 

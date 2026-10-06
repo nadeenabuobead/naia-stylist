@@ -877,6 +877,39 @@ export const FORMALITY_CONDITIONAL_ADJUSTMENTS: Record<string, { min: number; ma
   "formality-occasion":{ min: 4, max: 6 },
 };
 
+// ── Canonical register permission ────────────────────────────────────────────
+//
+// FORMALITY_CONDITIONAL_ADJUSTMENTS above is the ONE definition of what each dressiness
+// answer permits, and it governs BOTH owned-closet garments and auto-selected NADINE
+// products. Exported under this name so the permission question has an obvious home and
+// so the NADINE side cannot quietly grow a second interpretation — which is exactly what
+// had happened: the catalogue scorer carried relaxed {1,3} / smart {2,4} / polished {3,5}
+// / occasion {4,5} while this table read {1,2} / {2,3} / {3,4} / {4,6}, so one customer
+// answer meant two different things in the same session and a rank-4 trouser was offered
+// for a Relaxed brief.
+//
+// ELIGIBILITY IS NOT SCORING. This decides what she is allowed to be shown. How the
+// allowed items are then ranked is a separate question with its own, deliberately wider
+// windows — see CATALOGUE_FORMALITY_SCORING_RANGES in styleme-recommendation.ts. Those two
+// numbers do not need to agree, and the scoring table must never be consulted to decide
+// whether something is permitted.
+export const CANONICAL_REGISTER_BANDS = FORMALITY_CONDITIONAL_ADJUSTMENTS;
+
+/**
+ * The register band an EXPLICIT customer dressiness answer permits, or null.
+ *
+ * Null when she did not answer. Deliberately NOT falling back to an occasion's implicit
+ * dressiness: an inferred assumption must not become a hidden exclusion. Occasion is
+ * already a hard gate in its own right, and the implicit value still shapes soft ranking —
+ * it simply does not remove anything.
+ */
+export function resolveCanonicalRegisterBand(
+  formalityConditional: string | null | undefined,
+): { min: number; max: number } | null {
+  if (typeof formalityConditional !== "string" || formalityConditional === "") return null;
+  return CANONICAL_REGISTER_BANDS[formalityConditional] ?? null;
+}
+
 /**
  * Resolves the target formality band for an occasion and an explicit formality answer.
  *
