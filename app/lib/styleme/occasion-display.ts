@@ -52,7 +52,8 @@ export const OCCASION_DISPLAY_LABELS: Readonly<Record<string, string>> = {
   "special-event": "Event / celebration",
   "family": "Family gathering",
   "travel": "Travel day",
-  "active": "Active / busy day",
+  // Renamed: a practical, mobile day — not a workout. Canonical key stays "active".
+  "active": "Busy / on-the-go day",
   "not-sure": "Not sure yet",
 };
 

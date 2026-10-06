@@ -20,25 +20,26 @@ export const SESSION_OCCASION_TO_CLOSET_TOKENS: Record<string, readonly string[]
   "travel":        ["travel"],                                  // AI = session ID
   "family":        ["family"],                                  // no AI equiv — keep session ID as legacy match
   "not-sure":      [],                                          // no meaningful match
-  // Active / busy day — a practical, mobile, on-the-go day: errands, commuting,
-  // appointments, a packed workday, travel, the school run. NOT gym-only.
+  // "Busy / on-the-go day" — errands, commuting, appointments, walking around, travel,
+  // generally moving through a full day. NOT a gym or workout occasion. The canonical key
+  // stays "active" for this release to avoid migration/routing risk; only the
+  // customer-facing label changed (see OCCASION_DISPLAY_LABELS).
   //
-  // It was athletic-only ("active","gym","athletic","sport"), which made every practical
-  // garment in a real wardrobe match nothing: computeOccasionTier returns 0 — invalid —
-  // for a core slot that HAS tags and matches none of them, so a work-tagged shirt scored
-  // the same as a ball gown for a day of errands. Manual QA hit this with a smart-casual
-  // top reviewed [work, casual, weekend, evening, date-night].
+  // WHY NO athletic TOKENS. The reviewed `occasions` vocabulary is
+  //   work · casual · weekend · evening · date-night · special-occasion · travel · gym ·
+  //   beach · loungewear
+  // so "active", "athletic" and "sport" are not emittable at all — they were dead tokens
+  // that no reviewed garment could ever carry. The only real workout token is `gym`, and
+  // being a workout piece is evidence of the wrong thing for a practical day. A sporty
+  // garment still qualifies normally when it ALSO carries casual / weekend / travel, which
+  // is the real athleisure case, or through an explicit occasionFit approval.
   //
-  // Practical contexts are therefore compatible without anyone re-tagging garments with a
-  // literal "active". Evening-register contexts stay out: a busy day does not make a gown
-  // practical. Any specific garment can still be approved individually through occasionFit,
-  // which this map does not touch.
-  // `work` is deliberately NOT here. A busy day can be a workday, but work-appropriate
+  // `work` is deliberately absent too: a busy day can be a workday, but work-appropriate
   // does not imply practical or mobile — a tailored suit is work-valid and wrong for the
-  // school run. work stays a distinct occasion; a garment earns Active / busy day through
-  // a practical tag or an explicit occasionFit approval, never by being office-appropriate.
-  "active":        ["active", "gym", "athletic", "sport",
-                    "casual", "weekend", "everyday", "travel"],
+  // school run. work stays a distinct occasion.
+  //
+  // `everyday` is retained for legacy records only; it is not in the current vocabulary.
+  "active":        ["casual", "weekend", "travel", "everyday"],
 };
 
 // Returns true when the item's stored occasion tags include at least one token that

@@ -74,10 +74,26 @@ describe("AOS-A — practical, mobile, on-the-go garments qualify", () => {
       "travel / airport is the canonical on-the-go case");
   });
 
-  test("AOS-A.4 an athletic piece still qualifies", () => {
-    for (const tag of ["active", "gym", "athletic", "sport"]) {
-      assert.equal(matchesSessionOccasion([tag], ACTIVE), true, `${tag} must remain valid`);
+  test("AOS-A.4 a gym-only piece does NOT qualify", () => {
+    // Busy / on-the-go day is not a workout occasion. `gym` is the only workout token in
+    // the reviewed vocabulary, and on its own it is evidence of the wrong thing.
+    assert.equal(matchesSessionOccasion(["gym"], ACTIVE), false,
+      "a workout piece must not qualify merely by being a workout piece");
+    assert.equal(matchesSessionOccasion(["gym", "loungewear"], ACTIVE), false,
+      "still no practical/daytime evidence");
+  });
+
+  test("AOS-A.6 a sporty piece WITH practical evidence still qualifies", () => {
+    // The real-world athleisure case: trainers or a zip-up tagged for everyday wear.
+    for (const tags of [["gym", "casual"], ["gym", "weekend"], ["gym", "travel"]]) {
+      assert.equal(matchesSessionOccasion(tags, ACTIVE), true,
+        `${tags.join("+")} carries daytime evidence and should qualify`);
     }
+  });
+
+  test("AOS-A.7 legacy `everyday` still qualifies", () => {
+    assert.equal(matchesSessionOccasion(["everyday"], ACTIVE), true,
+      "retained for older records; not in the current reviewed vocabulary");
   });
 
   test("AOS-A.5 the real reviewed tag set from QA qualifies", () => {
@@ -127,8 +143,9 @@ describe("AOS-C — a practical core piece is no longer tier 0", () => {
     }
   });
 
-  test("AOS-C.2 an athletic core piece is still not invalid", () => {
-    assert.notEqual(tier(["active", "gym"]), 0);
+  test("AOS-C.2 a gym-only core piece IS invalid; a sporty+practical one is not", () => {
+    assert.equal(tier(["gym"]), 0, "workout-only evidence is not a busy-day qualification");
+    assert.notEqual(tier(["gym", "casual"]), 0, "daytime evidence rescues it");
   });
 
   test("AOS-C.3 an evening-only core piece IS still invalid", () => {
@@ -298,14 +315,14 @@ describe("AOS-H — occasion eligibility widens the pool; coherence still picks 
 
   test("AOS-H.1 casual + athletic forms a coherent Active look", () => {
     const top = piece("top", "casual", ["casual"]);
-    const legs = piece("legs", "athletic", ["active"]);
+    const legs = piece("legs", "athletic", ["casual"]);
     assert.equal(bothEligible(top, legs), true);
     assert.equal(passesRegisterCoherenceWithAnchor(legs, top, ACTIVE), true,
       "a casual top with leggings is athleisure, not a clash");
   });
 
   test("AOS-H.2 athletic + casual forms a coherent Active look (either order)", () => {
-    const sporty = piece("sporty", "athletic", ["active"]);
+    const sporty = piece("sporty", "athletic", ["weekend"]);
     const jeans = piece("jeans", "casual", ["casual"]);
     assert.equal(bothEligible(sporty, jeans), true);
     assert.equal(passesRegisterCoherenceWithAnchor(jeans, sporty, ACTIVE), true);
@@ -314,7 +331,7 @@ describe("AOS-H — occasion eligibility widens the pool; coherence still picks 
 
   test("AOS-H.3 an incoherent cross-register pair loses despite both being Active-eligible", () => {
     // This is the assertion that matters: eligibility true on BOTH sides, coherence false.
-    const technical = piece("tech", "athletic", ["active"]);
+    const technical = piece("tech", "athletic", ["casual"]);
     const dressyTrousers = piece("dressy", "dressy", ["casual"]);
     assert.equal(bothEligible(technical, dressyTrousers), true,
       "both pass the widened occasion gate — that is the point of the scenario");
@@ -322,14 +339,14 @@ describe("AOS-H — occasion eligibility widens the pool; coherence still picks 
       "a performance top with dressy trousers must not combine on occasion grounds alone");
 
     const eveningBlouse = piece("evening", "evening", ["casual"]);
-    const compression = piece("comp", "athletic", ["active"]);
+    const compression = piece("comp", "athletic", ["casual"]);
     assert.equal(bothEligible(eveningBlouse, compression), true);
     assert.equal(passesRegisterCoherenceWithAnchor(compression, eveningBlouse, ACTIVE), false);
   });
 
   test("AOS-H.4 token eligibility alone is never sufficient", () => {
     // Every register gap > 2 is refused regardless of occasion eligibility.
-    const anchor = piece("a", "athletic", ["active"]);
+    const anchor = piece("a", "athletic", ["casual"]);
     for (const [reg, coherent] of [["casual", true], ["elevated-casual", true],
                                    ["smart-casual", false], ["polished", false],
                                    ["dressy", false], ["evening", false]] as const) {
@@ -342,7 +359,7 @@ describe("AOS-H — occasion eligibility widens the pool; coherence still picks 
 
   test("AOS-H.5 coherence never consults occasion tokens", () => {
     // Same two pieces, same registers, different tags → identical coherence verdict.
-    const a1 = piece("a", "athletic", ["active"]);
+    const a1 = piece("a", "athletic", ["casual"]);
     const a2 = piece("a", "athletic", ["evening", "date-night"]);
     const c = piece("c", "dressy", ["casual"]);
     assert.equal(
@@ -357,7 +374,7 @@ describe("AOS-H — occasion eligibility widens the pool; coherence still picks 
     // on both sides overrides the generic register gap. It requires a reviewer to approve
     // each piece for this occasion — it cannot happen from tags.
     const blouse = piece("b", "evening", ["casual"], { active: "Acceptable" });
-    const legs = piece("l", "athletic", ["active"], { active: "Acceptable" });
+    const legs = piece("l", "athletic", ["casual"], { active: "Acceptable" });
     assert.equal(passesRegisterCoherenceWithAnchor(legs, blouse, ACTIVE), true,
       "human-authored paired truth outranks the heuristic");
     const blouseNoFit = piece("b", "evening", ["casual"], null);

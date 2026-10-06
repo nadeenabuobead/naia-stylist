@@ -53,8 +53,9 @@ describe("OD-B — unchanged occasions stay unchanged", () => {
     assert.equal(occasionDisplayFor(null, "dinner"), "Dinner");
   });
 
-  test("OD-B.2 active still displays 'Active / busy day'", () => {
-    assert.equal(occasionDisplayFor(null, "active"), "Active / busy day");
+  test("OD-B.2 active displays 'Busy / on-the-go day'", () => {
+    // Renamed: the occasion is a practical day, not a workout. Canonical key stays "active".
+    assert.equal(occasionDisplayFor(null, "active"), "Busy / on-the-go day");
   });
 
   test("OD-B.3 family and travel keep the questionnaire wording", () => {
@@ -119,8 +120,16 @@ describe("OD-E — coverage of the canonical vocabulary", () => {
   });
 
   test("OD-E.2 no canonical ID leaks through as display text", () => {
+    // Was `!label.includes("-")`, using a hyphen as the proxy for "looks like an ID".
+    // Too crude: "Busy / on-the-go day" is written English that happens to hyphenate.
+    // The real property is that a label must not be ID-SHAPED — all lowercase, hyphen
+    // separated, no spaces, which is what "date-night" looks like.
     for (const [id, label] of Object.entries(OCCASION_DISPLAY_LABELS)) {
-      assert.ok(!label.includes("-"), `${id} renders as "${label}", which still looks like an ID`);
+      assert.notEqual(label, id, `${id} renders as its own key`);
+      // ID-shaped = all lowercase, hyphen separated ("date-night"). Single written words
+      // like "Dinner" are fine, so the check is capitalisation + shape, not word count.
+      assert.doesNotMatch(label, /^[a-z]+(-[a-z]+)*$/,
+        `${id} renders as "${label}", which still looks like an ID`);
     }
   });
 });

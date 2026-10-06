@@ -27,7 +27,7 @@ const occasions = [
   { id: "night-out",       label: "Night out / party" },
   { id: "family",          label: "Family gathering" },
   { id: "travel",          label: "Travel day" },
-  { id: "active-busy-day", label: "Active / busy day" },
+  { id: "active-busy-day", label: "Busy / on-the-go day" },
 ];
 
 // Rev 3 UI IDs → canonical engine IDs (applied at action time, before session storage).

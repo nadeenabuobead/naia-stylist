@@ -552,13 +552,23 @@ describe("C. Active occasion", () => {
     );
   });
 
-  it("C2 SESSION_OCCASION_TO_CLOSET_TOKENS has active key with gym/athletic/sport tokens", () => {
+  it("C2 SESSION_OCCASION_TO_CLOSET_TOKENS has an active key with practical daytime tokens", () => {
+    // UPDATED with the Busy / on-the-go day correction. This pinned the athletic set
+    // ("active","gym","athletic","sport"). Three of those are not in the reviewed
+    // `occasions` vocabulary at all, so no garment could ever carry them — they were dead
+    // tokens. The fourth, `gym`, means a workout session, which is evidence of the wrong
+    // thing for a practical day.
+    //
+    // The test's intent is unchanged: the active key must EXIST with its own token set and
+    // not be normalised away. It now pins the corrected set.
     const tokens = SESSION_OCCASION_TO_CLOSET_TOKENS["active"];
     assert.ok(Array.isArray(tokens), "active key must exist in SESSION_OCCASION_TO_CLOSET_TOKENS");
-    assert.ok(tokens.includes("active"), "active tokens must include 'active'");
-    assert.ok(tokens.includes("gym"), "active tokens must include 'gym'");
-    assert.ok(tokens.includes("athletic"), "active tokens must include 'athletic'");
-    assert.ok(tokens.includes("sport"), "active tokens must include 'sport'");
+    for (const t of ["casual", "weekend", "travel", "everyday"]) {
+      assert.ok(tokens.includes(t), `active tokens must include '${t}'`);
+    }
+    for (const t of ["gym", "athletic", "sport", "active", "work"]) {
+      assert.ok(!tokens.includes(t), `active tokens must NOT include '${t}'`);
+    }
   });
 
   it("C3 signal-contract skipForOccasions includes 'active'", () => {
@@ -573,15 +583,15 @@ describe("C. Active occasion", () => {
     assert.ok(lineMatch![1].includes('"active"'), 'skipForOccasions must contain "active"');
   });
 
-  it("C4 the Active occasion displays as 'Active / busy day'", () => {
+  it("C4 the Active occasion displays as 'Busy / on-the-go day'", () => {
     // The map moved out of result.tsx into app/lib/styleme/occasion-display.ts when the
     // result page was changed to echo the questionnaire's own wording. The assertion is the
     // same one — Active must read as "Active / busy day" — against the new home.
     const displaySrc = readFileSync(join(ROOT, "app/lib/styleme/occasion-display.ts"), "utf8");
     assert.ok(
-      displaySrc.includes('"active": "Active / busy day"') ||
-      displaySrc.includes("'active': 'Active / busy day'"),
-      "OCCASION_DISPLAY_LABELS must map active → 'Active / busy day'",
+      displaySrc.includes('"active": "Busy / on-the-go day"') ||
+      displaySrc.includes("'active': 'Busy / on-the-go day'"),
+      "OCCASION_DISPLAY_LABELS must map active → 'Busy / on-the-go day'",
     );
   });
 
@@ -594,12 +604,16 @@ describe("C. Active occasion", () => {
   it("C5a active occasion: rank 1 (casual) still beats rank 3 (business-casual) — upper bound still excludes it", async () => {
     const businessCasual = makeAutoItem("business-casual-top", {
       category: "TOPS",
-      occasions: ["active", "gym"], // better occasion-token match than the casual item
+      // Real vocabulary tags. "active"/"gym" were never emittable as reviewed
+      // occasions, and the occasion bonus is boolean (+10 once if ANY token matches),
+      // so both items earn it equally and formality rank is the sole differentiator —
+      // which is what this test actually proves.
+      occasions: ["casual", "weekend"],
       formality: "business-casual", // rank 3 > 2 → still out of range for active
     });
     const casual = makeAutoItem("casual-tee", {
       category: "TOPS",
-      occasions: ["active"],
+      occasions: ["casual"],
       formality: "casual", // rank 1 → in range
     });
     const result = await autoSelectClosetAnchor("u1", {
@@ -614,12 +628,12 @@ describe("C. Active occasion", () => {
   it("C5b active occasion: rank 2 (smart-casual) also beats rank 3 (business-casual) — rank 2 is top-tier too", async () => {
     const businessCasual = makeAutoItem("business-casual-top", {
       category: "TOPS",
-      occasions: ["active", "gym"], // better occasion-token match than the smart-casual item
+      occasions: ["casual", "weekend"],
       formality: "business-casual", // rank 3 → out of range for active
     });
     const smartCasual = makeAutoItem("smart", {
       category: "TOPS",
-      occasions: ["active"],
+      occasions: ["casual"],
       formality: "smart-casual", // rank 2 → now in range for active
     });
     const result = await autoSelectClosetAnchor("u1", {
@@ -639,12 +653,12 @@ describe("C. Active occasion", () => {
     // no longer automatically dominates rank 2 for active.
     const smartCasual = makeAutoItem("smart", {
       category: "TOPS",
-      occasions: ["active", "gym"], // stronger occasion-token match
+      occasions: ["casual", "weekend"],
       formality: "smart-casual", // rank 2 → now in range for active
     });
     const casual = makeAutoItem("casual-tee", {
       category: "TOPS",
-      occasions: ["active"],
+      occasions: ["casual"],
       formality: "casual", // rank 1 → in range
     });
     const result = await autoSelectClosetAnchor("u1", {
@@ -664,18 +678,18 @@ describe("C. Active occasion", () => {
     //
     // The test's intent is unchanged and still enforced: the two must remain DISTINCT
     // occasions, not synonyms. Each keeps tokens the other does not have — active adds
-    // gym/athletic/sport and travel; everyday admits none of those. (work is NOT an
-    // Active token — work stays a distinct occasion.)
+    // travel; everyday admits neither. (work and gym are NOT Active tokens: work stays a
+    // distinct occasion, and a workout piece needs daytime evidence to qualify.)
     const activeTokens = [...(SESSION_OCCASION_TO_CLOSET_TOKENS["active"] ?? [])];
     const everydayTokens = [...(SESSION_OCCASION_TO_CLOSET_TOKENS["everyday"] ?? [])];
     assert.notDeepEqual([...activeTokens].sort(), [...everydayTokens].sort(),
       "active must not be a synonym for everyday");
     assert.ok(activeTokens.some((t) => !everydayTokens.includes(t)),
       "active must carry tokens everyday does not (athletic, work, travel)");
-    for (const athletic of ["active", "gym", "athletic", "sport"]) {
-      assert.ok(activeTokens.includes(athletic), `active must still accept '${athletic}'`);
-      assert.ok(!everydayTokens.includes(athletic), `everyday must not accept '${athletic}'`);
-    }
+    assert.ok(activeTokens.includes("travel"), "active must accept travel");
+    assert.ok(!everydayTokens.includes("travel"), "everyday must not accept travel");
+    assert.ok(!activeTokens.includes("gym"), "gym alone must not qualify for a busy day");
+    assert.ok(!activeTokens.includes("work"), "work stays a distinct occasion");
   });
 });
 
