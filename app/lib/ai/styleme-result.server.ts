@@ -5451,6 +5451,39 @@ export async function computeStyleMeResult(
 
   const isNaiaClosetMode = mode === "naia" && anchor?.type === "closet" && !!getClosetItems;
 
+  // TEMPORARY INSTRUMENTATION — read-only, remove once the WI/active fallback is diagnosed.
+  //
+  // A WI-origin session (Cream Ribbed Knit Tank Top / Active-busy-day) produced descriptive
+  // Complete-the-Look text instead of owned pieces, and the live trace showed ZERO
+  // [nAia-dressing-gate] candidate lines for that run against 75 diagnostic lines for a
+  // working generation on the same build. The pool is built inside the branch below, so no
+  // gate lines means isNaiaClosetMode was false — but which of its three conjuncts failed is
+  // not recorded anywhere, and each implies a different fix. This logs the actual values.
+  //
+  // Placed immediately AFTER the const rather than before it so it reports the REAL
+  // isNaiaClosetMode rather than a second copy of the expression, which could drift from the
+  // one that decides the branch. A console.log behind the existing diagnostics flag: it reads
+  // values, assigns nothing, and mutates nothing.
+  //
+  // anchorProvenance is deliberately absent — it is not on StyleMeEngineInput, and widening
+  // the engine signature is not instrumentation.
+  if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true") {
+    console.log("[nAia-closet-mode-branch]", JSON.stringify({
+      mode,
+      modeFromInput: engineInput.mode ?? null,
+      anchorType: anchor?.type ?? null,
+      anchorId: anchor
+        ? (anchor.type === "closet"
+            ? (anchor as NormalizedClosetAnchor).id
+            : (anchor as NormalizedNadineAnchor).handle)
+        : null,
+      hasGetClosetItems: !!getClosetItems,
+      isNaiaClosetMode,
+      sessionSource: session.source ?? null,
+      sessionOccasion: session.occasion ?? null,
+    }));
+  }
+
   let naiaWordingOverride: StyleMeWording | null = null;
   let closetAnchorNote: string | null = null;
   let sameCombination: boolean | undefined;
