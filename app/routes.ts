@@ -34,6 +34,13 @@ export default [
   // and not linked from the storefront. Remove when the real handoff is connected.
   route("style-me/nadine-preview", "routes/style-me.nadine-preview.tsx"),
   route("api/styleme-nadine-entry", "routes/api.styleme-nadine-entry.tsx"),
+  // The NADINE PDP "Style Me" handoff. The route module has existed complete and
+  // origin-guarded since the PDP block shipped, but was never registered here, so
+  // every tap posted into a 404 (verified against production:
+  //   GET https://naia-stylist.vercel.app/api/styleme-handoff -> 404).
+  // The path must stay in step with naia-product-block.js, which builds
+  // form.action = appUrl + "/api/styleme-handoff" — see HR-A.4.
+  route("api/styleme-handoff", "routes/api.styleme-handoff.tsx"),
   route("api/customer-auth", "routes/api.customer-auth.jsx"),
   route("api/closet", "routes/api.closet.jsx"),
   route("api/closet-preview-analyze", "routes/api.closet-preview-analyze.ts"),
