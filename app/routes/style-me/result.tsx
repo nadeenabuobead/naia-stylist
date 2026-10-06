@@ -29,6 +29,10 @@ import { autoSelectClosetAnchor, resolveActionAnchor, loadAllClosetItemsForEngin
 import { parseSuggestionMetadata } from "~/lib/ai/styleme-result.types";
 import { resolveStyleMeMode } from "~/lib/styleme/mode-resolution";
 import { occasionDisplayFor } from "~/lib/styleme/occasion-display";
+import {
+  resolveCommerceCtaHref,
+  resolveCommerceCtaLabel,
+} from "~/lib/styleme/commerce-cta";
 import { issueImageToken } from "~/lib/dev-tryon-image-tokens.server";
 import { isTryOnEligible } from "~/lib/ai/tryon-product-eligibility";
 import { TryOnPanel } from "~/components/TryOnPanel";
@@ -1404,9 +1408,6 @@ export default function StyleMeResult() {
     (item: any) =>
       !["SHOES", "ACCESSORY", "BAG"].includes(item.itemType) && item.productImageUrl,
   );
-  const primaryNaiaItem = suggestion.items?.find(
-    (item: any) => !["SHOES", "ACCESSORY", "BAG"].includes(item.itemType),
-  );
   // True when the real production VtoExperience is rendering for this session.
   // When active, the "See This Look On Me" placeholder section is suppressed to avoid
   // simultaneously showing live VTO and a "coming in future update" message.
@@ -2344,7 +2345,24 @@ export default function StyleMeResult() {
             </p>
           )}
           {suggestionMeta?.outcome !== "closet-led" && (
-            <a href={primaryNaiaItem?.productUrl || "https://naiabynadine.com"} className="sm-result-action-btn">Shop nAia</a>
+            // nAia is the stylist; NADINE is the brand being bought. Both the label and the
+            // destination are derived, because a NADINE hero used to be offered as
+            // "Shop nAia" — and, when a closet piece came first in the look, linked to the
+            // storefront instead of the piece she had just been shown.
+            <a
+              href={resolveCommerceCtaHref({
+                outcome: suggestionMeta?.outcome,
+                mode: suggestionMeta?.mode,
+                items: suggestion.items,
+              })}
+              className="sm-result-action-btn"
+            >
+              {resolveCommerceCtaLabel({
+                outcome: suggestionMeta?.outcome,
+                mode: suggestionMeta?.mode,
+                items: suggestion.items,
+              })}
+            </a>
           )}
         </div>
 
