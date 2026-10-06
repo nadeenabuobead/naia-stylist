@@ -229,3 +229,64 @@ describe("NE-E — the staging preview route", () => {
     }
   });
 });
+
+// ── NE-F: the customer-facing copy is part of the contract ────────────────
+//
+// The screen shipped reading "ONLY MY CLOSET" / "MY CLOSET + BRANDS". Both were wrong for
+// this surface. It is reached only from the NADINE context, and the engine evaluates only
+// the five approved live handles — there is no generic multi-brand catalogue — so "BRANDS"
+// promised a breadth that does not exist.
+//
+// Pinned exactly, because this is the one place a customer learns what the second option
+// will actually do.
+
+describe("NE-F — the NADINE source-choice copy", () => {
+  const options = () => {
+    const src = read("app/routes/style-me/source.tsx");
+    const block = src.slice(src.indexOf("const REV3_SOURCE_OPTIONS"),
+                            src.indexOf("];", src.indexOf("const REV3_SOURCE_OPTIONS")));
+    return [...block.matchAll(/id:\s*"([a-z-]+)",\s*\n\s*label:\s*"([^"]+)",\s*\n\s*description:\s*"([^"]+)"/g)]
+      .map((m) => ({ id: m[1], label: m[2], description: m[3] }));
+  };
+
+  test("NE-F.1 both options parse — guards the regex itself", () => {
+    assert.equal(options().length, 2, "exactly two options, and both must be readable");
+  });
+
+  test("NE-F.2 MY CLOSET reads exactly as approved, and submits my-closet", () => {
+    const o = options().find((x) => x.id === "my-closet");
+    assert.ok(o, "the closet-only option must submit source=my-closet");
+    assert.equal(o!.label, "MY CLOSET");
+    assert.equal(o!.description, "Build the look using pieces I already own.");
+  });
+
+  test("NE-F.3 NADINE + MY CLOSET reads exactly as approved, and submits both", () => {
+    const o = options().find((x) => x.id === "both");
+    assert.ok(o, "the mixed option must submit source=both");
+    assert.equal(o!.label, "NADINE + MY CLOSET");
+    assert.equal(o!.description,
+      "Start with what I own, and bring in a NADINE piece only if it genuinely adds something.");
+  });
+
+  test("NE-F.4 the word Brands cannot reappear anywhere on this screen", () => {
+    const src = read("app/routes/style-me/source.tsx");
+    assert.ok(!/brands?/i.test(src.replace(/\/\/.*$/gm, "")),
+      "no form of 'brand' belongs on the NADINE source choice: the engine evaluates only " +
+      "the five approved live NADINE handles, so it would promise a catalogue breadth " +
+      "that does not exist");
+  });
+
+  test("NE-F.5 no third option, and no generic multi-brand path", () => {
+    const ids = options().map((o) => o.id).sort();
+    assert.deepEqual(ids, ["both", "my-closet"],
+      "a NADINE-only option is deliberately absent, and nothing else is offered here");
+  });
+
+  test("NE-F.6 the labels are display-only — the id is what submits", () => {
+    const src = read("app/routes/style-me/source.tsx");
+    assert.ok(/onClick=\{\(\) => setSelected\(option\.id\)\}/.test(src),
+      "selection must carry option.id, so renaming a label cannot change behaviour");
+    assert.ok(/name="source" value=\{selected \?\? ""\}/.test(src),
+      "the submitted source must be the selected id");
+  });
+});

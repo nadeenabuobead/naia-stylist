@@ -242,23 +242,25 @@ describe("SM-REV3-D4 — SourceStep question is 'What should nAia work with toda
   });
 });
 
-describe("SM-REV3-D5 — my-closet option label is 'ONLY MY CLOSET'", () => {
-  it("ONLY MY CLOSET label is in REV3_SOURCE_OPTIONS", () => {
+describe("SM-REV3-D5 — my-closet option label is 'MY CLOSET'", () => {
+  it("MY CLOSET label is in REV3_SOURCE_OPTIONS", () => {
     const revBlock = source.slice(
       source.indexOf("const REV3_SOURCE_OPTIONS"),
       source.indexOf("const sourceOptions"),
     );
-    assert.ok(revBlock.includes("ONLY MY CLOSET"), "ONLY MY CLOSET label");
+    assert.ok(revBlock.includes('label: "MY CLOSET"'), "MY CLOSET label");
+    assert.ok(!revBlock.includes("ONLY MY CLOSET"), "the superseded label must be gone");
   });
 });
 
-describe("SM-REV3-D6 — both option label is 'MY CLOSET + BRANDS'", () => {
-  it("MY CLOSET + BRANDS label is in REV3_SOURCE_OPTIONS", () => {
+describe("SM-REV3-D6 — both option label is 'NADINE + MY CLOSET'", () => {
+  it("NADINE + MY CLOSET label is in REV3_SOURCE_OPTIONS", () => {
     const revBlock = source.slice(
       source.indexOf("const REV3_SOURCE_OPTIONS"),
       source.indexOf("const sourceOptions"),
     );
-    assert.ok(revBlock.includes("MY CLOSET + BRANDS"), "MY CLOSET + BRANDS label");
+    assert.ok(revBlock.includes("NADINE + MY CLOSET"), "NADINE + MY CLOSET label");
+    assert.ok(!/brands?/i.test(revBlock), "no form of 'brand' belongs on this screen");
   });
 });
 
@@ -486,7 +488,7 @@ describe("SM-REV3-I2 — both description is approved copy", () => {
       source.indexOf("const sourceOptions"),
     );
     assert.ok(
-      revBlock.includes("Start with what I own, and bring in brand pieces only if they genuinely add something."),
+      revBlock.includes("Start with what I own, and bring in a NADINE piece only if it genuinely adds something."),
       "both description approved copy",
     );
   });

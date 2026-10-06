@@ -24,16 +24,26 @@ export const links: LinksFunction = () => [
 const VALID_SOURCE_IDS = new Set(["naia-piece", "my-closet", "both"]);
 
 // Rev 3 UI source options — 2 options only for fresh Rev 3 flow.
+// The NADINE source choice. Two options, and the wording is part of the product contract:
+// this screen is reached only from the NADINE context, so the second option names NADINE
+// rather than "brands". There is no generic multi-brand path — the engine evaluates only
+// the five approved LIVE_NADINE_STYLING_HANDLES — and calling it "BRANDS" would promise a
+// breadth of catalogue that does not exist. "only if it genuinely adds something" is also
+// literal, not softening: a hero appears only when one passes the hard gates, and a
+// closet-only look is a valid outcome.
+//
+// `id` is what the form submits; `label` and `description` are display only. NE-F pins the
+// exact strings and fails if "BRANDS" returns.
 const REV3_SOURCE_OPTIONS = [
   {
     id: "my-closet",
-    label: "ONLY MY CLOSET",
+    label: "MY CLOSET",
     description: "Build the look using pieces I already own.",
   },
   {
     id: "both",
-    label: "MY CLOSET + BRANDS",
-    description: "Start with what I own, and bring in brand pieces only if they genuinely add something.",
+    label: "NADINE + MY CLOSET",
+    description: "Start with what I own, and bring in a NADINE piece only if it genuinely adds something.",
   },
 ];
 

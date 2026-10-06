@@ -1556,8 +1556,11 @@ describe("R3.25 — Source UI: exactly 4 approved Rev 3 customer choices", () =>
   const sourceSrc = readFileSync(join(ROOT, "app/routes/style-me/source.tsx"), "utf8");
 
   const APPROVED_SOURCE_LABELS = [
-    "ONLY MY CLOSET",
-    "MY CLOSET + BRANDS",
+    // Renamed 2026-10-06: this screen is reached only from the NADINE context and the
+    // engine evaluates only the five approved live NADINE handles, so "BRANDS" promised a
+    // catalogue breadth that does not exist. Exact strings pinned in NE-F.
+    "MY CLOSET",
+    "NADINE + MY CLOSET",
   ];
 
   for (const label of APPROVED_SOURCE_LABELS) {
