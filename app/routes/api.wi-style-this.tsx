@@ -9,7 +9,7 @@
 // closetItemId is never trusted on its own.
 
 import { redirect, type ActionFunctionArgs } from "react-router";
-import { getSession, commitSession } from "~/lib/session.server";
+import { getSession, commitSession, STYLEME_SESSION_KEYS } from "~/lib/session.server";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { resolveClosetAnchor } from "~/lib/ai/styleme-anchor.server";
 
@@ -34,10 +34,28 @@ export async function action({ request }: ActionFunctionArgs) {
   // Intelligence rather than the closet picker. Mirrors api.styleme-handoff.tsx's
   // session-priming shape, minus the cross-origin check (this is same-origin).
   const session = await getSession(request.headers.get("Cookie"));
+
+  // A fresh Today questionnaire. Clicking a garment in Wardrobe Intelligence starts a new
+  // session, so every prior answer goes first — otherwise she arrives at question one with
+  // last session's answers already selected. QA hit exactly this: an old intention
+  // ("HELP ME FEEL SHARPER") was pre-selected on entry.
+  //
+  // Driven off STYLEME_SESSION_KEYS rather than a hand-written list, for the reason that
+  // registry documents about itself: a key missing from it silently survives into the next
+  // questionnaire. The two NADINE doorways clear their own explicit lists; this one cannot
+  // drift from the registry, and a key added there is covered here automatically.
+  //
+  // Only styleMe* keys are in that registry, so authentication and Style Passport data are
+  // untouched — the customer stays signed in and her profile is unaffected.
+  //
+  // ORDER MATTERS: clear first, then set the anchor. The reverse would discard the very
+  // garment she clicked.
+  for (const key of STYLEME_SESSION_KEYS) {
+    session.unset(key);
+  }
+
   session.set("styleMeSource", "my-closet");
   session.set("styleMeMode", "naia");
-  session.unset("styleMeNadineAnchorHandle");
-  session.unset("styleMeAnchorMode");
   session.set("styleMeClosetAnchorId", resolved.id);
   // She tapped this exact garment in Wardrobe Intelligence, so the anchor is MANUAL:
   // New Look may vary the outfit around it but must never move it. Stated rather than
