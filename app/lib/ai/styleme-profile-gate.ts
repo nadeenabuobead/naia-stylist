@@ -722,32 +722,76 @@ export function resolveGateLength(
   };
 }
 
+// ── Coverage-conflict recoverability ──────────────────────────────────────
+//
+// A manual anchor that fails a coverage requirement fails it in one of two ways, and the
+// difference is what the customer gets told.
+//
+//   unrecoverable            No outfit slot can make this garment satisfy the requirement.
+//                            legs-covered on a leg garment: nothing lengthens a hem, and
+//                            there is no under-bottom slot. "No layer can change that" is
+//                            a true statement here, and only here.
+//
+//   recoverable-unsupported  Another slot COULD resolve it — a non-cropped top worn over a
+//                            cropped piece — but StyleMe cannot build a layered anchor yet:
+//                            OutfitSlot has no underlayer and candidates hold one piece per
+//                            slot, so the covering top cannot be guaranteed. The anchor is
+//                            still refused, because allowing it would WAIVE the Passport
+//                            requirement rather than satisfy it. What changes is only the
+//                            explanation: a limitation of the engine must not be reported
+//                            as a law of physics.
+//
+// Manual QA found the cost of conflating them: a bra was refused with "no layer can change
+// that", which is false — a bra under an opaque shirt satisfies no-cropped-tops. The
+// preference is about midriff exposure in the LOOK (quiz label "I avoid cropped tops";
+// Buy/Skip evaluates the same preference via midriffExposed), not about the garment's
+// presence in the outfit.
+//
+// The other three dressing preferences (arms-covered, chest-neckline-covered,
+// dresses-modestly) never reach here — they are compensated at outfit level by
+// passesCandidateDressingRequirements and already allow the anchor.
+//
+// Follow-up, deliberately NOT in this release: an `underlayer` slot would turn
+// recoverable-unsupported into genuinely allowed, with the covering top required rather
+// than hoped for. That is an engine change, not a gate change.
+export type AnchorCoverageRecoverability = "unrecoverable" | "recoverable-unsupported";
+
+export interface AnchorCoverageConflict {
+  requirement: "legs-covered" | "no-cropped-tops";
+  recoverability: AnchorCoverageRecoverability;
+}
+
+export function classifyAnchorCoverageConflict(
+  item: ClosetAnchorInput,
+  dressingPreferences: readonly string[] | null | undefined,
+): AnchorCoverageConflict | null {
+  if (!dressingPreferences || dressingPreferences.length === 0) return null;
+  const prefs = new Set(dressingPreferences);
+  const gateLength = resolveGateLength(item, CANONICAL_STYLEME_LENGTH);
+
+  if (prefs.has("legs-covered")) {
+    const hl = gateLength.hemLength;
+    if (hl !== null && hl !== undefined && hl !== "n/a" && hl !== "full" && hl !== "maxi") {
+      return { requirement: "legs-covered", recoverability: "unrecoverable" };
+    }
+  }
+  if (prefs.has("no-cropped-tops")) {
+    const tl = gateLength.topLength;
+    if (tl !== null && tl !== undefined && tl !== "n/a" && tl === "cropped") {
+      return { requirement: "no-cropped-tops", recoverability: "recoverable-unsupported" };
+    }
+  }
+  return null;
+}
+
 export function passesDressingRequirements(
   item: ClosetAnchorInput,
   dressingPreferences: readonly string[] | null | undefined,
 ): boolean {
-  if (!dressingPreferences || dressingPreferences.length === 0) return true;
-  const prefs = new Set(dressingPreferences);
-  const gateLength = resolveGateLength(item, CANONICAL_STYLEME_LENGTH);
-
-  // legs-covered — non-compensable for garments that cover the leg zone (hemLength not "n/a")
-  if (prefs.has("legs-covered")) {
-    const hl = gateLength.hemLength;
-    if (hl !== null && hl !== undefined && hl !== "n/a") {
-      if (hl !== "full" && hl !== "maxi") return false;
-    }
-  }
-
-  // no-cropped-tops — non-compensable: a garment explicitly cropped (topLength === "cropped")
-  // cannot become non-cropped through layering. Only applicable where topLength is known.
-  if (prefs.has("no-cropped-tops")) {
-    const tl = gateLength.topLength;
-    if (tl !== null && tl !== undefined && tl !== "n/a") {
-      if (tl === "cropped") return false;
-    }
-  }
-
-  return true;
+  // Delegates to the classifier so the pool filter and the anchor gate can never drift
+  // apart: one implementation of the two item-level checks, two different readings of it.
+  // Verdicts are identical to the pre-classifier behaviour by construction.
+  return classifyAnchorCoverageConflict(item, dressingPreferences) === null;
 }
 
 // ── Anchor eligibility ────────────────────────────────────────────────────────
@@ -775,7 +819,10 @@ export function passesDressingRequirements(
 //                   Compensable ones stay at outfit level, where a layer can satisfy them.
 //
 // Unknown metadata never rejects. A garment is refused only on explicit evidence.
-export type AnchorRejectionCode = "dressing-requirement" | "occasion-not-suitable";
+export type AnchorRejectionCode =
+  | "dressing-requirement"          // proven structurally unrecoverable
+  | "layered-anchor-unsupported"    // another slot could resolve it; the engine cannot build that yet
+  | "occasion-not-suitable";
 
 export interface AnchorEligibility {
   eligible: boolean;
@@ -791,7 +838,17 @@ export function evaluateAnchorEligibility(
   sessionOccasion: string,
   dressingPreferences: readonly string[] | null | undefined,
 ): AnchorEligibility {
-  if (!passesDressingRequirements(item, dressingPreferences)) {
+  const coverage = classifyAnchorCoverageConflict(item, dressingPreferences);
+  if (coverage !== null) {
+    if (coverage.recoverability === "recoverable-unsupported") {
+      return {
+        eligible: false,
+        code: "layered-anchor-unsupported",
+        message:
+          "This piece would need another top layered over it to meet your Style Passport. " +
+          "StyleMe can't build that kind of layered anchor yet. Choose another piece for now.",
+      };
+    }
     return {
       eligible: false,
       code: "dressing-requirement",

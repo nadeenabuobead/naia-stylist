@@ -117,9 +117,15 @@ describe("RC-A — a hard dressing requirement is not waived by being the anchor
   });
 
   test("RC-A.6 no-cropped-tops rejects an explicitly cropped anchor", () => {
+    // Still rejected — the Passport requirement is not waived. The CODE changed: a cropped
+    // piece is recoverable in principle (a non-cropped top over it would resolve it), so it
+    // is reported as a layered anchor the engine cannot build yet, not as a structural
+    // impossibility. Manual QA found the old wording claiming "no layer can change that"
+    // about a bra, which is false. See anchor-coverage-recoverability.test.ts.
     const r = evaluateAnchorEligibility(CROPPED_TOP, "everyday", ["no-cropped-tops"]);
-    assert.equal(r.eligible, false);
-    assert.equal(r.code, "dressing-requirement");
+    assert.equal(r.eligible, false, "rejection itself is unchanged");
+    assert.equal(r.code, "layered-anchor-unsupported");
+    assert.doesNotMatch(r.message ?? "", /no layer can change that/i);
   });
 
   test("RC-A.7 an approved occasionFit of No makes a garment ineligible to anchor", () => {
