@@ -1508,13 +1508,16 @@ describe("R3.23 — Fit / Comfort UI: exact 9 approved IDs, correct labels", () 
   });
 });
 
-// ── R3.24 — Occasion UI: exactly 9 approved Rev 3 IDs ───────────────────────
+// ── R3.24 — Occasion UI: exactly 8 approved Rev 3 IDs ───────────────────────
+// active-busy-day removed per the Everyday simplification: Busy / on-the-go day is no
+// longer a selectable occasion (historical occasion="active" sessions are unaffected —
+// see occasion-active-copy-cleanup.test.ts and anchor-occasion-incompatibility.test.ts).
 
-describe("R3.24 — Occasion UI: exactly 9 approved Rev 3 customer-facing IDs", () => {
+describe("R3.24 — Occasion UI: exactly 8 approved Rev 3 customer-facing IDs", () => {
   const occasionSrc = readFileSync(join(ROOT, "app/routes/style-me/occasion.tsx"), "utf8");
 
   const APPROVED_OCCASION_IDS = [
-    "work", "dinner", "date", "everyday", "event", "night-out", "family", "travel", "active-busy-day",
+    "work", "dinner", "date", "everyday", "event", "night-out", "family", "travel",
   ];
 
   for (const id of APPROVED_OCCASION_IDS) {
@@ -1526,7 +1529,7 @@ describe("R3.24 — Occasion UI: exactly 9 approved Rev 3 customer-facing IDs", 
     });
   }
 
-  const REJECTED_FROM_UI = ["girls-night", "not-sure", "date-night", "special-event"];
+  const REJECTED_FROM_UI = ["girls-night", "not-sure", "date-night", "special-event", "active-busy-day"];
 
   for (const id of REJECTED_FROM_UI) {
     it(`occasion UI occasions array must NOT expose "${id}" as a selectable option`, () => {

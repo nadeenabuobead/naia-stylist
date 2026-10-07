@@ -210,7 +210,9 @@ describe("ACR-E — the manual anchor is never silently substituted", () => {
 
   test("ACR-E.2 an accepted anchor is stored as the customer's own choice", () => {
     const text = source();
-    const setAnchor = text.slice(text.indexOf('intent === "set-anchor"')).slice(0, 2400);
+    // Window widened: the rejection branch now also remembers a rejected pick as pending
+    // (styleMePendingClosetAnchorId), pushing this success block further from the start.
+    const setAnchor = text.slice(text.indexOf('intent === "set-anchor"')).slice(0, 3200);
     assert.match(setAnchor, /session\.set\("styleMeClosetAnchorId", closetItemId\)/);
     assert.match(setAnchor, /session\.set\("styleMeAnchorProvenance", "MANUAL"\)/);
   });

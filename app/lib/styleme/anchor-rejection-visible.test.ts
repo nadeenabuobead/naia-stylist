@@ -149,7 +149,10 @@ describe("AR-C — recovery without losing her place", () => {
   test("AR-C.3 an eligible pick still proceeds to the result", () => {
     const text = src();
     const setAnchor = text.slice(text.indexOf('intent === "set-anchor"'));
-    const block = setAnchor.slice(0, 2400);
+    // Window widened: the rejection branch now also remembers a rejected pick as pending
+    // (styleMePendingClosetAnchorId, for Change Occasion), pushing this success block
+    // further from the start of the action than it used to sit.
+    const block = setAnchor.slice(0, 3200);
     assert.ok(/session\.set\("styleMeClosetAnchorId", closetItemId\)/.test(block));
     assert.ok(/session\.set\("styleMeAnchorProvenance", "MANUAL"\)/.test(block),
       "a hand-picked anchor stays MANUAL, so New Look cannot move it");
