@@ -32,6 +32,7 @@ const sourceSrc = () => readFileSync(join(ROOT, "app/routes/style-me/source.tsx"
 const occasionSrc = () => readFileSync(join(ROOT, "app/routes/style-me/occasion.tsx"), "utf8");
 const wiHandoffSrc = () => readFileSync(join(ROOT, "app/routes/api.wi-style-this.tsx"), "utf8");
 const lockedAnchorOutcomeSrc = () => readFileSync(join(ROOT, "app/lib/styleme/locked-anchor-outcome.ts"), "utf8");
+const sessionServerSrc = () => readFileSync(join(ROOT, "app/lib/session.server.ts"), "utf8");
 
 /** A minimal closet item shaped for evaluateAnchorEligibility — no DB involved. */
 const closetItem = (occasionFit: Record<string, string> | null, overrides: Partial<ClosetAnchorInput> = {}) =>
@@ -196,22 +197,33 @@ describe("4 — Wardrobe Intelligence handoff gets the same clean incompatibilit
 
   it("4.3 the re-check runs generically on every occasion submit, not only inside an Adjust-Vibe branch", () => {
     const src = occasionSrc();
+    const checkEligibilityIdx = src.indexOf("const checkEligibility =");
     const checkIdx = src.indexOf('const closetAnchorId = session.get("styleMeClosetAnchorId")');
     const adjustVibeIdx = src.indexOf('const adjustVibe = session.get("styleMeAdjustVibe")');
-    assert.ok(checkIdx > -1, "the eligibility re-check exists");
+    assert.ok(checkEligibilityIdx > -1 && checkEligibilityIdx < checkIdx, "the shared gate helper is defined before either check uses it");
     assert.ok(adjustVibeIdx > checkIdx, "the anchor check runs BEFORE adjustVibe is even read — it cannot be gated on it");
+    const helperBlock = src.slice(checkEligibilityIdx, checkIdx);
+    assert.ok(helperBlock.includes("evaluateAnchorEligibility"), "the same gate is re-run, inside the one shared helper both checks call");
     const checkBlock = src.slice(checkIdx, adjustVibeIdx);
-    assert.ok(checkBlock.includes("evaluateAnchorEligibility"), "the same gate is re-run");
+    assert.ok(checkBlock.includes("checkEligibility(closetAnchorId)"), "the real-anchor check uses the shared helper");
+    assert.ok(checkBlock.includes("checkEligibility(pendingClosetAnchorId)"), "the pending-anchor check uses the exact same helper — one gate, not two");
     assert.ok(!checkBlock.includes('styleMeAdjustVibe'), "the check reads no Adjust-Vibe state at all");
     assert.ok(!checkBlock.includes('session.get("styleMeAnchorLocked")'), "the check does not require the anchor to have been WI-locked — any existing closetAnchorId qualifies");
   });
 
-  it("4.4 occasion.tsx makes exactly one decision — eligible or not — and never reads/sets provenance itself", () => {
+  it("4.4 occasion.tsx decides eligible-or-not for an EXISTING anchor without reading/setting provenance; MANUAL is named only when promoting a pending pick, which is MANUAL by construction", () => {
     const src = occasionSrc();
     const fn = src.slice(src.indexOf("export async function action"), src.indexOf("export default function StyleMeOccasion"));
     assert.ok(!fn.includes('"AUTO"'), "occasion.tsx never names AUTO — that distinction belongs to source.tsx alone");
-    assert.ok(!fn.includes('"MANUAL"'), "occasion.tsx never names MANUAL either");
-    assert.ok(fn.includes('session.set("styleMeAnchorLocked", "1")'), "ineligible anchors are routed into source.tsx's own anchorLocked branch, not decided here");
+    // "MANUAL" appears exactly once: stamping a promoted pending pick. It is never read
+    // back, and never used to decide between AUTO/MANUAL for an existing anchor.
+    const manualCount = (fn.match(/"MANUAL"/g) ?? []).length;
+    assert.equal(manualCount, 1, "MANUAL is named only at the one promotion site, not as a general decision");
+    assert.ok(
+      fn.includes('pendingNowEligible) {\n      session.set("styleMeClosetAnchorId", pendingClosetAnchorId);\n      session.set("styleMeAnchorProvenance", "MANUAL");'),
+      "MANUAL is stamped only inside the pending-promotion branch",
+    );
+    assert.ok(fn.includes('session.set("styleMeAnchorLocked", "1")'), "ineligible EXISTING anchors are still routed into source.tsx's own anchorLocked branch, not decided here");
   });
 
   it("4.5 the ineligible branch redirects to /style-me/source, never to /style-me/result", () => {
@@ -329,5 +341,100 @@ describe("5 — silent recovery is gated strictly on provenance === 'AUTO', neve
     const eligibility = evaluateAnchorEligibility(fine, "everyday", []);
     const outcome = resolveLockedAnchorOutcome(eligibility, "AUTO");
     assert.deepEqual(outcome, { kind: "eligible" });
+  });
+});
+
+// ── 8. A rejected MANUAL pick is preserved across Change Occasion ───────────────
+//
+// Before this fix, a manually-picked piece that failed set-anchor's own eligibility
+// check was never written anywhere — only the error response carried it, gone the
+// moment the customer navigated. Change Occasion therefore always landed on an empty
+// picker, as if the piece had never been chosen. styleMePendingClosetAnchorId fixes
+// that: "explicitly chosen MANUAL piece, not yet eligible for any occasion checked" —
+// deliberately NOT styleMeClosetAnchorId, which means "validated anchor".
+
+describe("8 — rejected manual pick survives Change Occasion as a pending (not validated) choice", () => {
+  it("8.1 styleMePendingClosetAnchorId is registered in STYLEME_SESSION_KEYS, so Start Over / WI full-reset clear it automatically", () => {
+    const src = sessionServerSrc();
+    assert.ok(src.includes('"styleMePendingClosetAnchorId"'), "the key is in the registry both clearStyleMeSession and the WI handoff iterate");
+  });
+
+  it("8.2 a rejected manual pick persists the pending key with a committed cookie, and never writes styleMeClosetAnchorId", () => {
+    const src = sourceSrc();
+    const rejectIdx = src.indexOf("if (!eligibility.eligible) {");
+    const block = src.slice(rejectIdx, rejectIdx + 630);
+    assert.ok(block.includes('session.set("styleMePendingClosetAnchorId", closetItemId)'), "the rejected pick is remembered");
+    assert.ok(block.includes('headers: { "Set-Cookie": await commitSession(session) }'), "the cookie is actually committed on the 400 response — previously it was not");
+    assert.ok(!block.includes('session.set("styleMeClosetAnchorId"'), "an unvalidated piece must never be written to the field that means 'validated anchor'");
+  });
+
+  it("8.3 a successful manual pick clears any stale pending key left over from an earlier rejected attempt in the same flow", () => {
+    const src = sourceSrc();
+    const successIdx = src.indexOf('session.set("styleMeClosetAnchorId", closetItemId)');
+    const block = src.slice(successIdx, successIdx + 650);
+    assert.ok(block.includes('session.unset("styleMePendingClosetAnchorId")'));
+  });
+
+  it("8.4 CHOOSE ANOTHER PIECE (change-piece) clears the pending piece, not only the locked-anchor fields", () => {
+    const src = sourceSrc();
+    const idx = src.indexOf('if (intent === "change-piece")');
+    const block = src.slice(idx, idx + 500);
+    assert.ok(block.includes('session.unset("styleMePendingClosetAnchorId")'));
+  });
+
+  it("8.5 occasion.tsx promotes an eligible-now pending pick to the real anchor, stamps MANUAL, clears pending, and continues to /style-me/result", () => {
+    const src = occasionSrc();
+    const idx = src.indexOf("if (pendingNowEligible) {");
+    const block = src.slice(idx, idx + 300);
+    assert.ok(block.includes('session.set("styleMeClosetAnchorId", pendingClosetAnchorId)'));
+    assert.ok(block.includes('session.set("styleMeAnchorProvenance", "MANUAL")'));
+    assert.ok(block.includes('session.unset("styleMePendingClosetAnchorId")'));
+    const resultRedirectIdx = src.indexOf("pendingClosetAnchorId && pendingNowEligible");
+    const resultBlock = src.slice(resultRedirectIdx, resultRedirectIdx + 200);
+    assert.ok(resultBlock.includes('redirect("/style-me/result"'), "promotion proceeds exactly like a fresh successful manual pick");
+  });
+
+  it("8.6 occasion.tsx leaves a still-ineligible pending pick untouched and routes through /style-me/source, not /style-me/result", () => {
+    const src = occasionSrc();
+    const idx = src.indexOf("if (pendingClosetAnchorId && !pendingNowEligible)");
+    assert.ok(idx > -1);
+    const block = src.slice(idx, idx + 300);
+    assert.ok(block.includes('redirect("/style-me/source"'));
+    assert.ok(!block.includes("styleMePendingClosetAnchorId\", undefined") && !block.includes('unset("styleMePendingClosetAnchorId")'), "the still-ineligible branch must not clear the pending piece — it has to survive to be re-offered");
+  });
+
+  it("8.7 occasion.tsx only consults the pending key when there is no real anchor yet — a real anchor always takes precedence", () => {
+    const src = occasionSrc();
+    const idx = src.indexOf("const pendingClosetAnchorId = !closetAnchorId");
+    assert.ok(idx > -1, "the pending read is explicitly gated on the absence of a real closetAnchorId");
+  });
+
+  it("8.8 source.tsx's loader renders the SAME anchor-incompatible step for a still-ineligible pending piece, reusing the existing component and data shape", () => {
+    const src = sourceSrc();
+    const idx = src.indexOf('const pendingClosetAnchorId = session.get("styleMePendingClosetAnchorId")');
+    assert.ok(idx > -1, "the loader has its own independent re-check, not only occasion.tsx's");
+    const block = src.slice(idx, idx + 1600);
+    assert.ok(block.includes('step: "anchor-incompatible" as const'), "reuses the exact same step the WI-locked case renders");
+    assert.ok(block.includes('session.set("styleMeClosetAnchorId", resolvedPending.id)'), "the loader can also promote (e.g. direct navigation back to /style-me/source), mirroring occasion.tsx");
+    assert.ok(block.includes('redirect("/style-me/result"'));
+  });
+
+  it("8.9 a pending piece that no longer resolves (deleted) is dropped, not silently promoted", () => {
+    const src = sourceSrc();
+    const idx = src.indexOf('const pendingClosetAnchorId = session.get("styleMePendingClosetAnchorId")');
+    const block = src.slice(idx, idx + 2000);
+    const deletedIdx = block.indexOf("Deleted since the rejection");
+    assert.ok(deletedIdx > -1);
+    assert.ok(block.slice(deletedIdx, deletedIdx + 200).includes('session.unset("styleMePendingClosetAnchorId")'));
+  });
+
+  it("8.10 the same compatible/incompatible decision for the pending piece is the one, unmodified evaluateAnchorEligibility — no second eligibility rule", () => {
+    // Direct behavioural proof, independent of source text: the same piece, same
+    // gate, two different occasions — exactly what Change Occasion exercises.
+    const pieceA = closetItem({ work: "Strong", everyday: "No" });
+    const stillRejectedForEveryday = evaluateAnchorEligibility(pieceA, "everyday", []);
+    const okForWork = evaluateAnchorEligibility(pieceA, "work", []);
+    assert.equal(stillRejectedForEveryday.eligible, false);
+    assert.equal(okForWork.eligible, true);
   });
 });

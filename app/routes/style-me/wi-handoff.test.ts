@@ -165,7 +165,9 @@ describe("Wardrobe Intelligence -> StyleMe handoff", () => {
     const text = src("source.tsx");
     const idx = text.indexOf('intent === "change-piece"');
     assert.ok(idx !== -1, "change-piece intent is handled");
-    const block = text.slice(idx, idx + 400);
+    // Window widened: also unsets styleMePendingClosetAnchorId (a rejected-but-remembered
+    // manual pick — distinct from the locked-anchor fields this test already covers).
+    const block = text.slice(idx, idx + 600);
     assert.ok(block.includes('session.unset("styleMeAnchorLocked")'));
     assert.ok(block.includes('session.unset("styleMeClosetAnchorId")'), "clears the preselected item — it is not forced back on the customer");
     assert.ok(

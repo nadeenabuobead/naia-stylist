@@ -39,6 +39,11 @@ export const STYLEME_SESSION_KEYS = [
   "styleMeAnchorProvenance",
   // Wardrobe Intelligence handoff — anchor pre-selected, skip the picker.
   "styleMeAnchorLocked",
+  // A MANUAL closet pick that failed occasion eligibility, kept only so Change Occasion
+  // can re-offer the same piece against a different occasion. NOT a validated anchor —
+  // never read by anything that assumes a stored anchor is eligible. Cleared the moment
+  // it is promoted to styleMeClosetAnchorId, or a different piece is chosen.
+  "styleMePendingClosetAnchorId",
   // Rev 3 — Psychology-First StyleMe (Group 5)
   "styleMeState",
   "styleMeStateOtherText",

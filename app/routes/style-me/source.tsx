@@ -226,6 +226,59 @@ export async function loader({ request }: LoaderFunctionArgs) {
     });
   }
 
+  // A manual pick rejected earlier in this same flow (set-anchor's own eligibility
+  // check) — remembered so Change Occasion can re-offer it, never written to
+  // styleMeClosetAnchorId because it has not passed eligibility. Always MANUAL by
+  // construction (the only write site is a rejected manual pick), so there is no
+  // AUTO case to resolve here — only eligible-now (promote) or still-ineligible
+  // (show the same refusal again).
+  const pendingClosetAnchorId = session.get("styleMePendingClosetAnchorId") as string | undefined;
+  if (pendingClosetAnchorId) {
+    const resolvedPending = await resolveClosetAnchor(naiaCustomer.id, pendingClosetAnchorId);
+    if (resolvedPending) {
+      const profileRow = await prisma.closetItem.findFirst({
+        where: { id: resolvedPending.id, customerId: naiaCustomer.id },
+        select: { hemLength: true, topLength: true, styleMeProfile: true },
+      });
+      const approvedProfile =
+        profileRow?.styleMeProfile?.profileStatus === "approved"
+          ? { occasionFit: (profileRow.styleMeProfile.occasionFit as Record<string, string> | null) ?? null }
+          : null;
+      const eligibility = evaluateAnchorEligibility(
+        {
+          hemLength: profileRow?.hemLength ?? null,
+          topLength: profileRow?.topLength ?? null,
+          approvedProfile,
+        } as unknown as ClosetAnchorInput,
+        occasion,
+        naiaCustomer.onboardingProfile?.dressingPreferences ?? [],
+      );
+
+      if (eligibility.eligible) {
+        session.set("styleMeClosetAnchorId", resolvedPending.id);
+        session.set("styleMeAnchorProvenance", "MANUAL");
+        session.unset("styleMePendingClosetAnchorId");
+        session.unset("styleMeAnchorMode");
+        return redirect("/style-me/result", {
+          headers: { "Set-Cookie": await commitSession(session) },
+        });
+      }
+      return data({
+        step: "anchor-incompatible" as const,
+        source,
+        item: { id: resolvedPending.id, name: resolvedPending.name, imageUrl: resolvedPending.imageUrl } as LockedAnchorItem,
+        message: eligibility.message ?? "This piece isn't eligible for this occasion. Choose another piece, or change the occasion.",
+        occasionLabel: occasionDisplayFor(null, occasion),
+      });
+    }
+    // Deleted since the rejection — fail safe by dropping it, same as a locked
+    // anchor that no longer resolves.
+    session.unset("styleMePendingClosetAnchorId");
+    return redirect("/style-me/source", {
+      headers: { "Set-Cookie": await commitSession(session) },
+    });
+  }
+
   const anchorMode = session.get("styleMeAnchorMode") as string | undefined;
 
   if (anchorMode === "manual") {
@@ -403,6 +456,10 @@ export async function action({ request }: ActionFunctionArgs) {
     session.unset("styleMeAnchorLocked");
     session.unset("styleMeClosetAnchorId");
     session.unset("styleMeAnchorProvenance");
+    // Also drops a rejected-but-remembered manual pick, if this is reached from the
+    // anchor-incompatible screen for a pending (not yet eligible) piece rather than a
+    // locked one — same "choose a different piece" intent either way.
+    session.unset("styleMePendingClosetAnchorId");
     session.set("styleMeAnchorMode", "manual");
     return redirect("/style-me/source", {
       headers: { "Set-Cookie": await commitSession(session) },
@@ -451,9 +508,14 @@ export async function action({ request }: ActionFunctionArgs) {
       naiaCustomer.onboardingProfile?.dressingPreferences ?? [],
     );
     if (!eligibility.eligible) {
+      // Remembered, not validated: she chose this piece deliberately, so Change Occasion
+      // (occasion.tsx) can re-offer it against a different occasion instead of losing it.
+      // This is NOT styleMeClosetAnchorId — that field means "passed eligibility"; this
+      // one means only "explicitly chosen, not yet eligible for any occasion checked".
+      session.set("styleMePendingClosetAnchorId", closetItemId);
       return data(
         { error: eligibility.message, anchorRejectionCode: eligibility.code },
-        { status: 400 },
+        { status: 400, headers: { "Set-Cookie": await commitSession(session) } },
       );
     }
 
@@ -463,6 +525,9 @@ export async function action({ request }: ActionFunctionArgs) {
     // creates the StylingSession row both flows would otherwise look identical.
     session.set("styleMeAnchorProvenance", "MANUAL");
     session.unset("styleMeAnchorMode");
+    // A stale rejected pick from earlier in this same flow must not outlive the real,
+    // now-validated anchor it was superseded by.
+    session.unset("styleMePendingClosetAnchorId");
     return redirect("/style-me/result", {
       headers: { "Set-Cookie": await commitSession(session) },
     });

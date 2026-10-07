@@ -139,28 +139,49 @@ export async function action({ request }: ActionFunctionArgs) {
   // AUTO-vs-MANUAL recovery — stamping the lock and falling through to
   // /style-me/source hands that decision to its own anchorLocked branch, the one
   // place that owns provenance.
+  const checkEligibility = async (closetItemId: string): Promise<boolean> => {
+    const naiaCustomer = await getCurrentNaiaCustomer(request);
+    if (!naiaCustomer) return true;
+    const profileRow = await prisma.closetItem.findFirst({
+      where: { id: closetItemId, customerId: naiaCustomer.id },
+      select: { hemLength: true, topLength: true, styleMeProfile: true },
+    });
+    const approvedProfile =
+      profileRow?.styleMeProfile?.profileStatus === "approved"
+        ? { occasionFit: (profileRow.styleMeProfile.occasionFit as Record<string, string> | null) ?? null }
+        : null;
+    return evaluateAnchorEligibility(
+      {
+        hemLength: profileRow?.hemLength ?? null,
+        topLength: profileRow?.topLength ?? null,
+        approvedProfile,
+      } as unknown as ClosetAnchorInput,
+      occasion,
+      naiaCustomer.onboardingProfile?.dressingPreferences ?? [],
+    ).eligible;
+  };
+
   const closetAnchorId = session.get("styleMeClosetAnchorId") as string | undefined;
   let anchorStillEligible = true;
   if (closetAnchorId) {
-    const naiaCustomer = await getCurrentNaiaCustomer(request);
-    if (naiaCustomer) {
-      const profileRow = await prisma.closetItem.findFirst({
-        where: { id: closetAnchorId, customerId: naiaCustomer.id },
-        select: { hemLength: true, topLength: true, styleMeProfile: true },
-      });
-      const approvedProfile =
-        profileRow?.styleMeProfile?.profileStatus === "approved"
-          ? { occasionFit: (profileRow.styleMeProfile.occasionFit as Record<string, string> | null) ?? null }
-          : null;
-      anchorStillEligible = evaluateAnchorEligibility(
-        {
-          hemLength: profileRow?.hemLength ?? null,
-          topLength: profileRow?.topLength ?? null,
-          approvedProfile,
-        } as unknown as ClosetAnchorInput,
-        occasion,
-        naiaCustomer.onboardingProfile?.dressingPreferences ?? [],
-      ).eligible;
+    anchorStillEligible = await checkEligibility(closetAnchorId);
+  }
+
+  // A manual pick rejected earlier in this same flow (set-anchor's own eligibility
+  // check, unmodified) — remembered under styleMePendingClosetAnchorId rather than
+  // styleMeClosetAnchorId because it never passed eligibility. Only relevant when
+  // there is no real anchor yet; a real anchor always takes precedence. Always
+  // MANUAL by construction, so promoting it on success never needs an AUTO path.
+  const pendingClosetAnchorId = !closetAnchorId
+    ? (session.get("styleMePendingClosetAnchorId") as string | undefined)
+    : undefined;
+  let pendingNowEligible = false;
+  if (pendingClosetAnchorId) {
+    pendingNowEligible = await checkEligibility(pendingClosetAnchorId);
+    if (pendingNowEligible) {
+      session.set("styleMeClosetAnchorId", pendingClosetAnchorId);
+      session.set("styleMeAnchorProvenance", "MANUAL");
+      session.unset("styleMePendingClosetAnchorId");
     }
   }
 
@@ -169,6 +190,22 @@ export async function action({ request }: ActionFunctionArgs) {
   // result, but only once the anchor above is confirmed eligible for this occasion.
   const adjustVibe = session.get("styleMeAdjustVibe") as string | undefined;
   if (adjustVibe) session.unset("styleMeAdjustVibe");
+
+  if (pendingClosetAnchorId && !pendingNowEligible) {
+    // Still ineligible — leave it pending (do not clear, do not promote) and route
+    // through /style-me/source, whose loader shows the same anchor-incompatible
+    // screen for this same piece.
+    return redirect("/style-me/source", {
+      headers: { "Set-Cookie": await commitSession(session) },
+    });
+  }
+
+  if (pendingClosetAnchorId && pendingNowEligible) {
+    // Promoted above — proceed exactly as a fresh successful manual pick would.
+    return redirect("/style-me/result", {
+      headers: { "Set-Cookie": await commitSession(session) },
+    });
+  }
 
   if (!anchorStillEligible) {
     // Force the anchorLocked branch to run on arrival, regardless of how this
