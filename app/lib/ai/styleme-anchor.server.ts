@@ -11,7 +11,7 @@ import type { NadineAnchorInput, ClosetAnchorInput, AnchorInput } from "./stylem
 import prisma from "../../db.server.js";
 import { buildPrivateDownloadUrl, getCloudinaryConfig } from "../../lib/cloudinary-admin.server.js";
 import { matchesSessionOccasion } from "./styleme-occasion-tokens.js";
-import { passesDressingRequirements, evaluateAnchorEligibility, explainDressingRequirements, canSlotAnchorOutfit, getTargetFormalityRange, FORMALITY_CONDITIONAL_ADJUSTMENTS, profileOccasionRating } from "./styleme-profile-gate.js";
+import { passesDressingRequirements, evaluateAnchorEligibility, canSlotAnchorOutfit, getTargetFormalityRange, FORMALITY_CONDITIONAL_ADJUSTMENTS, profileOccasionRating } from "./styleme-profile-gate.js";
 import { closetItemToSlot } from "./closet-slot.js";
 import { getEffectiveClosetItem, type ClosetItemFields } from "../admin/closet-review.server.js";
 
@@ -624,31 +624,6 @@ export async function autoSelectClosetAnchor(
   //
   // 2. Non-compensable dressing requirements. Unknown metadata fails open — only
   //    explicit evidence rejects.
-  // DIAGNOSTIC ONLY — emitted for EVERY loaded item, including ones the filter below
-  // removes, so a garment that never reaches ranking is still visible in the logs.
-  // Behaviour unchanged: the filter is still the only thing that decides.
-  if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true") {
-    for (const item of allItems) {
-      const probe = { hemLength: item.hemLength, topLength: item.topLength } as unknown as ClosetAnchorInput;
-      const x = explainDressingRequirements(probe, signals.dressingPreferences);
-      console.log("[nAia-dressing-gate]", JSON.stringify({
-        entry: "auto-anchor",
-        closetId: item.id,
-        name: item.name ?? null,
-        category: item.category,
-        subcategory: item.subcategory ?? null,
-        hemLengthStored: item.hemLength ?? null,
-        topLengthStored: item.topLength ?? null,
-        resolvedDressingPreferences: x.requirements,
-        legsCoveredPresent: x.legsCoveredPresent,
-        legsCovered: x.legsCovered,
-        noCroppedTops: x.noCroppedTops,
-        passesDressingRequirements: x.passes,
-        anchorCapable: isStructuralAnchorCandidate(item),
-      }));
-    }
-  }
-
   const items: AutoSelectItem[] = allItems.filter(
     (item) =>
       isStructuralAnchorCandidate(item) &&
@@ -978,71 +953,6 @@ export async function autoSelectClosetAnchor(
   })();
 
   const winnerEntry = fallbackWinnerEntry ?? diversityWinnerEntry ?? defaultWinnerEntry;
-  if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true") {
-    console.log("[nAia-anchor-rank]", JSON.stringify({
-      occasion: signals.occasion,
-      formalityConditional: signals.formalityConditional ?? null,
-      intentions: activeIntentions,
-      bodyNeeds: activeBodyNeeds,
-      targetBandMin,
-      singlePointBandFallbackUsed: fallbackWinnerEntry !== undefined,
-      rerollDiversityUsed: diversityWinnerEntry !== undefined,
-      previousOutfitCount: (signals.previousOutfitClosetIds ?? []).length,
-      defaultWinnerId: defaultWinnerEntry?.item.id ?? null,
-      top10: scored.slice(0, 10).map((s) => {
-        const ap2 = s.item.styleMeProfile?.profileStatus === "approved" ? s.item.styleMeProfile : null;
-        const gfbn = (need: string) => scoreBodyNeedForClosetItem(need, {
-          fitProfile: null, waistShape: s.item.waistShape,
-          styleTags: s.item.styleTags, approvedProfile: asScoringProfile(ap2),
-          sleeveLength: s.item.sleeveLength, necklineCoverage: s.item.necklineCoverage,
-          hemLength: s.item.hemLength, shoulderCoverage: s.item.shoulderCoverage,
-          midriffExposed: s.item.midriffExposed,
-        });
-        const bnDetail: Record<string, unknown> = {};
-        if (needsConstructionBonus && ap2 && isStructuralAnchorCandidate(s.item)) {
-          const c = ap2.construction;
-          bnDetail.construction = c ? (_ANCHOR_CONSTRUCTION_BONUS[c] ?? 0) : 0;
-        }
-        if (needsLooseBonus && isStructuralAnchorCandidate(s.item)) {
-          const r = gfbn("loose-comfortable");
-          bnDetail["loose-comfortable"] = { violation: r.violation, fitScore: r.fitScore, bonus: r.violation ? -2.0 : (r.fitScore ?? 0) * 2.0 };
-        }
-        if (needsLessBodyConscious && isStructuralAnchorCandidate(s.item)) {
-          const r = gfbn("less-body-conscious");
-          bnDetail["less-body-conscious"] = { violation: r.violation, fitScore: r.fitScore, bonus: r.violation ? -2.0 : (r.fitScore ?? 0) * 1.7 };
-        }
-        if (needsSofterFabrics && isStructuralAnchorCandidate(s.item)) {
-          const r = gfbn("softer-easier-fabrics");
-          bnDetail["softer-easier-fabrics"] = { fitScore: r.fitScore };
-        }
-        if (needsMoreCoverage && isStructuralAnchorCandidate(s.item)) {
-          const r = gfbn("more-coverage");
-          bnDetail["more-coverage"] = { violation: r.violation, fitScore: r.fitScore, bonus: r.violation ? -2.0 : (r.fitScore ?? 0) * 1.7 };
-        }
-        return {
-          id: s.item.id, name: s.item.name, score: s.score,
-          formality: s.item.formality ?? null,
-          atOrAboveBandFloor: s.atOrAboveFloor,
-          targetBandMin,
-          construction: ap2?.construction ?? null,
-          silhouetteCharacter: ap2?.silhouetteCharacter ?? null,
-          fabricBehaviour: ap2?.fabricBehaviour ?? null,
-          waistComfort: ap2?.waistComfort ?? null,
-          bodyNeedDetail: bnDetail,
-          isAnchorCapable: s.isAnchorCapable, inRange: s.inRange,
-          occasions: s.item.occasions,
-          occasionFit: ap2?.occasionFit ?? null,
-          intentionPotentials: activeIntentions.length > 0 && ap2?.intentionPotentials
-            ? Object.fromEntries(activeIntentions.map((id) => [
-                id,
-                (ap2.intentionPotentials as Record<string, string>)[id] ?? "(missing)",
-              ]))
-            : ap2 ? "(approved, no intentions active)" : "(no approved profile)",
-        };
-      }),
-      winner: winnerEntry ? { id: winnerEntry.item.id, name: winnerEntry.item.name, score: winnerEntry.score } : null,
-    }));
-  }
   if (!winnerEntry) return null;
 
   const winner = winnerEntry.item;

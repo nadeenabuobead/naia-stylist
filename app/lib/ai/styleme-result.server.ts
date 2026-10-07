@@ -1983,41 +1983,6 @@ export function buildNaiaOutfitCandidates(
     }
   }
 
-  if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true") {
-    const out = ([candidateA, candidateB, candidateC, candidateD, candidateE] as (OutfitCandidate | null)[])
-      .filter(Boolean)
-      .map((c) => ({
-        id: c!.id,
-        pieces: c!.pieces.map((p) => ({ slot: p.slot, id: p.closetId, label: p.label })),
-      }));
-    console.log("[nAia-candidates]", JSON.stringify({ anchor: anchor.id, candidates: out }));
-  }
-
-  if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true") {
-    const BASE = new Set(["top", "bottom", "dress", "set"]);
-    console.log("[nAia-slot-pipeline]", JSON.stringify({
-      stage: "S5-candidates-before-ranking",
-      anchorId: anchor.id,
-      anchorSlot: anchor.slot,
-      candidates: [
-        ["A", candidateA], ["B", candidateB], ["C", candidateC], ["D", candidateD], ["E", candidateE],
-      ].map(([id, c]) => {
-        const cand = c as OutfitCandidate | null;
-        if (!cand) return { id, present: false };
-        const slots = cand.pieces.map((pc) => pc.slot);
-        return {
-          id,
-          present: true,
-          slots,
-          pieces: cand.pieces.map((pc) => ({ slot: pc.slot, closetId: pc.closetId, label: pc.label ?? null })),
-          // The ST16 question: did this candidate end up with any base clothing slot?
-          hasBaseClothing: slots.some((sl) => BASE.has(sl)),
-          hasBottomOrOnepiece: slots.some((sl) => sl === "bottom" || sl === "dress" || sl === "set"),
-        };
-      }),
-    }));
-  }
-
   return [candidateA, candidateB, candidateC, candidateD, candidateE];
 }
 
@@ -2683,52 +2648,6 @@ export function buildCandidateOccasionEvidence(
   return result;
 }
 
-// Staging-only: logs normalized selection evidence without altering the selection path.
-// No-op on production.
-function logNaiaSelectionDiag(data: {
-  sessionOccasion: string;
-  formalityConditional: string | null;
-  candidateCount: number;
-  evidenceSummary: Array<{
-    id: string;
-    knownOccasionPieces: number;
-    matchingOccasionPieces: number;
-    explicitNonMatches: number;
-    occasionCoverageRatio: number;
-    baseAndShoeMatchCount: number;
-    optionalPieceCount: number;
-    // Whole-outfit suitability fields (null when formality data insufficient)
-    formalityFit: string;
-    outfitFormalityRank: number | null;
-    targetFormalityRange: { min: number; max: number };
-    compositeScore: number;
-    deterministicFallbackRank: string;
-    pieces: Array<{ slot: string; pieceRole: string; label: string | null; occasionStatus: string; formality: string | null }>;
-    // QA instrumentation. The EXACT CandidateRankKey this candidate was ranked by —
-    // read from the rankKeys map the sort itself used, never recomputed. Without it a
-    // failing run could only be read backwards from the chosen outfit.
-    rankKey: CandidateRankKey;
-    rankOrder: number;          // 0-based position after the T1-T6d sort
-    isModelEligible: boolean;   // passed isTiedAtT1T4 against deterministicBest
-    pieceLabels: string[];
-  }>;
-  modelCallAttempted: boolean;
-  modelReturnedId?: string | null;
-  modelValidationPassed?: boolean;
-  modelDurationMs?: number;
-  fallbackUsed: boolean;
-  fallbackReason?: string;
-  finalCandidateId: string;
-  // QA instrumentation — the three decision points the previous payload omitted.
-  deterministicBestId: string;
-  deterministicBestRankKey: CandidateRankKey;
-  rankedOrder: string[];        // candidate ids, best first
-  modelEligibleIds: string[];   // the exact set offered to the model
-}): void {
-  if (process.env.NAIA_STYLEME_DIAGNOSTICS !== "true") return;
-  console.log("[nAia-selection-diag]", JSON.stringify(data));
-}
-
 // ── nAia candidate selection Claude call ─────────────────────────────────────
 // Single Claude call that selects the best outfit candidate AND generates all
 // outfit wording plus per-piece notes. No second AI round trip.
@@ -3206,32 +3125,6 @@ export async function callClaudeForNaiaSelection(
       return `Candidate ${c.id}:\n${lines.join("\n")}`;
     })
     .join("\n\n");
-
-  if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true") {
-    console.log("[nAia-t4-and-profile]", JSON.stringify({
-      intentions: activeIntentions,
-      candidates: candidates.map((c) => ({
-        candidateId: c.id,
-        t4Score: allItems && activeIntentions.length > 0
-          ? computeIntentionFit(activeIntentions, c, candidateA, allItems, profileForScoring)
-          : null,
-        pieces: c.pieces.map((p) => {
-          const ap = allItems?.find((i) => i.id === p.closetId)?.approvedProfile;
-          const wantsConstruction = activeIntentions.some((i) => i === "feel-sharper" || i === "give-structure");
-          return {
-            slot: p.slot,
-            label: p.label,
-            hasProfile: !!ap,
-            construction: ap?.construction ?? null,
-            feelSharper: ap?.intentionPotentials
-              ? ((ap.intentionPotentials as Record<string, string>)["feel-sharper"] ?? "(missing)")
-              : "(no profile)",
-            constructionInPrompt: wantsConstruction && ap?.construction ? `construction: ${ap.construction}` : "(absent)",
-          };
-        }),
-      })),
-    }));
-  }
 
   const selectionHint = (() => {
     if (candidates.length === 1) {
@@ -4262,32 +4155,6 @@ export function coreClothingMeetsLooseNeed(
 // At most one item per slot. The anchor is always excluded by ID.
 
 
-// QA instrumentation (C4). Snapshots the structural-slot pipeline so a missing bottom
-// can be attributed to an exact stage instead of inferred from the finished outfit.
-// Pure reads; no effect on selection. Behind NAIA_STYLEME_DIAGNOSTICS.
-function logSlotPipeline(
-  stage: string,
-  candidatesBySlot: Map<OutfitSlot, Array<{ item: ClosetAnchorInput; score: number }>>,
-  extra: Record<string, unknown> = {},
-): void {
-  if (process.env.NAIA_STYLEME_DIAGNOSTICS !== "true") return;
-  const STRUCTURAL = ["top", "bottom", "dress", "set", "shoe", "outerwear"];
-  const slots: Record<string, unknown> = {};
-  for (const [slot, list] of candidatesBySlot.entries()) {
-    slots[slot] = {
-      count: list.length,
-      top3: list.slice(0, 3).map((c) => ({ id: c.item.id, name: c.item.name ?? null, score: Math.round(c.score * 1000) / 1000 })),
-    };
-  }
-  console.log("[nAia-slot-pipeline]", JSON.stringify({
-    stage,
-    keys: [...candidatesBySlot.keys()],
-    structuralPresent: STRUCTURAL.filter((sl) => candidatesBySlot.has(sl as OutfitSlot)),
-    structuralAbsent: STRUCTURAL.filter((sl) => !candidatesBySlot.has(sl as OutfitSlot)),
-    slots,
-    ...extra,
-  }));
-}
 
 export function selectAdditionalClosetGarments(
   anchor: NormalizedStyleAnchor | null,
@@ -4344,92 +4211,26 @@ export function selectAdditionalClosetGarments(
   for (const item of closetItems) {
     if (item.id === anchorId) continue;
 
-    // DIAGNOSTIC ONLY — logged BEFORE the gate's `continue`, because an item the gate
-    // rejects currently produces no log line at all, which makes "the gate passed it"
-    // and "the gate never saw it" indistinguishable in the logs. Behaviour unchanged:
-    // the predicate below is still the only thing that decides.
-    //
-    // StyleMe reads hemLength/topLength straight off loadAllClosetItemsForEngine with
-    // no normalisation, so the values printed here ARE the stored ClosetItem values.
-    // Note that StyleMe does NOT apply ClosetItemAdminReview overrides — if a reviewer
-    // corrected a hem, StyleMe would still read the raw AI value, and that divergence
-    // would show up as a stored value disagreeing with what the Closet UI displays.
-    if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true") {
-      const x = explainDressingRequirements(item, profile?.dressingPreferences);
-      console.log("[nAia-dressing-gate]", JSON.stringify({
-        entry: "candidate",
-        closetId: item.id,
-        name: item.name ?? null,
-        category: item.category,
-        subcategory: item.subcategory ?? null,
-        slot: resolveProfileSlot(item, closetItemToSlot(item.category, item.subcategory)),
-        hemLengthStored: x.hemLength,
-        topLengthStored: x.topLength,
-        hemLengthSeenByGate: item.hemLength ?? null,
-        resolvedDressingPreferences: x.requirements,
-        legsCoveredPresent: x.legsCoveredPresent,
-        legsCovered: x.legsCovered,
-        noCroppedTops: x.noCroppedTops,
-        passesDressingRequirements: x.passes,
-      }));
-    }
-
-    // TEMPORARY INSTRUMENTATION — read-only, staging diagnostics. Remove with the other
-    // [nAia-*] probes once catalogue eligibility is understood.
-    //
-    // 34 garments passed the dressing gate and vanished before scoring, and the logs could
-    // not say which gate took them: only survivors emit [nAia-slot-score]. This names the
-    // rejecting gate per item. It reads values and logs — no gate, score or control flow
-    // changes; every `continue` stays exactly where it was.
-    //
-    // REASON VOCABULARY: the brief asked for four reasons, but this path has SEVEN exits
-    // after the dressing gate. Three were missing, and one of them —
-    // slot-covered-by-anchor — is expected to account for most TOPS here: the anchor IS a
-    // top, so every other top is correctly excluded as a duplicate slot, not as an
-    // eligibility failure. Reporting that separately avoids reading a structural exclusion
-    // as a catalogue-data problem.
-    const logDrop = (rejectedBy: string, extra: Record<string, unknown> = {}): void => {
-      if (process.env.NAIA_STYLEME_DIAGNOSTICS !== "true") return;
-      const ap = item.approvedProfile;
-      console.log("[nAia-eligibility-drop]", JSON.stringify({
-        itemId: item.id,
-        itemName: item.name ?? null,
-        slot: resolveProfileSlot(item, closetItemToSlot(item.category, item.subcategory)),
-        category: item.category,
-        rejectedBy,
-        occasionFitForSession: profileOccasionRating(ap?.occasionFit, session.occasion) ?? null,
-        occasionFit: ap?.occasionFit ?? null,
-        occasions: item.occasions,
-        dressRegister: ap?.dressRegister ?? null,
-        anchorDressRegister: anchorClosetItem?.approvedProfile?.dressRegister ?? null,
-        occasionTokenMatch: matchesSessionOccasion(item.occasions, session.occasion),
-        ...extra,
-      }));
-    };
-
     if (!passesDressingRequirements(item, profile?.dressingPreferences)) continue;
 
     // APPROVED profile truth gates — take precedence over all legacy classification.
     // Gate 1: occasion "No" is a hard exclusion from this garment for this occasion.
-    if (!passesProfileOccasionGate(item, session.occasion)) { logDrop("occasion-fit"); continue; }
+    if (!passesProfileOccasionGate(item, session.occasion)) continue;
     // Gate 2: register incompatibility blocks cross-register outfit construction.
     //         Approved occasionFit Strong/Acceptable overrides blanket register rules.
-    if (!passesProfileRegisterGate(item, session.occasion)) { logDrop("profile-register"); continue; }
+    if (!passesProfileRegisterGate(item, session.occasion)) continue;
     // Gate 3: outfit-level register coherence — candidate must be compatible with anchor.
     //         Shared-occasion approval (both approved for this occasion) overrides the gap check.
-    if (!passesRegisterCoherenceWithAnchor(item, anchorClosetItem, session.occasion)) { logDrop("anchor-register-coherence"); continue; }
+    if (!passesRegisterCoherenceWithAnchor(item, anchorClosetItem, session.occasion)) continue;
 
     // Use profile exactSlot when available (authoritative slot override).
     const categorySlot = closetItemToSlot(item.category, item.subcategory);
     const slot = resolveProfileSlot(item, categorySlot);
-    if (slot === "unknown") { logDrop("slot-unknown"); continue; }
-    if (coveredSlots.has(slot)) {
-      logDrop("slot-covered-by-anchor", { coveredSlots: [...coveredSlots] });
-      continue;
-    }
+    if (slot === "unknown") continue;
+    if (coveredSlots.has(slot)) continue;
 
     // Gate 4: outfitFunction gate — "finishing" function pieces must not fill structural clothing slots.
-    if (!passesOutfitFunctionGate(item, slot)) { logDrop("outfit-function"); continue; }
+    if (!passesOutfitFunctionGate(item, slot)) continue;
 
     const baseScore = scoreClosetItemForSession(
       { occasions: item.occasions, styleTags: item.styleTags, category: item.category, colors: item.colors, primaryColor: item.primaryColor },
@@ -4491,33 +4292,9 @@ export function selectAdditionalClosetGarments(
     // Apply outfitFunction priority: anchor pieces boosted, supporting pieces penalised.
     const score = (baseScore + bodyNeedSlotBonus + intentionBonus + registerBonus) * outfitFunctionPriority(item);
 
-    if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true") {
-      console.log("[nAia-slot-score]", JSON.stringify({
-        slot, id: item.id, name: item.name ?? null,
-        baseScore,
-        bodyNeedSlotBonus: Math.round(bodyNeedSlotBonus * 1000) / 1000,
-        intentionBonus: Math.round(intentionBonus * 1000) / 1000,
-        registerBonus: Math.round(registerBonus * 1000) / 1000,
-        registerRank: itemRegisterRank,
-        registerRankSource,
-        intentionPotentials: activeIntentions.length > 0
-          ? Object.fromEntries(activeIntentions.map((iid) => [
-              iid,
-              item.approvedProfile?.intentionPotentials
-                ? ((item.approvedProfile.intentionPotentials as Record<string, string>)[iid] ?? "(missing)")
-                : "(no profile)",
-            ]))
-          : {},
-        construction: item.approvedProfile?.construction ?? null,
-        hasApprovedProfile: !!item.approvedProfile,
-        outfitFunctionPri: outfitFunctionPriority(item),
-        finalScore: Math.round(score * 1000) / 1000,
-      }));
-    }
-
     // Gate: total contribution must be positive. Legacy baseScore is no longer the sole
     // gate — approved Fit/Comfort and Intention signals can carry a zero-base item through.
-    if (score <= 0) { logDrop("zero-or-negative-score", { scoreBeforeThreshold: score, baseScore, bodyNeedSlotBonus, intentionBonus, registerBonus }); continue; }
+    if (score <= 0) continue;
 
     const list = candidatesBySlot.get(slot) ?? [];
     list.push({ item, score });
@@ -4525,14 +4302,6 @@ export function selectAdditionalClosetGarments(
   }
 
   for (const list of candidatesBySlot.values()) list.sort((a, b) => b.score - a.score);
-
-  logSlotPipeline("S1-after-scoring", candidatesBySlot, {
-    anchorId: anchorId ?? null,
-    anchorSlot: anchorClosetItem ? closetItemToSlot(anchorClosetItem.category, anchorClosetItem.subcategory ?? null) : null,
-    coveredSlots: [...coveredSlots],
-    sessionOccasion: session.occasion,
-    formalityConditional: session.formalityConditional ?? null,
-  });
 
   // ── Base-architecture exclusivity ──────────────────────────────────────────
   // Enforce selection-order-independence: if candidates include both a separates
@@ -4577,12 +4346,6 @@ export function selectAdditionalClosetGarments(
     }
   }
 
-  logSlotPipeline("S2-after-architecture-exclusivity", candidatesBySlot, {
-    hasSeparatesInCandidates, hasOnepieceInCandidates,
-    committedSeparates: coveredSlots.has("top") || coveredSlots.has("bottom"),
-    committedOnepiece: coveredSlots.has("dress") || coveredSlots.has("set"),
-  });
-
   // ── Outfit size cap + prioritised optional selection ───────────────────────
   // Total outfit pieces = anchor + primary NADINE product + additional closet garments.
   // Stay within MAX_OUTFIT_PIECES. Base garments (top/bottom/dress/set) are always
@@ -4601,16 +4364,6 @@ export function selectAdditionalClosetGarments(
     const fresh = recentlyShownIds ? candidates.find((c) => !recentlyShownIds.has(c.item.id)) : null;
     const chosen = fresh ?? candidates[0];
     result.push({ slot, id: chosen.item.id, label: chosen.item.name, imageUrl: chosen.item.imageUrl, colors: chosen.item.colors ?? [] });
-  }
-
-  if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true") {
-    console.log("[nAia-slot-pipeline]", JSON.stringify({
-      stage: "S3-after-phase1-base",
-      committedCount, maxAdditional,
-      phase1: result.map((r) => ({ slot: r.slot, id: r.id, label: r.label })),
-      phase1Slots: result.map((r) => r.slot),
-      baseSlotsOfferedByCandidates: ["top", "bottom", "dress", "set"].filter((sl) => candidatesBySlot.has(sl as OutfitSlot)),
-    }));
   }
 
   // Target band at function scope — the per-item `targetRange` inside the scoring loop is
@@ -4666,28 +4419,6 @@ export function selectAdditionalClosetGarments(
             slot,
           ))
       : candidates;
-
-    if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true" && suitabilityGateActive && SUITABILITY_GATED_SLOTS.has(slot)) {
-      console.log("[nAia-finishing-suitability]", JSON.stringify({
-        slot,
-        targetBand: finishingTargetBand,
-        baseRegisterRank,
-        considered: candidates.map((c) => ({
-          id: c.item.id, name: c.item.name ?? null,
-          formality: c.item.formality ?? null,
-          formalityRank: c.item.formality ? (FORMALITY_RANK[c.item.formality] ?? null) : null,
-          score: Math.round(c.score * 1000) / 1000,
-          suitable: finishingPieceIsSuitable(
-            c.item.formality ? (FORMALITY_RANK[c.item.formality] ?? null) : null,
-            baseRegisterRank,
-            finishingTargetBand,
-            slot,
-          ),
-        })),
-        eligibleCount: eligible.length,
-        slotLeftUnfilled: eligible.length === 0,
-      }));
-    }
 
     if (eligible.length === 0) {
       // Nothing appropriate — leave the slot unfilled and tell the caller, so the
@@ -4916,14 +4647,6 @@ export function selectAdditionalClosetGarments(
         return [];
       }
     }
-  }
-
-  if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true") {
-    console.log("[nAia-slot-pipeline]", JSON.stringify({
-      stage: "S4-selectAdditionalClosetGarments-return",
-      returned: result.map((r) => ({ slot: r.slot, id: r.id, label: r.label })),
-      returnedSlots: result.map((r) => r.slot),
-    }));
   }
 
   return result;
@@ -5498,39 +5221,6 @@ export async function computeStyleMeResult(
 
   const isNaiaClosetMode = mode === "naia" && anchor?.type === "closet" && !!getClosetItems;
 
-  // TEMPORARY INSTRUMENTATION — read-only, remove once the WI/active fallback is diagnosed.
-  //
-  // A WI-origin session (Cream Ribbed Knit Tank Top / Active-busy-day) produced descriptive
-  // Complete-the-Look text instead of owned pieces, and the live trace showed ZERO
-  // [nAia-dressing-gate] candidate lines for that run against 75 diagnostic lines for a
-  // working generation on the same build. The pool is built inside the branch below, so no
-  // gate lines means isNaiaClosetMode was false — but which of its three conjuncts failed is
-  // not recorded anywhere, and each implies a different fix. This logs the actual values.
-  //
-  // Placed immediately AFTER the const rather than before it so it reports the REAL
-  // isNaiaClosetMode rather than a second copy of the expression, which could drift from the
-  // one that decides the branch. A console.log behind the existing diagnostics flag: it reads
-  // values, assigns nothing, and mutates nothing.
-  //
-  // anchorProvenance is deliberately absent — it is not on StyleMeEngineInput, and widening
-  // the engine signature is not instrumentation.
-  if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true") {
-    console.log("[nAia-closet-mode-branch]", JSON.stringify({
-      mode,
-      modeFromInput: engineInput.mode ?? null,
-      anchorType: anchor?.type ?? null,
-      anchorId: anchor
-        ? (anchor.type === "closet"
-            ? (anchor as NormalizedClosetAnchor).id
-            : (anchor as NormalizedNadineAnchor).handle)
-        : null,
-      hasGetClosetItems: !!getClosetItems,
-      isNaiaClosetMode,
-      sessionSource: session.source ?? null,
-      sessionOccasion: session.occasion ?? null,
-    }));
-  }
-
   let naiaWordingOverride: StyleMeWording | null = null;
   let closetAnchorNote: string | null = null;
   let sameCombination: boolean | undefined;
@@ -5601,19 +5291,6 @@ export async function computeStyleMeResult(
       : prevCoreSig
         ? allCandidates.filter((c) => computeCoreLookSignature(c.pieces) !== prevCoreSig)
         : allCandidates.filter((c) => computeOutfitSignature(c.pieces.map((p) => p.closetId)) !== prevSig);
-
-    if (process.env.NAIA_STYLEME_DIAGNOSTICS === "true" && prevSig) {
-      console.log("[nAia-core-diversity]", JSON.stringify({
-        prevCoreSig: prevCoreSig || null,
-        usedCoreComparison: !!prevCoreSig,
-        candidates: allCandidates.map((c) => ({
-          id: c.id,
-          coreSig: computeCoreLookSignature(c.pieces),
-          coreDiffers: computeCoreLookSignature(c.pieces) !== prevCoreSig,
-        })),
-        survivingCount: dedupedCandidates.length,
-      }));
-    }
 
     // Candidate-level dressing gate: reject candidates that fail compensable coverage
     // requirements (arms-covered, chest-neckline-covered, dresses-modestly) after checking
@@ -5694,7 +5371,6 @@ export async function computeStyleMeResult(
       );
 
       // Single selection-and-wording call. Always called for wording even with one eligible candidate.
-      const naiaCallStart = Date.now();
       const naiaResult = await _callNaiaSelection(
         modelEligible,
         session,
@@ -5703,7 +5379,6 @@ export async function computeStyleMeResult(
         allItems,
         outfitScores,
       );
-      const naiaModelDurationMs = Date.now() - naiaCallStart;
 
       // Determine final candidate: model selection (if within eligible set) or deterministic best.
       let finalCandidate: OutfitCandidate;
@@ -5734,53 +5409,6 @@ export async function computeStyleMeResult(
         setPieces(finalCandidate, undefined);
       }
 
-      logNaiaSelectionDiag({
-        sessionOccasion: session.occasion,
-        formalityConditional: session.formalityConditional ?? null,
-        candidateCount: filteredCandidates.length,
-        evidenceSummary: filteredCandidates.map((c) => {
-          const e = occasionEvidence.get(c.id)!;
-          const s = outfitScores.get(c.id)!;
-          const itemMap = new Map(allItems.map((i) => [i.id, i]));
-          // Read-only reads of the structures the real ranking path produced above.
-          const liveRankKey = rankKeys.get(c.id)!;
-          const liveRankOrder = rankedCandidates.findIndex((rc) => rc.id === c.id);
-          const liveModelEligible = modelEligible.some((mc) => mc.id === c.id);
-          return {
-            id: c.id,
-            rankKey: liveRankKey,
-            rankOrder: liveRankOrder,
-            isModelEligible: liveModelEligible,
-            pieceLabels: c.pieces.map((p) => p.label ?? p.closetId),
-            knownOccasionPieces: e.knownOccasionPieces,
-            matchingOccasionPieces: e.matchingOccasionPieces,
-            explicitNonMatches: e.explicitNonMatchCount,
-            occasionCoverageRatio: Math.round(e.occasionCoverageRatio * 100) / 100,
-            baseAndShoeMatchCount: e.baseAndShoeMatchCount,
-            optionalPieceCount: e.optionalPieceCount,
-            formalityFit: s.formalityFit,
-            outfitFormalityRank: s.outfitFormalityRank,
-            targetFormalityRange: s.targetFormalityRange,
-            compositeScore: Math.round(s.compositeScore * 100) / 100,
-            deterministicFallbackRank: c.id === finalCandidate.id ? "selected" : "not-selected",
-            pieces: e.pieces.map((p) => ({
-              slot: p.slot, pieceRole: p.pieceRole, label: p.label, occasionStatus: p.occasionStatus,
-              formality: itemMap.get(p.closetId)?.formality ?? null,
-            })),
-          };
-        }),
-        modelCallAttempted: true,
-        modelReturnedId: naiaResult?.candidate.id ?? null,
-        modelValidationPassed: naiaResult ? !fallbackUsed : undefined,
-        modelDurationMs: naiaModelDurationMs,
-        fallbackUsed,
-        fallbackReason,
-        finalCandidateId: finalCandidate.id,
-        deterministicBestId: deterministicBest.id,
-        deterministicBestRankKey: bestKey,
-        rankedOrder: rankedCandidates.map((c) => c.id),
-        modelEligibleIds: modelEligible.map((c) => c.id),
-      });
     }
   } else if (getClosetItems) {
     // NADINE mode (or nAia mode without a closet anchor): standard garment scan.
