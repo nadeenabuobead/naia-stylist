@@ -155,15 +155,15 @@ describe("SM-REV3-B3 — 'other' option label is 'Other'", () => {
 
 // ── C: Occasion — 8 options, "other" removed ─────────────────────────────────
 
-describe("SM-REV3-C1 — occasions array has exactly 9 items", () => {
-  it("occasions array contains exactly 9 { id: ... } entries", () => {
+describe("SM-REV3-C1 — occasions array has exactly 8 items", () => {
+  it("occasions array contains exactly 8 { id: ... } entries", () => {
     const matches = [...occasion.matchAll(/\{ id: "/g)];
     // Subtract formality options (they are also { id: "formality-... })
     const occasionMatches = [...occasion.matchAll(/\{ id: "(?!formality)/g)];
     assert.strictEqual(
       occasionMatches.length,
-      9,
-      `Expected 9 occasion entries, got ${occasionMatches.length}`,
+      8,
+      `Expected 8 occasion entries, got ${occasionMatches.length}`,
     );
   });
 });
@@ -423,14 +423,14 @@ describe("SM-REV3-G1 — REV3_OCCASION_MAP retains 'other' → 'not-sure' for le
   });
 });
 
-describe("SM-REV3-G2 — fresh Rev 3 UI still has exactly 9 visible options", () => {
-  it("occasions array has 9 entries (other not visible)", () => {
+describe("SM-REV3-G2 — fresh Rev 3 UI still has exactly 8 visible options", () => {
+  it("occasions array has 8 entries (other not visible)", () => {
     const occasionsBlock = occasion.slice(
       occasion.indexOf("const occasions = ["),
       occasion.indexOf("const REV3_OCCASION_MAP"),
     );
     const ids = [...occasionsBlock.matchAll(/\{ id: "/g)];
-    assert.strictEqual(ids.length, 9, `UI occasions must be 9, got ${ids.length}`);
+    assert.strictEqual(ids.length, 8, `UI occasions must be 8, got ${ids.length}`);
     // Check id: "other" specifically — not just the word "other" in comments
     assert.ok(!occasionsBlock.includes('id: "other"'), "other id not in UI occasions");
   });

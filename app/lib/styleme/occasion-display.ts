@@ -44,7 +44,7 @@
  * written label.
  */
 export const OCCASION_DISPLAY_LABELS: Readonly<Record<string, string>> = {
-  "everyday": "Everyday or casual plans",
+  "everyday": "Everyday",
   "work": "Work or meetings",
   "dinner": "Dinner",
   "date-night": "Date",

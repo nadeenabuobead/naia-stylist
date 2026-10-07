@@ -160,7 +160,7 @@ describe("OD-F — display labels are derived from the questionnaire, not writte
     // Without this, a changed source shape would silently yield zero options and OD-F.2
     // would vacuously pass.
     const occasionOpts = options.filter((o) => !o.id.startsWith("formality-"));
-    assert.ok(occasionOpts.length >= 9, `expected the nine occasion options, parsed ${occasionOpts.length}`);
+    assert.ok(occasionOpts.length >= 8, `expected the eight occasion options, parsed ${occasionOpts.length}`);
     assert.equal(uiToCanonical["night-out"], "girls-night", "REV3_OCCASION_MAP was not parsed");
   });
 

@@ -22,12 +22,11 @@ const occasions = [
   { id: "work",            label: "Work or meetings" },
   { id: "dinner",          label: "Dinner" },
   { id: "date",            label: "Date" },
-  { id: "everyday",        label: "Everyday or casual plans" },
+  { id: "everyday",        label: "Everyday" },
   { id: "event",           label: "Event / celebration" },
   { id: "night-out",       label: "Night out / party" },
   { id: "family",          label: "Family gathering" },
   { id: "travel",          label: "Travel day" },
-  { id: "active-busy-day", label: "Busy / on-the-go day" },
 ];
 
 // Rev 3 UI IDs → canonical engine IDs (applied at action time, before session storage).
