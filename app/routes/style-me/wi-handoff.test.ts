@@ -146,7 +146,10 @@ describe("Wardrobe Intelligence -> StyleMe handoff", () => {
   it("5b: source.tsx loader re-validates the locked anchor on every visit and drops the lock if it no longer resolves", () => {
     const text = src("source.tsx");
     const lockedIdx = text.indexOf('session.get("styleMeAnchorLocked")');
-    const block = text.slice(lockedIdx, lockedIdx + 900);
+    // Window widened: the occasion-eligibility re-check (added so a locked anchor is
+    // validated against the occasion once it's known, not just re-resolved for
+    // ownership) now sits between resolution and this fail-safe drop-the-lock path.
+    const block = text.slice(lockedIdx, lockedIdx + 2600);
     assert.ok(block.includes("resolveClosetAnchor(naiaCustomer.id, closetAnchorId)"), "re-resolves ownership, does not trust the stale cookie value");
     assert.ok(block.includes('session.unset("styleMeAnchorLocked")'), "drops the lock on failed re-resolution");
     assert.ok(block.includes('session.unset("styleMeClosetAnchorId")'), "drops the stale anchor id too — never styles around a deleted item");

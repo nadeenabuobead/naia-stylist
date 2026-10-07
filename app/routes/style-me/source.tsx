@@ -14,6 +14,8 @@ import prisma from "~/db.server";
 import { autoSelectClosetAnchor, resolveClosetAnchor } from "~/lib/ai/styleme-anchor.server";
 import { evaluateAnchorEligibility } from "~/lib/ai/styleme-profile-gate";
 import type { ClosetAnchorInput } from "~/lib/ai/styleme-recommendation.types";
+import { occasionDisplayFor } from "~/lib/styleme/occasion-display";
+import { resolveLockedAnchorOutcome } from "~/lib/styleme/locked-anchor-outcome";
 import { buildPrivateDownloadUrl, getCloudinaryConfig } from "~/lib/cloudinary-admin.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 
@@ -173,11 +175,48 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const closetAnchorId = session.get("styleMeClosetAnchorId") as string | undefined;
     const resolved = closetAnchorId ? await resolveClosetAnchor(naiaCustomer.id, closetAnchorId) : null;
     if (resolved) {
-      return data({
-        step: "anchor-locked" as const,
-        source,
-        item: { id: resolved.id, name: resolved.name, imageUrl: resolved.imageUrl } as LockedAnchorItem,
+      // The anchor was locked before occasion was necessarily chosen (a WI handoff
+      // happens before the questionnaire). Re-run the same eligibility gate the
+      // manual picker's set-anchor action already applies, now that occasion is
+      // known, instead of letting an ineligible locked anchor reach generation.
+      const profileRow = await prisma.closetItem.findFirst({
+        where: { id: resolved.id, customerId: naiaCustomer.id },
+        select: { hemLength: true, topLength: true, styleMeProfile: true },
       });
+      const approvedProfile =
+        profileRow?.styleMeProfile?.profileStatus === "approved"
+          ? { occasionFit: (profileRow.styleMeProfile.occasionFit as Record<string, string> | null) ?? null }
+          : null;
+      const eligibility = evaluateAnchorEligibility(
+        {
+          hemLength: profileRow?.hemLength ?? null,
+          topLength: profileRow?.topLength ?? null,
+          approvedProfile,
+        } as unknown as ClosetAnchorInput,
+        occasion,
+        naiaCustomer.onboardingProfile?.dressingPreferences ?? [],
+      );
+      const provenance = ((session.get("styleMeAnchorProvenance") as string | undefined) ?? null) as "AUTO" | "MANUAL" | null;
+      const outcome = resolveLockedAnchorOutcome(eligibility, provenance);
+
+      if (outcome.kind === "eligible") {
+        return data({
+          step: "anchor-locked" as const,
+          source,
+          item: { id: resolved.id, name: resolved.name, imageUrl: resolved.imageUrl } as LockedAnchorItem,
+        });
+      }
+      if (outcome.kind === "incompatible") {
+        return data({
+          step: "anchor-incompatible" as const,
+          source,
+          item: { id: resolved.id, name: resolved.name, imageUrl: resolved.imageUrl } as LockedAnchorItem,
+          message: outcome.message,
+          occasionLabel: occasionDisplayFor(null, occasion),
+        });
+      }
+      // outcome.kind === "stale-auto" — nAia chose it, so drop the lock and let the
+      // normal anchor-method flow (auto or manual) run against this occasion.
     }
     session.unset("styleMeAnchorLocked");
     session.unset("styleMeClosetAnchorId");
@@ -559,6 +598,13 @@ export default function StyleMeSource() {
         {step === "anchor-locked" && (
           <AnchorLockedStep item={(loaderData as { item: LockedAnchorItem }).item} />
         )}
+        {step === "anchor-incompatible" && (
+          <AnchorIncompatibleStep
+            item={(loaderData as { item: LockedAnchorItem }).item}
+            message={(loaderData as { message: string }).message}
+            occasionLabel={(loaderData as { occasionLabel: string }).occasionLabel}
+          />
+        )}
         {step === "anchor-method" && (
           <AnchorMethodStep
             source={(loaderData as { source: string }).source}
@@ -656,6 +702,42 @@ function AnchorLockedStep({ item }: { item: LockedAnchorItem }) {
         <input type="hidden" name="_action" value="change-piece" />
         <button type="submit" className="sm-btn-back">Change piece</button>
       </Form>
+    </>
+  );
+}
+
+// ── Step: locked anchor is not eligible for the chosen occasion ─────────────
+// The piece is shown (never silently swapped) alongside a deterministic refusal
+// and two actions: pick a different piece (reuses the existing change-piece
+// action), or go back and change the occasion instead.
+
+function AnchorIncompatibleStep({
+  item, message, occasionLabel,
+}: { item: LockedAnchorItem; message: string; occasionLabel: string }) {
+  return (
+    <>
+      <p className="sm-step-label">My Closet</p>
+      <h1 className="sm-heading">Not quite right for {occasionLabel}</h1>
+      <div className="sm-anchor-card" style={{ marginBottom: "24px" }}>
+        {item.imageUrl && (
+          <img
+            src={item.imageUrl}
+            alt={item.name ?? "Your closet piece"}
+            style={{ width: "100%", maxWidth: "230px", height: "auto", objectFit: "contain", borderRadius: "4px", marginBottom: "10px", background: "var(--naia-warm)" }}
+          />
+        )}
+        <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "16px", color: "var(--naia-ink)" }}>
+          {item.name ?? "This piece"}
+        </p>
+      </div>
+      <p className="sm-sub" style={{ marginBottom: "20px" }}>{message}</p>
+      <div className="sm-step-buttons">
+        <Link to="/style-me/occasion" className="sm-btn-back">Change occasion</Link>
+        <Form method="post">
+          <input type="hidden" name="_action" value="change-piece" />
+          <button type="submit" className="sm-continue">Choose another piece</button>
+        </Form>
+      </div>
     </>
   );
 }

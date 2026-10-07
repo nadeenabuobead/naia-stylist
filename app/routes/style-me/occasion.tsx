@@ -8,6 +8,10 @@ import { useState } from "react";
 import { commitSession, getSession } from "~/lib/session.server";
 import { SESSION_QUESTIONS, SQ } from "~/lib/ai/signal-contract";
 import { CANONICAL_STYLEME_ENTRY } from "~/lib/styleme/handoff";
+import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
+import { evaluateAnchorEligibility } from "~/lib/ai/styleme-profile-gate";
+import type { ClosetAnchorInput } from "~/lib/ai/styleme-recommendation.types";
+import prisma from "~/db.server";
 import { SmPage } from "~/components/style-me/SmPage";
 import { SmContinue } from "~/components/style-me/SmContinue";
 import naiaStyles from "~/styles/naia-design-system.css?url";
@@ -118,11 +122,65 @@ export async function action({ request }: ActionFunctionArgs) {
     session.unset("styleMeFormalityConditional");
   }
 
+  // Whenever a new occasion is submitted and a closet anchor is already chosen —
+  // locked via Wardrobe Intelligence, picked earlier through the manual picker, or
+  // auto-selected — that anchor has to be revalidated against THIS occasion before
+  // any destination is allowed to proceed. It may never have been checked against
+  // an occasion at all (a WI handoff locks it before the questionnaire runs), or it
+  // may have been checked against a DIFFERENT occasion the customer has since
+  // changed via Back-navigation or Adjust Vibe.
+  //
+  // This is the single write site for styleMeOccasion, so it is the only place that
+  // can catch every route to generation — a fresh forward pass, Adjust Vibe's
+  // skip-source shortcut, and a Back-and-resubmit regenerate alike — rather than
+  // duplicating this check once per shortcut.
+  //
+  // occasion.tsx decides exactly one thing: eligible or not. It does not decide
+  // AUTO-vs-MANUAL recovery — stamping the lock and falling through to
+  // /style-me/source hands that decision to its own anchorLocked branch, the one
+  // place that owns provenance.
+  const closetAnchorId = session.get("styleMeClosetAnchorId") as string | undefined;
+  let anchorStillEligible = true;
+  if (closetAnchorId) {
+    const naiaCustomer = await getCurrentNaiaCustomer(request);
+    if (naiaCustomer) {
+      const profileRow = await prisma.closetItem.findFirst({
+        where: { id: closetAnchorId, customerId: naiaCustomer.id },
+        select: { hemLength: true, topLength: true, styleMeProfile: true },
+      });
+      const approvedProfile =
+        profileRow?.styleMeProfile?.profileStatus === "approved"
+          ? { occasionFit: (profileRow.styleMeProfile.occasionFit as Record<string, string> | null) ?? null }
+          : null;
+      anchorStillEligible = evaluateAnchorEligibility(
+        {
+          hemLength: profileRow?.hemLength ?? null,
+          topLength: profileRow?.topLength ?? null,
+          approvedProfile,
+        } as unknown as ClosetAnchorInput,
+        occasion,
+        naiaCustomer.onboardingProfile?.dressingPreferences ?? [],
+      ).eligible;
+    }
+  }
+
   // When the customer used "Adjust Vibe" from the result page, source and focal
-  // item are already in the cookie — skip the source step and go straight to result.
+  // item are already in the cookie — skip the source step and go straight to
+  // result, but only once the anchor above is confirmed eligible for this occasion.
   const adjustVibe = session.get("styleMeAdjustVibe") as string | undefined;
+  if (adjustVibe) session.unset("styleMeAdjustVibe");
+
+  if (!anchorStillEligible) {
+    // Force the anchorLocked branch to run on arrival, regardless of how this
+    // anchor was originally chosen — that branch, not this one, decides AUTO
+    // (clear and recover) vs MANUAL/null (show anchor-incompatible, never swap).
+    session.set("styleMeAnchorLocked", "1");
+    return redirect("/style-me/source", {
+      headers: { "Set-Cookie": await commitSession(session) },
+    });
+  }
+
   if (adjustVibe) {
-    session.unset("styleMeAdjustVibe");
     return redirect("/style-me/result", {
       headers: { "Set-Cookie": await commitSession(session) },
     });
