@@ -64,6 +64,7 @@ import {
   passesProfileRegisterGate,
   passesRegisterCoherenceWithAnchor,
   getProfileOccasionTier,
+  occasionGradeRank,
   computeProfileIntentionFit,
   computeHybridIntentionFit,
   computeItemIntentionWeight,
@@ -4301,7 +4302,14 @@ export function selectAdditionalClosetGarments(
     candidatesBySlot.set(slot, list);
   }
 
-  for (const list of candidatesBySlot.values()) list.sort((a, b) => b.score - a.score);
+  // Authored occasionFit grade decides first; the existing score decides within a grade.
+  // Deterministic rather than a tuned bonus — see occasionGradeRank. "No" never reaches
+  // here (the gate above removed it), and a missing grade ranks with Acceptable.
+  for (const list of candidatesBySlot.values()) {
+    list.sort((a, b) =>
+      occasionGradeRank(b.item, session.occasion) - occasionGradeRank(a.item, session.occasion)
+      || b.score - a.score);
+  }
 
   // ── Base-architecture exclusivity ──────────────────────────────────────────
   // Enforce selection-order-independence: if candidates include both a separates

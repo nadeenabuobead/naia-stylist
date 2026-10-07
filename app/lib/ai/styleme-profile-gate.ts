@@ -279,6 +279,44 @@ export function passesRegisterCoherenceWithAnchor(
 
 // Returns 2 (Strong) / 1 (Acceptable) / 0 (No) from the approved profile occasion rating.
 // Returns null when no approved profile or no rating for this occasion (caller uses legacy).
+/**
+ * Slot-selection rank for an authored occasionFit grade. HIGHER WINS.
+ *
+ *   Strong                         2
+ *   Acceptable                     1
+ *   missing / unrated / no profile 1   — same as Acceptable, deliberately
+ *   No                             0   — never reaches a sort; the gate removed it
+ *
+ * Why this exists: the grade was computed correctly and then discarded at the one moment
+ * it would change the outfit. getProfileOccasionTier feeds candidate ranking, but slot
+ * selection picks ONE piece per slot before candidates are assembled, and its score reads
+ * no occasionFit at all. So an Acceptable piece could win a slot outright and a Strong
+ * piece never entered any candidate — Nadeen's Acceptable leggings (17.588) beat two
+ * Strong jeans (15.75), and Omar's Acceptable joggers won under a polo and a shirt jacket.
+ *
+ * Used as the PRIMARY sort key with the existing score as secondary, rather than as an
+ * added bonus: a tuned number would leave the relationship dependent on the spread of
+ * unrelated signals. That spread was 1.838 and nothing holds it there.
+ *
+ * MISSING IS NOT A DEMOTION. An unreviewed garment ranks with Acceptable, never below it.
+ * The engine fails open on absent profile data throughout, and ranking unreviewed pieces
+ * last would turn an incomplete catalogue into a styling verdict. It does not rank WITH
+ * Strong either: fail-open means "treated as Acceptable".
+ *
+ * Generic across occasions by design. occasionFit carries the same semantics everywhere
+ * and getProfileOccasionTier already grades them uniformly; honouring the grade for a busy
+ * day but ignoring it for work would be a second inconsistency on top of the one this
+ * fixes. Pinned by OGO-E.
+ */
+export function occasionGradeRank(
+  item: ClosetAnchorInput,
+  sessionOccasion: string,
+): number {
+  const tier = getProfileOccasionTier(item, sessionOccasion);
+  if (tier === null) return 1;   // no profile, or no rating for this occasion → fail open
+  return tier;                   // Strong 2 · Acceptable 1 · No 0
+}
+
 export function getProfileOccasionTier(
   item: ClosetAnchorInput,
   sessionOccasion: string,
