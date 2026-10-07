@@ -86,6 +86,34 @@ describe("1 — locked anchor rejected for Everyday (the Omar case)", () => {
     assert.ok(component.includes('value="change-piece"'), "Choose another piece reuses the existing change-piece action");
     assert.ok(component.includes('to="/style-me/occasion"'), "Change occasion links back to the occasion step");
   });
+
+  it("1.6 the manual picker's inline rejection (ClosetAnchorStep) replaces the ambiguous Continue/Back pair with the same two explicit actions", () => {
+    // The manual-pick path (set-anchor's own pre-existing, unmodified eligibility check)
+    // is a second place the same refusal surfaces, distinct from the locked-anchor step
+    // above. Before this fix it kept the generic Continue (which just resubmitted the
+    // same rejected item — the "dead button" ActionError's own comment describes) and
+    // a Back that returned to the anchor-method screen, not the occasion step.
+    const src = sourceSrc();
+    const fn = src.slice(src.indexOf("function ClosetAnchorStep"), src.indexOf("function RequiresLoginStep"));
+    assert.ok(fn.includes("const rejected ="), "the rejected state is read from the same actionData the message already uses");
+    const rejectedBlock = fn.slice(fn.indexOf("rejected ? ("), fn.indexOf("rejected ? (") + 400);
+    assert.ok(rejectedBlock.includes(">Change occasion<"), "explicit label, not Back");
+    assert.ok(rejectedBlock.includes('to="/style-me/occasion"'), "routes to the occasion step, not the anchor-method screen Back currently used");
+    assert.ok(rejectedBlock.includes(">Choose another piece<"), "explicit label, not Continue");
+    assert.ok(rejectedBlock.includes('value="change-piece"'), "reuses the existing change-piece action, per the required behaviour, rather than resubmitting the same rejected item");
+    // The generic Continue must not be offered at all once rejected — only the fresh
+    // selection it would silently resubmit made it ambiguous in the first place.
+    assert.ok(!rejectedBlock.includes(">Continue<"));
+    assert.ok(!rejectedBlock.includes("← Back"));
+  });
+
+  it("1.7 the normal (non-rejected) picker is unchanged — Continue/Back keep their existing labels and destinations", () => {
+    const src = sourceSrc();
+    const fn = src.slice(src.indexOf("function ClosetAnchorStep"), src.indexOf("function RequiresLoginStep"));
+    assert.ok(fn.includes("!rejected &&"), "Continue is still offered when nothing was rejected");
+    assert.ok(fn.includes('value="back"'), "the original Back intent is preserved for the unrejected case");
+    assert.ok(fn.includes('name="from" value="closet-anchor"'), "Back still carries its original from=closet-anchor hydration");
+  });
 });
 
 // ── 2. My Closet + eligible locked anchor — unchanged ────────────────────────────

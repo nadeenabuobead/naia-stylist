@@ -800,6 +800,16 @@ function ClosetAnchorStep({ source, items }: { source: string; items: PickerItem
   const [selected, setSelected] = useState<string | null>(null);
   const label = source === "both" ? "NADINE + My Closet" : "My Closet";
 
+  // A rejected pick (the manual-anchor eligibility refusal ActionError renders) makes
+  // CONTINUE ambiguous: it just resubmits the same ineligible item, which reads as "do
+  // nothing" — the exact dead-button report ActionError's own note above describes. Once
+  // rejected, the two actions are named explicitly instead: CHOOSE ANOTHER PIECE reuses
+  // the existing change-piece action (a fresh /style-me/source load, so the stale error
+  // and selection both clear) and CHANGE OCCASION goes to the step that produced the
+  // occasion this piece was judged against. Unrejected, CONTINUE/Back are unchanged.
+  const actionData = useActionData<typeof action>() as { anchorRejectionCode?: string } | undefined;
+  const rejected = !!actionData?.anchorRejectionCode;
+
   return (
     <>
       <p className="sm-step-label">{label}</p>
@@ -830,17 +840,29 @@ function ClosetAnchorStep({ source, items }: { source: string; items: PickerItem
         <input type="hidden" name="closetItemId" value={selected ?? ""} />
         {/* Beside CONTINUE, not above the grid — see the note on ActionError. */}
         <ActionError />
-        <div className="sm-step-buttons">
-          <button type="submit" disabled={!selected} className="sm-continue">
-            Continue
-          </button>
+        {!rejected && (
+          <div className="sm-step-buttons">
+            <button type="submit" disabled={!selected} className="sm-continue">
+              Continue
+            </button>
+          </div>
+        )}
+      </Form>
+      {rejected ? (
+        <div className="sm-step-buttons" style={{ marginTop: "8px" }}>
+          <Link to="/style-me/occasion" className="sm-btn-back">Change occasion</Link>
+          <Form method="post">
+            <input type="hidden" name="_action" value="change-piece" />
+            <button type="submit" className="sm-continue">Choose another piece</button>
+          </Form>
         </div>
-      </Form>
-      <Form method="post" style={{ marginTop: "8px" }}>
-        <input type="hidden" name="_action" value="back" />
-        <input type="hidden" name="from" value="closet-anchor" />
-        <button type="submit" className="sm-btn-back">← Back</button>
-      </Form>
+      ) : (
+        <Form method="post" style={{ marginTop: "8px" }}>
+          <input type="hidden" name="_action" value="back" />
+          <input type="hidden" name="from" value="closet-anchor" />
+          <button type="submit" className="sm-btn-back">← Back</button>
+        </Form>
+      )}
     </>
   );
 }
