@@ -9,6 +9,7 @@ import {
 } from "~/lib/cloudinary-admin.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
+import { occasionDisplayFor } from "~/lib/styleme/occasion-display";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: naiaStyles },
@@ -184,7 +185,8 @@ function LookCard({ look }: { look: Look }) {
   const thumbItems = imagedItems.slice(0, 3);
 
   const formattedDate = fmtUtcDate(look.createdAt);
-  const metaParts = [look.occasion, formattedDate].filter(Boolean).join(" · ");
+  const occasionLabel = look.occasion ? occasionDisplayFor(null, look.occasion) : null;
+  const metaParts = [occasionLabel, formattedDate].filter(Boolean).join(" · ");
 
   return (
     <article className="sv-card">

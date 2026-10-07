@@ -19,6 +19,7 @@ import {
 } from "react-router";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { prisma } from "~/lib/prisma.server";
+import { occasionDisplayFor } from "~/lib/styleme/occasion-display";
 import {
   upsertPostWearReview,
   loadPostWearReview,
@@ -422,7 +423,7 @@ export default function PostWearReviewPage() {
         </h1>
         {session.currentMood && (
           <p style={{ fontFamily: SERIF_BODY, fontSize: "17px", fontStyle: "italic", color: "var(--naia-muted, #7a6f6a)", marginBottom: "36px" }}>
-            {session.currentMood}{session.occasion ? ` · ${session.occasion}` : ""}
+            {session.currentMood}{session.occasion ? ` · ${occasionDisplayFor(null, session.occasion)}` : ""}
           </p>
         )}
 

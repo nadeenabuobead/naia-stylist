@@ -8,6 +8,7 @@
 
 import { ALL_QUESTIONS, ALL_OPTION_LABELS } from "../onboarding/quiz-data.js";
 import { closetItemToSlot } from "./closet-slot.js";
+import { occasionDisplayFor } from "../styleme/occasion-display.js";
 import { projectStyleDirectionsToArchetypes, splitStyleExpression } from "../passport/rev7-vocabulary.js";
 import { runRecommendation, buildSessionFingerprint } from "./styleme-recommendation.js";
 import type {
@@ -578,7 +579,11 @@ export function deterministicWording(
   selectedGarments?: Array<{ slot: string; label: string | null; colors: string[]; material?: string | null }>,
   context?: { intentions?: string[]; state?: string | null; profileHint?: string | null },
 ): StyleMeWording {
-  const occasionLabel = occasion.replace(/-/g, " ");
+  // Same leak as buildSongReason below: "active" has no hyphen, so replace is a no-op.
+  // Feeds outfitName/whyThisWorks — genuinely customer-facing — so the same fix applies.
+  const occasionLabel = occasion === "active"
+    ? occasionDisplayFor(null, occasion).toLowerCase()
+    : occasion.replace(/-/g, " ");
 
   let outfitName: string;
   if (outcome === "no-eligible-product") {
@@ -771,7 +776,15 @@ export function buildSongReason(
     .slice(0, 2)
     .map((m) => m.replace(/-/g, " "))
     .join(" and ");
-  const occasionLabel = occasion.replace(/-/g, " ");
+  // "active" is the one canonical id with no hyphen, so the generic replace below is a
+  // no-op and the raw internal word leaked ("...for your active."). Every other occasion
+  // already reads correctly through replace and is left exactly as it was. The
+  // replacement value is read from the shared display map (occasionDisplayFor), not
+  // hardcoded, so it can never drift from the "Busy / on-the-go day" label shown
+  // everywhere else this occasion is named.
+  const occasionLabel = occasion === "active"
+    ? occasionDisplayFor(null, occasion).toLowerCase()
+    : occasion.replace(/-/g, " ");
 
   if (matchedMoods.length > 0 && occasionMatches) {
     return `Matched to your ${moodLabel} energy for ${occasionLabel}.`;

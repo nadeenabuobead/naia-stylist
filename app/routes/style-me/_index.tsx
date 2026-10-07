@@ -6,6 +6,7 @@ import { prisma } from "~/lib/prisma.server";
 import { writeSourceEvidence } from "~/lib/ai/taste-reconcile.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
+import { occasionDisplayFor } from "~/lib/styleme/occasion-display";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: naiaStyles },
@@ -14,12 +15,6 @@ export const links: LinksFunction = () => [
 export function meta() {
   return [{ title: "StyleMe | nAia" }];
 }
-
-const OCCASION_LABELS: Record<string, string> = {
-  "everyday": "Everyday", "work": "Work", "dinner": "Dinner", "date-night": "Date night",
-  "girls-night": "Girls' night", "family": "Family gathering", "special-event": "Special event",
-  "travel": "Travel", "not-sure": "Not sure yet",
-};
 
 export async function action({ request }: ActionFunctionArgs) {
   const formData = await request.formData();
@@ -219,7 +214,7 @@ function SessionCard({ session }: { session: SessionRecord }) {
     year: "numeric",
   });
 
-  const occasionLabel = session.occasion ? (OCCASION_LABELS[session.occasion] ?? session.occasion) : null;
+  const occasionLabel = session.occasion ? occasionDisplayFor(null, session.occasion) : null;
 
   function handleDelete(e: React.FormEvent) {
     if (

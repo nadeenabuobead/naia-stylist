@@ -14,6 +14,7 @@ import {
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import { ALL_OPTION_LABELS } from "~/lib/onboarding/quiz-data";
 import { REV7_PROFILE_VERSION, currentStyleExpression } from "~/lib/passport/rev7-vocabulary";
+import { occasionDisplayFor } from "~/lib/styleme/occasion-display";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 
 export const links: LinksFunction = () => [
@@ -694,7 +695,7 @@ export default function MyNaiaOverview() {
                           )}
                         </Link>
                         <div className="mn-look-date" style={{ marginTop: "0.75rem" }}>
-                          {fmtDate(session.createdAt)}{session.occasion ? ` · ${session.occasion}` : ""}
+                          {fmtDate(session.createdAt)}{session.occasion ? ` · ${occasionDisplayFor(null, session.occasion)}` : ""}
                         </div>
                         <Link to={`/style-me/result?sessionId=${session.id}`} className="mn-look-title" style={{ marginTop: "0.375rem" }}>
                           {suggestion?.outfitName ?? "nAia Look"}
