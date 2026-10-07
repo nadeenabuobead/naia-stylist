@@ -1,7 +1,7 @@
 // app/routes/style-me/result.tsx
 import { Form, Link, useLoaderData, useFetcher } from "react-router";
 import { data, redirect, type LoaderFunctionArgs, type ActionFunctionArgs, type ShouldRevalidateFunctionArgs, type LinksFunction } from "react-router";
-import { useState, useEffect, type Dispatch, type SetStateAction, type CSSProperties } from "react";
+import { useState, useEffect, useRef, type Dispatch, type SetStateAction, type CSSProperties } from "react";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import {
   STYLEME_STATE_LABELS,
@@ -1265,6 +1265,30 @@ export default function StyleMeResult() {
   const suggestion = generateFetcher.data?.suggestion || loaderData.suggestion;
   const error = generateFetcher.data?.error || loaderData.error;
 
+  // ── New Look, Same Vibe: scroll to the new result once it actually arrives ────
+  //
+  // generateFetcher is shared with the initial-generation auto-submit above, so the
+  // ref — armed only by the New Look button's own click handler — is what tells this
+  // effect "this settle is a reroll", never the first-load generation. ScrollRestoration
+  // never applies here regardless: a fetcher submission creates no navigation entry, so
+  // there is nothing restoring or fighting the scroll position — the page just never
+  // asked to move at all, which is the actual bug. No defer-past-ScrollRestoration trick
+  // (cf. passport.selfie.tsx) is needed for the same reason.
+  //
+  // Scrolls only on a genuine new outfit (data.suggestion present) — an error or a
+  // sameCombination response leaves the old outfit on screen, so scrolling would imply
+  // something changed when nothing did. The ref is cleared on every settle regardless
+  // of outcome, so a failed reroll can never leave it armed for a later, unrelated
+  // fetcher transition to misfire against.
+  const isRerollingRef = useRef(false);
+  useEffect(() => {
+    if (generateFetcher.state !== "idle" || !isRerollingRef.current) return;
+    if (generateFetcher.data?.suggestion) {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+    isRerollingRef.current = false;
+  }, [generateFetcher.state, generateFetcher.data]);
+
   // Whether to show the pending-save banner (active pending state, not dismissed, not yet saved).
   const showPendingBanner = !!loaderData.pendingState && !pendingDismissed && !isSaved;
 
@@ -2348,6 +2372,7 @@ export default function StyleMeResult() {
             onClick={() => {
               const sid = (suggestion as any)?.sessionId ?? loaderData.sessionId;
               if (!sid) return;
+              isRerollingRef.current = true;
               generateFetcher.submit({ intent: "regenerate", sessionId: sid }, { method: "post" });
             }}
             className="sm-result-action-btn"
