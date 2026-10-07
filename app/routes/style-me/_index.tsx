@@ -7,6 +7,12 @@ import { writeSourceEvidence } from "~/lib/ai/taste-reconcile.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import { occasionDisplayFor } from "~/lib/styleme/occasion-display";
+import {
+  resolveSavedSessionIds,
+  selectExtraSavedSessionIds,
+  mergeHistoryWithSavedSessions,
+  type SessionRecord,
+} from "~/lib/styleme/history-saved-durability";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: naiaStyles },
@@ -117,16 +123,41 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }),
   ]);
 
-  const recentSessions: SessionRecord[] = recentRaw.map((s) => {
-    const sugg = s.suggestions[0] ?? null;
-    return {
-      id: s.id,
-      occasion: s.occasion,
-      createdAt: s.createdAt.toISOString(),
-      outfitName: sugg?.outfitName ?? null,
-      suggestionId: sugg?.id ?? null,
-    };
+  // An explicitly saved look's originating session can fall outside the
+  // recent-20 window above while SavedLook itself stays persisted — surface
+  // it anyway so a saved look never becomes unreachable. SavedLook.fromSuggestionId
+  // has no FK cascade: a stale/deleted suggestion simply finds no match below,
+  // failing safe (no crash, no phantom card).
+  const savedLooks = await prisma.savedLook.findMany({
+    where: { customerId, fromSuggestionId: { not: null } },
+    select: { fromSuggestionId: true },
   });
+  const savedSuggestionIds = [...new Set(savedLooks.map((l) => l.fromSuggestionId!))];
+  const resolvedSuggestions = savedSuggestionIds.length > 0
+    ? await prisma.outfitSuggestion.findMany({
+        where: { id: { in: savedSuggestionIds } },
+        select: { id: true, sessionId: true },
+      })
+    : [];
+  const savedSessionIds = resolveSavedSessionIds(savedLooks, resolvedSuggestions);
+
+  const recentSessionIds = new Set(recentRaw.map((s) => s.id));
+  const extraSessionIds = selectExtraSavedSessionIds(recentSessionIds, savedSessionIds);
+  const extraRaw = extraSessionIds.length > 0
+    ? await prisma.stylingSession.findMany({
+        where: { customerId, id: { in: extraSessionIds } },
+        orderBy: { createdAt: "desc" },
+        include: {
+          suggestions: {
+            take: 1,
+            orderBy: { createdAt: "desc" },
+            select: { id: true, outfitName: true },
+          },
+        },
+      })
+    : [];
+
+  const recentSessions: SessionRecord[] = mergeHistoryWithSavedSessions(recentRaw, extraRaw, savedSessionIds);
 
   return data({
     hasProfile: !!profile,
@@ -136,14 +167,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     recentSessions,
   });
 }
-
-type SessionRecord = {
-  id: string;
-  occasion: string | null;
-  createdAt: string;
-  outfitName: string | null;
-  suggestionId: string | null;
-};
 
 export default function StyleMeIndex() {
   const { recentSessions } = useLoaderData<typeof loader>();
@@ -228,7 +251,10 @@ function SessionCard({ session }: { session: SessionRecord }) {
 
   return (
     <article className="sml-card">
-      <div className="sml-card-date">{formattedDate}</div>
+      <div className="sml-card-date">
+        {formattedDate}
+        {session.saved && <span className="sml-card-saved-badge">SAVED</span>}
+      </div>
       <Link
         to={`/style-me/result?sessionId=${session.id}`}
         className="sml-card-title"

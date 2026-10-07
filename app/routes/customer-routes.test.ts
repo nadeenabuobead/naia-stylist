@@ -18,6 +18,7 @@ import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { mergeHistoryWithSavedSessions } from "../lib/styleme/history-saved-durability";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "../..");
@@ -1455,11 +1456,27 @@ describe("O — StyleMe history: unified list, delete action, no Saved UI", () =
     assert.ok(src.includes("suggestionId"), "suggestionId in session record");
   });
 
-  it("loader does NOT fetch SavedLooks — isSaved/savedLookId removed from session record", () => {
-    assert.ok(!src.includes("prisma.savedLook.findMany"), "savedLook.findMany removed from loader");
-    assert.ok(!src.includes("savedMap"), "savedMap removed — no save-state annotation");
-    assert.ok(!src.includes("isSaved:"), "isSaved field removed from session record");
-    assert.ok(!src.includes("savedLookId:"), "savedLookId removed from session record");
+  it("unified history may annotate cards with saved/bookmark state, without introducing a second archive", () => {
+    // Product decision narrowed, not reversed: a saved-look durability fix
+    // (older explicitly-saved sessions must stay reachable past the recent-20
+    // cap) requires the loader to know which sessions are saved. What remains
+    // forbidden — a standalone Saved view, filter, or tab — is asserted by the
+    // sibling tests in this suite and in "P", unchanged below.
+    //
+    // Proving this behaviorally (via the real merge logic the loader calls)
+    // rather than via source-string presence/absence: saved-state annotation
+    // exists, is a plain boolean on the same unified record shape, and the
+    // function that produces it takes no filter/view argument — it returns
+    // one flat, single list, never a split "saved vs. not" structure.
+    const result = mergeHistoryWithSavedSessions(
+      [{ id: "s1", occasion: null, createdAt: new Date(), suggestions: [] }],
+      [],
+      new Set(["s1"]),
+    );
+    assert.ok(Array.isArray(result), "returns a single flat list — not split into saved/unsaved views");
+    assert.equal(typeof result[0].saved, "boolean", "each record carries a plain boolean saved flag");
+    assert.equal(result[0].id, "s1", "the annotated record is the same unified session record, not a separate shape");
+    assert.equal(mergeHistoryWithSavedSessions.length, 3, "no filter/view parameter — only sessions + saved-id lookup");
   });
 
   it("action handles intent=delete-session — deletes session by id", () => {
