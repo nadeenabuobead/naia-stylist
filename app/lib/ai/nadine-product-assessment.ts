@@ -345,12 +345,20 @@ export function assessProduct(
     }
   }
 
-  // ── Avoid-color conflict (strong negative) ──────────────────────────────────
+  // ── Avoid-color conflict (advisory — no score contribution) ─────────────────
+  // B2c correction: a non-zero penalty here, even after removing the
+  // explicit hasStrongNegative clause, was still large enough to cross the
+  // generic `score <= -2` worst-verdict threshold by itself (any product
+  // with zero other evidence and one avoided colour landed on
+  // not-best-addition purely via this number). That is an implicit hard
+  // override, not a fixed magnitude bug — no replacement weight closes this
+  // for every possible input, only a zero contribution does, which is why
+  // this is a removal rather than a new invented weight. Detection and the
+  // caveat remain fully intact; only the arithmetic influence is gone.
   if (profile.avoidColors.length > 0) {
     const conflict = findColorOverlap(profile.avoidColors, product.colors);
     signals.avoidColorConflict = conflict;
     if (conflict.length > 0) {
-      score -= 3;
       caveats.push({
         code: "avoid-color-conflict",
         text: `Contains colours you prefer to avoid: ${conflict.slice(0, 2).join(", ")}`,
@@ -400,11 +408,12 @@ export function assessProduct(
 
   // ── Verdict ─────────────────────────────────────────────────────────────────
   // B2c — avoidColors is preference evidence ("colours you usually avoid"),
-  // not an absolute exclusion: it keeps its existing score penalty (above)
-  // and caveat, but no longer independently forces the verdict. It can still
-  // contribute to "not-best-addition" through the ordinary score <= -2
-  // threshold below, same as every other signal — it just can't do it alone,
-  // the way notIdealFor's own (already-conditional) clause still can.
+  // not an absolute exclusion: it carries a caveat (above) but contributes
+  // nothing to `score`, so it structurally cannot influence this threshold
+  // check or the strong-match/good-match boundary either — not just "can't
+  // trigger alone" in practice, but arithmetically incapable of it for any
+  // input. notIdealFor's own (already-conditional) clause is unaffected and
+  // remains a genuinely independent path to the worst verdict.
   const hasStrongNegative = signals.notIdealForMatched && score <= 0;
 
   let verdict: AssessmentVerdict;

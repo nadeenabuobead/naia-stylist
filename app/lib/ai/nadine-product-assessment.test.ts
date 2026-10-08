@@ -710,4 +710,54 @@ describe("§7 B2c — avoid-colour conflict is advisory, not a hard override", (
     assert.deepEqual(r1.signals, r2.signals);
     assert.deepEqual(r1.caveats, r2.caveats);
   });
+
+  it("B2c-J — mechanical invariant: avoid-colour conflict alone, with zero other evidence, never crosses the not-best-addition threshold", () => {
+    // Control vs. treatment, otherwise byte-identical: every other scoring
+    // block is driven to zero contribution (empty stylePersonalities/
+    // desiredFeelings/dressesFor skip those blocks entirely; empty product
+    // notIdealFor skips that block; empty closetItems skips duplication/
+    // wardrobe-gap/closet-compatibility). fitPreferences is populated only
+    // to satisfy the >=2 signal-dimension floor; it has no score path of its
+    // own when notIdealFor is empty. The only delta between the two runs is
+    // one product colour. This is the regression that caught B2c's first
+    // pass: removing avoidColorConflict from hasStrongNegative was not
+    // sufficient on its own, because its former -3 score penalty alone could
+    // still cross the generic `score <= -2` catch-all. The fix removes the
+    // score contribution entirely rather than picking a smaller magnitude —
+    // zero is the only value that is arithmetically incapable of crossing
+    // any threshold, for any other combination of evidence, not just this one.
+    const baseProfile = {
+      stylePersonalities: [],
+      desiredFeelings: [],
+      lifestyle: null,
+      dressesFor: [],
+      favoriteColors: [],
+      fitPreferences: ["structured"],
+      comfortLevel: null,
+    };
+    const baseProduct = {
+      v8Handle: "diag", nadinaTitle: "Diagnostic Product", shopifyHandle: null,
+      itemType: "TOP", formalityScore: 3, formalityDescription: "", stylingRole: "",
+      occasionTags: [], notIdealFor: "", desiredFeelingMatch: [], stylePersonalityMatch: [],
+      colorDirection: "", coverageModesty: "", bodyFitLogic: "", avoidPairingWithNadinePieces: null,
+      mediaEligibility: "ready" as const, hasVerifiedMedia: true,
+    };
+
+    const control = assessProduct(
+      { ...baseProduct, colors: ["navy"] },
+      { ...baseProfile, avoidColors: ["pink"] }, // declared, but no family overlap with navy
+      [],
+    );
+    const treatment = assessProduct(
+      { ...baseProduct, colors: ["pink"] },
+      { ...baseProfile, avoidColors: ["pink"] },
+      [],
+    );
+
+    assert.equal(control.signals.avoidColorConflict.length, 0);
+    assert.notEqual(treatment.signals.avoidColorConflict.length, 0, "treatment must actually exercise the conflict path");
+    assert.ok(treatment.caveats.some((c) => c.code === "avoid-color-conflict"), "conflict must still be visible as a caveat");
+    assert.notEqual(treatment.verdict, "not-best-addition", "colour conflict alone, with zero other evidence, must never reach the worst verdict");
+    assert.equal(control.verdict, treatment.verdict, "the only input delta is the colour conflict — verdict must be unaffected by it alone");
+  });
 });
