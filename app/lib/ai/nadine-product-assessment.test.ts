@@ -192,15 +192,19 @@ describe("§2 assessProduct — verdicts", () => {
     assert.equal(result.verdict, "good-match-with-caveat");
   });
 
-  it("T09 — not-best-addition when avoid-color conflict fires", () => {
+  it("T09 — B2c: avoid-color conflict is detected and caveated but does not alone force not-best-addition", () => {
     const product = makeProduct({
       colors: ["Cream", "beige"],
     });
     const profile = makeFullProfile({
       avoidColors: ["Cream"],
+      lifestyle: null, // pre-existing baseline issue — see §7 note above
     });
     const result = assessProduct(product, profile, []);
-    assert.equal(result.verdict, "not-best-addition");
+    // Strong positive signals (style/feeling/occasion all match makeProduct's
+    // defaults) outweigh the colour penalty on their own — conflict is real
+    // and visible, but it is advisory, not a hard override.
+    assert.equal(result.verdict, "good-match-with-caveat");
     assert.ok(result.signals.avoidColorConflict.length > 0);
     assert.ok(result.caveats.some((c) => c.code === "avoid-color-conflict"));
   });
@@ -241,11 +245,11 @@ describe("§2 assessProduct — verdicts", () => {
     assert.equal(result.signals.wardrobeGapFilled, true);
   });
 
-  it("T14 — avoid-color conflict is case-insensitive and partial-match aware", () => {
+  it("T14 — B2c: avoid-color conflict is case-insensitive and family-aware (B2a resolver), still advisory", () => {
     const product = makeProduct({ colors: ["Burgundy", "ivory"] });
-    const profile = makeFullProfile({ avoidColors: ["burgundy"] });
+    const profile = makeFullProfile({ avoidColors: ["burgundy"], lifestyle: null });
     const result = assessProduct(product, profile, []);
-    assert.equal(result.verdict, "not-best-addition");
+    assert.equal(result.verdict, "good-match-with-caveat");
     assert.ok(result.signals.avoidColorConflict.includes("burgundy"));
   });
 
@@ -460,11 +464,15 @@ describe("§6 security and fail-closed", () => {
 
   it("T35 — assessment is isolated per profile: different profiles produce different verdicts", () => {
     const product = makeProduct({ colors: ["Cream", "beige"] });
-    const profileA = makeFullProfile({ avoidColors: ["Cream"] }); // conflict → not-best-addition
-    const profileB = makeFullProfile({ avoidColors: [], stylePersonalities: ["corporate-chic"], dressesFor: ["work"] });
+    // B2c: a colour conflict alone no longer forces not-best-addition, so this
+    // now lands on good-match-with-caveat rather than not-best-addition — the
+    // isolation this test actually proves (two profiles, two different
+    // verdicts) still holds regardless of which specific verdicts they are.
+    const profileA = makeFullProfile({ avoidColors: ["Cream"], lifestyle: null }); // conflict → caveated, not forced
+    const profileB = makeFullProfile({ avoidColors: [], stylePersonalities: ["corporate-chic"], dressesFor: ["work"], lifestyle: null });
     const rA = assessProduct(product, profileA, []);
     const rB = assessProduct(product, profileB, []);
-    assert.equal(rA.verdict, "not-best-addition");
+    assert.equal(rA.verdict, "good-match-with-caveat");
     assert.notEqual(rA.verdict, rB.verdict);
   });
 
@@ -550,5 +558,156 @@ describe("V2-A1 desiredFeelings field contract", () => {
     const profile: Record<string, unknown> = makeFullProfile();
     assert.ok(!("desiredFeeling" in profile), "profile must not contain legacy desiredFeeling key");
     assert.ok("desiredFeelings" in profile, "profile must contain canonical desiredFeelings key");
+  });
+
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// B2c — avoidColors is advisory evidence for NADINE, never a hard override.
+// Passport avoidColors means "colours you usually avoid" — preference
+// evidence, not an absolute exclusion. Mirrors the B2b1 Buy/Skip policy
+// decision, implemented through NADINE's own existing score/caveat
+// mechanism (no new weighting system), using B2a's shared colour-family
+// resolver in place of NADINE's prior substring matching.
+// ═════════════════════════════════════════════════════════════════════════════
+
+describe("§7 B2c — avoid-colour conflict is advisory, not a hard override", () => {
+
+  // NOTE: every fixture below passes `lifestyle: null` explicitly. This is a
+  // pre-existing baseline issue, not something B2c introduces or fixes:
+  // makeFullProfile()'s own default is `lifestyle: "professional"` (a plain
+  // string), but checkNotIdealFor() calls `.some()` on it, which assumes an
+  // array per the real CustomerAssessmentProfile type. That mismatch already
+  // throws identically on unmodified 601ae68 for ~17 pre-existing tests in
+  // this file (confirmed by diffing this suite's failures before/after the
+  // B2c change — the failing-test set is byte-identical). Passing an explicit
+  // `lifestyle: null` override avoids tripping that landmine in these new
+  // fixtures without touching the shared helper or the production code.
+
+  it("B2c-A — avoid-colour conflict alone is detected and caveated but does not force not-best-addition", () => {
+    const product = makeProduct({ colors: ["Cream", "beige", "espresso brown"] });
+    const profile = makeFullProfile({ avoidColors: ["cream"], lifestyle: null });
+    const result = assessProduct(product, profile, []);
+    assert.notEqual(result.verdict, "not-best-addition");
+    assert.ok(result.signals.avoidColorConflict.length > 0, "conflict must still be detected");
+    assert.ok(result.caveats.some((c) => c.code === "avoid-color-conflict"), "conflict must still be visible as a caveat");
+  });
+
+  it("B2c-B — no avoided-colour family overlap: verdict behavior unchanged from no-conflict baseline", () => {
+    const product = makeProduct({ colors: ["Cream", "beige"] });
+    const profile = makeFullProfile({ avoidColors: ["navy"], lifestyle: null }); // no family overlap with Cream/beige
+    const result = assessProduct(product, profile, []);
+    assert.equal(result.signals.avoidColorConflict.length, 0);
+    assert.ok(!result.caveats.some((c) => c.code === "avoid-color-conflict"));
+    assert.equal(result.verdict, "strong-match");
+  });
+
+  it("B2c-C — family-aware match: exact strings differ, canonical family is the same (burgundy / wine)", () => {
+    const product = makeProduct({ colors: ["wine", "ivory"] });
+    const profile = makeFullProfile({ avoidColors: ["burgundy"], lifestyle: null });
+    const result = assessProduct(product, profile, []);
+    assert.ok(result.signals.avoidColorConflict.includes("burgundy"), "burgundy and wine share the red-burgundy/red family");
+    assert.notEqual(result.verdict, "not-best-addition");
+  });
+
+  it("B2c-D — false-positive protection: substring match would be wrong, canonical families genuinely differ", () => {
+    // Old substring logic: normalizeColor("Stanford gray").includes("tan") is TRUE
+    // ("Stan[tan? no]ford" -- literally "s-TAN-ford" contains the substring "tan"),
+    // which would have wrongly flagged a beige-brown avoid colour against a grey
+    // product. B2a's family resolver tokenizes on whole words only.
+    const product = makeProduct({ colors: ["Stanford gray"] });
+    const profile = makeFullProfile({ avoidColors: ["tan"], lifestyle: null });
+    const result = assessProduct(product, profile, []);
+    assert.equal(result.signals.avoidColorConflict.length, 0, "tan (beige-brown) must not match Stanford gray (grey) via substring");
+    assert.ok(!result.caveats.some((c) => c.code === "avoid-color-conflict"));
+  });
+
+  it("B2c-E — multi-colour product: conflict on one of several colours is detected, identified, and still advisory", () => {
+    const product = makeProduct({ colors: ["black", "beige", "pink"] });
+    const profile = makeFullProfile({ avoidColors: ["pink"], lifestyle: null });
+    const result = assessProduct(product, profile, []);
+    assert.ok(result.signals.avoidColorConflict.includes("pink"));
+    assert.ok(result.caveats.some((c) => c.code === "avoid-color-conflict" && c.text.includes("pink")));
+    assert.notEqual(result.verdict, "not-best-addition");
+  });
+
+  it("B2c-F — independent notIdealFor conflict still legitimately drives not-best-addition, with or without the colour conflict", () => {
+    const product = makeProduct({
+      colors: ["pink", "ivory"],
+      notIdealFor: "Fitted silhouette with limited coverage around the waist",
+      stylePersonalityMatch: [],
+      desiredFeelingMatch: [],
+      occasionTags: [],
+    });
+    const profileWithColourConflict = makeFullProfile({
+      stylePersonalities: [],
+      desiredFeelings: [],
+      dressesFor: [],
+      avoidColors: ["pink"],
+      fitPreferences: ["modest coverage"],
+      lifestyle: null,
+    });
+    const profileWithoutColourConflict = makeFullProfile({
+      stylePersonalities: [],
+      desiredFeelings: [],
+      dressesFor: [],
+      avoidColors: [],
+      fitPreferences: ["modest coverage"],
+      lifestyle: null,
+    });
+
+    const withConflict = assessProduct(product, profileWithColourConflict, []);
+    const withoutConflict = assessProduct(product, profileWithoutColourConflict, []);
+
+    assert.equal(withConflict.verdict, "not-best-addition");
+    assert.ok(withConflict.signals.avoidColorConflict.length > 0);
+    assert.ok(withConflict.signals.notIdealForMatched);
+
+    // The real test: removing the colour conflict does not change the result —
+    // notIdealFor's own (already-conditional) authority is independent and intact.
+    assert.equal(withoutConflict.verdict, "not-best-addition");
+    assert.equal(withoutConflict.signals.avoidColorConflict.length, 0);
+    assert.ok(withoutConflict.signals.notIdealForMatched);
+  });
+
+  it("B2c-G — a genuinely independent negative NADINE path (notIdealFor, no colour involved) still reaches not-best-addition", () => {
+    const product = makeProduct({
+      colors: ["black"],
+      notIdealFor: "Fitted silhouette with limited coverage around the waist",
+      stylePersonalityMatch: [],
+      desiredFeelingMatch: [],
+      occasionTags: [],
+    });
+    const profile = makeFullProfile({
+      stylePersonalities: [],
+      desiredFeelings: [],
+      dressesFor: [],
+      avoidColors: [],
+      fitPreferences: ["modest coverage"],
+      lifestyle: null,
+    });
+    const result = assessProduct(product, profile, []);
+    assert.equal(result.verdict, "not-best-addition");
+    assert.equal(result.signals.avoidColorConflict.length, 0);
+  });
+
+  it("B2c-H — insufficient-evidence is unaffected by colour-semantics changes", () => {
+    const product = makeProduct({ colors: ["cream"] });
+    const thin = makeThinProfile();
+    const result = assessProduct(product, thin, []);
+    assert.equal(result.verdict, "insufficient-evidence");
+    assert.equal(result.signals.sufficientEvidence, false);
+  });
+
+  it("B2c-I — determinism: identical colour-conflict input returns identical structured output on repeated calls", () => {
+    const product = makeProduct({ colors: ["Cream", "beige"] });
+    const profile = makeFullProfile({ avoidColors: ["cream"], lifestyle: null });
+    const r1 = assessProduct(product, profile, []);
+    const r2 = assessProduct(product, profile, []);
+    assert.equal(r1.verdict, r2.verdict);
+    assert.equal(r1.explanation, r2.explanation);
+    assert.deepEqual(r1.positiveEvidence, r2.positiveEvidence);
+    assert.deepEqual(r1.signals, r2.signals);
+    assert.deepEqual(r1.caveats, r2.caveats);
   });
 });

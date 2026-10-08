@@ -9,6 +9,11 @@ import {
   VIRTUAL_TRY_ON_ENABLED,
 } from "./naia-product-media.js";
 import { getProductByHandle } from "./naia-catalog.js";
+import {
+  resolveCanonicalColourFamilies,
+  resolveFreeTextColourFamilies,
+  colourFamiliesOverlap,
+} from "./colour-family.js";
 import type { TryOnEligibility } from "./naia-product-media.js";
 import type {
   AssessmentCaveat,
@@ -170,20 +175,23 @@ function countSignalDimensions(profile: CustomerAssessmentProfile): number {
 }
 
 // ── Color helpers ─────────────────────────────────────────────────────────────
+//
+// B2c — adopts B2a's shared colour-family resolver in place of NADINE's own
+// substring matching. Customer avoidColors are closed-vocabulary Passport
+// values (resolveCanonicalColourFamilies, whole-string lookup); NADINE
+// catalogue product colours are trusted but free-form text ("espresso
+// brown", "art print") and go through the free-text resolver. Substring
+// matching produced real false positives this replaces — e.g. avoid colour
+// "tan" is a literal substring of "Stanford" and would have wrongly flagged
+// a "Stanford gray" product; family resolution does not.
 
-function normalizeColor(s: string): string {
-  return s.toLowerCase().trim();
-}
-
-function findColorOverlap(customerColors: string[], productColors: string[]): string[] {
+function findColorOverlap(avoidColors: string[], productColors: string[]): string[] {
+  const productResolutions = productColors.map((pc) => resolveFreeTextColourFamilies(pc));
   const conflicts: string[] = [];
-  for (const avoid of customerColors) {
-    const a = normalizeColor(avoid);
-    for (const pc of productColors) {
-      if (normalizeColor(pc).includes(a) || a.includes(normalizeColor(pc))) {
-        if (!conflicts.includes(avoid)) conflicts.push(avoid);
-      }
-    }
+  for (const avoid of avoidColors) {
+    const avoidResolution = resolveCanonicalColourFamilies(avoid);
+    const matches = productResolutions.some((pr) => colourFamiliesOverlap(avoidResolution, pr));
+    if (matches && !conflicts.includes(avoid)) conflicts.push(avoid);
   }
   return conflicts;
 }
@@ -391,8 +399,13 @@ export function assessProduct(
   }
 
   // ── Verdict ─────────────────────────────────────────────────────────────────
-  const hasStrongNegative =
-    signals.avoidColorConflict.length > 0 || (signals.notIdealForMatched && score <= 0);
+  // B2c — avoidColors is preference evidence ("colours you usually avoid"),
+  // not an absolute exclusion: it keeps its existing score penalty (above)
+  // and caveat, but no longer independently forces the verdict. It can still
+  // contribute to "not-best-addition" through the ordinary score <= -2
+  // threshold below, same as every other signal — it just can't do it alone,
+  // the way notIdealFor's own (already-conditional) clause still can.
+  const hasStrongNegative = signals.notIdealForMatched && score <= 0;
 
   let verdict: AssessmentVerdict;
   if (hasStrongNegative || score <= -2) {
