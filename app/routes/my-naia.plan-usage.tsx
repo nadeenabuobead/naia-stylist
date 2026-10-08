@@ -121,6 +121,16 @@ export default function PlanUsagePage() {
     ? `${closet.currentCount} items · ${closet.limit} included`
     : `${closet.currentCount} of ${closet.limit} items`;
 
+  // ── Personalised Trend Edit — monthlyUsed is a real count from
+  // PersonalisedTrendEditUsage (never JourneyEvent). NONE has monthlyLimit 0
+  // and shows "Not included"; usageLabel's own over-limit branch already
+  // renders an anomaly (e.g. 2 used while enforcement is disabled) as plain
+  // descriptive text, never a subtraction that could go negative.
+  const trendEditExhausted = personalisedTrend.monthlyUsed >= personalisedTrend.monthlyLimit;
+  const trendEditValue = personalisedTrend.monthlyLimit > 0
+    ? usageLabel(personalisedTrend.monthlyUsed, personalisedTrend.monthlyLimit, "edits")
+    : "Not included";
+
   return (
     <MyNaiaLayout>
       <Link to="/my-naia" className="sp-back">← Overview</Link>
@@ -167,7 +177,10 @@ export default function PlanUsagePage() {
                 />
                 <UsageRow
                   label="Personalised Trend Edit"
-                  value={personalisedTrend.monthlyLimit > 0 ? "1 included this month" : "Not included"}
+                  value={trendEditValue}
+                  bar={personalisedTrend.monthlyLimit > 0
+                    ? { used: personalisedTrend.monthlyUsed, limit: personalisedTrend.monthlyLimit, exhausted: trendEditExhausted }
+                    : undefined}
                 />
               </div>
             </Section>

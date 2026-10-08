@@ -50,6 +50,19 @@ vi.mock("~/lib/plan/entitlement.server", () => ({
   checkEntitlement: vi.fn(),
 }));
 
+vi.mock("~/lib/plan/personalised-trend-edit-usage.server", () => ({
+  recordPersonalisedTrendEditUsage: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("~/lib/plan/usage-window.server", () => ({
+  getUsageWindow: vi.fn(() => ({
+    start: new Date("2026-10-01T00:00:00.000Z"),
+    end: new Date("2026-11-01T00:00:00.000Z"),
+    label: "October 2026",
+    periodKey: "2026-10",
+  })),
+}));
+
 vi.mock("~/lib/ai/journey-events.server", () => ({
   emitTrendEditGenerated: vi.fn((p: any) => ({ type: "trend_edit_generated", payload: p })),
   recordJourneyEventAwaited: vi.fn().mockResolvedValue({ created: true }),
@@ -66,6 +79,7 @@ import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { getEditorialReportBySlug, getPublishedEditorialReports } from "~/lib/editorial-reports.server";
 import { getShopperEvidence, buildShopperEdit } from "~/lib/trend-evidence.server";
 import { checkEntitlement } from "~/lib/plan/entitlement.server";
+import { recordPersonalisedTrendEditUsage } from "~/lib/plan/personalised-trend-edit-usage.server";
 import { recordJourneyEventAwaited } from "~/lib/ai/journey-events.server";
 import { loader } from "./trends.my-edits.$slug";
 
@@ -230,7 +244,85 @@ describe("§TREND-EDIT-V1 — usage completion signal (analytics only, never quo
   });
 });
 
+describe("§TREND-EDIT-V1 — canonical usage recording (PersonalisedTrendEditUsage, the entitlement/Plan&Usage source of truth)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getEditorialReportBySlug).mockResolvedValue(REPORT as any);
+    vi.mocked(getPublishedEditorialReports).mockResolvedValue([REPORT] as any);
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValue(makeCustomer());
+  });
+
+  it("1. a genuine completed edit records exactly one usage row", async () => {
+    vi.mocked(getShopperEvidence).mockResolvedValue({ hasProfile: true, closetItems: [] } as any);
+    vi.mocked(buildShopperEdit).mockReturnValue(MOCK_EDIT as any);
+    await callLoader();
+    expect(recordPersonalisedTrendEditUsage).toHaveBeenCalledTimes(1);
+    expect(recordPersonalisedTrendEditUsage).toHaveBeenCalledWith("cust-1", REPORT.slug);
+  });
+
+  it("6. a public Trend Report view never calls the usage writer — it is only ever invoked from this (member) loader", () => {
+    const publicSrc = route("trends.jsx");
+    const publicDetailSrc = route("trends.$slug.tsx");
+    expect(publicSrc).not.toMatch(/recordPersonalisedTrendEditUsage/);
+    expect(publicDetailSrc).not.toMatch(/recordPersonalisedTrendEditUsage/);
+  });
+
+  it("7. generation failure records no usage", async () => {
+    vi.mocked(getShopperEvidence).mockRejectedValue(new Error("db error"));
+    await callLoader();
+    expect(recordPersonalisedTrendEditUsage).not.toHaveBeenCalled();
+  });
+
+  it("8. a missing/incomplete profile records no usage", async () => {
+    vi.mocked(getShopperEvidence).mockResolvedValue({ hasProfile: false, closetItems: [] } as any);
+    await callLoader();
+    expect(recordPersonalisedTrendEditUsage).not.toHaveBeenCalled();
+  });
+
+  it("9. a membership-blocked path records no usage", async () => {
+    process.env.ENTITLEMENT_ENFORCEMENT = "true";
+    vi.mocked(checkEntitlement).mockResolvedValue({ allowed: false, reason: "quota_exceeded" });
+    await callLoader();
+    expect(recordPersonalisedTrendEditUsage).not.toHaveBeenCalled();
+    delete process.env.ENTITLEMENT_ENFORCEMENT;
+  });
+
+  it("10. an unpublished/missing report (404) records no usage", async () => {
+    vi.mocked(getEditorialReportBySlug).mockResolvedValue(null);
+    await expect(callLoader("does-not-exist")).rejects.toMatchObject({ status: 404 });
+    expect(recordPersonalisedTrendEditUsage).not.toHaveBeenCalled();
+  });
+
+  it("refresh of the same completed report/month calls the writer again with the identical idempotent key material — the DB unique constraint, not this call count, is the dedup authority", async () => {
+    vi.mocked(getShopperEvidence).mockResolvedValue({ hasProfile: true, closetItems: [] } as any);
+    vi.mocked(buildShopperEdit).mockReturnValue(MOCK_EDIT as any);
+    await callLoader();
+    await callLoader();
+    expect(recordPersonalisedTrendEditUsage).toHaveBeenCalledTimes(2);
+    expect(recordPersonalisedTrendEditUsage).toHaveBeenNthCalledWith(1, "cust-1", REPORT.slug);
+    expect(recordPersonalisedTrendEditUsage).toHaveBeenNthCalledWith(2, "cust-1", REPORT.slug);
+  });
+});
+
 describe("§TREND-EDIT-V1 — ownership and lane boundaries", () => {
+  it("19. the entitlement service never reads JourneyEvent for Plan & Usage or quota — only PersonalisedTrendEditUsage", () => {
+    const entSrc = route("../lib/plan/entitlement.server.ts");
+    // Comments are free to name JourneyEvent to explain the boundary; what
+    // must never appear is an actual query against it or an import of the
+    // journey-events module.
+    expect(entSrc).not.toMatch(/prisma\.journeyEvent/);
+    expect(entSrc).not.toMatch(/from ["']~\/lib\/ai\/journey-events/);
+    expect(entSrc).toMatch(/prisma\.personalisedTrendEditUsage\.count/);
+  });
+
+  it("20. public Trend Report routes do not import the usage writer, the entitlement service, or the customer session — unmetered by construction", () => {
+    const publicIndexSrc = route("trends.jsx");
+    const publicDetailSrc = route("trends.$slug.tsx");
+    for (const src of [publicIndexSrc, publicDetailSrc]) {
+      expect(src).not.toMatch(/recordPersonalisedTrendEditUsage|checkEntitlement|requireCurrentNaiaCustomer/);
+    }
+  });
+
   it("13. the loader scopes every customer-evidence read to the authenticated session only — never to a route param or query string", () => {
     const src = route("trends.my-edits.$slug.tsx");
     // params is destructured for slug only; the only identifier ever passed

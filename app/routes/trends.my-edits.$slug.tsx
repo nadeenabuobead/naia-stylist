@@ -18,6 +18,8 @@ import {
   type NadineProductRecommendation,
 } from "~/lib/trend-product-recommendation.server";
 import { checkEntitlement } from "~/lib/plan/entitlement.server";
+import { recordPersonalisedTrendEditUsage } from "~/lib/plan/personalised-trend-edit-usage.server";
+import { getUsageWindow } from "~/lib/plan/usage-window.server";
 import {
   emitTrendEditGenerated,
   recordJourneyEventAwaited,
@@ -105,21 +107,33 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       };
     }
 
-    // Usage completion signal — fired only for a genuine personalised edit
-    // (never a locked/empty/failed state), analytics-only (see
-    // emitTrendEditGenerated). Idempotency key is per customer+report+month,
-    // so a refresh/reload within the same month never double-counts. Never
-    // blocks the response.
+    // Usage recording — fired only for a genuine personalised edit (never a
+    // locked/empty/failed state). Two independent writes, two independent
+    // purposes:
+    //   - recordPersonalisedTrendEditUsage: the customer entitlement/usage
+    //     source of truth (PersonalisedTrendEditUsage) — this is what Plan &
+    //     Usage and checkEntitlement read. Idempotent create-if-absent; the
+    //     DB unique constraint is the race-safety authority.
+    //   - emitTrendEditGenerated: analytics only (JourneyEvent, hashed
+    //     customerId) — never read for quota or Plan & Usage.
+    // Both share one periodKey from getUsageWindow(), so the idempotency
+    // boundary and the monthly count window can never drift apart. Neither
+    // write ever blocks the response.
     if (edit) {
+      const { periodKey } = getUsageWindow();
       try {
-        const monthKey = new Date().toISOString().slice(0, 7); // "YYYY-MM"
+        await recordPersonalisedTrendEditUsage(customer.id, report.slug);
+      } catch {
+        /* never let usage recording block the response */
+      }
+      try {
         await recordJourneyEventAwaited(
           emitTrendEditGenerated({
             customerId: customer.id,
             slug: report.slug,
             closetItemCount: evidence.closetItems.length,
           }),
-          `trend_edit_generated:${hashCustomerId(customer.id)}:${report.slug}:${monthKey}:v1`,
+          `trend_edit_generated:${hashCustomerId(customer.id)}:${report.slug}:${periodKey}:v1`,
         );
       } catch {
         /* never let usage-event recording block the response */

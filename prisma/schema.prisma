@@ -73,6 +73,7 @@ model Customer {
   tasteEvidence           TasteEvidence[]
   styleTendencies         StyleTendency[]
   wardrobeSnapshots       WardrobeSnapshot[]
+  personalisedTrendEditUsage PersonalisedTrendEditUsage[]
 
   // ── Secondary use of this customer's data for NADINE design research ──────
   //
@@ -769,6 +770,29 @@ model EditorialTrendReport {
   visualTreatment String?
 
   @@map("editorial_trend_reports")
+}
+
+/// Personalised Trend Edit — customer entitlement/usage truth (1/month).
+/// reportSlug is a historical string identity, not a FK to EditorialTrendReport:
+/// an editorial report may later be edited or archived, but the fact that this
+/// customer consumed one completed personalised edit of it in this period must
+/// stay valid regardless of what happens to the editorial row afterward.
+/// This is a distinct source of truth from JourneyEvent (analytics only, hashed
+/// customerId, not queryable per-customer) — Plan & Usage and quota checks read
+/// only this model, never JourneyEvent.
+model PersonalisedTrendEditUsage {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  reportSlug String
+  /// UTC "YYYY-MM", derived from the same authority as getUsageWindow() —
+  /// exists for the idempotency constraint below; monthly counting itself
+  /// still queries createdAt, matching every sibling usage check.
+  periodKey  String
+  createdAt  DateTime @default(now())
+
+  @@unique([customerId, reportSlug, periodKey])
+  @@index([customerId, createdAt])
 }
 
 // AI TREND REPORTS (legacy Phase 4 — not actively used)

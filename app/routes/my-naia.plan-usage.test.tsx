@@ -98,7 +98,7 @@ describe("plan-usage loader — authentication and ownership", () => {
       buySkip: { monthlyLimit: 5, monthlyUsed: 0, resetDate: "1 October" },
       vto: { monthlyLimit: 10, monthlyCompleted: 0, monthlyInFlight: 0, resetDate: "1 October" },
       closet: { currentCount: 0, limit: 250, atCapacity: false },
-      personalisedTrend: { monthlyLimit: 1, monthlyUsed: null },
+      personalisedTrend: { monthlyLimit: 1, monthlyUsed: 0 },
       windowLabel: "October 2026",
     } as any);
 
@@ -118,7 +118,7 @@ type Summary = {
   buySkip: { monthlyLimit: number; monthlyUsed: number; resetDate: string };
   vto: { monthlyLimit: number; monthlyCompleted: number; monthlyInFlight: number; resetDate: string };
   closet: { currentCount: number; limit: number; atCapacity: boolean };
-  personalisedTrend: { monthlyLimit: number; monthlyUsed: null };
+  personalisedTrend: { monthlyLimit: number; monthlyUsed: number };
   windowLabel: string;
 };
 
@@ -129,7 +129,7 @@ function baseSummary(overrides: Partial<Summary> = {}): Summary {
     buySkip: { monthlyLimit: 5, monthlyUsed: 1, resetDate: "1 October" },
     vto: { monthlyLimit: 10, monthlyCompleted: 2, monthlyInFlight: 0, resetDate: "1 October" },
     closet: { currentCount: 47, limit: 250, atCapacity: false },
-    personalisedTrend: { monthlyLimit: 1, monthlyUsed: null },
+    personalisedTrend: { monthlyLimit: 1, monthlyUsed: 0 },
     windowLabel: "October 2026",
     ...overrides,
   };
@@ -225,13 +225,38 @@ describe("plan-usage component — NONE (no membership) state", () => {
   });
 });
 
-describe("plan-usage component — Personalised Trend Edit (unavailable usage source)", () => {
+describe("plan-usage component — Personalised Trend Edit (real usage count, PersonalisedTrendEditUsage)", () => {
+  // Product decision narrowed, not reversed: monthlyUsed is no longer a
+  // permanently-null placeholder (190fbdb-era "no persisted usage event
+  // exists yet") — PersonalisedTrendEditUsage now makes it truthful, same
+  // honesty contract every other metered feature already has.
   beforeEach(() => vi.clearAllMocks());
 
-  it("does not fabricate a used count when monthlyUsed is null", () => {
-    const html = render(baseSummary());
-    expect(html).not.toMatch(/\d+ of 1 used/);
-    expect(html).toContain("1 included this month");
+  it("13. shows a truthful 0 of 1 when nothing has been consumed this period", () => {
+    const html = render(baseSummary({ personalisedTrend: { monthlyLimit: 1, monthlyUsed: 0 } }));
+    expect(html).toContain("0 of 1 used");
+  });
+
+  it("14. shows a truthful 1 of 1 — exhausted, not understated — when the single monthly edit is consumed", () => {
+    const html = render(baseSummary({ personalisedTrend: { monthlyLimit: 1, monthlyUsed: 1 } }));
+    expect(html).toContain("1 of 1 used");
+    expect(html).toContain("var(--c-alert");
+  });
+
+  it("15. an over-limit historical anomaly (enforcement disabled) renders truthfully, never a negative remaining count", () => {
+    const html = render(baseSummary({ personalisedTrend: { monthlyLimit: 1, monthlyUsed: 2 } }));
+    // usageLabel never computes "remaining" via subtraction — it only ever
+    // renders "X of Y used" or, over-limit, "X unit used · Y included this
+    // month" — so there is structurally no negative number to render here.
+    expect(html).toContain("2 edits used · 1 included this month");
+    expect(html).not.toContain("-1 ");
+    expect(html).not.toContain("−1"); // unicode minus, in case of a future formatting change
+  });
+
+  it("NONE (no membership) never renders a Personalised Trend Edit usage count at all", () => {
+    const html = render(baseSummary({ membershipStatus: "NONE", personalisedTrend: { monthlyLimit: 0, monthlyUsed: 0 } }));
+    expect(html).toContain("What you get"); // NONE renders the marketing list, not usage meters
+    expect(html).not.toMatch(/\d+ of \d+ used/);
   });
 });
 

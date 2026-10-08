@@ -77,6 +77,19 @@ vi.mock("~/lib/plan/entitlement.server", () => ({
   checkEntitlement: vi.fn().mockResolvedValue({ allowed: true }),
 }));
 
+vi.mock("~/lib/plan/personalised-trend-edit-usage.server", () => ({
+  recordPersonalisedTrendEditUsage: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("~/lib/plan/usage-window.server", () => ({
+  getUsageWindow: vi.fn(() => ({
+    start: new Date("2026-10-01T00:00:00.000Z"),
+    end: new Date("2026-11-01T00:00:00.000Z"),
+    label: "October 2026",
+    periodKey: "2026-10",
+  })),
+}));
+
 vi.mock("~/lib/ai/journey-events.server", () => ({
   emitTrendEditGenerated: vi.fn(() => ({ type: "trend_edit_generated" })),
   recordJourneyEventAwaited: vi.fn().mockResolvedValue({ created: true }),

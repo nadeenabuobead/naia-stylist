@@ -72,7 +72,7 @@ export interface ClosetEntitlement {
 
 export interface PersonalisedTrendEntitlement {
   monthlyLimit: number;  // 1 for MEMBER, 0 for NONE
-  monthlyUsed: null;     // V1: always null — no persisted usage event exists yet
+  monthlyUsed: number;   // real count from PersonalisedTrendEditUsage, current window
 }
 
 export interface EntitlementSummary {
@@ -106,6 +106,7 @@ export async function getEntitlementSummary(
     vtoCompleted,
     vtoInFlight,
     closetCount,
+    monthlyPersonalisedTrendUsed,
   ] = await Promise.all([
     // StyleMe: qualifying root sessions in current window
     prisma.stylingSession.count({
@@ -141,6 +142,14 @@ export async function getEntitlementSummary(
 
     // Closet: hard-delete model — every row is an active item
     prisma.closetItem.count({ where: { customerId } }),
+
+    // Personalised Trend Edit: completed-edit usage rows in current window.
+    // PersonalisedTrendEditUsage is the customer entitlement/usage source of
+    // truth — JourneyEvent's trend_edit_generated is analytics-only and is
+    // never read here.
+    prisma.personalisedTrendEditUsage.count({
+      where: { customerId, createdAt: { gte: window.start, lt: window.end } },
+    }),
   ]);
 
   return {
@@ -174,7 +183,7 @@ export async function getEntitlementSummary(
 
     personalisedTrend: {
       monthlyLimit: limits.personalisedTrendPerMonth,
-      monthlyUsed: null, // V1: enforcement deferred — no persisted usage event exists
+      monthlyUsed: monthlyPersonalisedTrendUsed,
     },
   };
 }
@@ -252,12 +261,15 @@ export async function checkEntitlement(
     }
 
     case "personalisedTrend": {
-      // V1: binary membership gate only — monthly usage cannot be safely counted
-      // yet (no persisted completed-edit model exists without a new migration;
-      // see PersonalisedTrendEntitlement.monthlyUsed, which stays null rather
-      // than faking a count). NONE has zero allowance regardless of usage;
-      // MEMBER's "1/month" is not yet enforced by count, only by membership tier.
+      // Binary membership short-circuit first — NONE has zero allowance
+      // regardless of usage, same as every other feature's zero-limit case.
       if (limits.personalisedTrendPerMonth <= 0) return { allowed: false, reason: "quota_exceeded" };
+      // Real count against PersonalisedTrendEditUsage — the customer
+      // entitlement/usage source of truth. JourneyEvent is never read here.
+      const count = await prisma.personalisedTrendEditUsage.count({
+        where: { customerId, createdAt: { gte: window.start, lt: window.end } },
+      });
+      if (count >= limits.personalisedTrendPerMonth) return { allowed: false, reason: "quota_exceeded" };
       return { allowed: true };
     }
 
