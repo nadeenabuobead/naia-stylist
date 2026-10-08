@@ -24,7 +24,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 function UsageBar({ used, limit, exhausted }: { used: number; limit: number; exhausted: boolean }) {
   const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
   return (
-    <div style={{ marginTop: "0.5rem" }}>
+    // Decorative — the "X of Y used" text rendered alongside this bar is the
+    // accessible equivalent, so the bar itself is hidden from assistive tech.
+    <div style={{ marginTop: "0.5rem" }} aria-hidden="true">
       <div style={{ height: "3px", background: "var(--fg-10)", borderRadius: "2px", overflow: "hidden" }}>
         <div style={{
           height: "100%",
@@ -42,7 +44,7 @@ function Section({ title, right, children }: { title: string; right?: string; ch
   return (
     <section className="mn-section">
       <div className="mn-section-head" style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap" }}>
-        <div className="mn-eyebrow">{title}</div>
+        <h2 className="mn-eyebrow" style={{ margin: 0, font: "inherit" }}>{title}</h2>
         {right && <div style={{ fontSize: "0.62rem", color: "var(--fg-40, var(--fg-55))", letterSpacing: "0.1em", textTransform: "uppercase" }}>{right}</div>}
       </div>
       <div className="mn-section-body">{children}</div>
