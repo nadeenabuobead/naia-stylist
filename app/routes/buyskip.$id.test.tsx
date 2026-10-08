@@ -298,3 +298,298 @@ describe("BuyOrSkipResult — B2b3 colour-preference caution", () => {
     expect(html).not.toContain("disagreement");
   });
 });
+
+// ── B5 — Your Wardrobe (B4 evidence) + Your History (B3 evidence) ───────────
+//
+// The component performs no matching/classification of its own — it only
+// translates an already-computed decisionEvidence.wardrobeUtility /
+// .outcomeHistory status into customer wording. These tests prove: the
+// translation is correct for the supported states, every unsupported/absent
+// state renders nothing (never an invented claim in either direction), the
+// canonical verdict/heading are never altered by B4/B3 evidence, and older
+// records missing these fields render safely.
+
+const WARDROBE_LABEL = "Your Wardrobe";
+const HISTORY_LABEL = "Your History";
+
+function wardrobeUtility(overrides: Record<string, unknown> = {}) {
+  return {
+    redundancy: { status: "no-match" },
+    gap: { status: "no-clear-gap" },
+    utility: { status: "evidence-only", complementCount: 0, complementItemIds: [] },
+    ...overrides,
+  };
+}
+
+describe("BuyOrSkipResult — B5 Your Wardrobe (B4 gap/redundancy/complement)", () => {
+  it("3. gap: fills-gap → 'This fills a gap in your wardrobe.'", () => {
+    const html = render({
+      verdict: "BUY", confidence: 80, finalThought: "Good fit.",
+      decisionEvidence: { wardrobeUtility: wardrobeUtility({ gap: { status: "fills-gap" } }) },
+    });
+    expect(html).toContain(WARDROBE_LABEL);
+    expect(html).toContain("This fills a gap in your wardrobe.");
+  });
+
+  it("4. redundancy: already-enough → 'You already have similar options in your Closet.'", () => {
+    const html = render({
+      verdict: "BUY", confidence: 80, finalThought: "Good fit.",
+      decisionEvidence: { wardrobeUtility: wardrobeUtility({ redundancy: { status: "already-enough" } }) },
+    });
+    expect(html).toContain(WARDROBE_LABEL);
+    expect(html).toContain("You already have similar options in your Closet.");
+  });
+
+  it("5. complement evidence surfaces only when complementCount > 0", () => {
+    const withComplement = render({
+      verdict: "BUY", confidence: 80, finalThought: "Good fit.",
+      decisionEvidence: { wardrobeUtility: wardrobeUtility({ utility: { status: "evidence-only", complementCount: 3, complementItemIds: ["a", "b", "c"] } }) },
+    });
+    expect(withComplement).toContain("This works with several pieces you already own.");
+
+    const singleComplement = render({
+      verdict: "BUY", confidence: 80, finalThought: "Good fit.",
+      decisionEvidence: { wardrobeUtility: wardrobeUtility({ utility: { status: "evidence-only", complementCount: 1, complementItemIds: ["a"] } }) },
+    });
+    expect(singleComplement).toContain("This works with a piece you already own.");
+
+    const noComplement = render({
+      verdict: "BUY", confidence: 80, finalThought: "Good fit.",
+      decisionEvidence: { wardrobeUtility: wardrobeUtility() },
+    });
+    expect(noComplement).not.toContain("you already own.");
+    expect(noComplement).not.toContain(WARDROBE_LABEL);
+  });
+
+  it("6. redundancy: unavailable never becomes 'unique' — section does not render on redundancy alone", () => {
+    const html = render({
+      verdict: "BUY", confidence: 80, finalThought: "Good fit.",
+      decisionEvidence: { wardrobeUtility: wardrobeUtility({ redundancy: { status: "unavailable" } }) },
+    });
+    expect(html).not.toContain("unique");
+    expect(html).not.toContain(WARDROBE_LABEL);
+  });
+
+  it("6b. redundancy: no-match never becomes 'unique' or any redundancy claim", () => {
+    const html = render({
+      verdict: "BUY", confidence: 80, finalThought: "Good fit.",
+      decisionEvidence: { wardrobeUtility: wardrobeUtility({ redundancy: { status: "no-match" } }) },
+    });
+    expect(html).not.toContain("unique");
+    expect(html).not.toContain("similar options");
+  });
+
+  it("7. gap: no-clear-gap never becomes 'You don't need this.'", () => {
+    const html = render({
+      verdict: "BUY", confidence: 80, finalThought: "Good fit.",
+      decisionEvidence: { wardrobeUtility: wardrobeUtility({ gap: { status: "no-clear-gap" } }) },
+    });
+    expect(html).not.toContain("don't need");
+    expect(html).not.toContain("fills a gap");
+  });
+
+  it("gap: unavailable renders nothing", () => {
+    const html = render({
+      verdict: "BUY", confidence: 80, finalThought: "Good fit.",
+      decisionEvidence: { wardrobeUtility: wardrobeUtility({ gap: { status: "unavailable" } }) },
+    });
+    expect(html).not.toContain("fills a gap");
+    expect(html).not.toContain("don't need");
+  });
+
+  it("the 'repetition' background finding is never surfaced to the customer", () => {
+    const html = render({
+      verdict: "BUY", confidence: 80, finalThought: "Good fit.",
+      decisionEvidence: {
+        wardrobeUtility: wardrobeUtility({
+          gap: {
+            status: "no-clear-gap",
+            backgroundFinding: { id: "need-work-repetition", title: "You have work pieces, but fewer ways to combine them", body: "...", kind: "repetition" },
+          },
+        }),
+      },
+    });
+    expect(html).not.toContain("repetition");
+    expect(html).not.toContain("fewer ways to combine them");
+  });
+
+  it("no internal evidence identifiers/enum names leak into rendered HTML", () => {
+    const html = render({
+      verdict: "BUY", confidence: 80, finalThought: "Good fit.",
+      decisionEvidence: {
+        wardrobeUtility: wardrobeUtility({
+          redundancy: { status: "already-enough", findingId: "enough-work-top-neutral", title: "You already have enough work neutral tops", body: "...", garmentIds: ["g1", "g2"] },
+          gap: { status: "fills-gap", findingId: "need-work", title: "Work is the thinner side of your wardrobe", body: "...", garmentIds: [], kind: "could-use-more" },
+        }),
+      },
+    });
+    expect(html).not.toContain("enough-work-top-neutral");
+    expect(html).not.toContain("need-work");
+    expect(html).not.toContain("DepthFinding");
+    expect(html).not.toContain("outfitClassKey");
+    expect(html).not.toContain('"g1"');
+    expect(html).not.toContain("could-use-more");
+  });
+
+  it("13. older record with no wardrobeUtility field renders safely, no Your Wardrobe section", () => {
+    const html = render({
+      verdict: "BUY", confidence: 80, finalThought: "Good fit.",
+      decisionEvidence: { colourPreferenceEvidence: conflictEvidence({ status: "clear" }) },
+    });
+    expect(html).not.toContain(WARDROBE_LABEL);
+    expect(html).toContain("Why It Works");
+  });
+
+  it("14. missing decisionEvidence entirely renders safely", () => {
+    const html = render({ verdict: "BUY", confidence: 80, finalThought: "Good fit." });
+    expect(html).not.toContain(WARDROBE_LABEL);
+    expect(html).toContain("Why It Works");
+  });
+});
+
+describe("BuyOrSkipResult — B5 Your History (B3 outcome history)", () => {
+  it("8. loved outcome surfaces narrowly by category", () => {
+    const html = render({
+      verdict: "BUY", confidence: 80, finalThought: "Good fit.",
+      decisionEvidence: { outcomeHistory: { available: true, category: "Top", lovedCount: 2, returnedCount: 0, provenanceIds: ["o1", "o2"] } },
+    });
+    expect(html).toContain(HISTORY_LABEL);
+    expect(html).toContain("loved top purchases like this before.");
+    expect(html).not.toContain("returned");
+  });
+
+  it("8b. returned outcome surfaces narrowly by category", () => {
+    const html = render({
+      verdict: "SKIP", confidence: 40, finalThought: "Not a fit.",
+      decisionEvidence: { outcomeHistory: { available: true, category: "Bottom", lovedCount: 0, returnedCount: 1, provenanceIds: ["o1"] } },
+    });
+    expect(html).toContain(HISTORY_LABEL);
+    expect(html).toContain("returned bottom purchases like this before.");
+    expect(html).not.toContain("loved");
+  });
+
+  it("9. a single outcome never produces sweeping taste language", () => {
+    const html = render({
+      verdict: "BUY", confidence: 80, finalThought: "Good fit.",
+      decisionEvidence: { outcomeHistory: { available: true, category: "Top", lovedCount: 1, returnedCount: 0, provenanceIds: ["o1"] } },
+    });
+    expect(html).toContain("loved top purchases like this before.");
+    expect(html).not.toMatch(/you love/i);
+    expect(html).not.toMatch(/your (go-to|favourite|favorite)/i);
+  });
+
+  it("outcomeHistory.available === false renders nothing", () => {
+    const html = render({
+      verdict: "BUY", confidence: 80, finalThought: "Good fit.",
+      decisionEvidence: { outcomeHistory: { available: false } },
+    });
+    expect(html).not.toContain(HISTORY_LABEL);
+  });
+
+  it("13. older record with no outcomeHistory field renders safely", () => {
+    const html = render({
+      verdict: "BUY", confidence: 80, finalThought: "Good fit.",
+      decisionEvidence: { colourPreferenceEvidence: conflictEvidence({ status: "clear" }) },
+    });
+    expect(html).not.toContain(HISTORY_LABEL);
+  });
+
+  it("no provenance IDs leak into rendered HTML", () => {
+    const html = render({
+      verdict: "BUY", confidence: 80, finalThought: "Good fit.",
+      decisionEvidence: { outcomeHistory: { available: true, category: "Top", lovedCount: 1, returnedCount: 0, provenanceIds: ["outcome-record-xyz-123"] } },
+    });
+    expect(html).not.toContain("outcome-record-xyz-123");
+  });
+});
+
+describe("BuyOrSkipResult — B5 does not alter the canonical verdict, and preserves hard-constraint authority", () => {
+  it("1. BUY renders the existing canonical verdict unchanged alongside B4/B3 evidence", () => {
+    const html = render({
+      verdict: "BUY", confidence: 85, finalThought: "Strong match.",
+      decisionEvidence: {
+        wardrobeUtility: wardrobeUtility({ gap: { status: "fills-gap" } }),
+        outcomeHistory: { available: true, category: "Top", lovedCount: 1, returnedCount: 0, provenanceIds: ["o1"] },
+      },
+    });
+    expect(html).toContain("BUY");
+    expect(html).toContain("Why It Works");
+    expect(html).toContain(WARDROBE_LABEL);
+    expect(html).toContain(HISTORY_LABEL);
+  });
+
+  it("2. SKIP renders the existing canonical verdict unchanged alongside B4/B3 evidence", () => {
+    const html = render({
+      verdict: "SKIP", confidence: 20, finalThought: "Clear mismatch.",
+      decisionEvidence: {
+        wardrobeUtility: wardrobeUtility({ redundancy: { status: "already-enough" } }),
+        outcomeHistory: { available: true, category: "Top", lovedCount: 0, returnedCount: 1, provenanceIds: ["o1"] },
+      },
+    });
+    expect(html).toContain("SKIP");
+    expect(html).toContain("Why It Doesn");
+    expect(html).toContain(WARDROBE_LABEL);
+    expect(html).toContain(HISTORY_LABEL);
+  });
+
+  it("12. a genuine hard-constraint SKIP reason text is unaffected by B4/B3 evidence being present", () => {
+    const html = render({
+      verdict: "SKIP",
+      confidence: 15,
+      finalThought: "Conflicts with a dressing requirement on your Passport: Keep arms covered.",
+      decisionEvidence: {
+        constraintEvidence: { hasHardViolation: true, checks: [{ label: "Keep arms covered", state: "violated", reason: "sleeveless construction" }] },
+        wardrobeUtility: wardrobeUtility({ gap: { status: "fills-gap" } }),
+      },
+    });
+    expect(html).toContain("Conflicts with a dressing requirement on your Passport: Keep arms covered.");
+    expect(html).toContain("SKIP");
+  });
+
+  it("10. B5 performs no verdict recalculation — displayVerdict still derives solely from fullAnalysis.verdict/DB verdict", () => {
+    // Rich B4/B3 evidence that would, under an invented rule, suggest BUY — the
+    // rendered verdict must still be the canonical SKIP from fullAnalysis.verdict.
+    const html = render({
+      verdict: "SKIP",
+      confidence: 30,
+      finalThought: "Still a skip despite wardrobe evidence.",
+      decisionEvidence: {
+        wardrobeUtility: wardrobeUtility({ gap: { status: "fills-gap" }, utility: { status: "evidence-only", complementCount: 5, complementItemIds: ["a", "b", "c", "d", "e"] } }),
+        outcomeHistory: { available: true, category: "Top", lovedCount: 3, returnedCount: 0, provenanceIds: ["o1", "o2", "o3"] },
+      },
+    });
+    expect(html).toContain("Why It Doesn");
+    expect(html).not.toContain("Why It Works");
+  });
+
+  it("B2b3 BUY-only caution still renders exactly once, unduplicated, alongside new B4/B3 sections", () => {
+    const html = render({
+      verdict: "BUY",
+      confidence: 88,
+      finalThought: "Strong match overall.",
+      decisionEvidence: {
+        colourPreferenceEvidence: conflictEvidence(),
+        wardrobeUtility: wardrobeUtility({ gap: { status: "fills-gap" } }),
+        outcomeHistory: { available: true, category: "Top", lovedCount: 1, returnedCount: 0, provenanceIds: ["o1"] },
+      },
+    });
+    const occurrences = html.split(CAUTION_TEXT).length - 1;
+    expect(occurrences).toBe(1);
+    expect(html).toContain(WARDROBE_LABEL);
+    expect(html).toContain(HISTORY_LABEL);
+  });
+
+  it("11. SKIP does not gain the BUY-only B2b3 caution even with B4/B3 evidence present", () => {
+    const html = render({
+      verdict: "SKIP",
+      confidence: 30,
+      finalThought: "Fit concerns dominate.",
+      decisionEvidence: {
+        colourPreferenceEvidence: conflictEvidence(),
+        wardrobeUtility: wardrobeUtility({ gap: { status: "fills-gap" } }),
+      },
+    });
+    expect(html).not.toContain(CAUTION_TEXT);
+    expect(html).toContain(WARDROBE_LABEL);
+  });
+});

@@ -237,6 +237,43 @@ export default function BuyOrSkipResult() {
   const showColourCaution =
     !skipResult && fa?.decisionEvidence?.colourPreferenceEvidence?.status === "conflict";
 
+  // B5 — Your Wardrobe. Reads B4's already-computed decisionEvidence.wardrobeUtility
+  // verbatim; this component performs no matching/classification of its own, only
+  // translates an already-supported status into customer wording. Every other
+  // status (unavailable / no-match / no-clear-gap / zero complements) renders
+  // nothing — absence of evidence is never rewritten as a claim in either
+  // direction (never "this is unique", never "you don't need this"). The
+  // "repetition" background finding B4 preserves for provenance is deliberately
+  // not surfaced here — it has no safe customer-facing phrasing yet.
+  const wardrobeUtility = fa?.decisionEvidence?.wardrobeUtility ?? null;
+  const wardrobeGapNote =
+    wardrobeUtility?.gap?.status === "fills-gap" ? "This fills a gap in your wardrobe." : null;
+  const wardrobeRedundancyNote =
+    wardrobeUtility?.redundancy?.status === "already-enough"
+      ? "You already have similar options in your Closet." : null;
+  const complementCount =
+    typeof wardrobeUtility?.utility?.complementCount === "number" ? wardrobeUtility.utility.complementCount : 0;
+  const wardrobeComplementNote =
+    complementCount > 0
+      ? `This works with ${complementCount === 1 ? "a piece" : "several pieces"} you already own.`
+      : null;
+  const hasWardrobeNotes = !!(wardrobeGapNote || wardrobeRedundancyNote || wardrobeComplementNote);
+
+  // B5 — Your History. Reads B3's already-computed decisionEvidence.outcomeHistory
+  // verbatim, narrowly: only this exact category, only when a real count exists.
+  // One past outcome stays one factual sentence, never a sweeping taste claim.
+  const outcomeHistory = fa?.decisionEvidence?.outcomeHistory ?? null;
+  const outcomeCategoryLabel =
+    typeof outcomeHistory?.category === "string" && outcomeHistory.category.trim()
+      ? outcomeHistory.category.trim().toLowerCase() : "items like this";
+  const outcomeLovedNote =
+    outcomeHistory?.available === true && typeof outcomeHistory.lovedCount === "number" && outcomeHistory.lovedCount > 0
+      ? `You've loved ${outcomeCategoryLabel} purchases like this before.` : null;
+  const outcomeReturnedNote =
+    outcomeHistory?.available === true && typeof outcomeHistory.returnedCount === "number" && outcomeHistory.returnedCount > 0
+      ? `You've returned ${outcomeCategoryLabel} purchases like this before.` : null;
+  const hasOutcomeNotes = !!(outcomeLovedNote || outcomeReturnedNote);
+
   const displayType = fa?.itemType ?? analysis.category;
 
   // Customer-selected colours from the form
@@ -535,6 +572,29 @@ export default function BuyOrSkipResult() {
                 ✓ {fa.fillsGap}
               </p>
             )}
+          </div>
+        )}
+
+        {/* ── Your Wardrobe — B4 evidence, additive context only ─────────────── */}
+        {hasWardrobeNotes && (
+          <div className="bos-result-section">
+            <div className="bos-result-section-label">Your Wardrobe</div>
+            <div className="bos-result-section-body">
+              {wardrobeGapNote && <div className="bos-result-section-row">{wardrobeGapNote}</div>}
+              {wardrobeRedundancyNote && <div className="bos-result-section-row">{wardrobeRedundancyNote}</div>}
+              {wardrobeComplementNote && <div className="bos-result-section-row">{wardrobeComplementNote}</div>}
+            </div>
+          </div>
+        )}
+
+        {/* ── Your History — B3 outcome history, narrow category-exact evidence ── */}
+        {hasOutcomeNotes && (
+          <div className="bos-result-section">
+            <div className="bos-result-section-label">Your History</div>
+            <div className="bos-result-section-body">
+              {outcomeLovedNote && <div className="bos-result-section-row">{outcomeLovedNote}</div>}
+              {outcomeReturnedNote && <div className="bos-result-section-row">{outcomeReturnedNote}</div>}
+            </div>
           </div>
         )}
 
