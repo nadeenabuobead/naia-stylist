@@ -100,57 +100,58 @@ export async function getEntitlementSummary(
 
   const qualifyingWhere = qualifyingStyleMeWhere(customerId);
 
-  const [
-    monthlyQualifyingCount,
-    monthlyBuySkipUsed,
-    vtoCompleted,
-    vtoInFlight,
-    closetCount,
-    monthlyPersonalisedTrendUsed,
-  ] = await Promise.all([
-    // StyleMe: qualifying root sessions in current window
-    prisma.stylingSession.count({
-      where: { ...qualifyingWhere, createdAt: { gte: window.start, lt: window.end } },
-    }),
+  // Sequential, not Promise.all: the pooled DATABASE_URL runs this app with
+  // connection_limit=1 per serverless instance, so N concurrent queries never
+  // actually run in parallel at the DB — they just all queue for the same one
+  // connection. Firing them as Promise.all only maximises how many queries are
+  // simultaneously waiting on that queue, which is what was pushing requests
+  // (this function is a major contributor, called from the main Overview
+  // loader) past the pool's 10s connection-wait timeout under any real load.
+  // Awaiting one at a time means each query holds and releases the connection
+  // before the next asks for it — same data, no queuing.
 
-    // BuySkip: usable analyses in current window
-    prisma.buyOrSkipAnalysis.count({
-      where: {
-        customerId,
-        verdict: { in: ["BUY", "SKIP", "MAYBE"] },
-        createdAt: { gte: window.start, lt: window.end },
-      },
-    }),
+  // StyleMe: qualifying root sessions in current window
+  const monthlyQualifyingCount = await prisma.stylingSession.count({
+    where: { ...qualifyingWhere, createdAt: { gte: window.start, lt: window.end } },
+  });
 
-    // VTO: completed jobs in current window
-    prisma.virtualTryOnJob.count({
-      where: {
-        customerId,
-        status: "COMPLETED",
-        createdAt: { gte: window.start, lt: window.end },
-      },
-    }),
+  // BuySkip: usable analyses in current window
+  const monthlyBuySkipUsed = await prisma.buyOrSkipAnalysis.count({
+    where: {
+      customerId,
+      verdict: { in: ["BUY", "SKIP", "MAYBE"] },
+      createdAt: { gte: window.start, lt: window.end },
+    },
+  });
 
-    // VTO: genuinely active in-flight jobs (not stale)
-    prisma.virtualTryOnJob.count({
-      where: {
-        customerId,
-        status: { in: ["CREATED", "SUBMITTED", "PROCESSING"] },
-        lastActivityAt: { gte: staleThreshold },
-      },
-    }),
+  // VTO: completed jobs in current window
+  const vtoCompleted = await prisma.virtualTryOnJob.count({
+    where: {
+      customerId,
+      status: "COMPLETED",
+      createdAt: { gte: window.start, lt: window.end },
+    },
+  });
 
-    // Closet: hard-delete model — every row is an active item
-    prisma.closetItem.count({ where: { customerId } }),
+  // VTO: genuinely active in-flight jobs (not stale)
+  const vtoInFlight = await prisma.virtualTryOnJob.count({
+    where: {
+      customerId,
+      status: { in: ["CREATED", "SUBMITTED", "PROCESSING"] },
+      lastActivityAt: { gte: staleThreshold },
+    },
+  });
 
-    // Personalised Trend Edit: completed-edit usage rows in current window.
-    // PersonalisedTrendEditUsage is the customer entitlement/usage source of
-    // truth — JourneyEvent's trend_edit_generated is analytics-only and is
-    // never read here.
-    prisma.personalisedTrendEditUsage.count({
-      where: { customerId, createdAt: { gte: window.start, lt: window.end } },
-    }),
-  ]);
+  // Closet: hard-delete model — every row is an active item
+  const closetCount = await prisma.closetItem.count({ where: { customerId } });
+
+  // Personalised Trend Edit: completed-edit usage rows in current window.
+  // PersonalisedTrendEditUsage is the customer entitlement/usage source of
+  // truth — JourneyEvent's trend_edit_generated is analytics-only and is
+  // never read here.
+  const monthlyPersonalisedTrendUsed = await prisma.personalisedTrendEditUsage.count({
+    where: { customerId, createdAt: { gte: window.start, lt: window.end } },
+  });
 
   return {
     membershipStatus,

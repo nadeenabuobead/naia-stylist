@@ -1,4 +1,4 @@
-import { useLoaderData, Link } from "react-router";
+import { useLoaderData, Link, Form } from "react-router";
 import type { LinksFunction, LoaderFunctionArgs } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import prisma from "~/db.server";
@@ -305,36 +305,41 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const customer = await requireCurrentNaiaCustomer(request);
   const customerId = customer.id;
 
-  const [sessions, editorialReports, buyOrSkipRaw, reviewCount, closetCount, strongestTendency, candidateCount, entitlement] =
-    await Promise.all([
-      prisma.stylingSession.findMany({
-        where: { customerId },
-        take: 3,
-        orderBy: { createdAt: "desc" },
-        select: {
-          id: true, createdAt: true, currentMood: true, desiredFeeling: true, occasion: true, styleFrom: true,
-          suggestions: {
-            take: 1, select: { id: true, heroImageUrl: true, outfitName: true,
-              items: { take: 5, select: { itemType: true, closetItemId: true, productTitle: true, productImageUrl: true, closetItem: { select: { name: true, imageUrl: true, imagePublicId: true, imageFormat: true } } } } }
-          },
-          review: { select: { id: true } },
-        },
-      }),
-      getPublishedEditorialReports(),
-      prisma.buyOrSkipAnalysis.findMany({
-        where: { customerId },
-        take: 3,
-        orderBy: { createdAt: "desc" },
-        select: { id: true, productName: true, verdict: true, createdAt: true, imageUrl: true, imagePublicId: true, imageFormat: true, category: true, fullAnalysis: true },
-      }),
-      prisma.postOutfitReview.count({ where: { customerId } }),
-      prisma.closetItem.count({ where: { customerId } }),
-      loadStrongestConfirmedTendency(customerId),
-      prisma.styleTendency.count({
-        where: { customerId, state: "CANDIDATE", customerFeedback: { not: "not-quite" } },
-      }),
-      getEntitlementSummary(customerId, customer.membershipStatus),
-    ]);
+  // Sequential, not Promise.all: the pooled DATABASE_URL runs this app with
+  // connection_limit=1 per serverless instance. Firing 8 queries (several of
+  // which — getEntitlementSummary especially — issue several more of their
+  // own) as Promise.all just maximises how many are simultaneously queued for
+  // that one connection, which was pushing requests to this route past the
+  // pool's 10s connection-wait timeout (the "Application Error" on refresh).
+  // Awaiting one at a time means each holds and releases the connection
+  // before the next asks for it — identical data, no queuing.
+  const sessions = await prisma.stylingSession.findMany({
+    where: { customerId },
+    take: 3,
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true, createdAt: true, currentMood: true, desiredFeeling: true, occasion: true, styleFrom: true,
+      suggestions: {
+        take: 1, select: { id: true, heroImageUrl: true, outfitName: true,
+          items: { take: 5, select: { itemType: true, closetItemId: true, productTitle: true, productImageUrl: true, closetItem: { select: { name: true, imageUrl: true, imagePublicId: true, imageFormat: true } } } } }
+      },
+      review: { select: { id: true } },
+    },
+  });
+  const editorialReports = await getPublishedEditorialReports();
+  const buyOrSkipRaw = await prisma.buyOrSkipAnalysis.findMany({
+    where: { customerId },
+    take: 3,
+    orderBy: { createdAt: "desc" },
+    select: { id: true, productName: true, verdict: true, createdAt: true, imageUrl: true, imagePublicId: true, imageFormat: true, category: true, fullAnalysis: true },
+  });
+  const reviewCount = await prisma.postOutfitReview.count({ where: { customerId } });
+  const closetCount = await prisma.closetItem.count({ where: { customerId } });
+  const strongestTendency = await loadStrongestConfirmedTendency(customerId);
+  const candidateCount = await prisma.styleTendency.count({
+    where: { customerId, state: "CANDIDATE", customerFeedback: { not: "not-quite" } },
+  });
+  const entitlement = await getEntitlementSummary(customerId, customer.membershipStatus);
 
   const latestEditorial = editorialReports[0] ?? null;
   const trendReport = latestEditorial
@@ -539,9 +544,17 @@ export default function MyNaiaOverview() {
               Get a look based on your mood, plans, comfort needs and Style Passport.
             </p>
             <div className="mn-styleme-hero-actions">
-              <Link to="/style-me" className="mn-styleme-btn">
-                Start StyleMe
-              </Link>
+              {/* Goes straight into the questionnaire via the existing /style-me
+                  action's "start a new session" branch (clears any stale cookie
+                  state, then redirects to /style-me/state) — not a second entry
+                  point, the same POST a returning user already triggers from the
+                  StyleMe overview page itself. "How StyleMe Works" below stays a
+                  plain link to that overview. */}
+              <Form method="post" action="/style-me" style={{ display: "contents" }}>
+                <button type="submit" className="mn-styleme-btn">
+                  Start StyleMe
+                </button>
+              </Form>
               <Link to="/style-me" className="mn-styleme-link">
                 How StyleMe Works
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -636,11 +649,13 @@ export default function MyNaiaOverview() {
           <div className="mn-section-body">
             <style>{`@media (min-width:640px){.mn-quick-grid{grid-template-columns:repeat(3,1fr)!important}}`}</style>
             <div className="mn-quick-grid" style={{ display: "grid", gap: "0.75rem" }}>
-              <Link to="/style-me" className="mn-quick-tool">
-                <div className="mn-quick-tool-title">Start StyleMe</div>
-                <p className="mn-quick-tool-note">A look for your mood and your plans.</p>
-                <div className="mn-quick-tool-cta">Open <span aria-hidden>↗</span></div>
-              </Link>
+              <Form method="post" action="/style-me" style={{ display: "contents" }}>
+                <button type="submit" className="mn-quick-tool" style={{ textAlign: "left", width: "100%" }}>
+                  <div className="mn-quick-tool-title">Start StyleMe</div>
+                  <p className="mn-quick-tool-note">A look for your mood and your plans.</p>
+                  <div className="mn-quick-tool-cta">Open <span aria-hidden>↗</span></div>
+                </button>
+              </Form>
               <Link to="/closet" className="mn-quick-tool">
                 <div className="mn-quick-tool-title">Open My Closet</div>
                 <p className="mn-quick-tool-note">Your saved wardrobe, ready to style.</p>

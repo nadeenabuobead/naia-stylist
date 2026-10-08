@@ -1827,3 +1827,107 @@ describe("R — result.tsx: suggestionId is scoped to the ownership-checked sess
     );
   });
 });
+
+// ── H. Main Overview — StyleMe CTA routing + connection-pool fix ───────────────
+//
+// Two fixes to my-naia._index.tsx (the main nAia Overview page):
+//   1. "Start StyleMe" and "How StyleMe Works" previously led to the identical
+//      destination (/style-me). "Start StyleMe" now POSTs to the existing
+//      /style-me action's default branch (clears stale session state, redirects
+//      to /style-me/state) — the SAME code path the StyleMe overview page's own
+//      "Start a New Session" button already uses, not a second entry point.
+//      "How StyleMe Works" stays a plain link to /style-me (the overview).
+//   2. The loader's Promise.all over 8 DB calls (one of which —
+//      getEntitlementSummary — issues 6 more internally) was exhausting the
+//      pooled DATABASE_URL's connection_limit=1 under normal load, producing
+//      an "Application Error" on refresh (P2024: connection pool timeout).
+//      Converted to sequential awaits — identical data, no concurrent
+//      connection demand.
+
+describe("S — Main Overview: StyleMe CTA routing is no longer duplicated", () => {
+  const src = route("my-naia._index.tsx");
+
+  it("imports Form from react-router", () => {
+    assert.ok(
+      /import\s*\{[^}]*\bForm\b[^}]*\}\s*from\s*["']react-router["']/.test(src),
+      "Form must be imported to post to the existing /style-me start action",
+    );
+  });
+
+  it("'Start StyleMe' (hero) is a POST form to /style-me, not a plain Link", () => {
+    const heroIdx = src.indexOf("mn-styleme-hero-actions");
+    assert.ok(heroIdx !== -1, "hero actions block present");
+    const heroBlock = src.slice(heroIdx, heroIdx + 1300);
+    assert.ok(heroBlock.includes('action="/style-me"'), "posts to the existing /style-me action");
+    assert.ok(heroBlock.includes('method="post"'), "uses POST, not a GET navigation");
+    assert.ok(!/<Link\s+to="\/style-me"\s+className="mn-styleme-btn"/.test(heroBlock), "no longer a plain Link to /style-me");
+  });
+
+  it("'How StyleMe Works' remains a plain Link to the existing /style-me overview", () => {
+    const heroIdx = src.indexOf("mn-styleme-hero-actions");
+    const heroBlock = src.slice(heroIdx, heroIdx + 1300);
+    assert.ok(
+      /<Link\s+to="\/style-me"\s+className="mn-styleme-link">\s*How StyleMe Works/.test(heroBlock),
+      "How StyleMe Works stays an unchanged plain link to the overview page",
+    );
+  });
+
+  it("the two CTAs are no longer behaviourally identical — one posts, one navigates", () => {
+    const heroIdx = src.indexOf("mn-styleme-hero-actions");
+    const heroBlock = src.slice(heroIdx, heroIdx + 1300);
+    const startsViaForm = /<Form[^>]*action="\/style-me"[^>]*>[\s\S]*?Start StyleMe/.test(heroBlock);
+    const worksViaLink = /<Link\s+to="\/style-me"[^>]*>\s*How StyleMe Works/.test(heroBlock);
+    assert.ok(startsViaForm && worksViaLink, "Start StyleMe and How StyleMe Works now take two different code paths");
+  });
+
+  it("the Quick Tools 'Start StyleMe' card also posts to /style-me (consistent with the hero CTA)", () => {
+    const quickIdx = src.indexOf("mn-quick-grid");
+    assert.ok(quickIdx !== -1, "quick tools grid present");
+    const quickBlock = src.slice(quickIdx, quickIdx + 900);
+    assert.ok(quickBlock.includes('action="/style-me"'), "Quick Tools Start StyleMe also posts to the existing start action");
+    assert.ok(!/<Link\s+to="\/style-me"\s+className="mn-quick-tool"/.test(quickBlock), "no longer a plain Link");
+  });
+
+  it("does not introduce a second StyleMe engine or duplicate questionnaire route", () => {
+    assert.ok(!src.includes("style-me/state2"), "no duplicate second-step route");
+    assert.ok(!/route\(["']style-me/.test(src), "my-naia._index.tsx defines no new style-me routes itself");
+  });
+});
+
+describe("S — Main Overview: loader no longer fans out Promise.all over the pooled connection", () => {
+  const src = route("my-naia._index.tsx");
+  const entitlementSrc = lib("plan/entitlement.server.ts");
+
+  it("my-naia._index.tsx loader's DB calls are sequential awaits, not Promise.all", () => {
+    const loaderIdx = src.indexOf("export async function loader");
+    const nextExportIdx = src.indexOf("\nexport ", loaderIdx + 1);
+    const loaderBody = src.slice(loaderIdx, nextExportIdx === -1 ? loaderIdx + 4000 : nextExportIdx);
+    assert.ok(!loaderBody.includes("Promise.all("), "loader body no longer calls Promise.all");
+    assert.ok(loaderBody.includes("const sessions = await prisma.stylingSession.findMany"), "sessions fetched via a direct sequential await");
+    assert.ok(loaderBody.includes("const entitlement = await getEntitlementSummary"), "entitlement fetched via a direct sequential await");
+  });
+
+  it("getEntitlementSummary no longer fans out its 6 count queries via Promise.all", () => {
+    const fnIdx = entitlementSrc.indexOf("export async function getEntitlementSummary");
+    assert.ok(fnIdx !== -1, "getEntitlementSummary present");
+    const fnBody = entitlementSrc.slice(fnIdx, fnIdx + 3200);
+    assert.ok(!fnBody.includes("Promise.all("), "no Promise.all inside getEntitlementSummary");
+    assert.ok(fnBody.includes("const monthlyQualifyingCount = await prisma.stylingSession.count"), "sequential await present");
+    assert.ok(fnBody.includes("const monthlyPersonalisedTrendUsed = await prisma.personalisedTrendEditUsage.count"), "last query still present and sequential");
+  });
+
+  it("getEntitlementSummary's return value shape is unchanged — same six fields read into the same result object", () => {
+    const fnIdx = entitlementSrc.indexOf("export async function getEntitlementSummary");
+    const fnBody = entitlementSrc.slice(fnIdx, fnIdx + 3000);
+    for (const field of [
+      "monthlyQualifyingCount",
+      "monthlyBuySkipUsed",
+      "vtoCompleted",
+      "vtoInFlight",
+      "closetCount",
+      "monthlyPersonalisedTrendUsed",
+    ]) {
+      assert.ok(fnBody.includes(field), `${field} still referenced after the Promise.all removal`);
+    }
+  });
+});
