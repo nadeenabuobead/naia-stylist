@@ -37,8 +37,10 @@ vi.mock("~/components/my-naia/MyNaiaLayout", () => ({
 import { useLoaderData } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { getEntitlementSummary } from "~/lib/plan/entitlement.server";
-import PlanUsagePage, { loader } from "./my-naia.plan-usage";
+import PlanUsagePage, { loader, CUSTOMER_FACING_ADDON_LABELS } from "./my-naia.plan-usage";
 import { MEMBERSHIP_PRICING, ADDON_CATALOG } from "~/lib/plan/plan-limits.server";
+
+const CUSTOMER_FACING_ADDONS = ADDON_CATALOG.filter((a) => CUSTOMER_FACING_ADDON_LABELS.has(a.label));
 
 // ── Loader — ownership / auth gate ────────────────────────────────────────────
 
@@ -133,11 +135,13 @@ function baseSummary(overrides: Partial<Summary> = {}): Summary {
   };
 }
 
-function render(summary: Summary): string {
+function render(summary: Summary, addonCatalog = CUSTOMER_FACING_ADDONS): string {
+  // Defaults to the filtered list the real loader actually returns — not the
+  // full ADDON_CATALOG — so component tests reflect what customers see.
   vi.mocked(useLoaderData).mockReturnValue({
     summary,
     membershipPricing: MEMBERSHIP_PRICING,
-    addonCatalog: ADDON_CATALOG,
+    addonCatalog,
   });
   return renderToString(<PlanUsagePage />);
 }
@@ -246,6 +250,85 @@ describe("plan-usage component — add-ons", () => {
     expect(html).toContain("+10 Virtual Try-Ons");
     const addonSection = html.slice(html.indexOf("VTO Pack"));
     expect(addonSection.slice(0, 400)).toContain("AED 15");
+  });
+});
+
+// ── Customer-facing add-on allowlist ──────────────────────────────────────────
+// Current approved package is only StyleMe Pack (+5, AED 15) and VTO Pack
+// (+10, AED 15). ADDON_CATALOG in plan-limits.server.ts also holds four
+// legacy/internal entries (Buy or Skip Pack, Trend Edit Add-on, nAia Boost,
+// Closet Expansion) that are not approved for customer display yet — they
+// must stay out of the rendered page without being deleted from the shared
+// catalog, in case other code comes to depend on them later.
+
+describe("plan-usage loader — customer-facing add-on allowlist", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("loader returns only the two approved add-ons, in the real rendering path", async () => {
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({
+      id: "c1", membershipStatus: "MEMBER",
+    } as any);
+    vi.mocked(getEntitlementSummary).mockResolvedValueOnce({} as any);
+
+    const result = await loader({ request: new Request("http://localhost/my-naia/plan-usage"), params: {}, context: {} } as any);
+
+    expect(result.addonCatalog.map((a: any) => a.label)).toEqual(["StyleMe Pack", "VTO Pack"]);
+  });
+});
+
+describe("plan-usage component — only approved add-ons render", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("1. StyleMe +5 renders at AED 15", () => {
+    const html = render(baseSummary());
+    const section = html.slice(html.indexOf("StyleMe Pack"), html.indexOf("StyleMe Pack") + 400);
+    expect(section).toContain("+5 StyleMe sessions");
+    expect(section).toContain("AED 15");
+  });
+
+  it("2. VTO +10 renders at AED 15", () => {
+    const html = render(baseSummary());
+    const section = html.slice(html.indexOf("VTO Pack"), html.indexOf("VTO Pack") + 400);
+    expect(section).toContain("+10 Virtual Try-Ons");
+    expect(section).toContain("AED 15");
+  });
+
+  it("3. Buy or Skip Pack does not render", () => {
+    const html = render(baseSummary());
+    expect(html).not.toContain("Buy or Skip Pack");
+  });
+
+  it("4. Trend Edit Add-on does not render", () => {
+    const html = render(baseSummary());
+    expect(html).not.toContain("Trend Edit Add-on");
+  });
+
+  it("5. nAia Boost does not render", () => {
+    const html = render(baseSummary());
+    expect(html).not.toContain("nAia Boost");
+  });
+
+  it("6. Closet Expansion does not render", () => {
+    const html = render(baseSummary());
+    expect(html).not.toContain("Closet Expansion");
+  });
+
+  it("7. shared legacy catalog entries remain intact in ADDON_CATALOG for other code that may depend on them", () => {
+    const labels = ADDON_CATALOG.map((a) => a.label);
+    expect(labels).toContain("Buy or Skip Pack");
+    expect(labels).toContain("Trend Edit Add-on");
+    expect(labels).toContain("nAia Boost");
+    expect(labels).toContain("Closet Expansion");
+    // The allowlist filters a view of the catalog — it never mutates the source array.
+    expect(ADDON_CATALOG.length).toBeGreaterThan(CUSTOMER_FACING_ADDON_LABELS.size);
+  });
+
+  it("8. no fake checkout/action appears alongside the two approved add-ons", () => {
+    const html = render(baseSummary());
+    expect(html).toContain("Coming soon");
+    expect(html).not.toContain("<form");
+    expect(html).not.toContain("<button");
+    expect(html).not.toMatch(/href="\/checkout/);
   });
 });
 

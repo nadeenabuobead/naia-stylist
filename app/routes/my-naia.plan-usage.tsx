@@ -13,10 +13,22 @@ import naiaStyles from "~/styles/naia-design-system.css?url";
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: naiaStyles }];
 
+// ── Customer-facing add-on allowlist ──────────────────────────────────────────
+// ADDON_CATALOG in plan-limits.server.ts is the full historical/internal add-on
+// catalog — other code may still rely on entries that are not yet approved for
+// customer display. Only the two add-ons below are approved for the Plan & Usage
+// page today. This allowlist is presentation-only: it does not mutate or trim
+// ADDON_CATALOG itself, so adding to it later does not require touching this file.
+export const CUSTOMER_FACING_ADDON_LABELS: ReadonlySet<string> = new Set([
+  "StyleMe Pack",
+  "VTO Pack",
+]);
+
 export async function loader({ request }: LoaderFunctionArgs) {
   const customer = await requireCurrentNaiaCustomer(request);
   const summary = await getEntitlementSummary(customer.id, customer.membershipStatus);
-  return { summary, membershipPricing: MEMBERSHIP_PRICING, addonCatalog: ADDON_CATALOG };
+  const addonCatalog = ADDON_CATALOG.filter((addon) => CUSTOMER_FACING_ADDON_LABELS.has(addon.label));
+  return { summary, membershipPricing: MEMBERSHIP_PRICING, addonCatalog };
 }
 
 // ── Display helpers ────────────────────────────────────────────────────────────
