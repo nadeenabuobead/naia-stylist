@@ -18,7 +18,7 @@ import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { mergeHistoryWithSavedSessions } from "../lib/styleme/history-saved-durability";
+import { buildUnifiedHistory } from "../lib/styleme/history-saved-durability";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "../..");
@@ -1465,18 +1465,19 @@ describe("O — StyleMe history: unified list, delete action, no Saved UI", () =
     //
     // Proving this behaviorally (via the real merge logic the loader calls)
     // rather than via source-string presence/absence: saved-state annotation
-    // exists, is a plain boolean on the same unified record shape, and the
-    // function that produces it takes no filter/view argument — it returns
-    // one flat, single list, never a split "saved vs. not" structure.
-    const result = mergeHistoryWithSavedSessions(
-      [{ id: "s1", occasion: null, createdAt: new Date(), suggestions: [] }],
+    // exists per-suggestion, is a plain boolean on the same unified record
+    // shape, and the function that produces it takes no filter/view argument
+    // — it returns one flat, single list, never a split "saved vs. not"
+    // structure.
+    const result = buildUnifiedHistory(
+      [{ id: "s1", occasion: null, createdAt: new Date(), suggestions: [{ id: "sugg-1", outfitName: "Look", createdAt: new Date() }] }],
       [],
-      new Set(["s1"]),
+      new Set(["sugg-1"]),
     );
     assert.ok(Array.isArray(result), "returns a single flat list — not split into saved/unsaved views");
     assert.equal(typeof result[0].saved, "boolean", "each record carries a plain boolean saved flag");
     assert.equal(result[0].id, "s1", "the annotated record is the same unified session record, not a separate shape");
-    assert.equal(mergeHistoryWithSavedSessions.length, 3, "no filter/view parameter — only sessions + saved-id lookup");
+    assert.equal(buildUnifiedHistory.length, 3, "no filter/view parameter — only sessions + extra suggestions + saved-id lookup");
   });
 
   it("action handles intent=delete-session — deletes session by id", () => {
@@ -1742,6 +1743,87 @@ describe("Q — StyleMe regression: currentMood fix + delete-session safety", ()
     assert.ok(
       savedLookPos !== -1 && sessionDeletePos !== -1 && savedLookPos < sessionDeletePos,
       "SavedLook cleanup runs BEFORE stylingSession.delete"
+    );
+  });
+});
+
+// ── R. result.tsx: suggestion-scoped ownership (saved-look identity closeout) ──
+//
+// result.tsx now accepts an optional ?suggestionId= to pin the load to one
+// specific historical suggestion (needed so an older saved look, not the
+// session's latest, stays reachable from its own history card). The security
+// contract: a requestedSuggestionId can ONLY ever resolve to a suggestion
+// that belongs to the exact session already fetched and ownership-checked by
+// sessionId — never a different session, and never another customer's data.
+//
+// resolveResultSuggestionSelector's own unit tests (history-saved-durability
+// .test.ts) cover the selector's pure output shape directly. These tests
+// prove the surrounding wiring that makes that shape actually safe: the
+// selector is spread into THIS session's own `suggestions` relation include
+// (not a standalone top-level suggestion lookup), and the customerId
+// ownership check runs before any suggestion field is read or returned —
+// matching this file's established pattern for route-level ownership
+// invariants (see suite O's delete-session ownership tests above), since
+// this codebase has no live-DB integration-test harness to exercise the
+// real cross-session/cross-customer cases end-to-end.
+describe("R — result.tsx: suggestionId is scoped to the ownership-checked session, never a global lookup", () => {
+  const src = route("style-me/result.tsx");
+  const sessionBranch = src.slice(src.indexOf("if (sessionId) {"), src.indexOf("if (sessionId) {") + 4000);
+
+  it("imports resolveResultSuggestionSelector rather than inlining an unscoped suggestion filter", () => {
+    assert.ok(
+      src.includes('import { resolveResultSuggestionSelector } from "~/lib/styleme/history-saved-durability"'),
+      "selector imported from the extracted, unit-tested pure function"
+    );
+  });
+
+  it("9. the selector is spread inside THIS session's own suggestions include — not a standalone outfitSuggestion lookup by requestedSuggestionId", () => {
+    const includeStart = sessionBranch.indexOf("include: {");
+    assert.ok(
+      sessionBranch.includes("...resolveResultSuggestionSelector(requestedSuggestionId)"),
+      "selector spread directly into the suggestions relation block"
+    );
+    assert.ok(
+      sessionBranch.indexOf("...resolveResultSuggestionSelector(requestedSuggestionId)") > includeStart,
+      "the spread sits inside this session's own include — not before/outside it"
+    );
+    // The only place requestedSuggestionId is actually consumed is this one call — confirming
+    // there is no separate `prisma.outfitSuggestion.findUnique({ where: { id: requestedSuggestionId } })`
+    // elsewhere that could cross session/customer boundaries unscoped.
+    const selectorCalls = [...sessionBranch.matchAll(/resolveResultSuggestionSelector\(requestedSuggestionId\)/g)].length;
+    assert.equal(selectorCalls, 1, "requestedSuggestionId passed to the scoped selector exactly once, nowhere else");
+    assert.ok(
+      !sessionBranch.includes("outfitSuggestion.findUnique({ where: { id: requestedSuggestionId"),
+      "no standalone top-level outfitSuggestion lookup by requestedSuggestionId exists"
+    );
+  });
+
+  it("10. ownership check (session.customerId !== naiaCustomer.id) runs before any suggestion field is read", () => {
+    const ownershipCheckPos = sessionBranch.indexOf("session.customerId !== naiaCustomer.id");
+    const firstSuggestionReadPos = sessionBranch.indexOf("session.suggestions[0]");
+    assert.ok(ownershipCheckPos !== -1, "ownership check present");
+    assert.ok(firstSuggestionReadPos !== -1, "suggestion is read from session.suggestions[0]");
+    assert.ok(
+      ownershipCheckPos < firstSuggestionReadPos,
+      "ownership check gates the response before any suggestion data (foreign or otherwise) is read — so a foreign customer's session can never reach the point where its suggestion data is used"
+    );
+  });
+
+  it("11/8. a miss (nonexistent id, foreign-session id, or stale SavedLook reference) yields an empty suggestions array, not a crash — optional chaining guards every read", () => {
+    assert.ok(
+      sessionBranch.includes("session.suggestions[0]?.id ?? null"),
+      "currentSuggestionId falls back to null when suggestions is empty"
+    );
+    assert.ok(
+      sessionBranch.includes("session.suggestions[0] ?? null"),
+      "rawSuggestion falls back to null when suggestions is empty — no [0] crash on an empty array"
+    );
+  });
+
+  it("12. absence of suggestionId preserves the exact legacy selector call site — same include block, same session fetch", () => {
+    assert.ok(
+      !sessionBranch.includes("if (requestedSuggestionId) {"),
+      "no separate code branch/query path for the suggestionId case — one single findUnique call handles both, via the selector's own ternary"
     );
   });
 });

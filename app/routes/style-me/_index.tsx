@@ -8,9 +8,10 @@ import naiaStyles from "~/styles/naia-design-system.css?url";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import { occasionDisplayFor } from "~/lib/styleme/occasion-display";
 import {
-  resolveSavedSessionIds,
-  selectExtraSavedSessionIds,
-  mergeHistoryWithSavedSessions,
+  resolveSavedSuggestions,
+  selectExtraSavedSuggestions,
+  buildUnifiedHistory,
+  buildDisplayedSuggestionMap,
   type SessionRecord,
 } from "~/lib/styleme/history-saved-durability";
 
@@ -117,47 +118,56 @@ export async function loader({ request }: LoaderFunctionArgs) {
         suggestions: {
           take: 1,
           orderBy: { createdAt: "desc" },
-          select: { id: true, outfitName: true },
+          select: { id: true, outfitName: true, createdAt: true },
         },
       },
     }),
   ]);
 
-  // An explicitly saved look's originating session can fall outside the
-  // recent-20 window above while SavedLook itself stays persisted — surface
-  // it anyway so a saved look never becomes unreachable. SavedLook.fromSuggestionId
-  // has no FK cascade: a stale/deleted suggestion simply finds no match below,
-  // failing safe (no crash, no phantom card).
+  // Card identity is per-SUGGESTION, not per-session: a saved suggestion that
+  // isn't the latest one in its session must get its own correctly-badged,
+  // reachable card — never a false badge on whichever suggestion a recent
+  // card happens to display. SavedLook.fromSuggestionId has no FK cascade: a
+  // stale/deleted suggestion simply finds no match below, failing safe (no
+  // crash, no phantom card).
   const savedLooks = await prisma.savedLook.findMany({
     where: { customerId, fromSuggestionId: { not: null } },
     select: { fromSuggestionId: true },
   });
-  const savedSuggestionIds = [...new Set(savedLooks.map((l) => l.fromSuggestionId!))];
-  const resolvedSuggestions = savedSuggestionIds.length > 0
+  const rawSavedSuggestionIds = [...new Set(savedLooks.map((l) => l.fromSuggestionId!))];
+  const resolvedSuggestions = rawSavedSuggestionIds.length > 0
     ? await prisma.outfitSuggestion.findMany({
-        where: { id: { in: savedSuggestionIds } },
+        where: { id: { in: rawSavedSuggestionIds } },
         select: { id: true, sessionId: true },
       })
     : [];
-  const savedSessionIds = resolveSavedSessionIds(savedLooks, resolvedSuggestions);
+  const savedSuggestions = resolveSavedSuggestions(savedLooks, resolvedSuggestions);
+  const savedSuggestionIds = new Set(savedSuggestions.map((s) => s.suggestionId));
 
-  const recentSessionIds = new Set(recentRaw.map((s) => s.id));
-  const extraSessionIds = selectExtraSavedSessionIds(recentSessionIds, savedSessionIds);
-  const extraRaw = extraSessionIds.length > 0
-    ? await prisma.stylingSession.findMany({
-        where: { customerId, id: { in: extraSessionIds } },
-        orderBy: { createdAt: "desc" },
-        include: {
-          suggestions: {
-            take: 1,
-            orderBy: { createdAt: "desc" },
-            select: { id: true, outfitName: true },
-          },
+  const displayedSuggestionBySession = buildDisplayedSuggestionMap(recentRaw);
+  const extraSavedSuggestions = selectExtraSavedSuggestions(savedSuggestions, displayedSuggestionBySession);
+  const extraSuggestionIds = extraSavedSuggestions.map((s) => s.suggestionId);
+  const extraSuggestionRows = extraSuggestionIds.length > 0
+    ? await prisma.outfitSuggestion.findMany({
+        where: { id: { in: extraSuggestionIds }, session: { customerId } },
+        select: {
+          id: true,
+          outfitName: true,
+          createdAt: true,
+          sessionId: true,
+          session: { select: { occasion: true } },
         },
       })
     : [];
+  const extraSuggestionInputs = extraSuggestionRows.map((s) => ({
+    suggestionId: s.id,
+    outfitName: s.outfitName,
+    suggestionCreatedAt: s.createdAt,
+    sessionId: s.sessionId,
+    sessionOccasion: s.session.occasion,
+  }));
 
-  const recentSessions: SessionRecord[] = mergeHistoryWithSavedSessions(recentRaw, extraRaw, savedSessionIds);
+  const recentSessions: SessionRecord[] = buildUnifiedHistory(recentRaw, extraSuggestionInputs, savedSuggestionIds);
 
   return data({
     hasProfile: !!profile,
@@ -215,7 +225,7 @@ export default function StyleMeIndex() {
         {recentSessions.length > 0 ? (
           <ul className="sml-grid" style={{ listStyle: "none", margin: 0, padding: 0 }}>
             {recentSessions.map((session) => (
-              <li key={session.id}>
+              <li key={session.suggestionId ?? session.id}>
                 <SessionCard session={session} />
               </li>
             ))}
@@ -249,6 +259,15 @@ function SessionCard({ session }: { session: SessionRecord }) {
     }
   }
 
+  // suggestionId pins the link to the EXACT suggestion this card represents —
+  // required when a session has multiple suggestions and this card is not
+  // the latest one (e.g. an older saved suggestion). Harmless and
+  // equivalent to today's behavior when suggestionId is the session's
+  // latest suggestion anyway.
+  const resultHref = session.suggestionId
+    ? `/style-me/result?sessionId=${session.id}&suggestionId=${session.suggestionId}`
+    : `/style-me/result?sessionId=${session.id}`;
+
   return (
     <article className="sml-card">
       <div className="sml-card-date">
@@ -256,7 +275,7 @@ function SessionCard({ session }: { session: SessionRecord }) {
         {session.saved && <span className="sml-card-saved-badge">SAVED</span>}
       </div>
       <Link
-        to={`/style-me/result?sessionId=${session.id}`}
+        to={resultHref}
         className="sml-card-title"
       >
         {session.outfitName || (occasionLabel ? `${occasionLabel} look` : "Styled look")}
@@ -264,7 +283,7 @@ function SessionCard({ session }: { session: SessionRecord }) {
       {occasionLabel && <p className="sml-card-occasion">{occasionLabel}</p>}
       <div className="sv-card-actions">
         <Link
-          to={`/style-me/result?sessionId=${session.id}`}
+          to={resultHref}
           className="sv-card-action"
         >
           View Look

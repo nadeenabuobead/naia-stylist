@@ -29,6 +29,7 @@ import { autoSelectClosetAnchor, resolveActionAnchor, loadAllClosetItemsForEngin
 import { parseSuggestionMetadata } from "~/lib/ai/styleme-result.types";
 import { resolveStyleMeMode } from "~/lib/styleme/mode-resolution";
 import { occasionDisplayFor } from "~/lib/styleme/occasion-display";
+import { resolveResultSuggestionSelector } from "~/lib/styleme/history-saved-durability";
 import {
   NO_NADINE_HERO_NOTE,
   shouldExplainNoNadineHero,
@@ -64,6 +65,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const url = new URL(request.url);
     const sessionId = url.searchParams.get("sessionId");
+    // Optional: pins the load to one specific historical suggestion within the
+    // session (e.g. an older saved look that isn't the session's latest
+    // suggestion). Absent -> existing behavior, unchanged: latest suggestion.
+    const requestedSuggestionId = url.searchParams.get("suggestionId");
 
     // Resolve the optional nAia session once — used by both the direct-load and cookie paths.
     const naiaCustomer = await getCurrentNaiaCustomer(request);
@@ -123,8 +128,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
                 },
               },
             },
-            orderBy: { createdAt: "desc" },
-            take: 1,
+            // resolveResultSuggestionSelector nests under this session's own
+            // `suggestions` relation (never a standalone top-level suggestion
+            // lookup), so requestedSuggestionId can only ever match a suggestion
+            // that belongs to this exact session — already ownership-checked
+            // below against sessionId. A foreign-session or foreign-customer id,
+            // or a nonexistent/stale one, simply matches nothing here and falls
+            // through to the existing empty-suggestions shape, same as any miss.
+            ...resolveResultSuggestionSelector(requestedSuggestionId),
           },
         },
       });

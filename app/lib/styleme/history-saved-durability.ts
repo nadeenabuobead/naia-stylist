@@ -1,86 +1,164 @@
 // app/lib/styleme/history-saved-durability.ts
 //
 // Saved-look durability for the unified StyleMe history loader
-// (app/routes/style-me/_index.tsx). The loader caps normal history at the
-// 20 most recent sessions; SavedLook persistence itself has no such cap —
-// a look explicitly saved from a session outside the recent 20 remains in
-// the database but was unreachable from the customer UI. These pure
-// functions resolve which older sessions must be surfaced anyway, and
-// merge them deterministically into one unified list. Extracted here
-// (rather than left inline in the route module) so they're testable
-// without pulling in route-only imports (CSS, etc.) that break under a
-// plain test runner — the same pattern already used for
-// resolveLockedAnchorOutcome.
+// (app/routes/style-me/_index.tsx). Card identity is per-SUGGESTION, not
+// per-session: a session can have multiple OutfitSuggestions (rerolls),
+// and SavedLook.fromSuggestionId names one specific suggestion. The loader
+// caps normal history at the 20 most recent sessions, each showing its
+// latest suggestion; SavedLook persistence has no such cap and is not
+// necessarily the latest suggestion in its session. A saved suggestion
+// that isn't the one a recent card already displays needs its own card —
+// otherwise it is either badged onto the wrong (unsaved) suggestion, or
+// never reachable at all regardless of the 20-session cap.
+//
+// Extracted here (rather than left inline in the route module) so these
+// are testable without pulling in route-only imports — the same pattern
+// already used for resolveLockedAnchorOutcome.
 
 export type SessionRecord = {
-  id: string;
+  id: string; // session id — used for the result-page sessionId link param
   occasion: string | null;
   createdAt: string;
   outfitName: string | null;
-  suggestionId: string | null;
-  saved: boolean;
+  suggestionId: string | null; // the EXACT suggestion this card represents and links to
+  saved: boolean; // true iff suggestionId is an actually-saved suggestion
 };
 
 export type HistorySessionInput = {
   id: string;
   occasion: string | null;
-  createdAt: Date;
-  suggestions: Array<{ id: string; outfitName: string | null }>;
+  createdAt: Date; // session creation — ordering fallback only, when the session has no suggestion yet
+  suggestions: Array<{ id: string; outfitName: string | null; createdAt: Date }>;
+};
+
+export type SavedSuggestionInfo = { suggestionId: string; sessionId: string };
+
+export type ExtraSuggestionInput = {
+  suggestionId: string;
+  outfitName: string | null;
+  suggestionCreatedAt: Date; // the suggestion's own generation time — orders this card
+  sessionId: string;
+  sessionOccasion: string | null;
 };
 
 /**
- * Resolves which StylingSession ids have at least one SavedLook pointing at
- * them, via the SavedLook -> OutfitSuggestion -> StylingSession chain.
- * A SavedLook whose fromSuggestionId has no matching row in resolvedSuggestions
- * (a stale reference to a deleted suggestion — fromSuggestionId has no FK) is
- * simply skipped — never throws.
+ * Resolves each SavedLook to its exact {suggestionId, sessionId} pair via
+ * SavedLook.fromSuggestionId -> OutfitSuggestion. A fromSuggestionId with no
+ * matching row in resolvedSuggestions (a stale reference to a deleted
+ * suggestion — fromSuggestionId has no FK) is simply skipped — never throws.
  */
-export function resolveSavedSessionIds(
+export function resolveSavedSuggestions(
   savedLooks: Array<{ fromSuggestionId: string | null }>,
   resolvedSuggestions: Array<{ id: string; sessionId: string }>,
-): Set<string> {
-  const suggestionToSession = new Map(resolvedSuggestions.map((s) => [s.id, s.sessionId]));
-  const result = new Set<string>();
+): SavedSuggestionInfo[] {
+  const sessionBySuggestion = new Map(resolvedSuggestions.map((s) => [s.id, s.sessionId]));
+  const seen = new Set<string>();
+  const result: SavedSuggestionInfo[] = [];
   for (const look of savedLooks) {
     if (!look.fromSuggestionId) continue;
-    const sessionId = suggestionToSession.get(look.fromSuggestionId);
-    if (sessionId) result.add(sessionId);
+    if (seen.has(look.fromSuggestionId)) continue;
+    const sessionId = sessionBySuggestion.get(look.fromSuggestionId);
+    if (!sessionId) continue; // stale reference — fails safe
+    seen.add(look.fromSuggestionId);
+    result.push({ suggestionId: look.fromSuggestionId, sessionId });
   }
   return result;
 }
 
-/** The saved sessions not already present in the recent-20 window — never includes an unsaved session. */
-export function selectExtraSavedSessionIds(
-  recentSessionIds: ReadonlySet<string>,
-  savedSessionIds: ReadonlySet<string>,
-): string[] {
-  return [...savedSessionIds].filter((id) => !recentSessionIds.has(id));
+/**
+ * A saved suggestion needs its own extra card only when it is not already
+ * the suggestion a recent-20 card displays for that session — either
+ * because the session isn't in the recent-20 window at all (displayed is
+ * undefined), or because the session IS recent but its displayed (latest)
+ * suggestion is a different one.
+ */
+export function selectExtraSavedSuggestions(
+  savedSuggestions: SavedSuggestionInfo[],
+  recentDisplayedSuggestionBySession: ReadonlyMap<string, string | null>,
+): SavedSuggestionInfo[] {
+  return savedSuggestions.filter(({ suggestionId, sessionId }) => {
+    const displayed = recentDisplayedSuggestionBySession.get(sessionId);
+    return displayed === undefined || displayed !== suggestionId;
+  });
 }
 
 /**
- * Merges the recent-20 sessions with any older explicitly-saved sessions into
- * one deterministically-ordered list (createdAt desc), annotating each with
- * its saved state. recentSessions and extraSavedSessions are assumed disjoint
- * (selectExtraSavedSessionIds already excludes overlap) — this function does
- * not re-check for duplicates, it only orders and annotates.
+ * Builds the single unified, deterministically-ordered history: one card
+ * per recent-20 session (its latest suggestion, as before) plus one card
+ * per extra saved suggestion that isn't already displayed by a recent
+ * card. Each card's `saved` flag reflects whether its own exact
+ * suggestionId is in savedSuggestionIds — never the session as a whole,
+ * so two independently-saved suggestions from the same session each get
+ * their own correctly-badged card, and neither collapses into the other.
+ *
+ * Ordering contract: each card orders by the real generation time of the
+ * exact look it represents — the suggestion's own createdAt — not the
+ * parent session's createdAt. A session's first suggestion and a later
+ * reroll on that same session can be generated minutes or days apart;
+ * ordering by session.createdAt would misrepresent when a rerolled (or
+ * later-saved) look was actually made. Session.createdAt is used only as
+ * a fallback for the rare case of a session with no suggestion yet
+ * (mid-generation). Ties break by insertion order (Array.sort is stable);
+ * cards with no suggestion sort using the session's own createdAt.
  */
-export function mergeHistoryWithSavedSessions(
+export function buildUnifiedHistory(
   recentSessions: HistorySessionInput[],
-  extraSavedSessions: HistorySessionInput[],
-  savedSessionIds: ReadonlySet<string>,
+  extraSuggestions: ExtraSuggestionInput[],
+  savedSuggestionIds: ReadonlySet<string>,
 ): SessionRecord[] {
-  const toRecord = (s: HistorySessionInput): SessionRecord => {
+  const recentCards: SessionRecord[] = recentSessions.map((s) => {
     const sugg = s.suggestions[0] ?? null;
     return {
       id: s.id,
       occasion: s.occasion,
-      createdAt: s.createdAt.toISOString(),
+      createdAt: (sugg?.createdAt ?? s.createdAt).toISOString(),
       outfitName: sugg?.outfitName ?? null,
       suggestionId: sugg?.id ?? null,
-      saved: savedSessionIds.has(s.id),
+      saved: sugg ? savedSuggestionIds.has(sugg.id) : false,
     };
-  };
-  return [...recentSessions, ...extraSavedSessions]
-    .map(toRecord)
-    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
+  });
+
+  const extraCards: SessionRecord[] = extraSuggestions.map((s) => ({
+    id: s.sessionId,
+    occasion: s.sessionOccasion,
+    createdAt: s.suggestionCreatedAt.toISOString(),
+    outfitName: s.outfitName,
+    suggestionId: s.suggestionId,
+    saved: true, // extraSuggestions are, by construction, always saved suggestions
+  }));
+
+  return [...recentCards, ...extraCards].sort((a, b) =>
+    a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0,
+  );
+}
+
+/** Convenience: session id -> the suggestion id its recent-20 card displays (or null if no suggestion). */
+export function buildDisplayedSuggestionMap(
+  recentSessions: HistorySessionInput[],
+): Map<string, string | null> {
+  return new Map(recentSessions.map((s) => [s.id, s.suggestions[0]?.id ?? null]));
+}
+
+export type ResultSuggestionSelector =
+  | { where: { id: string } }
+  | { orderBy: { createdAt: "desc" }; take: 1 };
+
+/**
+ * Builds the Prisma sub-query passed to `StylingSession.findUnique(...).include.suggestions`
+ * in the result-page loader (app/routes/style-me/result.tsx). This is deliberately a value
+ * to be nested under that one `include`, never a standalone `prisma.outfitSuggestion.findUnique`
+ * keyed by id alone — nesting it there means Prisma scopes the `id` filter to suggestions
+ * belonging to the session already fetched (and ownership-checked) by sessionId, so a
+ * suggestionId from a different session, or from another customer's session, can never
+ * substitute in: it simply matches nothing under this session's relation and the suggestion
+ * list comes back empty, same as any other miss.
+ *
+ * No requestedSuggestionId -> the exact pre-existing selector shape (latest suggestion only).
+ */
+export function resolveResultSuggestionSelector(
+  requestedSuggestionId: string | null,
+): ResultSuggestionSelector {
+  return requestedSuggestionId
+    ? { where: { id: requestedSuggestionId } }
+    : { orderBy: { createdAt: "desc" }, take: 1 };
 }
