@@ -62,6 +62,24 @@ export const REEMERGENCE_SUPPORT_MULTIPLIER = 1.5;   // 4.0 * 1.5 = 6.0
 export const REEMERGENCE_DISTINCT_RECORDS   = 5;
 export const REEMERGENCE_WNET_MINIMUM       = 4.0;
 
+// ── Staleness / recency — explicitly DEFERRED to V2 ────────────────────────────
+//
+// V1 rule (locked for this release): evidence age does not modify weight.
+// aggregateEvidence() in taste-reconcile.server.ts sums each row's `strength`
+// unconditionally — a row from a year ago counts exactly as much as one from
+// today. occurredAt/lastEvidenceAt are tracked and displayed, and used only
+// as the generation-cutoff boundary after a rejection (see
+// REEMERGENCE_* above) — never to decay or expire active evidence. No
+// half-life, no recency multiplier, and no age-based threshold change exist
+// anywhere in this file or in taste-reconcile.server.ts, by design, not by
+// oversight. See taste-staleness-deferred.test.ts for the test that proves
+// this against the real engine.
+//
+// Deferred to V2: determine evidence recency policy, including whether
+// different sources decay at different rates, minimum persistence windows,
+// and how customer-confirmed tendencies interact with age. None of those
+// rules are invented here — this comment documents the V1 boundary only.
+
 // ── Source base strengths ──────────────────────────────────────────────────────
 
 export const SOURCE_BASE_STRENGTH: Record<TasteSource, number> = {

@@ -120,24 +120,26 @@ async function backfillBuySkip(customerId: string): Promise<void> {
       take: BATCH_SIZE,
       skip,
       orderBy: { createdAt: "asc" },
-      include: { outcomes: { select: { id: true, postPurchaseOutcome: true, createdAt: true } } },
+      // BuyOrSkipAnalysis.outcome is singular/one-to-one (prisma/schema.prisma:542:
+      // `outcome BuySkipOutcome?`) — there is no `outcomes` relation on this model.
+      include: { outcome: { select: { id: true, postPurchaseOutcome: true, createdAt: true } } },
     });
     if (analyses.length === 0) break;
 
     for (const analysis of analyses) {
-      for (const outcome of analysis.outcomes) {
-        try {
-          const rows = extractBuySkipEvidence({
-            id:                  outcome.id,
-            customerId,
-            postPurchaseOutcome: outcome.postPurchaseOutcome,
-            category:            analysis.category,
-            createdAt:           outcome.createdAt,
-          });
-          await writeSourceEvidence(customerId, "BUYSKIP_OUTCOME", outcome.id, rows);
-        } catch (err) {
-          console.warn(`  [warn] BuySkip ${outcome.id}: ${err}`);
-        }
+      const outcome = analysis.outcome;
+      if (!outcome) continue;
+      try {
+        const rows = extractBuySkipEvidence({
+          id:                  outcome.id,
+          customerId,
+          postPurchaseOutcome: outcome.postPurchaseOutcome,
+          category:            analysis.category,
+          createdAt:           outcome.createdAt,
+        });
+        await writeSourceEvidence(customerId, "BUYSKIP_OUTCOME", outcome.id, rows);
+      } catch (err) {
+        console.warn(`  [warn] BuySkip ${outcome.id}: ${err}`);
       }
     }
     skip += analyses.length;

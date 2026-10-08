@@ -16,6 +16,12 @@ import {
 import { data } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { loadConfirmedTendencies } from "~/lib/ai/taste-reconcile.server";
+import {
+  loadPassportSnapshot,
+  detectPassportContradiction,
+  generateObservationText,
+  PASSPORT_TASTE_MAPPINGS,
+} from "~/lib/ai/taste-passport-boundary.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 
@@ -31,18 +37,31 @@ export function meta() {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const customer = await requireCurrentNaiaCustomer(request);
-  const { confirmed, candidateCount } = await loadConfirmedTendencies(customer.id);
+  const [{ confirmed, candidateCount }, passport] = await Promise.all([
+    loadConfirmedTendencies(customer.id),
+    loadPassportSnapshot(customer.id),
+  ]);
 
   return data({
-    confirmed: confirmed.map(t => ({
-      id:               t.id,
-      dimension:        t.dimension,
-      value:            t.value,
-      observationFamily: t.observationFamily,
-      claimText:        t.claimText,
-      rationaleText:    t.rationaleText,
-      customerFeedback: t.customerFeedback,
-    })),
+    confirmed: confirmed.map(t => {
+      const contradiction = detectPassportContradiction(
+        t.dimension,
+        t.value,
+        t.dominantPolarity as "positive" | "negative",
+        passport,
+      );
+      const mapping = PASSPORT_TASTE_MAPPINGS[t.dimension as keyof typeof PASSPORT_TASTE_MAPPINGS];
+      const text = generateObservationText(t.claimText ?? "", t.rationaleText ?? "", contradiction, mapping);
+      return {
+        id:               t.id,
+        dimension:        t.dimension,
+        value:            t.value,
+        observationFamily: t.observationFamily,
+        claimText:        text.claimText,
+        rationaleText:    text.rationaleText,
+        customerFeedback: t.customerFeedback,
+      };
+    }),
     candidateCount,
   });
 }
