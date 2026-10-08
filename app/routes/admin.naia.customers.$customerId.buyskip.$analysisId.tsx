@@ -88,6 +88,7 @@ function DecisionEvidenceSection({ decisionEvidence }: { decisionEvidence: unkno
   const con = isRecord(decisionEvidence.constraintEvidence) ? decisionEvidence.constraintEvidence : null;
   const colour = isRecord(decisionEvidence.colourPreferenceEvidence) ? decisionEvidence.colourPreferenceEvidence : null;
   const need = isRecord(decisionEvidence.wardrobeNeed) ? decisionEvidence.wardrobeNeed : null;
+  const outcomeHistory = isRecord(decisionEvidence.outcomeHistory) ? decisionEvidence.outcomeHistory : null;
 
   return (
     <div className="na-card">
@@ -188,6 +189,25 @@ function DecisionEvidenceSection({ decisionEvidence }: { decisionEvidence: unkno
             <p style={{ fontSize: "0.7rem", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "0.3rem" }}>Wardrobe Need</p>
             <p style={{ fontSize: "0.78rem", color: "#9ca3af" }}>
               {String(need.status)} — {String(need.reason ?? "")}
+            </p>
+          </div>
+        )}
+
+        {outcomeHistory && outcomeHistory.available === true && (
+          <div>
+            <p style={{ fontSize: "0.7rem", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "0.3rem" }}>
+              Outcome History <span style={{ color: "#93c5fd" }}>— B3, advisory evidence only</span>
+            </p>
+            <p style={{ fontSize: "0.78rem", color: "#9ca3af" }}>
+              {String(outcomeHistory.category ?? "")}: {String(outcomeHistory.lovedCount ?? 0)} previous purchase{outcomeHistory.lovedCount === 1 ? "" : "s"} loved, {String(outcomeHistory.returnedCount ?? 0)} returned
+            </p>
+            {Array.isArray(outcomeHistory.provenanceIds) && outcomeHistory.provenanceIds.length > 0 && (
+              <p style={{ fontSize: "0.65rem", color: "#6b7280", marginTop: "0.2rem" }}>
+                From {outcomeHistory.provenanceIds.length} prior outcome record{outcomeHistory.provenanceIds.length === 1 ? "" : "s"} — this customer's own, never another customer's.
+              </p>
+            )}
+            <p style={{ fontSize: "0.65rem", color: "#6b7280", marginTop: "0.3rem" }}>
+              Derived from this customer's own explicit post-purchase reports only — never from a past nAia verdict. Not read by the verdict or the AI prompt in this phase; evidence only.
             </p>
           </div>
         )}

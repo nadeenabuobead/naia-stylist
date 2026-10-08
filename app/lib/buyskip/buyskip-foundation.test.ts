@@ -195,6 +195,7 @@ describe("decision-evidence: assembly + hard-constraint veto (Phase 8, regressio
       constraintEvidence,
       colourPreferenceEvidence: checkColourPreference([], facts()),
       wardrobeNeed: getWardrobeNeedEvidence(),
+      outcomeHistory: { available: false },
       computedAt: "2026-10-01T00:00:00.000Z",
     });
     assert.equal(de.passportAlignment, "deferred_to_resolved_passport");
@@ -209,6 +210,7 @@ describe("decision-evidence: assembly + hard-constraint veto (Phase 8, regressio
       constraintEvidence,
       colourPreferenceEvidence: checkColourPreference([], facts()),
       wardrobeNeed: getWardrobeNeedEvidence(),
+      outcomeHistory: { available: false },
       computedAt: "2026-10-01T00:00:00.000Z",
     });
     assert.equal(de.passportAlignment, "available");

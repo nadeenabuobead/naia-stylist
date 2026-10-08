@@ -19,6 +19,7 @@ import type { ProductFacts } from "./product-facts.server";
 import type { DuplicateEvidence } from "./duplicate-evidence.server";
 import type { ConstraintEvidence, ColourPreferenceEvidence } from "./constraint-evidence.server";
 import type { WardrobeNeedEvidence } from "./wardrobe-need.server";
+import type { OutcomeHistoryEvidence } from "./outcome-history-evidence.server";
 
 export type BuySkipDecisionState = "BUY" | "LEAN_BUY" | "LEAN_SKIP" | "SKIP" | "INSUFFICIENT_EVIDENCE";
 
@@ -29,6 +30,12 @@ export interface DecisionEvidence {
   /** B2b1 — advisory only. Never read by applyHardConstraintVeto. */
   colourPreferenceEvidence: ColourPreferenceEvidence;
   wardrobeNeed: WardrobeNeedEvidence;
+  /** B3 — the customer's own past explicit purchase outcomes for this exact
+   * candidate's category. Evidence only: never read by applyHardConstraintVeto
+   * or applyVerdictOverride, never injected into the AI prompt. Older
+   * persisted records (pre-B3) simply lack this field — always optional-chain
+   * when reading it back. */
+  outcomeHistory: OutcomeHistoryEvidence;
   passportAlignment: "available" | "deferred_to_resolved_passport";
   tasteEvidence: "unavailable";
   provenance: {
@@ -45,6 +52,7 @@ export function assembleDecisionEvidence(input: {
   constraintEvidence: ConstraintEvidence;
   colourPreferenceEvidence: ColourPreferenceEvidence;
   wardrobeNeed: WardrobeNeedEvidence;
+  outcomeHistory: OutcomeHistoryEvidence;
   computedAt: string;
 }): DecisionEvidence {
   return {
@@ -53,6 +61,7 @@ export function assembleDecisionEvidence(input: {
     constraintEvidence: input.constraintEvidence,
     colourPreferenceEvidence: input.colourPreferenceEvidence,
     wardrobeNeed: input.wardrobeNeed,
+    outcomeHistory: input.outcomeHistory,
     passportAlignment: input.constraintEvidence.deferredToResolvedPassport ? "deferred_to_resolved_passport" : "available",
     tasteEvidence: "unavailable",
     provenance: {

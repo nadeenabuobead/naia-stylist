@@ -23,6 +23,7 @@ import { normalizeDeclaredFacts, mergeVisionFacts } from "../lib/buyskip/product
 import { computeDuplicateEvidence } from "../lib/buyskip/duplicate-evidence.server";
 import { checkHardConstraints, checkColourPreference } from "../lib/buyskip/constraint-evidence.server";
 import { getWardrobeNeedEvidence } from "../lib/buyskip/wardrobe-need.server";
+import { summarizeOutcomeHistory } from "../lib/buyskip/outcome-history-evidence.server";
 import { assembleDecisionEvidence, applyHardConstraintVeto } from "../lib/buyskip/decision-evidence.server";
 import {
   GARMENT_SILHOUETTE_VALUES,
@@ -950,12 +951,34 @@ Respond ONLY with valid JSON, no markdown:
     // match can never reach applyHardConstraintVeto.
     const colourPreferenceEvidence = checkColourPreference(styleProfile?.avoidColors ?? null, productFacts);
     const wardrobeNeed = getWardrobeNeedEvidence();
+
+    // B3 — the customer's own past explicit purchase outcomes for this exact
+    // category, never nAia's own past verdicts. Additive only, same pattern
+    // as the Phase 3 wardrobe-context lookup above: a failure here must
+    // never block the core verdict, so it degrades to "no history" on any
+    // error. Deliberately a separate, ungated resolveCustomerIntelligence
+    // call — not folded into the wardrobe-context call above, which is
+    // restricted to WARDROBE_CONTEXT_ELIGIBLE_CATEGORIES for unrelated
+    // wardrobe-gap reasons that have nothing to do with whether this
+    // customer has a purchase-outcome history in this category.
+    let outcomeHistory = { available: false };
+    try {
+      const outcomeFindings = await resolveCustomerIntelligence({
+        customerId: naiaCustomer.id,
+        include: ["buyskip-outcome"],
+      });
+      outcomeHistory = summarizeOutcomeHistory(normalizedCategory, outcomeFindings);
+    } catch (outcomeHistoryErr) {
+      console.error("[buy-skip] outcome history lookup failed (non-fatal):", outcomeHistoryErr?.message ?? outcomeHistoryErr);
+    }
+
     const decisionEvidence = assembleDecisionEvidence({
       productFacts,
       duplicateEvidence,
       constraintEvidence,
       colourPreferenceEvidence,
       wardrobeNeed,
+      outcomeHistory,
       computedAt: new Date().toISOString(),
     });
 
