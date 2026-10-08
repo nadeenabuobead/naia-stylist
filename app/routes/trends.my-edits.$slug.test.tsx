@@ -73,6 +73,16 @@ vi.mock("~/lib/trend-product-recommendation.server", () => ({
   matchNadineProduct: vi.fn(() => null),
 }));
 
+vi.mock("~/lib/plan/entitlement.server", () => ({
+  checkEntitlement: vi.fn().mockResolvedValue({ allowed: true }),
+}));
+
+vi.mock("~/lib/ai/journey-events.server", () => ({
+  emitTrendEditGenerated: vi.fn(() => ({ type: "trend_edit_generated" })),
+  recordJourneyEventAwaited: vi.fn().mockResolvedValue({ created: true }),
+  hashCustomerId: vi.fn(() => "hash123"),
+}));
+
 vi.mock("~/styles/naia-design-system.css?url", () => ({ default: "/styles.css" }));
 
 vi.mock("~/components/my-naia/MyNaiaLayout", () => ({

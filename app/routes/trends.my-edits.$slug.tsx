@@ -17,6 +17,12 @@ import {
   matchNadineProduct,
   type NadineProductRecommendation,
 } from "~/lib/trend-product-recommendation.server";
+import { checkEntitlement } from "~/lib/plan/entitlement.server";
+import {
+  emitTrendEditGenerated,
+  recordJourneyEventAwaited,
+  hashCustomerId,
+} from "~/lib/ai/journey-events.server";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 
@@ -27,6 +33,7 @@ type LoaderData = {
   generationFailed: boolean;
   nadineRecommendation: NadineProductRecommendation | null;
   reportIndex: number;
+  membershipRequired: boolean;
 };
 
 export const links: LinksFunction = () => [
@@ -51,6 +58,26 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   ]);
   if (!report) throw new Response("Not Found", { status: 404 });
   const reportIndex = allPublished.findIndex((r) => r.slug === report.slug);
+
+  // Personalised Trend Edit is a membership feature. Behind ENTITLEMENT_ENFORCEMENT
+  // (same rollout flag as StyleMe/BuySkip/VTO — disabled in production until the
+  // upgrade flow exists) a non-member sees a clear membership-required state
+  // instead of the full personalised edit. No Closet/Passport read happens for a
+  // blocked customer — nothing to leak, nothing generated, nothing to count.
+  if (process.env.ENTITLEMENT_ENFORCEMENT === "true") {
+    const entitlement = await checkEntitlement(customer.id, customer.membershipStatus, "personalisedTrend");
+    if (!entitlement.allowed) {
+      return {
+        report,
+        edit: null,
+        hasProfile: false,
+        generationFailed: false,
+        nadineRecommendation: null,
+        reportIndex,
+        membershipRequired: true,
+      } satisfies LoaderData;
+    }
+  }
 
   try {
     const evidence = await getShopperEvidence(customer.id);
@@ -78,6 +105,27 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       };
     }
 
+    // Usage completion signal — fired only for a genuine personalised edit
+    // (never a locked/empty/failed state), analytics-only (see
+    // emitTrendEditGenerated). Idempotency key is per customer+report+month,
+    // so a refresh/reload within the same month never double-counts. Never
+    // blocks the response.
+    if (edit) {
+      try {
+        const monthKey = new Date().toISOString().slice(0, 7); // "YYYY-MM"
+        await recordJourneyEventAwaited(
+          emitTrendEditGenerated({
+            customerId: customer.id,
+            slug: report.slug,
+            closetItemCount: evidence.closetItems.length,
+          }),
+          `trend_edit_generated:${hashCustomerId(customer.id)}:${report.slug}:${monthKey}:v1`,
+        );
+      } catch {
+        /* never let usage-event recording block the response */
+      }
+    }
+
     return {
       report,
       edit,
@@ -85,6 +133,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       generationFailed: false,
       nadineRecommendation,
       reportIndex,
+      membershipRequired: false,
     } satisfies LoaderData;
   } catch (error) {
     console.error("Shopper trend edit generation failed:", error);
@@ -95,6 +144,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       generationFailed: true,
       nadineRecommendation: null,
       reportIndex,
+      membershipRequired: false,
     } satisfies LoaderData;
   }
 }
@@ -514,7 +564,7 @@ export function ErrorBoundary() {
 }
 
 export default function MyTrendEditDetail() {
-  const { report, edit, hasProfile, generationFailed, nadineRecommendation, reportIndex } = useLoaderData() as LoaderData;
+  const { report, edit, hasProfile, generationFailed, nadineRecommendation, reportIndex, membershipRequired } = useLoaderData() as LoaderData;
   const tint = TINTS[Math.max(0, reportIndex) % TINTS.length];
   const num = String(Math.max(0, reportIndex)).padStart(2, "0");
 
@@ -627,8 +677,15 @@ export default function MyTrendEditDetail() {
           </div>
         </div>
 
-        {/* State: generation error */}
-        {generationFailed ? (
+        {/* State: membership required */}
+        {membershipRequired ? (
+          <div className="tmd-state">
+            <p className="tmd-state-text">
+              Your Personalised Trend Edit is a nAia Membership feature. Join to see this direction read through your own Style Passport and Closet.
+            </p>
+            <Link to="/my-naia/plan-usage" className="tmd-state-btn">Explore nAia Membership →</Link>
+          </div>
+        ) : generationFailed ? (
           <div className="tmd-state">
             <p className="tmd-state-text">
               Your nAia Edit is taking a moment. Please try again shortly.

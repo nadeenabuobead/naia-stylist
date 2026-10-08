@@ -421,3 +421,28 @@ export function emitBuySkipSubmitted(params: {
     params.nowFn,
   );
 }
+
+// ── trend_edit_generated ──────────────────────────────────────────────────────
+// Emitted when a genuine personalised Trend Edit was produced (Passport
+// complete, buildShopperEdit succeeded) — never for a locked/error/empty
+// state. Analytics-only: the hashed customerId here cannot feed Plan & Usage's
+// per-customer monthly count (PersonalisedTrendEntitlement.monthlyUsed stays
+// null), so this does not and must not drive quota enforcement.
+
+export function emitTrendEditGenerated(params: {
+  customerId: string;
+  slug: string;              // editorial report slug — not customer data
+  closetItemCount: number;   // aggregate count only — no item IDs
+  nowFn?: () => string;
+}): JourneyEvent {
+  return makeEvent(
+    "trend_edit_generated",
+    params.customerId,
+    "trend-edit",             // sentinel — Trend Edit views have no StylingSession
+    {
+      slug: params.slug,
+      closetItemCount: params.closetItemCount,
+    },
+    params.nowFn,
+  );
+}

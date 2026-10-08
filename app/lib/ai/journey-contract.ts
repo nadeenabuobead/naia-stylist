@@ -374,7 +374,8 @@ export type JourneyEventType =
   | "closet_item_added"
   | "look_saved"
   | "in_session_review_submitted"
-  | "buy_skip_submitted";
+  | "buy_skip_submitted"
+  | "trend_edit_generated";
 
 export interface JourneyEvent {
   type: JourneyEventType;

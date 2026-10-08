@@ -183,7 +183,7 @@ export async function getEntitlementSummary(
 // Returns whether the customer may perform the given action right now.
 // Called by route actions before executing the feature.
 
-export type EntitlementFeature = "styleMe" | "buySkip" | "vto" | "closet";
+export type EntitlementFeature = "styleMe" | "buySkip" | "vto" | "closet" | "personalisedTrend";
 
 export interface EntitlementCheck {
   allowed: boolean;
@@ -248,6 +248,16 @@ export async function checkEntitlement(
       if (completed + inFlight >= effectiveVtoLimit) {
         return { allowed: false, reason: "quota_exceeded" };
       }
+      return { allowed: true };
+    }
+
+    case "personalisedTrend": {
+      // V1: binary membership gate only — monthly usage cannot be safely counted
+      // yet (no persisted completed-edit model exists without a new migration;
+      // see PersonalisedTrendEntitlement.monthlyUsed, which stays null rather
+      // than faking a count). NONE has zero allowance regardless of usage;
+      // MEMBER's "1/month" is not yet enforced by count, only by membership tier.
+      if (limits.personalisedTrendPerMonth <= 0) return { allowed: false, reason: "quota_exceeded" };
       return { allowed: true };
     }
 
