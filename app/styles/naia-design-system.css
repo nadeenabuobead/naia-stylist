@@ -1472,6 +1472,8 @@ a.mn-action:focus-visible,
   color: var(--naia-ink);
   text-align: right;
   line-height: 1.4;
+  overflow-wrap: break-word;
+  min-width: 0;
 }
 .sp-detail-missing  { color: var(--naia-accent); }
 .sp-detail-optional { color: rgba(40, 21, 12, 0.45); }
