@@ -415,12 +415,21 @@ describe("H — Digital Closet: composed shell + content invariants", () => {
     assert.ok(src.includes("cl-headline"), "uses cl-headline class");
   });
 
-  it("closet._index.tsx has Total Pieces / Categories / Brands stats from Option A", () => {
+  it("closet._index.tsx has Total Pieces / Categories stats from Option A (Brands removed — optional field, not meaningful as a summary stat)", () => {
     const src = route("closet._index.tsx");
     assert.ok(src.includes("Total Pieces"), "has Total Pieces stat");
     assert.ok(src.includes("Categories"), "has Categories stat");
-    assert.ok(src.includes("Brands"), "has Brands stat");
     assert.ok(src.includes("cl-stats"), "uses cl-stats grid");
+    const statsIdx = src.indexOf('className="cl-stats"');
+    const statsBlock = src.slice(statsIdx, src.indexOf("</div>\n\n", statsIdx));
+    assert.ok(!statsBlock.includes(">Brands<"), "Brands stat card removed from the summary");
+    assert.ok(statsBlock.includes("cl-stat-label\">Total Pieces") && statsBlock.includes("cl-stat-label\">Categories"), "the two remaining stats are still present");
+  });
+
+  it("closet._index.tsx .cl-stats grid rebalances to 2 columns, not a 3-column grid with an empty slot", () => {
+    const src = route("closet._index.tsx");
+    assert.ok(src.includes(".cl-stats{display:grid;grid-template-columns:repeat(2,1fr)"), "stats grid is a 2-column layout");
+    assert.ok(!src.includes("grid-template-columns:repeat(3,1fr)"), "no leftover 3-column stats grid rule");
   });
 
   it("closet._index.tsx Add to Wardrobe form is from Option A (inline panel, not overlay)", () => {

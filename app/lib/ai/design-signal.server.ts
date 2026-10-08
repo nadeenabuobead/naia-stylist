@@ -2,23 +2,30 @@
 //
 // Who is eligible to contribute design evidence, enforced at the QUERY layer.
 //
-// Two filters, both in the `where` clause rather than applied after loading:
+// One filter, in the `where` clause rather than applied after loading:
 //
-//   designResearchConsent  — opt-in, defaulting to false. Declining changes
-//                            nothing about the styling service.
-//   accountType            — our own test, demo and QA accounts never reach
-//                            customer insight.
+//   accountType  — our own test, demo and QA accounts never reach customer
+//                  insight.
 //
-// Filtering in the UI instead would mean a non-consenting customer's data had
-// already been read, joined and held in memory, and one missed filter in one
-// view would expose it. Doing it here means the rows are never fetched.
+// Aggregated/coarsened design-pattern contribution is part of normal nAia
+// operation for every real customer — it is no longer a separate per-customer
+// opt-in (that toggle, and its designResearchConsent gate, were removed from
+// Settings; see settings.tsx). This does not change what a designer view may
+// ever see: ids only, aggregated, never names/emails/Closet photographs — see
+// eligibleCustomerIds() below and §DS-4 in design-signal.test.ts for the
+// boundary that still holds regardless of eligibility.
+//
+// Filtering in the UI instead would mean a row had already been read, joined
+// and held in memory, and one missed filter in one view would expose it.
+// Doing it here means only eligible rows are ever fetched.
 //
 // NOTHING IS AGGREGATED HERE YET. This is the plumbing the future designer view
 // will call; the view itself is not being built.
 
 import prisma from "~/db.server";
 
-/** Bumped when the consent wording changes, which requires asking again. */
+/** Retained for any historical consent record still on file; no longer read
+ * by ELIGIBLE_WHERE. Not currently written by any active code path. */
 export const CONSENT_VERSION = "2026-09-28.1";
 
 type EligibleCustomer = { id: string };
@@ -37,8 +44,6 @@ const db = prisma as unknown as {
  * each call site hand-rolling a filter that quietly drifts.
  */
 export const ELIGIBLE_WHERE = {
-  designResearchConsent: true,
-  designResearchConsentVersion: CONSENT_VERSION,
   accountType: "CUSTOMER",
 } as const;
 
@@ -69,27 +74,3 @@ export async function eligiblePopulation(): Promise<{ eligible: number; allCusto
   return { eligible, allCustomers };
 }
 
-/**
- * Records a customer's decision. Storing the version matters: consent given to
- * one description of the research does not carry to a different one.
- */
-export async function recordDesignResearchConsent(input: {
-  customerId: string;
-  granted: boolean;
-}): Promise<void> {
-  const { customerId, granted } = input;
-  await (prisma as unknown as { customer: { update(args: unknown): Promise<unknown> } }).customer.update({
-    where: { id: customerId },
-    data: granted
-      ? {
-          designResearchConsent: true,
-          designResearchConsentAt: new Date(),
-          designResearchConsentVersion: CONSENT_VERSION,
-        }
-      : {
-          designResearchConsent: false,
-          designResearchConsentAt: new Date(),
-          designResearchConsentVersion: null,
-        },
-  });
-}

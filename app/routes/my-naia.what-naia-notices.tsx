@@ -37,10 +37,11 @@ export function meta() {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const customer = await requireCurrentNaiaCustomer(request);
-  const [{ confirmed, candidateCount }, passport] = await Promise.all([
-    loadConfirmedTendencies(customer.id),
-    loadPassportSnapshot(customer.id),
-  ]);
+  // Sequential, not Promise.all: the pooled DATABASE_URL runs this app with
+  // connection_limit=1 per serverless instance — see my-naia._index.tsx's
+  // loader for the confirmed P2024 failure this same pattern caused there.
+  const { confirmed, candidateCount } = await loadConfirmedTendencies(customer.id);
+  const passport = await loadPassportSnapshot(customer.id);
 
   return data({
     confirmed: confirmed.map(t => {

@@ -18,7 +18,7 @@ import {
   MIN_GROUP_SIZE,
   type DesignSignal,
 } from "./design-signal.ts";
-import { ELIGIBLE_WHERE, CONSENT_VERSION } from "./design-signal.server.ts";
+import { ELIGIBLE_WHERE } from "./design-signal.server.ts";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -174,10 +174,10 @@ describe("§DS-2 counting people, not rows", () => {
 // ── §DS-3 — eligibility at the query layer ────────────────────────────────────
 
 describe("§DS-3 eligibility", () => {
-  it("§DS-3a eligibility requires consent, the current version, and a real account", () => {
-    assert.equal(ELIGIBLE_WHERE.designResearchConsent, true);
-    assert.equal(ELIGIBLE_WHERE.designResearchConsentVersion, CONSENT_VERSION);
+  it("§DS-3a eligibility requires only a real account — aggregated design-pattern contribution is normal nAia operation, not a per-customer opt-in", () => {
     assert.equal(ELIGIBLE_WHERE.accountType, "CUSTOMER");
+    assert.ok(!("designResearchConsent" in ELIGIBLE_WHERE));
+    assert.ok(!("designResearchConsentVersion" in ELIGIBLE_WHERE));
   });
 
   it("§DS-3b the filter is a query clause, so non-consenting rows are never read", () => {

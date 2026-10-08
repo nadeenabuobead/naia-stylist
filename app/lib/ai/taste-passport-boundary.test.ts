@@ -130,10 +130,19 @@ describe("PP.4 — conflicting observation does not mutate Passport", () => {
     assert.ok(!/prisma\.customer\.(update|upsert|create|delete)/i.test(boundarySrc));
   });
 
-  it("the module's only Customer access is a single read-only findUnique, scoped by id", () => {
-    const writeCalls = boundarySrc.match(/prisma\.customer\.\w+\(/g) ?? [];
-    assert.deepEqual(writeCalls, ["prisma.customer.findUnique("]);
-    assert.ok(/findUnique\(\s*\{\s*where:\s*\{\s*id:\s*customerId\s*\}/.test(boundarySrc));
+  it("the module makes no Customer access at all — the Passport fields live on OnboardingProfile", () => {
+    // Previously read these four fields directly off Customer via
+    // prisma.customer.findUnique — a PrismaClientValidationError in
+    // production, since styleExpression/dressingHabits/silhouette/
+    // fitConcerns are OnboardingProfile fields, not Customer fields.
+    const calls = boundarySrc.match(/prisma\.customer\.\w+\(/g) ?? [];
+    assert.deepEqual(calls, []);
+  });
+
+  it("the module's only DB access is a single read-only OnboardingProfile findUnique, scoped by customerId", () => {
+    const calls = boundarySrc.match(/prisma\.onboardingProfile\.\w+\(/g) ?? [];
+    assert.deepEqual(calls, ["prisma.onboardingProfile.findUnique("]);
+    assert.ok(/findUnique\(\s*\{\s*where:\s*\{\s*customerId\s*\}/.test(boundarySrc));
   });
 });
 
@@ -221,7 +230,7 @@ describe("PP.9 — customer A's Passport cannot affect customer B's observation"
   });
 
   it("loadPassportSnapshot scopes its Prisma read by the given customerId only", () => {
-    assert.ok(/where:\s*\{\s*id:\s*customerId\s*\}/.test(boundarySrc));
+    assert.ok(/where:\s*\{\s*customerId\s*\}/.test(boundarySrc));
   });
 });
 

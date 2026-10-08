@@ -685,7 +685,7 @@ export default function MyTrendEditDetail() {
               <em>{report.title.split(" ").slice(-1)[0]}</em>
             </h1>
             {edit && <p className="tmd-hero-subtitle">{edit.subTitle}</p>}
-            <Link to={`/trends/${report.slug}`} className="tmd-hero-public-link">
+            <Link to={`/trend-reports/${report.slug}`} className="tmd-hero-public-link">
               Read the public report →
             </Link>
           </div>
@@ -704,7 +704,7 @@ export default function MyTrendEditDetail() {
             <p className="tmd-state-text">
               Your nAia Edit is taking a moment. Please try again shortly.
             </p>
-            <Link to={`/trends/${report.slug}`} className="tmd-state-btn">
+            <Link to={`/trend-reports/${report.slug}`} className="tmd-state-btn">
               Back to the report →
             </Link>
           </div>

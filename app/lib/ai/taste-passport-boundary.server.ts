@@ -105,8 +105,10 @@ const EMPTY_SNAPSHOT: PassportSnapshot = {
  * rather than re-deriving Passport vocabulary rules.
  */
 export async function loadPassportSnapshot(customerId: string): Promise<PassportSnapshot> {
-  const customer = await prisma.customer.findUnique({
-    where: { id: customerId },
+  // These four fields live on OnboardingProfile (the Passport record),
+  // related to Customer 1:1 via customerId — never directly on Customer.
+  const profile = await prisma.onboardingProfile.findUnique({
+    where: { customerId },
     select: {
       styleExpression: true,
       dressingHabits: true,
@@ -114,12 +116,12 @@ export async function loadPassportSnapshot(customerId: string): Promise<Passport
       fitConcerns: true,
     },
   });
-  if (!customer) return EMPTY_SNAPSHOT;
+  if (!profile) return EMPTY_SNAPSHOT;
   return {
-    styleExpression: currentStyleExpression(customer.styleExpression),
-    dressingHabits: customer.dressingHabits ?? [],
-    silhouette: customer.silhouette ?? [],
-    fitConcerns: customer.fitConcerns ?? [],
+    styleExpression: currentStyleExpression(profile.styleExpression),
+    dressingHabits: profile.dressingHabits ?? [],
+    silhouette: profile.silhouette ?? [],
+    fitConcerns: profile.fitConcerns ?? [],
   };
 }
 

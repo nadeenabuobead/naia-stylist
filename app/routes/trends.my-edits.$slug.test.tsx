@@ -280,8 +280,27 @@ describe("MyTrendEditDetail component", () => {
       nadineRecommendation: null,
     });
     const html = renderToString(React.createElement(MyTrendEditDetail));
-    expect(html).toContain(`href="/trends/${MOCK_REPORT.slug}"`);
+    expect(html).toContain(`href="/trend-reports/${MOCK_REPORT.slug}"`);
     expect(html).toContain("public report");
+  });
+
+  // /trend-reports/:slug is a re-export shell of /trends/:slug registered
+  // specifically "at the same path used by the storefront proxy" (see
+  // trend-reports.$slug.tsx) — nadine-storefront's own rewrite only proxies
+  // /trend-reports/*, not /trends/*. Linking to /trends/:slug from a page
+  // already being served through that proxy landed the browser on
+  // nadine-storefront.vercel.app instead of the nAia host.
+  it("public report link never uses the unproxied /trends/:slug path, and is a relative nAia-hosted href (no nadine-storefront host)", () => {
+    vi.mocked(useLoaderData).mockReturnValueOnce({
+      report: MOCK_REPORT,
+      edit: null,
+      hasProfile: false,
+      generationFailed: false,
+      nadineRecommendation: null,
+    });
+    const html = renderToString(React.createElement(MyTrendEditDetail));
+    expect(html).not.toContain(`href="/trends/${MOCK_REPORT.slug}"`);
+    expect(html).not.toContain("nadine-storefront");
   });
 
   it("renders incomplete-passport state when hasProfile is false", () => {
@@ -307,7 +326,7 @@ describe("MyTrendEditDetail component", () => {
     });
     const html = renderToString(React.createElement(MyTrendEditDetail));
     expect(html).toContain("taking a moment");
-    expect(html).toContain(`href="/trends/${MOCK_REPORT.slug}"`);
+    expect(html).toContain(`href="/trend-reports/${MOCK_REPORT.slug}"`);
   });
 
   it("renders all 6 content sections when edit is available", () => {

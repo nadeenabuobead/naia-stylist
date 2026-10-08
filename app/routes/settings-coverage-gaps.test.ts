@@ -32,49 +32,57 @@ const settingsSrc = read("app/routes/settings.tsx");
 const routesSrc   = read("app/routes.ts");
 const cssSrc       = read("app/styles/naia-design-system.css");
 
-// ── P. Design-research consent is genuinely wired ────────────────────────────
+// ── P. NADINE design-pattern sharing is aggregated-only, no customer toggle ──
+//
+// The per-customer opt-in/opt-out toggle was removed: aggregated/coarsened
+// design-pattern contribution is normal nAia operation now, not an optional
+// customer choice (see design-signal.server.ts's ELIGIBLE_WHERE). This section
+// proves the toggle and its action/loader wiring are genuinely gone from the
+// customer-facing settings page, and that the schema fields/historical
+// consent values are left untouched for backward compatibility pending legal
+// review — not retroactively cleared.
 
-describe("P — design-research consent is real, not decorative", () => {
-  it("VALID_INTENTS includes both consent intents", () => {
-    assert.ok(settingsSrc.includes('"design-research-opt-in"'),  "opt-in intent present");
-    assert.ok(settingsSrc.includes('"design-research-opt-out"'), "opt-out intent present");
+describe("P — NADINE design-pattern sharing has no customer-facing toggle", () => {
+  it("no consent intents remain in VALID_INTENTS or the action", () => {
+    assert.ok(!settingsSrc.includes('"design-research-opt-in"'),  "opt-in intent removed");
+    assert.ok(!settingsSrc.includes('"design-research-opt-out"'), "opt-out intent removed");
+    assert.ok(!settingsSrc.includes("recordDesignResearchConsent"), "no call into the removed consent-write function");
   });
 
-  it("action calls recordDesignResearchConsent with server-derived customer.id for both intents", () => {
-    const actionIdx = settingsSrc.indexOf("export async function action");
-    const actionBody = settingsSrc.slice(actionIdx);
-    const optInIdx  = actionBody.indexOf('"design-research-opt-in"');
-    const optOutIdx = actionBody.indexOf('"design-research-opt-out"');
-    const optInBlock  = actionBody.slice(optInIdx,  optOutIdx);
-    const optOutBlock = actionBody.slice(optOutIdx, actionBody.indexOf('"delete-selfie-photo"'));
-    assert.ok(optInBlock.includes("recordDesignResearchConsent({ customerId: customer.id, granted: true })"),
-      "opt-in calls recordDesignResearchConsent(granted: true) with the authenticated customer id");
-    assert.ok(optOutBlock.includes("recordDesignResearchConsent({ customerId: customer.id, granted: false })"),
-      "opt-out calls recordDesignResearchConsent(granted: false) with the authenticated customer id");
-  });
-
-  it("loader reads designResearchConsent behind a try/catch (safe if the column is unmigrated)", () => {
+  it("loader no longer reads designResearchConsent for display", () => {
     const loaderIdx = settingsSrc.indexOf("export async function loader");
     const loaderBody = settingsSrc.slice(loaderIdx, settingsSrc.indexOf("export async function action"));
-    const tryIdx   = loaderBody.indexOf("try {");
-    const fieldIdx = loaderBody.indexOf("designResearchConsent: true");
-    const catchIdx = loaderBody.indexOf("} catch");
-    assert.ok(tryIdx > -1 && fieldIdx > tryIdx && catchIdx > fieldIdx,
-      "designResearchConsent read happens inside a try block with a catch fallback");
+    assert.ok(!loaderBody.includes("designResearchConsent"), "loader does not read the consent field");
   });
 
-  it("consent toggle is reversible and is not grouped with the destructive confirmation modal", () => {
-    const confirmIdx = settingsSrc.indexOf("const CONFIRM: Record<DestructiveIntent");
-    const confirmBlock = settingsSrc.slice(confirmIdx, settingsSrc.indexOf("// ── Sub-components"));
+  it("no 'Turn on' / 'Not currently sharing' toggle copy remains", () => {
+    assert.ok(!settingsSrc.includes("Helping NADINE design"));
+    assert.ok(!settingsSrc.includes("Not currently sharing"));
+    assert.ok(!settingsSrc.includes('"Turn on"') && !settingsSrc.includes(">Turn on<"));
+  });
+
+  it("the Personalisation section states aggregated/coarsened patterns may inform design decisions, without naming individual customer data", () => {
+    const idx = settingsSrc.indexOf("HOW YOUR INFORMATION IS USED");
+    const block = settingsSrc.slice(idx, idx + 1200);
+    assert.ok(/aggregat/i.test(block), "mentions aggregation");
+    assert.ok(/coarsen/i.test(block), "mentions coarsening");
     assert.ok(
-      !confirmBlock.includes('"design-research-opt-in"') && !confirmBlock.includes('"design-research-opt-out"'),
-      "design-research consent intents are not DestructiveIntent keys — they need no confirm dialog",
+      !/your (individual )?(style passport|closet)\b.*\b(design|nadine)/i.test(block),
+      "does not imply individual Passport/Closet data reaches design decisions",
     );
   });
 
-  it("the designResearchConsent DB field exists in the schema (not provisional)", () => {
+  it("the designResearchConsent DB field still exists in the schema (not deleted — backward compatibility pending legal review)", () => {
     const schema = read("prisma/schema.prisma");
-    assert.ok(schema.includes("designResearchConsent "), "field is declared in schema.prisma");
+    assert.ok(schema.includes("designResearchConsent "), "field remains declared in schema.prisma");
+  });
+
+  it("design-signal.server.ts's eligibility no longer gates on per-customer consent", () => {
+    const src = read("app/lib/ai/design-signal.server.ts");
+    const whereIdx = src.indexOf("export const ELIGIBLE_WHERE");
+    const whereBlock = src.slice(whereIdx, src.indexOf("} as const", whereIdx));
+    assert.ok(!whereBlock.includes("designResearchConsent"), "ELIGIBLE_WHERE no longer requires consent");
+    assert.ok(whereBlock.includes('accountType: "CUSTOMER"'), "still excludes test/demo/QA accounts");
   });
 });
 
@@ -116,8 +124,11 @@ describe("R — account deletion is a request, not a destructive action", () => 
 
   it("account deletion is a mailto link, never a <Form method=\"post\"> submit", () => {
     const dataSectionIdx = settingsSrc.indexOf("Your Data & Privacy");
-    const optionalSectionIdx = settingsSrc.indexOf("Optional: helping NADINE design");
-    const dataSection = settingsSrc.slice(dataSectionIdx, optionalSectionIdx);
+    // The NADINE design-sharing section that used to sit between "Your Data &
+    // Privacy" and "Sign Out" was removed (see section P) — Sign Out is now
+    // the next marker after this section.
+    const signOutSectionIdx = settingsSrc.indexOf("── Sign Out");
+    const dataSection = settingsSrc.slice(dataSectionIdx, signOutSectionIdx);
     assert.ok(dataSection.includes("mailto:privacy@naiabynadine.com"), "deletion request uses mailto");
     assert.ok(!dataSection.includes("<Form"), "no <Form> element in the data/deletion section");
     assert.ok(!dataSection.includes("fetcher.submit"), "no fetcher.submit in the data/deletion section");

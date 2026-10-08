@@ -1583,3 +1583,67 @@ describe("CI.31 — prohibited inference strings", () => {
     }
   });
 });
+
+// ── CI.54 — overlapping relationship tags: raw per-tag counts, explicit overlap sentence ──
+//
+// A piece can carry up to 2 tags (e.g. both rarely-wear and regret). Category
+// counts in the claim must be the RAW per-tag total — every item with that
+// tag, including ones that also carry the other tag — never pre-subtracted
+// into mutually-exclusive buckets, which reads as if the categories can't
+// overlap. The overlap itself is called out in its own explicit sentence.
+
+describe("CI.54 — overlapping relationship tags are never silently pre-subtracted", () => {
+  it("negative-majority: rarely-wear and regret counts are each the raw per-tag total, with an explicit overlap sentence", () => {
+    const items = [
+      makeItem({ id: "1", garmentRelationships: ["favourite"] }),
+      makeItem({ id: "2", garmentRelationships: ["wear-often"] }),
+      makeItem({ id: "3", garmentRelationships: ["rarely-wear"] }),
+      makeItem({ id: "4", garmentRelationships: ["regret"] }),
+      makeItem({ id: "5", garmentRelationships: ["rarely-wear", "regret"] }),
+    ];
+    const result = computeClosetInsights(items, emptyProfile);
+    const wb = result.insights.find((i) => i.type === "wear-behaviour");
+    assert.ok(wb, "wear-behaviour should fire");
+    // Raw per-tag totals: 2 items carry rarely-wear (item 3 + item 5), 2 carry
+    // regret (item 4 + item 5) — NOT the pre-subtracted 1-and-1 a mutually-
+    // exclusive split would produce.
+    assert.match(wb!.claim, /2 rarely get worn/);
+    assert.match(wb!.claim, /2 are purchases you regret/);
+    // The overlap is named explicitly, not left for the reader to infer.
+    assert.match(wb!.claim, /One piece is both rarely worn and a purchase you regret\./);
+    // The lead "N of M pieces aren't earning their place" count stays the
+    // deduplicated unique-item count (3: items 3, 4, 5 — item 5 once, not twice).
+    assert.match(wb!.claim, /^3 of the 5 pieces/);
+  });
+
+  it("does not double-count the overlapping piece into the total number of distinct negative pieces", () => {
+    // 5 items minimum for compositionEligible (totalItems >= 5); 100% tagged
+    // for relationshipEligible (coverage >= 0.6).
+    const items = [
+      makeItem({ id: "1", garmentRelationships: ["rarely-wear"] }),
+      makeItem({ id: "2", garmentRelationships: ["regret"] }),
+      makeItem({ id: "3", garmentRelationships: ["rarely-wear", "regret"] }),
+      makeItem({ id: "4", garmentRelationships: ["favourite"] }),
+      makeItem({ id: "5", garmentRelationships: ["wear-often"] }),
+    ];
+    const result = computeClosetInsights(items, emptyProfile);
+    const wb = result.insights.find((i) => i.type === "wear-behaviour");
+    assert.ok(wb);
+    // 3 distinct pieces are negative (1, 2, 3) — never 4 (which double-counts piece 3).
+    assert.match(wb!.claim, /^3 of the 5 pieces/);
+  });
+
+  it("no overlap sentence appears when no piece carries both tags", () => {
+    const items = [
+      makeItem({ id: "1", garmentRelationships: ["rarely-wear"] }),
+      makeItem({ id: "2", garmentRelationships: ["regret"] }),
+      makeItem({ id: "3", garmentRelationships: ["favourite"] }),
+      makeItem({ id: "4", garmentRelationships: ["favourite"] }),
+      makeItem({ id: "5", garmentRelationships: ["wear-often"] }),
+    ];
+    const result = computeClosetInsights(items, emptyProfile);
+    const wb = result.insights.find((i) => i.type === "wear-behaviour");
+    assert.ok(wb);
+    assert.ok(!wb!.claim.includes("both rarely worn"), "no overlap sentence when there is no overlap");
+  });
+});

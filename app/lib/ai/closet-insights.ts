@@ -268,10 +268,21 @@ export function computeClosetInsights(
       const rels = i.garmentRelationships ?? [];
       return rels.includes("rarely-wear") && rels.includes("regret");
     }).length;
-    const rarelyWearOnlyItems = rarelyWearItems - bothNegItems;
-    const regretOnlyItems = regretItems - bothNegItems;
     const frictionItems = struggleItems + unsureItems;
     const negativeItems = rarelyWearItems + regretItems - bothNegItems; // unique items
+
+    // A piece can carry up to 2 relationship tags, so rarely-wear and regret
+    // counts below are each the RAW per-tag total (every item with that tag,
+    // including the one(s) that also carry the other tag) — never pre-split
+    // into mutually-exclusive buckets, which read as if the categories
+    // couldn't overlap. The one explicit overlap sentence below is what makes
+    // the overlap itself unambiguous, rather than silent subtraction.
+    const overlapNote = (): string | null => {
+      if (bothNegItems === 0) return null;
+      return bothNegItems === 1
+        ? "One piece is both rarely worn and a purchase you regret."
+        : `${bothNegItems} pieces are both rarely worn and purchases you regret.`;
+    };
 
     const taggedCount = taggedItems.length;
     const positiveRatio = positiveItems / taggedCount;
@@ -293,30 +304,28 @@ export function computeClosetInsights(
         if (unsureItems > 0) {
           notes.push(`${unsureItems} you're still unsure about`);
         }
-        if (bothNegItems > 0) {
-          notes.push(bothNegItems === 1 ? "1 is rarely worn and a purchase you regret" : `${bothNegItems} are rarely worn and purchases you regret`);
+        if (rarelyWearItems > 0) {
+          notes.push(`${rarelyWearItems} ${rarelyWearItems === 1 ? "rarely gets" : "rarely get"} worn`);
         }
-        if (rarelyWearOnlyItems > 0) {
-          notes.push(`${rarelyWearOnlyItems} ${rarelyWearOnlyItems === 1 ? "rarely gets" : "rarely get"} worn`);
-        }
-        if (regretOnlyItems > 0) {
-          notes.push(regretOnlyItems === 1 ? "1 is a purchase you regret" : `${regretOnlyItems} are purchases you regret`);
+        if (regretItems > 0) {
+          notes.push(regretItems === 1 ? "1 is a purchase you regret" : `${regretItems} are purchases you regret`);
         }
         claim = `${positiveItems} of the ${taggedCount} pieces you've tagged are favourites or regular wears — ${joinInsightNotes(notes)}.`;
+        const overlap = overlapNote();
+        if (overlap) claim += ` ${overlap}`;
       }
     } else if (negativeRatio >= 0.4) {
       const parts: string[] = [];
-      if (bothNegItems > 0) {
-        parts.push(bothNegItems === 1 ? "1 is rarely worn and a purchase you regret" : `${bothNegItems} are rarely worn and purchases you regret`);
+      if (rarelyWearItems > 0) {
+        parts.push(`${rarelyWearItems} ${rarelyWearItems === 1 ? "rarely gets" : "rarely get"} worn`);
       }
-      if (rarelyWearOnlyItems > 0) {
-        parts.push(`${rarelyWearOnlyItems} ${rarelyWearOnlyItems === 1 ? "rarely gets" : "rarely get"} worn`);
-      }
-      if (regretOnlyItems > 0) {
-        parts.push(regretOnlyItems === 1 ? "1 is a purchase you regret" : `${regretOnlyItems} are purchases you regret`);
+      if (regretItems > 0) {
+        parts.push(regretItems === 1 ? "1 is a purchase you regret" : `${regretItems} are purchases you regret`);
       }
       const negDesc = joinInsightNotes(parts);
       claim = `${negativeItems} of the ${taggedCount} ${negativeItems === 1 ? "piece" : "pieces"} you've tagged ${negativeItems === 1 ? "isn't earning its place" : "aren't earning their place"} — ${negDesc}.`;
+      const overlap = overlapNote();
+      if (overlap) claim += ` ${overlap}`;
     } else if (frictionRatio > positiveRatio && frictionRatio >= 0.33) {
       if (struggleItems > 0 && unsureItems > 0) {
         claim = `${struggleItems} of the ${taggedCount} pieces you've tagged are harder to style, and ${unsureItems} you're still unsure about — more uncertain pieces than clear favourites right now.`;
@@ -336,18 +345,19 @@ export function computeClosetInsights(
       if (unsureItems > 0) {
         parts.push(`${unsureItems} you're still unsure about`);
       }
-      if (bothNegItems > 0) {
-        parts.push(bothNegItems === 1 ? "1 that's rarely worn and a purchase you regret" : `${bothNegItems} that are rarely worn and purchases you regret`);
+      if (rarelyWearItems > 0) {
+        parts.push(`${rarelyWearItems} that rarely ${rarelyWearItems === 1 ? "gets" : "get"} worn`);
       }
-      if (rarelyWearOnlyItems > 0) {
-        parts.push(`${rarelyWearOnlyItems} that rarely ${rarelyWearOnlyItems === 1 ? "gets" : "get"} worn`);
-      }
-      if (regretOnlyItems > 0) {
-        parts.push(regretOnlyItems === 1 ? "1 that's a purchase you regret" : `${regretOnlyItems} that are purchases you regret`);
+      if (regretItems > 0) {
+        parts.push(regretItems === 1 ? "1 that's a purchase you regret" : `${regretItems} that are purchases you regret`);
       }
       claim = parts.length > 0
         ? `The pieces you've tagged are spread — ${joinInsightNotes(parts)}.`
         : `You've tagged ${taggedCount} of the ${totalItems} pieces you've added with how you feel about them.`;
+      if (parts.length > 0) {
+        const overlap = overlapNote();
+        if (overlap) claim += ` ${overlap}`;
+      }
     }
 
     insights.push({

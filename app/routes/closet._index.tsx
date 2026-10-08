@@ -814,8 +814,8 @@ const css = `
   @media(min-width:1024px){.cl-headline{font-size:4.25rem}}
   /* Subtitle — shared editorial intro style */
   .cl-sub{font-family:var(--naia-ff-body);font-style:italic;font-size:1.05rem;line-height:1.75;color:rgba(40,21,12,0.65);margin:0 0 28px}
-  /* Stats — 3-col grid. Padding 20px (was 24px) to tighten card density. */
-  .cl-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:28px}
+  /* Stats — 2-col grid (Brands removed: optional field, not meaningful as a summary stat). Padding 20px (was 24px) to tighten card density. */
+  .cl-stats{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:28px}
   .cl-stat{background:var(--bg-50, var(--c-surface));padding:20px;border:1px solid var(--fg-10, var(--c-border))}
   .cl-stat-num{font-family:var(--ff-display);font-size:40px;font-weight:900;color:var(--fg, var(--c-ink))}
   .cl-stat-label{font-family:var(--ff-ui);font-size:7px;letter-spacing:2px;text-transform:uppercase;color:var(--fg-60, var(--c-muted))}
@@ -1447,7 +1447,7 @@ export default function Closet() {
         <h1 className="cl-headline">DIGITAL <span className="sp-shell-accent">closet.</span></h1>
         <p className="cl-sub">Upload, save, and style your pieces.</p>
 
-        {/* Option A: Total Pieces / Categories / Brands */}
+        {/* Option A: Total Pieces / Categories */}
         <div className="cl-stats">
           <div className="cl-stat">
             <div className="cl-stat-num">{items.length}</div>
@@ -1456,10 +1456,6 @@ export default function Closet() {
           <div className="cl-stat">
             <div className="cl-stat-num">{new Set(items.map((i: any) => i.category)).size}</div>
             <div className="cl-stat-label">Categories</div>
-          </div>
-          <div className="cl-stat">
-            <div className="cl-stat-num">{new Set(items.map((i: any) => i.brand).filter(Boolean)).size}</div>
-            <div className="cl-stat-label">Brands</div>
           </div>
         </div>
 

@@ -64,14 +64,20 @@ function Section({ title, right, children }: { title: string; right?: string; ch
   );
 }
 
-function UsageRow({ label, value, sub, bar }: {
+function UsageRow({ label, value, sub, bar, last }: {
   label: string;
   value: string;
   sub?: string;
   bar?: { used: number; limit: number; exhausted: boolean };
+  // The section wrapper (.mn-section) below already supplies its own
+  // top border, immediately adjacent to this row's own border-bottom when
+  // this is the last row in the list — two stacked lines with nothing
+  // between them. Omit only the last row's border; every other row keeps
+  // its separator unchanged.
+  last?: boolean;
 }) {
   return (
-    <div style={{ paddingBottom: "1rem", borderBottom: "1px solid var(--fg-08, var(--fg-10))" }}>
+    <div style={last ? { paddingBottom: "1rem" } : { paddingBottom: "1rem", borderBottom: "1px solid var(--fg-08, var(--fg-10))" }}>
       <div style={{ fontSize: "0.62rem", textTransform: "uppercase", letterSpacing: "0.3em", color: "var(--fg-55)" }}>
         {label}
       </div>
@@ -181,6 +187,7 @@ export default function PlanUsagePage() {
                   bar={personalisedTrend.monthlyLimit > 0
                     ? { used: personalisedTrend.monthlyUsed, limit: personalisedTrend.monthlyLimit, exhausted: trendEditExhausted }
                     : undefined}
+                  last
                 />
               </div>
             </Section>

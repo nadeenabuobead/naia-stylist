@@ -1458,6 +1458,10 @@ a.mn-action:focus-visible,
   border-bottom: 1px solid rgba(40, 21, 12, 0.09);
   padding: 14px 0;
 }
+/* The last row's own border-bottom sat close enough to the next .bos-section's
+   border-top (Account Details → My nAia Model) to read as two divider lines.
+   Only used on settings.tsx's Account Details list — no other page affected. */
+.sp-detail-row:last-child { border-bottom: none; }
 .sp-detail-label {
   font-family: var(--naia-ff-ui);
   font-size: 9px;
