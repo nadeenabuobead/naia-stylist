@@ -16,6 +16,17 @@ export async function loader() {
   return { featured: featured ?? null, rest };
 }
 
+export function meta() {
+  return [
+    { title: "Trend Reports | nAia" },
+    {
+      name: "description",
+      content:
+        "Seasonal fashion intelligence from nAia — what's rising, what's fading, and how to read the shift before it reaches your wardrobe.",
+    },
+  ];
+}
+
 // Inline Lovable-matched Google Fonts — Oswald (thin-display), Cormorant Garamond (editorial), Space Mono (mono)
 const FONTS =
   "https://fonts.googleapis.com/css2?family=Inter:wght@400&family=Oswald:wght@200;300;400&family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300;1,400&family=Space+Mono&display=swap";
