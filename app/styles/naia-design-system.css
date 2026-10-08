@@ -2503,6 +2503,13 @@ a.mn-action:focus-visible,
 .bos-link:hover { color: var(--naia-accent); }
 .bos-error { font-family: var(--naia-ff-ui); font-size: 11px; letter-spacing: 0.5px; color: var(--naia-accent); margin-top: 4px; }
 .bos-result { margin-top: 32px; }
+/* This wrapper's own .bos-section border-top duplicated the first inner
+   .bos-result-section's border-top immediately below it — two adjacent
+   divider lines above "Why It Works" with nothing between them. Removing
+   only this compound-class instance's border leaves the single inner one
+   as the divider; .bos-section elsewhere (buyskip._index.tsx, passport.selfie.tsx,
+   settings.tsx) and .bos-result's own margin-top are untouched. */
+.bos-section.bos-result { border-top: none; }
 .bos-verdict { font-family: var(--naia-ff-display); font-size: 13px; letter-spacing: 0.32em; text-transform: uppercase; color: var(--naia-accent); margin-bottom: 16px; white-space: nowrap; }
 .bos-verdict-match { font-family: var(--naia-ff-ui); font-size: 10px; letter-spacing: 0.18em; color: var(--naia-muted); text-transform: uppercase; }
 .bos-confidence { font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.2em; color: var(--naia-muted); margin-bottom: 20px; }
