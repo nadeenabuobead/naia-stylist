@@ -18,12 +18,14 @@ import { checkEntitlement } from "../lib/plan/entitlement.server";
 import { moderateImageContent } from "../lib/image-moderation.server";
 import { screenGarmentSuitability } from "../lib/image-suitability.server";
 import { loadWardrobeIntelligence } from "../lib/ai/wardrobe-intelligence.server";
+import { closetItemToSlot } from "../lib/ai/closet-slot";
 import { resolveCustomerIntelligence } from "../lib/ai/customer-intelligence-resolver.server";
 import { normalizeDeclaredFacts, mergeVisionFacts } from "../lib/buyskip/product-facts.server";
 import { computeDuplicateEvidence } from "../lib/buyskip/duplicate-evidence.server";
 import { checkHardConstraints, checkColourPreference } from "../lib/buyskip/constraint-evidence.server";
-import { getWardrobeNeedEvidence } from "../lib/buyskip/wardrobe-need.server";
+import { wardrobeNeedFromUtilityEvidence } from "../lib/buyskip/wardrobe-need.server";
 import { summarizeOutcomeHistory } from "../lib/buyskip/outcome-history-evidence.server";
+import { computeWardrobeUtilityEvidence } from "../lib/buyskip/wardrobe-utility-evidence.server";
 import { assembleDecisionEvidence, applyHardConstraintVeto } from "../lib/buyskip/decision-evidence.server";
 import {
   GARMENT_SILHOUETTE_VALUES,
@@ -589,9 +591,12 @@ async function analyzeItem(request) {
     // not expose), and passes that same bundle into the resolver so WI is
     // computed exactly once, never duplicated.
     let wardrobeContext = null;
+    // B4 — hoisted so the decisionEvidence assembly below (section 7b) can
+    // reuse the same bundle; WI is still loaded at most once per request.
+    let wi = null;
     if (WARDROBE_CONTEXT_ELIGIBLE_CATEGORIES.has(normalizedCategory)) {
       try {
-        const wi = await loadWardrobeIntelligence(naiaCustomer.id, {
+        wi = await loadWardrobeIntelligence(naiaCustomer.id, {
           imageUrlById: new Map(),
           passport: toWardrobePassport(styleProfile),
         });
@@ -950,7 +955,26 @@ Respond ONLY with valid JSON, no markdown:
     // shipped). Computed separately from checkHardConstraints so a colour
     // match can never reach applyHardConstraintVeto.
     const colourPreferenceEvidence = checkColourPreference(styleProfile?.avoidColors ?? null, productFacts);
-    const wardrobeNeed = getWardrobeNeedEvidence();
+
+    // B4 — redundancy/gap/utility evidence read from the SAME wi bundle
+    // computed above (section 4), never a second loadWardrobeIntelligence
+    // call. candidateSlot reuses the existing closetItemCategoryEnum map
+    // (section 4) — the same mapping sameSlotClosetItems is built from —
+    // so the candidate's slot is derived identically everywhere in this file.
+    const candidateSlot = closetItemCategoryEnum ? closetItemToSlot(closetItemCategoryEnum) : "unknown";
+    const wardrobeUtility = computeWardrobeUtilityEvidence({
+      wi,
+      candidate: {
+        slot: candidateSlot,
+        primaryColor: productFacts.declaredColor.value?.[0] ?? productFacts.detectedColor.value ?? null,
+        silhouette: productFacts.silhouette.value,
+        fitProfile: productFacts.fitProfile.value,
+        formality: productFacts.formality.value,
+        material: productFacts.material.value,
+        pattern: productFacts.pattern.value,
+      },
+    });
+    const wardrobeNeed = wardrobeNeedFromUtilityEvidence(wardrobeUtility);
 
     // B3 — the customer's own past explicit purchase outcomes for this exact
     // category, never nAia's own past verdicts. Additive only, same pattern
@@ -979,6 +1003,7 @@ Respond ONLY with valid JSON, no markdown:
       colourPreferenceEvidence,
       wardrobeNeed,
       outcomeHistory,
+      wardrobeUtility,
       computedAt: new Date().toISOString(),
     });
 

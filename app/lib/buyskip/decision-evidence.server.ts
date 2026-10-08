@@ -20,6 +20,7 @@ import type { DuplicateEvidence } from "./duplicate-evidence.server";
 import type { ConstraintEvidence, ColourPreferenceEvidence } from "./constraint-evidence.server";
 import type { WardrobeNeedEvidence } from "./wardrobe-need.server";
 import type { OutcomeHistoryEvidence } from "./outcome-history-evidence.server";
+import type { WardrobeUtilityEvidence } from "./wardrobe-utility-evidence.server";
 
 export type BuySkipDecisionState = "BUY" | "LEAN_BUY" | "LEAN_SKIP" | "SKIP" | "INSUFFICIENT_EVIDENCE";
 
@@ -36,6 +37,14 @@ export interface DecisionEvidence {
    * persisted records (pre-B3) simply lack this field — always optional-chain
    * when reading it back. */
   outcomeHistory: OutcomeHistoryEvidence;
+  /** B4 — redundancy/gap/utility evidence read from Wardrobe Intelligence's
+   * own already-computed findings for the customer's current Closet.
+   * wardrobeNeed above is derived from this same evidence for backward
+   * compatibility; this field carries the fuller provenance. Evidence only:
+   * never read by applyHardConstraintVeto or applyVerdictOverride, never
+   * injected into the AI prompt. Older persisted records (pre-B4) simply
+   * lack this field — always optional-chain when reading it back. */
+  wardrobeUtility: WardrobeUtilityEvidence;
   passportAlignment: "available" | "deferred_to_resolved_passport";
   tasteEvidence: "unavailable";
   provenance: {
@@ -53,6 +62,7 @@ export function assembleDecisionEvidence(input: {
   colourPreferenceEvidence: ColourPreferenceEvidence;
   wardrobeNeed: WardrobeNeedEvidence;
   outcomeHistory: OutcomeHistoryEvidence;
+  wardrobeUtility: WardrobeUtilityEvidence;
   computedAt: string;
 }): DecisionEvidence {
   return {
@@ -62,6 +72,7 @@ export function assembleDecisionEvidence(input: {
     colourPreferenceEvidence: input.colourPreferenceEvidence,
     wardrobeNeed: input.wardrobeNeed,
     outcomeHistory: input.outcomeHistory,
+    wardrobeUtility: input.wardrobeUtility,
     passportAlignment: input.constraintEvidence.deferredToResolvedPassport ? "deferred_to_resolved_passport" : "available",
     tasteEvidence: "unavailable",
     provenance: {

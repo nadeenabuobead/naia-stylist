@@ -9,6 +9,13 @@ import { computeDuplicateEvidence } from "./duplicate-evidence.server";
 import { checkHardConstraints, checkColourPreference } from "./constraint-evidence.server";
 import { getWardrobeNeedEvidence } from "./wardrobe-need.server";
 import { assembleDecisionEvidence, applyHardConstraintVeto } from "./decision-evidence.server";
+import type { WardrobeUtilityEvidence } from "./wardrobe-utility-evidence.server";
+
+const UNAVAILABLE_WARDROBE_UTILITY: WardrobeUtilityEvidence = {
+  redundancy: { status: "unavailable", reason: "Wardrobe Intelligence is not available for this assessment.", findingId: null, title: null, body: null, garmentIds: [] },
+  gap: { status: "unavailable", reason: "Wardrobe Intelligence is not available for this assessment.", findingId: null, title: null, body: null, garmentIds: [], kind: null, backgroundFinding: null },
+  utility: { status: "unavailable", complementCount: 0, complementItemIds: [] },
+};
 
 function facts(overrides = {}) {
   const declared = normalizeDeclaredFacts({ category: "Top", color: ["Black"], brand: "Acme", size: "M" });
@@ -196,6 +203,7 @@ describe("decision-evidence: assembly + hard-constraint veto (Phase 8, regressio
       colourPreferenceEvidence: checkColourPreference([], facts()),
       wardrobeNeed: getWardrobeNeedEvidence(),
       outcomeHistory: { available: false },
+      wardrobeUtility: UNAVAILABLE_WARDROBE_UTILITY,
       computedAt: "2026-10-01T00:00:00.000Z",
     });
     assert.equal(de.passportAlignment, "deferred_to_resolved_passport");
@@ -211,6 +219,7 @@ describe("decision-evidence: assembly + hard-constraint veto (Phase 8, regressio
       colourPreferenceEvidence: checkColourPreference([], facts()),
       wardrobeNeed: getWardrobeNeedEvidence(),
       outcomeHistory: { available: false },
+      wardrobeUtility: UNAVAILABLE_WARDROBE_UTILITY,
       computedAt: "2026-10-01T00:00:00.000Z",
     });
     assert.equal(de.passportAlignment, "available");

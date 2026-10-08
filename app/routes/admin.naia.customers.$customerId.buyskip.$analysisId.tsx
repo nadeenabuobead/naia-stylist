@@ -89,6 +89,10 @@ function DecisionEvidenceSection({ decisionEvidence }: { decisionEvidence: unkno
   const colour = isRecord(decisionEvidence.colourPreferenceEvidence) ? decisionEvidence.colourPreferenceEvidence : null;
   const need = isRecord(decisionEvidence.wardrobeNeed) ? decisionEvidence.wardrobeNeed : null;
   const outcomeHistory = isRecord(decisionEvidence.outcomeHistory) ? decisionEvidence.outcomeHistory : null;
+  const utility = isRecord(decisionEvidence.wardrobeUtility) ? decisionEvidence.wardrobeUtility : null;
+  const redundancy = utility && isRecord(utility.redundancy) ? utility.redundancy : null;
+  const gap = utility && isRecord(utility.gap) ? utility.gap : null;
+  const util = utility && isRecord(utility.utility) ? utility.utility : null;
 
   return (
     <div className="na-card">
@@ -208,6 +212,42 @@ function DecisionEvidenceSection({ decisionEvidence }: { decisionEvidence: unkno
             )}
             <p style={{ fontSize: "0.65rem", color: "#6b7280", marginTop: "0.3rem" }}>
               Derived from this customer's own explicit post-purchase reports only — never from a past nAia verdict. Not read by the verdict or the AI prompt in this phase; evidence only.
+            </p>
+          </div>
+        )}
+
+        {utility && (
+          <div>
+            <p style={{ fontSize: "0.7rem", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "0.3rem" }}>
+              Wardrobe Utility <span style={{ color: "#93c5fd" }}>— B4, evidence only</span>
+            </p>
+            {redundancy && (
+              <p style={{ fontSize: "0.78rem", color: redundancy.status === "already-enough" ? "#fbbf24" : "#9ca3af" }}>
+                Redundancy: <strong>{String(redundancy.status)}</strong>
+                {typeof redundancy.title === "string" && <> — {redundancy.title}</>}
+                {typeof redundancy.reason === "string" && <> ({redundancy.reason})</>}
+              </p>
+            )}
+            {gap && (
+              <p style={{ fontSize: "0.78rem", color: gap.status === "fills-gap" ? "#93c5fd" : "#9ca3af" }}>
+                Gap: <strong>{String(gap.status)}</strong>
+                {typeof gap.title === "string" && <> — {gap.title}</>}
+                {typeof gap.reason === "string" && <> ({gap.reason})</>}
+              </p>
+            )}
+            {gap && isRecord(gap.backgroundFinding) && (
+              <p style={{ fontSize: "0.68rem", color: "#9ca3af", marginTop: "0.2rem" }}>
+                Background ({String(gap.backgroundFinding.kind)}): {String(gap.backgroundFinding.title)}
+              </p>
+            )}
+            {util && (
+              <p style={{ fontSize: "0.78rem", color: "#9ca3af" }}>
+                Complements {String(util.complementCount ?? 0)} existing Closet piece{util.complementCount === 1 ? "" : "s"}
+                {Array.isArray(util.complementItemIds) && util.complementItemIds.length > 0 ? ` (${util.complementItemIds.length} shown)` : ""}.
+              </p>
+            )}
+            <p style={{ fontSize: "0.65rem", color: "#6b7280", marginTop: "0.3rem" }}>
+              Read directly from Wardrobe Intelligence's own already-computed findings for this customer's current Closet — no new clustering, threshold, or scoring logic. Not read by the verdict or the AI prompt in this phase; evidence only.
             </p>
           </div>
         )}
