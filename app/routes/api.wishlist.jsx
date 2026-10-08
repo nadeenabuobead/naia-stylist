@@ -694,7 +694,7 @@ LIFESTYLE & OCCASIONS
 COLOUR PALETTE
 - Favourite colours: ${styleProfile.favoriteColors?.join(", ")}
 - Colours the customer avoids: ${styleProfile.avoidColors?.length > 0 ? styleProfile.avoidColors.join(", ") : "none specified"}
-→ COLOUR RULE: For the uploaded item's colour, explain specifically whether it complements the customer's palette, usefully expands it, or conflicts with avoided colours. How does it coordinate with confirmed Closet pieces? Treat favourites as preferences, not exclusions. Never reject a neutral without naming how it works or clashes with this specific palette.
+→ COLOUR RULE: For the uploaded item's colour, explain specifically whether it complements the customer's palette, usefully expands it, or conflicts with avoided colours. How does it coordinate with confirmed Closet pieces? Treat favourites as preferences, not exclusions. An avoided colour is a caution worth naming, not a disqualifier — it must never be the sole basis for a SKIP verdict; weigh it alongside the item's other evidence. Never reject a neutral without naming how it works or clashes with this specific palette.
 
 FIT, SILHOUETTE & BODY
 - Preferred silhouettes: ${styleProfile.silhouette?.length > 0 ? styleProfile.silhouette.map(id => optionLabel("silhouette", id)).join(", ") : "not specified"}
@@ -782,7 +782,7 @@ No brand-sizing claims.
 REPETITION RULE: Each colour, concern or trait appears ONCE. Never repeat Final Condition reasoning in any earlier section.
 
 VERDICT-AWARE PERSONALIZATION RULE:
-→ VERDICT SEVERITY RULE: Hard SKIP requires strong evidence that the item genuinely conflicts with the customer — a dressing requirement violated, an avoided colour present, an established regret pattern duplicated, or wear being realistically near-zero given the customer's actual occasions. If style alignment is strong, silhouette/colour fit is good, and the item serves a genuine occasion in the customer's life but realistic wear frequency is uncertain, that is SKIP FOR NOW, not SKIP. Default to SKIP FOR NOW when the item has real merit but a specific named uncertainty blocks confident recommendation.
+→ VERDICT SEVERITY RULE: Hard SKIP requires strong evidence that the item genuinely conflicts with the customer — a dressing requirement violated, an established regret pattern duplicated, or wear being realistically near-zero given the customer's actual occasions. An avoided colour alone is never sufficient for Hard SKIP — it is a caution to name, not a disqualifying conflict; a SKIP verdict needs one of the conflicts above or another substantive negative independent of colour. If style alignment is strong, silhouette/colour fit is good, and the item serves a genuine occasion in the customer's life but realistic wear frequency is uncertain, that is SKIP FOR NOW, not SKIP. Default to SKIP FOR NOW when the item has real merit but a specific named uncertainty blocks confident recommendation.
 - BUY: every claim must cite a Passport or form field — name the style personality/personalities, reference actual lifestyle occasions, apply silhouette preference, fit preferences and palette. No generic praise.
 - SKIP FOR NOW: lead with specific blockers — cite silhouette preference, fit preferences, lifestyle occasions, palette, or dressing requirements by name.
 - SKIP: name the specific conflict with the customer's Passport or form data. No softening.
