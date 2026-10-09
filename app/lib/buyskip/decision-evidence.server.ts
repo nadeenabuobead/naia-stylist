@@ -117,3 +117,63 @@ export function applyHardConstraintVeto(constraintEvidence: ConstraintEvidence):
     vetoReason: `This conflicts with a dressing requirement on your Passport: ${violated.join(", ")}.`,
   };
 }
+
+export interface ColourOnlyOverrideResult {
+  overridden: true;
+  verdict: "BUY";
+  overrideReason: string;
+}
+
+export interface NoColourOnlyOverride {
+  overridden: false;
+}
+
+/**
+ * B2d — the second place code is allowed to override the model's own
+ * verdict: when the model's own SKIP / SKIP FOR NOW has no structural
+ * support beyond an avoided-colour conflict. Live QA proved prompt wording
+ * alone is not reliable enough — the model repeatedly used an avoided
+ * colour as the deciding SKIP factor despite explicit instructions not to.
+ *
+ * This is a narrow, structurally-grounded guard, not a general "second
+ * verdict engine": it only ever turns a SKIP/SKIP FOR NOW into BUY, and
+ * only when every other evidence source this schema actually has is clear.
+ * It intentionally does NOT attempt to parse the model's own prose to find
+ * an "independent negative" — if a genuine negative exists that isn't
+ * captured in constraintEvidence, duplicateEvidence, or wardrobeUtility
+ * (e.g. a fit/construction concern the model only ever states in free
+ * text), this schema has no structured way to prove it, and the product
+ * policy is unambiguous: an avoided colour alone must never produce SKIP or
+ * SKIP FOR NOW. See the B2d-follow-up recon for the accepted tradeoff this
+ * implies.
+ *
+ * Structural "independent substantive negative" sources checked here —
+ * the only ones this schema currently has:
+ *   - constraintEvidence.hasHardViolation — if true, this guard never
+ *     fires; that is applyHardConstraintVeto's job, and takes priority.
+ *   - duplicateEvidence.overlap === "strong-overlap" — B4: customer
+ *     already owns something very similar, independent of colour.
+ *   - wardrobeUtility.redundancy.status === "already-enough" — the same
+ *     redundancy signal via Wardrobe Intelligence's own finding.
+ */
+export function applyColourOnlySkipGuard(input: {
+  verdict: string;
+  constraintEvidence: ConstraintEvidence;
+  colourPreferenceEvidence: ColourPreferenceEvidence;
+  duplicateEvidence: DuplicateEvidence;
+  wardrobeUtility: WardrobeUtilityEvidence;
+}): ColourOnlyOverrideResult | NoColourOnlyOverride {
+  const isSkipVerdict = input.verdict === "SKIP" || input.verdict === "SKIP FOR NOW";
+  if (!isSkipVerdict) return { overridden: false };
+  if (input.constraintEvidence.hasHardViolation) return { overridden: false };
+  if (input.colourPreferenceEvidence.status !== "conflict") return { overridden: false };
+  if (input.duplicateEvidence.overlap === "strong-overlap") return { overridden: false };
+  if (input.wardrobeUtility.redundancy.status === "already-enough") return { overridden: false };
+
+  return {
+    overridden: true,
+    verdict: "BUY",
+    overrideReason:
+      "This includes a colour you usually avoid, but every other signal — style, fit, lifestyle fit, and your own history — supports it, so this stays a BUY.",
+  };
+}

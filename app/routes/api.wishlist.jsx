@@ -26,7 +26,7 @@ import { checkHardConstraints, checkColourPreference } from "../lib/buyskip/cons
 import { wardrobeNeedFromUtilityEvidence } from "../lib/buyskip/wardrobe-need.server";
 import { summarizeOutcomeHistory } from "../lib/buyskip/outcome-history-evidence.server";
 import { computeWardrobeUtilityEvidence } from "../lib/buyskip/wardrobe-utility-evidence.server";
-import { assembleDecisionEvidence, applyHardConstraintVeto } from "../lib/buyskip/decision-evidence.server";
+import { assembleDecisionEvidence, applyHardConstraintVeto, applyColourOnlySkipGuard } from "../lib/buyskip/decision-evidence.server";
 import { classifyPersistenceError } from "../lib/buyskip/persistence-error-diagnostics.server";
 import {
   GARMENT_SILHOUETTE_VALUES,
@@ -300,6 +300,32 @@ export function applyVerdictOverride(analysis, veto, modelVerdict) {
     confidence: null,
     finalThought: veto.vetoReason,
     buyIf: null,
+  };
+}
+
+/**
+ * B2d — the inverse direction: the model's own SKIP / SKIP FOR NOW had no
+ * structural support beyond an avoided-colour conflict (see
+ * applyColourOnlySkipGuard for exactly what "structural support" means).
+ * The model's own finalThought/skipIf text was written to justify a skip;
+ * once overridden it would contradict the persisted BUY verdict, so it is
+ * replaced rather than shown alongside a verdict it no longer supports —
+ * same pattern as applyVerdictOverride's BUY→SKIP direction above.
+ */
+export function applyColourOnlyOverride(analysis, colourGuard, modelVerdict) {
+  if (!colourGuard.overridden) {
+    return analysis;
+  }
+  return {
+    ...analysis,
+    verdict: colourGuard.verdict, // "BUY"
+    verdictOverridden: true,
+    verdictOverrideReason: colourGuard.overrideReason,
+    modelVerdict,
+    modelConfidence: typeof analysis.confidence === "number" ? analysis.confidence : null,
+    confidence: null,
+    finalThought: colourGuard.overrideReason,
+    skipIf: null,
   };
 }
 
@@ -1014,6 +1040,21 @@ Respond ONLY with valid JSON, no markdown:
     const modelVerdict = analysis.verdict;
     const veto = applyHardConstraintVeto(constraintEvidence);
     analysis = applyVerdictOverride(analysis, veto, modelVerdict);
+
+    // B2d — live QA proved prompt wording alone is not reliable enough: the
+    // model repeatedly used an avoided colour as the deciding SKIP / SKIP FOR
+    // NOW factor despite explicit instructions not to. This is the
+    // deterministic backstop — it only fires when no other structural
+    // evidence (hard violation, B4 redundancy) supports the skip, so a
+    // colour conflict alone can never produce SKIP or SKIP FOR NOW.
+    const colourGuard = applyColourOnlySkipGuard({
+      verdict: analysis.verdict,
+      constraintEvidence,
+      colourPreferenceEvidence,
+      duplicateEvidence,
+      wardrobeUtility,
+    });
+    analysis = applyColourOnlyOverride(analysis, colourGuard, analysis.verdict);
 
     // ── 8. Persist analysis (awaited; DB-backed idempotency via unique key) ───
     // Verdict is stated intent only — never a transaction, purchase, or revenue signal.
