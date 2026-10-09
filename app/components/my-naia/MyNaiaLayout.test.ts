@@ -7,6 +7,10 @@
 //   C. It renders in both the desktop sidebar and the mobile nav
 //   D. It reads as a nav item, not a special-cased button
 //   E. It is never treated as the "active" page
+//   F. Typography — the Sign Out <button> computes identically to the <Link>
+//      items around it (regression coverage for a real bug: a button's own
+//      browser default can override inherited font-family/text-transform/
+//      letter-spacing even when a <Link> in the same spot renders correctly)
 //
 // Run: node --test --import tsx/esm app/components/my-naia/MyNaiaLayout.test.ts
 
@@ -16,6 +20,8 @@ import { resolve } from "node:path";
 import { describe, it } from "node:test";
 
 const SRC = readFileSync(resolve(import.meta.dirname, "MyNaiaLayout.tsx"), "utf-8");
+const CSS_PATH = resolve(import.meta.dirname, "../../styles/naia-design-system.css");
+const CSS = readFileSync(CSS_PATH, "utf-8");
 
 describe("A — Sign Out lives in the Account nav group", () => {
   it("the Account group's items include a Sign Out entry", () => {
@@ -76,5 +82,35 @@ describe("E — Sign Out is never treated as the current page", () => {
     const fnIdx = SRC.indexOf("function isActive(");
     const fnBlock = SRC.slice(fnIdx, fnIdx + 200);
     assert.ok(/item\.logout/.test(fnBlock), "isActive() checks item.logout");
+  });
+});
+
+describe("F — Sign Out button typography matches the surrounding nav links", () => {
+  it(".mn-sidebar-nav-link declares its own typography — not just inherited from .mn-sidebar-nav", () => {
+    const ruleIdx = CSS.indexOf(".mn-sidebar-nav-link {");
+    assert.ok(ruleIdx !== -1, ".mn-sidebar-nav-link rule present");
+    const rule = CSS.slice(ruleIdx, CSS.indexOf("}", ruleIdx));
+    for (const prop of ["font-size", "text-transform", "letter-spacing", "color"]) {
+      assert.ok(rule.includes(prop), `.mn-sidebar-nav-link declares ${prop} directly (a <button> sharing this class can't rely on inheriting it from the <ol>)`);
+    }
+  });
+
+  it(".mn-nav-button-reset never uses the `font` shorthand", () => {
+    const ruleIdx = CSS.indexOf(".mn-nav-button-reset {");
+    assert.ok(ruleIdx !== -1, ".mn-nav-button-reset rule present");
+    const rule = CSS.slice(ruleIdx, CSS.indexOf("}", ruleIdx));
+    assert.ok(!/(?<!-)font\s*:/.test(rule), "no `font:` shorthand — it would reset font-size/line-height to inherit at equal specificity and clobber .mn-mobile-nav-link's own explicit font-size");
+  });
+
+  it(".mn-nav-button-reset resets font-family specifically, since buttons get their own browser default", () => {
+    const ruleIdx = CSS.indexOf(".mn-nav-button-reset {");
+    const rule = CSS.slice(ruleIdx, CSS.indexOf("}", ruleIdx));
+    assert.ok(rule.includes("font-family: inherit") || rule.includes("font-family:inherit"), "font-family explicitly reset to inherit");
+  });
+
+  it(".mn-mobile-nav-link's own font-size rule is not overridden later for buttons sharing the class", () => {
+    const linkIdx = CSS.indexOf(".mn-mobile-nav-link {");
+    const linkRule = CSS.slice(linkIdx, CSS.indexOf("}", linkIdx));
+    assert.ok(linkRule.includes("font-size"), ".mn-mobile-nav-link declares font-size directly");
   });
 });

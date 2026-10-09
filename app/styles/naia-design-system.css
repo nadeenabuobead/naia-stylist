@@ -2907,7 +2907,12 @@ a.sv-card-action { text-decoration: underline; }
 .mn-sidebar-nav-item.mn-nav-indent { padding-left: 1rem; }
 .mn-sidebar-nav-link {
   display: inline-flex; align-items: baseline; gap: 0.75rem;
-  text-decoration: none; color: inherit; transition: color 0.15s;
+  text-decoration: none; transition: color 0.15s;
+  /* Declared directly (not just inherited from .mn-sidebar-nav) so a real
+     <button> sharing this class — the Sign Out nav item — matches exactly:
+     a button's own browser default can override inherited text-transform/
+     letter-spacing even though <a> tags never run into that. */
+  font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.18em; color: var(--fg-70);
 }
 .mn-sidebar-nav-link:hover { color: var(--fg); }
 .mn-sidebar-nav-link.mn-active { color: var(--lipstick); }
@@ -2918,11 +2923,15 @@ a.sv-card-action { text-decoration: underline; }
 .mn-sidebar-nav-item.mn-nav-indent .mn-sidebar-nav-line { width: 0.5rem; }
 .mn-sidebar-nav-link.mn-active .mn-sidebar-nav-line { background: var(--lipstick); }
 /* Lets the Sign Out nav item be a real <button> (inside a POST <Form>) while
-   reading identically to the <Link> items around it — only resets browser
-   button chrome, never the padding/display each nav class already sets. */
+   reading identically to the <Link> items around it. Browsers apply their
+   own UA font-family to <button> (observed: Arial over the page's Inter) —
+   reset only that single longhand, not the `font` shorthand: the shorthand
+   would also reset font-size/line-height to "inherit" at equal specificity,
+   clobbering .mn-mobile-nav-link's own explicit font-size since this rule
+   comes later in the stylesheet. */
 .mn-nav-button-reset {
   background: none; border: none; margin: 0; width: 100%;
-  text-align: left; cursor: pointer; font: inherit;
+  text-align: left; cursor: pointer; font-family: inherit;
 }
 button.mn-sidebar-nav-link.mn-nav-button-reset { padding: 0; }
 .mn-content { min-width: 0; }
