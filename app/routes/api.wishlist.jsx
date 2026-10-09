@@ -27,6 +27,7 @@ import { wardrobeNeedFromUtilityEvidence } from "../lib/buyskip/wardrobe-need.se
 import { summarizeOutcomeHistory } from "../lib/buyskip/outcome-history-evidence.server";
 import { computeWardrobeUtilityEvidence } from "../lib/buyskip/wardrobe-utility-evidence.server";
 import { assembleDecisionEvidence, applyHardConstraintVeto } from "../lib/buyskip/decision-evidence.server";
+import { classifyPersistenceError } from "../lib/buyskip/persistence-error-diagnostics.server";
 import {
   GARMENT_SILHOUETTE_VALUES,
   FIT_PROFILE_VALUES,
@@ -1101,7 +1102,16 @@ Respond ONLY with valid JSON, no markdown:
           // Idempotent repeat — same bucket/customer/image hit a concurrent write.
           isIdempotentRepeat = true;
         } else {
-          console.error("[buy-skip] persistence failed:", dbErr?.code ?? "unknown");
+          // Diagnostic only — never the raw error message/meta, which can embed
+          // invocation values. Safe to log: the error's class, its P-code when
+          // it has one (a fixed Prisma enum, not a value), and the operation
+          // name, which we know statically from our own code, not the error.
+          const diagnostic = classifyPersistenceError(dbErr);
+          console.error("[buy-skip] persistence failed", {
+            operation: "buyOrSkipAnalysis.create",
+            category: diagnostic.category,
+            code: diagnostic.code,
+          });
           return json(
             { error: "Analysis could not be saved. Please try again." },
             { status: 503 },
