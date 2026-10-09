@@ -219,7 +219,7 @@ export async function fetchCustomerProfile(accessToken: string): Promise<Shopify
         "Origin":        process.env.SHOPIFY_APP_URL!,
         "User-Agent":    "nAia Stylist Staging",
       },
-      body: JSON.stringify({ query: "query CurrentCustomer { customer { id firstName lastName displayName } }" }),
+      body: JSON.stringify({ query: "query CurrentCustomer { customer { id firstName lastName } }" }),
     });
   } catch {
     throw new Error("customer_identity_query_failed");
@@ -227,7 +227,7 @@ export async function fetchCustomerProfile(accessToken: string): Promise<Shopify
   if (!gqlRes.ok) throw new Error("customer_identity_query_failed");
 
   const body = await gqlRes.json() as {
-    data?: { customer?: { id?: unknown; firstName?: unknown; lastName?: unknown; displayName?: unknown } };
+    data?: { customer?: { id?: unknown; firstName?: unknown; lastName?: unknown } };
     errors?: unknown;
   };
   if (body.errors) throw new Error("customer_identity_query_failed");
@@ -241,14 +241,6 @@ export async function fetchCustomerProfile(accessToken: string): Promise<Shopify
 
   const rawFirstName = body.data?.customer?.firstName;
   const rawLastName  = body.data?.customer?.lastName;
-
-  // TEMP DIAGNOSTIC — remove after Settings name-display rule is decided.
-  // Server-side log only (Vercel runtime logs), never shown to the customer.
-  console.log("TEMP DIAGNOSTIC — Shopify Customer Account API name fields", JSON.stringify({
-    firstName:   rawFirstName,
-    lastName:    rawLastName,
-    displayName: body.data?.customer?.displayName,
-  }));
 
   return {
     customerId: numericId,

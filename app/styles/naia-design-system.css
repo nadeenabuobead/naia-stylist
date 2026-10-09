@@ -2917,6 +2917,14 @@ a.sv-card-action { text-decoration: underline; }
 }
 .mn-sidebar-nav-item.mn-nav-indent .mn-sidebar-nav-line { width: 0.5rem; }
 .mn-sidebar-nav-link.mn-active .mn-sidebar-nav-line { background: var(--lipstick); }
+/* Lets the Sign Out nav item be a real <button> (inside a POST <Form>) while
+   reading identically to the <Link> items around it — only resets browser
+   button chrome, never the padding/display each nav class already sets. */
+.mn-nav-button-reset {
+  background: none; border: none; margin: 0; width: 100%;
+  text-align: left; cursor: pointer; font: inherit;
+}
+button.mn-sidebar-nav-link.mn-nav-button-reset { padding: 0; }
 .mn-content { min-width: 0; }
 
 /* ── Footer ──────────────────────────────────────────────────────── */

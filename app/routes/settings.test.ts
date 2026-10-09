@@ -13,7 +13,7 @@
 //   F. Removed features — Communication Preferences, Delivery Addresses absent
 //   G. No fake request-success — no fake "Your request has been received" behavior
 //   H. Privacy contact — data/account requests use verified privacy email
-//   I. Sign out — uses /auth/logout
+//   I. Sign out — not duplicated here; lives in the nav (MyNaiaLayout.tsx)
 //   J. Selfie and model sections are clearly separated
 
 import { describe, it } from "node:test";
@@ -250,11 +250,16 @@ describe("H — privacy contact uses verified email", () => {
 });
 
 // ── I. Sign out ───────────────────────────────────────────────────────────────
+// Sign Out moved to the authenticated left nav (Account group, MyNaiaLayout.tsx)
+// — Settings no longer renders its own Sign Out control, so logout isn't duplicated.
 
 describe("I — sign out", () => {
-  it("sign out form posts to /auth/logout", () => {
-    assert.ok(src.includes('action="/auth/logout"'), "sign out targets /auth/logout");
-    assert.ok(src.includes('method="post"'),         "sign out uses POST method");
+  it("Settings does not render its own /auth/logout form — the nav action is the only one", () => {
+    assert.ok(!src.includes('action="/auth/logout"'), "no standalone Sign Out form in Settings");
+  });
+
+  it("Settings has no standalone Sign Out section heading", () => {
+    assert.ok(!/<h2[^>]*>Sign Out<\/h2>/.test(src), "no 'Sign Out' section heading");
   });
 });
 
@@ -326,14 +331,9 @@ describe("K — hero and section copy", () => {
     );
   });
 
-  it("sign out section has a heading", () => {
-    const signOutIdx = src.indexOf("Sign Out");
-    assert.ok(signOutIdx > -1, "Sign Out appears in the file");
-    const signOutSection = src.slice(src.lastIndexOf("Sign Out", src.indexOf('action="/auth/logout"')) - 200, src.indexOf('action="/auth/logout"'));
-    assert.ok(
-      signOutSection.includes("set-section-eyebrow") || signOutSection.includes("set-section-title"),
-      "Sign Out section has a heading element",
-    );
+  it("no standalone Sign Out section — it lives in the nav, not as its own bos-section here", () => {
+    assert.ok(!/<h2[^>]*>Sign Out<\/h2>/.test(src), "no Sign Out section heading in Settings");
+    assert.ok(!src.includes('<button type="submit" className="sp-btn-outline">Sign Out</button>'), "no standalone Sign Out button in Settings");
   });
 });
 
@@ -483,10 +483,6 @@ describe("N — data request buttons are mailto links", () => {
 describe("O — routing targets", () => {
   it("Go to My Closet links to /closet (covered by storefront rewrite)", () => {
     assert.ok(src.includes('to="/closet"'), "My Closet link uses /closet");
-  });
-
-  it("sign out posts to /auth/logout (covered by storefront /auth/:path* rewrite)", () => {
-    assert.ok(src.includes('action="/auth/logout"'), "sign out targets /auth/logout");
   });
 
   it("no hardcoded absolute URLs that would break through the storefront proxy", () => {

@@ -124,11 +124,11 @@ describe("R — account deletion is a request, not a destructive action", () => 
 
   it("account deletion is a mailto link, never a <Form method=\"post\"> submit", () => {
     const dataSectionIdx = settingsSrc.indexOf("Your Data & Privacy");
-    // The NADINE design-sharing section that used to sit between "Your Data &
-    // Privacy" and "Sign Out" was removed (see section P) — Sign Out is now
-    // the next marker after this section.
-    const signOutSectionIdx = settingsSrc.indexOf("── Sign Out");
-    const dataSection = settingsSrc.slice(dataSectionIdx, signOutSectionIdx);
+    // Sign Out no longer has its own section in this file (it moved to the
+    // nav — see MyNaiaLayout.tsx) — the next stable marker after the data
+    // section is the server-backed success-feedback comment.
+    const nextSectionIdx = settingsSrc.indexOf("── Server-backed success feedback");
+    const dataSection = settingsSrc.slice(dataSectionIdx, nextSectionIdx);
     assert.ok(dataSection.includes("mailto:privacy@naiabynadine.com"), "deletion request uses mailto");
     assert.ok(!dataSection.includes("<Form"), "no <Form> element in the data/deletion section");
     assert.ok(!dataSection.includes("fetcher.submit"), "no fetcher.submit in the data/deletion section");

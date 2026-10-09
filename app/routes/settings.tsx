@@ -18,10 +18,11 @@
 
 import { useState, useEffect } from "react";
 import type { ActionFunctionArgs, LinksFunction, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useFetcher, useRevalidator, Link, Form } from "react-router";
+import { useLoaderData, useFetcher, useRevalidator, Link } from "react-router";
 import { data } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import prisma from "~/db.server";
+import { conciseFamilyName } from "~/lib/customer-name-display";
 import {
   deleteSelfiePhoto,
   deleteAnalysisResult,
@@ -263,7 +264,7 @@ export default function Settings() {
   // reversible and applies immediately.
   const [pending, setPending] = useState<DestructiveIntent | null>(null);
 
-  const fullName    = [firstName, lastName].filter(Boolean).join(" ") || null;
+  const fullName    = [firstName, conciseFamilyName(lastName)].filter(Boolean).join(" ") || null;
   const isSubmitting = fetcher.state !== "idle";
   const actionData  = fetcher.data;
 
@@ -496,14 +497,8 @@ export default function Settings() {
         </div>
       </section>
 
-      {/* ── Sign Out ─────────────────────────────────────────────────────── */}
-      <section className="bos-section">
-        <div className="set-section-eyebrow">Account</div>
-        <h2 className="set-section-title">Sign Out</h2>
-        <Form method="post" action="/auth/logout">
-          <button type="submit" className="sp-btn-outline">Sign Out</button>
-        </Form>
-      </section>
+      {/* Sign Out lives in the authenticated left nav (Account group) now —
+          not duplicated here. See MyNaiaLayout.tsx. */}
 
       {/* ── Server-backed success feedback ───────────────────────────────── */}
       {actionData?.ok && (

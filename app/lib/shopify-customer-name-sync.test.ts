@@ -175,7 +175,7 @@ describe("auth.shopify.callback.tsx — name sync is actually wired in", () => {
 describe("shopify-customer-oauth.server.ts — the GraphQL lookup actually requests the name fields", () => {
   it("fetchCustomerProfile queries firstName and lastName alongside id", () => {
     assert.ok(
-      oauthSrc.includes("query CurrentCustomer { customer { id firstName lastName"),
+      oauthSrc.includes("query CurrentCustomer { customer { id firstName lastName } }"),
       "GraphQL query requests id, firstName, and lastName",
     );
   });

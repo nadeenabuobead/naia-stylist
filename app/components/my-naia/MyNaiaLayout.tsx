@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { Link, useLocation } from "react-router";
+import { Form, Link, useLocation } from "react-router";
 import { STOREFRONT_ORIGIN, STOREFRONT_NAV } from "~/lib/storefront-config";
 
-type NavItem = { to: string; label: string; exact?: boolean };
+type NavItem = { to: string; label: string; exact?: boolean; logout?: boolean };
 type NavGroup = { title: string; items: NavItem[] };
 
 const MY_NAIA_NAV: NavGroup[] = [
@@ -30,12 +30,13 @@ const MY_NAIA_NAV: NavGroup[] = [
     items: [
       { to: "/my-naia/plan-usage", label: "Plan & Usage" },
       { to: "/settings", label: "Settings & Privacy" },
+      { to: "/auth/logout", label: "Sign Out", logout: true },
     ],
   },
 ];
 
 function isActive(pathname: string, item: NavItem) {
-  if (!item.to) return false;
+  if (!item.to || item.logout) return false;
   return item.exact ? pathname === item.to : pathname.startsWith(item.to);
 }
 
@@ -177,6 +178,21 @@ export default function MyNaiaLayout({ children, compact = false }: Props) {
                 <div className="mn-mobile-nav-group-title">{group.title}</div>
                 <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
                   {group.items.map((item) => {
+                    if (item.logout) {
+                      return (
+                        <li key={item.to}>
+                          <Form method="post" action="/auth/logout" style={{ display: "contents" }}>
+                            <button
+                              type="submit"
+                              onClick={() => setMobileOpen(false)}
+                              className="mn-mobile-nav-link mn-nav-button-reset"
+                            >
+                              {item.label}
+                            </button>
+                          </Form>
+                        </li>
+                      );
+                    }
                     const active = isActive(pathname, item);
                     return (
                       <li key={item.to}>
@@ -208,6 +224,18 @@ export default function MyNaiaLayout({ children, compact = false }: Props) {
                 <nav aria-label={group.title}>
                   <ol className="mn-sidebar-nav">
                     {group.items.map((item) => {
+                      if (item.logout) {
+                        return (
+                          <li key={item.to} className="mn-sidebar-nav-item">
+                            <Form method="post" action="/auth/logout" style={{ display: "contents" }}>
+                              <button type="submit" className="mn-sidebar-nav-link mn-nav-button-reset">
+                                <span className="mn-sidebar-nav-line" aria-hidden="true" />
+                                {item.label}
+                              </button>
+                            </Form>
+                          </li>
+                        );
+                      }
                       const active = isActive(pathname, item);
                       return (
                         <li key={item.to} className="mn-sidebar-nav-item">
