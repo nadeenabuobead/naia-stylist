@@ -390,7 +390,15 @@ describe("L — explicit destructive button labels", () => {
 // ── M. Account details ────────────────────────────────────────────────────────
 
 describe("M — account details", () => {
-  it("name row is conditionally rendered — hidden when name is absent", () => {
+  it("renders Name when available — the row pairs the Name label with the real fullName value", () => {
+    const guardIdx = src.indexOf("{fullName && (");
+    assert.ok(guardIdx !== -1, "fullName guard present");
+    const rowBlock = src.slice(guardIdx, guardIdx + 300);
+    assert.ok(rowBlock.includes(">Name<"), "label text is literally 'Name'");
+    assert.ok(rowBlock.includes("{fullName}"), "value binds to the real fullName, not a literal or the email");
+  });
+
+  it("omits Name when unavailable — the row is absent from the tree, not shown with a placeholder", () => {
     assert.ok(
       src.includes("{fullName && ("),
       "name row is wrapped in a conditional on fullName",

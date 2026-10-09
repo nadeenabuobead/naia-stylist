@@ -178,12 +178,19 @@ export async function validateIdToken(
 }
 
 // ---------------------------------------------------------------------------
-// Customer Account API — discover GraphQL endpoint + fetch verified customer GID
+// Customer Account API — discover GraphQL endpoint + fetch verified customer
+// identity, including the name fields used to populate the nAia Customer row.
 // ---------------------------------------------------------------------------
 
 let customerAccountApiEndpoint: string | null = null;
 
-export async function fetchCustomerGid(accessToken: string): Promise<string> {
+export interface ShopifyCustomerProfile {
+  customerId: string;
+  firstName:  string | null;
+  lastName:   string | null;
+}
+
+export async function fetchCustomerProfile(accessToken: string): Promise<ShopifyCustomerProfile> {
   // ── Discover endpoint (module-level cache after first call) ──
   if (!customerAccountApiEndpoint) {
     const storeDomain = process.env.SHOPIFY_STORE_DOMAIN!;
@@ -212,14 +219,17 @@ export async function fetchCustomerGid(accessToken: string): Promise<string> {
         "Origin":        process.env.SHOPIFY_APP_URL!,
         "User-Agent":    "nAia Stylist Staging",
       },
-      body: JSON.stringify({ query: "query CurrentCustomer { customer { id } }" }),
+      body: JSON.stringify({ query: "query CurrentCustomer { customer { id firstName lastName } }" }),
     });
   } catch {
     throw new Error("customer_identity_query_failed");
   }
   if (!gqlRes.ok) throw new Error("customer_identity_query_failed");
 
-  const body = await gqlRes.json() as { data?: { customer?: { id?: unknown } }; errors?: unknown };
+  const body = await gqlRes.json() as {
+    data?: { customer?: { id?: unknown; firstName?: unknown; lastName?: unknown } };
+    errors?: unknown;
+  };
   if (body.errors) throw new Error("customer_identity_query_failed");
 
   const gid = body.data?.customer?.id;
@@ -228,7 +238,15 @@ export async function fetchCustomerGid(accessToken: string): Promise<string> {
   }
   const numericId = gid.split("/").pop();
   if (!numericId || !/^\d+$/.test(numericId)) throw new Error("customer_gid_format_invalid");
-  return numericId;
+
+  const rawFirstName = body.data?.customer?.firstName;
+  const rawLastName  = body.data?.customer?.lastName;
+
+  return {
+    customerId: numericId,
+    firstName:  typeof rawFirstName === "string" ? rawFirstName : null,
+    lastName:   typeof rawLastName === "string" ? rawLastName : null,
+  };
 }
 
 // ---------------------------------------------------------------------------

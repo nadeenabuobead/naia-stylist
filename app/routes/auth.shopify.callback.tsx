@@ -5,9 +5,10 @@ import {
   getOidcConfig,
   exchangeCodeForTokens,
   validateIdToken,
-  fetchCustomerGid,
+  fetchCustomerProfile,
   validateReturnTo,
 } from "~/lib/shopify-customer-oauth.server";
+import { usableName, resolveNameUpdate } from "~/lib/shopify-customer-name-sync.server";
 import { getSession, commitSession } from "~/lib/session.server";
 import {
   createNaiaSession,
@@ -117,13 +118,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return fail(502, "No access token returned");
   }
 
-  // ── 9: resolve verified customer GID via Customer Account API ──
-  let shopifyCustomerId: string;
+  // ── 9: resolve verified customer identity (GID + name) via Customer Account API ──
+  let shopifyProfile: { customerId: string; firstName: string | null; lastName: string | null };
   try {
-    shopifyCustomerId = await fetchCustomerGid(tokens.access_token);
+    shopifyProfile = await fetchCustomerProfile(tokens.access_token);
   } catch {
     return fail(502, "Customer identity lookup failed");
   }
+  const shopifyCustomerId = shopifyProfile.customerId;
 
   // ── Resolve or create the Customer record ──
   let customer;
@@ -134,11 +136,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   if (!customer) {
-    // First-time Shopify customer — create a minimal record using the already-verified
-    // shopifyCustomerId. email is left null; no additional token parsing needed.
+    // First-time Shopify customer — create using the already-verified shopifyCustomerId,
+    // plus firstName/lastName from the same Customer Account API response, if usable.
+    // email is left null; no additional token parsing needed.
     try {
       customer = await prisma.customer.create({
-        data: { shopifyCustomerId },
+        data: {
+          shopifyCustomerId,
+          firstName: usableName(shopifyProfile.firstName),
+          lastName:  usableName(shopifyProfile.lastName),
+        },
       });
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
@@ -152,6 +159,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
       } else {
         return fail(502, "Database error");
       }
+    }
+  }
+
+  // ── Sync name from Shopify on every successful login ──
+  // Never overwrites an existing usable local name with a null/blank Shopify
+  // value. A failure here is non-fatal — login proceeds with the name as-is.
+  const nameUpdate = resolveNameUpdate(
+    { firstName: shopifyProfile.firstName, lastName: shopifyProfile.lastName },
+    { firstName: customer.firstName,       lastName: customer.lastName },
+  );
+  if (Object.keys(nameUpdate).length > 0) {
+    try {
+      customer = await prisma.customer.update({ where: { id: customer.id }, data: nameUpdate });
+    } catch {
+      // Non-fatal — proceed with the previously-resolved customer record.
     }
   }
 
