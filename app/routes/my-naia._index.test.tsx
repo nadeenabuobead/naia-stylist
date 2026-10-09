@@ -280,9 +280,10 @@ describe("my-naia component — static structure", () => {
     expect(html).not.toContain("Welcome back");
   });
 
-  it("renders 'Welcome, Name.' greeting when firstName provided", () => {
+  it("renders 'Welcome,' in the display font and the name in the italic editorial accent", () => {
     const html = render({ firstName: "Alia" });
-    expect(html).toContain("Welcome, Alia.");
+    expect(html).toContain("Welcome,");
+    expect(html).toMatch(/<span[^>]*font-style:\s*italic[^>]*>\s*Alia\.\s*<\/span>/);
   });
 
   it("renders Welcome. when no first name", () => {
