@@ -1,6 +1,7 @@
 import prisma from "../db.server";
 import type { TrendReportData } from "./trend-reports";
 import { buildPrivateDownloadUrl, getCloudinaryConfig } from "./cloudinary-admin.server";
+import { scoreItemAttributes, dimensionIdsForSlug } from "./trend-evidence-attribute-scoring.server";
 
 // ---------------------------------------------------------------------------
 // Evidence bundle — assembled server-side, scoped to exactly one customer,
@@ -30,6 +31,16 @@ export type ShopperClosetItemEvidence = {
   styleTags: string[];
   occasions: string[];
   material: string | null;
+  // Garment Intelligence — already on ClosetItem (migration 20260828000000),
+  // null/absent for items not yet analyzed (and for older test fixtures that
+  // predate this field set). Trend-specific scoring treats missing/null as
+  // "no signal from this field", never as a negative — optional so every
+  // pre-existing fixture across this file's other tests stays valid.
+  silhouette?: string | null;
+  fitProfile?: string | null;
+  formality?: string | null;
+  pattern?: string | null;
+  colors?: string[];
 };
 
 export type ShopperReviewSignal = {
@@ -87,6 +98,11 @@ export async function getShopperEvidence(customerId: string): Promise<ShopperEvi
           styleTags: true,
           occasions: true,
           material: true,
+          silhouette: true,
+          fitProfile: true,
+          formality: true,
+          pattern: true,
+          colors: true,
         },
       },
       postOutfitReviews: {
@@ -157,6 +173,11 @@ export async function getShopperEvidence(customerId: string): Promise<ShopperEvi
       styleTags: item.styleTags ?? [],
       occasions: item.occasions ?? [],
       material: item.material ?? null,
+      silhouette: item.silhouette ?? null,
+      fitProfile: item.fitProfile ?? null,
+      formality: item.formality ?? null,
+      pattern: item.pattern ?? null,
+      colors: item.colors ?? [],
     })),
     reviewSignal: {
       reviewCount: customer.postOutfitReviews.length,
@@ -503,7 +524,11 @@ function buildColourEvidence(
 const SLUG_COMPATIBLE_CATEGORIES: Record<string, Set<string>> = {
   "spring-2026-soft-structure":   new Set(["TOPS", "BOTTOMS", "OUTERWEAR", "DRESSES"]),
   "modern-tailoring-spring-2026": new Set(["TOPS", "BOTTOMS", "OUTERWEAR", "DRESSES"]),
-  "spring-2026-colour-direction": new Set(["TOPS", "BAGS", "SHOES", "ACCESSORIES"]),
+  // BOTTOMS/DRESSES/OUTERWEAR included so real colour evidence in those
+  // categories can compete — excluding them meant a bag or a pair of shoes
+  // could win as "best colour evidence" purely because nothing with
+  // stronger colour evidence was ever allowed to be considered.
+  "spring-2026-colour-direction": new Set(["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR", "BAGS", "SHOES", "ACCESSORIES"]),
 };
 
 // Subcategory values (lowercased) that disqualify an otherwise-compatible item.
@@ -1181,6 +1206,71 @@ function categoriesAreWearablePair(catA: string, catB: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Section-specific evidence selection.
+//
+// Root-cause fix: the old pipeline computed one ranked top-2 array and
+// threaded it through every section unchanged. This gives each section its
+// own selection job against the same scored pool, so sections genuinely
+// differ — and differ for a reason (which trend dimension a piece proves),
+// not arbitrary rotation.
+// ---------------------------------------------------------------------------
+
+interface DimensionScoredItem {
+  item: ShopperClosetItemEvidence;
+  score: number;
+  dimensionId: string | null;
+}
+
+// Your Closet Shows — one item per trend dimension (diversified by what the
+// trend itself actually asks for — base vs. accent, tailored vs. relaxed —
+// never arbitrary diversity), then fills remaining slots with the next-best
+// overall items. A slug with no dimension profile (or a customer whose
+// Closet only demonstrates one dimension) still returns the best available
+// items — this never forces a weak item in just to hit a count.
+function selectClosetShowsItems(
+  pool: DimensionScoredItem[],
+  slug: string,
+  max: number,
+): DimensionScoredItem[] {
+  const picked: DimensionScoredItem[] = [];
+  const used = new Set<ShopperClosetItemEvidence>();
+
+  for (const dimensionId of dimensionIdsForSlug(slug)) {
+    if (picked.length >= max) break;
+    const best = pool.find((m) => m.dimensionId === dimensionId && !used.has(m.item));
+    if (best) {
+      picked.push(best);
+      used.add(best.item);
+    }
+  }
+  for (const m of pool) {
+    if (picked.length >= max) break;
+    if (used.has(m.item)) continue;
+    picked.push(m);
+    used.add(m.item);
+  }
+  return picked;
+}
+
+// Best wearable partner for `anchor` from `pool`, skipping anchor itself and
+// anything in `exclude`. Used to give Route In and A Look To Try each their
+// own support-piece pick instead of always reusing the #2 overall item.
+function pickWearablePartner(
+  anchor: DimensionScoredItem,
+  pool: DimensionScoredItem[],
+  exclude: Set<ShopperClosetItemEvidence>,
+  slug: string,
+): DimensionScoredItem | null {
+  for (const m of pool) {
+    if (m.item === anchor.item || exclude.has(m.item)) continue;
+    if (categoriesAreWearablePair(getEffectiveCategory(anchor.item, slug), getEffectiveCategory(m.item, slug))) {
+      return m;
+    }
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // A LOOK TO TRY — an executable outfit formula.
 // Always includes: named Closet piece(s) where compatible + complementary category
 // or generic recommendation + footwear + occasion context.
@@ -1518,10 +1608,10 @@ const TREND_COVERAGE_CONFIG: Record<string, TrendCoverageConfig> = {
     viableRoutes: [
       // accent piece only: quiet base is assumed from any neutral wardrobe
       { id: "accent-piece",   requires: [["BAGS", "SHOES", "ACCESSORIES"]] },
-      // qualifying top as base + accent in closet = complete method
-      { id: "base-and-accent", requires: [["TOPS"], ["BAGS", "SHOES", "ACCESSORIES"]] },
-      // qualifying top as quiet base alone is also viable (accent via assumed neutrals)
-      { id: "base-only",      requires: [["TOPS"]] },
+      // qualifying base piece (any clothing category, not just tops) + accent in closet = complete method
+      { id: "base-and-accent", requires: [["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR"], ["BAGS", "SHOES", "ACCESSORIES"]] },
+      // qualifying base piece alone is also viable (accent via assumed neutrals)
+      { id: "base-only",      requires: [["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR"]] },
     ],
     optionalRole: {
       // if only base-only route exists, an accent piece completes the method
@@ -1956,12 +2046,21 @@ export function buildShopperEdit(
   const colourEvidence = buildColourEvidence(profile, closetItemsList, closetMatchText);
   const useNeutralColour = slug === "spring-2026-colour-direction" && !colourEvidence.found;
 
-  // Named closet item scoring
+  // Named closet item scoring — trend-attribute-aware (V1 architecture fix).
+  // Root cause this replaces: every item's score used to come ONLY from
+  // matching its own terms against one flat blob of this report's editorial
+  // copy, with no access to structured Garment Intelligence (silhouette,
+  // fitProfile, formality) at all — so two trend reports with similar
+  // editorial language scored Closet items near-identically. The qualifying
+  // gate now accepts EITHER the original text-overlap signal OR real
+  // trend-attribute evidence (scoreItemAttributes), so a well-analyzed item
+  // can qualify on structured evidence alone, and an un-analyzed item (no
+  // Garment Intelligence yet) still gets a fair chance via the original
+  // text-overlap path — neither signal regresses the other.
   const compatibleCategories = SLUG_COMPATIBLE_CATEGORIES[slug] ?? new Set<string>();
   const excludedSubcategories = SUBCATEGORY_EXCLUDE[slug] ?? new Set<string>();
 
-  type ScoredItem = { item: ShopperClosetItemEvidence; score: number };
-  const scored: ScoredItem[] = [];
+  const scored: DimensionScoredItem[] = [];
 
   for (const item of closetItemsList) {
     if (!compatibleCategories.has(item.category)) continue;
@@ -1974,7 +2073,6 @@ export function buildShopperEdit(
       (t) => !GENERIC_NAME_TERMS.has(t.toLowerCase()),
     );
 
-    // Qualification gate: at least one meaningful, non-generic signal must hit.
     const qualifyingTerms = [
       item.subcategory,
       item.material,
@@ -1985,16 +2083,47 @@ export function buildShopperEdit(
     ].filter((t): t is string => Boolean(t));
 
     const hits = matchedTerms(closetMatchText, qualifyingTerms);
-    if (hits.length === 0) continue;
+    const attribute = scoreItemAttributes(item, slug);
 
-    let score = hits.length;
+    // Qualification gate: real evidence from either signal.
+    if (hits.length === 0 && attribute.bestScore === 0) continue;
+
+    let score = hits.length + attribute.bestScore;
     if (item.name) score += 3;
     if (item.imageUrl) score += 1;
-    scored.push({ item, score });
+    scored.push({ item, score, dimensionId: attribute.bestDimensionId });
   }
 
   scored.sort((a, b) => b.score - a.score);
-  const namedMatches = scored.filter((m) => m.item.name).slice(0, 2);
+  const namedScored = scored.filter((m) => m.item.name);
+
+  // Each section now runs its own selection against the same scored pool,
+  // instead of every section reading the same fixed top-2 slice.
+  const closetShowsScored = selectClosetShowsItems(namedScored, slug, 4);
+
+  const routeInAnchor = namedScored[0] ?? null;
+  const routeInSupport = routeInAnchor
+    ? pickWearablePartner(routeInAnchor, namedScored, new Set(), slug)
+    : null;
+  const routeInPair: DimensionScoredItem[] = routeInAnchor
+    ? (routeInSupport ? [routeInAnchor, routeInSupport] : [routeInAnchor])
+    : [];
+
+  // A Look To Try prefers a DIFFERENT supporting piece from Route In where
+  // the Closet supports it; reuse only happens when no other wearable
+  // partner exists — intentional, not automatic.
+  const usedByRouteIn = new Set<ShopperClosetItemEvidence>(routeInSupport ? [routeInSupport.item] : []);
+  const lookSupport = routeInAnchor
+    ? (pickWearablePartner(routeInAnchor, namedScored, usedByRouteIn, slug) ?? routeInSupport)
+    : null;
+  const lookPair: DimensionScoredItem[] = routeInAnchor
+    ? (lookSupport ? [routeInAnchor, lookSupport] : [routeInAnchor])
+    : [];
+
+  // Legacy alias — Worth Investing In's prose names "what you can already
+  // wear this with", which is Route In's own anchor+support pair (a
+  // genuinely wearable combination), not an arbitrary evidence slice.
+  const namedMatches = routeInPair;
 
   // Work/lifestyle context — three-way label, computed once, used across sections
   const lifestyleIds = profile
@@ -2037,7 +2166,7 @@ export function buildShopperEdit(
     ? buildPassportPointsBlock(profile, lifestyleIds, slug)
     : null;
 
-  const evidenceClosetItems: EvidenceClosetItem[] = namedMatches.map(({ item }) => ({
+  const evidenceClosetItems: EvidenceClosetItem[] = closetShowsScored.map(({ item }) => ({
     name: item.name!,
     imageUrl: item.imageUrl,
     category: item.category,
@@ -2048,7 +2177,7 @@ export function buildShopperEdit(
   // 3. YOUR BEST ROUTE IN
   // -------------------------------------------------------------------------
   const yourBestRouteIn = rules
-    ? buildBestRouteIn(namedMatches, slug, register, rules, profile, workCtx)
+    ? buildBestRouteIn(routeInPair, slug, register, rules, profile, workCtx)
     : (report.wardrobeNote ?? report.summary);
 
   // -------------------------------------------------------------------------
@@ -2058,7 +2187,7 @@ export function buildShopperEdit(
     ?? (report.wardrobeNote ?? report.summary);
 
   const aLookToTry = buildALookToTry(
-    namedMatches,
+    lookPair,
     slug,
     workCtx,
     passportOnlyLook,
@@ -2191,8 +2320,11 @@ export function buildShopperEdit(
 
   // Outcome C aware override: when the Closet already covers the trend, prefer a Look
   // To Try built from the actual qualifying items rather than introducing missing garments.
+  // Reads the full closetShowsScored pool, not just the Route In anchor/support pair —
+  // a one-piece DRESS route needs to find a dress even when it wasn't chosen as the
+  // single strongest overall anchor.
   const finalLookToTry = worthInvestingStatement !== null
-    ? (buildOutcomeCLookToTry(namedMatches, slug, workCtx) ?? aLookToTry)
+    ? (buildOutcomeCLookToTry(closetShowsScored, slug, workCtx) ?? aLookToTry)
     : aLookToTry;
 
   const coveredClosetCategories = [...new Set(scored.map((s) => getEffectiveCategory(s.item, slug)))];

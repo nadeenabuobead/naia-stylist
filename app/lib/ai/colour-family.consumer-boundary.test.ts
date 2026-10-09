@@ -26,11 +26,16 @@ const ALWAYS_ALLOWED_BASENAMES = new Set([
 // The ONLY production (non-test) files permitted to import colour-family.ts.
 // Buy/Skip's colour-preference resolution owns the original import; B2c adds
 // NADINE's product-assessment colour-conflict detection as the second,
-// deliberately-wired consumer. Extend this set only in a future phase that
-// deliberately wires another new consumer, never silently.
+// deliberately-wired consumer. Personalised Trend Edit's base-neutral vs.
+// accent-colour evidence scoring (Colour Direction report) is the third —
+// added deliberately to fix generic text-matching picking weak colour
+// evidence (a beanie, running shoes) over genuine base/accent garments.
+// Extend this set only in a future phase that deliberately wires another
+// new consumer, never silently.
 const ALLOWED_PRODUCTION_IMPORTERS = new Set([
   "app/lib/buyskip/constraint-evidence.server.ts",
   "app/lib/ai/nadine-product-assessment.ts",
+  "app/lib/trend-evidence-attribute-scoring.server.ts",
 ]);
 
 const SKIP_DIRS = new Set(["node_modules", ".git", "build", "dist", ".vercel"]);
