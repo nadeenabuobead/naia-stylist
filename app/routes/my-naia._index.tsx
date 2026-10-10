@@ -763,7 +763,18 @@ export default function MyNaiaOverview() {
                     const items = suggestion?.items ?? [];
                     const hasNadine = items.some((i) => !i.closetItemId && i.productTitle);
                     const hasCloset = items.some((i) => !!i.closetItemId);
-                    const sourcing = hasNadine && hasCloset ? "NADINE + My Closet" : hasNadine ? "NADINE" : hasCloset ? "My Closet" : session.styleFrom === "OWN_WARDROBE" ? "My Closet" : "NADINE";
+                    // When the result has items, derive the label from what's actually in it.
+                    // When it doesn't (no OutfitSuggestion persisted), fall back to the
+                    // session's own recorded styleFrom rather than defaulting to NADINE —
+                    // StyleSource is CLOSET | NAIA | BOTH ("OWN_WARDROBE" is not a valid
+                    // value and never matched, which is why this always fell through before.
+                    const sourcing =
+                      hasNadine && hasCloset ? "NADINE + My Closet"
+                      : hasNadine ? "NADINE"
+                      : hasCloset ? "My Closet"
+                      : session.styleFrom === "CLOSET" ? "My Closet"
+                      : session.styleFrom === "BOTH" ? "NADINE + My Closet"
+                      : "NADINE";
                     return (
                       <article key={session.id} style={{ display: "flex", flexDirection: "column" }}>
                         <Link

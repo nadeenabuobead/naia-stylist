@@ -471,6 +471,14 @@ describe("my-naia component — static structure", () => {
     expect(html).not.toMatch(/<img[^>]*src="[^"]*"/);
   });
 
+  it("a CLOSET-sourced session with no persisted OutfitSuggestion labels its source 'My Closet', not 'NADINE'", () => {
+    const html = render({
+      sessions: [baseSession({ styleFrom: "CLOSET", suggestions: [] })],
+    });
+    expect(html).toMatch(/letter-spacing:0\.28em;color:var\(--fg-55\)">My Closet</);
+    expect(html).not.toMatch(/letter-spacing:0\.28em;color:var\(--fg-55\)">NADINE</);
+  });
+
   it("renders empty state for Buy or Skip when no history", () => {
     const html = render({ buyOrSkipHistory: [] });
     expect(html).toContain("No decisions yet");
