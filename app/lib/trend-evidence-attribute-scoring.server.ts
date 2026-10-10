@@ -107,6 +107,27 @@ function itemColourText(item: ShopperClosetItemEvidence): string | null {
   return item.primaryColor ?? item.colors?.[0] ?? null;
 }
 
+// Foundation garments (TOPS/BOTTOMS/DRESSES/OUTERWEAR) are what "the quiet
+// base" actually means in Colour Direction's own method — a neutral
+// accessory (a beanie, a tote) can support that base but should never beat
+// a real neutral skirt, trouser, shirt, sweater, blazer, or dress for the
+// role. Previously every neutral item scored an identical 6 regardless of
+// category, so the tie-break (unrelated text-overlap hits) decided the
+// winner — confirmed via live staging QA to put a beanie ahead of a
+// tailored blazer. This bonus makes every foundation garment strictly
+// outrank every accessory/bag/shoe for this role, deterministically.
+const FOUNDATION_CATEGORIES = new Set(["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR"]);
+
+// Everyday-wearable formality should outrank occasion/evening formality for
+// the accent role by default — Colour Direction is a general-wardrobe
+// method, not an eveningwear one. A genuinely coloured evening gown is
+// still valid accent evidence (so it still qualifies), but it should not
+// automatically outrank a more generally useful coloured blouse, skirt, or
+// pair of jeans just because both are "accent-colour". Driven entirely by
+// the item's own formality field — never a hard-coded item name.
+const EVERYDAY_FORMALITIES = new Set(["casual", "smart-casual"]);
+const SEMI_FORMAL_FORMALITIES = new Set(["business-casual"]);
+
 const colourDirectionDimensions: DimensionRule[] = [
   {
     id: "base-neutral",
@@ -114,7 +135,8 @@ const colourDirectionDimensions: DimensionRule[] = [
       const text = itemColourText(item);
       if (!text) return 0;
       const resolution = resolveFreeTextColourFamilies(text);
-      return resolution.isNeutral ? 6 : 0;
+      if (!resolution.isNeutral) return 0;
+      return FOUNDATION_CATEGORIES.has(item.category) ? 9 : 6;
     },
   },
   {
@@ -123,7 +145,11 @@ const colourDirectionDimensions: DimensionRule[] = [
       const text = itemColourText(item);
       if (!text) return 0;
       const resolution = resolveFreeTextColourFamilies(text);
-      return !resolution.isNeutral && resolution.hueFamilies.length > 0 ? 6 : 0;
+      if (resolution.isNeutral || resolution.hueFamilies.length === 0) return 0;
+      let score = 6;
+      if (item.formality && EVERYDAY_FORMALITIES.has(item.formality)) score += 2;
+      else if (item.formality && SEMI_FORMAL_FORMALITIES.has(item.formality)) score += 1;
+      return score;
     },
   },
 ];

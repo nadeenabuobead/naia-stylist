@@ -2,9 +2,9 @@ import prisma from "../db.server";
 import type { TrendReportData } from "./trend-reports";
 import { buildPrivateDownloadUrl, getCloudinaryConfig } from "./cloudinary-admin.server";
 import { scoreItemAttributes, dimensionIdsForSlug } from "./trend-evidence-attribute-scoring.server";
-// TEMP DIAGNOSTIC import — live Closet colour QA only, see the diagnostic
-// block below. Not used by any scoring/selection logic (that stays
-// entirely inside trend-evidence-attribute-scoring.server.ts).
+// Used by buildColorMaterialSuffix (Colour Direction's neutral/accent copy
+// boundary) — the same canonical resolver scoreItemAttributes uses, so a
+// garment's role is decided identically everywhere in this file.
 import { resolveFreeTextColourFamilies } from "./ai/colour-family";
 
 // ---------------------------------------------------------------------------
@@ -45,10 +45,6 @@ export type ShopperClosetItemEvidence = {
   formality?: string | null;
   pattern?: string | null;
   colors?: string[];
-  // TEMP DIAGNOSTIC field — not read by any scoring/selection logic, only
-  // by the temporary live-Closet diagnostic log below. Safe to leave or
-  // remove independently of the diagnostic itself.
-  analysisStatus?: string | null;
 };
 
 export type ShopperReviewSignal = {
@@ -120,7 +116,6 @@ export async function getShopperEvidence(customerId: string): Promise<ShopperEvi
           formality: true,
           pattern: true,
           colors: true,
-          analysisStatus: true,
         },
       },
       postOutfitReviews: {
@@ -135,24 +130,6 @@ export async function getShopperEvidence(customerId: string): Promise<ShopperEvi
   });
 
   if (!customer) return EMPTY_BUNDLE;
-
-  // TEMP DIAGNOSTIC — live Closet QA: closetItems above is capped at the 20
-  // most recently added items (take: 20). If this customer owns more than
-  // 20 pieces, anything older than their 20 most recent additions is
-  // structurally invisible to Trend Edit regardless of how good its colour
-  // evidence is. This directly tests that theory. Server-side log only,
-  // never customer-facing. Remove once the Colour Direction diagnostic is
-  // closed.
-  try {
-    const totalClosetCount = await prisma.closetItem.count({ where: { customerId } });
-    if (totalClosetCount > customer.closetItems.length) {
-      console.log("TEMP DIAGNOSTIC — trend-evidence closet truncation", JSON.stringify({
-        customerIdHash: customerId.slice(0, 8),
-        totalClosetCount,
-        fetchedCount: customer.closetItems.length,
-      }));
-    }
-  } catch { /* diagnostic only — never block the real response */ }
 
   const profile = customer.onboardingProfile;
   const hasProfile = Boolean(profile?.completed);
@@ -214,7 +191,6 @@ export async function getShopperEvidence(customerId: string): Promise<ShopperEvi
       formality: item.formality ?? null,
       pattern: item.pattern ?? null,
       colors: item.colors ?? [],
-      analysisStatus: item.analysisStatus ?? null,
     })),
     reviewSignal: {
       reviewCount: customer.postOutfitReviews.length,
@@ -1156,17 +1132,35 @@ function buildColorMaterialSuffix(item: ShopperClosetItemEvidence, slug: string)
   const c = item.primaryColor?.toLowerCase() ?? null;
   const m = item.material?.toLowerCase() ?? null;
 
-  const isNeutral = c ? ["white", "cream", "beige", "stone", "ivory", "off-white", "sand", "ecru", "oatmeal"].some((t) => c.includes(t)) : false;
+  // Dark-anchor is purely a phrasing refinement WITHIN the neutral set (a
+  // nicer sentence for black/navy/charcoal-type depth) — never the
+  // neutral/accent boundary itself. That boundary comes from the same
+  // canonical resolver every other role decision uses. Previously this used
+  // its own short hard-coded neutral-word list ("white, cream, beige,
+  // stone, ivory..."), which did not include every word the resolver itself
+  // treats as neutral (e.g. "camel", "grey"/"gray", "khaki", "tan",
+  // "taupe") — those items fell through to the "potential accent note"
+  // branch despite being genuinely neutral, the same category of
+  // contradiction as the white-sneaker bug, just via a text-list mismatch
+  // instead of a category switch.
   const isDarkAnchor = c ? ["black", "navy", "charcoal", "espresso", "brown", "chocolate", "dark", "midnight"].some((t) => c.includes(t)) : false;
   const isFluid = m ? ["silk", "viscose", "satin", "chiffon", "jersey", "crepe", "linen", "lyocell", "modal", "georgette"].some((t) => m.includes(t)) : false;
   const isStructured = m ? ["wool", "twill", "denim", "leather", "suede", "cashmere", "gabardine", "ponte"].some((t) => m.includes(t)) : false;
 
   // Colour Direction: colour is always the most relevant signal.
   if (slug === "spring-2026-colour-direction" && c) {
-    if (isNeutral) return ` Its ${c} tone reads as the base — the quiet foundation this direction requires.`;
-    if (isDarkAnchor) return ` Its ${c} depth works as the anchor in this direction — one of the warm neutrals the method is built on.`;
-    return ` Its ${c} colour is a potential accent note — one considered colour against a quieter base.`;
+    const resolution = resolveFreeTextColourFamilies(c);
+    if (resolution.isNeutral) {
+      if (isDarkAnchor) return ` Its ${c} depth works as the anchor in this direction — one of the warm neutrals the method is built on.`;
+      return ` Its ${c} tone reads as the base — the quiet foundation this direction requires.`;
+    }
+    if (!resolution.unknown && resolution.hueFamilies.length > 0) {
+      return ` Its ${c} colour is a potential accent note — one considered colour against a quieter base.`;
+    }
+    return "";
   }
+
+  const isNeutral = c ? ["white", "cream", "beige", "stone", "ivory", "off-white", "sand", "ecru", "oatmeal"].some((t) => c.includes(t)) : false;
 
   // Soft Structure / Modern Tailoring: material is the most structurally relevant signal.
   if (slug === "spring-2026-soft-structure" && m) {
@@ -1208,13 +1202,33 @@ function buildEvidenceItemRoleNote(item: ShopperClosetItemEvidence, slug: string
     return (notes[getEffectiveCategory(item, slug)] ?? "A starting point for this direction.") + suffix;
   }
   if (slug === "spring-2026-colour-direction") {
-    const notes: Partial<Record<string, string>> = {
-      TOPS:        "The neutral base this direction builds from. Keep the outfit at this tone and introduce one deliberate accent through a bag, flat, or scarf.",
-      BAGS:        "An entry point into this direction at the accessory level. One accent note against a calm base.",
-      SHOES:       "The accent note at ground level. Keep the rest of the outfit quiet so one colour reads.",
-      ACCESSORIES: "A low-commitment entry into this direction. One considered piece against a quiet base.",
+    // Role-aware, not category-aware. Confirmed root cause of a live QA
+    // contradiction: white sneakers (genuinely neutral — base-neutral role)
+    // got "The accent note at ground level" purely because SHOES was in
+    // this map, while the same item correctly read as "the base" elsewhere
+    // in the same report. Category only selects WHICH accent or base
+    // sentence to use once the role itself is already decided — it can
+    // never flip a base item into accent wording or vice versa.
+    const role = scoreItemAttributes(item, slug).bestDimensionId;
+
+    if (role === "accent-colour") {
+      const accentNotes: Partial<Record<string, string>> = {
+        BAGS:        "An entry point into this direction at the accessory level. One accent note against a calm base.",
+        SHOES:       "The accent note at ground level. Keep the rest of the outfit quiet so one colour reads.",
+        ACCESSORIES: "A low-commitment entry into this direction. One considered piece against a quiet base.",
+      };
+      return (accentNotes[item.category] ?? "The accent note in this direction — one deliberate colour against a quiet base.") + suffix;
+    }
+
+    // base-neutral, or no resolvable role at all — base/support language
+    // only. Never accent wording for a neutral shoe, bag, or accessory.
+    const baseNotes: Partial<Record<string, string>> = {
+      TOPS:      "The neutral base this direction builds from. Keep the outfit at this tone and introduce one deliberate accent through a bag, flat, or scarf.",
+      BOTTOMS:   "The neutral base this direction builds from. A clean foundation — the accent comes from elsewhere.",
+      DRESSES:   "The neutral base this direction builds from. One piece covers the foundation; add the accent through a smaller piece.",
+      OUTERWEAR: "The neutral base this direction builds from. Keep it quiet and let one accent piece do the colour work.",
     };
-    return (notes[item.category] ?? "A starting point for this direction.") + suffix;
+    return (baseNotes[item.category] ?? "A quiet, neutral piece in this direction — it supports the base rather than carrying the accent.") + suffix;
   }
   return "A starting point for this direction.";
 }
@@ -1305,6 +1319,95 @@ function pickWearablePartner(
     }
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Colour Direction — role-aware pair selection (Fix #2).
+//
+// Generic selection (above) picks the single highest-scored item overall,
+// then whatever is wearable with it. For Colour Direction specifically that
+// is not "quiet base + clear accent" — it is just "best + next-best", which
+// is how a second neutral accessory could end up standing in for the
+// accent even when real accent-colour evidence exists elsewhere in the
+// Closet. These helpers deliberately pick one item per role instead.
+// ---------------------------------------------------------------------------
+
+function bestOfRole(pool: DimensionScoredItem[], dimensionId: string): DimensionScoredItem | null {
+  let best: DimensionScoredItem | null = null;
+  for (const m of pool) {
+    if (m.dimensionId !== dimensionId) continue;
+    if (!best || m.score > best.score) best = m;
+  }
+  return best;
+}
+
+// Best wearable partner carrying a specific role (e.g. "accent-colour"),
+// excluding `anchor` and anything already in `exclude`. Used so Route In's
+// support slot prefers a genuine accent over a second neutral, and so A
+// Look To Try can look for a DIFFERENT accent than the one Route In used.
+function pickWearablePartnerWithRole(
+  anchor: DimensionScoredItem,
+  pool: DimensionScoredItem[],
+  dimensionId: string,
+  exclude: Set<ShopperClosetItemEvidence>,
+  slug: string,
+): DimensionScoredItem | null {
+  let best: DimensionScoredItem | null = null;
+  for (const m of pool) {
+    if (m.item === anchor.item || exclude.has(m.item) || m.dimensionId !== dimensionId) continue;
+    if (!categoriesAreWearablePair(getEffectiveCategory(anchor.item, slug), getEffectiveCategory(m.item, slug))) continue;
+    if (!best || m.score > best.score) best = m;
+  }
+  return best;
+}
+
+// Colour Direction's own anchor+support pick: anchor is the strongest
+// base-neutral foundation piece when one exists (falling back to the
+// single strongest item overall for an accent-only or evidence-thin
+// Closet); support is the strongest wearable genuine accent-colour piece,
+// falling back to any wearable partner only when no accent evidence pairs
+// with this anchor at all.
+function selectColourDirectionPair(
+  pool: DimensionScoredItem[],
+  exclude: Set<ShopperClosetItemEvidence>,
+  slug: string,
+): { anchor: DimensionScoredItem; support: DimensionScoredItem | null } | null {
+  const bestBase = bestOfRole(pool.filter((m) => !exclude.has(m.item)), "base-neutral");
+  const anchor = bestBase ?? pool.find((m) => !exclude.has(m.item)) ?? null;
+  if (!anchor) return null;
+
+  const support =
+    pickWearablePartnerWithRole(anchor, pool, "accent-colour", exclude, slug) ??
+    pickWearablePartner(anchor, pool, exclude, slug);
+  return { anchor, support };
+}
+
+// Your Closet Shows for Colour Direction: up to 2 of the strongest
+// base-neutral pieces interleaved with up to 2 of the strongest
+// accent-colour pieces — never padded with a 4th irrelevant neutral just to
+// hit a count when fewer genuinely useful pieces exist (e.g. only one real
+// accent item in the whole Closet).
+function selectColourDirectionClosetShows(
+  pool: DimensionScoredItem[],
+  max: number,
+): DimensionScoredItem[] {
+  const base = pool.filter((m) => m.dimensionId === "base-neutral").sort((a, b) => b.score - a.score);
+  const accent = pool.filter((m) => m.dimensionId === "accent-colour").sort((a, b) => b.score - a.score);
+  const picked: DimensionScoredItem[] = [];
+  const used = new Set<ShopperClosetItemEvidence>();
+  const maxPerRole = Math.ceil(max / 2);
+
+  for (let i = 0; i < maxPerRole; i++) {
+    if (picked.length < max && base[i] && !used.has(base[i].item)) {
+      picked.push(base[i]);
+      used.add(base[i].item);
+    }
+    if (picked.length < max && accent[i] && !used.has(accent[i].item)) {
+      picked.push(accent[i]);
+      used.add(accent[i].item);
+    }
+  }
+  return picked;
 }
 
 // ---------------------------------------------------------------------------
@@ -2201,62 +2304,45 @@ export function buildShopperEdit(
   scored.sort((a, b) => b.score - a.score);
   const namedScored = scored.filter((m) => m.item.name);
 
-  // TEMP DIAGNOSTIC — live Colour Direction Closet QA. Dumps every Closet
-  // item this customer owns (within the take:20 fetch), whether or not it
-  // qualified, with its full colour resolution and dimension scores — to
-  // answer directly: does real accent-colour evidence exist in this
-  // Closet, and if so, why didn't it surface. Server-side log only, never
-  // shown to the customer. Remove once the diagnostic is closed.
-  if (slug === "spring-2026-colour-direction") {
-    const rankById = new Map(scored.map((s, i) => [s.item, i + 1]));
-    const diagnostic = closetItemsList.map((it) => {
-      const colourText = it.primaryColor ?? it.colors?.[0] ?? null;
-      const colourResolution = colourText ? resolveFreeTextColourFamilies(colourText) : null;
-      const attr = scoreItemAttributes(it, slug);
-      const categoryEligible = compatibleCategories.has(it.category);
-      const subcategoryExcluded = Boolean(it.subcategory && excludedSubcategories.has(it.subcategory.toLowerCase()));
-      return {
-        name: it.name,
-        category: it.category,
-        subcategory: it.subcategory,
-        primaryColor: it.primaryColor,
-        colors: it.colors ?? [],
-        hueFamilies: colourResolution?.hueFamilies ?? [],
-        isNeutral: colourResolution?.isNeutral ?? null,
-        colourUnknown: colourResolution?.unknown ?? (colourText === null),
-        imagePresent: Boolean(it.imageUrl),
-        analysisStatus: it.analysisStatus ?? null,
-        fitProfile: it.fitProfile ?? null,
-        silhouette: it.silhouette ?? null,
-        formality: it.formality ?? null,
-        categoryEligible,
-        subcategoryExcluded,
-        dimensionScores: attr.dimensionScores,
-        bestDimensionId: attr.bestDimensionId,
-        finalRank: rankById.get(it) ?? null,
-      };
-    });
-    console.log("TEMP DIAGNOSTIC — Colour Direction Closet breakdown", JSON.stringify(diagnostic));
-  }
-
   // Each section now runs its own selection against the same scored pool,
-  // instead of every section reading the same fixed top-2 slice.
-  const closetShowsScored = selectClosetShowsItems(namedScored, slug, 4);
+  // instead of every section reading the same fixed top-2 slice. Colour
+  // Direction gets its own role-aware pair selection (Fix #2) — the
+  // generic "best overall + whatever's wearable with it" logic has no
+  // concept of base vs. accent, so a second neutral accessory could stand
+  // in for the accent even when real accent-colour evidence exists
+  // elsewhere. Modern Tailoring / Soft Structure are untouched.
+  const isColourDirection = slug === "spring-2026-colour-direction";
 
-  const routeInAnchor = namedScored[0] ?? null;
-  const routeInSupport = routeInAnchor
-    ? pickWearablePartner(routeInAnchor, namedScored, new Set(), slug)
+  const closetShowsScored = isColourDirection
+    ? selectColourDirectionClosetShows(namedScored, 4)
+    : selectClosetShowsItems(namedScored, slug, 4);
+
+  const routeInSelection = isColourDirection
+    ? selectColourDirectionPair(namedScored, new Set(), slug)
     : null;
+
+  const routeInAnchor = isColourDirection
+    ? (routeInSelection?.anchor ?? null)
+    : (namedScored[0] ?? null);
+  const routeInSupport = isColourDirection
+    ? (routeInSelection?.support ?? null)
+    : (routeInAnchor ? pickWearablePartner(routeInAnchor, namedScored, new Set(), slug) : null);
   const routeInPair: DimensionScoredItem[] = routeInAnchor
     ? (routeInSupport ? [routeInAnchor, routeInSupport] : [routeInAnchor])
     : [];
 
   // A Look To Try prefers a DIFFERENT supporting piece from Route In where
   // the Closet supports it; reuse only happens when no other wearable
-  // partner exists — intentional, not automatic.
+  // partner exists — intentional, not automatic. For Colour Direction this
+  // means a different genuine accent where one exists, not just a
+  // different item of any role.
   const usedByRouteIn = new Set<ShopperClosetItemEvidence>(routeInSupport ? [routeInSupport.item] : []);
   const lookSupport = routeInAnchor
-    ? (pickWearablePartner(routeInAnchor, namedScored, usedByRouteIn, slug) ?? routeInSupport)
+    ? (isColourDirection
+        ? (pickWearablePartnerWithRole(routeInAnchor, namedScored, "accent-colour", usedByRouteIn, slug)
+            ?? pickWearablePartner(routeInAnchor, namedScored, usedByRouteIn, slug)
+            ?? routeInSupport)
+        : (pickWearablePartner(routeInAnchor, namedScored, usedByRouteIn, slug) ?? routeInSupport))
     : null;
   const lookPair: DimensionScoredItem[] = routeInAnchor
     ? (lookSupport ? [routeInAnchor, lookSupport] : [routeInAnchor])

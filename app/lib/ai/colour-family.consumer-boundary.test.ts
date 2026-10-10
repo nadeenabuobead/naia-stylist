@@ -36,9 +36,9 @@ const ALLOWED_PRODUCTION_IMPORTERS = new Set([
   "app/lib/buyskip/constraint-evidence.server.ts",
   "app/lib/ai/nadine-product-assessment.ts",
   "app/lib/trend-evidence-attribute-scoring.server.ts",
-  // TEMP DIAGNOSTIC — live Closet colour QA (see trend-evidence.server.ts's
-  // own TEMP DIAGNOSTIC block). Remove this entry in the same commit that
-  // removes the diagnostic import.
+  // Colour Direction's own customer-facing copy (buildColorMaterialSuffix)
+  // uses the same canonical resolver as its scoring, so the neutral/accent
+  // boundary in prose always matches the boundary used for selection.
   "app/lib/trend-evidence.server.ts",
 ]);
 

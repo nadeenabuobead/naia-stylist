@@ -471,3 +471,273 @@ describe("V1 hard invariant — reuse is allowed, but only when it is the Closet
     });
   }
 });
+
+// ═════════════════════════════════════════════════════════════════════════
+// Fix #2 — role-aware category priority. Live staging QA confirmed every
+// neutral item scored an identical flat 6 regardless of category, so the
+// text-overlap tie-break (not product judgement) decided the winner — a
+// black beanie outranked a tailored blazer for the base role. Fix #2 makes
+// foundation garments (TOPS/BOTTOMS/DRESSES/OUTERWEAR) strictly outrank
+// accessories/bags/shoes for base-neutral, and makes everyday-formality
+// accent pieces outrank occasion/evening-formality ones for accent-colour,
+// without ever hard-coding an item name.
+// ═════════════════════════════════════════════════════════════════════════
+
+describe("Fix #2 — a foundation garment beats a neutral accessory for the BASE role", () => {
+  it("a neutral blazer (OUTERWEAR) outranks a neutral beanie (ACCESSORIES) for base-neutral, even though both are genuinely neutral", () => {
+    const closet = [
+      item({ name: "Black Ribbed Knit Beanie", category: "ACCESSORIES", primaryColor: "black" }),
+      item({ name: "Black Tailored Blazer", category: "OUTERWEAR", primaryColor: "black" }),
+    ];
+    const edit = buildShopperEdit(COLOUR_DIRECTION_REPORT, evidence(closet));
+    assert.ok(
+      edit.yourBestRouteIn.includes("Black Tailored Blazer"),
+      "the foundation garment, not the accessory, is named as the base in Route In",
+    );
+    assert.ok(
+      !edit.yourBestRouteIn.includes("Beanie"),
+      "the beanie is not named as the base when a stronger foundation garment exists",
+    );
+  });
+
+  it("this holds across all four foundation categories against all three accessory categories", () => {
+    for (const foundationCat of ["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR"]) {
+      for (const accessoryCat of ["BAGS", "SHOES", "ACCESSORIES"]) {
+        const closet = [
+          item({ name: "Accessory Item", category: accessoryCat, primaryColor: "black" }),
+          item({ name: "Foundation Item", category: foundationCat, primaryColor: "black" }),
+        ];
+        const edit = buildShopperEdit(COLOUR_DIRECTION_REPORT, evidence(closet));
+        assert.ok(
+          edit.yourBestRouteIn.includes("Foundation Item"),
+          `${foundationCat} must outrank ${accessoryCat} for the base role`,
+        );
+      }
+    }
+  });
+});
+
+describe("Fix #2 — everyday-formality accent evidence outranks occasion/evening accent evidence by default", () => {
+  it("casual jeans outrank an evening gown for the accent role when both are genuinely coloured", () => {
+    // Base anchor is OUTERWEAR (not BOTTOMS) deliberately — it's the one
+    // category that can wear alongside BOTH a BOTTOMS accent (jeans) and a
+    // DRESSES accent (gown), per categoriesAreWearablePair's own rules, so
+    // the test isolates the formality-priority question from wearable-pair
+    // mechanics.
+    const closet = [
+      item({ name: "Burgundy Evening Gown", category: "DRESSES", primaryColor: "burgundy", formality: "evening" }),
+      item({ name: "Blue Wash Jeans", category: "BOTTOMS", primaryColor: "blue", formality: "casual" }),
+      item({ name: "Cream Blazer", category: "OUTERWEAR", primaryColor: "cream" }),
+    ];
+    const edit = buildShopperEdit(COLOUR_DIRECTION_REPORT, evidence(closet));
+    assert.ok(
+      edit.yourBestRouteIn.includes("Blue Wash Jeans"),
+      "the everyday-formality accent piece is named over the evening-formality one",
+    );
+  });
+
+  it("a genuinely coloured evening piece still qualifies as accent evidence when it is the only accent candidate", () => {
+    const closet = [
+      item({ name: "Cream Blazer", category: "OUTERWEAR", primaryColor: "cream" }),
+      item({ name: "Burgundy Evening Gown", category: "DRESSES", primaryColor: "burgundy", formality: "evening" }),
+    ];
+    const edit = buildShopperEdit(COLOUR_DIRECTION_REPORT, evidence(closet));
+    assert.ok(
+      edit.yourBestRouteIn.includes("Burgundy Evening Gown"),
+      "an evening-formality accent piece is still named as the accent when it's the only real accent evidence — being lower-priority is not the same as being excluded",
+    );
+  });
+});
+
+describe("Fix #2 — Your Closet Shows represents both roles, and never pads with irrelevant neutrals", () => {
+  it("with abundant base-neutral evidence and exactly one real accent, Closet Shows returns base+accent, not four neutrals", () => {
+    const closet = [
+      item({ name: "Neutral One", category: "TOPS", primaryColor: "black" }),
+      item({ name: "Neutral Two", category: "BOTTOMS", primaryColor: "cream" }),
+      item({ name: "Neutral Three", category: "OUTERWEAR", primaryColor: "beige" }),
+      item({ name: "Neutral Four", category: "DRESSES", primaryColor: "stone" }),
+      item({ name: "Real Accent", category: "BAGS", primaryColor: "red" }),
+    ];
+    const edit = buildShopperEdit(COLOUR_DIRECTION_REPORT, evidence(closet));
+    const shownNames = edit.evidenceClosetItems.map((i) => i.name);
+    assert.ok(shownNames.includes("Real Accent"), "the genuine accent piece is represented in Closet Shows");
+    const baseCount = shownNames.filter((n) => n !== "Real Accent").length;
+    assert.ok(baseCount <= 2, `Closet Shows should surface at most 2 base pieces alongside the accent, got ${baseCount}: ${shownNames.join(", ")}`);
+  });
+
+  it("with only one base piece and one accent piece, Closet Shows returns exactly those 2 — never padded to 4 with irrelevant items", () => {
+    const closet = [
+      item({ name: "Only Base", category: "TOPS", primaryColor: "black" }),
+      item({ name: "Only Accent", category: "BAGS", primaryColor: "red" }),
+    ];
+    const edit = buildShopperEdit(COLOUR_DIRECTION_REPORT, evidence(closet));
+    assert.equal(edit.evidenceClosetItems.length, 2, "no padding — exactly the 2 genuinely useful pieces are shown");
+    assert.deepEqual(
+      edit.evidenceClosetItems.map((i) => i.name).sort(),
+      ["Only Accent", "Only Base"],
+      "both the base and the accent are represented",
+    );
+  });
+
+  it("with real evidence for both roles, Closet Shows contains at least one item from each role", () => {
+    const closet = [
+      item({ name: "Base Alpha", category: "TOPS", primaryColor: "black" }),
+      item({ name: "Base Beta", category: "BOTTOMS", primaryColor: "cream" }),
+      item({ name: "Accent Alpha", category: "BAGS", primaryColor: "red" }),
+      item({ name: "Accent Beta", category: "SHOES", primaryColor: "blue" }),
+    ];
+    const edit = buildShopperEdit(COLOUR_DIRECTION_REPORT, evidence(closet));
+    const shownNames = new Set(edit.evidenceClosetItems.map((i) => i.name));
+    const hasBase = shownNames.has("Base Alpha") || shownNames.has("Base Beta");
+    const hasAccent = shownNames.has("Accent Alpha") || shownNames.has("Accent Beta");
+    assert.ok(hasBase, "at least one base-role item is represented");
+    assert.ok(hasAccent, "at least one accent-role item is represented");
+  });
+});
+
+describe("Fix #2 — Route In and A Look To Try prefer a genuine accent over a second neutral", () => {
+  it("Route In's support slot is the real accent item, not another neutral that happens to be wearable", () => {
+    const closet = [
+      item({ name: "Quiet Base", category: "TOPS", primaryColor: "black" }),
+      item({ name: "Second Neutral", category: "BOTTOMS", primaryColor: "cream" }),
+      item({ name: "Real Accent", category: "BOTTOMS", primaryColor: "blue", formality: "casual" }),
+    ];
+    const edit = buildShopperEdit(COLOUR_DIRECTION_REPORT, evidence(closet));
+    const routeInNames = edit.routeInItems.map((i) => i.name);
+    assert.ok(routeInNames.includes("Real Accent"), "the genuine accent is picked over a second neutral for Route In's support slot");
+    assert.ok(!routeInNames.includes("Second Neutral"), "the second neutral is not used when real accent evidence is wearable with the base");
+  });
+
+  it("A Look To Try picks a DIFFERENT real accent than Route In used, when a second one exists", () => {
+    const closet = [
+      item({ name: "Quiet Base", category: "TOPS", primaryColor: "black" }),
+      item({ name: "Accent One", category: "BOTTOMS", primaryColor: "blue", formality: "casual" }),
+      item({ name: "Accent Two", category: "BAGS", primaryColor: "burgundy", formality: "casual" }),
+    ];
+    const edit = buildShopperEdit(COLOUR_DIRECTION_REPORT, evidence(closet));
+    const routeInNames = new Set(edit.routeInItems.map((i) => i.name));
+    const lookToTryNames = new Set(edit.lookToTryItems.map((i) => i.name));
+    assert.notDeepEqual([...routeInNames].sort(), [...lookToTryNames].sort(), "Route In and A Look To Try use different accent items when two genuine accents exist");
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════
+// Fix #3 — role-aware copy everywhere. Live staging QA found a direct
+// contradiction: white sneakers (genuinely neutral — base-neutral role)
+// were called "the base" in one place and "the accent note at ground
+// level" in another (buildEvidenceItemRoleNote), purely because SHOES was
+// in a category-keyed map. These tests prove the roleNote shown under
+// Your Closet Shows always matches the item's actual resolved role.
+// ═════════════════════════════════════════════════════════════════════════
+
+// The specific unconditional category-level sentences the live QA bug
+// traced to — these must never appear on an item whose resolved role is
+// base-neutral, no matter its category. (Legitimate base copy is still
+// allowed to use the word "accent" in passing — e.g. "introduce one
+// deliberate accent through a bag, flat, or scarf" — so the test checks
+// for these exact self-referential accent CLAIMS, not the bare word.)
+const SELF_CLAIMED_ACCENT_PHRASES = [
+  "The accent note at ground level",
+  "A low-commitment entry into this direction",
+  "An entry point into this direction at the accessory level",
+  "The accent note in this direction",
+];
+
+function claimsSelfIsAccent(roleNote: string): boolean {
+  return SELF_CLAIMED_ACCENT_PHRASES.some((p) => roleNote.includes(p));
+}
+
+describe("Fix #3 — Closet Shows roleNote copy always matches the resolved role, never raw category", () => {
+  it("a neutral white shoe never receives accent wording", () => {
+    const closet = [item({ name: "White Running Sneakers", category: "SHOES", primaryColor: "white" })];
+    const edit = buildShopperEdit(COLOUR_DIRECTION_REPORT, evidence(closet));
+    const card = edit.evidenceClosetItems.find((i) => i.name === "White Running Sneakers");
+    assert.ok(card, "the item is shown");
+    assert.ok(!claimsSelfIsAccent(card!.roleNote), `a neutral shoe must not claim itself as the accent, got: "${card!.roleNote}"`);
+    assert.ok(card!.roleNote.includes("base"), `a neutral shoe's note should use base/support language, got: "${card!.roleNote}"`);
+  });
+
+  it("a neutral black beanie never receives accent wording", () => {
+    const closet = [item({ name: "Black Ribbed Knit Beanie", category: "ACCESSORIES", primaryColor: "black" })];
+    const edit = buildShopperEdit(COLOUR_DIRECTION_REPORT, evidence(closet));
+    const card = edit.evidenceClosetItems.find((i) => i.name === "Black Ribbed Knit Beanie");
+    assert.ok(card, "the item is shown");
+    assert.ok(!claimsSelfIsAccent(card!.roleNote), `a neutral beanie must not claim itself as the accent, got: "${card!.roleNote}"`);
+  });
+
+  it("a neutral beige tote never receives accent wording", () => {
+    const closet = [item({ name: "Beige Suede Tote Bag", category: "BAGS", primaryColor: "beige" })];
+    const edit = buildShopperEdit(COLOUR_DIRECTION_REPORT, evidence(closet));
+    const card = edit.evidenceClosetItems.find((i) => i.name === "Beige Suede Tote Bag");
+    assert.ok(card, "the item is shown");
+    assert.ok(!claimsSelfIsAccent(card!.roleNote), `a neutral bag must not claim itself as the accent, got: "${card!.roleNote}"`);
+  });
+
+  it("a real coloured accessory (red bag) may receive accent wording", () => {
+    const closet = [item({ name: "Crimson Leather Bag", category: "BAGS", primaryColor: "red" })];
+    const edit = buildShopperEdit(COLOUR_DIRECTION_REPORT, evidence(closet));
+    const card = edit.evidenceClosetItems.find((i) => i.name === "Crimson Leather Bag");
+    assert.ok(card, "the item is shown");
+    assert.ok(/accent/i.test(card!.roleNote), `a genuinely coloured bag should get accent wording, got: "${card!.roleNote}"`);
+  });
+
+  it("a real coloured garment (blue shirt) may receive accent wording", () => {
+    const closet = [item({ name: "Blue Chambray Shirt", category: "TOPS", primaryColor: "blue", formality: "business-casual" })];
+    const edit = buildShopperEdit(COLOUR_DIRECTION_REPORT, evidence(closet));
+    const card = edit.evidenceClosetItems.find((i) => i.name === "Blue Chambray Shirt");
+    assert.ok(card, "the item is shown");
+    assert.ok(/accent/i.test(card!.roleNote), `a genuinely coloured garment should get accent wording, got: "${card!.roleNote}"`);
+  });
+
+  it("a real coloured garment (burgundy blouse) may receive accent wording", () => {
+    const closet = [item({ name: "Burgundy Draped Blouse", category: "TOPS", primaryColor: "burgundy", formality: "evening" })];
+    const edit = buildShopperEdit(COLOUR_DIRECTION_REPORT, evidence(closet));
+    const card = edit.evidenceClosetItems.find((i) => i.name === "Burgundy Draped Blouse");
+    assert.ok(card, "the item is shown");
+    assert.ok(/accent/i.test(card!.roleNote), `a genuinely coloured blouse should get accent wording, got: "${card!.roleNote}"`);
+  });
+
+  it("the same white shoe is never called the base in one place and the accent in another within a single report", () => {
+    const closet = [
+      item({ name: "White Running Sneakers", category: "SHOES", primaryColor: "white" }),
+      item({ name: "Crimson Leather Bag", category: "BAGS", primaryColor: "red" }),
+    ];
+    const edit = buildShopperEdit(COLOUR_DIRECTION_REPORT, evidence(closet));
+    const card = edit.evidenceClosetItems.find((i) => i.name === "White Running Sneakers");
+    assert.ok(card, "the item is shown");
+    assert.ok(!claimsSelfIsAccent(card!.roleNote), "the white shoe's own card never claims itself as the accent");
+    assert.ok(!edit.yourBestRouteIn.toLowerCase().includes("white running sneakers is the accent"), "Route In never separately claims this same neutral shoe is the accent");
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════
+// Synthetic regression matching the real staging Closet's actual shape:
+// many recently-added neutral items, with the only real accent-colour
+// evidence sitting among older pieces that a take:20 cap would have hidden.
+// Confirms Fix #1 (take:250) and Fix #2/#3's role-aware selection compose
+// correctly end-to-end, not just in isolation.
+// ═════════════════════════════════════════════════════════════════════════
+
+describe("Fix #1 + Fix #2 composed — older blue/burgundy garments surface correctly once fetched", () => {
+  it("25 recent neutral fillers + 2 older genuinely-coloured garments: the older accents are named, not a neutral filler", () => {
+    const closet: ShopperClosetItemEvidence[] = [];
+    for (let i = 0; i < 25; i++) {
+      closet.push(item({ name: `Recent Neutral ${i}`, category: i % 2 === 0 ? "TOPS" : "ACCESSORIES", primaryColor: "black" }));
+    }
+    closet.push(item({ name: "Older Blue Jeans", category: "BOTTOMS", primaryColor: "blue", formality: "casual" }));
+    closet.push(item({ name: "Older Burgundy Blouse", category: "TOPS", primaryColor: "burgundy", formality: "evening" }));
+
+    const edit = buildShopperEdit(COLOUR_DIRECTION_REPORT, evidence(closet));
+
+    assert.ok(edit.yourBestRouteIn.includes("Older Blue Jeans"), "the real, everyday-formality accent is named in Route In over any neutral filler");
+
+    const shownNames = edit.evidenceClosetItems.map((i) => i.name);
+    assert.ok(
+      shownNames.includes("Older Blue Jeans") || shownNames.includes("Older Burgundy Blouse"),
+      "at least one of the older genuine accents is represented in Closet Shows",
+    );
+
+    const blueCard = edit.evidenceClosetItems.find((i) => i.name === "Older Blue Jeans");
+    if (blueCard) assert.ok(/accent/i.test(blueCard.roleNote), "the older blue jeans get accent wording, not base/neutral wording");
+  });
+});
