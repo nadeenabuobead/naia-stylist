@@ -81,9 +81,20 @@ export function meta() {
   return [{ title: "Selfie Style Analysis | nAia" }];
 }
 
+// V1 deactivation flag. A plain `boolean`-returning function (not a literal `true`/`false`
+// inline in the guard) so TypeScript cannot prove the post-guard code unreachable and strip
+// its flow-sensitive narrowing — the loader/action bodies below stay fully type-checked and
+// intact for reactivation.
+function isSelfieFeatureEnabledForV1(): boolean {
+  return false;
+}
+
 // ── Loader ────────────────────────────────────────────────────────────────────
 
 export async function loader({ request }: LoaderFunctionArgs) {
+  // V1 deactivation — hidden from customer-facing V1 (see passport.tsx); not deleted.
+  if (!isSelfieFeatureEnabledForV1()) throw redirect("/passport");
+
   const customer = await getCurrentNaiaCustomer(request);
   if (!customer) throw redirect("/auth/shopify/login");
 
@@ -120,6 +131,9 @@ type ActionResult =
   | { intent: "delete-analysis" | "delete-model-face" | "delete-model-face-and-analysis" | "delete-both" | "keep-both" | "keep-analysis" | "save-selfie-only"; ok: boolean; errorCode?: string };
 
 export async function action({ request }: ActionFunctionArgs): Promise<ActionResult> {
+  // V1 deactivation — see the matching guard in loader() above.
+  if (!isSelfieFeatureEnabledForV1()) throw redirect("/passport");
+
   const customer = await getCurrentNaiaCustomer(request);
   if (!customer) throw redirect("/auth/shopify/login");
 

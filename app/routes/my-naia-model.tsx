@@ -39,19 +39,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const model = await loadNaiaModel(customer.id);
   const readiness = computeModelReadinessFromRecord(model);
 
-  // Per-request time-limited private_download URLs — never persisted. Null if config missing.
-  const faceDeliveryUrl = model?.facePublicId
-    ? buildModelPreviewUrl(model.facePublicId, model.faceFormat ?? null, model.deliveryType ?? "private")
-    : null;
+  // Per-request time-limited private_download URL — never persisted. Null if config missing.
+  // V1 is body-only customer-facing; the face slot (facePublicId) is kept in the server
+  // action/service layer for reactivation but is not surfaced to this page.
   const bodyDeliveryUrl = model?.bodyPublicId
     ? buildModelPreviewUrl(model.bodyPublicId, model.bodyFormat ?? null, model.deliveryType ?? "private")
     : null;
 
   return data({
     customerId: customer.id,
-    faceDeliveryUrl,
     bodyDeliveryUrl,
-    photoAnalysisConsentGiven: !!model?.photoAnalysisConsentAt,
     saveModelConsentGiven: !!model?.saveModelConsentAt,
     readiness,
   });

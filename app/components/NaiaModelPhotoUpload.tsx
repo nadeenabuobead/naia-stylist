@@ -25,9 +25,7 @@ const COLOR_ACCENT = "#8b2035";
 
 interface Props {
   customerId: string;
-  faceDeliveryUrl: string | null;
   bodyDeliveryUrl: string | null;
-  photoAnalysisConsentGiven: boolean;
   saveModelConsentGiven: boolean;
   readiness: NaiaModelReadiness;
 }
@@ -54,9 +52,7 @@ const FULL_BODY_GUIDANCE = [
 
 export default function NaiaModelPhotoUpload({
   customerId,
-  faceDeliveryUrl,
   bodyDeliveryUrl,
-  photoAnalysisConsentGiven,
   saveModelConsentGiven,
   readiness,
 }: Props) {
@@ -67,13 +63,11 @@ export default function NaiaModelPhotoUpload({
   // deletingSlot: which slot currently has a delete-photo action in flight.
   const [deletingSlot, setDeletingSlot] = useState<UploadSlot | null>(null);
 
-  const [photoAnalysis, setPhotoAnalysis] = useState(photoAnalysisConsentGiven);
   const [saveModel, setSaveModel] = useState(saveModelConsentGiven);
 
   // Sync local checkbox state whenever the server-persisted consent changes.
   // Fetcher actions (save-consent, withdraw-*) trigger loader revalidation, which
   // updates these props. Without this sync, the checkbox shows stale local state.
-  useEffect(() => { setPhotoAnalysis(photoAnalysisConsentGiven); }, [photoAnalysisConsentGiven]);
   useEffect(() => { setSaveModel(saveModelConsentGiven); }, [saveModelConsentGiven]);
 
   const faceInputRef = useRef<HTMLInputElement>(null);
@@ -83,7 +77,6 @@ export default function NaiaModelPhotoUpload({
   const deleteFetcher = useFetcher();               // delete-photo only
   const consentFetcher = useFetcher();
   const withdrawFetcher = useFetcher();
-  const withdrawPhotoAnalysisFetcher = useFetcher();
 
   // Handle save-photo response: replace objectUrl with server-confirmed signedUrl, or surface error.
   useEffect(() => {
@@ -125,10 +118,9 @@ export default function NaiaModelPhotoUpload({
 
   // Compute display URL for each slot.
   // objectUrl (in-flight blob) > signedUrl (server-confirmed this session) > loader delivery URL.
-  const faceUrl = faceSlot.objectUrl ?? faceSlot.signedUrl ?? faceDeliveryUrl;
   const bodyUrl = bodySlot.objectUrl ?? bodySlot.signedUrl ?? bodyDeliveryUrl;
 
-  const { hasFacePhoto, hasFullBodyPhoto, isReadyForTryOn } = readiness;
+  const { hasFullBodyPhoto, isReadyForTryOn } = readiness;
 
   async function handleUpload(slot: UploadSlot, file: File) {
     const setter = slot === "face" ? setFaceSlot : setBodySlot;
@@ -235,7 +227,6 @@ export default function NaiaModelPhotoUpload({
   function handleSaveConsent() {
     const fd = new FormData();
     fd.append("intent", "save-consent");
-    fd.append("photoAnalysis", String(photoAnalysis));
     fd.append("saveModel", String(saveModel));
     consentFetcher.submit(fd, { method: "post" });
   }
@@ -246,24 +237,14 @@ export default function NaiaModelPhotoUpload({
     withdrawFetcher.submit(fd, { method: "post" });
   }
 
-  function handleWithdrawPhotoAnalysis() {
-    const fd = new FormData();
-    fd.append("intent", "withdraw-photo-analysis-consent");
-    withdrawPhotoAnalysisFetcher.submit(fd, { method: "post" });
-  }
-
   const saveConsentSubmitting = consentFetcher.state !== "idle";
   const withdrawSubmitting = withdrawFetcher.state !== "idle";
-  const withdrawPhotoAnalysisSubmitting = withdrawPhotoAnalysisFetcher.state !== "idle";
 
   // Readiness truth: a slot is "ready" only when the server has confirmed it.
   //   - signedUrl: server just confirmed this session (moderation + suitability passed).
   //   - Server DB state (hasFacePhoto / hasFullBodyPhoto): confirmed in a prior session.
   //   - objectUrl alone does NOT count — Cloudinary upload done but server not yet confirmed.
   //   - Exclude a slot while it is being deleted (deletingSlot) or replaced (pendingSlot).
-  const faceReady =
-    !!faceSlot.signedUrl ||
-    (hasFacePhoto && pendingSlot !== "face" && deletingSlot !== "face");
   const bodyReady =
     !!bodySlot.signedUrl ||
     (hasFullBodyPhoto && pendingSlot !== "body" && deletingSlot !== "body");
@@ -274,24 +255,6 @@ export default function NaiaModelPhotoUpload({
 
   return (
     <div style={{ fontFamily: FONT_BODY }}>
-      {/* Face photo section */}
-      <PhotoSection
-        label="Face / Upper-Body Photo"
-        sublabel="Saved for visual styling — colour, neckline and jewellery intelligence."
-        guidance={[]}
-        statusLabel="Saved for visual styling"
-        currentUrl={faceUrl}
-        uploading={faceSlot.uploading}
-        error={faceSlot.error}
-        isProcessing={pendingSlot === "face"}
-        isDeleting={deletingSlot === "face"}
-        onUploadClick={() => faceInputRef.current?.click()}
-        onDelete={() => handleDelete("face")}
-        inputRef={faceInputRef}
-        onFileChange={(e) => handleFileChange("face", e)}
-        accept="image/jpeg,image/png,image/webp,image/heic"
-      />
-
       {/* Full-body photo section */}
       <PhotoSection
         label="Full-Body Photo"
@@ -317,12 +280,6 @@ export default function NaiaModelPhotoUpload({
         </div>
 
         <ConsentRow
-          id="photoAnalysisConsent"
-          checked={photoAnalysis}
-          onChange={setPhotoAnalysis}
-          label="Use my photo for nAia visual and style profile analysis."
-        />
-        <ConsentRow
           id="saveModelConsent"
           checked={saveModel}
           onChange={setSaveModel}
@@ -343,17 +300,6 @@ export default function NaiaModelPhotoUpload({
             {saveConsentSubmitting ? "Saving…" : "Save permissions"}
           </button>
 
-          {photoAnalysisConsentGiven && (
-            <button
-              type="button"
-              onClick={handleWithdrawPhotoAnalysis}
-              disabled={withdrawPhotoAnalysisSubmitting}
-              style={{ ...secondaryBtn, color: COLOR_MUTED }}
-            >
-              {withdrawPhotoAnalysisSubmitting ? "Withdrawing…" : "Withdraw photo analysis consent"}
-            </button>
-          )}
-
           {saveModelConsentGiven && (
             <button
               type="button"
@@ -371,11 +317,6 @@ export default function NaiaModelPhotoUpload({
             Permissions saved.
           </p>
         )}
-        {withdrawPhotoAnalysisFetcher.data && (withdrawPhotoAnalysisFetcher.data as any).ok && (
-          <p style={{ fontFamily: FONT_MONO, fontSize: "8px", letterSpacing: "2px", textTransform: "uppercase", color: "#4a7c59", marginTop: "12px" }}>
-            Photo analysis consent withdrawn.
-          </p>
-        )}
       </div>
 
       {/* Readiness summary — server-truth with in-flight adjustments */}
@@ -383,7 +324,6 @@ export default function NaiaModelPhotoUpload({
         <div style={{ fontFamily: FONT_MONO, fontSize: "8px", letterSpacing: "2px", textTransform: "uppercase", color: COLOR_MUTED, marginBottom: "4px" }}>
           Try-On Readiness
         </div>
-        <ReadinessRow label="Face photo" ready={faceReady} />
         <ReadinessRow label="Full-body photo" ready={bodyReady} />
         <ReadinessRow label="Save model consent" ready={saveModelConsentGiven} />
         <ReadinessRow label="Ready for try-on" ready={tryOnReady} highlight />

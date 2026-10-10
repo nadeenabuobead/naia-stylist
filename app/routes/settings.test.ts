@@ -14,7 +14,7 @@
 //   G. No fake request-success — no fake "Your request has been received" behavior
 //   H. Privacy contact — data/account requests use verified privacy email
 //   I. Sign out — not duplicated here; lives in the nav (MyNaiaLayout.tsx)
-//   J. Selfie and model sections are clearly separated
+//   J. Selfie Style Analysis is V1-deactivated; My nAia Model is body-only
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -78,9 +78,10 @@ describe("B — loader safety", () => {
     assert.ok(!afterReturn.includes("bodyPublicId"), "bodyPublicId not in returned loader data");
   });
 
-  it("loader selects selfie state (hasPhoto, hasAnalysis) without private IDs", () => {
-    assert.ok(src.includes("hasPhoto"),    "loader computes hasPhoto");
-    assert.ok(src.includes("hasAnalysis"), "loader computes hasAnalysis");
+  it("loader does not query SelfieAnalysis — the feature is V1-deactivated", () => {
+    assert.ok(!src.includes("selfieAnalysis"), "loader does not query prisma.selfieAnalysis");
+    assert.ok(!src.includes("hasPhoto"),    "loader no longer computes selfie hasPhoto");
+    assert.ok(!src.includes("hasAnalysis"), "loader no longer computes selfie hasAnalysis");
   });
 
   it("loader selects model state (hasFace, hasBody) without private IDs", () => {
@@ -97,17 +98,11 @@ describe("B — loader safety", () => {
 // ── C. Valid action intents wired to correct server functions ─────────────────
 
 describe("C — action intents wired to server functions", () => {
-  it("imports deleteSelfiePhoto from selfie-persistence.server", () => {
-    assert.ok(src.includes("deleteSelfiePhoto"),         "imports deleteSelfiePhoto");
-    assert.ok(src.includes("selfie-persistence.server"), "from selfie-persistence.server");
-  });
-
-  it("imports deleteAnalysisResult from selfie-persistence.server", () => {
-    assert.ok(src.includes("deleteAnalysisResult"), "imports deleteAnalysisResult");
-  });
-
-  it("imports deleteBoth from selfie-persistence.server", () => {
-    assert.ok(src.includes("deleteBoth"), "imports deleteBoth");
+  it("does not import selfie-persistence.server — Selfie Style Analysis is V1-deactivated here", () => {
+    assert.ok(!src.includes("selfie-persistence.server"), "no selfie-persistence.server import");
+    assert.ok(!src.includes("deleteSelfiePhoto"),    "no deleteSelfiePhoto import");
+    assert.ok(!src.includes("deleteAnalysisResult"), "no deleteAnalysisResult import");
+    assert.ok(!src.includes("deleteBoth"),           "no deleteBoth import");
   });
 
   it("imports deleteNaiaModelPhoto from my-naia-model.server", () => {
@@ -119,28 +114,13 @@ describe("C — action intents wired to server functions", () => {
     assert.ok(src.includes("withdrawSaveModelConsent"), "imports withdrawSaveModelConsent");
   });
 
-  it("action handles delete-selfie-photo intent calling deleteSelfiePhoto", () => {
+  it("action does not handle any delete-selfie-* or delete-model-face intent", () => {
     const actionBlock = src.slice(src.indexOf("export async function action"));
-    assert.ok(actionBlock.includes('"delete-selfie-photo"'),  "handles delete-selfie-photo");
-    assert.ok(actionBlock.includes("deleteSelfiePhoto(customer.id)"), "calls deleteSelfiePhoto with customer.id");
-  });
-
-  it("action handles delete-selfie-analysis intent calling deleteAnalysisResult", () => {
-    const actionBlock = src.slice(src.indexOf("export async function action"));
-    assert.ok(actionBlock.includes('"delete-selfie-analysis"'),     "handles delete-selfie-analysis");
-    assert.ok(actionBlock.includes("deleteAnalysisResult(customer.id)"), "calls deleteAnalysisResult with customer.id");
-  });
-
-  it("action handles delete-selfie-both intent calling deleteBoth", () => {
-    const actionBlock = src.slice(src.indexOf("export async function action"));
-    assert.ok(actionBlock.includes('"delete-selfie-both"'),   "handles delete-selfie-both");
-    assert.ok(actionBlock.includes("deleteBoth(customer.id)"), "calls deleteBoth with customer.id");
-  });
-
-  it("action handles delete-model-face intent calling deleteNaiaModelPhoto with face slot", () => {
-    const actionBlock = src.slice(src.indexOf("export async function action"));
-    assert.ok(actionBlock.includes('"delete-model-face"'),           "handles delete-model-face");
-    assert.ok(actionBlock.includes('deleteNaiaModelPhoto(customer.id, "face")'), "calls deleteNaiaModelPhoto face slot");
+    assert.ok(!actionBlock.includes('"delete-selfie-photo"'),    "no delete-selfie-photo handling");
+    assert.ok(!actionBlock.includes('"delete-selfie-analysis"'), "no delete-selfie-analysis handling");
+    assert.ok(!actionBlock.includes('"delete-selfie-both"'),     "no delete-selfie-both handling");
+    assert.ok(!actionBlock.includes('"delete-model-face"'),      "no delete-model-face handling");
+    assert.ok(!actionBlock.includes('deleteNaiaModelPhoto(customer.id, "face")'), "never calls deleteNaiaModelPhoto with face slot");
   });
 
   it("action handles delete-model-body intent calling deleteNaiaModelPhoto with body slot", () => {
@@ -263,32 +243,26 @@ describe("I — sign out", () => {
   });
 });
 
-// ── J. Selfie and model separation ───────────────────────────────────────────
+// ── J. Selfie is V1-deactivated; model section is body-only ──────────────────
 
-describe("J — selfie and model clearly separated", () => {
-  it("has distinct Selfie Style Analysis section heading", () => {
-    assert.ok(src.includes("Selfie Style Analysis"), "has Selfie Style Analysis heading");
+describe("J — Selfie Style Analysis is V1-deactivated; My nAia Model is body-only", () => {
+  it("has no Selfie Style Analysis section — feature hidden from customer-facing V1", () => {
+    assert.ok(!src.includes("Selfie Style Analysis"), "no Selfie Style Analysis heading");
   });
 
   it("has distinct My nAia Model section heading", () => {
     assert.ok(src.includes("My nAia Model"), "has My nAia Model heading");
   });
 
-  it("selfie intents do not reference model functions", () => {
-    // delete-selfie-* intents must not call deleteNaiaModelPhoto or withdrawSaveModelConsent
-    const selfiePhotoCase  = src.slice(src.indexOf('"delete-selfie-photo"'), src.indexOf('"delete-selfie-analysis"'));
-    const selfieAnalysis   = src.slice(src.indexOf('"delete-selfie-analysis"'), src.indexOf('"delete-selfie-both"'));
-    const selfieBoth       = src.slice(src.indexOf('"delete-selfie-both"'), src.indexOf('"delete-model-face"'));
-    for (const block of [selfiePhotoCase, selfieAnalysis, selfieBoth]) {
-      assert.ok(!block.includes("deleteNaiaModelPhoto"),     "selfie case does not call deleteNaiaModelPhoto");
-      assert.ok(!block.includes("withdrawSaveModelConsent"), "selfie case does not call withdrawSaveModelConsent");
-    }
+  it("My nAia Model section never renders a standalone 'Remove saved face photo' control", () => {
+    assert.ok(!src.includes("Remove saved face photo"), "no face-specific remove control");
+    assert.ok(!src.includes('intent="delete-model-face"'), "no delete-model-face ControlRow");
   });
 
-  it("model intents do not reference selfie functions", () => {
-    const modelFaceCase = src.slice(src.indexOf('"delete-model-face"'), src.indexOf('"delete-model-body"'));
+  it("model-all intent (the only remaining path touching face data) does not reference selfie functions", () => {
     const modelBodyCase = src.slice(src.indexOf('"delete-model-body"'), src.indexOf('"delete-model-all"'));
-    for (const block of [modelFaceCase, modelBodyCase]) {
+    const modelAllCase  = src.slice(src.indexOf('"delete-model-all"'), src.indexOf('"delete-vto-results"'));
+    for (const block of [modelBodyCase, modelAllCase]) {
       assert.ok(!block.includes("deleteSelfiePhoto"),    "model case does not call deleteSelfiePhoto");
       assert.ok(!block.includes("deleteAnalysisResult"), "model case does not call deleteAnalysisResult");
       assert.ok(!block.includes("deleteBoth"),           "model case does not call deleteBoth");
@@ -351,10 +325,10 @@ describe("L — explicit destructive button labels", () => {
     );
   });
 
-  it("Remove face photo button label is 'Remove face photo'", () => {
+  it("no 'Remove face photo' button label — the control is removed, not just hidden text", () => {
     assert.ok(
-      src.includes('buttonLabel="Remove face photo"'),
-      "face photo ControlRow has explicit buttonLabel",
+      !src.includes('buttonLabel="Remove face photo"'),
+      "no face-photo-specific buttonLabel remains",
     );
   });
 

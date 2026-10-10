@@ -3,7 +3,8 @@
 //
 // What this page does:
 //   - Displays account name + email (read-only)
-//   - Exposes real server-backed deletion for Selfie Analysis and My nAia Model photos
+//   - Exposes real server-backed deletion for My nAia Model (body) photos
+//   - The selfie-based visual-analysis feature is V1-deactivated — no controls for it here
 //   - Provides honest mailto links for data export and account deletion requests
 //   - Explains how nAia personalises the experience (informational only)
 //   - Explains Closet photo management (delete via My Closet)
@@ -23,11 +24,6 @@ import { data } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import prisma from "~/db.server";
 import { conciseFamilyName } from "~/lib/customer-name-display";
-import {
-  deleteSelfiePhoto,
-  deleteAnalysisResult,
-  deleteBoth,
-} from "~/lib/ai/selfie-persistence.server";
 import {
   deleteNaiaModelPhoto,
   withdrawSaveModelConsent,
@@ -56,11 +52,7 @@ export function meta() {
 export async function loader({ request }: LoaderFunctionArgs) {
   const customer = await requireCurrentNaiaCustomer(request);
 
-  const [selfieRecord, modelRecord, hasVtoResults, hasBosImages] = await Promise.all([
-    prisma.selfieAnalysis.findUnique({
-      where: { customerId: customer.id },
-      select: { photoPublicId: true, photoDeletedAt: true, analysisStatus: true, analysisResult: true },
-    }),
+  const [modelRecord, hasVtoResults, hasBosImages] = await Promise.all([
     prisma.naiaModel.findUnique({
       where: { customerId: customer.id },
       select: { facePublicId: true, bodyPublicId: true, saveModelConsentAt: true },
@@ -70,16 +62,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
   ]);
 
   // Derive public-safe booleans — private IDs never leave the server.
-  const hasPhoto    = selfieRecord !== null && selfieRecord.photoPublicId !== null && selfieRecord.photoDeletedAt === null;
-  const hasAnalysis = selfieRecord !== null && selfieRecord.analysisStatus === "completed" && selfieRecord.analysisResult !== null;
-  const hasFace     = modelRecord !== null && modelRecord.facePublicId !== null;
-  const hasBody     = modelRecord !== null && modelRecord.bodyPublicId !== null;
+  // hasFace is V1-internal only: it is never surfaced as its own control (the
+  // face-photo slot is not customer-facing in V1) — it only widens the "remove
+  // all" bulk action's visibility for legacy accounts that still have one.
+  const hasFace = modelRecord !== null && modelRecord.facePublicId !== null;
+  const hasBody = modelRecord !== null && modelRecord.bodyPublicId !== null;
 
   return data({
     firstName:     customer.firstName,
     lastName:      customer.lastName,
     email:         customer.email,
-    selfie:        selfieRecord !== null ? { hasPhoto, hasAnalysis } : null,
     model:         modelRecord  !== null ? { hasFace,  hasBody }     : null,
     hasVtoResults,
     hasBosImages,
@@ -89,10 +81,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
 // ── Action ────────────────────────────────────────────────────────────────────
 
 const VALID_INTENTS = new Set([
-  "delete-selfie-photo",
-  "delete-selfie-analysis",
-  "delete-selfie-both",
-  "delete-model-face",
   "delete-model-body",
   "delete-model-all",
   "delete-vto-results",
@@ -100,10 +88,6 @@ const VALID_INTENTS = new Set([
 ]);
 
 type DestructiveIntent =
-  | "delete-selfie-photo"
-  | "delete-selfie-analysis"
-  | "delete-selfie-both"
-  | "delete-model-face"
   | "delete-model-body"
   | "delete-model-all"
   | "delete-vto-results"
@@ -112,10 +96,6 @@ type DestructiveIntent =
 type Intent = DestructiveIntent;
 
 const SUCCESS_MESSAGES: Record<Intent, string> = {
-  "delete-selfie-photo":    "Your selfie photo has been permanently removed.",
-  "delete-selfie-analysis": "Your Selfie Style Analysis has been permanently removed.",
-  "delete-selfie-both":     "Your selfie photo and Selfie Style Analysis have both been permanently removed.",
-  "delete-model-face":      "Your saved face photo has been removed from your nAia Model.",
   "delete-model-body":      "Your saved body photo has been removed from your nAia Model.",
   "delete-model-all":       "Your saved nAia Model photos and consent have been permanently removed.",
   "delete-vto-results":     "Your saved Virtual Try-On preview images have been permanently removed.",
@@ -134,26 +114,6 @@ export async function action({ request }: ActionFunctionArgs) {
   const typed = intent as Intent;
 
   switch (typed) {
-    case "delete-selfie-photo": {
-      const r = await deleteSelfiePhoto(customer.id);
-      if (!r.ok) return data({ ok: false as const, error: "Could not remove your selfie photo. Please try again." }, { status: 500 });
-      break;
-    }
-    case "delete-selfie-analysis": {
-      const r = await deleteAnalysisResult(customer.id);
-      if (!r.ok) return data({ ok: false as const, error: "Could not remove your analysis. Please try again." }, { status: 500 });
-      break;
-    }
-    case "delete-selfie-both": {
-      const r = await deleteBoth(customer.id);
-      if (!r.ok) return data({ ok: false as const, error: "Could not remove your selfie and analysis. Please try again." }, { status: 500 });
-      break;
-    }
-    case "delete-model-face": {
-      const r = await deleteNaiaModelPhoto(customer.id, "face");
-      if (!r.ok) return data({ ok: false as const, error: "Could not remove your face photo. Please try again." }, { status: 500 });
-      break;
-    }
     case "delete-model-body": {
       const r = await deleteNaiaModelPhoto(customer.id, "body");
       if (!r.ok) return data({ ok: false as const, error: "Could not remove your body photo. Please try again." }, { status: 500 });
@@ -184,26 +144,6 @@ export async function action({ request }: ActionFunctionArgs) {
 // ── Confirmation specs ────────────────────────────────────────────────────────
 
 const CONFIRM: Record<DestructiveIntent, { title: string; body: string; cta: string }> = {
-  "delete-selfie-photo": {
-    title: "Remove selfie photo",
-    body:  "Your uploaded selfie will be permanently deleted. Your existing Selfie Style Analysis is kept and will continue to personalise your experience.",
-    cta:   "Remove selfie photo",
-  },
-  "delete-selfie-analysis": {
-    title: "Remove Selfie Style Analysis",
-    body:  "Your Selfie Style Analysis will be permanently deleted. Your selfie photo is kept and you can run a new analysis at any time.",
-    cta:   "Remove analysis",
-  },
-  "delete-selfie-both": {
-    title: "Remove selfie and analysis",
-    body:  "Your selfie photo and your Selfie Style Analysis will both be permanently deleted. You can create them again at any time from your Style Passport.",
-    cta:   "Remove both",
-  },
-  "delete-model-face": {
-    title: "Remove saved face photo",
-    body:  "Your saved face photo will be permanently deleted from your nAia Model. Virtual try-ons that use this photo will require a new one. Your body photo and styling history are not affected.",
-    cta:   "Remove face photo",
-  },
   "delete-model-body": {
     title: "Remove saved body photo",
     body:  "Your saved body photo will be permanently deleted from your nAia Model. Virtual try-ons that use this photo will require a new one. Your face photo and styling history are not affected.",
@@ -257,7 +197,7 @@ function ControlRow({
 // ── Component ────────────────────────────────────────────────────────────────
 
 export default function Settings() {
-  const { firstName, lastName, email, selfie, model, hasVtoResults, hasBosImages } = useLoaderData<typeof loader>();
+  const { firstName, lastName, email, model, hasVtoResults, hasBosImages } = useLoaderData<typeof loader>();
   const fetcher     = useFetcher<typeof action>();
   const revalidator = useRevalidator();
   // Only destructive actions open the confirmation modal; consent is
@@ -276,7 +216,6 @@ export default function Settings() {
     }
   }, [actionData]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const hasSelfieSection = selfie !== null;
   const hasModelSection  = model  !== null;
 
   return (
@@ -308,51 +247,6 @@ export default function Settings() {
         </dl>
       </section>
 
-      {/* ── Selfie Style Analysis ─────────────────────────────────────────── */}
-      {hasSelfieSection && (
-        <section className="bos-section">
-          <div className="set-section-eyebrow">Selfie Style Analysis</div>
-          <h2 className="set-section-title">Selfie Style Analysis</h2>
-          <p className="sp-shell-desc" style={{ marginBottom: "20px" }}>
-            Your selfie photo and the style signals derived from it are stored securely. You can remove either independently or together.
-          </p>
-          <div className="set-controls">
-            {selfie.hasPhoto && (
-              <ControlRow
-                intent="delete-selfie-photo"
-                label="Remove selfie photo"
-                description="Permanently deletes your uploaded selfie. Your style analysis result is kept."
-                buttonLabel="Remove selfie photo"
-                onOpen={setPending}
-              />
-            )}
-            {selfie.hasAnalysis && (
-              <ControlRow
-                intent="delete-selfie-analysis"
-                label="Remove Selfie Style Analysis"
-                description="Permanently deletes your analysis result. Your selfie photo is kept."
-                buttonLabel="Remove analysis"
-                onOpen={setPending}
-              />
-            )}
-            {selfie.hasPhoto && selfie.hasAnalysis && (
-              <ControlRow
-                intent="delete-selfie-both"
-                label="Remove selfie photo and analysis"
-                description="Permanently deletes both your selfie photo and your style analysis."
-                buttonLabel="Remove both"
-                onOpen={setPending}
-              />
-            )}
-            {!selfie.hasPhoto && !selfie.hasAnalysis && (
-              <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "15px", fontStyle: "italic", color: "var(--naia-muted)" }}>
-                You have no selfie photo or analysis on file.
-              </p>
-            )}
-          </div>
-        </section>
-      )}
-
       {/* ── My nAia Model ─────────────────────────────────────────────────── */}
       {hasModelSection && (
         <section className="bos-section">
@@ -362,15 +256,6 @@ export default function Settings() {
             These are the photos you saved to enable virtual try-ons. Removing them stops virtual previews until you upload new ones. Your styling history and Closet are not affected.
           </p>
           <div className="set-controls">
-            {model.hasFace && (
-              <ControlRow
-                intent="delete-model-face"
-                label="Remove saved face photo"
-                description="Permanently deletes your face photo from your nAia Model. Your body photo is kept."
-                buttonLabel="Remove face photo"
-                onOpen={setPending}
-              />
-            )}
             {model.hasBody && (
               <ControlRow
                 intent="delete-model-body"
