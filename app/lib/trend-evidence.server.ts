@@ -2,6 +2,10 @@ import prisma from "../db.server";
 import type { TrendReportData } from "./trend-reports";
 import { buildPrivateDownloadUrl, getCloudinaryConfig } from "./cloudinary-admin.server";
 import { scoreItemAttributes, dimensionIdsForSlug } from "./trend-evidence-attribute-scoring.server";
+// TEMP DIAGNOSTIC import — live Closet colour QA only, see the diagnostic
+// block below. Not used by any scoring/selection logic (that stays
+// entirely inside trend-evidence-attribute-scoring.server.ts).
+import { resolveFreeTextColourFamilies } from "./ai/colour-family";
 
 // ---------------------------------------------------------------------------
 // Evidence bundle — assembled server-side, scoped to exactly one customer,
@@ -41,6 +45,10 @@ export type ShopperClosetItemEvidence = {
   formality?: string | null;
   pattern?: string | null;
   colors?: string[];
+  // TEMP DIAGNOSTIC field — not read by any scoring/selection logic, only
+  // by the temporary live-Closet diagnostic log below. Safe to leave or
+  // remove independently of the diagnostic itself.
+  analysisStatus?: string | null;
 };
 
 export type ShopperReviewSignal = {
@@ -103,6 +111,7 @@ export async function getShopperEvidence(customerId: string): Promise<ShopperEvi
           formality: true,
           pattern: true,
           colors: true,
+          analysisStatus: true,
         },
       },
       postOutfitReviews: {
@@ -117,6 +126,24 @@ export async function getShopperEvidence(customerId: string): Promise<ShopperEvi
   });
 
   if (!customer) return EMPTY_BUNDLE;
+
+  // TEMP DIAGNOSTIC — live Closet QA: closetItems above is capped at the 20
+  // most recently added items (take: 20). If this customer owns more than
+  // 20 pieces, anything older than their 20 most recent additions is
+  // structurally invisible to Trend Edit regardless of how good its colour
+  // evidence is. This directly tests that theory. Server-side log only,
+  // never customer-facing. Remove once the Colour Direction diagnostic is
+  // closed.
+  try {
+    const totalClosetCount = await prisma.closetItem.count({ where: { customerId } });
+    if (totalClosetCount > customer.closetItems.length) {
+      console.log("TEMP DIAGNOSTIC — trend-evidence closet truncation", JSON.stringify({
+        customerIdHash: customerId.slice(0, 8),
+        totalClosetCount,
+        fetchedCount: customer.closetItems.length,
+      }));
+    }
+  } catch { /* diagnostic only — never block the real response */ }
 
   const profile = customer.onboardingProfile;
   const hasProfile = Boolean(profile?.completed);
@@ -178,6 +205,7 @@ export async function getShopperEvidence(customerId: string): Promise<ShopperEvi
       formality: item.formality ?? null,
       pattern: item.pattern ?? null,
       colors: item.colors ?? [],
+      analysisStatus: item.analysisStatus ?? null,
     })),
     reviewSignal: {
       reviewCount: customer.postOutfitReviews.length,
@@ -2163,6 +2191,44 @@ export function buildShopperEdit(
 
   scored.sort((a, b) => b.score - a.score);
   const namedScored = scored.filter((m) => m.item.name);
+
+  // TEMP DIAGNOSTIC — live Colour Direction Closet QA. Dumps every Closet
+  // item this customer owns (within the take:20 fetch), whether or not it
+  // qualified, with its full colour resolution and dimension scores — to
+  // answer directly: does real accent-colour evidence exist in this
+  // Closet, and if so, why didn't it surface. Server-side log only, never
+  // shown to the customer. Remove once the diagnostic is closed.
+  if (slug === "spring-2026-colour-direction") {
+    const rankById = new Map(scored.map((s, i) => [s.item, i + 1]));
+    const diagnostic = closetItemsList.map((it) => {
+      const colourText = it.primaryColor ?? it.colors?.[0] ?? null;
+      const colourResolution = colourText ? resolveFreeTextColourFamilies(colourText) : null;
+      const attr = scoreItemAttributes(it, slug);
+      const categoryEligible = compatibleCategories.has(it.category);
+      const subcategoryExcluded = Boolean(it.subcategory && excludedSubcategories.has(it.subcategory.toLowerCase()));
+      return {
+        name: it.name,
+        category: it.category,
+        subcategory: it.subcategory,
+        primaryColor: it.primaryColor,
+        colors: it.colors ?? [],
+        hueFamilies: colourResolution?.hueFamilies ?? [],
+        isNeutral: colourResolution?.isNeutral ?? null,
+        colourUnknown: colourResolution?.unknown ?? (colourText === null),
+        imagePresent: Boolean(it.imageUrl),
+        analysisStatus: it.analysisStatus ?? null,
+        fitProfile: it.fitProfile ?? null,
+        silhouette: it.silhouette ?? null,
+        formality: it.formality ?? null,
+        categoryEligible,
+        subcategoryExcluded,
+        dimensionScores: attr.dimensionScores,
+        bestDimensionId: attr.bestDimensionId,
+        finalRank: rankById.get(it) ?? null,
+      };
+    });
+    console.log("TEMP DIAGNOSTIC — Colour Direction Closet breakdown", JSON.stringify(diagnostic));
+  }
 
   // Each section now runs its own selection against the same scored pool,
   // instead of every section reading the same fixed top-2 slice.

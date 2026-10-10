@@ -223,10 +223,17 @@ describe("V1 — Worth Investing In still produces a real gap OR no-purchase-nee
 // ── 8/9/10: data-boundary guarantees ────────────────────────────────────────
 
 describe("V1 — data boundaries preserved", () => {
-  it("refresh/reopen cannot increment usage — buildShopperEdit and getShopperEvidence make exactly one Prisma call, and it is read-only", () => {
+  it("refresh/reopen cannot increment usage — every Prisma call buildShopperEdit/getShopperEvidence make is read-only", () => {
+    // Count was temporarily added alongside findUnique for the live Closet-
+    // truncation diagnostic — still strictly read-only, so the real
+    // invariant (no writes, ever) is unaffected. If a write verb ever
+    // appears here, that's the actual regression this test exists to catch.
     const prismaCalls = TREND_EVIDENCE_SRC.match(/prisma\.\w+\.\w+\(/g) ?? [];
-    assert.equal(prismaCalls.length, 1, "exactly one Prisma call in the whole evidence/selection pipeline");
-    assert.ok(prismaCalls[0].includes("findUnique"), "that one call is a read (findUnique), never a write");
+    assert.ok(prismaCalls.length >= 1, "at least one Prisma call exists");
+    const readOnlyVerbs = ["findUnique", "findFirst", "findMany", "count"];
+    for (const call of prismaCalls) {
+      assert.ok(readOnlyVerbs.some((v) => call.includes(v)), `${call} must be read-only`);
+    }
     assert.ok(
       !TREND_EVIDENCE_SRC.includes("personalised-trend-edit-usage"),
       "this file never imports or calls the usage-recording module — usage accounting is wired at the route loader, outside this pure selection pipeline",

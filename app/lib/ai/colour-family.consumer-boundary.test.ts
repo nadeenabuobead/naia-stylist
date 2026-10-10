@@ -36,6 +36,10 @@ const ALLOWED_PRODUCTION_IMPORTERS = new Set([
   "app/lib/buyskip/constraint-evidence.server.ts",
   "app/lib/ai/nadine-product-assessment.ts",
   "app/lib/trend-evidence-attribute-scoring.server.ts",
+  // TEMP DIAGNOSTIC — live Closet colour QA (see trend-evidence.server.ts's
+  // own TEMP DIAGNOSTIC block). Remove this entry in the same commit that
+  // removes the diagnostic import.
+  "app/lib/trend-evidence.server.ts",
 ]);
 
 const SKIP_DIRS = new Set(["node_modules", ".git", "build", "dist", ".vercel"]);
