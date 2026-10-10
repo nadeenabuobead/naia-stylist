@@ -39,7 +39,14 @@ import {
 function session(
   id: string,
   daysAgo: number,
-  suggestions: Array<{ id: string; outfitName: string | null; createdAtDaysAgo?: number }>,
+  suggestions: Array<{
+    id: string;
+    outfitName: string | null;
+    createdAtDaysAgo?: number;
+    itemCount?: number;
+    resolvedImages?: string[];
+    extraCount?: number;
+  }>,
 ): HistorySessionInput {
   return {
     id,
@@ -49,6 +56,9 @@ function session(
       id: s.id,
       outfitName: s.outfitName,
       createdAt: new Date(Date.now() - (s.createdAtDaysAgo ?? daysAgo) * 86_400_000),
+      itemCount: s.itemCount,
+      resolvedImages: s.resolvedImages,
+      extraCount: s.extraCount,
     })),
   };
 }
@@ -265,12 +275,14 @@ describe("§ORDERING — cards order by the suggestion's own createdAt, never th
     assert.ok(cardAgeMs < 2 * 86_400_000, "orders by the 1-day-old suggestion.createdAt, not a 30-day-old session.createdAt");
   });
 
-  it("a session with no suggestion yet (mid-generation) falls back to session.createdAt without crashing", () => {
+  // Deliberately changed behavior: "Latest StyleMe"/history means completed
+  // looks, not every StylingSession row — a session with no suggestion yet
+  // never finished generating a look and must not occupy a card slot (shown
+  // as an empty visual card). It is excluded from this gallery, not deleted.
+  it("a session with no suggestion yet (mid-generation) is excluded without crashing — it is not a completed look", () => {
     const emptySession: HistorySessionInput = { id: "empty", occasion: "everyday", createdAt: new Date(), suggestions: [] };
     const history = buildUnifiedHistory([emptySession], [], new Set());
-    assert.equal(history.length, 1);
-    assert.equal(history[0].suggestionId, null);
-    assert.equal(history[0].saved, false);
+    assert.equal(history.length, 0);
   });
 });
 
@@ -293,5 +305,68 @@ describe("§RESULT-SECURITY — resolveResultSuggestionSelector (app/routes/styl
   it("11. a nonexistent suggestionId still only ever narrows by id — no special-case branch that could widen the query", () => {
     const selector = resolveResultSuggestionSelector("nonexistent-id");
     assert.deepEqual(selector, { where: { id: "nonexistent-id" } });
+  });
+});
+
+describe("§COLLAGE — the history gallery shows each completed look's own real pieces (Overview parity)", () => {
+  it("a completed result carries its resolved collage images and extraCount through to the card", () => {
+    const completed = session("s-completed", 1, [{
+      id: "sugg-completed", outfitName: "Look", itemCount: 4,
+      resolvedImages: ["https://a.example/1.jpg", "https://a.example/2.jpg", "https://a.example/3.jpg"],
+      extraCount: 1,
+    }]);
+    const history = buildUnifiedHistory([completed], [], new Set());
+    assert.equal(history.length, 1);
+    assert.deepEqual(history[0].resolvedImages, ["https://a.example/1.jpg", "https://a.example/2.jpg", "https://a.example/3.jpg"]);
+    assert.equal(history[0].extraCount, 1);
+  });
+
+  it("each card's images are exactly its own suggestion's resolved items — never borrowed from a different look", () => {
+    const lookA = session("s-a", 2, [{ id: "sugg-a", outfitName: "Look A", itemCount: 2, resolvedImages: ["https://a.example/1.jpg", "https://a.example/2.jpg"], extraCount: 0 }]);
+    const lookB = session("s-b", 1, [{ id: "sugg-b", outfitName: "Look B", itemCount: 1, resolvedImages: ["https://b.example/1.jpg"], extraCount: 0 }]);
+    const history = buildUnifiedHistory([lookB, lookA], [], new Set());
+    const cardA = history.find((r) => r.suggestionId === "sugg-a")!;
+    const cardB = history.find((r) => r.suggestionId === "sugg-b")!;
+    assert.deepEqual(cardA.resolvedImages, ["https://a.example/1.jpg", "https://a.example/2.jpg"]);
+    assert.deepEqual(cardB.resolvedImages, ["https://b.example/1.jpg"]);
+  });
+
+  it("a one-image legacy result renders a graceful single-image card, not an empty or broken one", () => {
+    const oneImage = session("s-one", 1, [{ id: "sugg-one", outfitName: "Look", itemCount: 1, resolvedImages: ["https://legacy.example/dress.jpg"], extraCount: 0 }]);
+    const history = buildUnifiedHistory([oneImage], [], new Set());
+    assert.equal(history.length, 1);
+    assert.deepEqual(history[0].resolvedImages, ["https://legacy.example/dress.jpg"]);
+  });
+
+  it("an incomplete session (suggestion exists but has zero items) is excluded from the completed-looks gallery, not shown as an empty card", () => {
+    const incomplete = session("s-incomplete", 1, [{ id: "sugg-incomplete", outfitName: null, itemCount: 0, resolvedImages: [], extraCount: 0 }]);
+    const history = buildUnifiedHistory([incomplete], [], new Set());
+    assert.equal(history.length, 0, "a suggestion with zero items never finished generating a look");
+  });
+
+  it("a completed result's SAVED badge is preserved alongside its collage data", () => {
+    const completed = session("s-saved-completed", 1, [{ id: "sugg-saved", outfitName: "Look", itemCount: 2, resolvedImages: ["https://a.example/1.jpg", "https://a.example/2.jpg"], extraCount: 0 }]);
+    const history = buildUnifiedHistory([completed], [], new Set(["sugg-saved"]));
+    assert.equal(history.length, 1);
+    assert.equal(history[0].saved, true, "saved badge unaffected by the collage addition");
+    assert.deepEqual(history[0].resolvedImages, ["https://a.example/1.jpg", "https://a.example/2.jpg"]);
+  });
+
+  it("View Look / Delete link identity (session id + suggestionId) is unchanged by the collage addition", () => {
+    const completed = session("s-link", 1, [{ id: "sugg-link", outfitName: "Look", itemCount: 1, resolvedImages: ["https://a.example/1.jpg"], extraCount: 0 }]);
+    const history = buildUnifiedHistory([completed], [], new Set());
+    assert.equal(history[0].id, "s-link", "Delete still targets the session id");
+    assert.equal(history[0].suggestionId, "sugg-link", "View Look still targets the exact suggestion id");
+  });
+
+  it("a session with an incomplete newer suggestion and completed older ones is unaffected when the completed ones are what the query returns", () => {
+    // Mirrors the Overview fix: the DB-level filter is what skips incomplete
+    // rows before this function ever sees them. This proves the function
+    // itself does not re-exclude or truncate completed results it receives.
+    const olderCompleted = session("s-older", 2, [{ id: "sugg-older", outfitName: "Older Look", itemCount: 3, resolvedImages: ["https://a.example/1.jpg"], extraCount: 2 }]);
+    const newerCompleted = session("s-newer", 1, [{ id: "sugg-newer", outfitName: "Newer Look", itemCount: 1, resolvedImages: ["https://b.example/1.jpg"], extraCount: 0 }]);
+    const history = buildUnifiedHistory([newerCompleted, olderCompleted], [], new Set());
+    assert.equal(history.length, 2);
+    assert.deepEqual(history.map((r) => r.suggestionId), ["sugg-newer", "sugg-older"]);
   });
 });

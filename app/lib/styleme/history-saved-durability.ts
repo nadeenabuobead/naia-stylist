@@ -22,13 +22,25 @@ export type SessionRecord = {
   outfitName: string | null;
   suggestionId: string | null; // the EXACT suggestion this card represents and links to
   saved: boolean; // true iff suggestionId is an actually-saved suggestion
+  resolvedImages: string[]; // real per-item images for this exact result's collage
+  extraCount: number; // pieces beyond what the collage shows
 };
 
 export type HistorySessionInput = {
   id: string;
   occasion: string | null;
   createdAt: Date; // session creation — ordering fallback only, when the session has no suggestion yet
-  suggestions: Array<{ id: string; outfitName: string | null; createdAt: Date }>;
+  suggestions: Array<{
+    id: string;
+    outfitName: string | null;
+    createdAt: Date;
+    // Optional: callers that don't resolve collage imagery (existing tests,
+    // other call sites) simply omit these and get prior behavior — a
+    // completed look is assumed unless itemCount is explicitly 0.
+    itemCount?: number;
+    resolvedImages?: string[];
+    extraCount?: number;
+  }>;
 };
 
 export type SavedSuggestionInfo = { suggestionId: string; sessionId: string };
@@ -39,6 +51,9 @@ export type ExtraSuggestionInput = {
   suggestionCreatedAt: Date; // the suggestion's own generation time — orders this card
   sessionId: string;
   sessionOccasion: string | null;
+  itemCount?: number;
+  resolvedImages?: string[];
+  extraCount?: number;
 };
 
 /**
@@ -106,26 +121,41 @@ export function buildUnifiedHistory(
   extraSuggestions: ExtraSuggestionInput[],
   savedSuggestionIds: ReadonlySet<string>,
 ): SessionRecord[] {
-  const recentCards: SessionRecord[] = recentSessions.map((s) => {
-    const sugg = s.suggestions[0] ?? null;
-    return {
-      id: s.id,
-      occasion: s.occasion,
-      createdAt: (sugg?.createdAt ?? s.createdAt).toISOString(),
-      outfitName: sugg?.outfitName ?? null,
-      suggestionId: sugg?.id ?? null,
-      saved: sugg ? savedSuggestionIds.has(sugg.id) : false,
-    };
-  });
+  // "Latest StyleMe"/history means completed looks: a session with no
+  // suggestion at all, or a suggestion with zero items, never finished
+  // generating a look and must not get a card — it's excluded, not shown
+  // as an empty card. Undefined itemCount (callers that don't resolve
+  // collage imagery) is treated as complete, preserving prior behavior
+  // for those call sites.
+  const recentCards: SessionRecord[] = recentSessions
+    .map((s): SessionRecord | null => {
+      const sugg = s.suggestions[0] ?? null;
+      if (!sugg || sugg.itemCount === 0) return null;
+      return {
+        id: s.id,
+        occasion: s.occasion,
+        createdAt: sugg.createdAt.toISOString(),
+        outfitName: sugg.outfitName,
+        suggestionId: sugg.id,
+        saved: savedSuggestionIds.has(sugg.id),
+        resolvedImages: sugg.resolvedImages ?? [],
+        extraCount: sugg.extraCount ?? 0,
+      };
+    })
+    .filter((c): c is SessionRecord => c !== null);
 
-  const extraCards: SessionRecord[] = extraSuggestions.map((s) => ({
-    id: s.sessionId,
-    occasion: s.sessionOccasion,
-    createdAt: s.suggestionCreatedAt.toISOString(),
-    outfitName: s.outfitName,
-    suggestionId: s.suggestionId,
-    saved: true, // extraSuggestions are, by construction, always saved suggestions
-  }));
+  const extraCards: SessionRecord[] = extraSuggestions
+    .filter((s) => s.itemCount !== 0)
+    .map((s) => ({
+      id: s.sessionId,
+      occasion: s.sessionOccasion,
+      createdAt: s.suggestionCreatedAt.toISOString(),
+      outfitName: s.outfitName,
+      suggestionId: s.suggestionId,
+      saved: true, // extraSuggestions are, by construction, always saved suggestions
+      resolvedImages: s.resolvedImages ?? [],
+      extraCount: s.extraCount ?? 0,
+    }));
 
   return [...recentCards, ...extraCards].sort((a, b) =>
     a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0,

@@ -15,6 +15,8 @@ import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import { ALL_OPTION_LABELS } from "~/lib/onboarding/quiz-data";
 import { REV7_PROFILE_VERSION, currentStyleExpression } from "~/lib/passport/rev7-vocabulary";
 import { occasionDisplayFor } from "~/lib/styleme/occasion-display";
+import { resolveCollageImages } from "~/lib/styleme/look-image-resolution.server";
+import { LookCollage } from "~/components/styleme/LookCollage";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 
 export const links: LinksFunction = () => [
@@ -390,34 +392,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // real pieces from that exact result (up to 4, in the order StyleMe returned
   // them), not one arbitrarily-chosen "representative" garment. extraCount tells
   // the UI how many more pieces the look had beyond what's shown.
-  const MAX_COLLAGE_IMAGES = 4;
-  function resolveItemImage(
-    item: {
-      closetItemId?: string | null;
-      productImageUrl?: string | null;
-      closetItem?: { imageUrl?: string | null; imagePublicId?: string | null; imageFormat?: string | null } | null;
-    },
-  ): string | null {
-    const ci = item.closetItem;
-    if (item.closetItemId && ci?.imagePublicId && ci?.imageFormat && cloudinaryConfig) {
-      const ownership = validatePublicIdOwnership(ci.imagePublicId, customerId);
-      if (ownership.ok) {
-        return buildPrivateDownloadUrl(cloudinaryConfig, ci.imagePublicId, ci.imageFormat, "private");
-      }
-    }
-    if (item.productImageUrl) return item.productImageUrl;
-    if (ci?.imageUrl) return ci.imageUrl;
-    return null;
-  }
-
   const sessionsWithThumb = sessions.map((s) => {
     const suggestion = s.suggestions[0];
     const items = suggestion?.items ?? [];
-    const resolvedImages = items
-      .map((i) => resolveItemImage(i))
-      .filter((url): url is string => !!url)
-      .slice(0, MAX_COLLAGE_IMAGES);
-    const extraCount = Math.max(0, items.length - resolvedImages.length);
+    const { resolvedImages, extraCount } = resolveCollageImages(items, { customerId, cloudinaryConfig });
 
     return { ...s, resolvedImages, extraCount };
   });
@@ -484,76 +462,6 @@ function buildOverviewPlanCards(e: EntitlementSummary): { label: string; value: 
     { label: "Trend Edit", value: trendEditUsageValue(e.personalisedTrend) },
     { label: "My Closet", value: `${e.closet.currentCount} of ${e.closet.limit} items` },
   ];
-}
-
-// A single collage tile. If a signed/expired image URL fails client-side, it
-// swaps to the same neutral placeholder used when no image resolved server-side
-// at all — never a broken-image icon.
-function CollageTile({ src, alt }: { src: string; alt: string }) {
-  return (
-    <div style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden" }}>
-      <img
-        src={src}
-        alt={alt}
-        loading="lazy"
-        style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-        onError={(e) => {
-          e.currentTarget.style.display = "none";
-          const fallback = e.currentTarget.nextElementSibling as HTMLElement | null;
-          if (fallback) fallback.style.display = "grid";
-        }}
-      />
-      <div style={{ display: "none", position: "absolute", inset: 0, placeItems: "center", background: "color-mix(in oklab, var(--bg) 92%, white)" }} aria-hidden="true">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.25, color: "var(--fg)" }}>
-          <path d="M12 3 4.5 7.5v9L12 21l7.5-4.5v-9L12 3z" /><path d="m4.5 7.5 7.5 4.5 7.5-4.5M12 12v9" />
-        </svg>
-      </div>
-    </div>
-  );
-}
-
-const EMPTY_LOOK_ICON = (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.25, color: "var(--fg)" }} aria-hidden="true">
-    <path d="M12 3 4.5 7.5v9L12 21l7.5-4.5v-9L12 3z" /><path d="m4.5 7.5 7.5 4.5 7.5-4.5M12 12v9" />
-  </svg>
-);
-
-// Renders the real pieces from one StyleMe result as a compact collage: one
-// image fills the card, two split it evenly, three or four tile it — always
-// the actual pieces from that result, never an invented or borrowed image.
-function LookCollage({ images, extraCount, alt }: { images: string[]; extraCount: number; alt: string }) {
-  if (images.length === 0) {
-    return <div style={{ display: "grid", placeItems: "center", width: "100%", height: "100%" }}>{EMPTY_LOOK_ICON}</div>;
-  }
-
-  const gridStyle: React.CSSProperties =
-    images.length === 1
-      ? { display: "grid", width: "100%", height: "100%" }
-      : { display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: images.length === 2 ? "1fr" : "1fr 1fr", gap: "2px", width: "100%", height: "100%" };
-
-  return (
-    <div style={{ position: "relative", width: "100%", height: "100%" }}>
-      <div style={gridStyle}>
-        {images.map((src, i) => (
-          <div key={i} style={images.length === 3 && i === 0 ? { gridColumn: "1 / 3" } : undefined}>
-            <CollageTile src={src} alt={alt} />
-          </div>
-        ))}
-      </div>
-      {extraCount > 0 && (
-        <span
-          style={{
-            position: "absolute", bottom: "0.4rem", right: "0.4rem",
-            background: "color-mix(in oklab, var(--bg) 20%, black)", color: "white",
-            fontSize: "0.62rem", letterSpacing: "0.05em", lineHeight: 1,
-            padding: "0.2rem 0.45rem", borderRadius: "999px",
-          }}
-        >
-          {`+${extraCount}`}
-        </span>
-      )}
-    </div>
-  );
 }
 
 export default function MyNaiaOverview() {

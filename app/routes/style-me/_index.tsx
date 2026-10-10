@@ -13,7 +13,12 @@ import {
   buildUnifiedHistory,
   buildDisplayedSuggestionMap,
   type SessionRecord,
+  type HistorySessionInput,
+  type ExtraSuggestionInput,
 } from "~/lib/styleme/history-saved-durability";
+import { getCloudinaryConfig } from "~/lib/cloudinary-admin.server";
+import { resolveCollageImages } from "~/lib/styleme/look-image-resolution.server";
+import { LookCollage } from "~/components/styleme/LookCollage";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: naiaStyles },
@@ -104,6 +109,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return data({ hasProfile: false, hasClosetItems: false, recentSessions: [] as SessionRecord[] });
   }
 
+  const cloudinaryConfig = getCloudinaryConfig();
+  const itemImageSelect = {
+    itemType: true, closetItemId: true, productTitle: true, productImageUrl: true,
+    closetItem: { select: { name: true, imageUrl: true, imagePublicId: true, imageFormat: true } },
+  } as const;
+
   const [profile, closetCount, recentRaw] = await Promise.all([
     prisma.onboardingProfile.findUnique({
       where: { customerId },
@@ -111,18 +122,47 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }),
     prisma.closetItem.count({ where: { customerId } }),
     prisma.stylingSession.findMany({
-      where: { customerId },
+      // "Your StyleMe Looks" means completed looks, not every StylingSession
+      // row — a session with no suggestion (or a suggestion with no items)
+      // never finished generating a look and has nothing to show. Filtering
+      // here lets Prisma naturally reach further back to fill the 20-card
+      // window with real results, same fix as Overview's Latest StyleMe.
+      where: { customerId, suggestions: { some: { items: { some: {} } } } },
       take: 20,
       orderBy: { createdAt: "desc" },
       include: {
         suggestions: {
           take: 1,
           orderBy: { createdAt: "desc" },
-          select: { id: true, outfitName: true, createdAt: true },
+          select: { id: true, outfitName: true, createdAt: true, items: { take: 5, select: itemImageSelect } },
         },
       },
     }),
   ]);
+
+  // Resolve each displayed suggestion's real collage imagery server-side —
+  // the same resolver Overview's Latest StyleMe uses, so both surfaces
+  // render identically. A suggestion whose items.length is 0 here (the
+  // `take: 1 / orderBy: desc` sub-query can still land on an incomplete
+  // reroll even though the where clause found a different, completed,
+  // suggestion in the same session) is marked with itemCount: 0 so
+  // buildUnifiedHistory excludes it rather than show an empty card.
+  const recentWithImages: HistorySessionInput[] = recentRaw.map((s) => ({
+    id: s.id,
+    occasion: s.occasion,
+    createdAt: s.createdAt,
+    suggestions: s.suggestions.map((sg) => {
+      const { resolvedImages, extraCount } = resolveCollageImages(sg.items, { customerId, cloudinaryConfig });
+      return {
+        id: sg.id,
+        outfitName: sg.outfitName,
+        createdAt: sg.createdAt,
+        itemCount: sg.items.length,
+        resolvedImages,
+        extraCount,
+      };
+    }),
+  }));
 
   // Card identity is per-SUGGESTION, not per-session: a saved suggestion that
   // isn't the latest one in its session must get its own correctly-badged,
@@ -144,7 +184,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const savedSuggestions = resolveSavedSuggestions(savedLooks, resolvedSuggestions);
   const savedSuggestionIds = new Set(savedSuggestions.map((s) => s.suggestionId));
 
-  const displayedSuggestionBySession = buildDisplayedSuggestionMap(recentRaw);
+  const displayedSuggestionBySession = buildDisplayedSuggestionMap(recentWithImages);
   const extraSavedSuggestions = selectExtraSavedSuggestions(savedSuggestions, displayedSuggestionBySession);
   const extraSuggestionIds = extraSavedSuggestions.map((s) => s.suggestionId);
   const extraSuggestionRows = extraSuggestionIds.length > 0
@@ -156,18 +196,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
           createdAt: true,
           sessionId: true,
           session: { select: { occasion: true } },
+          items: { take: 5, select: itemImageSelect },
         },
       })
     : [];
-  const extraSuggestionInputs = extraSuggestionRows.map((s) => ({
-    suggestionId: s.id,
-    outfitName: s.outfitName,
-    suggestionCreatedAt: s.createdAt,
-    sessionId: s.sessionId,
-    sessionOccasion: s.session.occasion,
-  }));
+  const extraSuggestionInputs: ExtraSuggestionInput[] = extraSuggestionRows.map((s) => {
+    const { resolvedImages, extraCount } = resolveCollageImages(s.items, { customerId, cloudinaryConfig });
+    return {
+      suggestionId: s.id,
+      outfitName: s.outfitName,
+      suggestionCreatedAt: s.createdAt,
+      sessionId: s.sessionId,
+      sessionOccasion: s.session.occasion,
+      itemCount: s.items.length,
+      resolvedImages,
+      extraCount,
+    };
+  });
 
-  const recentSessions: SessionRecord[] = buildUnifiedHistory(recentRaw, extraSuggestionInputs, savedSuggestionIds);
+  const recentSessions: SessionRecord[] = buildUnifiedHistory(recentWithImages, extraSuggestionInputs, savedSuggestionIds);
 
   return data({
     hasProfile: !!profile,
@@ -270,6 +317,20 @@ function SessionCard({ session }: { session: SessionRecord }) {
 
   return (
     <article className="sml-card">
+      <Link
+        to={resultHref}
+        style={{
+          display: "block", aspectRatio: "4/5", border: "1px solid var(--naia-border)",
+          background: "var(--naia-surface)", overflow: "hidden", marginBottom: "12px",
+        }}
+        aria-label={`View look — ${session.outfitName ?? "nAia Look"}`}
+      >
+        <LookCollage
+          images={session.resolvedImages}
+          extraCount={session.extraCount}
+          alt={session.outfitName ?? ""}
+        />
+      </Link>
       <div className="sml-card-date">
         {formattedDate}
         {session.saved && <span className="sml-card-saved-badge">SAVED</span>}
