@@ -731,13 +731,13 @@ const PERSONAL_EDIT_RULES: Record<string, PersonalEditRules> = {
     },
     yourBestRouteIn: {
       "clean-polished":
-        "Based on your Style DNA, start with one accent introduced through a bag, flat, or scarf against a neutral base you already own.",
+        "Based on your Style DNA, start with one clear accent — a bag, shoe, top, skirt, or trouser — against a neutral base you already own.",
       "fluid-ease":
-        "Based on your Style DNA, try one accent piece — a bag, flat, or scarf — against the calm, unfussy base you already wear.",
+        "Based on your Style DNA, try one accent piece — a bag, shoe, or coloured garment — against the calm, unfussy base you already wear.",
       "expressive":
         "Based on your Style DNA, try one genuinely intentional accent note against a quiet base — one piece, one clear colour.",
       "neutral":
-        "Based on your Passport, introduce one accent piece — a bag, flat, or scarf — against a neutral base.",
+        "Based on your Passport, introduce one accent piece — a bag, shoe, or coloured garment — against a neutral base.",
     },
     theBalanceToProtect: {
       "clean-polished":
@@ -751,11 +751,11 @@ const PERSONAL_EDIT_RULES: Record<string, PersonalEditRules> = {
     },
     partToTake: [
       "A quiet base that earns its place by working with everything: soft white, cream, stone, washed denim, or black.",
-      "One clear accent, introduced through the lowest-commitment piece first — a bag, flat, or scarf — before committing to a full accent garment.",
+      "One clear accent against that base — a bag, shoe, top, skirt, trouser, or other single colour note.",
     ],
     partToTakeNeutralColour: [
       "A quiet base — a neutral colour already easy to repeat — is the starting condition for this method.",
-      "One clear accent, introduced through the lowest-commitment piece first — a bag, flat, or scarf — before committing to a full accent garment.",
+      "One clear accent against that base — a bag, shoe, top, skirt, trouser, or other single colour note.",
     ],
     partToTakeColourHints: [
       {
@@ -910,7 +910,7 @@ const PASSPORT_POINTS_TO_SUPPLEMENT: Partial<Record<string, Partial<Record<strin
     "creative":       "You are working toward a more original way of dressing — one genuinely deliberate colour note achieves that more directly than a fuller palette.",
     "interesting":    "You want to look more interesting — one considered accent against a quiet base achieves that more reliably than multiple colour notes.",
     "confident":      "You want to feel confident — one clear, deliberate accent note makes a direct statement without requiring everything else to change.",
-    "effortless":     "You want to look effortless — one accent introduced through a low-commitment piece, a bag, flat, or scarf, keeps the look intentional without demanding a re-edit.",
+    "effortless":     "You want to look effortless — one accent, whether a bag, shoe, or coloured garment, keeps the look intentional without demanding a re-edit.",
     "put-together":   "You want to feel consistently put-together — a quiet base with one deliberate accent reads as composed rather than cautious.",
     "comfortable":    "You want to feel comfortable — one considered note against a familiar base is the simplest version of this direction.",
     "soft-confident": "You want to feel soft but confident — one clear accent against a quiet base achieves exactly that register.",
@@ -950,7 +950,7 @@ const VERSION_PASSPORT_SUPPLEMENT: Partial<Record<string, Partial<Record<string,
   "spring-2026-colour-direction": {
     "relaxed-fits": "An unfussy base is already the starting condition — the accent works with what you already wear.",
     "structured":   "A composed base gives one accent exactly the room it needs to register.",
-    "effortless":   "Colour through one low-commitment piece — a bag, flat, or scarf — keeps the look intentional without demanding a full re-edit.",
+    "effortless":   "Colour through one considered piece — a bag, shoe, or coloured garment — keeps the look intentional without demanding a full re-edit.",
     "put-together": "A quiet base with one deliberate note reads as composed rather than cautious.",
     "interesting":  "One considered colour note registers more than multiple competing accents.",
     "creative":     "One considered colour note registers as intentional rather than decorated.",
@@ -1223,9 +1223,9 @@ function buildEvidenceItemRoleNote(item: ShopperClosetItemEvidence, slug: string
     // base-neutral, or no resolvable role at all — base/support language
     // only. Never accent wording for a neutral shoe, bag, or accessory.
     const baseNotes: Partial<Record<string, string>> = {
-      TOPS:      "The neutral base this direction builds from. Keep the outfit at this tone and introduce one deliberate accent through a bag, flat, or scarf.",
+      TOPS:      "The neutral base this direction builds from. Keep the outfit at this tone and introduce one deliberate accent — a bag, shoe, or coloured garment.",
       BOTTOMS:   "The neutral base this direction builds from. A clean foundation — the accent comes from elsewhere.",
-      DRESSES:   "The neutral base this direction builds from. One piece covers the foundation; add the accent through a smaller piece.",
+      DRESSES:   "The neutral base this direction builds from. One piece covers the foundation; add the accent through one other piece.",
       OUTERWEAR: "The neutral base this direction builds from. Keep it quiet and let one accent piece do the colour work.",
     };
     return (baseNotes[item.category] ?? "A quiet, neutral piece in this direction — it supports the base rather than carrying the accent.") + suffix;
@@ -1574,7 +1574,7 @@ function buildALookToTry(
       if (accentItem) {
         return `Your ${accentItem.name!} as the single accent — build the rest of the look in cream, stone, or soft white. One note; nothing competing.${ctxClose(true)}`;
       }
-      return `Your ${name} as the quiet base. The accent is the missing piece — add one bag, flat, or scarf in a deliberate colour to complete the look.${ctxClose(true)}`;
+      return `Your ${name} as the quiet base. The accent is the missing piece — add one piece in a deliberate colour, whether a bag, shoe, or garment, to complete the look.${ctxClose(true)}`;
     }
   }
 
@@ -1612,7 +1612,7 @@ function buildALookToTry(
       }
       return `Your ${name} as the single accent — keep the rest of the outfit in cream, stone, or soft white. One considered note against a quiet ground.`;
     }
-    return `Your ${name} as the base — add one clear accent through a bag, flat, or scarf in a single deliberate colour. Keep the rest neutral.`;
+    return `Your ${name} as the base — add one clear accent in a single deliberate colour, whether a bag, shoe, top, skirt, or trouser. Keep the rest neutral.`;
   }
 
   return `Your ${name} with quieter, simpler pieces. Clean flat shoe; keep accessories minimal.`;
@@ -1781,7 +1781,7 @@ function buildBestRouteIn(
       }
       // Neither item carries accent-colour evidence — both are base. Never
       // claim a neutral is "a colour move" just because it scored highest.
-      return `Your ${name} is already the quiet base this method needs. The accent is the missing half — one deliberate colour note in a smaller piece, like a bag, flat, or scarf, would complete it.`;
+      return `Your ${name} is already the quiet base this method needs. The accent is the missing half — one deliberate colour note, whether a bag, shoe, or garment, would complete it.`;
     }
 
     if (topRole === "accent-colour") {
@@ -1793,7 +1793,7 @@ function buildBestRouteIn(
       }
       return `Your ${name} is the accent. The principle is one considered note against a quiet ground — cream, stone, or soft white in everything else. Everything else neutral; this is the move.`;
     }
-    return `Your ${name} is the quiet base the method is built on. The principle is to add one deliberate colour note in a smaller piece — a bag, flat, or scarf — and keep everything else neutral. The base makes the note land.`;
+    return `Your ${name} is the quiet base the method is built on. The principle is to add one deliberate colour note — a bag, shoe, top, skirt, or trouser — and keep everything else neutral. The base makes the note land.`;
   }
 
   return rules.yourBestRouteIn[register];
@@ -1885,7 +1885,7 @@ const TREND_COVERAGE_CONFIG: Record<string, TrendCoverageConfig> = {
       // if only base-only route exists, real accent-colour evidence completes the method
       categories: ["ROLE:accent-colour"],
       appliesToRoutes: ["base-only"],
-      investNote: "A bag, flat, or scarf in a clear accent colour would complete the method — you have the quiet base; this is the piece that activates it.",
+      investNote: "One piece in a clear accent colour — a bag, shoe, or coloured garment — would complete the method: you have the quiet base; this is what activates it.",
     },
   },
 };
@@ -2033,13 +2033,13 @@ const PASSPORT_ROUTE_LIFESTYLE_LEAD: Partial<Record<string, Partial<Record<strin
     "on-the-go":   "one well-cut tailored piece — blazer or wide-leg trouser — that carries across the range of what your day requires.",
   },
   "spring-2026-colour-direction": {
-    "office":      "one deliberate accent piece — a bag, flat, or scarf — against the neutral base you already wear to professional settings.",
-    "hybrid":      "one considered accent piece — a bag, flat, or scarf — that carries across professional and casual contexts without adjustment.",
-    "events":      "one clear accent note — a bag, flat, or scarf in a single considered colour — against a quiet base outfit for the occasion.",
-    "casual-days": "one accent piece introduced at the accessory level — a bag, flat, or scarf — against the unfussy base you already default to.",
-    "busy-mom":    "one low-commitment accent note — a bag, flat, or scarf — that shifts a familiar outfit without adding anything to think about.",
-    "travel":      "one accent piece you can move across looks — a flat, bag, or scarf — against the neutral base you already travel in.",
-    "on-the-go":   "one accent piece at the accessory level — a bag, flat, or scarf — that activates a familiar outfit without requiring a different approach.",
+    "office":      "one deliberate accent piece — a bag, shoe, or coloured garment — against the neutral base you already wear to professional settings.",
+    "hybrid":      "one considered accent piece — a bag, shoe, or coloured garment — that carries across professional and casual contexts without adjustment.",
+    "events":      "one clear accent note — a bag, shoe, or garment in a single considered colour — against a quiet base outfit for the occasion.",
+    "casual-days": "one accent piece — a bag, shoe, or coloured garment — against the unfussy base you already default to.",
+    "busy-mom":    "one considered accent note — a bag, shoe, or coloured garment — that shifts a familiar outfit without adding anything to think about.",
+    "travel":      "one accent piece you can move across looks — a bag, shoe, or coloured garment — against the neutral base you already travel in.",
+    "on-the-go":   "one accent piece — a bag, shoe, or coloured garment — that activates a familiar outfit without requiring a different approach.",
   },
 };
 
@@ -2154,28 +2154,28 @@ const PASSPORT_LOOK_VARIANTS: Partial<Record<
   },
   "spring-2026-colour-direction": {
     "work-meetings": {
-      "clean-polished": "Cream trousers and a simple tucked knit, with one clear accent through a bag or flat. One deliberate note; everything else calm. Holds for professional settings.",
-      "fluid-ease":     "Washed denim or a soft neutral trouser with a fine top, plus one accent piece — a bag or flat. Unfussy base; one clear note. Holds for work.",
-      "expressive":     "A quiet neutral base — cream, stone, or soft white — with one single considered accent note through a bag or flat. One deliberate choice; everything else calm.",
-      "neutral":        "A quiet neutral base with one accent introduced through a bag, flat, or scarf. One note; everything else calm. Holds for professional settings.",
+      "clean-polished": "Cream trousers and a simple tucked knit, with one clear accent — a bag, shoe, or coloured garment. One deliberate note; everything else calm. Holds for professional settings.",
+      "fluid-ease":     "Washed denim or a soft neutral trouser with a fine top, plus one accent piece — a bag, shoe, or coloured garment. Unfussy base; one clear note. Holds for work.",
+      "expressive":     "A quiet neutral base — cream, stone, or soft white — with one single considered accent note, whether a bag, shoe, or garment. One deliberate choice; everything else calm.",
+      "neutral":        "A quiet neutral base with one accent — a bag, shoe, or coloured garment. One note; everything else calm. Holds for professional settings.",
     },
     "events": {
-      "clean-polished": "A simple outfit in cream, stone, or soft white — one clean silhouette — with one considered colour note through a bag or evening flat. The accent registers more clearly against the restrained base.",
-      "fluid-ease":     "A fluid, unfussy outfit in a quiet neutral with one accent introduced through a bag or shoe. The ease is already in the base — the colour does the one thing it needs to.",
+      "clean-polished": "A simple outfit in cream, stone, or soft white — one clean silhouette — with one considered colour note, whether a bag, shoe, or garment. The accent registers more clearly against the restrained base.",
+      "fluid-ease":     "A fluid, unfussy outfit in a quiet neutral with one accent, whether a bag, shoe, or coloured garment. The ease is already in the base — the colour does the one thing it needs to.",
       "expressive":     "A quiet base — cream, stone, or washed denim — with one genuinely deliberate accent piece. One note; nothing competing with it.",
-      "neutral":        "A quiet base outfit with one clear colour note introduced through a bag, flat, or scarf. One considered choice for the occasion.",
+      "neutral":        "A quiet base outfit with one clear colour note — a bag, shoe, or coloured garment. One considered choice for the occasion.",
     },
     "work-meetings-events": {
-      "clean-polished": "A quiet, clean base — cream, stone, or soft white — worn with one deliberate colour accent through a bag or flat. The same note carries across professional and evening contexts.",
-      "fluid-ease":     "An unfussy neutral base with one accent piece — a bag, flat, or scarf — that moves across professional and evening without adjustment.",
+      "clean-polished": "A quiet, clean base — cream, stone, or soft white — worn with one deliberate colour accent, whether a bag, shoe, or garment. The same note carries across professional and evening contexts.",
+      "fluid-ease":     "An unfussy neutral base with one accent piece — a bag, shoe, or coloured garment — that moves across professional and evening without adjustment.",
       "expressive":     "One quiet base, one considered accent. The restraint is intentional — one note registers more clearly than several.",
-      "neutral":        "A quiet neutral base with one accent piece — a bag, flat, or scarf — introduced consistently. One note; everything else calm.",
+      "neutral":        "A quiet neutral base with one accent piece — a bag, shoe, or coloured garment — introduced consistently. One note; everything else calm.",
     },
     "none": {
-      "clean-polished": "Cream trousers and a simple knit, or washed denim with a fine top — add one clear accent through a bag, flat, or scarf. One considered note; everything else calm.",
+      "clean-polished": "Cream trousers and a simple knit, or washed denim with a fine top — add one clear accent, whether a bag, shoe, or garment. One considered note; everything else calm.",
       "fluid-ease":     "An unfussy neutral base — washed denim, cream, or stone — with one accent piece. The ease is already in the base; the colour is the single deliberate move.",
       "expressive":     "A quiet base outfit with one genuinely considered accent note. One piece; one colour; everything else restrained.",
-      "neutral":        "Cream trousers and a simple knit, or washed denim with a fine top — add one clear accent through a bag, flat, or scarf. One considered note; everything else calm.",
+      "neutral":        "Cream trousers and a simple knit, or washed denim with a fine top — add one clear accent, whether a bag, shoe, or garment. One considered note; everything else calm.",
     },
   },
 };
