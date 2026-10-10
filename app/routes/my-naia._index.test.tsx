@@ -291,6 +291,55 @@ describe("my-naia loader — StyleMe card imagery", () => {
     const session = (result as any).sessions[0];
     expect(session.resolvedImages).toEqual(["https://signed.example.com/private.jpg"]);
   });
+
+  // "Latest StyleMe" means the latest *completed* looks — a StylingSession with
+  // no OutfitSuggestion, or a suggestion with no items, never finished
+  // generating a look and must not occupy a card slot.
+
+  it("queries only completed results: where clause requires a suggestion that has items", async () => {
+    vi.mocked(prisma.stylingSession.findMany).mockResolvedValueOnce([]);
+    await loader({ request: new Request("http://localhost/my-naia"), params: {}, context: {} } as any);
+    const callArgs = vi.mocked(prisma.stylingSession.findMany).mock.calls[0][0] as any;
+    expect(callArgs.where).toEqual({
+      customerId: "c1",
+      suggestions: { some: { items: { some: {} } } },
+    });
+  });
+
+  it("a completed result is included and still renders its real multi-piece collage", async () => {
+    vi.mocked(prisma.stylingSession.findMany).mockResolvedValueOnce([
+      sessionWith([
+        { productImageUrl: "https://nadine.example.com/dress.jpg" },
+        { productImageUrl: "https://nadine.example.com/shoes.jpg" },
+      ]),
+    ] as any);
+    const result = await loader({ request: new Request("http://localhost/my-naia"), params: {}, context: {} } as any);
+    expect((result as any).sessions).toHaveLength(1);
+    expect((result as any).sessions[0].resolvedImages).toEqual([
+      "https://nadine.example.com/dress.jpg",
+      "https://nadine.example.com/shoes.jpg",
+    ]);
+  });
+
+  it("incomplete recent sessions do not prevent older completed results from being returned — the loader trusts the query's own history reach-back", async () => {
+    // The where clause (asserted above) is what makes Prisma skip incomplete
+    // rows and reach further back in history; this proves the loader doesn't
+    // then re-filter or drop any of what the query already returned.
+    vi.mocked(prisma.stylingSession.findMany).mockResolvedValueOnce([
+      { ...sessionWith([{ productImageUrl: "https://nadine.example.com/newer.jpg" }]), id: "s-newer-completed" },
+      { ...sessionWith([{ productImageUrl: "https://nadine.example.com/older.jpg" }]), id: "s-older-completed" },
+    ] as any);
+    const result = await loader({ request: new Request("http://localhost/my-naia"), params: {}, context: {} } as any);
+    expect((result as any).sessions.map((s: any) => s.id)).toEqual(["s-newer-completed", "s-older-completed"]);
+  });
+
+  it("fewer than 3 completed results in history renders fewer than 3 cards — no fake padding", async () => {
+    vi.mocked(prisma.stylingSession.findMany).mockResolvedValueOnce([
+      sessionWith([{ productImageUrl: "https://nadine.example.com/only.jpg" }]),
+    ] as any);
+    const result = await loader({ request: new Request("http://localhost/my-naia"), params: {}, context: {} } as any);
+    expect((result as any).sessions).toHaveLength(1);
+  });
 });
 
 // ── Component structure tests ─────────────────────────────────────────────────

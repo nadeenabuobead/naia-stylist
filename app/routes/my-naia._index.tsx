@@ -314,7 +314,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Awaiting one at a time means each holds and releases the connection
   // before the next asks for it — identical data, no queuing.
   const sessions = await prisma.stylingSession.findMany({
-    where: { customerId },
+    // "Latest StyleMe" means the latest completed looks, not every StylingSession
+    // row — a session with no OutfitSuggestion (or a suggestion with no items)
+    // never finished generating a look and has nothing to show. This where
+    // clause filters before `take: 3`, so Prisma naturally reaches further back
+    // in history to fill the card limit with real results, skipping gaps.
+    where: { customerId, suggestions: { some: { items: { some: {} } } } },
     take: 3,
     orderBy: { createdAt: "desc" },
     select: {
