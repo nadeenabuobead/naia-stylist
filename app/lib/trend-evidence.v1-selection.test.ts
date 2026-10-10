@@ -245,3 +245,187 @@ describe("V1 — data boundaries preserved", () => {
     assert.ok(!/taste|StyleTendency/i.test(ATTRIBUTE_SCORING_SRC), "no taste/StyleTendency reference in trend-evidence-attribute-scoring.server.ts");
   });
 });
+
+// ═════════════════════════════════════════════════════════════════════════
+// Colour Direction QA follow-up (live staging regression): a black beanie,
+// a black/beige tote, a black skirt, and white sneakers — all NEUTRAL by
+// colour-family.ts's own NEUTRAL_COLORS set — were (a) called "your
+// stronger colour move" in Route In, and (b) declared sufficient coverage
+// ("you do not need to buy anything") by Worth Investing In. Both were role-
+// blind: coverage was category-based (any BAGS/SHOES/ACCESSORIES item "is"
+// the accent, regardless of actual colour), and Route In named whichever
+// item scored highest overall without checking its role.
+// ═════════════════════════════════════════════════════════════════════════
+
+describe("Colour Direction — role-based coverage: neutral-only Closet never claims full coverage", () => {
+  it("four category-eligible items that are ALL neutral (black/beige/white) → Worth Investing In never says 'you do not need to buy anything' — it recommends the missing accent", () => {
+    const closet = [
+      item({ name: "Black Ribbed Knit Beanie", category: "ACCESSORIES", primaryColor: "black" }),
+      item({ name: "Black and Beige Geometric Tote", category: "BAGS", primaryColor: "black" }),
+      item({ name: "Black Draped Maxi Skirt", category: "DRESSES", primaryColor: "black" }),
+      item({ name: "White Cloud Running Sneakers", category: "SHOES", primaryColor: "white" }),
+    ];
+    const edit = buildShopperEdit(COLOUR_DIRECTION_REPORT, evidence(closet));
+    assert.doesNotMatch(edit.worthInvestingStatement ?? "", /do not need to buy/i);
+    // Outcome B — real base coverage, accent genuinely missing: the gap is named as an extension, not hidden.
+    assert.ok(edit.partToTake.some((b) => /accent/i.test(b)), "the missing accent role is named in partToTake, not silently dropped");
+  });
+
+  it("black, white, and beige items all resolve to the base-neutral role, not accent-colour, in a real buildShopperEdit run", () => {
+    const closet = [
+      item({ name: "Black Item", category: "ACCESSORIES", primaryColor: "black" }),
+      item({ name: "White Item", category: "SHOES", primaryColor: "white" }),
+      item({ name: "Beige Item", category: "BAGS", primaryColor: "beige" }),
+    ];
+    const edit = buildShopperEdit(COLOUR_DIRECTION_REPORT, evidence(closet));
+    // None of these may be named as "the accent" in Route In — only as the base, or omitted.
+    assert.ok(!/is the accent/i.test(edit.yourBestRouteIn), "no neutral item is ever labelled the accent");
+  });
+
+  it("a black item never becomes 'your stronger colour move' — that exact phrase is retired", () => {
+    const closet = [
+      item({ name: "Black Beanie", category: "ACCESSORIES", primaryColor: "black" }),
+      item({ name: "Black Tote", category: "BAGS", primaryColor: "black" }),
+    ];
+    const edit = buildShopperEdit(COLOUR_DIRECTION_REPORT, evidence(closet));
+    assert.ok(!edit.yourBestRouteIn.includes("stronger colour move"), "role-blind 'stronger colour move' framing must not appear for an all-neutral pair");
+  });
+});
+
+describe("Colour Direction — a genuine accent item outranks a neutral accessory for the ACCENT role, even when the neutral item scores higher overall", () => {
+  it("the real accent item is named as the accent in Route In, and the neutral item as the base — regardless of which one has the higher raw score", () => {
+    const closet = [
+      // Deliberately given an extra image-bonus point so it OUTSCORES the accent item overall —
+      // proving role assignment is per-dimension, not "whichever item wins the overall race".
+      item({ name: "Black Ribbed Beanie", category: "ACCESSORIES", primaryColor: "black", imageUrl: "https://example.com/beanie.jpg" }),
+      item({ name: "Crimson Leather Bag", category: "BAGS", primaryColor: "red" }),
+    ];
+    const edit = buildShopperEdit(COLOUR_DIRECTION_REPORT, evidence(closet));
+    assert.ok(edit.yourBestRouteIn.includes("Crimson Leather Bag"), "the genuine accent item is named as the accent");
+    assert.ok(edit.yourBestRouteIn.includes("Black Ribbed Beanie"), "the neutral item is named too, as the base");
+    assert.ok(!/Black Ribbed Beanie.{0,40}is the accent/.test(edit.yourBestRouteIn), "the neutral item is never mislabelled as the accent");
+  });
+
+  it("both the base-neutral and accent-colour items are selected into Closet Shows, each for their own dimension", () => {
+    const closet = [
+      item({ name: "Black Ribbed Beanie", category: "ACCESSORIES", primaryColor: "black", imageUrl: "https://example.com/beanie.jpg" }),
+      item({ name: "Crimson Leather Bag", category: "BAGS", primaryColor: "red" }),
+    ];
+    const edit = buildShopperEdit(COLOUR_DIRECTION_REPORT, evidence(closet));
+    const names = edit.evidenceClosetItems.map((i) => i.name);
+    assert.ok(names.includes("Black Ribbed Beanie") && names.includes("Crimson Leather Bag"), "Closet Shows includes both the base and the accent evidence");
+  });
+});
+
+describe("Colour Direction — base + genuine accent together may validly produce no-purchase-needed", () => {
+  it("a real neutral base plus a real accent item → Worth Investing In may correctly say no purchase is needed", () => {
+    const closet = [
+      item({ name: "Cream Wide-Leg Trouser", category: "BOTTOMS", primaryColor: "cream" }),
+      item({ name: "Crimson Leather Bag", category: "BAGS", primaryColor: "red" }),
+    ];
+    const edit = buildShopperEdit(COLOUR_DIRECTION_REPORT, evidence(closet));
+    assert.match(edit.worthInvestingStatement ?? "", /do not need to buy/i);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════
+// Section-repetition hard V1 invariants (live QA regression, confirmed
+// across Colour Direction, Modern Tailoring, AND Soft Structure): the
+// prose already varied by section, but every "Already Yours" strip
+// rendered the SAME full Closet Shows array regardless — because
+// ShopperEdit had no section-specific item-array field for the UI to read.
+// These tests exercise all three current slugs.
+// ═════════════════════════════════════════════════════════════════════════
+
+const THREE_REPORTS: [string, TrendReportData][] = [
+  ["Colour Direction", COLOUR_DIRECTION_REPORT],
+  ["Modern Tailoring", MODERN_TAILORING_REPORT],
+  ["Soft Structure", SOFT_STRUCTURE_REPORT],
+];
+
+describe("V1 hard invariant — evidenceClosetItems is never blindly reused as routeInItems or lookToTryItems", () => {
+  it("the renderer source no longer maps edit.evidenceClosetItems under the Route In or A Look To Try 'Already Yours' strips", () => {
+    const rendererSrc = readFileSync(resolve(import.meta.dirname, "../routes/trends.my-edits.$slug.tsx"), "utf-8");
+    const routeInSectionIdx = rendererSrc.indexOf("03 / Your route in");
+    const lookToTrySectionIdx = rendererSrc.indexOf("04 / A look to try");
+    const worthInvestingIdx = rendererSrc.indexOf("05 / Worth investing in");
+    assert.ok(routeInSectionIdx !== -1 && lookToTrySectionIdx !== -1 && worthInvestingIdx !== -1, "all three section markers found");
+
+    const routeInBlock = rendererSrc.slice(routeInSectionIdx, lookToTrySectionIdx);
+    const lookToTryBlock = rendererSrc.slice(lookToTrySectionIdx, worthInvestingIdx);
+    assert.ok(routeInBlock.includes("edit.routeInItems"), "Route In's Already Yours strip reads edit.routeInItems");
+    assert.ok(!routeInBlock.includes("edit.evidenceClosetItems"), "Route In's Already Yours strip no longer reads the shared Closet Shows array");
+    assert.ok(lookToTryBlock.includes("edit.lookToTryItems"), "A Look To Try's Already Yours strip reads edit.lookToTryItems");
+    assert.ok(!lookToTryBlock.includes("edit.evidenceClosetItems"), "A Look To Try's Already Yours strip no longer reads the shared Closet Shows array");
+  });
+
+  for (const [label, report] of THREE_REPORTS) {
+    it(`${label}: routeInItems is a genuine subset of evidenceClosetItems, never the identical full array, when more evidence exists`, () => {
+      const closet = [
+        item({ name: "Alpha Piece", category: "OUTERWEAR", fitProfile: "tailored", formality: "business-formal", primaryColor: "black" }),
+        item({ name: "Beta Piece", category: "TOPS", fitProfile: "relaxed", material: "jersey", primaryColor: "cream" }),
+        item({ name: "Gamma Piece", category: "BOTTOMS", fitProfile: "tailored", silhouette: "wrap", primaryColor: "red" }),
+        item({ name: "Delta Piece", category: "DRESSES", fitProfile: "flowy", silhouette: "a-line", primaryColor: "stone" }),
+      ];
+      const edit = buildShopperEdit(report, evidence(closet));
+      assert.ok(edit.evidenceClosetItems.length >= 3, "Closet Shows surfaces multiple pieces of evidence");
+      assert.ok(edit.routeInItems.length <= 2, "Route In never shows more than its own 1-2 selected items");
+      assert.notDeepEqual(
+        edit.routeInItems.map((i) => i.name).sort(),
+        edit.evidenceClosetItems.map((i) => i.name).sort(),
+        "Route In's item set is not identical to the full Closet Shows set",
+      );
+    });
+
+    it(`${label}: lookToTryItems is a genuine subset of evidenceClosetItems, never the identical full array, when more evidence exists`, () => {
+      const closet = [
+        item({ name: "Alpha Piece", category: "OUTERWEAR", fitProfile: "tailored", formality: "business-formal", primaryColor: "black" }),
+        item({ name: "Beta Piece", category: "TOPS", fitProfile: "relaxed", material: "jersey", primaryColor: "cream" }),
+        item({ name: "Gamma Piece", category: "BOTTOMS", fitProfile: "tailored", silhouette: "wrap", primaryColor: "red" }),
+        item({ name: "Delta Piece", category: "DRESSES", fitProfile: "flowy", silhouette: "a-line", primaryColor: "stone" }),
+      ];
+      const edit = buildShopperEdit(report, evidence(closet));
+      assert.ok(edit.lookToTryItems.length <= 2, "A Look To Try never shows more than its own 1-2 selected items");
+      assert.notDeepEqual(
+        edit.lookToTryItems.map((i) => i.name).sort(),
+        edit.evidenceClosetItems.map((i) => i.name).sort(),
+        "A Look To Try's item set is not identical to the full Closet Shows set",
+      );
+    });
+  }
+});
+
+describe("V1 hard invariant — A Look To Try differs from Route In by at least one item when a valid alternative exists", () => {
+  for (const [label, report] of THREE_REPORTS) {
+    it(`${label}: with 3+ wearable candidates, Route In and A Look To Try use different support items`, () => {
+      const closet = [
+        item({ name: "Primary Anchor", category: "OUTERWEAR", fitProfile: "tailored", formality: "business-formal", primaryColor: "black" }),
+        item({ name: "Secondary Option", category: "TOPS", fitProfile: "relaxed", material: "jersey", primaryColor: "cream" }),
+        item({ name: "Tertiary Option", category: "BOTTOMS", fitProfile: "tailored", silhouette: "wrap", primaryColor: "stone" }),
+      ];
+      const edit = buildShopperEdit(report, evidence(closet));
+      const routeInNames = new Set(edit.routeInItems.map((i) => i.name));
+      const lookToTryNames = new Set(edit.lookToTryItems.map((i) => i.name));
+      assert.notDeepEqual(
+        [...routeInNames].sort(),
+        [...lookToTryNames].sort(),
+        "the two sections' item sets differ when the Closet offers more than one valid support option",
+      );
+    });
+  }
+});
+
+describe("V1 hard invariant — reuse is allowed, but only when it is the Closet's genuinely only/best option", () => {
+  for (const [label, report] of THREE_REPORTS) {
+    it(`${label}: with only 2 wearable items total, Route In and A Look To Try legitimately reuse the same pair — this is truthful, not padding`, () => {
+      const closet = [
+        item({ name: "Only Anchor", category: "OUTERWEAR", fitProfile: "tailored", formality: "business-formal", primaryColor: "black" }),
+        item({ name: "Only Partner", category: "TOPS", fitProfile: "relaxed", material: "jersey", primaryColor: "cream" }),
+      ];
+      const edit = buildShopperEdit(report, evidence(closet));
+      const routeInNames = edit.routeInItems.map((i) => i.name).sort();
+      const lookToTryNames = edit.lookToTryItems.map((i) => i.name).sort();
+      assert.deepEqual(routeInNames, lookToTryNames, "with no alternative, reusing the same pair is correct, not a bug");
+    });
+  }
+});

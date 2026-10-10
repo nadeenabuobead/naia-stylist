@@ -1279,7 +1279,7 @@ function pickWearablePartner(
 // ---------------------------------------------------------------------------
 
 function buildALookToTry(
-  namedMatches: { item: ShopperClosetItemEvidence }[],
+  namedMatches: DimensionScoredItem[],
   slug: string,
   workCtx: WorkContextLabel,
   passportOnlyLook: string,
@@ -1295,6 +1295,8 @@ function buildALookToTry(
   const top = namedMatches[0].item;
   const second = namedMatches[1]?.item ?? null;
   const name = top.name!;
+  const topRole = namedMatches[0].dimensionId;
+  const secondRole = namedMatches[1]?.dimensionId ?? null;
 
   const ctxClose = (forPair: boolean): string => {
     if (workCtx === "none") return "";
@@ -1334,7 +1336,20 @@ function buildALookToTry(
       return `Your ${name} with your ${secName}. Clean flat or simple leather shoe; keep everything else — bag, jewellery — minimal so the proportion contrast reads.${ctxClose(true)}`;
     }
     if (slug === "spring-2026-colour-direction") {
-      return `Your ${name} as the anchor neutral and a single clear accent elsewhere — a bag, flat, or scarf in one deliberate colour. Keep your ${secName} in reserve; two accent pieces compete.`;
+      // Role-aware (see buildBestRouteIn's colour-direction branch for the
+      // same fix, same reason): never label whichever item scored highest
+      // "the anchor neutral" without checking it's actually base-neutral —
+      // that previously inverted the truth whenever the top item was
+      // genuinely the accent.
+      const accentItem = topRole === "accent-colour" ? top : (secondRole === "accent-colour" ? second : null);
+      const baseItem = topRole === "base-neutral" ? top : (secondRole === "base-neutral" ? second : null);
+      if (accentItem && baseItem) {
+        return `Your ${baseItem.name!} as the quiet base, with your ${accentItem.name!} as the single clear accent. Keep everything else neutral — one note is the whole method.${ctxClose(true)}`;
+      }
+      if (accentItem) {
+        return `Your ${accentItem.name!} as the single accent — build the rest of the look in cream, stone, or soft white. One note; nothing competing.${ctxClose(true)}`;
+      }
+      return `Your ${name} as the quiet base. The accent is the missing piece — add one bag, flat, or scarf in a deliberate colour to complete the look.${ctxClose(true)}`;
     }
   }
 
@@ -1363,13 +1378,13 @@ function buildALookToTry(
   }
 
   if (slug === "spring-2026-colour-direction") {
-    if (top.category === "BAGS") {
-      return `Your ${name} as the accent note — pair with a quiet base of cream trousers and a simple white or ivory top, and a flat shoe. One colour note; everything else neutral.`;
-    }
-    if (top.category === "SHOES") {
-      return `Your ${name} at ground level against a quiet outfit — cream or stone trousers, a fine white knit, and no further colour. One note from the ground up.`;
-    }
-    if (top.category === "ACCESSORIES") {
+    if (topRole === "accent-colour") {
+      if (top.category === "BAGS") {
+        return `Your ${name} as the accent note — pair with a quiet base of cream trousers and a simple white or ivory top, and a flat shoe. One colour note; everything else neutral.`;
+      }
+      if (top.category === "SHOES") {
+        return `Your ${name} at ground level against a quiet outfit — cream or stone trousers, a fine white knit, and no further colour. One note from the ground up.`;
+      }
       return `Your ${name} as the single accent — keep the rest of the outfit in cream, stone, or soft white. One considered note against a quiet ground.`;
     }
     return `Your ${name} as the base — add one clear accent through a bag, flat, or scarf in a single deliberate colour. Keep the rest neutral.`;
@@ -1454,7 +1469,7 @@ function buildItemQualification(item: ShopperClosetItemEvidence, slug: string): 
 }
 
 function buildBestRouteIn(
-  namedMatches: { item: ShopperClosetItemEvidence }[],
+  namedMatches: DimensionScoredItem[],
   slug: string,
   register: StyleRegister,
   rules: PersonalEditRules,
@@ -1520,16 +1535,37 @@ function buildBestRouteIn(
   }
 
   if (slug === "spring-2026-colour-direction") {
+    // Role-aware (base-neutral vs. accent-colour — scoreItemAttributes'
+    // actual dimensionId, never re-derived from category or raw colour
+    // text here). Previously this branch called whichever item scored
+    // highest overall "your stronger colour move" with no check of which
+    // role it actually filled — a pure-neutral item (black, white, beige)
+    // could win on base-neutral evidence alone and still get accent framing.
+    const topRole = namedMatches[0].dimensionId;
+    const secondRole = second ? namedMatches[1]?.dimensionId ?? null : null;
+
     if (second) {
-      return `Your ${name} is your stronger colour move. The principle is one deliberate note against a quiet ground — position it as either the base or the accent, then keep everything else neutral. Your ${second.name!} plays a supporting role, not a competing one.`;
+      const accentItem = topRole === "accent-colour" ? top : (secondRole === "accent-colour" ? second : null);
+      const baseItem = topRole === "base-neutral" ? top : (secondRole === "base-neutral" ? second : null);
+
+      if (accentItem && baseItem) {
+        return `Your ${accentItem.name!} is the accent — one deliberate colour note against a quiet ground. Your ${baseItem.name!} is the quiet base it sits against. The principle is one considered note, not two competing ones.`;
+      }
+      if (accentItem) {
+        return `Your ${accentItem.name!} is the accent — one deliberate colour note against a quiet ground. The principle is one considered note; keep everything else neutral.`;
+      }
+      // Neither item carries accent-colour evidence — both are base. Never
+      // claim a neutral is "a colour move" just because it scored highest.
+      return `Your ${name} is already the quiet base this method needs. The accent is the missing half — one deliberate colour note in a smaller piece, like a bag, flat, or scarf, would complete it.`;
     }
-    if (top.category === "BAGS") {
-      return `Your ${name} is the accent piece. The principle is one deliberate colour note against a quiet base — cream, stone, or washed denim in everything else. One note; nothing competing.`;
-    }
-    if (top.category === "SHOES") {
-      return `Your ${name} is the colour note at ground level. The principle is a quiet outfit above — cream, stone, or a fine white knit — so the one note from the ground up reads clearly.`;
-    }
-    if (top.category === "ACCESSORIES") {
+
+    if (topRole === "accent-colour") {
+      if (top.category === "BAGS") {
+        return `Your ${name} is the accent piece. The principle is one deliberate colour note against a quiet base — cream, stone, or washed denim in everything else. One note; nothing competing.`;
+      }
+      if (top.category === "SHOES") {
+        return `Your ${name} is the colour note at ground level. The principle is a quiet outfit above — cream, stone, or a fine white knit — so the one note from the ground up reads clearly.`;
+      }
       return `Your ${name} is the accent. The principle is one considered note against a quiet ground — cream, stone, or soft white in everything else. Everything else neutral; this is the move.`;
     }
     return `Your ${name} is the quiet base the method is built on. The principle is to add one deliberate colour note in a smaller piece — a bag, flat, or scarf — and keep everything else neutral. The base makes the note land.`;
@@ -1605,17 +1641,24 @@ const TREND_COVERAGE_CONFIG: Record<string, TrendCoverageConfig> = {
     },
   },
   "spring-2026-colour-direction": {
+    // ROLE-based, not category-based (see the ROLE:<dimensionId> tokens
+    // assessWorthInvesting adds to scoredCategories for this slug). A method
+    // is only "covered" when genuine accent-colour evidence exists — not
+    // merely any item in an accent-eligible category. A closet of neutral
+    // accessories (a black beanie, a neutral tote) must not satisfy
+    // "accent-piece" just because the categories happen to match; it has to
+    // actually carry accent-colour evidence.
     viableRoutes: [
       // accent piece only: quiet base is assumed from any neutral wardrobe
-      { id: "accent-piece",   requires: [["BAGS", "SHOES", "ACCESSORIES"]] },
-      // qualifying base piece (any clothing category, not just tops) + accent in closet = complete method
-      { id: "base-and-accent", requires: [["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR"], ["BAGS", "SHOES", "ACCESSORIES"]] },
-      // qualifying base piece alone is also viable (accent via assumed neutrals)
-      { id: "base-only",      requires: [["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR"]] },
+      { id: "accent-piece",   requires: [["ROLE:accent-colour"]] },
+      // genuine base-neutral evidence + genuine accent-colour evidence = complete method
+      { id: "base-and-accent", requires: [["ROLE:base-neutral"], ["ROLE:accent-colour"]] },
+      // genuine base-neutral evidence alone is also viable (accent via assumed neutrals)
+      { id: "base-only",      requires: [["ROLE:base-neutral"]] },
     ],
     optionalRole: {
-      // if only base-only route exists, an accent piece completes the method
-      categories: ["BAGS", "SHOES", "ACCESSORIES"],
+      // if only base-only route exists, real accent-colour evidence completes the method
+      categories: ["ROLE:accent-colour"],
       appliesToRoutes: ["base-only"],
       investNote: "A bag, flat, or scarf in a clear accent colour would complete the method — you have the quiet base; this is the piece that activates it.",
     },
@@ -1638,7 +1681,7 @@ type WorthInvestingResult = {
 };
 
 function assessWorthInvesting(
-  scored: Array<{ item: ShopperClosetItemEvidence; score: number }>,
+  scored: DimensionScoredItem[],
   namedMatches: Array<{ item: ShopperClosetItemEvidence }>,
   slug: string,
   rules: PersonalEditRules,
@@ -1674,7 +1717,24 @@ function assessWorthInvesting(
     return { worthInvestingStatement: null, partToTake: staticBullets };
   }
 
-  const scoredCategories = new Set(scored.map((s) => getEffectiveCategory(s.item, slug)));
+  // Colour Direction coverage must be ROLE-aware, not just category-aware —
+  // a neutral accessory (a black beanie, a neutral tote) satisfying
+  // "BAGS/SHOES/ACCESSORIES exists" used to be enough to call the accent
+  // role covered, even with zero genuine accent-colour evidence. For this
+  // slug only, each item's own dimensionId (base-neutral / accent-colour,
+  // from scoreItemAttributes — never re-derived here) is added as an
+  // additional ROLE:<dimensionId> token alongside its real category, and
+  // the viable routes below are defined in terms of those role tokens, not
+  // raw categories. Modern Tailoring / Soft Structure are untouched — their
+  // routes still reference real categories, which these extra tokens never
+  // collide with.
+  const scoredCategories = new Set<string>();
+  for (const s of scored) {
+    scoredCategories.add(getEffectiveCategory(s.item, slug));
+    if (slug === "spring-2026-colour-direction" && s.dimensionId) {
+      scoredCategories.add(`ROLE:${s.dimensionId}`);
+    }
+  }
 
   const satisfiedRoutes = config.viableRoutes.filter((r) =>
     routeIsSatisfied(r, scoredCategories),
@@ -1971,8 +2031,15 @@ export type ShopperEdit = {
   lowDataNotice: string | null;              // shown when only Style DNA/Passport is available
   // 3. YOUR BEST ROUTE IN — named Closet item path or Passport-only route
   yourBestRouteIn: string;
+  // The exact item(s) yourBestRouteIn's prose actually names — renders its
+  // own "Already Yours" strip. A subset of evidenceClosetItems, never the
+  // same shared array (that was the Already-Yours rendering bug).
+  routeInItems: EvidenceClosetItem[];
   // 4. A LOOK TO TRY
   aLookToTry: string;
+  // The exact item(s) aLookToTry's prose actually names — its own
+  // "Already Yours" strip, independent of routeInItems.
+  lookToTryItems: EvidenceClosetItem[];
   // 5. THE BALANCE TO PROTECT — one guardrail
   theBalanceToProtect: string;
   // 6. THE PART TO TAKE — exactly 2 bullets; null when Outcome C (no purchase needed)
@@ -2166,12 +2233,20 @@ export function buildShopperEdit(
     ? buildPassportPointsBlock(profile, lifestyleIds, slug)
     : null;
 
-  const evidenceClosetItems: EvidenceClosetItem[] = closetShowsScored.map(({ item }) => ({
+  const toEvidenceClosetItem = ({ item }: DimensionScoredItem): EvidenceClosetItem => ({
     name: item.name!,
     imageUrl: item.imageUrl,
     category: item.category,
     roleNote: buildEvidenceItemRoleNote(item, slug),
-  }));
+  });
+
+  const evidenceClosetItems: EvidenceClosetItem[] = closetShowsScored.map(toEvidenceClosetItem);
+  // Each section's own "Already Yours" strip — the exact items its prose
+  // names, never the shared Closet Shows array. Fixes the Already-Yours
+  // rendering bug confirmed across all three reports: the prose already
+  // varied by section, but the UI had no section-specific array to read.
+  const routeInItems: EvidenceClosetItem[] = routeInPair.map(toEvidenceClosetItem);
+  const lookToTryItems: EvidenceClosetItem[] = lookPair.map(toEvidenceClosetItem);
 
   // -------------------------------------------------------------------------
   // 3. YOUR BEST ROUTE IN
@@ -2338,7 +2413,9 @@ export function buildShopperEdit(
     evidenceReviews,
     lowDataNotice,
     yourBestRouteIn,
+    routeInItems,
     aLookToTry: finalLookToTry,
+    lookToTryItems,
     theBalanceToProtect,
     partToTake,
     worthInvestingStatement,

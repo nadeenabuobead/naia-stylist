@@ -778,11 +778,11 @@ export default function MyTrendEditDetail() {
             <div className="tmd-section">
               <div className="tmd-section-label">03 / Your route in</div>
               <p className="tmd-body">{edit.yourBestRouteIn}</p>
-              {edit.evidenceClosetItems.length > 0 && (
+              {edit.routeInItems.length > 0 && (
                 <div className="tmd-already-yours">
                   <span className="tmd-already-yours-label">Already yours</span>
                   <div className="tmd-already-yours-items">
-                    {edit.evidenceClosetItems.map((item: EvidenceClosetItem, i: number) => (
+                    {edit.routeInItems.map((item: EvidenceClosetItem, i: number) => (
                       <div key={i} className="tmd-already-yours-item">
                         {item.imageUrl && (
                           <img src={item.imageUrl} alt={item.name} className="tmd-already-yours-img" />
@@ -799,11 +799,11 @@ export default function MyTrendEditDetail() {
             <div className="tmd-section">
               <div className="tmd-section-label">04 / A look to try</div>
               <p className="tmd-body">{edit.aLookToTry}</p>
-              {edit.evidenceClosetItems.length > 0 && (
+              {edit.lookToTryItems.length > 0 && (
                 <div className="tmd-already-yours">
                   <span className="tmd-already-yours-label">Already yours</span>
                   <div className="tmd-already-yours-items">
-                    {edit.evidenceClosetItems.map((item: EvidenceClosetItem, i: number) => (
+                    {edit.lookToTryItems.map((item: EvidenceClosetItem, i: number) => (
                       <div key={i} className="tmd-already-yours-item">
                         {item.imageUrl && (
                           <img src={item.imageUrl} alt={item.name} className="tmd-already-yours-img" />
