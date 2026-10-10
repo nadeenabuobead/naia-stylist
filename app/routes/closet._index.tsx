@@ -31,6 +31,7 @@ const CATEGORIES = ["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR", "ACTIVEWEAR", "SW
 // Server-side suitability check (screenGarmentSuitability) is the real gate at trigger time.
 // SHOES and BAGS added 2026-09-07 for staging QA (Phase 4A5-ext). ACCESSORIES and JEWELRY remain excluded.
 const COLORS = ["Black", "White", "Beige", "Brown", "Grey", "Navy", "Blue", "Green", "Red", "Pink", "Purple", "Yellow", "Orange", "Gold", "Silver", "Multicolor"];
+const MAX_COLORS = 3; // customer may select up to 3 colours per piece; colors[0] is the deterministic primaryColor
 const OCCASIONS = ["Casual", "Work", "Dinner", "Party", "Formal", "Date", "Weekend", "Travel"];
 const SEASONS = ["Spring", "Summer", "Fall", "Winter", "All Season"];
 const PATTERNS = ["Solid", "Stripes", "Floral", "Plaid", "Animal Print", "Geometric", "Abstract", "Other"];
@@ -101,6 +102,24 @@ function detectImageFormatFromBytes(header: Uint8Array): string | null {
   ) return "webp";
   if (header.length >= 8 && header[4] === 0x66 && header[5] === 0x74 && header[6] === 0x79 && header[7] === 0x70) return "heic";
   return null;
+}
+
+// Validates and caps a client-submitted colours array server-side. Never trusts the
+// client-computed primaryColor — colors[0] after this normalization is the single
+// source of truth for the deterministic primaryColor.
+function normalizeColors(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== "string") continue;
+    const trimmed = entry.trim();
+    if (!trimmed || seen.has(trimmed.toLowerCase())) continue;
+    seen.add(trimmed.toLowerCase());
+    out.push(trimmed);
+    if (out.length >= 3) break; // MAX_COLORS
+  }
+  return out;
 }
 
 // Re-evaluate Stage A eligibility for ACCESSORIES/JEWELRY items after garment analysis.
@@ -244,7 +263,8 @@ export async function action({ request }: ActionFunctionArgs) {
     const name = formData.get("name") as string;
     const category = formData.get("category") as string;
     const publicId = (formData.get("publicId") as string)?.trim();
-    const primaryColor = formData.get("primaryColor") as string;
+    const colors = normalizeColors(JSON.parse((formData.get("colors") as string) || "[]"));
+    const primaryColor = colors[0] ?? null; // deterministic — colors[0] is always the primary colour
     const pattern = formData.get("pattern") as string;
     const brand = formData.get("brand") as string;
     const occasions = JSON.parse((formData.get("occasions") as string) || "[]");
@@ -442,6 +462,7 @@ export async function action({ request }: ActionFunctionArgs) {
         imageUrl: null,                // private upload — null for new records
         imagePublicId: publicId,
         imageFormat: serverFormat,
+        colors,
         primaryColor: primaryColor || null,
         pattern: pattern || null,
         brand: brand || null,
@@ -511,7 +532,9 @@ export async function action({ request }: ActionFunctionArgs) {
     const itemId    = (formData.get("itemId")      as string)?.trim();
     const name      = (formData.get("name")        as string)?.trim();
     const category  = (formData.get("category")    as string)?.trim();
-    const primaryColor = (formData.get("primaryColor") as string)?.trim();
+    const colors = normalizeColors(JSON.parse((formData.get("colors") as string) || "[]"));
+    const primaryColor = colors[0] ?? null; // deterministic — colors[0] is always the primary colour
+    const brand = (formData.get("brand") as string)?.trim() || null;
     const newPublicId  = (formData.get("newPublicId")  as string)?.trim();
     const editCustomerNote = (formData.get("customerNote") as string)?.trim() || null;
 
@@ -540,7 +563,7 @@ export async function action({ request }: ActionFunctionArgs) {
         // Set pending then rerun analysis on the existing image with the updated category.
         await prisma.closetItem.update({
           where: { id: itemId },
-          data: { name: name || null, category, primaryColor: primaryColor || null, garmentRelationships: editGarmentRelationships, customerNote: editCustomerNote, analysisStatus: "pending" },
+          data: { name: name || null, category, colors, primaryColor: primaryColor || null, brand, garmentRelationships: editGarmentRelationships, customerNote: editCustomerNote, analysisStatus: "pending" },
         });
         await analyzeClosetGarment({
           closetItemId: itemId,
@@ -557,7 +580,7 @@ export async function action({ request }: ActionFunctionArgs) {
       } else {
         await prisma.closetItem.update({
           where: { id: itemId },
-          data: { name: name || null, category, primaryColor: primaryColor || null, garmentRelationships: editGarmentRelationships, customerNote: editCustomerNote },
+          data: { name: name || null, category, colors, primaryColor: primaryColor || null, brand, garmentRelationships: editGarmentRelationships, customerNote: editCustomerNote },
         });
       }
       // Taste evidence — re-extract after edit (relationships or category may have changed)
@@ -739,7 +762,9 @@ export async function action({ request }: ActionFunctionArgs) {
       data: {
         name: name || null,
         category,
+        colors,
         primaryColor: primaryColor || null,
+        brand,
         imageUrl: null,
         imagePublicId: newPublicId,
         imageFormat: editFormat,
@@ -982,7 +1007,7 @@ export default function Closet() {
   const [newPublicId, setNewPublicId] = useState("");  // Cloudinary public ID — sent to action
   const blobUrlRef = useRef<string | null>(null);
   const addFileInputRef = useRef<HTMLInputElement>(null);
-  const [newColor, setNewColor] = useState("");
+  const [newColors, setNewColors] = useState<string[]>([]);
   const [newPattern, setNewPattern] = useState("");
   const [newBrand, setNewBrand] = useState("");
   const [newOccasions, setNewOccasions] = useState<string[]>([]);
@@ -1013,7 +1038,8 @@ export default function Closet() {
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editCategory, setEditCategory] = useState("TOPS");
-  const [editColor, setEditColor] = useState("");
+  const [editColors, setEditColors] = useState<string[]>([]);
+  const [editBrand, setEditBrand] = useState("");
   const [editPublicId, setEditPublicId] = useState("");
   const [editImageUrl, setEditImageUrl] = useState("");
   const editBlobUrlRef = useRef<string | null>(null);
@@ -1155,7 +1181,7 @@ export default function Closet() {
       // Pre-fill name, category, color, pattern from AI detection.
       if (preview.name) setNewName(preview.name);
       if (preview.category && CATEGORIES.includes(preview.category)) setNewCategory(preview.category);
-      if (preview.primaryColor) setNewColor(preview.primaryColor);
+      if (preview.primaryColor) setNewColors([preview.primaryColor]);
       if (preview.pattern) {
         const uiPattern = (PATTERN_AI_TO_UI as Record<string, string>)[preview.pattern] ?? preview.pattern;
         setNewPattern(uiPattern);
@@ -1236,6 +1262,13 @@ export default function Closet() {
   function toggleSeason(s: string) {
     setNewSeasons(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s]);
   }
+  // Up to MAX_COLORS selections. colors[0] is always the deterministic primaryColor.
+  function toggleColor(c: string) {
+    setNewColors(prev => prev.includes(c) ? prev.filter(x => x !== c) : prev.length >= MAX_COLORS ? prev : [...prev, c]);
+  }
+  function toggleEditColor(c: string) {
+    setEditColors(prev => prev.includes(c) ? prev.filter(x => x !== c) : prev.length >= MAX_COLORS ? prev : [...prev, c]);
+  }
 
   function handleAdd() {
     if (!newPublicId) return;
@@ -1246,7 +1279,8 @@ export default function Closet() {
         name: newName,
         category: newCategory,
         publicId: newPublicId,           // Cloudinary public ID — server verifies ownership
-        primaryColor: newColor,
+        primaryColor: newColors[0] ?? "",
+        colors: JSON.stringify(newColors),
         pattern: newPattern,
         brand: newBrand,
         occasions: JSON.stringify(newOccasions),
@@ -1266,7 +1300,7 @@ export default function Closet() {
     if (blobUrlRef.current) { URL.revokeObjectURL(blobUrlRef.current); blobUrlRef.current = null; }
     setNewImageUrl("");
     setNewPublicId("");
-    setNewColor("");
+    setNewColors([]);
     setNewPattern("");
     setNewBrand("");
     setNewOccasions([]);
@@ -1344,7 +1378,9 @@ export default function Closet() {
     setEditingItemId(item.id);
     setEditName(item.name ?? "");
     setEditCategory(item.category ?? "TOPS");
-    setEditColor(item.primaryColor ?? "");
+    // colors[] is the canonical multi-colour field; legacy items only have primaryColor set.
+    setEditColors(item.colors && item.colors.length > 0 ? item.colors : (item.primaryColor ? [item.primaryColor] : []));
+    setEditBrand(item.brand ?? "");
     setEditPublicId("");
     setEditImageUrl("");
     setEditUploadError(null);
@@ -1357,7 +1393,8 @@ export default function Closet() {
     setEditingItemId(null);
     setEditName("");
     setEditCategory("TOPS");
-    setEditColor("");
+    setEditColors([]);
+    setEditBrand("");
     setEditPublicId("");
     if (editBlobUrlRef.current) { URL.revokeObjectURL(editBlobUrlRef.current); editBlobUrlRef.current = null; }
     setEditImageUrl("");
@@ -1374,7 +1411,9 @@ export default function Closet() {
         itemId: editingItemId,
         name: editName,
         category: editCategory,
-        primaryColor: editColor,
+        primaryColor: editColors[0] ?? "",
+        colors: JSON.stringify(editColors),
+        brand: editBrand,
         newPublicId: editPublicId,   // empty string = meta-only edit; publicId = photo replacement
         garmentRelationships: JSON.stringify(editRelationships),
         customerNote: editNote,
@@ -1591,11 +1630,20 @@ export default function Closet() {
                       ))}
                     </div>
 
-                    <div className="cl-label">Color</div>
+                    <div className="cl-label">
+                      Color{" "}
+                      <span style={{ fontWeight: "normal", textTransform: "none", letterSpacing: 0 }}>
+                        Up to {MAX_COLORS} · first selected is the primary colour
+                      </span>
+                    </div>
                     <div className="cl-pills">
-                      {COLORS.map(c => (
-                        <button key={c} type="button" onClick={() => setNewColor(c === newColor ? "" : c)} className={`cl-pill${newColor.toLowerCase() === c.toLowerCase() ? " on" : ""}`}>{c}</button>
-                      ))}
+                      {COLORS.map(c => {
+                        const selected = newColors.includes(c);
+                        const atMax = newColors.length >= MAX_COLORS;
+                        return (
+                          <button key={c} type="button" onClick={() => toggleColor(c)} className={`cl-pill${selected ? " on" : ""}`} disabled={!selected && atMax} style={!selected && atMax ? { opacity: 0.4 } : undefined}>{c}</button>
+                        );
+                      })}
                     </div>
 
                     <div className="cl-label">Pattern</div>
@@ -1714,11 +1762,20 @@ export default function Closet() {
                   ))}
                 </div>
 
-                <div className="cl-label">Color</div>
+                <div className="cl-label">
+                  Color{" "}
+                  <span style={{ fontWeight: "normal", textTransform: "none", letterSpacing: 0 }}>
+                    Up to {MAX_COLORS} · first selected is the primary colour
+                  </span>
+                </div>
                 <div className="cl-pills">
-                  {COLORS.map(c => (
-                    <button key={c} type="button" onClick={() => setNewColor(c === newColor ? "" : c)} className={`cl-pill${newColor === c ? " on" : ""}`}>{c}</button>
-                  ))}
+                  {COLORS.map(c => {
+                    const selected = newColors.includes(c);
+                    const atMax = newColors.length >= MAX_COLORS;
+                    return (
+                      <button key={c} type="button" onClick={() => toggleColor(c)} className={`cl-pill${selected ? " on" : ""}`} disabled={!selected && atMax} style={!selected && atMax ? { opacity: 0.4 } : undefined}>{c}</button>
+                    );
+                  })}
                 </div>
 
                 <div className="cl-label">Pattern</div>
@@ -1862,12 +1919,30 @@ export default function Closet() {
               ))}
             </div>
 
-            <div className="cl-label">Colour</div>
-            <div className="cl-pills">
-              {COLORS.map(c => (
-                <button key={c} type="button" onClick={() => setEditColor(c)} className={`cl-pill${editColor === c ? " on" : ""}`}>{c}</button>
-              ))}
+            <div className="cl-label">
+              Colour{" "}
+              <span style={{ fontWeight: "normal", textTransform: "none", letterSpacing: 0 }}>
+                Up to {MAX_COLORS} · first selected is the primary colour
+              </span>
             </div>
+            <div className="cl-pills">
+              {COLORS.map(c => {
+                const selected = editColors.includes(c);
+                const atMax = editColors.length >= MAX_COLORS;
+                return (
+                  <button key={c} type="button" onClick={() => toggleEditColor(c)} className={`cl-pill${selected ? " on" : ""}`} disabled={!selected && atMax} style={!selected && atMax ? { opacity: 0.4 } : undefined}>{c}</button>
+                );
+              })}
+            </div>
+
+            <div className="cl-label">Brand (optional)</div>
+            <input
+              className="cl-input"
+              type="text"
+              placeholder="Brand name"
+              value={editBrand}
+              onChange={e => setEditBrand(e.target.value)}
+            />
 
             <div className="cl-label">
               How do you feel about it?{" "}
