@@ -320,7 +320,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     select: {
       id: true, createdAt: true, currentMood: true, desiredFeeling: true, occasion: true, styleFrom: true,
       suggestions: {
-        take: 1, select: { id: true, heroImageUrl: true, outfitName: true,
+        take: 1, select: { id: true, outfitName: true,
           items: { take: 5, select: { itemType: true, closetItemId: true, productTitle: true, productImageUrl: true, closetItem: { select: { name: true, imageUrl: true, imagePublicId: true, imageFormat: true } } } } }
       },
       review: { select: { id: true } },
@@ -381,56 +381,40 @@ export async function loader({ request }: LoaderFunctionArgs) {
     };
   });
 
-  // Resolve each StyleMe session's thumbnail server-side.
-  // Cross-session deduplication: track which items have already been shown so the same
-  // physical piece (closetItemId / productImageUrl) is not repeated across the three cards.
-  // Within a session: prefer items not yet shown; among those, apply type priority
-  // (DRESS>OUTERWEAR>TOP>BOTTOM>SHOES>BAG>ACCESSORY). Fall back to top-priority item
-  // only if every candidate has already been used for a previous card.
-  const ITEM_TYPE_PRIORITY = ["DRESS", "OUTERWEAR", "TOP", "BOTTOM", "SHOES", "BAG", "ACCESSORY"];
-  function itemKey(item: { closetItemId?: string | null; productImageUrl?: string | null }) {
-    if (item.closetItemId) return `c:${item.closetItemId}`;
-    if (item.productImageUrl) return `n:${item.productImageUrl}`;
+  // Resolve each StyleMe session's card imagery server-side: the card shows the
+  // real pieces from that exact result (up to 4, in the order StyleMe returned
+  // them), not one arbitrarily-chosen "representative" garment. extraCount tells
+  // the UI how many more pieces the look had beyond what's shown.
+  const MAX_COLLAGE_IMAGES = 4;
+  function resolveItemImage(
+    item: {
+      closetItemId?: string | null;
+      productImageUrl?: string | null;
+      closetItem?: { imageUrl?: string | null; imagePublicId?: string | null; imageFormat?: string | null } | null;
+    },
+  ): string | null {
+    const ci = item.closetItem;
+    if (item.closetItemId && ci?.imagePublicId && ci?.imageFormat && cloudinaryConfig) {
+      const ownership = validatePublicIdOwnership(ci.imagePublicId, customerId);
+      if (ownership.ok) {
+        return buildPrivateDownloadUrl(cloudinaryConfig, ci.imagePublicId, ci.imageFormat, "private");
+      }
+    }
+    if (item.productImageUrl) return item.productImageUrl;
+    if (ci?.imageUrl) return ci.imageUrl;
     return null;
   }
-  const shownKeys = new Set<string>();
 
   const sessionsWithThumb = sessions.map((s) => {
     const suggestion = s.suggestions[0];
-    // Only consider items that have at least one resolvable image source
-    const candidates = (suggestion?.items ?? []).filter(
-      (i) => !!(i.productImageUrl || i.closetItem?.imagePublicId || i.closetItem?.imageUrl)
-    );
-    let resolvedThumb: string | null = null;
+    const items = suggestion?.items ?? [];
+    const resolvedImages = items
+      .map((i) => resolveItemImage(i))
+      .filter((url): url is string => !!url)
+      .slice(0, MAX_COLLAGE_IMAGES);
+    const extraCount = Math.max(0, items.length - resolvedImages.length);
 
-    if (suggestion?.heroImageUrl) {
-      resolvedThumb = suggestion.heroImageUrl;
-    } else if (candidates.length > 0) {
-      const byPriority = [...candidates].sort((a, b) => {
-        const pa = ITEM_TYPE_PRIORITY.indexOf(a.itemType) === -1 ? 99 : ITEM_TYPE_PRIORITY.indexOf(a.itemType);
-        const pb = ITEM_TYPE_PRIORITY.indexOf(b.itemType) === -1 ? 99 : ITEM_TYPE_PRIORITY.indexOf(b.itemType);
-        return pa - pb;
-      });
-      // Prefer an item not already shown in an earlier card; fall back to best-by-type
-      const bestItem =
-        byPriority.find((i) => { const k = itemKey(i); return k === null || !shownKeys.has(k); })
-        ?? byPriority[0];
-
-      const k = itemKey(bestItem);
-      if (k) shownKeys.add(k);
-
-      const ci = bestItem.closetItem;
-      if (bestItem.closetItemId && ci?.imagePublicId && ci?.imageFormat && cloudinaryConfig) {
-        const ownership = validatePublicIdOwnership(ci.imagePublicId, customerId);
-        if (ownership.ok) {
-          resolvedThumb = buildPrivateDownloadUrl(cloudinaryConfig, ci.imagePublicId, ci.imageFormat, "private");
-        }
-      }
-      if (!resolvedThumb && bestItem.productImageUrl) resolvedThumb = bestItem.productImageUrl;
-      if (!resolvedThumb && bestItem.closetItem?.imageUrl) resolvedThumb = bestItem.closetItem.imageUrl;
-    }
-
-    return { ...s, resolvedThumb };
+    return { ...s, resolvedImages, extraCount };
   });
 
   const p = customer.onboardingProfile;
@@ -469,6 +453,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 import type { EntitlementSummary } from "~/lib/plan/entitlement.server";
 
+// Trend Edit wording must come from the same canonical entitlement.personalisedTrend
+// data Plan & Usage reads (never a separate calculation), but say it the Overview way:
+// a short "remaining" count when available, and an honest "used · included" readout
+// — never "included" alone — once usage has passed the monthly allowance, so it can't
+// read as "1 still available" when it isn't.
+function trendEditUsageValue(trend: EntitlementSummary["personalisedTrend"]): string {
+  if (trend.monthlyLimit <= 0) return "Not included";
+  if (trend.monthlyUsed > trend.monthlyLimit) {
+    return `${trend.monthlyUsed} used · ${trend.monthlyLimit} included this month`;
+  }
+  const trendRemaining = trend.monthlyLimit - trend.monthlyUsed;
+  return `${trendRemaining} edit${trendRemaining !== 1 ? "s" : ""} remaining`;
+}
+
 function buildOverviewPlanCards(e: EntitlementSummary): { label: string; value: string }[] {
   const smRemaining = Math.max(0, e.styleMe.monthlyLimit - e.styleMe.monthlyUsed);
   const bsRemaining = Math.max(0, e.buySkip.monthlyLimit - e.buySkip.monthlyUsed);
@@ -478,9 +476,79 @@ function buildOverviewPlanCards(e: EntitlementSummary): { label: string; value: 
     { label: "StyleMe", value: `${smRemaining} session${smRemaining !== 1 ? "s" : ""} remaining` },
     { label: "Buy or Skip", value: `${bsRemaining} check${bsRemaining !== 1 ? "s" : ""} remaining` },
     { label: "Virtual Try-On", value: `${vtoRemaining} try-on${vtoRemaining !== 1 ? "s" : ""} remaining` },
-    { label: "Trend Edit", value: e.personalisedTrend.monthlyLimit > 0 ? "1 included this month" : "Not included" },
+    { label: "Trend Edit", value: trendEditUsageValue(e.personalisedTrend) },
     { label: "My Closet", value: `${e.closet.currentCount} of ${e.closet.limit} items` },
   ];
+}
+
+// A single collage tile. If a signed/expired image URL fails client-side, it
+// swaps to the same neutral placeholder used when no image resolved server-side
+// at all — never a broken-image icon.
+function CollageTile({ src, alt }: { src: string; alt: string }) {
+  return (
+    <div style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden" }}>
+      <img
+        src={src}
+        alt={alt}
+        loading="lazy"
+        style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+        onError={(e) => {
+          e.currentTarget.style.display = "none";
+          const fallback = e.currentTarget.nextElementSibling as HTMLElement | null;
+          if (fallback) fallback.style.display = "grid";
+        }}
+      />
+      <div style={{ display: "none", position: "absolute", inset: 0, placeItems: "center", background: "color-mix(in oklab, var(--bg) 92%, white)" }} aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.25, color: "var(--fg)" }}>
+          <path d="M12 3 4.5 7.5v9L12 21l7.5-4.5v-9L12 3z" /><path d="m4.5 7.5 7.5 4.5 7.5-4.5M12 12v9" />
+        </svg>
+      </div>
+    </div>
+  );
+}
+
+const EMPTY_LOOK_ICON = (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.25, color: "var(--fg)" }} aria-hidden="true">
+    <path d="M12 3 4.5 7.5v9L12 21l7.5-4.5v-9L12 3z" /><path d="m4.5 7.5 7.5 4.5 7.5-4.5M12 12v9" />
+  </svg>
+);
+
+// Renders the real pieces from one StyleMe result as a compact collage: one
+// image fills the card, two split it evenly, three or four tile it — always
+// the actual pieces from that result, never an invented or borrowed image.
+function LookCollage({ images, extraCount, alt }: { images: string[]; extraCount: number; alt: string }) {
+  if (images.length === 0) {
+    return <div style={{ display: "grid", placeItems: "center", width: "100%", height: "100%" }}>{EMPTY_LOOK_ICON}</div>;
+  }
+
+  const gridStyle: React.CSSProperties =
+    images.length === 1
+      ? { display: "grid", width: "100%", height: "100%" }
+      : { display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: images.length === 2 ? "1fr" : "1fr 1fr", gap: "2px", width: "100%", height: "100%" };
+
+  return (
+    <div style={{ position: "relative", width: "100%", height: "100%" }}>
+      <div style={gridStyle}>
+        {images.map((src, i) => (
+          <div key={i} style={images.length === 3 && i === 0 ? { gridColumn: "1 / 3" } : undefined}>
+            <CollageTile src={src} alt={alt} />
+          </div>
+        ))}
+      </div>
+      {extraCount > 0 && (
+        <span
+          style={{
+            position: "absolute", bottom: "0.4rem", right: "0.4rem",
+            background: "color-mix(in oklab, var(--bg) 20%, black)", color: "white",
+            fontSize: "0.62rem", letterSpacing: "0.05em", lineHeight: 1,
+            padding: "0.2rem 0.45rem", borderRadius: "999px",
+          }}
+        >
+          {`+${extraCount}`}
+        </span>
+      )}
+    </div>
+  );
 }
 
 export default function MyNaiaOverview() {
@@ -708,13 +776,11 @@ export default function MyNaiaOverview() {
                           }}
                           aria-label={`View look — ${suggestion?.outfitName ?? "nAia Look"}`}
                         >
-                          {session.resolvedThumb ? (
-                            <img src={session.resolvedThumb} alt={suggestion?.outfitName ?? ""} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                          ) : (
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.25, color: "var(--fg)" }} aria-hidden="true">
-                              <path d="M12 3 4.5 7.5v9L12 21l7.5-4.5v-9L12 3z" /><path d="m4.5 7.5 7.5 4.5 7.5-4.5M12 12v9" />
-                            </svg>
-                          )}
+                          <LookCollage
+                            images={session.resolvedImages}
+                            extraCount={session.extraCount}
+                            alt={suggestion?.outfitName ?? ""}
+                          />
                         </Link>
                         <div className="mn-look-date" style={{ marginTop: "0.75rem" }}>
                           {fmtDate(session.createdAt)}{session.occasion ? ` · ${occasionDisplayFor(null, session.occasion)}` : ""}
@@ -811,7 +877,7 @@ export default function MyNaiaOverview() {
             {trendReport ? (
               <div style={{ display: "grid", gap: "1.5rem" }}>
                 <style>{`@media(min-width:1024px){.mn-trend-grid{grid-template-columns:1.3fr 1fr!important;gap:2.5rem!important}}`}</style>
-                <div className="mn-trend-grid" style={{ display: "grid" }}>
+                <div className={trendReport.visual?.treatment ? "mn-trend-grid" : undefined} style={{ display: "grid" }}>
                   <div>
                     <div style={{ fontSize: "0.62rem", textTransform: "uppercase", letterSpacing: "0.3em", color: "var(--fg-55)" }}>
                       {trendReport.season ? `${trendReport.season} · ` : ""}Latest Personalised Edit
@@ -821,11 +887,11 @@ export default function MyNaiaOverview() {
                       <p style={{ marginTop: "0.75rem", maxWidth: "36rem", fontSize: "0.9rem", lineHeight: 1.75, color: "var(--fg-80)" }}>{trendReport.summary}</p>
                     )}
                   </div>
-                  <div style={{ aspectRatio: "4/5", background: "color-mix(in oklab, var(--bg) 92%, white)", border: "1px solid var(--fg-10)", overflow: "hidden" }}>
-                    {trendReport.visual?.treatment
-                      ? reportVisual(trendReport.visual.treatment as TreatmentType, "featured")
-                      : null}
-                  </div>
+                  {trendReport.visual?.treatment && (
+                    <div style={{ aspectRatio: "4/5", background: "color-mix(in oklab, var(--bg) 92%, white)", border: "1px solid var(--fg-10)", overflow: "hidden" }}>
+                      {reportVisual(trendReport.visual.treatment as TreatmentType, "featured")}
+                    </div>
+                  )}
                 </div>
               </div>
             ) : (

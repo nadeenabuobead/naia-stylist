@@ -33,6 +33,20 @@ vi.mock("react-router", async (importOriginal) => {
     "aria-label"?: string;
   }) =>
     createElement("a", { href: to, className, style, onClick, "aria-current": ariaCurrent, "aria-label": ariaLabel }, children as any);
+  // <Form> needs a real router context (unstable_useTransitions) that plain
+  // renderToString never provides — stub it as a plain <form>, same technique
+  // as the Link mock above, so these tests can render the component at all.
+  const mockForm = ({
+    method,
+    action,
+    style,
+    children,
+  }: {
+    method?: string;
+    action?: string;
+    style?: object;
+    children: unknown;
+  }) => createElement("form", { method, action, style }, children as any);
   const mockUseLoaderData = vi.fn(() => ({
     firstName: null as string | null,
     profile: null as unknown,
@@ -56,6 +70,7 @@ vi.mock("react-router", async (importOriginal) => {
   return {
     ...actual,
     Link: mockLink,
+    Form: mockForm,
     useLoaderData: mockUseLoaderData,
     useLocation: vi.fn(() => ({ pathname: "/my-naia" })),
     UNSAFE_withComponentProps: (Component: any) => Component,
@@ -111,6 +126,9 @@ vi.mock("~/styles/naia-design-system.css?url", () => ({ default: "/styles.css" }
 
 import { useLoaderData } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
+import prisma from "~/db.server";
+import { getCloudinaryConfig, validatePublicIdOwnership, buildPrivateDownloadUrl } from "~/lib/cloudinary-admin.server";
+import { reportVisual } from "~/lib/report-visual";
 import MyNaiaOverview, { loader } from "./my-naia._index";
 
 // ── Loader tests ──────────────────────────────────────────────────────────────
@@ -174,6 +192,104 @@ describe("my-naia loader — authentication gate", () => {
     const serialised = JSON.stringify(result);
     expect(serialised).not.toContain("c-secret");
     expect(serialised).not.toContain("private@example.com");
+  });
+});
+
+// ── Loader — Latest StyleMe card imagery (Task 1) ──────────────────────────────
+// The card must represent the real pieces from that exact result, not one
+// arbitrarily-chosen "representative" garment, and must degrade gracefully
+// when a result has few or no resolvable images.
+
+describe("my-naia loader — StyleMe card imagery", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValue({
+      id: "c1", firstName: "Alia", onboardingProfile: null,
+    } as any);
+    vi.mocked(getCloudinaryConfig).mockReturnValue(null);
+  });
+
+  function sessionWith(items: Array<{ itemType?: string; closetItemId?: string | null; productImageUrl?: string | null; closetItem?: { imageUrl?: string | null; imagePublicId?: string | null; imageFormat?: string | null } | null }>) {
+    return {
+      id: "s1", createdAt: new Date("2026-09-01"), currentMood: null, desiredFeeling: null, occasion: null, styleFrom: null,
+      suggestions: [{ id: "sg1", outfitName: "Look", items: items.map((i) => ({ itemType: "TOP", closetItemId: null, productTitle: null, productImageUrl: null, closetItem: null, ...i })) }],
+      review: null,
+    };
+  }
+
+  it("multi-item result: every resolvable item image is carried through, not just one", async () => {
+    vi.mocked(prisma.stylingSession.findMany).mockResolvedValueOnce([
+      sessionWith([
+        { productImageUrl: "https://nadine.example.com/blazer.jpg" },
+        { productImageUrl: "https://nadine.example.com/trousers.jpg" },
+        { productImageUrl: "https://nadine.example.com/shoes.jpg" },
+        { productImageUrl: "https://nadine.example.com/bag.jpg" },
+      ]),
+    ] as any);
+    const result = await loader({ request: new Request("http://localhost/my-naia"), params: {}, context: {} } as any);
+    const session = (result as any).sessions[0];
+    expect(session.resolvedImages).toEqual([
+      "https://nadine.example.com/blazer.jpg",
+      "https://nadine.example.com/trousers.jpg",
+      "https://nadine.example.com/shoes.jpg",
+      "https://nadine.example.com/bag.jpg",
+    ]);
+    expect(session.extraCount).toBe(0);
+  });
+
+  it("caps the collage at 4 images and reports the rest via extraCount", async () => {
+    vi.mocked(prisma.stylingSession.findMany).mockResolvedValueOnce([
+      sessionWith([
+        { productImageUrl: "https://nadine.example.com/1.jpg" },
+        { productImageUrl: "https://nadine.example.com/2.jpg" },
+        { productImageUrl: "https://nadine.example.com/3.jpg" },
+        { productImageUrl: "https://nadine.example.com/4.jpg" },
+        { productImageUrl: "https://nadine.example.com/5.jpg" },
+      ]),
+    ] as any);
+    const result = await loader({ request: new Request("http://localhost/my-naia"), params: {}, context: {} } as any);
+    const session = (result as any).sessions[0];
+    expect(session.resolvedImages).toHaveLength(4);
+    expect(session.extraCount).toBe(1);
+  });
+
+  it("one-image legacy result: resolves exactly the one usable image", async () => {
+    vi.mocked(prisma.stylingSession.findMany).mockResolvedValueOnce([
+      sessionWith([
+        { closetItemId: "ci1", closetItem: { imageUrl: "https://legacy.example.com/dress.jpg", imagePublicId: null, imageFormat: null } },
+      ]),
+    ] as any);
+    const result = await loader({ request: new Request("http://localhost/my-naia"), params: {}, context: {} } as any);
+    const session = (result as any).sessions[0];
+    expect(session.resolvedImages).toEqual(["https://legacy.example.com/dress.jpg"]);
+    expect(session.extraCount).toBe(0);
+  });
+
+  it("no-image legacy result: resolves no images, leaving the fallback to the UI", async () => {
+    vi.mocked(prisma.stylingSession.findMany).mockResolvedValueOnce([
+      sessionWith([
+        { closetItemId: "ci1", closetItem: { imageUrl: null, imagePublicId: null, imageFormat: null } },
+        { closetItemId: "ci2", closetItem: { imageUrl: null, imagePublicId: null, imageFormat: null } },
+      ]),
+    ] as any);
+    const result = await loader({ request: new Request("http://localhost/my-naia"), params: {}, context: {} } as any);
+    const session = (result as any).sessions[0];
+    expect(session.resolvedImages).toEqual([]);
+    expect(session.extraCount).toBe(2);
+  });
+
+  it("prefers a private signed Cloudinary URL over a legacy imageUrl when ownership validates", async () => {
+    vi.mocked(getCloudinaryConfig).mockReturnValue({ cloudName: "naia" } as any);
+    vi.mocked(validatePublicIdOwnership).mockReturnValue({ ok: true } as any);
+    vi.mocked(buildPrivateDownloadUrl).mockReturnValue("https://signed.example.com/private.jpg");
+    vi.mocked(prisma.stylingSession.findMany).mockResolvedValueOnce([
+      sessionWith([
+        { closetItemId: "ci1", closetItem: { imageUrl: "https://legacy.example.com/stale.jpg", imagePublicId: "naia-wardrobe/c1/ci1", imageFormat: "jpg" } },
+      ]),
+    ] as any);
+    const result = await loader({ request: new Request("http://localhost/my-naia"), params: {}, context: {} } as any);
+    const session = (result as any).sessions[0];
+    expect(session.resolvedImages).toEqual(["https://signed.example.com/private.jpg"]);
   });
 });
 
@@ -312,6 +428,49 @@ describe("my-naia component — static structure", () => {
     expect(html).toContain("first StyleMe look will appear here");
   });
 
+  function baseSession(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "s1", createdAt: "2026-09-01T00:00:00.000Z", currentMood: null, desiredFeeling: null, occasion: null, styleFrom: null,
+      suggestions: [{ id: "sg1", outfitName: "nAia Look", items: [] }],
+      review: null,
+      resolvedImages: [] as string[],
+      extraCount: 0,
+      ...overrides,
+    };
+  }
+
+  it("multi-item StyleMe result renders every real result image, not one arbitrary piece", () => {
+    const html = render({
+      sessions: [baseSession({ resolvedImages: ["https://a.example/1.jpg", "https://a.example/2.jpg", "https://a.example/3.jpg"], extraCount: 0 })],
+    });
+    expect(html).toContain('src="https://a.example/1.jpg"');
+    expect(html).toContain('src="https://a.example/2.jpg"');
+    expect(html).toContain('src="https://a.example/3.jpg"');
+  });
+
+  it("multi-item result beyond the collage cap shows a +N indicator", () => {
+    const html = render({
+      sessions: [baseSession({ resolvedImages: ["https://a.example/1.jpg", "https://a.example/2.jpg", "https://a.example/3.jpg", "https://a.example/4.jpg"], extraCount: 1 })],
+    });
+    expect(html).toContain("+1");
+  });
+
+  it("one-image legacy result renders exactly one image", () => {
+    const html = render({
+      sessions: [baseSession({ resolvedImages: ["https://legacy.example/dress.jpg"], extraCount: 0 })],
+    });
+    const imgMatches = html.match(/<img[^>]*src="https:\/\/legacy\.example\/dress\.jpg"/g) ?? [];
+    expect(imgMatches).toHaveLength(1);
+  });
+
+  it("no-image legacy result shows the intentional fallback, never a broken image tag", () => {
+    const html = render({
+      sessions: [baseSession({ resolvedImages: [], extraCount: 1 })],
+    });
+    // The card for this look renders no <img> at all — only the neutral SVG placeholder.
+    expect(html).not.toMatch(/<img[^>]*src="[^"]*"/);
+  });
+
   it("renders empty state for Buy or Skip when no history", () => {
     const html = render({ buyOrSkipHistory: [] });
     expect(html).toContain("No decisions yet");
@@ -374,6 +533,26 @@ describe("my-naia component — static structure", () => {
   it("shows no trend edit when trendReport is null", () => {
     const html = render({ trendReport: null });
     expect(html).toContain("personalised trend edit will appear here");
+  });
+
+  it("renders the visual box when the report has a visual treatment", () => {
+    vi.mocked(reportVisual).mockReturnValueOnce(<div data-testid="trend-visual-mark">MARK</div> as any);
+    const html = render({
+      trendReport: { slug: "spring-2026", title: "Spring 2026", season: "Spring 2026", summary: "An edit.", visual: { treatment: "soft-structure" } },
+    });
+    expect(html).toContain("trend-visual-mark");
+    expect(html).toContain('class="mn-trend-grid"');
+  });
+
+  it("omits the empty visual box entirely when visual.treatment is unset, instead of a blank image", () => {
+    const html = render({
+      trendReport: { slug: "spring-2026", title: "Spring 2026", season: "Spring 2026", summary: "An edit.", visual: null },
+    });
+    // No two-column grid class is applied — the text column takes the full row
+    // instead of leaving an empty image box beside it. (The media-query <style>
+    // text always mentions the selector name, so check the actual class attribute.)
+    expect(html).not.toContain('class="mn-trend-grid"');
+    expect(html).toContain("Spring 2026");
   });
 
   it("passport snapshot renders style direction when profile has stylePersonalities", () => {
