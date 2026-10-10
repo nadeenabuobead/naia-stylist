@@ -254,6 +254,41 @@ describe("V1 — data boundaries preserved", () => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════
+// Fix #1 — the 20-item blind spot. Live staging diagnostic confirmed a real
+// 47-item Closet had 27 pieces (including the only two non-neutral items
+// found anywhere in the fetched window) invisible to every Trend Edit
+// report, because the evidence query capped at the 20 most recently added
+// items regardless of Closet size.
+// ═════════════════════════════════════════════════════════════════════════
+
+describe("V1 — the Closet evidence fetch is no longer capped at the 20 most recent items", () => {
+  it("closetItems' take is a bounded high limit (matching the plan's 250-piece Closet cap), not 20", () => {
+    const closetBlockIdx = TREND_EVIDENCE_SRC.indexOf("closetItems: {");
+    assert.ok(closetBlockIdx !== -1, "closetItems Prisma block found");
+    const closetBlockRaw = TREND_EVIDENCE_SRC.slice(closetBlockIdx, TREND_EVIDENCE_SRC.indexOf("select: {", closetBlockIdx));
+    const closetBlock = closetBlockRaw.replace(/\/\/.*$/gm, ""); // strip comments — the explanatory comment deliberately mentions the old "take: 20" value
+    assert.ok(!/take:\s*20\b/.test(closetBlock), "closetItems no longer caps at the 20 most recently added items");
+    assert.ok(/take:\s*250\b/.test(closetBlock), "closetItems is bounded at 250 — the plan's own Closet size cap, not an unbounded fetch");
+  });
+
+  it("an item that would be the 21st+ most recently added one is still a real, selectable piece of evidence once fetched — buildShopperEdit has no fetch-order dependency of its own", () => {
+    // buildShopperEdit only ever sees whatever closetItems getShopperEvidence
+    // handed it — it has no concept of "recency" or array position. This
+    // proves the SELECTION side has no residual 20-item-window assumption:
+    // a strong accent item placed deliberately LAST in a 25-item array
+    // (simulating "oldest, would have been truncated under the old take:20")
+    // is still correctly surfaced as the accent.
+    const closet: ShopperClosetItemEvidence[] = [];
+    for (let i = 0; i < 24; i++) {
+      closet.push(item({ name: `Neutral Filler ${i}`, category: "TOPS", primaryColor: "black" }));
+    }
+    closet.push(item({ name: "Older Crimson Bag", category: "BAGS", primaryColor: "red" })); // the 25th item — "oldest"
+    const edit = buildShopperEdit(COLOUR_DIRECTION_REPORT, evidence(closet));
+    assert.ok(edit.yourBestRouteIn.includes("Older Crimson Bag"), "an item at the end of a >20-item array is still correctly surfaced as the accent");
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════
 // Colour Direction QA follow-up (live staging regression): a black beanie,
 // a black/beige tote, a black skirt, and white sneakers — all NEUTRAL by
 // colour-family.ts's own NEUTRAL_COLORS set — were (a) called "your

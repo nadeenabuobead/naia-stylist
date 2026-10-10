@@ -93,7 +93,16 @@ export async function getShopperEvidence(customerId: string): Promise<ShopperEvi
         },
       },
       closetItems: {
-        take: 20,
+        // Was take: 20 — silently capped Trend Edit evidence to the 20 most
+        // recently added items, regardless of Closet size. Confirmed via
+        // live staging diagnostic: a real 47-item Closet had 27 pieces
+        // (including the only two non-neutral items found anywhere in the
+        // fetched window) structurally invisible to every report. 250
+        // matches the plan's own Closet size cap — every owned piece a
+        // customer can actually have is now considered. All selected
+        // fields remain scalar-only (no relations, no blobs) — this is not
+        // a heavier query, just a correct one.
+        take: 250,
         orderBy: { createdAt: "desc" },
         select: {
           name: true,
