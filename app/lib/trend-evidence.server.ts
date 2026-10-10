@@ -1322,15 +1322,30 @@ function pickWearablePartner(
 }
 
 // ---------------------------------------------------------------------------
-// Colour Direction — role-aware pair selection (Fix #2).
-//
-// Generic selection (above) picks the single highest-scored item overall,
-// then whatever is wearable with it. For Colour Direction specifically that
-// is not "quiet base + clear accent" — it is just "best + next-best", which
-// is how a second neutral accessory could end up standing in for the
-// accent even when real accent-colour evidence exists elsewhere in the
-// Closet. These helpers deliberately pick one item per role instead.
+// Colour Direction — role-aware pair selection (Fix #2) + semantic novelty
+// (Fix #4). Item-ID diversity is not styling diversity: two pairs of blue
+// jeans are two different Closet rows but the same idea. These helpers
+// compare candidates by role + hue family + category — a "signature" — and
+// prefer a candidate with a genuinely different signature over a
+// higher-scoring near-duplicate, falling back to the near-duplicate only
+// when no semantically distinct alternative is actually wearable.
 // ---------------------------------------------------------------------------
+
+type RoleSignature = { hueFamily: string | null; category: string };
+
+function itemHueFamily(item: ShopperClosetItemEvidence): string | null {
+  const text = item.primaryColor ?? item.colors?.[0] ?? null;
+  if (!text) return null;
+  return resolveFreeTextColourFamilies(text).hueFamilies[0] ?? null;
+}
+
+function roleSignature(item: ShopperClosetItemEvidence, slug: string): RoleSignature {
+  return { hueFamily: itemHueFamily(item), category: getEffectiveCategory(item, slug) };
+}
+
+function sameSignature(a: RoleSignature, b: RoleSignature): boolean {
+  return a.hueFamily === b.hueFamily && a.category === b.category;
+}
 
 function bestOfRole(pool: DimensionScoredItem[], dimensionId: string): DimensionScoredItem | null {
   let best: DimensionScoredItem | null = null;
@@ -1341,32 +1356,64 @@ function bestOfRole(pool: DimensionScoredItem[], dimensionId: string): Dimension
   return best;
 }
 
-// Best wearable partner carrying a specific role (e.g. "accent-colour"),
-// excluding `anchor` and anything already in `exclude`. Used so Route In's
-// support slot prefers a genuine accent over a second neutral, and so A
-// Look To Try can look for a DIFFERENT accent than the one Route In used.
-function pickWearablePartnerWithRole(
-  anchor: DimensionScoredItem,
-  pool: DimensionScoredItem[],
-  dimensionId: string,
-  exclude: Set<ShopperClosetItemEvidence>,
-  slug: string,
-): DimensionScoredItem | null {
+function bestOfCandidates(candidates: DimensionScoredItem[]): DimensionScoredItem | null {
   let best: DimensionScoredItem | null = null;
-  for (const m of pool) {
-    if (m.item === anchor.item || exclude.has(m.item) || m.dimensionId !== dimensionId) continue;
-    if (!categoriesAreWearablePair(getEffectiveCategory(anchor.item, slug), getEffectiveCategory(m.item, slug))) continue;
+  for (const m of candidates) {
     if (!best || m.score > best.score) best = m;
   }
   return best;
 }
 
+// Best wearable partner carrying a specific role, preferring one whose
+// signature (hue family + category) genuinely differs from every signature
+// in `avoidSignatures` — only falling back to a same-signature candidate
+// when no distinct one is wearable at all. With zero `avoidSignatures` this
+// is a plain "best wearable item of this role" pick (Route In's own
+// support, which has nothing yet to differ from).
+function pickDiverseRoleMatch(
+  anchor: DimensionScoredItem,
+  pool: DimensionScoredItem[],
+  dimensionId: string,
+  exclude: Set<ShopperClosetItemEvidence>,
+  avoidSignatures: RoleSignature[],
+  slug: string,
+): DimensionScoredItem | null {
+  const candidates = pool.filter((m) =>
+    m.item !== anchor.item &&
+    !exclude.has(m.item) &&
+    m.dimensionId === dimensionId &&
+    categoriesAreWearablePair(getEffectiveCategory(anchor.item, slug), getEffectiveCategory(m.item, slug)),
+  );
+  if (candidates.length === 0) return null;
+  if (avoidSignatures.length === 0) return bestOfCandidates(candidates);
+
+  // Tier 1 — a genuinely different hue family from every avoided signature.
+  const differentHue = candidates.filter((m) => {
+    const sig = roleSignature(m.item, slug);
+    return avoidSignatures.every((avoid) => avoid.hueFamily === null || sig.hueFamily !== avoid.hueFamily);
+  });
+  const tier1 = bestOfCandidates(differentHue);
+  if (tier1) return tier1;
+
+  // Tier 2 — same hue family is unavoidable, but at least a different category.
+  const differentCategory = candidates.filter((m) => {
+    const sig = roleSignature(m.item, slug);
+    return avoidSignatures.every((avoid) => sig.category !== avoid.category);
+  });
+  const tier2 = bestOfCandidates(differentCategory);
+  if (tier2) return tier2;
+
+  // Tier 3 — no semantically distinct alternative exists; repetition of the
+  // same role+hue+category idea is the Closet's genuine only option.
+  return bestOfCandidates(candidates);
+}
+
 // Colour Direction's own anchor+support pick: anchor is the strongest
 // base-neutral foundation piece when one exists (falling back to the
 // single strongest item overall for an accent-only or evidence-thin
-// Closet); support is the strongest wearable genuine accent-colour piece,
-// falling back to any wearable partner only when no accent evidence pairs
-// with this anchor at all.
+// Closet); support is the strongest wearable genuine accent-colour piece —
+// the simplest, most obvious entry, so no novelty preference here, only in
+// Look To Try's search relative to this pick.
 function selectColourDirectionPair(
   pool: DimensionScoredItem[],
   exclude: Set<ShopperClosetItemEvidence>,
@@ -1377,7 +1424,7 @@ function selectColourDirectionPair(
   if (!anchor) return null;
 
   const support =
-    pickWearablePartnerWithRole(anchor, pool, "accent-colour", exclude, slug) ??
+    pickDiverseRoleMatch(anchor, pool, "accent-colour", exclude, [], slug) ??
     pickWearablePartner(anchor, pool, exclude, slug);
   return { anchor, support };
 }
@@ -1386,9 +1433,12 @@ function selectColourDirectionPair(
 // base-neutral pieces interleaved with up to 2 of the strongest
 // accent-colour pieces — never padded with a 4th irrelevant neutral just to
 // hit a count when fewer genuinely useful pieces exist (e.g. only one real
-// accent item in the whole Closet).
+// accent item in the whole Closet), and never filling two slots of the same
+// role with the same hue-family+category idea (two pairs of blue jeans)
+// when a genuinely different one (a burgundy piece) is also strong evidence.
 function selectColourDirectionClosetShows(
   pool: DimensionScoredItem[],
+  slug: string,
   max: number,
 ): DimensionScoredItem[] {
   const base = pool.filter((m) => m.dimensionId === "base-neutral").sort((a, b) => b.score - a.score);
@@ -1397,14 +1447,49 @@ function selectColourDirectionClosetShows(
   const used = new Set<ShopperClosetItemEvidence>();
   const maxPerRole = Math.ceil(max / 2);
 
+  // Picks the best remaining item in `roleSorted`, preferring one whose
+  // signature differs from everything already picked for this role — same
+  // tiered fallback as pickDiverseRoleMatch, just over a role's own sorted
+  // list instead of a wearable-partner search.
+  function pickNextForRole(roleSorted: DimensionScoredItem[], alreadyPicked: DimensionScoredItem[]): DimensionScoredItem | null {
+    const remaining = roleSorted.filter((m) => !used.has(m.item));
+    if (remaining.length === 0) return null;
+    const avoidSignatures = alreadyPicked.map((m) => roleSignature(m.item, slug));
+    if (avoidSignatures.length === 0) return remaining[0];
+
+    const differentHue = remaining.filter((m) => {
+      const sig = roleSignature(m.item, slug);
+      return avoidSignatures.every((avoid) => avoid.hueFamily === null || sig.hueFamily !== avoid.hueFamily);
+    });
+    if (differentHue.length > 0) return differentHue[0];
+
+    const differentCategory = remaining.filter((m) => {
+      const sig = roleSignature(m.item, slug);
+      return avoidSignatures.every((avoid) => sig.category !== avoid.category);
+    });
+    if (differentCategory.length > 0) return differentCategory[0];
+
+    return remaining[0];
+  }
+
+  const pickedBase: DimensionScoredItem[] = [];
+  const pickedAccent: DimensionScoredItem[] = [];
   for (let i = 0; i < maxPerRole; i++) {
-    if (picked.length < max && base[i] && !used.has(base[i].item)) {
-      picked.push(base[i]);
-      used.add(base[i].item);
+    if (picked.length < max) {
+      const next = pickNextForRole(base, pickedBase);
+      if (next) {
+        picked.push(next);
+        used.add(next.item);
+        pickedBase.push(next);
+      }
     }
-    if (picked.length < max && accent[i] && !used.has(accent[i].item)) {
-      picked.push(accent[i]);
-      used.add(accent[i].item);
+    if (picked.length < max) {
+      const next = pickNextForRole(accent, pickedAccent);
+      if (next) {
+        picked.push(next);
+        used.add(next.item);
+        pickedAccent.push(next);
+      }
     }
   }
   return picked;
@@ -2314,7 +2399,7 @@ export function buildShopperEdit(
   const isColourDirection = slug === "spring-2026-colour-direction";
 
   const closetShowsScored = isColourDirection
-    ? selectColourDirectionClosetShows(namedScored, 4)
+    ? selectColourDirectionClosetShows(namedScored, slug, 4)
     : selectClosetShowsItems(namedScored, slug, 4);
 
   const routeInSelection = isColourDirection
@@ -2333,13 +2418,17 @@ export function buildShopperEdit(
 
   // A Look To Try prefers a DIFFERENT supporting piece from Route In where
   // the Closet supports it; reuse only happens when no other wearable
-  // partner exists — intentional, not automatic. For Colour Direction this
-  // means a different genuine accent where one exists, not just a
-  // different item of any role.
+  // partner exists — intentional, not automatic. For Colour Direction,
+  // "different" means a genuinely different styling idea — a different hue
+  // family or category, not merely a different SKU of the same idea (two
+  // pairs of blue jeans). pickDiverseRoleMatch's own tiered fallback only
+  // repeats Route In's exact signature when nothing semantically distinct
+  // is wearable at all.
   const usedByRouteIn = new Set<ShopperClosetItemEvidence>(routeInSupport ? [routeInSupport.item] : []);
+  const routeInSupportSignature = routeInSupport ? [roleSignature(routeInSupport.item, slug)] : [];
   const lookSupport = routeInAnchor
     ? (isColourDirection
-        ? (pickWearablePartnerWithRole(routeInAnchor, namedScored, "accent-colour", usedByRouteIn, slug)
+        ? (pickDiverseRoleMatch(routeInAnchor, namedScored, "accent-colour", usedByRouteIn, routeInSupportSignature, slug)
             ?? pickWearablePartner(routeInAnchor, namedScored, usedByRouteIn, slug)
             ?? routeInSupport)
         : (pickWearablePartner(routeInAnchor, namedScored, usedByRouteIn, slug) ?? routeInSupport))

@@ -741,3 +741,124 @@ describe("Fix #1 + Fix #2 composed — older blue/burgundy garments surface corr
     if (blueCard) assert.ok(/accent/i.test(blueCard.roleNote), "the older blue jeans get accent wording, not base/neutral wording");
   });
 });
+
+// ═════════════════════════════════════════════════════════════════════════
+// Fix #4 — semantic diversity, not just item-ID diversity. Live staging QA
+// confirmed the engine satisfied "4 different Closet rows" while repeating
+// the exact same styling idea twice: two pairs of medium-blue jeans filled
+// both accent slots in Closet Shows, and A Look To Try "differed" from
+// Route In only by swapping one pair of blue jeans for the other — not a
+// meaningfully different look, even though real burgundy accent evidence
+// (a skirt, a blouse, an evening gown) existed in the same Closet. These
+// tests prove selection now compares candidates by role + hue family +
+// category, not item identity.
+// ═════════════════════════════════════════════════════════════════════════
+
+describe("Fix #4 — Closet Shows does not fill both accent slots with the same hue-family+category idea", () => {
+  it("two blue bottoms + one burgundy bottom, all genuine accent evidence: Closet Shows does not select both blue items when burgundy is also strong", () => {
+    const closet = [
+      item({ name: "Quiet Base Top", category: "TOPS", primaryColor: "cream" }),
+      item({ name: "Blue Jeans One", category: "BOTTOMS", primaryColor: "blue", formality: "casual" }),
+      item({ name: "Blue Jeans Two", category: "BOTTOMS", primaryColor: "blue", formality: "casual" }),
+      item({ name: "Burgundy Skirt", category: "BOTTOMS", primaryColor: "burgundy", formality: "evening" }),
+    ];
+    const edit = buildShopperEdit(COLOUR_DIRECTION_REPORT, evidence(closet));
+    const shown = new Set(edit.evidenceClosetItems.map((i) => i.name));
+    const blueCount = ["Blue Jeans One", "Blue Jeans Two"].filter((n) => shown.has(n)).length;
+    assert.ok(blueCount <= 1, `at most one blue item should occupy an accent slot when burgundy evidence is also available, got both: ${[...shown].join(", ")}`);
+    assert.ok(shown.has("Burgundy Skirt"), "the genuinely different accent (burgundy) is represented instead of a second blue item");
+  });
+
+  it("different item IDs alone are not sufficient diversity — same hue family + same category is a near-duplicate even with different names", () => {
+    const closet = [
+      item({ name: "Quiet Base Top", category: "TOPS", primaryColor: "cream" }),
+      item({ name: "Navy Trouser A", category: "BOTTOMS", primaryColor: "blue", formality: "casual" }),
+      item({ name: "Navy Trouser B", category: "BOTTOMS", primaryColor: "blue", formality: "casual" }),
+      item({ name: "Red Blouse", category: "TOPS", primaryColor: "red", formality: "casual" }),
+    ];
+    // Red Blouse is TOPS, same category as the anchor — not wearable as a
+    // second accent alongside it, but IS a genuinely different hue+category
+    // than the two blue trousers. Closet Shows should still prefer breadth
+    // over a second near-identical blue trouser where a scored alternative
+    // exists at all.
+    const edit = buildShopperEdit(COLOUR_DIRECTION_REPORT, evidence(closet));
+    const shown = edit.evidenceClosetItems.map((i) => i.name);
+    const blueTrouserCount = shown.filter((n) => n === "Navy Trouser A" || n === "Navy Trouser B").length;
+    assert.ok(blueTrouserCount <= 1, "two same-hue-family, same-category trousers are a near-duplicate — at most one occupies an accent slot");
+  });
+});
+
+describe("Fix #4 — A Look To Try prefers a genuinely different accent idea from Route In, not another SKU of the same idea", () => {
+  it("Route In uses a blue bottom as the accent; A Look To Try prefers a burgundy piece over a second pair of blue jeans", () => {
+    const closet = [
+      item({ name: "Cream Tank", category: "TOPS", primaryColor: "cream" }),
+      item({ name: "Medium Blue Wash Jeans", category: "BOTTOMS", primaryColor: "blue", formality: "casual" }),
+      item({ name: "Medium Blue Wide-Leg Jeans", category: "BOTTOMS", primaryColor: "blue", formality: "casual" }),
+      item({ name: "Burgundy Midi Skirt", category: "BOTTOMS", primaryColor: "burgundy", formality: "evening" }),
+    ];
+    const edit = buildShopperEdit(COLOUR_DIRECTION_REPORT, evidence(closet));
+    const routeInNames = edit.routeInItems.map((i) => i.name);
+    const lookToTryNames = edit.lookToTryItems.map((i) => i.name);
+
+    assert.ok(routeInNames.includes("Medium Blue Wash Jeans"), "Route In uses the strongest (blue) accent — the simplest, most obvious entry");
+    assert.ok(
+      lookToTryNames.includes("Burgundy Midi Skirt"),
+      `A Look To Try should prefer the genuinely different burgundy accent over a second pair of blue jeans, got: ${lookToTryNames.join(", ")}`,
+    );
+    assert.ok(
+      !lookToTryNames.includes("Medium Blue Wide-Leg Jeans"),
+      "A Look To Try should not fall back to a same-hue-family, same-category item when a genuinely different one is available",
+    );
+  });
+
+  it("this holds end-to-end for the real staging Closet shape that surfaced the bug", () => {
+    const closet = [
+      item({ name: "Cream Ribbed Knit Tank Top", category: "TOPS", primaryColor: "cream" }),
+      item({ name: "Medium Blue Wash Jeans", category: "BOTTOMS", primaryColor: "Medium Blue", formality: "casual", fitProfile: "relaxed" }),
+      item({ name: "Black Draped Maxi Skirt", category: "BOTTOMS", primaryColor: "black", fitProfile: "flowy", formality: "smart-casual" }),
+      item({ name: "Medium Blue Wide-Leg Jeans", category: "BOTTOMS", primaryColor: "Medium Blue", formality: "casual", fitProfile: "relaxed" }),
+      item({ name: "Burgundy Midi Skirt", category: "BOTTOMS", primaryColor: "Burgundy", formality: "evening", fitProfile: "fitted" }),
+      item({ name: "Blue Chambray Button-Up Shirt", category: "TOPS", primaryColor: "Periwinkle Blue", formality: "business-casual", fitProfile: "relaxed" }),
+      item({ name: "Burgundy Cowl Neck Evening Gown", category: "DRESSES", primaryColor: "Burgundy", formality: "evening", fitProfile: "fitted" }),
+      item({ name: "Burgundy Draped Sleeveless Blouse", category: "TOPS", primaryColor: "Burgundy", formality: "evening", fitProfile: "body-skimming" }),
+    ];
+    const edit = buildShopperEdit(COLOUR_DIRECTION_REPORT, evidence(closet));
+
+    const closetShowsNames = edit.evidenceClosetItems.map((i) => i.name);
+    const blueBottomsShown = closetShowsNames.filter((n) => n === "Medium Blue Wash Jeans" || n === "Medium Blue Wide-Leg Jeans").length;
+    assert.ok(blueBottomsShown <= 1, `Closet Shows must not fill both accent slots with the two blue jeans, got: ${closetShowsNames.join(", ")}`);
+    assert.ok(
+      closetShowsNames.some((n) => n.includes("Burgundy")),
+      `Closet Shows should represent the burgundy accent family alongside blue, got: ${closetShowsNames.join(", ")}`,
+    );
+
+    const routeInNames = edit.routeInItems.map((i) => i.name);
+    const lookToTryNames = edit.lookToTryItems.map((i) => i.name);
+    assert.notDeepEqual(
+      [...routeInNames].sort(),
+      [...lookToTryNames].sort(),
+      "Route In and A Look To Try must not be the exact same item set",
+    );
+    const lookToTryIsJustTheOtherBlueJeans =
+      lookToTryNames.includes("Medium Blue Wide-Leg Jeans") && routeInNames.includes("Medium Blue Wash Jeans");
+    assert.ok(!lookToTryIsJustTheOtherBlueJeans, "A Look To Try must not be 'the same idea, different SKU' — swapping one pair of blue jeans for the other pair");
+  });
+});
+
+describe("Fix #4 — repetition of the same hue-family+category idea remains allowed when no semantically distinct alternative exists", () => {
+  it("with only two same-hue-family bottoms and nothing else wearable, A Look To Try legitimately reuses the same accent idea", () => {
+    const closet = [
+      item({ name: "Cream Tank", category: "TOPS", primaryColor: "cream" }),
+      item({ name: "Blue Jeans One", category: "BOTTOMS", primaryColor: "blue", formality: "casual" }),
+      item({ name: "Blue Jeans Two", category: "BOTTOMS", primaryColor: "blue", formality: "casual" }),
+    ];
+    const edit = buildShopperEdit(COLOUR_DIRECTION_REPORT, evidence(closet));
+    const routeInNames = edit.routeInItems.map((i) => i.name);
+    const lookToTryNames = edit.lookToTryItems.map((i) => i.name);
+    assert.ok(
+      routeInNames.includes("Blue Jeans One") || routeInNames.includes("Blue Jeans Two"),
+      "a real accent is still named even though both candidates share the same hue family and category",
+    );
+    assert.ok(lookToTryNames.length > 0, "A Look To Try still produces a real pairing — repetition here is truthful, not a bug, since no distinct alternative exists");
+  });
+});
