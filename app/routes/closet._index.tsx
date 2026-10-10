@@ -21,6 +21,7 @@ import { writeSourceEvidence } from "~/lib/ai/taste-reconcile.server";
 import { loadNaiaModel, computeModelReadinessFromRecord } from "~/lib/ai/my-naia-model.server";
 import { VtoExperience } from "~/components/VtoExperience";
 import { checkEntitlement } from "~/lib/plan/entitlement.server";
+import { displayColors } from "~/lib/closet-card-colors";
 
 // Option B shell: MyNaiaLayout + naiaStyles (NADINE header, My nAia navigation)
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: naiaStyles }];
@@ -2056,6 +2057,7 @@ export default function Closet() {
                 itemNowSupported ? "pending-assessment" : item.tryOnEligibility,
                 item.tryOnCustomerHint,
               );
+              const cardColors = displayColors(item);
               return (
                 <div key={item.id} className="cl-card">
                   <div className="cl-card-img">
@@ -2067,8 +2069,8 @@ export default function Closet() {
                   <div className="cl-card-body">
                     <div className="cl-card-cat">{item.category}</div>
                     <div className="cl-card-name">{item.name}</div>
-                    {(item.primaryColor || item.pattern) && (
-                      <div className="cl-card-meta">{[item.primaryColor, item.pattern].filter(Boolean).join(" · ")}</div>
+                    {(cardColors.length > 0 || item.pattern) && (
+                      <div className="cl-card-meta">{[...cardColors, item.pattern].filter(Boolean).join(" · ")}</div>
                     )}
                     {item.brand && <div className="cl-card-meta" style={{ marginTop: "4px" }}>{item.brand}</div>}
                     {item.garmentRelationships?.length > 0 && (
