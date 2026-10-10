@@ -2354,6 +2354,18 @@ export function buildShopperEdit(
 
   const scored: DimensionScoredItem[] = [];
 
+  // TEMP DIAGNOSTIC — live Modern Tailoring / Soft Structure Closet QA.
+  // Confirmed manual-QA failure: both reports selected the exact same 4
+  // Closet pieces, only reordered. This captures each item's text-overlap
+  // hits, attribute dimension scores, and final score/role separately (the
+  // main loop below collapses them into one combined score) so the actual
+  // root cause — missing GI fields, overlapping dimension weights, or
+  // text-overlap dominating ties — can be read directly rather than
+  // guessed. Server-side log only, never customer-facing. Remove once the
+  // diagnostic is closed.
+  const mtSsDiagnostic: Array<{ item: ShopperClosetItemEvidence } & Record<string, unknown>> = [];
+  const captureMtSsDiagnostic = slug === "modern-tailoring-spring-2026" || slug === "spring-2026-soft-structure";
+
   for (const item of closetItemsList) {
     if (!compatibleCategories.has(item.category)) continue;
     if (item.subcategory && excludedSubcategories.has(item.subcategory.toLowerCase())) continue;
@@ -2384,10 +2396,38 @@ export function buildShopperEdit(
     if (item.name) score += 3;
     if (item.imageUrl) score += 1;
     scored.push({ item, score, dimensionId: attribute.bestDimensionId });
+
+    if (captureMtSsDiagnostic) {
+      mtSsDiagnostic.push({
+        item,
+        name: item.name,
+        category: item.category,
+        subcategory: item.subcategory,
+        styleTags: item.styleTags,
+        material: item.material,
+        silhouette: item.silhouette ?? null,
+        fitProfile: item.fitProfile ?? null,
+        formality: item.formality ?? null,
+        pattern: item.pattern ?? null,
+        textOverlapHits: hits,
+        textOverlapScore: hits.length,
+        dimensionScores: attribute.dimensionScores,
+        bestDimensionId: attribute.bestDimensionId,
+        finalScore: score,
+      });
+    }
   }
 
   scored.sort((a, b) => b.score - a.score);
   const namedScored = scored.filter((m) => m.item.name);
+
+  if (captureMtSsDiagnostic) {
+    const rankById = new Map(scored.map((s, i) => [s.item, i + 1]));
+    const withRank = mtSsDiagnostic
+      .map(({ item, ...rest }) => ({ ...rest, finalRank: rankById.get(item) ?? null }))
+      .sort((a, b) => ((a.finalRank as number) ?? 999) - ((b.finalRank as number) ?? 999));
+    console.log(`TEMP DIAGNOSTIC — ${slug} Closet breakdown`, JSON.stringify(withRank));
+  }
 
   // Each section now runs its own selection against the same scored pool,
   // instead of every section reading the same fixed top-2 slice. Colour
