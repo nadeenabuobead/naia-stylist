@@ -12,13 +12,22 @@
 // (`if (existing.state === "REJECTED") return;`), and
 // /api/taste-observation-feedback refuses any further action on one
 // (ALREADY_REJECTED). That immutability is intentional product behavior,
-// not a bug — there is no "undo rejection" anywhere in the real product.
-// A QA tester who rejects an observation while manually testing the
-// Not-Quite flow has no way to get it back for a second test pass. This
-// route is the one-time, explicitly-authorised exception: a narrow,
-// staging-only reset of exactly that state, scoped to the logged-in
-// customer only, so the same real evidence can be re-evaluated by the
-// unmodified reconciliation logic.
+// not a bug — there is no "undo rejection" (or "undo accurate") anywhere
+// in the real product. A QA tester who clicks Accurate or Not Quite while
+// manually testing has no way to get a card back to a neutral,
+// button-showing state for a second test pass. This route is the
+// one-time, explicitly-authorised exception: a narrow, staging-only reset
+// of exactly that feedback, scoped to the logged-in customer only, so the
+// same real evidence can be re-evaluated by the unmodified reconciliation
+// logic.
+//
+// Extended from the original not-quite-only version: an Accurate
+// submission never changes `state` at all (see
+// taste-feedback-engine.ts's applyFeedbackWithDeps — the else branch
+// writes customerFeedback/customerFeedbackAt only), so an "accurate" row
+// needed its own, simpler reset path that leaves `state` untouched —
+// unlike a REJECTED row, which needs `state` moved off REJECTED first or
+// reconcileObservations will keep refusing to touch it.
 //
 // Security / scope contract:
 //   - 404s unless process.env.NAIA_PROJECT_VARIANT === "staging" (checked
@@ -30,27 +39,31 @@
 //     tendencyId is ever accepted from the URL, query string, or body —
 //     this is not a generic admin reset tool for arbitrary customers.
 //   - Touches ONLY StyleTendency rows already in
-//     { state: "REJECTED", customerFeedback: "not-quite" } for this one
-//     customer. Never touches TasteEvidence, StyleMeOutcome,
-//     PostOutfitReview, ClosetItem, BuyOrSkipAnalysis/BuySkipOutcome, or
-//     OnboardingProfile (Style Passport) in any way — no deletes, no
-//     writes, not even a read beyond what reconcileObservations already
-//     does internally.
-//   - No raw SQL, no arbitrary field names accepted from the client —
-//     the exact fields cleared are hard-coded below.
-//   - Does not fabricate evidence and does not force a state. The reset
-//     clears the rejection fields and moves `state` off "REJECTED" to a
-//     neutral placeholder ("CANDIDATE") ONLY so reconcileObservations'
-//     existing "active generation" branch picks the row back up — that
-//     same call immediately recomputes the REAL state (CONFIRMED /
-//     CANDIDATE / SUPPRESSED) from the customer's real, untouched
-//     TasteEvidence rows, in the same request, before anything is
-//     returned. No threshold, weight, contradiction, or feedback-write
-//     semantic in taste-contract.ts / taste-reconcile.server.ts /
-//     taste-feedback-engine.ts is modified by this route.
+//     customerFeedback IN ("not-quite", "accurate") for this one customer.
+//     Never touches TasteEvidence, StyleMeOutcome, PostOutfitReview,
+//     ClosetItem, BuyOrSkipAnalysis/BuySkipOutcome, or OnboardingProfile
+//     (Style Passport) in any way — no deletes, no writes, not even a
+//     read beyond what reconcileObservations already does internally.
+//   - No raw SQL, no arbitrary field names accepted from the client — the
+//     exact fields cleared (customerFeedback, customerFeedbackAt,
+//     notQuiteReason, notQuiteNote) are hard-coded below, for both
+//     feedback types.
+//   - Does not fabricate evidence and does not force a state. For a
+//     REJECTED row, the reset clears the feedback fields and moves
+//     `state` off "REJECTED" to a neutral placeholder ("CANDIDATE") ONLY
+//     so reconcileObservations' existing "active generation" branch picks
+//     the row back up. For an "accurate" row (never REJECTED), `state` is
+//     left completely untouched — only the feedback fields are cleared.
+//     reconcileObservations then immediately recomputes the REAL state
+//     (CONFIRMED / CANDIDATE / SUPPRESSED) for every affected row from the
+//     customer's real, untouched TasteEvidence, in the same request,
+//     before anything is returned. No threshold, weight, contradiction,
+//     or feedback-write semantic in taste-contract.ts /
+//     taste-reconcile.server.ts / taste-feedback-engine.ts is modified by
+//     this route.
 //
-// GET  → read-only preview: which REJECTED tendencies exist right now and
-//        exactly what a reset would clear. No write.
+// GET  → read-only preview: which not-quite/accurate tendencies exist
+//        right now and exactly what a reset would clear. No write.
 // POST → performs the reset for those same rows, then re-runs
 //        reconcileObservations(customerId), then returns the resulting
 //        states computed from real evidence.
@@ -67,10 +80,12 @@ const RESET_FIELDS = {
   customerFeedbackAt: null,
 } as const;
 
-async function findRejected(customerId: string) {
+type FeedbackRow = { id: string; dimension: string; value: string; generation: number; state: string; customerFeedback: string | null };
+
+async function findFeedbackRows(customerId: string): Promise<FeedbackRow[]> {
   return prisma.styleTendency.findMany({
-    where: { customerId, state: "REJECTED", customerFeedback: "not-quite" },
-    select: { id: true, dimension: true, value: true, generation: true },
+    where: { customerId, customerFeedback: { in: ["not-quite", "accurate"] } },
+    select: { id: true, dimension: true, value: true, generation: true, state: true, customerFeedback: true },
   });
 }
 
@@ -79,10 +94,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return new Response("Not Found", { status: 404 });
   }
   const customer = await requireCurrentNaiaCustomer(request);
-  const rejected = await findRejected(customer.id);
+  const rows = await findFeedbackRows(customer.id);
 
   return data({
-    rejectedTendenciesFound: rejected.map(r => ({ dimension: r.dimension, value: r.value, generation: r.generation })),
+    tendenciesFound: rows.map(r => ({ dimension: r.dimension, value: r.value, generation: r.generation, state: r.state, customerFeedback: r.customerFeedback })),
     exactFieldsToClear: Object.keys(RESET_FIELDS),
     reconciliationPathToRun: "reconcileObservations(customerId) — the same function writeSourceEvidence/backfillTaste already call; re-evaluates every (dimension, value) group from this customer's real, untouched TasteEvidence rows",
     note: "GET is read-only — nothing has been changed. POST to this same URL to perform the reset.",
@@ -98,25 +113,40 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   const customer = await requireCurrentNaiaCustomer(request);
-  const rejected = await findRejected(customer.id);
+  const rows = await findFeedbackRows(customer.id);
 
-  if (rejected.length === 0) {
+  if (rows.length === 0) {
     return data({ ok: true, tendenciesReset: [], reconciliationRun: false, resultingStates: [] });
   }
 
-  // Move state off REJECTED so reconcileObservations' active-generation
-  // branch re-evaluates these rows — it overwrites `state` with the real
-  // computed value below in the same request. CANDIDATE is a placeholder
-  // only; it is never read by anything before reconcile runs.
-  await prisma.styleTendency.updateMany({
-    where: { id: { in: rejected.map(r => r.id) } },
-    data: { ...RESET_FIELDS, state: "CANDIDATE", updatedAt: new Date() },
-  });
+  const rejectedRows = rows.filter(r => r.state === "REJECTED");
+  const accurateRows = rows.filter(r => r.state !== "REJECTED");
+
+  if (rejectedRows.length > 0) {
+    // Move state off REJECTED so reconcileObservations' active-generation
+    // branch re-evaluates these rows — it overwrites `state` with the
+    // real computed value below, in the same request. CANDIDATE is a
+    // placeholder only; it is never read by anything before reconcile
+    // runs.
+    await prisma.styleTendency.updateMany({
+      where: { id: { in: rejectedRows.map(r => r.id) } },
+      data: { ...RESET_FIELDS, state: "CANDIDATE", updatedAt: new Date() },
+    });
+  }
+  if (accurateRows.length > 0) {
+    // An "accurate" row was never REJECTED and its state already reflects
+    // real evidence — only the feedback fields themselves need clearing,
+    // state is left exactly as-is.
+    await prisma.styleTendency.updateMany({
+      where: { id: { in: accurateRows.map(r => r.id) } },
+      data: { ...RESET_FIELDS, updatedAt: new Date() },
+    });
+  }
 
   await reconcileObservations(customer.id);
 
   const resultingStates = await prisma.styleTendency.findMany({
-    where: { id: { in: rejected.map(r => r.id) } },
+    where: { id: { in: rows.map(r => r.id) } },
     select: {
       dimension: true, value: true, state: true,
       effectiveSupport: true, wNet: true, distinctRecords: true,
@@ -125,7 +155,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
   return data({
     ok: true,
-    tendenciesReset: rejected.map(r => ({ dimension: r.dimension, value: r.value })),
+    tendenciesReset: rows.map(r => ({ dimension: r.dimension, value: r.value, previousFeedback: r.customerFeedback })),
     fieldsCleared: Object.keys(RESET_FIELDS),
     reconciliationRun: true,
     resultingStates,
