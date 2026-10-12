@@ -65,6 +65,10 @@ const ALWAYS_ALLOWED_BASENAMES = new Set([
   // only to type the vi.mock() replacement; the module is fully mocked,
   // never the real implementation.
   "api.taste-observation-feedback.test.ts",
+  // Test for api.staging-noticing-qa-reset.ts (already an approved
+  // production importer below) — prisma and reconcileObservations are
+  // both fully mocked; this file never touches the real implementations.
+  "api.staging-noticing-qa-reset.test.ts",
 ]);
 
 // The ONLY production (non-test) files permitted to import any member of
@@ -91,6 +95,11 @@ const ALLOWED_PRODUCTION_IMPORTERS = new Set([
   // read-only diagnostic engine shared by the local script and the
   // staging-only authenticated route below. Neither writes evidence.
   "app/lib/ai/taste-evidence-diagnostic.server.ts",
+  // TEMP STAGING QA RESET — session-scoped reset of the logged-in
+  // customer's own REJECTED tendencies, then re-runs the unmodified
+  // reconcileObservations. Delete alongside its routes.ts registration
+  // once manual QA is closed.
+  "app/routes/api.staging-noticing-qa-reset.ts",
 ]);
 
 const SKIP_DIRS = new Set(["node_modules", ".git", "build", "dist", ".vercel"]);

@@ -115,6 +115,11 @@ export default [
   // TEMP QA DIAGNOSTIC — What nAia Is Noticing evidence investigation.
   // Delete this registration along with the route file once closed.
   route("api/staging-noticing-diagnostic", "routes/api.staging-noticing-diagnostic.ts"),
+  // TEMP STAGING QA RESET — lets a QA tester re-test the Not Quite/Accurate
+  // feedback paths by resetting their own REJECTED observations back to
+  // real-evidence-derived state. Delete this registration along with the
+  // route file once manual QA is closed.
+  route("api/staging-noticing-qa-reset", "routes/api.staging-noticing-qa-reset.ts"),
   route("staging/designer-preview", "routes/staging.designer-preview.jsx"),
 
   // ── Standalone Internal Admin Portal ─────────────────────────────────────
