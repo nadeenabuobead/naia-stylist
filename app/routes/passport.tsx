@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react";
-import { Link, useLoaderData, useRevalidator, useNavigate, redirect } from "react-router";
+import { Link, useLoaderData, useRevalidator, useNavigate, useFetcher, redirect } from "react-router";
 import type { LinksFunction, LoaderFunctionArgs } from "react-router";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 
@@ -11,6 +11,18 @@ import { quizQuestions, LEGACY_QUESTIONS, COLOUR_FAMILIES, NOTES_HELPER_TEXT } f
 import { REV7_PROFILE_VERSION, currentStyleExpression } from "~/lib/passport/rev7-vocabulary";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
+// "What nAia Is Noticing" — moved from its own route into a Style Passport
+// section (see NoticingSection below). Learned/observed evidence; Style
+// Passport itself (savedAnswers above) remains explicit customer truth —
+// this is never read back into a Passport field, only displayed alongside it.
+import { loadConfirmedTendencies } from "~/lib/ai/taste-reconcile.server";
+import {
+  loadPassportSnapshot,
+  detectPassportContradiction,
+  generateObservationText,
+  PASSPORT_TASTE_MAPPINGS,
+} from "~/lib/ai/taste-passport-boundary.server";
+import { generateNoticingInterpretation } from "~/lib/ai/taste-contract";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Data tables derived from quiz data + passport-only definitions
@@ -870,6 +882,46 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if ((op as any).gender)                savedAnswers["gender"]                 = (op as any).gender;
   if ((op as any).genderSelfDescription) savedAnswers["gender-self-description"]= (op as any).genderSelfDescription;
 
+  // "What nAia Is Noticing" — sequential, not Promise.all: the pooled
+  // DATABASE_URL runs this app with connection_limit=1 per serverless
+  // instance (same reasoning as my-naia._index.tsx and
+  // my-naia.what-naia-notices.tsx's own loaders).
+  const { confirmed, candidateCount } = await loadConfirmedTendencies(customer.id);
+  const passportSnapshot = await loadPassportSnapshot(customer.id);
+  const noticingObservations = confirmed.map(t => {
+    const contradiction = detectPassportContradiction(
+      t.dimension,
+      t.value,
+      t.dominantPolarity as "positive" | "negative",
+      passportSnapshot,
+    );
+    const mapping = PASSPORT_TASTE_MAPPINGS[t.dimension as keyof typeof PASSPORT_TASTE_MAPPINGS];
+    // Unchanged contradiction-aware text (never fires in V1 — the mapping
+    // table is deliberately empty — kept wired for when a real mapping
+    // exists; see taste-passport-boundary.server.ts).
+    const adjusted = generateObservationText(t.claimText ?? "", t.rationaleText ?? "", contradiction, mapping);
+    // New, dimension-specific interpretation — presentation only, derived
+    // from (dimension, value, family); no new evidence or thresholds.
+    const interpretation = generateNoticingInterpretation(
+      t.dimension,
+      t.value,
+      t.observationFamily as "WORKS_WELL" | "FRICTION",
+    );
+    return {
+      id:               t.id,
+      dimension:        t.dimension,
+      value:            t.value,
+      observationFamily: t.observationFamily,
+      rationaleText:    adjusted.rationaleText,
+      customerFeedback: t.customerFeedback,
+      ...interpretation,
+      // Only populated when a real Passport mapping exists AND conflicts —
+      // today always null (PASSPORT_TASTE_MAPPINGS is empty), kept for when
+      // a mapping is added.
+      passportEvolutionNote: contradiction.status === "conflict" ? adjusted.claimText : null,
+    };
+  });
+
   return {
     savedAnswers,
     profileUpdatedAt: op.updatedAt.toISOString(),
@@ -877,6 +929,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // Rev 7 customers no longer see the retired "Which styles feel most like you?"
     // question. Rev 6 and legacy customers keep it, so their answer stays editable.
     isRev7Customer: (op as any).profileVersion === REV7_PROFILE_VERSION,
+    noticing: { confirmed: noticingObservations, candidateCount },
   };
 }
 
@@ -1058,12 +1111,149 @@ type SaveStatus = "idle" | "saving" | "error" | "conflict";
 type PendingNext = "next" | "exit" | null;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// "What nAia Is Noticing" — a section inside Style Passport, not a page.
+//
+// Product boundary (unchanged — see taste-passport-boundary.server.ts):
+//   Style Passport  = explicit customer truth (savedAnswers, above).
+//   What nAia Is Noticing = learned/observed patterns from evidence.
+// This section only DISPLAYS learned tendencies next to Passport answers —
+// it never writes a tendency into a Passport field, and never lets a
+// tendency silently change a Passport answer.
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface NoticingObservation {
+  id: string;
+  dimension: string;
+  value: string;
+  observationFamily: string;
+  headline: string;
+  body: string;
+  learningNote: string;
+  rationaleText: string | null;
+  customerFeedback: string | null;
+  passportEvolutionNote: string | null;
+}
+
+function NoticingObservationCard({ tendency }: { tendency: NoticingObservation }) {
+  const feedbackFetcher = useFetcher<{ ok?: boolean; error?: string }>();
+  const isPending = feedbackFetcher.state === "submitting";
+  const savedFeedback = feedbackFetcher.data?.ok
+    ? ((feedbackFetcher.formData?.get("feedback") as string) ?? null)
+    : tendency.customerFeedback;
+
+  function submit(fb: "accurate" | "not-quite") {
+    feedbackFetcher.submit(
+      { tendencyId: tendency.id, feedback: fb },
+      { method: "POST", action: "/api/taste-observation-feedback", encType: "application/json" },
+    );
+  }
+
+  const familyLabel = tendency.observationFamily === "WORKS_WELL" ? "CONSISTENTLY WORKS" : "RECURRING FRICTION";
+
+  return (
+    <div className="sp-ov-section">
+      <div className="sp-ov-section-header">{familyLabel}</div>
+      <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "1.1rem", lineHeight: 1.5, color: "var(--naia-ink)", margin: "0 0 10px" }}>
+        {tendency.headline}
+      </p>
+      <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "0.95rem", lineHeight: 1.65, color: "rgba(40, 21, 12, 0.75)", margin: "0 0 18px" }}>
+        {tendency.body}
+      </p>
+
+      <div className="sp-ov-section-header" style={{ marginBottom: "8px" }}>What nAia Is Learning</div>
+      <p style={{ fontFamily: "var(--naia-ff-body)", fontStyle: "italic", fontSize: "0.95rem", lineHeight: 1.65, color: "rgba(40, 21, 12, 0.75)", margin: "0 0 16px" }}>
+        {tendency.learningNote}
+      </p>
+
+      {tendency.passportEvolutionNote && (
+        <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "0.9rem", lineHeight: 1.6, color: "var(--naia-accent, #8b2035)", margin: "0 0 16px" }}>
+          {tendency.passportEvolutionNote}
+        </p>
+      )}
+
+      {tendency.rationaleText && (
+        <p style={{ fontFamily: "var(--naia-ff-ui)", fontSize: "0.78rem", letterSpacing: "0.02em", color: "rgba(40, 21, 12, 0.5)", margin: "0 0 18px" }}>
+          {tendency.rationaleText}
+        </p>
+      )}
+
+      {savedFeedback === "not-quite" ? (
+        <p style={{ fontSize: "13px", opacity: 0.5, fontStyle: "italic", margin: 0 }}>Noted — nAia won't show this again.</p>
+      ) : savedFeedback === "accurate" ? (
+        <p style={{ fontSize: "13px", opacity: 0.5, fontStyle: "italic", margin: 0 }}>Glad this resonates.</p>
+      ) : (
+        <div style={{ display: "flex", gap: "12px" }}>
+          <button
+            type="button"
+            className="sp-btn-outline"
+            style={{ fontSize: "13px", padding: "8px 16px" }}
+            disabled={isPending}
+            onClick={() => submit("accurate")}
+          >
+            Accurate
+          </button>
+          <button
+            type="button"
+            className="sp-btn-ghost"
+            style={{ fontSize: "13px", padding: "8px 16px", opacity: 0.7 }}
+            disabled={isPending}
+            onClick={() => submit("not-quite")}
+          >
+            Not quite
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NoticingSection({ confirmed, candidateCount }: { confirmed: NoticingObservation[]; candidateCount: number }) {
+  return (
+    <div id="noticing" style={{ borderTop: "1px solid rgba(40, 21, 12, 0.12)", marginTop: "48px", paddingTop: "40px" }}>
+      <div className="sp-refresh-banner">
+        <div className="sp-refresh-banner-title">What nAia Is Noticing</div>
+        <p className="sp-refresh-banner-desc" style={{ marginBottom: 0 }}>
+          Patterns nAia is learning from how you rate your looks, what works for you and the
+          clothes you own.
+          <br /><br />
+          These observations stay separate from your Style Passport and can evolve as nAia
+          learns more about you.
+        </p>
+      </div>
+
+      {confirmed.length > 0 ? (
+        <div className="sp-ov-sections">
+          {confirmed.map(t => (
+            <NoticingObservationCard key={t.id} tendency={t} />
+          ))}
+        </div>
+      ) : candidateCount > 0 ? (
+        <div className="sp-status-block" style={{ borderTop: "none", paddingTop: 0 }}>
+          <p className="sp-status-text">
+            nAia has picked up something, but not quite enough to say it with confidence yet.
+            Keep rating and reviewing your looks — it should become clearer shortly.
+          </p>
+        </div>
+      ) : (
+        <div className="sp-status-block" style={{ borderTop: "none", paddingTop: 0 }}>
+          <div className="sp-status-label">Still learning</div>
+          <p className="sp-status-text">
+            Keep rating your looks and telling nAia what worked. As patterns become clearer,
+            they'll begin appearing here.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function PassportPage() {
   const {
-    savedAnswers, profileUpdatedAt, isLegacyCustomer, isRev7Customer,
+    savedAnswers, profileUpdatedAt, isLegacyCustomer, isRev7Customer, noticing,
   } = useLoaderData<typeof loader>();
   const revalidator = useRevalidator();
   const navigate = useNavigate();
@@ -2084,6 +2274,8 @@ export default function PassportPage() {
               You'll resume at <strong>{missingSections[0].label}</strong>. All previous answers are preserved.
             </div>
           )}
+
+          <NoticingSection confirmed={noticing.confirmed} candidateCount={noticing.candidateCount} />
         </MyNaiaLayout>
       );
     }
@@ -2137,6 +2329,7 @@ export default function PassportPage() {
           </div>
         </div>
 
+        <NoticingSection confirmed={noticing.confirmed} candidateCount={noticing.candidateCount} />
       </MyNaiaLayout>
     );
   }

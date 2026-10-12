@@ -757,37 +757,27 @@ export default function MyNaiaOverview() {
           </div>
         </section>
 
-        {/* What nAia Is Noticing */}
+        {/* What nAia Is Noticing — preview only; the full section lives in Style Passport */}
         <section className="mn-section">
           <div className="mn-section-head">
-            <div className="mn-eyebrow">What nAia Is Beginning To Notice</div>
-            {strongestTendency && (
-              <Link to="/my-naia/what-naia-notices" className="mn-see-link">See All</Link>
-            )}
+            <div className="mn-eyebrow">What nAia Is Noticing</div>
+            <Link to="/passport#noticing" className="mn-see-link">View In Style Passport →</Link>
           </div>
           <div className="mn-section-body">
             {strongestTendency ? (
-              <>
-                <ul style={{ listStyle: "none", padding: 0, margin: 0, borderTop: "1px solid var(--fg-12)" }}>
-                  <li style={{ padding: "1.25rem 0", borderBottom: "1px solid var(--fg-12)" }}>
-                    <div style={{ fontSize: "0.62rem", textTransform: "uppercase", letterSpacing: "0.3em", color: "var(--lipstick)" }}>Style Intelligence</div>
-                    <p style={{ marginTop: "0.5rem", fontSize: "0.95rem", lineHeight: 1.75, color: "var(--fg-85)" }}>
-                      {strongestTendency.claimText}
+              <ul style={{ listStyle: "none", padding: 0, margin: 0, borderTop: "1px solid var(--fg-12)" }}>
+                <li style={{ padding: "1.25rem 0", borderBottom: "1px solid var(--fg-12)" }}>
+                  <div style={{ fontSize: "0.62rem", textTransform: "uppercase", letterSpacing: "0.3em", color: "var(--lipstick)" }}>Style Intelligence</div>
+                  <p style={{ marginTop: "0.5rem", fontSize: "0.95rem", lineHeight: 1.75, color: "var(--fg-85)" }}>
+                    {strongestTendency.claimText}
+                  </p>
+                  {strongestTendency.rationaleText && (
+                    <p style={{ marginTop: "0.5rem", fontSize: "0.82rem", lineHeight: 1.65, color: "var(--fg-55)" }}>
+                      {strongestTendency.rationaleText}
                     </p>
-                    {strongestTendency.rationaleText && (
-                      <p style={{ marginTop: "0.5rem", fontSize: "0.82rem", lineHeight: 1.65, color: "var(--fg-55)" }}>
-                        {strongestTendency.rationaleText}
-                      </p>
-                    )}
-                  </li>
-                </ul>
-                <p style={{ marginTop: "1.25rem", display: "flex", alignItems: "flex-start", gap: "0.5rem", fontSize: "0.78rem", lineHeight: 1.625, color: "var(--fg-55)" }}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginTop: "0.125rem", flexShrink: 0 }} aria-hidden="true">
-                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                  </svg>
-                  nAia only shares what it has confirmed once there is enough gentle evidence. <Link to="/my-naia/what-naia-notices" style={{ color: "inherit", textDecoration: "underline" }}>View all observations</Link>.
-                </p>
-              </>
+                  )}
+                </li>
+              </ul>
             ) : hasCandidates ? (
               <p className="mn-state-note">
                 nAia is picking up something — keep rating and reviewing your looks and it will share what it notices as patterns form.

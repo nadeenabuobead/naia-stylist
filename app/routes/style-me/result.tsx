@@ -2132,6 +2132,17 @@ export default function StyleMeResult() {
 
           return (
             <div style={{ borderTop: "1px solid rgba(34,21,22,0.08)", paddingTop: "20px", marginTop: "8px" }}>
+              {/* Why feedback matters — concise, visually secondary to the look itself.
+                  Deliberately does not promise this one rating instantly changes future
+                  recommendations; evidence-writing behavior below is unchanged. */}
+              <p style={{ fontFamily: "var(--naia-ff-ui)", fontSize: "10px", letterSpacing: "1.5px", textTransform: "uppercase", color: "var(--naia-muted)", opacity: 0.7, marginBottom: "4px" }}>
+                Your Feedback Helps nAia Learn
+              </p>
+              <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "12.5px", color: "var(--naia-muted)", opacity: 0.85, lineHeight: 1.5, marginBottom: "16px" }}>
+                Rate your looks to help nAia understand what works for you and make future
+                recommendations more personal.
+              </p>
+
               <p style={{ fontFamily: "var(--naia-ff-ui)", fontSize: "11px", letterSpacing: "1.5px", textTransform: "uppercase", color: "var(--naia-muted)", marginBottom: "16px" }}>
                 After you wear this
               </p>

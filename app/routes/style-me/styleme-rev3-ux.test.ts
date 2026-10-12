@@ -1545,3 +1545,42 @@ describe("§N — Finishing Layer does not repeat a Complete the Look suggestion
       "with no completion layer nothing is suppressed");
   });
 });
+
+// ── V1 UX restructure — "Your Feedback Helps nAia Learn" explanatory copy ─────
+// Added immediately before the existing outcome feedback/rating controls.
+// Must not promise one rating instantly changes future recommendations, and
+// must not touch the existing outcome-writing action at all.
+
+describe("result.tsx — feedback-helps-nAia-learn explanatory copy", () => {
+  it("renders the explanatory heading and copy immediately before the feedback controls", () => {
+    assert.ok(resultSrc.includes("Your Feedback Helps nAia Learn"), "explanatory heading present");
+    assert.ok(
+      resultSrc.includes("Rate your looks to help nAia understand what works for you and make future"),
+      "explanatory copy present",
+    );
+    const explanationIndex = resultSrc.indexOf("Your Feedback Helps nAia Learn");
+    // The "After you wear this" label also renders in the separate, already-
+    // saved/read-only summary branch (shows "Noted." + an Edit button, no
+    // input controls) — find the occurrence immediately following the
+    // explanation, which is the actual feedback-controls branch.
+    const afterYouWearIndex = resultSrc.indexOf("After you wear this", explanationIndex);
+    assert.ok(explanationIndex > -1 && afterYouWearIndex > -1, "both blocks exist");
+    assert.ok(explanationIndex < afterYouWearIndex, "explanation renders before the feedback/rating controls, not after");
+  });
+
+  it("does not promise one individual rating instantly changes future recommendations", () => {
+    const explanationStart = resultSrc.indexOf("Your Feedback Helps nAia Learn");
+    const explanationBlock = resultSrc.slice(
+      explanationStart,
+      resultSrc.indexOf("After you wear this", explanationStart),
+    );
+    assert.ok(!/instantly|immediately changes|right away/i.test(explanationBlock), "no instant-change promise");
+  });
+
+  it("the existing outcome action/evidence-writing behavior is unchanged — same action export, same field names", () => {
+    assert.ok(resultSrc.includes("export async function action"), "action export still present");
+    assert.ok(resultSrc.includes("outcomeStatus"), "outcomeStatus still collected");
+    assert.ok(resultSrc.includes("whatWorked"), "whatWorked still collected");
+    assert.ok(resultSrc.includes("whatFeltOff") || resultSrc.includes("didntWearReasons"), "friction/non-wear fields still collected");
+  });
+});

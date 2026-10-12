@@ -22,7 +22,8 @@ const MY_NAIA_NAV: NavGroup[] = [
     title: "Personalisation",
     items: [
       { to: "/my-naia-model", label: "My nAia Model" },
-      { to: "/my-naia/what-naia-notices", label: "What nAia Is Noticing" },
+      // The Noticing nav item moved into Style Passport (/passport#noticing) —
+      // no longer a standalone nav destination. See passport.tsx's section.
     ],
   },
   {

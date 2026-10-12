@@ -225,3 +225,105 @@ export function generateTendencyText(
     rationaleText: `Based on ${n} ${n === 1 ? "observation" : "observations"}.`,
   };
 }
+
+// ── Structured interpretation for the Style Passport "What nAia Is Noticing"
+// section ─────────────────────────────────────────────────────────────────────
+//
+// generateTendencyText above produces one flat sentence (claimText) plus a
+// rationale. The Passport presentation wants a short, dimension-specific
+// *interpretation* of what the pattern might mean — headline + plain-English
+// body, then a hedged "what nAia is learning" note — without claiming any
+// downstream engine (StyleMe, Wardrobe Intelligence, Buy or Skip) already
+// acts on it. Every "learning" sentence below is deliberately speculative
+// ("may", "might") — V1 surfaces an observation, not a recommendation
+// override. Pure text, keyed only by (dimension, value, family); no new
+// evidence, weights, or thresholds.
+
+export interface NoticingInterpretation {
+  headline: string;
+  body: string;
+  learningNote: string;
+}
+
+export function generateNoticingInterpretation(
+  dimension: string,
+  value: string,
+  family: ObservationFamily,
+): NoticingInterpretation {
+  if (dimension === "self-expression") {
+    if (family === "WORKS_WELL") {
+      return {
+        headline: "Feeling like yourself matters more than novelty.",
+        body: "Your strongest-rated looks tend to be the ones that feel most recognisably you.",
+        learningNote: "New ideas may work better when they evolve your existing style rather than push you toward something completely different.",
+      };
+    }
+    return {
+      headline: "Not feeling like yourself keeps showing up as a sticking point.",
+      body: "Looks that pulled you away from how you naturally see yourself tend to rate lower, even when other things about them worked.",
+      learningNote: "You may do better starting from pieces that already feel like you, then adjusting from there, rather than starting from something unfamiliar.",
+    };
+  }
+
+  if (dimension === "comfort") {
+    if (family === "WORKS_WELL") {
+      return {
+        headline: "Comfort is one of your strongest signals.",
+        body: "You consistently rate looks more positively when they feel physically comfortable.",
+        learningNote: "You may respond better to pieces that give you ease of movement rather than structure for structure's sake.",
+      };
+    }
+    return {
+      headline: "Physical comfort is a recurring sticking point.",
+      body: "Looks that felt restrictive or uncomfortable tend to rate lower, even when the styling itself worked.",
+      learningNote: "You may want how a piece feels to move in weighted as highly as how it looks.",
+    };
+  }
+
+  if (dimension === "fit") {
+    return {
+      headline: "Fit keeps coming up as a sticking point.",
+      body: "Looks that didn't quite fit right tend to be the ones that felt less successful overall.",
+      learningNote: "Getting the fit right first may matter more for you than the styling choices built on top of it.",
+    };
+  }
+
+  if (dimension === "formality") {
+    if (value === "too-formal") {
+      return {
+        headline: "Formality has tipped too far more than once.",
+        body: "A few looks have felt more formal than the moment actually called for.",
+        learningNote: "You may lean toward relaxed over polished by default when an occasion's formality isn't already pinned down.",
+      };
+    }
+    return {
+      headline: "Casualness has undercut a look more than once.",
+      body: "Some looks have felt too casual for what the occasion actually needed.",
+      learningNote: "You may want a touch more polish as your default when an occasion's formality isn't spelled out.",
+    };
+  }
+
+  if (dimension === "garment-category") {
+    const cat = value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();
+    const catPlural = cat.endsWith("s") ? cat : `${cat}s`;
+    if (family === "WORKS_WELL") {
+      return {
+        headline: `${catPlural} come up again and again in what you love wearing.`,
+        body: "Pieces in this category show up disproportionately among your favourites and most-worn items.",
+        learningNote: "This may be a category worth leaning into when you're deciding where to invest next.",
+      };
+    }
+    return {
+      headline: `${catPlural} are a recurring soft spot in your wardrobe.`,
+      body: "A pattern is forming around pieces in this category going unworn or ending up returned.",
+      learningNote: "It may be worth naming what isn't working here before adding more to this category.",
+    };
+  }
+
+  // Fallback — mirrors generateTendencyText's own fallback shape.
+  return {
+    headline: `A pattern is emerging around ${dimension}.`,
+    body: `nAia has noticed this coming up more than once.`,
+    learningNote: "This may be worth keeping an eye on as more evidence comes in.",
+  };
+}

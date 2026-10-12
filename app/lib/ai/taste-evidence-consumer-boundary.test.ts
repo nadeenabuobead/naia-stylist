@@ -4,9 +4,13 @@
 //
 // Governance rule (V1): raw/unconfirmed TasteEvidence/StyleTendency
 // inference must never influence a recommendation engine. Only the two
-// customer-facing surfaces (the My nAia overview teaser and the What nAia
-// Is Noticing page — both already scoped to CONFIRMED-only reads, see
-// taste-reconcile.server.ts) may read tendency data. Everything else —
+// customer-facing surfaces (the My nAia overview teaser and the "What nAia
+// Is Noticing" section inside Style Passport — both already scoped to
+// CONFIRMED-only reads, see taste-reconcile.server.ts) may read tendency
+// data. "What nAia Is Noticing" moved from its own route into Style
+// Passport (app/routes/passport.tsx, #noticing) in the V1 UX restructure;
+// the old route now only redirects there and no longer touches the taste
+// engine at all. Everything else —
 // StyleMe, Wardrobe Intelligence (incl. Shop Smarter), the Buy/Skip
 // decision engine, NADINE product assessment, Public Trend Reports, and
 // Personalised Trend Edit — must have zero import of the taste engine
@@ -72,7 +76,10 @@ const ALLOWED_PRODUCTION_IMPORTERS = new Set([
   "app/routes/api.styleme-outcome.tsx",
   "app/routes/api.wishlist.jsx",
   "app/routes/my-naia._index.tsx",
-  "app/routes/my-naia.what-naia-notices.tsx",
+  // V1 UX restructure: "What nAia Is Noticing" moved from its own route into
+  // a Style Passport section (#noticing below). The old route now only
+  // redirects and no longer imports the taste engine.
+  "app/routes/passport.tsx",
   "scripts/backfill-taste-evidence.ts",
   "app/routes/api.seed-staging.jsx",
   // TEMP QA DIAGNOSTIC (What nAia Is Noticing V1 evidence investigation) —
@@ -206,13 +213,17 @@ describe("Taste & Evidence — production-consumer boundary", () => {
   });
 
   it("the two allowed customer-facing readers only ever read CONFIRMED-scoped tendency data", () => {
-    const whatNaiaNotices = readFileSync(
-      join(REPO_ROOT, "app/routes/my-naia.what-naia-notices.tsx"),
-      "utf8",
-    );
+    // "What nAia Is Noticing" lives inside Style Passport now (V1 UX
+    // restructure) — passport.tsx is the real reader; the old standalone
+    // route only redirects there and no longer imports the taste engine.
+    const passportSrc = readFileSync(join(REPO_ROOT, "app/routes/passport.tsx"), "utf8");
     const overview = readFileSync(join(REPO_ROOT, "app/routes/my-naia._index.tsx"), "utf8");
-    assert.ok(/loadConfirmedTendencies/.test(whatNaiaNotices));
+    assert.ok(/loadConfirmedTendencies/.test(passportSrc));
     assert.ok(/loadStrongestConfirmedTendency/.test(overview));
+
+    const oldRouteSrc = readFileSync(join(REPO_ROOT, "app/routes/my-naia.what-naia-notices.tsx"), "utf8");
+    assert.ok(!/loadConfirmedTendencies/.test(oldRouteSrc), "the old route must not duplicate the UI/data access — it only redirects");
+    assert.ok(/redirect\(.*\/passport#noticing/.test(oldRouteSrc), "old links must redirect into Style Passport's Noticing section, not 404");
 
     const reconcileSrc = readFileSync(join(__dirname, "taste-reconcile.server.ts"), "utf8");
     assert.ok(/state:\s*["']CONFIRMED["']/.test(reconcileSrc));

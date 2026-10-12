@@ -185,7 +185,10 @@ describe("PP.8 — raw conflicting tendency is not consumed downstream", () => {
     const ROOT = join(__dirname, "../../..");
     const allowed = new Set([
       "app/routes/my-naia._index.tsx",
-      "app/routes/my-naia.what-naia-notices.tsx",
+      // "What nAia Is Noticing" moved into Style Passport (V1 UX restructure);
+      // the old route only redirects there now and imports nothing from the
+      // taste engine.
+      "app/routes/passport.tsx",
     ]);
     const files: string[] = [];
     const skip = new Set(["node_modules", ".git", "build", "dist", ".vercel"]);

@@ -1361,12 +1361,14 @@ describe("M — Saved navigation removed; StyleMe VIEW SAVED LOOKS; save fix; BO
     assert.ok(src.includes('"My Trend Edits"'), "My Trend Edits present");
   });
 
-  it("MyNaiaLayout.tsx Personalisation group has My nAia Model + What nAia Is Noticing", () => {
+  it("MyNaiaLayout.tsx Personalisation group has My nAia Model — What nAia Is Noticing moved into Style Passport", () => {
     const src = route("../components/my-naia/MyNaiaLayout.tsx");
     assert.ok(src.includes('"My nAia Model"'), "My nAia Model present");
     assert.ok(src.includes('"/my-naia-model"'), "My nAia Model links to /my-naia-model");
-    assert.ok(src.includes('"What nAia Is Noticing"'), "What nAia Is Noticing present");
-    assert.ok(src.includes('"/my-naia/what-naia-notices"'), "What nAia Is Noticing links correctly");
+    // V1 UX restructure: no longer a standalone nav destination — it's a
+    // section inside Style Passport (/passport#noticing) instead.
+    assert.ok(!src.includes('"What nAia Is Noticing"'), "What nAia Is Noticing nav item removed");
+    assert.ok(!src.includes('"/my-naia/what-naia-notices"'), "no nav link to the old standalone route");
   });
 
   it("MyNaiaLayout.tsx Account group has Plan & Usage + Settings & Privacy — Orders hidden", () => {
