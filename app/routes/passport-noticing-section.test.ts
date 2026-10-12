@@ -160,13 +160,64 @@ describe("Not Quite — first click opens an inline form, does not submit immedi
     assert.ok(cardDef.includes("Got it — nAia will be more cautious with this observation."), "new confirmation copy present");
     assert.ok(!cardDef.includes("Noted — nAia won't show this again."), "old abrupt copy removed");
   });
+
+  it("optionally shows the selected reason underneath the confirmation", () => {
+    assert.ok(cardDef.includes("You said:"), "reason line present");
+    assert.ok(cardDef.includes("selectedReason &&"), "only rendered when a reason was actually picked (Skip Details leaves it out)");
+  });
+});
+
+describe("QA BUG regression — a successful not-quite submission must not unmount the card before its confirmation is seen", () => {
+  const mergeDisplayListStart = passportSrc.indexOf("export function mergeDisplayList");
+  const sectionSrc = passportSrc.slice(mergeDisplayListStart, passportSrc.indexOf("\n// ─", mergeDisplayListStart));
+  const cardOnly = passportSrc.slice(
+    passportSrc.indexOf("NOT_QUITE_REASON_OPTIONS"),
+    mergeDisplayListStart,
+  );
+
+  it("the card reports a successful not-quite resolution upward via a callback, exactly once per resolution", () => {
+    assert.ok(cardOnly.includes("onResolvedNotQuite"), "card accepts an onResolvedNotQuite callback prop");
+    assert.ok(/useEffect\(\(\)\s*=>\s*\{[\s\S]*?savedFeedback === "not-quite"[\s\S]*?onResolvedNotQuite/.test(cardOnly), "reports upward when savedFeedback becomes not-quite");
+    assert.ok(cardOnly.includes("reportedRef"), "guards against reporting more than once for the same resolution");
+  });
+
+  it("the section tracks carried-over rejected tendencies in its own state, independent of the loader's confirmed list", () => {
+    assert.ok(sectionSrc.includes("carriedOverRejected"), "section-level state for carry-over");
+    assert.ok(sectionSrc.includes("useState<NoticingObservation[]>"), "typed as a list of observations");
+  });
+
+  it("mergeDisplayList combines the fresh confirmed list with any carry-over not already present, never duplicating", () => {
+    assert.ok(sectionSrc.includes("export function mergeDisplayList"), "pure, exported merge function — testable in isolation");
+    assert.ok(sectionSrc.includes("!confirmedIds.has(t.id)"), "filters out anything already present in the fresh list");
+  });
+
+  it("the section renders the merged displayList, not the loader's confirmed list directly", () => {
+    assert.ok(sectionSrc.includes("const displayList = mergeDisplayList(confirmed, carriedOverRejected)"), "computes the merged list");
+    assert.ok(sectionSrc.includes("displayList.map(t =>"), "maps over the merged list for rendering");
+    assert.ok(sectionSrc.includes("displayList.length > 0"), "the has-cards branch condition also accounts for carry-overs");
+    // Only the render JSX (the NoticingSection function body, after the
+    // merge helper) must avoid mapping the raw loader list directly —
+    // mergeDisplayList itself legitimately does `confirmed.map(t => t.id)`
+    // to build its exclusion set, which is not the bug this guards against.
+    const noticingSectionBody = sectionSrc.slice(sectionSrc.indexOf("function NoticingSection"));
+    assert.ok(!noticingSectionBody.includes("confirmed.map(t =>"), "render JSX no longer maps directly over the raw loader confirmed list");
+  });
+
+  it("does not weaken loadConfirmedTendencies' own REJECTED filter — the carry-over is purely a client-side display concern", () => {
+    // loadConfirmedTendencies itself (taste-reconcile.server.ts) is
+    // untouched by this fix — asserted again here, at the call site, as a
+    // belt-and-suspenders guard against ever threading a "show REJECTED
+    // rows" flag through to the loader.
+    assert.ok(passportSrc.includes("loadConfirmedTendencies(customer.id)"), "still calls the real, unmodified loader function");
+    assert.ok(!passportSrc.includes("includeRejected"), "no flag added to surface REJECTED rows from the server");
+  });
 });
 
 describe("No confirmed observations → compact Still Learning state, not an empty page", () => {
   it("renders the compact copy inline inside the section, never a separate empty page", () => {
     const sectionDef = passportSrc.slice(
       passportSrc.indexOf("function NoticingSection"),
-      passportSrc.indexOf("function NoticingSection") + 2500,
+      passportSrc.indexOf("function NoticingSection") + 3500,
     );
     assert.ok(sectionDef.includes("Still learning") || sectionDef.includes("STILL LEARNING"), "still-learning label present");
     assert.ok(

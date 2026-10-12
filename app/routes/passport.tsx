@@ -1188,10 +1188,35 @@ export function resolveSavedFeedback(
   return storedCustomerFeedback;
 }
 
-function NoticingObservationCard({ tendency }: { tendency: NoticingObservation }) {
+function NoticingObservationCard({
+  tendency,
+  onResolvedNotQuite,
+}: {
+  tendency: NoticingObservation;
+  // Called once a not-quite submission succeeds, so the parent section can
+  // keep rendering this tendency for the rest of the page session even
+  // after route revalidation removes it from the loader's `confirmed`
+  // array (loadConfirmedTendencies correctly excludes REJECTED rows — this
+  // never weakens that server-side filter, it only keeps the already-
+  // rejected card's confirmation on screen a little longer client-side).
+  onResolvedNotQuite?: (tendency: NoticingObservation) => void;
+}) {
   const feedbackFetcher = useFetcher<{ ok?: boolean; error?: string; feedback?: "accurate" | "not-quite" }>();
   const isPending = feedbackFetcher.state === "submitting";
   const savedFeedback = resolveSavedFeedback(feedbackFetcher.data, tendency.customerFeedback);
+
+  // Report a successful rejection upward exactly once. Without this, the
+  // very next action-triggered loader revalidation (React Router's
+  // default behavior — any fetcher action revalidates every loader on the
+  // page) drops this tendency from `confirmed` entirely, unmounting this
+  // card before its "Got it..." confirmation has had a chance to be seen.
+  const reportedRef = useRef(false);
+  useEffect(() => {
+    if (savedFeedback === "not-quite" && !reportedRef.current) {
+      reportedRef.current = true;
+      onResolvedNotQuite?.(tendency);
+    }
+  }, [savedFeedback, tendency, onResolvedNotQuite]);
 
   // First click on "Not quite" only opens this inline form — it must not
   // submit the rejection yet, and the observation stays fully visible
@@ -1258,9 +1283,16 @@ function NoticingObservationCard({ tendency }: { tendency: NoticingObservation }
       )}
 
       {savedFeedback === "not-quite" ? (
-        <p style={{ fontSize: "13px", opacity: 0.5, fontStyle: "italic", margin: 0 }}>
-          Got it — nAia will be more cautious with this observation.
-        </p>
+        <div>
+          <p style={{ fontSize: "13px", opacity: 0.5, fontStyle: "italic", margin: 0 }}>
+            Got it — nAia will be more cautious with this observation.
+          </p>
+          {selectedReason && (
+            <p style={{ fontSize: "12px", opacity: 0.45, margin: "6px 0 0" }}>
+              You said: {NOT_QUITE_REASON_OPTIONS.find(r => r.id === selectedReason)?.label ?? selectedReason}.
+            </p>
+          )}
+        </div>
       ) : savedFeedback === "accurate" ? (
         <p style={{ fontSize: "13px", opacity: 0.5, fontStyle: "italic", margin: 0 }}>Glad this resonates.</p>
       ) : notQuiteOpen ? (
@@ -1361,7 +1393,37 @@ function NoticingObservationCard({ tendency }: { tendency: NoticingObservation }
   );
 }
 
+// Pure merge logic, extracted for testability (see regression coverage in
+// passport-noticing-feedback.test.ts): the fresh, revalidated `confirmed`
+// list from the loader is always authoritative, but any carried-over
+// just-rejected tendency not present in it is appended once, by id, so it
+// keeps rendering for the rest of the page session.
+export function mergeDisplayList(
+  confirmed: NoticingObservation[],
+  carriedOverRejected: NoticingObservation[],
+): NoticingObservation[] {
+  const confirmedIds = new Set(confirmed.map(t => t.id));
+  return [...confirmed, ...carriedOverRejected.filter(t => !confirmedIds.has(t.id))];
+}
+
 function NoticingSection({ confirmed, candidateCount }: { confirmed: NoticingObservation[]; candidateCount: number }) {
+  // Page-session-only carry-over for a tendency that was just rejected.
+  // React Router revalidates every active loader after any fetcher action
+  // completes — so the instant a not-quite submission succeeds,
+  // loadConfirmedTendencies correctly drops the now-REJECTED row from the
+  // next `confirmed` array it returns (that server-side filter is never
+  // weakened). Without this, the card unmounts before its "Got it..."
+  // confirmation is ever actually seen. Resets to empty on a full page
+  // refresh or on leaving/returning to Passport, since both create a
+  // brand-new component tree with no client state at all — matching the
+  // required "disappears after refresh, not immediately" behavior.
+  const [carriedOverRejected, setCarriedOverRejected] = useState<NoticingObservation[]>([]);
+  const handleResolvedNotQuite = useCallback((tendency: NoticingObservation) => {
+    setCarriedOverRejected(prev => (prev.some(t => t.id === tendency.id) ? prev : [...prev, tendency]));
+  }, []);
+
+  const displayList = mergeDisplayList(confirmed, carriedOverRejected);
+
   return (
     <div id="noticing" style={{ borderTop: "1px solid rgba(40, 21, 12, 0.12)", marginTop: "48px", paddingTop: "40px" }}>
       <div className="sp-refresh-banner">
@@ -1375,10 +1437,10 @@ function NoticingSection({ confirmed, candidateCount }: { confirmed: NoticingObs
         </p>
       </div>
 
-      {confirmed.length > 0 ? (
+      {displayList.length > 0 ? (
         <div className="sp-ov-sections">
-          {confirmed.map(t => (
-            <NoticingObservationCard key={t.id} tendency={t} />
+          {displayList.map(t => (
+            <NoticingObservationCard key={t.id} tendency={t} onResolvedNotQuite={handleResolvedNotQuite} />
           ))}
         </div>
       ) : candidateCount > 0 ? (
