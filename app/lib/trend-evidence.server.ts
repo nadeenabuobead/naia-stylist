@@ -1322,16 +1322,20 @@ function pickWearablePartner(
 }
 
 // ---------------------------------------------------------------------------
-// Colour Direction — role-aware pair selection (Fix #2) + semantic novelty
-// (Fix #4). Item-ID diversity is not styling diversity: two pairs of blue
-// jeans are two different Closet rows but the same idea. These helpers
-// compare candidates by role + hue family + category — a "signature" — and
-// prefer a candidate with a genuinely different signature over a
-// higher-scoring near-duplicate, falling back to the near-duplicate only
-// when no semantically distinct alternative is actually wearable.
+// Role-aware pair selection (Fix #2) + semantic novelty (Fix #4), generalized
+// across every trend slug with a two-dimension profile (Colour Direction's
+// base-neutral/accent-colour; Modern Tailoring's tailored-anchor/
+// relaxed-counterpart; Soft Structure's structured-anchor/soft-flowing).
+// Item-ID diversity is not styling diversity: two pairs of blue jeans, or
+// two tailored-anchor pieces standing in for "the anchor" and "the
+// counterpart", are different Closet rows but the same idea. These helpers
+// compare candidates by role + a slug-appropriate "signature" and prefer a
+// candidate with a genuinely different signature over a higher-scoring
+// near-duplicate, falling back to the near-duplicate only when no
+// semantically distinct alternative is actually wearable.
 // ---------------------------------------------------------------------------
 
-type RoleSignature = { hueFamily: string | null; category: string };
+type RoleSignature = { hueFamily: string | null; category: string; subcategory: string | null };
 
 function itemHueFamily(item: ShopperClosetItemEvidence): string | null {
   const text = item.primaryColor ?? item.colors?.[0] ?? null;
@@ -1340,11 +1344,21 @@ function itemHueFamily(item: ShopperClosetItemEvidence): string | null {
 }
 
 function roleSignature(item: ShopperClosetItemEvidence, slug: string): RoleSignature {
-  return { hueFamily: itemHueFamily(item), category: getEffectiveCategory(item, slug) };
+  return {
+    hueFamily: slug === "spring-2026-colour-direction" ? itemHueFamily(item) : null,
+    category: getEffectiveCategory(item, slug),
+    subcategory: item.subcategory ?? null,
+  };
 }
 
-function sameSignature(a: RoleSignature, b: RoleSignature): boolean {
-  return a.hueFamily === b.hueFamily && a.category === b.category;
+// The fields checked, in priority order, when looking for a genuinely
+// different idea within the same role. Colour Direction's most meaningful
+// axis is hue family (two blue jeans vs. a blue-and-a-burgundy piece);
+// Modern Tailoring / Soft Structure have no colour axis, so category then
+// subcategory is the meaningful axis (a trouser vs. a skirt, even if both
+// are "tailored-anchor").
+function distinguishingFields(slug: string): Array<keyof RoleSignature> {
+  return slug === "spring-2026-colour-direction" ? ["hueFamily", "category"] : ["category", "subcategory"];
 }
 
 function bestOfRole(pool: DimensionScoredItem[], dimensionId: string): DimensionScoredItem | null {
@@ -1364,12 +1378,41 @@ function bestOfCandidates(candidates: DimensionScoredItem[]): DimensionScoredIte
   return best;
 }
 
+// Picks the best-scoring item from `candidates`, preferring one whose
+// signature genuinely differs from every signature in `avoidSignatures` —
+// tries each distinguishing field in priority order (most meaningful
+// first), only falling back to a same-signature candidate when nothing
+// distinct exists at all. A `null` value on the `avoid` side is never
+// treated as a constraint (e.g. an achromatic neutral with no hue family,
+// or an item with no subcategory) — there's nothing meaningful to avoid.
+function pickBestDistinct(
+  candidates: DimensionScoredItem[],
+  avoidSignatures: RoleSignature[],
+  slug: string,
+): DimensionScoredItem | null {
+  if (candidates.length === 0) return null;
+  if (avoidSignatures.length === 0) return bestOfCandidates(candidates);
+
+  for (const field of distinguishingFields(slug)) {
+    const distinct = candidates.filter((m) => {
+      const sig = roleSignature(m.item, slug);
+      return avoidSignatures.every((avoid) => avoid[field] === null || sig[field] !== avoid[field]);
+    });
+    const best = bestOfCandidates(distinct);
+    if (best) return best;
+  }
+
+  // No semantically distinct alternative exists; repetition of the same
+  // role+signature idea is the Closet's genuine only option.
+  return bestOfCandidates(candidates);
+}
+
 // Best wearable partner carrying a specific role, preferring one whose
-// signature (hue family + category) genuinely differs from every signature
-// in `avoidSignatures` — only falling back to a same-signature candidate
-// when no distinct one is wearable at all. With zero `avoidSignatures` this
-// is a plain "best wearable item of this role" pick (Route In's own
-// support, which has nothing yet to differ from).
+// signature genuinely differs from every signature in `avoidSignatures` —
+// only falling back to a same-signature candidate when no distinct one is
+// wearable at all. With zero `avoidSignatures` this is a plain "best
+// wearable item of this role" pick (Route In's own support, which has
+// nothing yet to differ from).
 function pickDiverseRoleMatch(
   anchor: DimensionScoredItem,
   pool: DimensionScoredItem[],
@@ -1384,65 +1427,48 @@ function pickDiverseRoleMatch(
     m.dimensionId === dimensionId &&
     categoriesAreWearablePair(getEffectiveCategory(anchor.item, slug), getEffectiveCategory(m.item, slug)),
   );
-  if (candidates.length === 0) return null;
-  if (avoidSignatures.length === 0) return bestOfCandidates(candidates);
-
-  // Tier 1 — a genuinely different hue family from every avoided signature.
-  const differentHue = candidates.filter((m) => {
-    const sig = roleSignature(m.item, slug);
-    return avoidSignatures.every((avoid) => avoid.hueFamily === null || sig.hueFamily !== avoid.hueFamily);
-  });
-  const tier1 = bestOfCandidates(differentHue);
-  if (tier1) return tier1;
-
-  // Tier 2 — same hue family is unavoidable, but at least a different category.
-  const differentCategory = candidates.filter((m) => {
-    const sig = roleSignature(m.item, slug);
-    return avoidSignatures.every((avoid) => sig.category !== avoid.category);
-  });
-  const tier2 = bestOfCandidates(differentCategory);
-  if (tier2) return tier2;
-
-  // Tier 3 — no semantically distinct alternative exists; repetition of the
-  // same role+hue+category idea is the Closet's genuine only option.
-  return bestOfCandidates(candidates);
+  return pickBestDistinct(candidates, avoidSignatures, slug);
 }
 
-// Colour Direction's own anchor+support pick: anchor is the strongest
-// base-neutral foundation piece when one exists (falling back to the
-// single strongest item overall for an accent-only or evidence-thin
-// Closet); support is the strongest wearable genuine accent-colour piece —
-// the simplest, most obvious entry, so no novelty preference here, only in
-// Look To Try's search relative to this pick.
-function selectColourDirectionPair(
+// This trend's own anchor+support pick, generalized from each slug's own
+// two-dimension profile (dimensionIdsForSlug): anchor is the strongest
+// primary-role piece when one exists (falling back to the single
+// strongest item overall for a secondary-role-only or evidence-thin
+// Closet); support is the strongest wearable genuine secondary-role
+// piece — the simplest, most obvious entry, so no novelty preference here,
+// only in Look To Try's search relative to this pick.
+function selectRoleAwarePair(
   pool: DimensionScoredItem[],
   exclude: Set<ShopperClosetItemEvidence>,
   slug: string,
 ): { anchor: DimensionScoredItem; support: DimensionScoredItem | null } | null {
-  const bestBase = bestOfRole(pool.filter((m) => !exclude.has(m.item)), "base-neutral");
-  const anchor = bestBase ?? pool.find((m) => !exclude.has(m.item)) ?? null;
+  const [primaryRole, secondaryRole] = dimensionIdsForSlug(slug);
+  const bestPrimary = primaryRole ? bestOfRole(pool.filter((m) => !exclude.has(m.item)), primaryRole) : null;
+  const anchor = bestPrimary ?? pool.find((m) => !exclude.has(m.item)) ?? null;
   if (!anchor) return null;
 
   const support =
-    pickDiverseRoleMatch(anchor, pool, "accent-colour", exclude, [], slug) ??
+    (secondaryRole ? pickDiverseRoleMatch(anchor, pool, secondaryRole, exclude, [], slug) : null) ??
     pickWearablePartner(anchor, pool, exclude, slug);
   return { anchor, support };
 }
 
-// Your Closet Shows for Colour Direction: up to 2 of the strongest
-// base-neutral pieces interleaved with up to 2 of the strongest
-// accent-colour pieces — never padded with a 4th irrelevant neutral just to
-// hit a count when fewer genuinely useful pieces exist (e.g. only one real
-// accent item in the whole Closet), and never filling two slots of the same
-// role with the same hue-family+category idea (two pairs of blue jeans)
-// when a genuinely different one (a burgundy piece) is also strong evidence.
-function selectColourDirectionClosetShows(
+// Your Closet Shows for this trend: up to 2 of the strongest primary-role
+// pieces interleaved with up to 2 of the strongest secondary-role pieces —
+// never padded with a 4th irrelevant same-role item just to hit a count
+// when fewer genuinely useful pieces exist (e.g. only one real
+// secondary-role item in the whole Closet), and never filling two slots of
+// the same role with the same signature idea (two pairs of blue jeans, or
+// two tailored-anchor trousers) when a genuinely different one is also
+// strong evidence.
+function selectRoleAwareClosetShows(
   pool: DimensionScoredItem[],
   slug: string,
   max: number,
 ): DimensionScoredItem[] {
-  const base = pool.filter((m) => m.dimensionId === "base-neutral").sort((a, b) => b.score - a.score);
-  const accent = pool.filter((m) => m.dimensionId === "accent-colour").sort((a, b) => b.score - a.score);
+  const [primaryRole, secondaryRole] = dimensionIdsForSlug(slug);
+  const primary = primaryRole ? pool.filter((m) => m.dimensionId === primaryRole).sort((a, b) => b.score - a.score) : [];
+  const secondary = secondaryRole ? pool.filter((m) => m.dimensionId === secondaryRole).sort((a, b) => b.score - a.score) : [];
   const picked: DimensionScoredItem[] = [];
   const used = new Set<ShopperClosetItemEvidence>();
   const maxPerRole = Math.ceil(max / 2);
@@ -1453,45 +1479,47 @@ function selectColourDirectionClosetShows(
   // list instead of a wearable-partner search.
   function pickNextForRole(roleSorted: DimensionScoredItem[], alreadyPicked: DimensionScoredItem[]): DimensionScoredItem | null {
     const remaining = roleSorted.filter((m) => !used.has(m.item));
-    if (remaining.length === 0) return null;
     const avoidSignatures = alreadyPicked.map((m) => roleSignature(m.item, slug));
-    if (avoidSignatures.length === 0) return remaining[0];
-
-    const differentHue = remaining.filter((m) => {
-      const sig = roleSignature(m.item, slug);
-      return avoidSignatures.every((avoid) => avoid.hueFamily === null || sig.hueFamily !== avoid.hueFamily);
-    });
-    if (differentHue.length > 0) return differentHue[0];
-
-    const differentCategory = remaining.filter((m) => {
-      const sig = roleSignature(m.item, slug);
-      return avoidSignatures.every((avoid) => sig.category !== avoid.category);
-    });
-    if (differentCategory.length > 0) return differentCategory[0];
-
-    return remaining[0];
+    return pickBestDistinct(remaining, avoidSignatures, slug);
   }
 
-  const pickedBase: DimensionScoredItem[] = [];
-  const pickedAccent: DimensionScoredItem[] = [];
+  const pickedPrimary: DimensionScoredItem[] = [];
+  const pickedSecondary: DimensionScoredItem[] = [];
   for (let i = 0; i < maxPerRole; i++) {
     if (picked.length < max) {
-      const next = pickNextForRole(base, pickedBase);
+      const next = pickNextForRole(primary, pickedPrimary);
       if (next) {
         picked.push(next);
         used.add(next.item);
-        pickedBase.push(next);
+        pickedPrimary.push(next);
       }
     }
     if (picked.length < max) {
-      const next = pickNextForRole(accent, pickedAccent);
+      const next = pickNextForRole(secondary, pickedSecondary);
       if (next) {
         picked.push(next);
         used.add(next.item);
-        pickedAccent.push(next);
+        pickedSecondary.push(next);
       }
     }
   }
+
+  // Fill any remaining slots with items that qualified on real text-overlap
+  // evidence but carry neither named role (dimensionId === null) — real
+  // evidence this trend's own two roles don't capture, not padding. This
+  // never pulls in a 3rd/4th same-role item once a role's own diverse picks
+  // are exhausted — that would reopen the "pad with a near-duplicate"
+  // problem Fix #2/#4 closed. A slug still correctly returns fewer than
+  // `max` items when no further qualifying evidence of any kind exists.
+  if (picked.length < max) {
+    const roleless = pool.filter((m) => m.dimensionId === null && !used.has(m.item)).sort((a, b) => b.score - a.score);
+    for (const m of roleless) {
+      if (picked.length >= max) break;
+      picked.push(m);
+      used.add(m.item);
+    }
+  }
+
   return picked;
 }
 
@@ -1618,44 +1646,17 @@ function buildALookToTry(
   return `Your ${name} with quieter, simpler pieces. Clean flat shoe; keep accessories minimal.`;
 }
 
-// ---------------------------------------------------------------------------
-// OUTCOME C — Look To Try override.
-// When Outcome C applies (Closet already covers the trend), Look To Try should
-// demonstrate that with the customer's actual items — not introduce missing
-// garment categories. Called as a post-processing override in buildShopperEdit.
-// Returns null when no owned-route override is available (fallback = original aLookToTry).
-// ---------------------------------------------------------------------------
-
-function buildOutcomeCLookToTry(
-  namedMatches: { item: ShopperClosetItemEvidence }[],
-  slug: string,
-  workCtx: WorkContextLabel,
-): string | null {
-  if (namedMatches.length === 0) return null;
-  const config = TREND_COVERAGE_CONFIG[slug];
-  if (!config) return null;
-
-  const scoredCategories = new Set(namedMatches.map(({ item }) => item.category));
-  const satisfied = config.viableRoutes.filter((r) => routeIsSatisfied(r, scoredCategories));
-
-  const ctxClose =
-    workCtx === "work-meetings"        ? " This holds for work or meetings."        :
-    workCtx === "events"               ? " Occasion-ready as it stands."             :
-    workCtx === "work-meetings-events" ? " This holds for work, meetings, or events." : "";
-
-  if (slug === "spring-2026-soft-structure" && satisfied.some((r) => r.id === "one-piece")) {
-    const dress = namedMatches.find(({ item }) => item.category === "DRESSES");
-    if (!dress) return null;
-    const dressName = dress.item.name!;
-    const layer = namedMatches.find(({ item }) => item.category !== "DRESSES");
-    if (layer) {
-      return `Your ${dressName} with a clean flat and minimal jewellery.${ctxClose} If you want more structure, add your ${layer.item.name!} as the finishing layer.`;
-    }
-    return `Your ${dressName} worn alone with a clean flat. One piece covers the full direction — keep jewellery minimal and the shoe simple.${ctxClose}`;
-  }
-
-  return null;
-}
+// Soft Structure previously had an OUTCOME C override here: its old
+// category-only "one-piece" route treated a single qualifying DRESS as
+// full coverage on its own, so Look To Try showed that dress worn alone.
+// Under the corrected role-based coverage model (see TREND_COVERAGE_CONFIG
+// below), a single item carries exactly one role — it can never, by
+// itself, prove both ROLE:structured-anchor and ROLE:soft-flowing, so
+// "one dress covers everything" is no longer a claim this report can
+// honestly make. Outcome C now only fires when the Closet genuinely
+// covers both roles, and the default aLookToTry (built from the real
+// anchor+support pair) already names those two real pieces directly — no
+// override is needed for any slug.
 
 // ---------------------------------------------------------------------------
 // YOUR BEST ROUTE IN — named Closet item path or Passport-only path.
@@ -1837,33 +1838,26 @@ type TrendCoverageConfig = {
 };
 
 const TREND_COVERAGE_CONFIG: Record<string, TrendCoverageConfig> = {
+  // ROLE-based, not category-based (see the ROLE:<dimensionId> tokens
+  // assessWorthInvesting adds to scoredCategories for every slug with a
+  // dimension profile). Live QA confirmed the category-only version was
+  // insufficient: two tailored-anchor pieces (a blazer and a trouser, both
+  // scoring on tailored-anchor alone, zero relaxed-counterpart evidence)
+  // satisfied BOTH old category routes ("outerwear-anchor" and
+  // "trouser-anchor") and produced a false "no purchase needed" — owning
+  // items in compatible categories is not the same as owning genuine
+  // evidence for both of this method's actual roles.
   "spring-2026-soft-structure": {
     viableRoutes: [
-      // one-piece: a qualifying dress covers the full direction alone
-      { id: "one-piece",  requires: [["DRESSES"]] },
-      // layered: proportioned outerwear + grounding bottom
-      { id: "layered",    requires: [["OUTERWEAR"], ["BOTTOMS"]] },
-      // separates: proportioned top + proportioned bottom
-      { id: "separates",  requires: [["TOPS"], ["BOTTOMS"]] },
+      { id: "structured-and-soft", requires: [["ROLE:structured-anchor"], ["ROLE:soft-flowing"]] },
     ],
-    optionalRole: {
-      categories: ["OUTERWEAR"],
-      appliesToRoutes: ["separates"],
-      investNote: "A longline blazer or fluid outer layer would give you a second way to build the silhouette and extend it across more occasions.",
-    },
+    optionalRole: null,
   },
   "modern-tailoring-spring-2026": {
     viableRoutes: [
-      // outerwear as the tailored anchor; relaxed counterpart is assumed
-      { id: "outerwear-anchor", requires: [["OUTERWEAR"]] },
-      // trouser/skirt as the tailored anchor; knit or soft top is assumed
-      { id: "trouser-anchor",   requires: [["BOTTOMS"]] },
+      { id: "tailored-and-relaxed", requires: [["ROLE:tailored-anchor"], ["ROLE:relaxed-counterpart"]] },
     ],
-    optionalRole: {
-      categories: ["OUTERWEAR", "BOTTOMS"],
-      appliesToRoutes: ["outerwear-anchor", "trouser-anchor"],
-      investNote: "A second tailored separates piece — a trouser if you have the blazer, a blazer if you have the trouser — would open different proportion contrasts without repeating the same look.",
-    },
+    optionalRole: null,
   },
   "spring-2026-colour-direction": {
     // ROLE-based, not category-based (see the ROLE:<dimensionId> tokens
@@ -1942,21 +1936,21 @@ function assessWorthInvesting(
     return { worthInvestingStatement: null, partToTake: staticBullets };
   }
 
-  // Colour Direction coverage must be ROLE-aware, not just category-aware —
-  // a neutral accessory (a black beanie, a neutral tote) satisfying
-  // "BAGS/SHOES/ACCESSORIES exists" used to be enough to call the accent
-  // role covered, even with zero genuine accent-colour evidence. For this
-  // slug only, each item's own dimensionId (base-neutral / accent-colour,
-  // from scoreItemAttributes — never re-derived here) is added as an
-  // additional ROLE:<dimensionId> token alongside its real category, and
-  // the viable routes below are defined in terms of those role tokens, not
-  // raw categories. Modern Tailoring / Soft Structure are untouched — their
-  // routes still reference real categories, which these extra tokens never
-  // collide with.
+  // Coverage must be ROLE-aware, not just category-aware, for every slug
+  // with a two-dimension profile — owning a category-compatible item used
+  // to be enough to call a role "covered" even with zero genuine evidence
+  // for that role (a neutral accessory satisfying Colour Direction's
+  // accent category; two tailored-anchor pieces satisfying both of Modern
+  // Tailoring's old category routes with zero relaxed-counterpart
+  // evidence). Each item's own dimensionId (from scoreItemAttributes —
+  // never re-derived here) is added as an additional ROLE:<dimensionId>
+  // token alongside its real category, and the viable routes below are
+  // defined in terms of those role tokens for these slugs, not raw
+  // categories. A slug with no profile falls back to real categories only.
   const scoredCategories = new Set<string>();
   for (const s of scored) {
     scoredCategories.add(getEffectiveCategory(s.item, slug));
-    if (slug === "spring-2026-colour-direction" && s.dimensionId) {
+    if (dimensionIdsForSlug(slug).length > 0 && s.dimensionId) {
       scoredCategories.add(`ROLE:${s.dimensionId}`);
     }
   }
@@ -2354,18 +2348,6 @@ export function buildShopperEdit(
 
   const scored: DimensionScoredItem[] = [];
 
-  // TEMP DIAGNOSTIC — live Modern Tailoring / Soft Structure Closet QA.
-  // Confirmed manual-QA failure: both reports selected the exact same 4
-  // Closet pieces, only reordered. This captures each item's text-overlap
-  // hits, attribute dimension scores, and final score/role separately (the
-  // main loop below collapses them into one combined score) so the actual
-  // root cause — missing GI fields, overlapping dimension weights, or
-  // text-overlap dominating ties — can be read directly rather than
-  // guessed. Server-side log only, never customer-facing. Remove once the
-  // diagnostic is closed.
-  const mtSsDiagnostic: Array<{ item: ShopperClosetItemEvidence } & Record<string, unknown>> = [];
-  const captureMtSsDiagnostic = slug === "modern-tailoring-spring-2026" || slug === "spring-2026-soft-structure";
-
   for (const item of closetItemsList) {
     if (!compatibleCategories.has(item.category)) continue;
     if (item.subcategory && excludedSubcategories.has(item.subcategory.toLowerCase())) continue;
@@ -2396,60 +2378,36 @@ export function buildShopperEdit(
     if (item.name) score += 3;
     if (item.imageUrl) score += 1;
     scored.push({ item, score, dimensionId: attribute.bestDimensionId });
-
-    if (captureMtSsDiagnostic) {
-      mtSsDiagnostic.push({
-        item,
-        name: item.name,
-        category: item.category,
-        subcategory: item.subcategory,
-        styleTags: item.styleTags,
-        material: item.material,
-        silhouette: item.silhouette ?? null,
-        fitProfile: item.fitProfile ?? null,
-        formality: item.formality ?? null,
-        pattern: item.pattern ?? null,
-        textOverlapHits: hits,
-        textOverlapScore: hits.length,
-        dimensionScores: attribute.dimensionScores,
-        bestDimensionId: attribute.bestDimensionId,
-        finalScore: score,
-      });
-    }
   }
 
   scored.sort((a, b) => b.score - a.score);
   const namedScored = scored.filter((m) => m.item.name);
 
-  if (captureMtSsDiagnostic) {
-    const rankById = new Map(scored.map((s, i) => [s.item, i + 1]));
-    const withRank = mtSsDiagnostic
-      .map(({ item, ...rest }) => ({ ...rest, finalRank: rankById.get(item) ?? null }))
-      .sort((a, b) => ((a.finalRank as number) ?? 999) - ((b.finalRank as number) ?? 999));
-    console.log(`TEMP DIAGNOSTIC — ${slug} Closet breakdown`, JSON.stringify(withRank));
-  }
-
   // Each section now runs its own selection against the same scored pool,
-  // instead of every section reading the same fixed top-2 slice. Colour
-  // Direction gets its own role-aware pair selection (Fix #2) — the
-  // generic "best overall + whatever's wearable with it" logic has no
-  // concept of base vs. accent, so a second neutral accessory could stand
-  // in for the accent even when real accent-colour evidence exists
-  // elsewhere. Modern Tailoring / Soft Structure are untouched.
-  const isColourDirection = slug === "spring-2026-colour-direction";
+  // instead of every section reading the same fixed top-2 slice. Every slug
+  // with a two-dimension profile (dimensionIdsForSlug) gets role-aware pair
+  // selection (Fix #2) — the generic "best overall + whatever's wearable
+  // with it" logic has no concept of primary vs. secondary role, so a
+  // second same-role item (a second neutral accessory, a second
+  // tailored-anchor piece) could stand in for the genuine secondary-role
+  // evidence that exists elsewhere in the Closet. A slug with no profile
+  // (or neither role ever populated) falls back to the original generic
+  // selection untouched.
+  const [primaryRole, secondaryRole] = dimensionIdsForSlug(slug);
+  const hasRoleProfile = Boolean(primaryRole && secondaryRole);
 
-  const closetShowsScored = isColourDirection
-    ? selectColourDirectionClosetShows(namedScored, slug, 4)
+  const closetShowsScored = hasRoleProfile
+    ? selectRoleAwareClosetShows(namedScored, slug, 4)
     : selectClosetShowsItems(namedScored, slug, 4);
 
-  const routeInSelection = isColourDirection
-    ? selectColourDirectionPair(namedScored, new Set(), slug)
+  const routeInSelection = hasRoleProfile
+    ? selectRoleAwarePair(namedScored, new Set(), slug)
     : null;
 
-  const routeInAnchor = isColourDirection
+  const routeInAnchor = hasRoleProfile
     ? (routeInSelection?.anchor ?? null)
     : (namedScored[0] ?? null);
-  const routeInSupport = isColourDirection
+  const routeInSupport = hasRoleProfile
     ? (routeInSelection?.support ?? null)
     : (routeInAnchor ? pickWearablePartner(routeInAnchor, namedScored, new Set(), slug) : null);
   const routeInPair: DimensionScoredItem[] = routeInAnchor
@@ -2458,17 +2416,18 @@ export function buildShopperEdit(
 
   // A Look To Try prefers a DIFFERENT supporting piece from Route In where
   // the Closet supports it; reuse only happens when no other wearable
-  // partner exists — intentional, not automatic. For Colour Direction,
-  // "different" means a genuinely different styling idea — a different hue
-  // family or category, not merely a different SKU of the same idea (two
-  // pairs of blue jeans). pickDiverseRoleMatch's own tiered fallback only
-  // repeats Route In's exact signature when nothing semantically distinct
-  // is wearable at all.
+  // partner exists — intentional, not automatic. "Different" means a
+  // genuinely different styling idea — a different hue family/category for
+  // Colour Direction, a different category/subcategory for Modern
+  // Tailoring / Soft Structure — not merely a different SKU of the same
+  // idea (two pairs of blue jeans, two tailored-anchor trousers).
+  // pickDiverseRoleMatch's own tiered fallback only repeats Route In's
+  // exact signature when nothing semantically distinct is wearable at all.
   const usedByRouteIn = new Set<ShopperClosetItemEvidence>(routeInSupport ? [routeInSupport.item] : []);
   const routeInSupportSignature = routeInSupport ? [roleSignature(routeInSupport.item, slug)] : [];
   const lookSupport = routeInAnchor
-    ? (isColourDirection
-        ? (pickDiverseRoleMatch(routeInAnchor, namedScored, "accent-colour", usedByRouteIn, routeInSupportSignature, slug)
+    ? (hasRoleProfile && secondaryRole
+        ? (pickDiverseRoleMatch(routeInAnchor, namedScored, secondaryRole, usedByRouteIn, routeInSupportSignature, slug)
             ?? pickWearablePartner(routeInAnchor, namedScored, usedByRouteIn, slug)
             ?? routeInSupport)
         : (pickWearablePartner(routeInAnchor, namedScored, usedByRouteIn, slug) ?? routeInSupport))
@@ -2683,14 +2642,11 @@ export function buildShopperEdit(
     return "Complete your Style Passport to unlock your personal read of this direction — your Style DNA and Lifestyle are how nAia builds this edit for you.";
   })();
 
-  // Outcome C aware override: when the Closet already covers the trend, prefer a Look
-  // To Try built from the actual qualifying items rather than introducing missing garments.
-  // Reads the full closetShowsScored pool, not just the Route In anchor/support pair —
-  // a one-piece DRESS route needs to find a dress even when it wasn't chosen as the
-  // single strongest overall anchor.
-  const finalLookToTry = worthInvestingStatement !== null
-    ? (buildOutcomeCLookToTry(closetShowsScored, slug, workCtx) ?? aLookToTry)
-    : aLookToTry;
+  // aLookToTry is already built from the real role-aware anchor+support
+  // pair (see selectRoleAwarePair above), so it already demonstrates
+  // Outcome C's "you can already wear this" with the customer's actual
+  // items — no separate override is needed here.
+  const finalLookToTry = aLookToTry;
 
   const coveredClosetCategories = [...new Set(scored.map((s) => getEffectiveCategory(s.item, slug)))];
 

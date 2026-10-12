@@ -208,13 +208,22 @@ describe("V1 — Worth Investing In still produces a real gap OR no-purchase-nee
     assert.equal(edit.worthInvestingStatement, null);
   });
 
-  it("Outcome C: both tailored-anchor routes are covered (no optional role left missing) → 'no purchase needed', grounded in the actual owned pieces", () => {
+  it("two tailored-anchor items (OUTERWEAR + BOTTOMS), zero relaxed-counterpart evidence → still a real gap, not 'no purchase needed' (the exact live-QA false-coverage bug: owning both OLD category routes is not the same as owning both real roles)", () => {
     const closet = [
       item({ name: "Structured Navy Blazer", category: "OUTERWEAR", fitProfile: "tailored", formality: "business-formal" }),
       item({ name: "Tailored Wide-Leg Trouser", category: "BOTTOMS", fitProfile: "tailored" }),
     ];
     const edit = buildShopperEdit(MODERN_TAILORING_REPORT, evidence(closet));
-    assert.ok(edit.worthInvestingStatement !== null, "a satisfied route produces a no-purchase-needed statement");
+    assert.equal(edit.worthInvestingStatement, null, "category presence alone (OUTERWEAR + BOTTOMS) must not satisfy coverage when every owned item is tailored-anchor and no relaxed-counterpart evidence exists at all");
+  });
+
+  it("Outcome C: genuine evidence for BOTH roles (tailored-anchor + relaxed-counterpart) → 'no purchase needed', grounded in the actual owned pieces", () => {
+    const closet = [
+      item({ name: "Structured Navy Blazer", category: "OUTERWEAR", fitProfile: "tailored", formality: "business-formal" }),
+      item({ name: "Relaxed Chambray Shirt", category: "TOPS", fitProfile: "relaxed", material: "jersey" }),
+    ];
+    const edit = buildShopperEdit(MODERN_TAILORING_REPORT, evidence(closet));
+    assert.ok(edit.worthInvestingStatement !== null, "genuine evidence for both roles produces a no-purchase-needed statement");
     assert.match(edit.worthInvestingStatement!, /do not need to buy/i);
     assert.ok(edit.worthInvestingStatement!.includes("Structured Navy Blazer"), "the statement is grounded in the actual owned piece, not invented");
   });
@@ -860,5 +869,175 @@ describe("Fix #4 — repetition of the same hue-family+category idea remains all
       "a real accent is still named even though both candidates share the same hue family and category",
     );
     assert.ok(lookToTryNames.length > 0, "A Look To Try still produces a real pairing — repetition here is truthful, not a bug, since no distinct alternative exists");
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════
+// Fix #5 — generalized role-aware selection for Modern Tailoring / Soft
+// Structure. Live staging QA confirmed both reports selected the exact
+// same 4 Closet pieces (only reordered) because Route In / A Look To Try
+// used the generic "global top scorer + next wearable scorer" path, which
+// has no concept of primary vs. secondary role — so a second tailored-
+// anchor item stood in for the genuine relaxed-counterpart/soft-flowing
+// evidence that existed elsewhere in the Closet. These tests prove the
+// same role-aware + semantic-novelty machinery already built and tested
+// for Colour Direction now applies to Modern Tailoring and Soft Structure
+// via each slug's own real dimensionIdsForSlug profile — not via any new,
+// slug-specific logic or hard-coded item name.
+//
+// Synthetic items are modeled on the real staging Closet shape (a tailored
+// blazer, tailored trousers, a relaxed chambray shirt, a draped flowy maxi
+// skirt, a relaxed button-down) without using the real customer's actual
+// item names.
+// ═════════════════════════════════════════════════════════════════════════
+
+function tailoredBlazer(name = "Tailored Blazer") {
+  return item({ name, category: "OUTERWEAR", subcategory: "blazer", fitProfile: "tailored", silhouette: "straight", formality: "business-formal", material: "wool" });
+}
+function tailoredTrousers(name = "Tailored Trousers") {
+  return item({ name, category: "BOTTOMS", subcategory: "trousers", fitProfile: "tailored", silhouette: "straight", formality: "business-casual", material: "wool" });
+}
+function relaxedChambrayShirt(name = "Relaxed Chambray Shirt") {
+  return item({ name, category: "TOPS", subcategory: "button-up shirt", fitProfile: "relaxed", silhouette: "straight", formality: "business-casual", material: "cotton" });
+}
+function drapedFlowyMaxiSkirt(name = "Draped Flowy Maxi Skirt") {
+  // silhouette "wrap" + a non-soft material deliberately gives this item a
+  // much stronger soft-flowing score (fitProfile + silhouette bonus) than
+  // relaxed-counterpart score (fitProfile only, no TOPS category bonus) —
+  // the real-world asymmetry that makes it a clear Soft Structure pick but
+  // only a middling Modern Tailoring one, used to prove genuine divergence
+  // below rather than relying on a coincidental tie.
+  return item({ name, category: "BOTTOMS", subcategory: "skirt", fitProfile: "flowy", silhouette: "wrap", formality: "smart-casual" });
+}
+function relaxedButtonDown(name = "Relaxed Button-Down") {
+  return item({ name, category: "TOPS", subcategory: "button-up shirt", fitProfile: "relaxed", silhouette: "straight", formality: "business-casual", material: "cotton" });
+}
+function relaxedLinenTrouser(name = "Relaxed Linen Trouser") {
+  // A third, genuinely distinct secondary-role candidate (BOTTOMS/trousers,
+  // not TOPS like the shirt or skirt-subcategory like the draped skirt) —
+  // used where a test needs real score-driven divergence between Modern
+  // Tailoring and Soft Structure without the semantic-novelty dedup logic
+  // (Fix #4/#5) stepping in to swap out a near-duplicate first.
+  return item({ name, category: "BOTTOMS", subcategory: "trousers", fitProfile: "relaxed", silhouette: "straight", formality: "casual" });
+}
+
+describe("Fix #5 — Modern Tailoring Route In uses the real primary + secondary role, not two anchor items", () => {
+  it("Route In = tailored-anchor + relaxed-counterpart, not the second tailored-anchor item", () => {
+    const closet = [tailoredBlazer(), tailoredTrousers(), relaxedChambrayShirt()];
+    const edit = buildShopperEdit(MODERN_TAILORING_REPORT, evidence(closet));
+    const routeInNames = edit.routeInItems.map((i) => i.name);
+    assert.ok(routeInNames.includes("Tailored Blazer"), "the strongest tailored-anchor item is the anchor");
+    assert.ok(routeInNames.includes("Relaxed Chambray Shirt"), "the genuine relaxed-counterpart item is the support");
+    assert.ok(!routeInNames.includes("Tailored Trousers"), "a second tailored-anchor item is not used as the support when real relaxed-counterpart evidence exists");
+  });
+});
+
+describe("Fix #5 — Soft Structure Route In uses structured-anchor + soft-flowing, not two structured items", () => {
+  it("Route In = structured-anchor + soft-flowing, not a second structured item", () => {
+    const closet = [tailoredBlazer(), tailoredTrousers(), drapedFlowyMaxiSkirt()];
+    const edit = buildShopperEdit(SOFT_STRUCTURE_REPORT, evidence(closet));
+    const routeInNames = edit.routeInItems.map((i) => i.name);
+    assert.ok(routeInNames.includes("Tailored Blazer"), "the strongest structured-anchor item is the anchor");
+    assert.ok(routeInNames.includes("Draped Flowy Maxi Skirt"), "the genuine soft-flowing item is the support");
+    assert.ok(!routeInNames.includes("Tailored Trousers"), "a second structured item is not used as the support when real soft-flowing evidence exists");
+  });
+});
+
+describe("Fix #5 — Modern Tailoring and Soft Structure may share a genuine anchor but do not collapse to the same full evidence set", () => {
+  it("with more secondary-role candidates than slots, the two reports' differing weights select a genuinely different full evidence set", () => {
+    // 2 primary-role items + 3 genuinely distinct secondary-role candidates
+    // (one more than the 2 slots available, each a different
+    // category/subcategory so Fix #4/#5's own near-duplicate avoidance
+    // doesn't itself decide the outcome) — Modern Tailoring's
+    // relaxed-counterpart formula favours the TOPS piece (category bonus);
+    // Soft Structure's soft-flowing formula favours the wrap-silhouette
+    // skirt instead (silhouette bonus, no category bonus to lose). Each
+    // report's own weighting decides which candidate it leaves out.
+    const closet = [
+      tailoredBlazer(), tailoredTrousers(),
+      relaxedChambrayShirt(), relaxedLinenTrouser(), drapedFlowyMaxiSkirt(),
+    ];
+    const mtEdit = buildShopperEdit(MODERN_TAILORING_REPORT, evidence(closet));
+    const ssEdit = buildShopperEdit(SOFT_STRUCTURE_REPORT, evidence(closet));
+
+    const mtRouteIn = mtEdit.routeInItems.map((i) => i.name).sort();
+    const ssRouteIn = ssEdit.routeInItems.map((i) => i.name).sort();
+    assert.notDeepEqual(mtRouteIn, ssRouteIn, "Route In's pairing differs between the two reports even though both may use the same anchor");
+
+    const mtShows = new Set(mtEdit.evidenceClosetItems.map((i) => i.name));
+    const ssShows = new Set(ssEdit.evidenceClosetItems.map((i) => i.name));
+    assert.notDeepEqual([...mtShows].sort(), [...ssShows].sort(), "Closet Shows' full evidence set differs between the two reports — this is the exact live-QA regression (same 4 items, only reordered)");
+    assert.ok(mtShows.has("Relaxed Linen Trouser"), "Modern Tailoring's category-weighted formula keeps the trouser over the skirt");
+    assert.ok(ssShows.has("Draped Flowy Maxi Skirt"), "Soft Structure's silhouette-weighted formula surfaces the wrap-silhouette skirt instead");
+  });
+
+  it("a blazer that genuinely belongs in both reports may legitimately appear in both — shared anchors are not forced apart", () => {
+    const closet = [tailoredBlazer(), relaxedChambrayShirt(), drapedFlowyMaxiSkirt()];
+    const mtEdit = buildShopperEdit(MODERN_TAILORING_REPORT, evidence(closet));
+    const ssEdit = buildShopperEdit(SOFT_STRUCTURE_REPORT, evidence(closet));
+    assert.ok(mtEdit.routeInItems.some((i) => i.name === "Tailored Blazer"), "MT genuinely uses the blazer as its anchor");
+    assert.ok(ssEdit.routeInItems.some((i) => i.name === "Tailored Blazer"), "SS genuinely uses the same blazer as its anchor — legitimate reuse, not a bug");
+  });
+});
+
+describe("Fix #5 — A Look To Try differs meaningfully from Route In for Modern Tailoring and Soft Structure", () => {
+  it("Modern Tailoring: A Look To Try prefers a different relaxed-counterpart candidate than Route In used, when one exists", () => {
+    const closet = [tailoredBlazer(), relaxedChambrayShirt(), relaxedButtonDown()];
+    const edit = buildShopperEdit(MODERN_TAILORING_REPORT, evidence(closet));
+    const routeInNames = new Set(edit.routeInItems.map((i) => i.name));
+    const lookToTryNames = new Set(edit.lookToTryItems.map((i) => i.name));
+    assert.notDeepEqual([...routeInNames].sort(), [...lookToTryNames].sort(), "Route In and A Look To Try use different relaxed-counterpart pieces when two exist");
+  });
+
+  it("Soft Structure: A Look To Try prefers a genuinely different composition from Route In when the Closet supports it", () => {
+    const closet = [tailoredBlazer(), drapedFlowyMaxiSkirt(), tailoredTrousers()];
+    const edit = buildShopperEdit(SOFT_STRUCTURE_REPORT, evidence(closet));
+    const routeInNames = new Set(edit.routeInItems.map((i) => i.name));
+    const lookToTryNames = new Set(edit.lookToTryItems.map((i) => i.name));
+    assert.notDeepEqual([...routeInNames].sort(), [...lookToTryNames].sort(), "Route In and A Look To Try differ when a valid alternative composition exists");
+  });
+});
+
+describe("Fix #5 — Closet Shows represents evidence from both configured roles for Modern Tailoring and Soft Structure", () => {
+  it("Modern Tailoring: Closet Shows includes both a tailored-anchor piece and a relaxed-counterpart piece", () => {
+    const closet = [tailoredBlazer(), tailoredTrousers(), relaxedChambrayShirt()];
+    const edit = buildShopperEdit(MODERN_TAILORING_REPORT, evidence(closet));
+    const shown = new Set(edit.evidenceClosetItems.map((i) => i.name));
+    assert.ok(shown.has("Tailored Blazer") || shown.has("Tailored Trousers"), "a tailored-anchor piece is represented");
+    assert.ok(shown.has("Relaxed Chambray Shirt"), "the genuine relaxed-counterpart piece is represented, not displaced by a second anchor item");
+  });
+
+  it("Soft Structure: Closet Shows includes both a structured-anchor piece and a soft-flowing piece", () => {
+    const closet = [tailoredBlazer(), tailoredTrousers(), drapedFlowyMaxiSkirt()];
+    const edit = buildShopperEdit(SOFT_STRUCTURE_REPORT, evidence(closet));
+    const shown = new Set(edit.evidenceClosetItems.map((i) => i.name));
+    assert.ok(shown.has("Tailored Blazer") || shown.has("Tailored Trousers"), "a structured-anchor piece is represented");
+    assert.ok(shown.has("Draped Flowy Maxi Skirt"), "the genuine soft-flowing piece is represented, not displaced by a second anchor item");
+  });
+});
+
+describe("Fix #5 — Worth Investing In cannot declare coverage from category presence alone for Modern Tailoring or Soft Structure", () => {
+  it("Modern Tailoring: two tailored-anchor items (OUTERWEAR + BOTTOMS categories both present) with zero relaxed-counterpart evidence is a genuine gap", () => {
+    const closet = [tailoredBlazer(), tailoredTrousers()];
+    const edit = buildShopperEdit(MODERN_TAILORING_REPORT, evidence(closet));
+    assert.equal(edit.worthInvestingStatement, null, "owning OUTERWEAR and BOTTOMS category items is not sufficient — relaxed-counterpart evidence is genuinely missing");
+  });
+
+  it("Modern Tailoring: genuine evidence for both roles → a valid no-purchase-needed conclusion", () => {
+    const closet = [tailoredBlazer(), relaxedChambrayShirt()];
+    const edit = buildShopperEdit(MODERN_TAILORING_REPORT, evidence(closet));
+    assert.ok(edit.worthInvestingStatement !== null, "genuine evidence for both roles can produce a valid no-purchase-needed conclusion");
+  });
+
+  it("Soft Structure: two structured items (OUTERWEAR + BOTTOMS categories both present) with zero soft-flowing evidence is a genuine gap", () => {
+    const closet = [tailoredBlazer(), tailoredTrousers()];
+    const edit = buildShopperEdit(SOFT_STRUCTURE_REPORT, evidence(closet));
+    assert.equal(edit.worthInvestingStatement, null, "owning OUTERWEAR and BOTTOMS category items is not sufficient — soft-flowing evidence is genuinely missing");
+  });
+
+  it("Soft Structure: genuine evidence for both roles → a valid no-purchase-needed conclusion", () => {
+    const closet = [tailoredBlazer(), drapedFlowyMaxiSkirt()];
+    const edit = buildShopperEdit(SOFT_STRUCTURE_REPORT, evidence(closet));
+    assert.ok(edit.worthInvestingStatement !== null, "genuine evidence for both roles can produce a valid no-purchase-needed conclusion");
   });
 });

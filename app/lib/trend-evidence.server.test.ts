@@ -157,7 +157,12 @@ describe("buildShopperEdit — Worth Investing In", () => {
     expect(edit.worthInvestingStatement).toBeNull();
   });
 
-  it("Outcome C: qualifying dress alone (one-piece route satisfied) → no purchase needed", () => {
+  it("a single dress alone is now a genuine gap, not Outcome C — one item can carry only one role (structured-anchor OR soft-flowing, never both)", () => {
+    // Pre-fix: the old category-only 'one-piece' route treated any
+    // qualifying DRESS as full coverage by itself. Post-fix: coverage
+    // requires genuine evidence for BOTH roles (ROLE:structured-anchor +
+    // ROLE:soft-flowing) — a single item's own scoreItemAttributes result
+    // has exactly one bestDimensionId, so it can never satisfy both alone.
     const evidence = makeEvidence({
       closetItems: [
         {
@@ -169,18 +174,19 @@ describe("buildShopperEdit — Worth Investing In", () => {
           styleTags: [],
           occasions: [],
           material: "viscose",
+          fitProfile: "flowy",
         },
       ],
     });
     const edit = buildShopperEdit(SOFT_STRUCTURE_REPORT, evidence);
-    expect(edit.worthInvestingStatement).not.toBeNull();
-    expect(edit.worthInvestingStatement).toMatch(/do not need to buy/i);
-    expect(edit.worthInvestingStatement).toMatch(/navy midi dress/i);
+    expect(edit.worthInvestingStatement).toBeNull();
   });
 
-  it("Outcome C: layered-route items (outerwear + bottom, optional role targets separates only) → no purchase needed", () => {
-    // layered route = OUTERWEAR + BOTTOMS. Optional role only targets 'separates',
-    // so a layered customer skips Outcome B entirely → Outcome C.
+  it("Outcome C: genuine structured-anchor + soft-flowing evidence (outerwear + bottom, each with real fitProfile) → no purchase needed", () => {
+    // Role-based coverage, not category-based: the blazer's fitProfile
+    // gives it structured-anchor evidence, the trouser's gives it
+    // soft-flowing evidence — both of Soft Structure's actual roles are
+    // genuinely represented, independent of which categories they sit in.
     const evidence = makeEvidence({
       closetItems: [
         {
@@ -192,6 +198,7 @@ describe("buildShopperEdit — Worth Investing In", () => {
           styleTags: [],
           occasions: [],
           material: "viscose",
+          fitProfile: "structured",
         },
         {
           name: "Wide Leg Trouser",
@@ -202,6 +209,7 @@ describe("buildShopperEdit — Worth Investing In", () => {
           styleTags: [],
           occasions: [],
           material: "crepe",
+          fitProfile: "flowy",
         },
       ],
     });
@@ -210,10 +218,13 @@ describe("buildShopperEdit — Worth Investing In", () => {
     expect(edit.worthInvestingStatement).toMatch(/do not need to buy/i);
   });
 
-  it("Outcome B: separates route satisfied but outerwear missing → optional investment with optional framing", () => {
-    // separates (TOPS + BOTTOMS) covers the direction, but OUTERWEAR is the optional role
-    // that applies to the 'separates' route. Missing OUTERWEAR → Outcome B.
-    // Both items need material that hits soft-structure closetMatchText ("viscose", "crepe", "twill")
+  it("Outcome A: TOPS + BOTTOMS category presence alone, with BOTH items carrying the SAME role (structured-anchor), is a genuine gap — category presence is not sufficient", () => {
+    // Pre-fix: TOPS + BOTTOMS category presence alone satisfied the old
+    // 'separates' route, regardless of whether any real soft-flowing
+    // evidence existed. Post-fix: both items here are tailored/structured
+    // (zero soft-flowing evidence anywhere), so the method is genuinely
+    // incomplete — Outcome B's old 'optional upsell' framing is retired in
+    // favour of an honest gap.
     const evidence = makeEvidence({
       closetItems: [
         {
@@ -224,7 +235,8 @@ describe("buildShopperEdit — Worth Investing In", () => {
           primaryColor: "ivory",
           styleTags: [],
           occasions: [],
-          material: "viscose", // hits closetMatchText → TOPS item scores
+          material: "viscose",
+          fitProfile: "structured",
         },
         {
           name: "Wide Leg Trouser",
@@ -235,19 +247,15 @@ describe("buildShopperEdit — Worth Investing In", () => {
           styleTags: [],
           occasions: [],
           material: "crepe",
+          fitProfile: "tailored",
         },
       ],
     });
     const edit = buildShopperEdit(SOFT_STRUCTURE_REPORT, evidence);
-    // Outcome B: worthInvestingStatement is null; partToTake first bullet has optional framing
     expect(edit.worthInvestingStatement).toBeNull();
-    expect(edit.partToTake[0]).toMatch(/can already wear/i);
-    expect(edit.partToTake[0]).toMatch(/if you wanted to extend/i);
   });
 
-  it("Outcome C: layered route (outerwear + bottom) — optional role is OUTERWEAR but layered already covers it → no purchase needed", () => {
-    // layered route = OUTERWEAR + BOTTOMS → satisfied. The optional role (OUTERWEAR)
-    // is already covered by the layered route → alreadyCoveredByOtherRoute → Outcome C.
+  it("Outcome C: a second genuinely different pairing (outerwear structured-anchor + bottom soft-flowing) → no purchase needed", () => {
     const evidence = makeEvidence({
       closetItems: [
         {
@@ -259,6 +267,7 @@ describe("buildShopperEdit — Worth Investing In", () => {
           styleTags: [],
           occasions: [],
           material: "crepe",
+          fitProfile: "structured",
         },
         {
           name: "Wide Leg Trouser",
@@ -269,6 +278,7 @@ describe("buildShopperEdit — Worth Investing In", () => {
           styleTags: [],
           occasions: [],
           material: "twill",
+          fitProfile: "flowy",
         },
       ],
     });
@@ -277,7 +287,7 @@ describe("buildShopperEdit — Worth Investing In", () => {
     expect(edit.worthInvestingStatement).toMatch(/do not need to buy/i);
   });
 
-  it("modern tailoring: one qualifying outerwear → Outcome B (optional trouser gap)", () => {
+  it("modern tailoring: one qualifying tailored-anchor outerwear alone, zero relaxed-counterpart evidence → genuine gap (Outcome B's old category-only upsell is retired)", () => {
     const evidence = makeEvidence({
       closetItems: [
         {
@@ -289,15 +299,15 @@ describe("buildShopperEdit — Worth Investing In", () => {
           styleTags: [],
           occasions: [],
           material: "wool",
+          fitProfile: "tailored",
         },
       ],
     });
     const edit = buildShopperEdit(MODERN_TAILORING_REPORT, evidence);
     expect(edit.worthInvestingStatement).toBeNull();
-    expect(edit.partToTake[0]).toMatch(/can already wear/i);
   });
 
-  it("modern tailoring: qualifying outerwear + qualifying bottom → Outcome C", () => {
+  it("modern tailoring: genuine tailored-anchor + relaxed-counterpart evidence → Outcome C", () => {
     const evidence = makeEvidence({
       closetItems: [
         {
@@ -309,6 +319,7 @@ describe("buildShopperEdit — Worth Investing In", () => {
           styleTags: [],
           occasions: [],
           material: "wool",
+          fitProfile: "tailored",
         },
         {
           name: "Wide Leg Trouser",
@@ -319,6 +330,7 @@ describe("buildShopperEdit — Worth Investing In", () => {
           styleTags: [],
           occasions: [],
           material: "twill",
+          fitProfile: "relaxed",
         },
       ],
     });
@@ -717,7 +729,9 @@ describe("buildShopperEdit — correction-pass fixes", () => {
   });
 
   it("Outcome C: worthInvestingStatement capitalises first named piece with 'Your' after a period", () => {
-    // Dress alone satisfies one-piece route → Outcome C fires
+    // Genuine evidence for both roles is required to fire Outcome C now — a
+    // structured-anchor dress (the primary role, so it's named first) plus
+    // a soft-flowing top.
     const evidence = makeEvidence({
       closetItems: [
         {
@@ -729,6 +743,19 @@ describe("buildShopperEdit — correction-pass fixes", () => {
           styleTags: [],
           occasions: [],
           material: "viscose",
+          fitProfile: "structured",
+        },
+        {
+          name: "Fluid Wrap Top",
+          imageUrl: null,
+          category: "TOPS",
+          subcategory: null,
+          primaryColor: "ivory",
+          styleTags: [],
+          occasions: [],
+          material: null,
+          fitProfile: "flowy",
+          silhouette: "wrap",
         },
       ],
     });
@@ -753,26 +780,26 @@ describe("buildShopperEdit — correction-pass fixes", () => {
     expect(count).toBeLessThanOrEqual(1);
   });
 
-  it("Outcome C + one-piece DRESS route → Look To Try uses owned DRESS, not a missing garment category (real report)", () => {
-    // Uses the production soft-structure report corpus, not a simplified fixture.
-    // In the real corpus: "blazer" and "linen" appear → TOPS scores ≥ 5
-    //                     "midi" appears in keyTrends[0] → DRESSES scores ≥ 1
-    // TOPS is namedMatches[0] (higher score), DRESSES is namedMatches[1].
-    // Only DRESSES satisfies the one-piece viable route → Outcome C fires.
-    // Pre-fix: Look To Try used namedMatches[0] (TOPS) and invented a trouser.
-    // Post-fix: buildOutcomeCLookToTry returns a DRESS-anchored outfit formula.
+  it("Outcome C with genuine structured-anchor + soft-flowing evidence → Look To Try uses owned pieces, not a missing garment category (real report)", () => {
+    // Uses the production soft-structure report corpus, not a simplified
+    // fixture. Role-based coverage, not category-based: the blazer's
+    // fitProfile gives it structured-anchor evidence; the dress's gives it
+    // soft-flowing evidence. OUTERWEAR is the only category that pairs
+    // with DRESSES (categoriesAreWearablePair), so the blazer anchors and
+    // the dress is the genuine wearable secondary-role support.
     const evidence = makeEvidence({
       profile: { ...BASE_PROFILE, lifestyle: ["office"] }, // office → workCtx "work-meetings"
       closetItems: [
         {
           name: "Ivory Linen Blazer",
-          category: "TOPS",
+          category: "OUTERWEAR",
           subcategory: "blazer",
           primaryColor: "ivory",
           material: "linen",
           styleTags: [],
           occasions: [],
           imageUrl: null,
+          fitProfile: "structured",
         },
         {
           name: "Navy Midi Dress",
@@ -783,15 +810,16 @@ describe("buildShopperEdit — correction-pass fixes", () => {
           styleTags: [],
           occasions: [],
           imageUrl: null,
+          fitProfile: "flowy",
         },
       ],
     });
     const edit = buildShopperEdit(REAL_SOFT_STRUCTURE, evidence);
 
-    // Outcome C must fire: DRESS satisfies one-piece route; no BOTTOMS or OUTERWEAR
+    // Outcome C must fire: genuine evidence for both roles
     expect(edit.worthInvestingStatement).not.toBeNull();
 
-    // Look To Try must anchor on the owned Dress — not invent a missing garment category
+    // Look To Try must anchor on the owned pieces — not invent a missing garment category
     expect(edit.aLookToTry).toContain("Navy Midi Dress");
     expect(edit.aLookToTry).not.toMatch(/trouser/i);
     expect(edit.aLookToTry).not.toMatch(/wide-leg/i);
@@ -870,7 +898,7 @@ describe("buildShopperEdit — Modern Tailoring TOPS narrative consistency", () 
     expect(roleNote).not.toMatch(/structured element/i);
   });
 
-  it("OUTERWEAR Outcome B: roleNote correctly identifies outerwear as the tailored anchor", () => {
+  it("OUTERWEAR alone, zero relaxed-counterpart evidence: genuine gap (Outcome B's old category-only upsell is retired), but roleNote still correctly identifies outerwear as the tailored anchor", () => {
     const evidence = makeEvidence({
       closetItems: [
         {
@@ -882,14 +910,19 @@ describe("buildShopperEdit — Modern Tailoring TOPS narrative consistency", () 
           styleTags: [],
           occasions: [],
           material: "wool",
+          fitProfile: "tailored",
         },
       ],
     });
     const edit = buildShopperEdit(MODERN_TAILORING_REPORT, evidence);
 
+    // Coverage: a single tailored-anchor item with no relaxed-counterpart
+    // evidence anywhere is a genuine gap now, not a false "can already
+    // wear this" — the category-only Outcome B upsell path is retired.
     expect(edit.worthInvestingStatement).toBeNull();
-    expect(edit.partToTake[0]).toMatch(/can already wear/i);
 
+    // roleNote correctness is independent of the coverage outcome — the
+    // blazer must still read as the tailored anchor it genuinely is.
     const roleNote = edit.evidenceClosetItems[0]?.roleNote ?? "";
     expect(roleNote).toMatch(/tailored anchor/i);
   });
