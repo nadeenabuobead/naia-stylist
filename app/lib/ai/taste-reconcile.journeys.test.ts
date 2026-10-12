@@ -33,7 +33,7 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { PrismaClient } from "@prisma/client";
-import { loadConfirmedTendencies } from "./taste-reconcile.server.js";
+import { loadConfirmedTendencies, loadStrongestConfirmedTendency } from "./taste-reconcile.server.js";
 
 const URL_ = process.env.TEST_DATABASE_URL;
 const skip = URL_ ? false : "set TEST_DATABASE_URL to run the persistence journeys";
@@ -126,5 +126,47 @@ describe("loadConfirmedTendencies — real-Postgres regression for the STILL LEA
     const { confirmed } = await loadConfirmedTendencies(customer.id);
 
     assert.equal(confirmed.length, 1);
+  });
+});
+
+describe("loadStrongestConfirmedTendency — same real-Postgres regression, the Overview teaser's query", { skip }, () => {
+  it("a CONFIRMED tendency with customerFeedback: null is returned, not silently dropped", async () => {
+    const customer = await db.customer.create({ data: { shopifyCustomerId: "journey-overview-null" } });
+    await db.styleTendency.create({ data: tendencyRow(customer.id) });
+
+    const strongest = await loadStrongestConfirmedTendency(customer.id);
+
+    assert.ok(strongest, "a real CONFIRMED row must come back — this is the exact bug: it used to return null");
+    assert.equal(strongest!.dimension, "comfort");
+  });
+
+  it("a CONFIRMED tendency with customerFeedback: 'accurate' is still returned", async () => {
+    const customer = await db.customer.create({ data: { shopifyCustomerId: "journey-overview-accurate" } });
+    await db.styleTendency.create({
+      data: tendencyRow(customer.id, { customerFeedback: "accurate", customerFeedbackAt: new Date() }),
+    });
+
+    const strongest = await loadStrongestConfirmedTendency(customer.id);
+
+    assert.ok(strongest);
+  });
+
+  it("a CONFIRMED tendency with customerFeedback: 'not-quite' (REJECTED in practice, but checked here at the raw state level) stays excluded", async () => {
+    const customer = await db.customer.create({ data: { shopifyCustomerId: "journey-overview-rejected" } });
+    await db.styleTendency.create({
+      data: tendencyRow(customer.id, { customerFeedback: "not-quite", customerFeedbackAt: new Date() }),
+    });
+
+    const strongest = await loadStrongestConfirmedTendency(customer.id);
+
+    assert.equal(strongest, null, "a 'not-quite' row must never surface as the strongest tendency");
+  });
+
+  it("no CONFIRMED tendencies at all → null", async () => {
+    const customer = await db.customer.create({ data: { shopifyCustomerId: "journey-overview-none" } });
+
+    const strongest = await loadStrongestConfirmedTendency(customer.id);
+
+    assert.equal(strongest, null);
   });
 });

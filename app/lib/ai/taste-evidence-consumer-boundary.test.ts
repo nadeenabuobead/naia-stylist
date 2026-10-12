@@ -51,6 +51,11 @@ const ALWAYS_ALLOWED_BASENAMES = new Set([
   "taste-reemergence.behavior.test.ts",
   "taste-backfill-idempotency.test.ts",
   "taste-staleness-deferred.test.ts",
+  // Not a taste-family file itself, but its own test — it exercises
+  // my-naia._index.tsx's (already an approved production importer below)
+  // raw prisma.styleTendency.count call directly, to pin the exact
+  // null-inclusive where-clause shape the NULL-exclusion bug fix depends on.
+  "my-naia._index.test.tsx",
 ]);
 
 // The ONLY production (non-test) files permitted to import any member of

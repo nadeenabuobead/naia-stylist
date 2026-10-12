@@ -422,11 +422,12 @@ export async function applyTasteObservationFeedback(
 // ── Load CONFIRMED observations for overview ───────────────────────────────────
 
 export async function loadStrongestConfirmedTendency(customerId: string) {
+  // See loadConfirmedTendencies below — same NULL-exclusion bug, same fix.
   return prisma.styleTendency.findFirst({
     where: {
       customerId,
-      state:            "CONFIRMED",
-      customerFeedback: { not: "not-quite" },
+      state: "CONFIRMED",
+      OR: [{ customerFeedback: null }, { customerFeedback: "accurate" }],
     },
     orderBy: { effectiveSupport: "desc" },
     select: {

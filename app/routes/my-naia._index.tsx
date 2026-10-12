@@ -343,8 +343,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const reviewCount = await prisma.postOutfitReview.count({ where: { customerId } });
   const closetCount = await prisma.closetItem.count({ where: { customerId } });
   const strongestTendency = await loadStrongestConfirmedTendency(customerId);
+  // customerFeedback is null until the customer reacts — Prisma's nested
+  // `{ not: "not-quite" }` on PostgreSQL excludes NULL too, which silently
+  // undercounted every CANDIDATE row nobody had reacted to yet (practically
+  // all of them, since CANDIDATE rows have no feedback UI at all). Same bug,
+  // same fix as taste-reconcile.server.ts's loadConfirmedTendencies.
   const candidateCount = await prisma.styleTendency.count({
-    where: { customerId, state: "CANDIDATE", customerFeedback: { not: "not-quite" } },
+    where: {
+      customerId,
+      state: "CANDIDATE",
+      OR: [{ customerFeedback: null }, { customerFeedback: "accurate" }],
+    },
   });
   const entitlement = await getEntitlementSummary(customerId, customer.membershipStatus);
 

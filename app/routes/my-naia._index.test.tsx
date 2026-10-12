@@ -195,6 +195,48 @@ describe("my-naia loader — authentication gate", () => {
   });
 });
 
+// ── Loader — candidateCount / hasCandidates (NULL-exclusion regression) ────────
+// customerFeedback is null until a customer reacts, which never happens for a
+// CANDIDATE row (no feedback UI exists for CANDIDATE anywhere in the app).
+// Prisma's nested `{ not: "not-quite" }` on PostgreSQL excludes NULL rows
+// too, so this query used to undercount — practically always to zero,
+// meaning hasCandidates was always false. Fixed to the null-inclusive OR
+// form also used by taste-reconcile.server.ts's loadConfirmedTendencies /
+// loadStrongestConfirmedTendency.
+
+describe("my-naia loader — candidateCount / hasCandidates", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValue({
+      id: "c1", firstName: "Alia", onboardingProfile: null,
+    } as any);
+  });
+
+  it("queries styleTendency.count with the null-inclusive OR form, not a NULL-excluding `not` filter", async () => {
+    await loader({ request: new Request("http://localhost/my-naia"), params: {}, context: {} } as any);
+
+    const candidateCountCall = vi.mocked(prisma.styleTendency.count).mock.calls.find(
+      (call) => (call[0] as any)?.where?.state === "CANDIDATE",
+    );
+    expect(candidateCountCall).toBeDefined();
+    const where = (candidateCountCall as any)[0].where;
+    expect(where.OR).toEqual([{ customerFeedback: null }, { customerFeedback: "accurate" }]);
+    expect(where.customerFeedback).toBeUndefined();
+  });
+
+  it("a real CANDIDATE row with customerFeedback: null (count resolves to 1) → hasCandidates: true", async () => {
+    vi.mocked(prisma.styleTendency.count).mockResolvedValueOnce(1);
+    const result = await loader({ request: new Request("http://localhost/my-naia"), params: {}, context: {} } as any);
+    expect((result as any).hasCandidates).toBe(true);
+  });
+
+  it("no CANDIDATE rows (count resolves to 0) → hasCandidates: false", async () => {
+    vi.mocked(prisma.styleTendency.count).mockResolvedValueOnce(0);
+    const result = await loader({ request: new Request("http://localhost/my-naia"), params: {}, context: {} } as any);
+    expect((result as any).hasCandidates).toBe(false);
+  });
+});
+
 // ── Loader — Latest StyleMe card imagery (Task 1) ──────────────────────────────
 // The card must represent the real pieces from that exact result, not one
 // arbitrarily-chosen "representative" garment, and must degrade gracefully

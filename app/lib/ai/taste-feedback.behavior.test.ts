@@ -284,12 +284,28 @@ describe("BV.5 — REJECTED row preserved: state/feedback/timestamp immutable", 
 
 // ── BV.6 — Customer-facing exclusion ─────────────────────────────────────────
 
+// Slice out one exported function's own source body, so a source-string
+// assertion actually checks the function it names rather than matching
+// anywhere in the file — the `{ not: "not-quite" }` bug hid for a while
+// precisely because loadConfirmedTendencies' own assertion below kept
+// passing on a match that actually lived inside a different function.
+function sliceFunctionSrc(name: string): string {
+  const start = reconcileSrc.indexOf(`export async function ${name}(`);
+  if (start === -1) throw new Error(`function ${name} not found in taste-reconcile.server.ts`);
+  const nextExport = reconcileSrc.indexOf("\nexport ", start + 1);
+  return reconcileSrc.slice(start, nextExport === -1 ? undefined : nextExport);
+}
+
 describe("BV.6 — REJECTED tendency excluded from customer-facing queries", () => {
-  it("BV.6.1 loadConfirmedTendencies Prisma query excludes customerFeedback: 'not-quite'", () => {
-    // Source-code assertion: the query filter explicitly excludes not-quite feedback
+  it("BV.6.1 loadConfirmedTendencies includes null/'accurate', excludes 'not-quite' (not via a NULL-excluding Prisma `not`)", () => {
+    const fnSrc = sliceFunctionSrc("loadConfirmedTendencies");
     assert.ok(
-      reconcileSrc.includes('customerFeedback: { not: "not-quite" }'),
-      "loadConfirmedTendencies excludes customerFeedback: not-quite",
+      fnSrc.includes('OR: [{ customerFeedback: null }, { customerFeedback: "accurate" }]'),
+      "loadConfirmedTendencies must use the null-inclusive OR form, not Prisma's `not` (which excludes NULL on Postgres)",
+    );
+    assert.ok(
+      !fnSrc.includes('customerFeedback: { not: "not-quite" }'),
+      "loadConfirmedTendencies must not regress to the NULL-excluding `not` filter",
     );
   });
 
@@ -301,11 +317,16 @@ describe("BV.6 — REJECTED tendency excluded from customer-facing queries", () 
     );
   });
 
-  it("BV.6.3 loadStrongestConfirmedTendency excludes customerFeedback: 'not-quite'", () => {
+  it("BV.6.3 loadStrongestConfirmedTendency includes null/'accurate', excludes 'not-quite' (not via a NULL-excluding Prisma `not`)", () => {
+    const fnSrc = sliceFunctionSrc("loadStrongestConfirmedTendency");
     assert.ok(
-      reconcileSrc.includes('state:            "CONFIRMED"') &&
-      reconcileSrc.includes('customerFeedback: { not: "not-quite" }'),
-      "loadStrongestConfirmedTendency has state+feedback double guard",
+      fnSrc.includes('state: "CONFIRMED"') &&
+      fnSrc.includes('OR: [{ customerFeedback: null }, { customerFeedback: "accurate" }]'),
+      "loadStrongestConfirmedTendency has the state guard plus the null-inclusive OR form",
+    );
+    assert.ok(
+      !fnSrc.includes('customerFeedback: { not: "not-quite" }'),
+      "loadStrongestConfirmedTendency must not regress to the NULL-excluding `not` filter",
     );
   });
 
