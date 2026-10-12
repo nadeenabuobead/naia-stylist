@@ -71,4 +71,30 @@ describe("api.taste-observation-feedback action — notQuiteReason/notQuiteNote"
     const res = await action({ request: postRequest({ tendencyId: "t1", feedback: "not-quite" }) } as any);
     expect((res as any).init?.status).toBe(401);
   });
+
+  // QA BUG fix — the success response now echoes back which feedback value
+  // was actually persisted, so the client can treat fetcher.data (durable
+  // across the fetcher's idle transition) as proof, instead of fetcher.json
+  // (cleared once idle) or the submitted request payload.
+  it("a successful 'accurate' submission's response includes feedback: 'accurate'", async () => {
+    const res = await action({ request: postRequest({ tendencyId: "t1", feedback: "accurate" }) } as any);
+    const body = (res as any).data ?? res;
+    expect(body).toEqual({ ok: true, feedback: "accurate" });
+  });
+
+  it("a successful 'not-quite' submission's response includes feedback: 'not-quite', regardless of detail fields", async () => {
+    const res = await action({
+      request: postRequest({ tendencyId: "t1", feedback: "not-quite", notQuiteReason: "only-sometimes", notQuiteNote: "x" }),
+    } as any);
+    const body = (res as any).data ?? res;
+    expect(body).toEqual({ ok: true, feedback: "not-quite" });
+  });
+
+  it("a failed submission's response never includes a feedback value", async () => {
+    vi.mocked(applyTasteObservationFeedback).mockResolvedValueOnce({ ok: false, errorCode: "ALREADY_REJECTED" });
+    const res = await action({ request: postRequest({ tendencyId: "t1", feedback: "not-quite" }) } as any);
+    const body = (res as any).data ?? res;
+    expect(body.feedback).toBeUndefined();
+    expect(body.ok).toBeUndefined();
+  });
 });

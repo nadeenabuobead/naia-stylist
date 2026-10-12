@@ -1146,37 +1146,52 @@ const NOT_QUITE_REASON_OPTIONS: Array<{ id: string; label: string }> = [
 ];
 const MAX_NOT_QUITE_NOTE_LENGTH = 500;
 
-// Extracted so the exact bug this fixes (see regression test
-// resolveSavedFeedback.test.ts-style coverage in passport-noticing-section.test.ts)
-// can be reproduced and asserted on in isolation, without rendering the
-// whole Passport page.
+// Extracted so the exact bug this fixes (see regression coverage in
+// passport-noticing-feedback.test.ts) can be reproduced and asserted on in
+// isolation, without rendering the whole Passport page.
 //
-// submitAccurate/submitNotQuite below both submit with encType:
-// "application/json". For a JSON submission, react-router's fetcher never
-// populates `.formData` — it stays undefined; the submitted value lives
-// on `.json` instead (react-router's own Submission type pairs
-// `formData: FormData` with `json: undefined`, or `formData: undefined`
-// with `json: JsonValue` — never both populated). Reading
-// `.formData?.get("feedback")` here always evaluated to undefined, so this
-// silently fell back to the pre-submit stored value (null, for a tendency
-// nobody had reacted to yet) immediately after every successful submit —
-// Accurate's "Glad this resonates." (and Not Quite's "Got it...") never
-// appeared until a full page reload, even though the POST itself succeeded
-// and customerFeedback was persisted correctly server-side the whole time.
+// History of this function — two bugs, same root cause (deriving "what was
+// submitted" from transient react-router fetcher state instead of durable
+// data):
+//
+//   v1 read `fetcher.formData?.get("feedback")`. submitAccurate/
+//   submitNotQuite submit with encType: "application/json", and a JSON
+//   submission never populates `.formData` at all (react-router's own
+//   Submission type pairs `formData: FormData` with `json: undefined`, or
+//   `formData: undefined` with `json: JsonValue` — never both). So
+//   `.formData?.get(...)` was always undefined, and the confirmation never
+//   appeared even though the POST succeeded.
+//
+//   v2 (the fix for v1) switched to reading `fetcher.json` instead — which
+//   IS populated while "submitting", but react-router's Fetcher type shows
+//   `.json` reverts to `undefined` once the fetcher settles back to "idle"
+//   (FetcherStates.Idle has `json: undefined` explicitly; only `.data`
+//   persists across the idle transition). So the confirmation flashed for
+//   exactly as long as the fetcher stayed in "submitting"/"loading", then
+//   vanished the instant it reached "idle" — even though `.data.ok` was
+//   still `true` the whole time.
+//
+// The fix: read the feedback value from `fetcher.data` — the actual action
+// response, which persists through idle and every subsequent re-render
+// until a *new* submission replaces it — instead of either submission-only
+// field. The server now echoes back the validated `feedback` value it
+// actually persisted (see api.taste-observation-feedback.tsx), so `.data`
+// alone is durable proof of both success and content. A failed or absent
+// response (ok falsy) always falls back to the loader-supplied
+// storedCustomerFeedback — the real persisted value as of page load — so a
+// failed submission can never show a false confirmation.
 export function resolveSavedFeedback(
-  fetcherData: { ok?: boolean } | undefined,
-  fetcherJson: unknown,
+  fetcherData: { ok?: boolean; feedback?: string } | undefined,
   storedCustomerFeedback: string | null,
 ): string | null {
-  if (!fetcherData?.ok) return storedCustomerFeedback;
-  const submitted = fetcherJson as { feedback?: string } | undefined;
-  return submitted?.feedback ?? null;
+  if (fetcherData?.ok && fetcherData.feedback) return fetcherData.feedback;
+  return storedCustomerFeedback;
 }
 
 function NoticingObservationCard({ tendency }: { tendency: NoticingObservation }) {
-  const feedbackFetcher = useFetcher<{ ok?: boolean; error?: string }>();
+  const feedbackFetcher = useFetcher<{ ok?: boolean; error?: string; feedback?: "accurate" | "not-quite" }>();
   const isPending = feedbackFetcher.state === "submitting";
-  const savedFeedback = resolveSavedFeedback(feedbackFetcher.data, feedbackFetcher.json, tendency.customerFeedback);
+  const savedFeedback = resolveSavedFeedback(feedbackFetcher.data, tendency.customerFeedback);
 
   // First click on "Not quite" only opens this inline form — it must not
   // submit the rejection yet, and the observation stays fully visible

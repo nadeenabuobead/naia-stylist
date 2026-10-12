@@ -72,5 +72,11 @@ export async function action({ request }: ActionFunctionArgs) {
     return data({ error: "failed" }, { status: 500 });
   }
 
-  return data({ ok: true });
+  // Echo back the server-validated feedback value that was actually
+  // persisted. The calling page reads this (not the submitted request
+  // payload) as its durable proof of what succeeded — see
+  // resolveSavedFeedback and its own comment for why: fetcher.json is
+  // cleared once the fetcher returns to idle, but fetcher.data (this
+  // response) is not.
+  return data({ ok: true, feedback: feedback as "accurate" | "not-quite" });
 }
