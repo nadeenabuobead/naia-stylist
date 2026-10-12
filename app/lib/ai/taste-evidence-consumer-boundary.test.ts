@@ -69,6 +69,10 @@ const ALLOWED_PRODUCTION_IMPORTERS = new Set([
   "app/routes/my-naia.what-naia-notices.tsx",
   "scripts/backfill-taste-evidence.ts",
   "app/routes/api.seed-staging.jsx",
+  // TEMP QA DIAGNOSTIC (What nAia Is Noticing V1 evidence investigation) —
+  // read-only diagnostic engine shared by the local script and the
+  // staging-only authenticated route below. Neither writes evidence.
+  "app/lib/ai/taste-evidence-diagnostic.server.ts",
 ]);
 
 const SKIP_DIRS = new Set(["node_modules", ".git", "build", "dist", ".vercel"]);
