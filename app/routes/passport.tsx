@@ -1146,12 +1146,37 @@ const NOT_QUITE_REASON_OPTIONS: Array<{ id: string; label: string }> = [
 ];
 const MAX_NOT_QUITE_NOTE_LENGTH = 500;
 
+// Extracted so the exact bug this fixes (see regression test
+// resolveSavedFeedback.test.ts-style coverage in passport-noticing-section.test.ts)
+// can be reproduced and asserted on in isolation, without rendering the
+// whole Passport page.
+//
+// submitAccurate/submitNotQuite below both submit with encType:
+// "application/json". For a JSON submission, react-router's fetcher never
+// populates `.formData` — it stays undefined; the submitted value lives
+// on `.json` instead (react-router's own Submission type pairs
+// `formData: FormData` with `json: undefined`, or `formData: undefined`
+// with `json: JsonValue` — never both populated). Reading
+// `.formData?.get("feedback")` here always evaluated to undefined, so this
+// silently fell back to the pre-submit stored value (null, for a tendency
+// nobody had reacted to yet) immediately after every successful submit —
+// Accurate's "Glad this resonates." (and Not Quite's "Got it...") never
+// appeared until a full page reload, even though the POST itself succeeded
+// and customerFeedback was persisted correctly server-side the whole time.
+export function resolveSavedFeedback(
+  fetcherData: { ok?: boolean } | undefined,
+  fetcherJson: unknown,
+  storedCustomerFeedback: string | null,
+): string | null {
+  if (!fetcherData?.ok) return storedCustomerFeedback;
+  const submitted = fetcherJson as { feedback?: string } | undefined;
+  return submitted?.feedback ?? null;
+}
+
 function NoticingObservationCard({ tendency }: { tendency: NoticingObservation }) {
   const feedbackFetcher = useFetcher<{ ok?: boolean; error?: string }>();
   const isPending = feedbackFetcher.state === "submitting";
-  const savedFeedback = feedbackFetcher.data?.ok
-    ? ((feedbackFetcher.formData?.get("feedback") as string) ?? null)
-    : tendency.customerFeedback;
+  const savedFeedback = resolveSavedFeedback(feedbackFetcher.data, feedbackFetcher.json, tendency.customerFeedback);
 
   // First click on "Not quite" only opens this inline form — it must not
   // submit the rejection yet, and the observation stays fully visible
