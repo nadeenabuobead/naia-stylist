@@ -406,6 +406,7 @@ export async function applyTasteObservationFeedback(
   customerId: string,
   tendencyId: string,
   feedback: "accurate" | "not-quite",
+  notQuiteDetails?: { reason?: string | null; note?: string | null },
 ): Promise<{ ok: boolean; errorCode?: string }> {
   return applyFeedbackWithDeps(
     {
@@ -416,6 +417,7 @@ export async function applyTasteObservationFeedback(
     customerId,
     tendencyId,
     feedback,
+    notQuiteDetails,
   );
 }
 

@@ -1134,6 +1134,18 @@ interface NoticingObservation {
   passportEvolutionNote: string | null;
 }
 
+// Fixed V1 vocabulary for the inline "What feels off?" picker. The ids must
+// match NOT_QUITE_REASONS in taste-feedback-engine.ts exactly — this is
+// feedback-UI vocabulary, not a Taste evidence dimension/value.
+const NOT_QUITE_REASON_OPTIONS: Array<{ id: string; label: string }> = [
+  { id: "doesnt-feel-like-me",   label: "Doesn't feel like me" },
+  { id: "only-sometimes",        label: "Only true sometimes" },
+  { id: "depends-on-situation",  label: "Depends on the situation" },
+  { id: "used-to-be-true",       label: "Used to be true" },
+  { id: "something-else",        label: "Something else" },
+];
+const MAX_NOT_QUITE_NOTE_LENGTH = 500;
+
 function NoticingObservationCard({ tendency }: { tendency: NoticingObservation }) {
   const feedbackFetcher = useFetcher<{ ok?: boolean; error?: string }>();
   const isPending = feedbackFetcher.state === "submitting";
@@ -1141,11 +1153,39 @@ function NoticingObservationCard({ tendency }: { tendency: NoticingObservation }
     ? ((feedbackFetcher.formData?.get("feedback") as string) ?? null)
     : tendency.customerFeedback;
 
-  function submit(fb: "accurate" | "not-quite") {
+  // First click on "Not quite" only opens this inline form — it must not
+  // submit the rejection yet, and the observation stays fully visible
+  // while the customer is answering. Only Send Feedback / Skip Details
+  // actually commits the existing not-quite semantics.
+  const [notQuiteOpen, setNotQuiteOpen] = useState(false);
+  const [selectedReason, setSelectedReason] = useState<string | null>(null);
+  const [note, setNote] = useState("");
+
+  function submitAccurate() {
     feedbackFetcher.submit(
-      { tendencyId: tendency.id, feedback: fb },
+      { tendencyId: tendency.id, feedback: "accurate" },
       { method: "POST", action: "/api/taste-observation-feedback", encType: "application/json" },
     );
+  }
+
+  function submitNotQuite(details?: { reason?: string | null; note?: string | null }) {
+    feedbackFetcher.submit(
+      {
+        tendencyId: tendency.id,
+        feedback: "not-quite",
+        notQuiteReason: details?.reason ?? null,
+        notQuiteNote: details?.note ?? null,
+      },
+      { method: "POST", action: "/api/taste-observation-feedback", encType: "application/json" },
+    );
+    setNotQuiteOpen(false);
+  }
+
+  function cancelNotQuite() {
+    // Closes the form with no data change — nothing has been submitted yet.
+    setNotQuiteOpen(false);
+    setSelectedReason(null);
+    setNote("");
   }
 
   const familyLabel = tendency.observationFamily === "WORKS_WELL" ? "CONSISTENTLY WORKS" : "RECURRING FRICTION";
@@ -1178,9 +1218,83 @@ function NoticingObservationCard({ tendency }: { tendency: NoticingObservation }
       )}
 
       {savedFeedback === "not-quite" ? (
-        <p style={{ fontSize: "13px", opacity: 0.5, fontStyle: "italic", margin: 0 }}>Noted — nAia won't show this again.</p>
+        <p style={{ fontSize: "13px", opacity: 0.5, fontStyle: "italic", margin: 0 }}>
+          Got it — nAia will be more cautious with this observation.
+        </p>
       ) : savedFeedback === "accurate" ? (
         <p style={{ fontSize: "13px", opacity: 0.5, fontStyle: "italic", margin: 0 }}>Glad this resonates.</p>
+      ) : notQuiteOpen ? (
+        <div style={{ borderTop: "1px solid rgba(40, 21, 12, 0.1)", paddingTop: "18px", marginTop: "2px" }}>
+          <div className="sp-ov-section-header" style={{ marginBottom: "10px" }}>What Feels Off?</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "18px" }}>
+            {NOT_QUITE_REASON_OPTIONS.map(r => {
+              const selected = selectedReason === r.id;
+              return (
+                <button
+                  key={r.id}
+                  type="button"
+                  disabled={isPending}
+                  onClick={() => setSelectedReason(prev => (prev === r.id ? null : r.id))}
+                  aria-pressed={selected}
+                  style={{
+                    fontFamily: "var(--naia-ff-ui)",
+                    fontSize: "12px",
+                    padding: "7px 14px",
+                    borderRadius: "999px",
+                    cursor: "pointer",
+                    border: selected ? "1px solid var(--naia-accent, #8b2035)" : "1px solid rgba(40, 21, 12, 0.2)",
+                    background: selected ? "rgba(139, 32, 53, 0.08)" : "transparent",
+                    color: selected ? "var(--naia-accent, #8b2035)" : "rgba(40, 21, 12, 0.7)",
+                  }}
+                >
+                  {r.label}
+                </button>
+              );
+            })}
+          </div>
+
+          <label style={{ display: "block", fontFamily: "var(--naia-ff-ui)", fontSize: "11px", letterSpacing: "0.04em", textTransform: "uppercase", color: "rgba(40, 21, 12, 0.55)", marginBottom: "8px" }}>
+            Anything you want nAia to know? <span style={{ opacity: 0.65, textTransform: "none" }}>Optional</span>
+          </label>
+          <textarea
+            value={note}
+            onChange={e => setNote(e.target.value)}
+            rows={3}
+            maxLength={MAX_NOT_QUITE_NOTE_LENGTH}
+            disabled={isPending}
+            className="sp-textarea"
+            style={{ width: "100%", marginBottom: "16px", boxSizing: "border-box" }}
+          />
+
+          <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
+            <button
+              type="button"
+              className="sp-btn-outline"
+              style={{ fontSize: "13px", padding: "8px 16px" }}
+              disabled={isPending}
+              onClick={() => submitNotQuite({ reason: selectedReason, note })}
+            >
+              Send Feedback
+            </button>
+            <button
+              type="button"
+              className="sp-btn-ghost"
+              style={{ fontSize: "13px", padding: "8px 16px", opacity: 0.7 }}
+              disabled={isPending}
+              onClick={cancelNotQuite}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={isPending}
+              onClick={() => submitNotQuite()}
+              style={{ marginLeft: "auto", fontFamily: "var(--naia-ff-ui)", fontSize: "12px", opacity: 0.55, background: "none", border: "none", textDecoration: "underline", cursor: "pointer", padding: 0 }}
+            >
+              Skip Details
+            </button>
+          </div>
+        </div>
       ) : (
         <div style={{ display: "flex", gap: "12px" }}>
           <button
@@ -1188,7 +1302,7 @@ function NoticingObservationCard({ tendency }: { tendency: NoticingObservation }
             className="sp-btn-outline"
             style={{ fontSize: "13px", padding: "8px 16px" }}
             disabled={isPending}
-            onClick={() => submit("accurate")}
+            onClick={submitAccurate}
           >
             Accurate
           </button>
@@ -1197,7 +1311,7 @@ function NoticingObservationCard({ tendency }: { tendency: NoticingObservation }
             className="sp-btn-ghost"
             style={{ fontSize: "13px", padding: "8px 16px", opacity: 0.7 }}
             disabled={isPending}
-            onClick={() => submit("not-quite")}
+            onClick={() => setNotQuiteOpen(true)}
           >
             Not quite
           </button>

@@ -4,6 +4,10 @@ import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import prisma from "~/db.server";
 import { getPublishedEditorialReports } from "~/lib/editorial-reports.server";
 import { loadStrongestConfirmedTendency } from "~/lib/ai/taste-reconcile.server";
+// Same pure, dimension-keyed copy generator Style Passport's Noticing
+// section uses — reused here so the Overview preview and the Passport
+// section never show two different interpretations of the same tendency.
+import { generateNoticingInterpretation } from "~/lib/ai/taste-contract";
 import { reportVisual, type TreatmentType } from "~/lib/report-visual";
 import { getEntitlementSummary } from "~/lib/plan/entitlement.server";
 import {
@@ -431,13 +435,28 @@ export async function loader({ request }: LoaderFunctionArgs) {
     (((p as any)?.styleDirections?.length ?? 0) === 0 ||
       currentStyleExpression((p as any)?.styleExpression ?? []).length === 0);
 
+  // Overview preview reuses the exact same interpretation Style Passport's
+  // Noticing section shows for this tendency — never a second, divergent
+  // generic sentence. Still only a preview: no "What nAia Is Learning" and
+  // no Accurate/Not quite here — those stay in Style Passport.
+  const strongestTendencyWithInterpretation = strongestTendency
+    ? {
+        ...strongestTendency,
+        ...generateNoticingInterpretation(
+          strongestTendency.dimension,
+          strongestTendency.value,
+          strongestTendency.observationFamily as "WORKS_WELL" | "FRICTION",
+        ),
+      }
+    : null;
+
   return {
     firstName: customer.firstName ?? null,
     profile: p,
     sessions: sessionsWithThumb, trendReport, buyOrSkipHistory, reviewCount, closetCount,
     passportState,
     missingRev7Answers,
-    strongestTendency: strongestTendency ?? null,
+    strongestTendency: strongestTendencyWithInterpretation,
     hasCandidates: candidateCount > 0,
     entitlement,
   };
@@ -767,9 +786,14 @@ export default function MyNaiaOverview() {
             {strongestTendency ? (
               <ul style={{ listStyle: "none", padding: 0, margin: 0, borderTop: "1px solid var(--fg-12)" }}>
                 <li style={{ padding: "1.25rem 0", borderBottom: "1px solid var(--fg-12)" }}>
-                  <div style={{ fontSize: "0.62rem", textTransform: "uppercase", letterSpacing: "0.3em", color: "var(--lipstick)" }}>Style Intelligence</div>
-                  <p style={{ marginTop: "0.5rem", fontSize: "0.95rem", lineHeight: 1.75, color: "var(--fg-85)" }}>
-                    {strongestTendency.claimText}
+                  <div style={{ fontSize: "0.62rem", textTransform: "uppercase", letterSpacing: "0.3em", color: "var(--lipstick)" }}>
+                    {strongestTendency.observationFamily === "WORKS_WELL" ? "Consistently Works" : "Recurring Friction"}
+                  </div>
+                  <p style={{ marginTop: "0.5rem", fontSize: "0.95rem", lineHeight: 1.6, color: "var(--fg-85)" }}>
+                    {strongestTendency.headline}
+                  </p>
+                  <p style={{ marginTop: "0.375rem", fontSize: "0.85rem", lineHeight: 1.65, color: "var(--fg-70, var(--fg-85))" }}>
+                    {strongestTendency.body}
                   </p>
                   {strongestTendency.rationaleText && (
                     <p style={{ marginTop: "0.5rem", fontSize: "0.82rem", lineHeight: 1.65, color: "var(--fg-55)" }}>

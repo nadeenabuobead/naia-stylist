@@ -101,6 +101,67 @@ describe("Confirmed tendencies render inside Passport with a useful interpretati
   });
 });
 
+describe("Not Quite — first click opens an inline form, does not submit immediately", () => {
+  // Starts at the reason-options constant (declared just above the
+  // component) through to NoticingSection, so this slice covers both the
+  // fixed reason vocabulary and the card component itself.
+  const cardDef = passportSrc.slice(
+    passportSrc.indexOf("NOT_QUITE_REASON_OPTIONS"),
+    passportSrc.indexOf("function NoticingSection"),
+  );
+
+  it("the Not quite button only opens the form — no fetcher.submit call on that click", () => {
+    const notQuiteButtonBlock = cardDef.slice(
+      cardDef.lastIndexOf("Not quite") - 400,
+      cardDef.lastIndexOf("Not quite") + 20,
+    );
+    assert.ok(/onClick=\{\(\)\s*=>\s*setNotQuiteOpen\(true\)\}/.test(notQuiteButtonBlock), "Not quite button only sets notQuiteOpen, it does not submit");
+    assert.ok(!/onClick=\{.*submitNotQuite/.test(notQuiteButtonBlock), "Not quite button itself must not call submitNotQuite directly");
+  });
+
+  it("the inline form renders only when notQuiteOpen is true", () => {
+    assert.ok(cardDef.includes("notQuiteOpen"), "component tracks notQuiteOpen state");
+    assert.ok(cardDef.includes("What Feels Off?") || cardDef.includes("What feels off?"), "inline form heading present");
+  });
+
+  it("renders all 5 required reason options", () => {
+    for (const label of ["Doesn't feel like me", "Only true sometimes", "Depends on the situation", "Used to be true", "Something else"]) {
+      assert.ok(cardDef.includes(label), `reason option "${label}" present`);
+    }
+  });
+
+  it("renders the optional note field with the specified copy", () => {
+    assert.ok(cardDef.includes("Anything you want nAia to know?"), "note prompt present");
+    assert.ok(cardDef.includes("Optional"), "marked optional");
+    assert.ok(cardDef.includes("<textarea"), "a text input for the note exists");
+  });
+
+  it("Cancel resets state and closes the form without calling submitNotQuite", () => {
+    const cancelFnBody = cardDef.slice(cardDef.indexOf("function cancelNotQuite"), cardDef.indexOf("function cancelNotQuite") + 300);
+    assert.ok(!cancelFnBody.includes("submitNotQuite"), "cancelNotQuite must never submit");
+    assert.ok(cancelFnBody.includes("setNotQuiteOpen(false)"), "closes the form");
+  });
+
+  it("Send Feedback submits not-quite with the selected reason and note", () => {
+    assert.ok(cardDef.includes("submitNotQuite({ reason: selectedReason, note })"), "Send Feedback passes the selected reason + note through");
+  });
+
+  it("Skip Details submits a plain not-quite with no details", () => {
+    assert.ok(cardDef.includes("submitNotQuite()"), "Skip Details calls submitNotQuite with no arguments");
+  });
+
+  it("Accurate still submits immediately on click — no gating state involved", () => {
+    const accurateButtonBlock = cardDef.slice(cardDef.lastIndexOf("submitAccurate") - 300, cardDef.lastIndexOf("submitAccurate") + 20);
+    assert.ok(/onClick=\{submitAccurate\}/.test(accurateButtonBlock), "Accurate button calls submitAccurate directly, unchanged");
+  });
+
+  it("successful not-quite still resolves through the existing savedFeedback mechanism — same confirmation branch, new copy", () => {
+    assert.ok(cardDef.includes('savedFeedback === "not-quite"'), "reuses the exact same post-submission detection already used before this feature");
+    assert.ok(cardDef.includes("Got it — nAia will be more cautious with this observation."), "new confirmation copy present");
+    assert.ok(!cardDef.includes("Noted — nAia won't show this again."), "old abrupt copy removed");
+  });
+});
+
 describe("No confirmed observations → compact Still Learning state, not an empty page", () => {
   it("renders the compact copy inline inside the section, never a separate empty page", () => {
     const sectionDef = passportSrc.slice(
@@ -151,5 +212,35 @@ describe("Overview — Noticing preview kept, heading/CTA updated (Style Passpor
     const section = overviewSrc.slice(sectionStart, sectionEnd);
     assert.ok(section.includes("mn-state-note"), "compact state-note style still used for the empty/accumulating states");
     assert.ok(section.includes("hasCandidates"), "still distinguishes accumulating vs. no-evidence-yet");
+  });
+
+  it("uses the same pure interpretation helper Style Passport uses — not a second, divergent generator", () => {
+    assert.ok(overviewSrc.includes("generateNoticingInterpretation"), "Overview calls the same taste-contract.ts helper");
+    assert.ok(overviewSrc.includes("strongestTendency.headline"), "renders the generated headline");
+    assert.ok(overviewSrc.includes("strongestTendency.body"), "renders the generated body");
+  });
+
+  it("no longer renders 'Style Intelligence' — ambiguous with Wardrobe Intelligence", () => {
+    const sectionStart = overviewSrc.indexOf("{/* What nAia Is Noticing");
+    const sectionEnd = overviewSrc.indexOf("{/* Latest Trend Edit");
+    const section = overviewSrc.slice(sectionStart, sectionEnd);
+    assert.ok(!/style intelligence/i.test(section), "'Style Intelligence' label removed from the teaser");
+  });
+
+  it("uses the same observation-family label Passport uses (Consistently Works / Recurring Friction)", () => {
+    const sectionStart = overviewSrc.indexOf("{/* What nAia Is Noticing");
+    const sectionEnd = overviewSrc.indexOf("{/* Latest Trend Edit");
+    const section = overviewSrc.slice(sectionStart, sectionEnd);
+    assert.ok(/consistently works/i.test(section), "WORKS_WELL family label present");
+    assert.ok(/recurring friction/i.test(section), "FRICTION family label present");
+  });
+
+  it("does not render What nAia Is Learning or Accurate/Not quite — those stay in Style Passport only", () => {
+    const sectionStart = overviewSrc.indexOf("{/* What nAia Is Noticing");
+    const sectionEnd = overviewSrc.indexOf("{/* Latest Trend Edit");
+    const section = overviewSrc.slice(sectionStart, sectionEnd);
+    assert.ok(!/what na?ia is learning/i.test(section), "no 'What nAia Is Learning' in the Overview preview");
+    assert.ok(!section.includes(">Accurate<"), "no Accurate control in the Overview preview");
+    assert.ok(!/>Not quite</.test(section), "no Not quite control in the Overview preview");
   });
 });

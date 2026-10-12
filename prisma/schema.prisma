@@ -1200,6 +1200,13 @@ model StyleTendency {
   customerFeedback   String?   // accurate | not-quite
   customerFeedbackAt DateTime?
 
+  // Optional "not-quite" context — V1 Passport Noticing UX. Additive,
+  // nullable; only ever set alongside customerFeedback = "not-quite".
+  // Customer feedback context only: never read as structured Taste
+  // evidence, never used to rewrite Passport or any recommendation logic.
+  notQuiteReason String?   // doesnt-feel-like-me | only-sometimes | depends-on-situation | used-to-be-true | something-else
+  notQuiteNote   String?   @db.Text
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

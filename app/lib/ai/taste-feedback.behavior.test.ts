@@ -30,6 +30,8 @@ type StoreRow = {
   state: string;
   customerFeedback: string | null;
   customerFeedbackAt: Date | null;
+  notQuiteReason?: string | null;
+  notQuiteNote?: string | null;
 };
 
 type CallLog = {
@@ -56,6 +58,8 @@ function makeStore(initialRows: StoreRow[]): {
       if (data.state)              row.state = data.state;
       if (data.customerFeedback)   row.customerFeedback = data.customerFeedback;
       if (data.customerFeedbackAt) row.customerFeedbackAt = data.customerFeedbackAt;
+      if ("notQuiteReason" in data) row.notQuiteReason = data.notQuiteReason as string | null;
+      if ("notQuiteNote" in data)   row.notQuiteNote = data.notQuiteNote as string | null;
     },
     async runReconcile(customerId) {
       log.reconcileCalls.push(customerId);
@@ -354,5 +358,67 @@ describe("BV.6 — REJECTED tendency excluded from customer-facing queries", () 
       r => ["CANDIDATE", "CONFIRMED"].includes(r.state) && r.customerFeedback !== "not-quite",
     );
     assert.equal(customerFacing.length, 1, "accurate-feedback CONFIRMED row is visible");
+  });
+});
+
+// ── BV.7 — Not-quite inline detail (reason + optional note) ──────────────────
+// V1 Passport Noticing UX: the inline "What feels off?" form. Submission
+// semantics are unchanged (still a single not-quite write + reconcile) —
+// only two additional, optional, nullable fields are now accepted.
+
+describe("BV.7 — Not-quite inline detail is persisted alongside the existing rejection write", () => {
+  it("BV.7.1 Send Feedback — a selected reason + note are written with the rejection", async () => {
+    const { rows, deps } = makeStore([confirmed("t1")]);
+    const result = await applyFeedbackWithDeps(deps, "cust-1", "t1", "not-quite", {
+      reason: "doesnt-feel-like-me",
+      note: "it just isn't me",
+    });
+    assert.deepEqual(result, { ok: true });
+    assert.equal(rows[0].state, "REJECTED");
+    assert.equal(rows[0].notQuiteReason, "doesnt-feel-like-me");
+    assert.equal(rows[0].notQuiteNote, "it just isn't me");
+  });
+
+  it("BV.7.2 Skip Details — plain not-quite with no reason/note leaves both null, identical to the pre-feature write", async () => {
+    const { rows, deps } = makeStore([confirmed("t1")]);
+    await applyFeedbackWithDeps(deps, "cust-1", "t1", "not-quite");
+    assert.equal(rows[0].state, "REJECTED");
+    assert.equal(rows[0].notQuiteReason ?? null, null);
+    assert.equal(rows[0].notQuiteNote ?? null, null);
+  });
+
+  it("BV.7.3 a reason with no note is persisted, note stays null", async () => {
+    const { rows, deps } = makeStore([confirmed("t1")]);
+    await applyFeedbackWithDeps(deps, "cust-1", "t1", "not-quite", { reason: "only-sometimes" });
+    assert.equal(rows[0].notQuiteReason, "only-sometimes");
+    assert.equal(rows[0].notQuiteNote, null);
+  });
+
+  it("BV.7.4 a note with no reason is persisted, reason stays null", async () => {
+    const { rows, deps } = makeStore([confirmed("t1")]);
+    await applyFeedbackWithDeps(deps, "cust-1", "t1", "not-quite", { note: "just a comment" });
+    assert.equal(rows[0].notQuiteReason, null);
+    assert.equal(rows[0].notQuiteNote, "just a comment");
+  });
+
+  it("BV.7.5 the rejection still triggers reconcile exactly once, same as before this feature", async () => {
+    const { log, deps } = makeStore([confirmed("t1")]);
+    await applyFeedbackWithDeps(deps, "cust-1", "t1", "not-quite", { reason: "used-to-be-true" });
+    assert.deepEqual(log.reconcileCalls, ["cust-1"]);
+  });
+
+  it("BV.7.6 'accurate' never writes a reason or note, even if somehow supplied", async () => {
+    const { rows, deps } = makeStore([confirmed("t1")]);
+    await applyFeedbackWithDeps(deps, "cust-1", "t1", "accurate");
+    assert.equal(rows[0].notQuiteReason ?? null, null);
+    assert.equal(rows[0].notQuiteNote ?? null, null);
+    assert.equal(rows[0].customerFeedback, "accurate");
+  });
+
+  it("BV.7.7 ALREADY_REJECTED guard still applies — no second write, detail or not", async () => {
+    const { log, deps } = makeStore([rejected("t2")]);
+    const result = await applyFeedbackWithDeps(deps, "cust-1", "t2", "not-quite", { reason: "something-else" });
+    assert.deepEqual(result, { ok: false, errorCode: "ALREADY_REJECTED" });
+    assert.equal(log.writeCalls.length, 0);
   });
 });

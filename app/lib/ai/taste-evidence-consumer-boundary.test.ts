@@ -60,6 +60,11 @@ const ALWAYS_ALLOWED_BASENAMES = new Set([
   // raw prisma.styleTendency.count call directly, to pin the exact
   // null-inclusive where-clause shape the NULL-exclusion bug fix depends on.
   "my-naia._index.test.tsx",
+  // Test for api.taste-observation-feedback.tsx (already an approved
+  // production importer below) — imports applyTasteObservationFeedback
+  // only to type the vi.mock() replacement; the module is fully mocked,
+  // never the real implementation.
+  "api.taste-observation-feedback.test.ts",
 ]);
 
 // The ONLY production (non-test) files permitted to import any member of
