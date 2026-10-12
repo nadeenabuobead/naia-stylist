@@ -40,6 +40,7 @@ const ALWAYS_ALLOWED_BASENAMES = new Set([
   "taste-extraction.server.ts",
   "taste-extraction.test.ts",
   "taste-reconcile.server.ts",
+  "taste-reconcile.journeys.test.ts",
   "taste-feedback-engine.ts",
   "taste-feedback.test.ts",
   "taste-feedback.behavior.test.ts",

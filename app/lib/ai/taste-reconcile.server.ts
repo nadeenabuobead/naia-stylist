@@ -443,12 +443,18 @@ export async function loadStrongestConfirmedTendency(customerId: string) {
 // ── Load observations for What nAia Is Noticing page ─────────────────────────
 
 export async function loadConfirmedTendencies(customerId: string) {
-  // Per concept (observationKey), return highest-generation non-REJECTED row
+  // Per concept (observationKey), return highest-generation non-REJECTED row.
+  // customerFeedback is null until the customer gives feedback — Prisma's
+  // `{ not: "not-quite" }` on PostgreSQL excludes NULL rows too (verified
+  // against a real Postgres instance, not assumed), which silently dropped
+  // every CONFIRMED/CANDIDATE tendency nobody had reacted to yet — i.e.
+  // nearly all of them. The three-way OR below is the only form that
+  // actually keeps null alongside the one real non-"not-quite" value.
   const allActive = await prisma.styleTendency.findMany({
     where: {
       customerId,
       state: { in: ["CANDIDATE", "CONFIRMED"] },
-      customerFeedback: { not: "not-quite" },
+      OR: [{ customerFeedback: null }, { customerFeedback: "accurate" }],
     },
     orderBy: [
       { observationKey: "asc" },
