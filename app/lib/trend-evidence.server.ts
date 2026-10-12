@@ -1185,21 +1185,58 @@ function buildEvidenceItemRoleNote(item: ShopperClosetItemEvidence, slug: string
   const suffix = buildColorMaterialSuffix(item, slug);
 
   if (slug === "spring-2026-soft-structure") {
-    const notes: Partial<Record<string, string>> = {
+    // Role-aware, not category-aware. Confirmed live QA contradiction: a
+    // draped, flowy BOTTOMS item (genuinely soft-flowing evidence) got
+    // "The structural base" purely because BOTTOMS was in this map — the
+    // same category-only mistake Colour Direction's branch below was
+    // already fixed for. Category only picks WHICH anchor or soft-flowing
+    // sentence to use once the role itself is decided — it never flips a
+    // soft-flowing item into anchor/structural wording or vice versa.
+    const role = scoreItemAttributes(item, slug).bestDimensionId;
+
+    if (role === "soft-flowing") {
+      const softNotes: Partial<Record<string, string>> = {
+        BOTTOMS:   "The soft, moving counterpart here. A cleaner, more structured piece above gives the drape something to play against.",
+        TOPS:      "The relaxed, flowing counterpart in this direction. A cleaner, more structured piece alongside it is what gives the proportion its contrast.",
+        OUTERWEAR: "A looser, more fluid layer in this direction — the ease it brings is the point.",
+        DRESSES:   "The soft, fluid expression of this direction on its own — no structured layer needed unless the occasion asks for more presence.",
+      };
+      return (softNotes[item.category] ?? "A soft, flowing counterpart in this direction.") + suffix;
+    }
+
+    // structured-anchor, or no resolvable role at all — anchor/structure
+    // language only.
+    const anchorNotes: Partial<Record<string, string>> = {
       OUTERWEAR: "The anchor silhouette in this direction. Keep everything underneath simple so the proportion carries.",
       BOTTOMS:   "The structural base. A clean, contained top lets the cut do the work.",
       TOPS:      "A useful starting point for this direction. Pair it with a cleaner, more structured bottom so the top remains the main point of interest.",
       DRESSES:   "One piece covers the whole direction. Add one structured layer only when the occasion needs more presence.",
     };
-    return (notes[item.category] ?? "A starting point for this direction.") + suffix;
+    return (anchorNotes[item.category] ?? "A starting point for this direction.") + suffix;
   }
   if (slug === "modern-tailoring-spring-2026") {
-    const notes: Partial<Record<string, string>> = {
+    // Role-aware, not category-aware — same fix as Soft Structure above.
+    // A relaxed TOPS/BOTTOMS item functioning as the relaxed counterpart
+    // must never read like another tailored anchor.
+    const role = scoreItemAttributes(item, slug).bestDimensionId;
+    const effCat = getEffectiveCategory(item, slug);
+
+    if (role === "relaxed-counterpart") {
+      const relaxedNotes: Partial<Record<string, string>> = {
+        TOPS:      "The softer counterpart in this direction. The contrast it creates with a structured piece — a blazer, waistcoat, or clean trouser — is what Modern Tailoring is built on.",
+        BOTTOMS:   "The relaxed, easy counterpart here. A structured piece above it (a blazer or clean shirt) is what creates the proportion contrast.",
+        OUTERWEAR: "A looser, more relaxed layer in this direction — it's the ease half of the contrast.",
+      };
+      return (relaxedNotes[effCat] ?? "The softer, more relaxed counterpart in this direction.") + suffix;
+    }
+
+    // tailored-anchor, or no resolvable role at all — anchor language only.
+    const anchorNotes: Partial<Record<string, string>> = {
       OUTERWEAR: "The tailored anchor. Pair it with something relaxed — a soft knit or fluid trouser — for the separates contrast.",
       BOTTOMS:   "The separates foundation. The styling question is which relaxed counterpart it works against.",
-      TOPS:      "The softer counterpart in this direction. The contrast it creates with a tailored anchor — a blazer, waistcoat, or clean trouser — is what Modern Tailoring is built on.",
+      TOPS:      "A structured, tailored piece in this direction — pair it with a relaxed trouser or skirt below for the contrast the method is built on.",
     };
-    return (notes[getEffectiveCategory(item, slug)] ?? "A starting point for this direction.") + suffix;
+    return (anchorNotes[effCat] ?? "A starting point for this direction.") + suffix;
   }
   if (slug === "spring-2026-colour-direction") {
     // Role-aware, not category-aware. Confirmed root cause of a live QA

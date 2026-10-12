@@ -1041,3 +1041,56 @@ describe("Fix #5 — Worth Investing In cannot declare coverage from category pr
     assert.ok(edit.worthInvestingStatement !== null, "genuine evidence for both roles can produce a valid no-purchase-needed conclusion");
   });
 });
+
+// ═════════════════════════════════════════════════════════════════════════
+// Fix #6 — Modern Tailoring / Soft Structure roleNote copy must derive from
+// the item's actual resolved role, not raw category. Live QA confirmed the
+// Draped Flowy Maxi Skirt (genuinely soft-flowing evidence) was described
+// in Soft Structure as "The structural base" purely because it sits in
+// BOTTOMS — the same category-only mistake Fix #3 already closed for
+// Colour Direction. Copy-only: no selection, ranking, or coverage logic
+// changes.
+// ═════════════════════════════════════════════════════════════════════════
+
+describe("Fix #6 — a soft-flowing / relaxed-counterpart item never receives anchor/structural-base copy", () => {
+  it("Soft Structure: the soft-flowing skirt's roleNote uses soft/movement language, never 'structural base' or 'anchor'", () => {
+    const closet = [tailoredBlazer(), drapedFlowyMaxiSkirt()];
+    const edit = buildShopperEdit(SOFT_STRUCTURE_REPORT, evidence(closet));
+    const skirtCard = edit.evidenceClosetItems.find((i) => i.name === "Draped Flowy Maxi Skirt");
+    assert.ok(skirtCard, "the skirt is represented in Closet Shows");
+    assert.ok(!/structural base/i.test(skirtCard!.roleNote), "a soft-flowing item must never be called the structural base");
+    assert.ok(!/anchor silhouette/i.test(skirtCard!.roleNote), "a soft-flowing item must never be called the anchor silhouette");
+    assert.match(skirtCard!.roleNote, /soft|flowing|moving|drape|ease/i, "the copy must use soft/movement language matching its real soft-flowing role");
+
+    const blazerCard = edit.evidenceClosetItems.find((i) => i.name === "Tailored Blazer");
+    assert.ok(blazerCard, "the blazer is represented in Closet Shows");
+    assert.match(blazerCard!.roleNote, /anchor/i, "the genuine structured-anchor item still reads as the anchor");
+  });
+
+  it("Modern Tailoring: the same skirt, now functioning as the relaxed counterpart, never receives tailored-anchor or 'separates foundation' copy", () => {
+    const closet = [tailoredBlazer(), drapedFlowyMaxiSkirt()];
+    const edit = buildShopperEdit(MODERN_TAILORING_REPORT, evidence(closet));
+    const skirtCard = edit.evidenceClosetItems.find((i) => i.name === "Draped Flowy Maxi Skirt");
+    assert.ok(skirtCard, "the skirt is represented in Closet Shows");
+    assert.ok(!/tailored anchor/i.test(skirtCard!.roleNote), "a relaxed-counterpart item must never be called the tailored anchor");
+    assert.ok(!/separates foundation/i.test(skirtCard!.roleNote), "a relaxed-counterpart item must never be called the separates foundation");
+    assert.match(skirtCard!.roleNote, /relaxed|soft|easy|ease|contrast/i, "the copy must use relaxed/soft contrast language matching its real relaxed-counterpart role");
+
+    const blazerCard = edit.evidenceClosetItems.find((i) => i.name === "Tailored Blazer");
+    assert.ok(blazerCard, "the blazer is represented in Closet Shows");
+    assert.match(blazerCard!.roleNote, /tailored anchor/i, "the genuine tailored-anchor item still reads as the anchor");
+  });
+
+  it("the same skirt is never called the anchor in one report while also being named the counterpart elsewhere in a way that contradicts its role card", () => {
+    const closet = [tailoredBlazer(), drapedFlowyMaxiSkirt()];
+    const ssEdit = buildShopperEdit(SOFT_STRUCTURE_REPORT, evidence(closet));
+    const mtEdit = buildShopperEdit(MODERN_TAILORING_REPORT, evidence(closet));
+    const ssCard = ssEdit.evidenceClosetItems.find((i) => i.name === "Draped Flowy Maxi Skirt");
+    const mtCard = mtEdit.evidenceClosetItems.find((i) => i.name === "Draped Flowy Maxi Skirt");
+    assert.ok(ssCard && mtCard, "the skirt is represented in both reports");
+    for (const card of [ssCard, mtCard]) {
+      assert.ok(!/\b(is|as) (a |the )?(tailored |structured )?anchor\b/i.test(card!.roleNote), `roleNote must not call the skirt an anchor in either report: "${card!.roleNote}"`);
+      assert.ok(!/structural base|separates foundation/i.test(card!.roleNote), `roleNote must not call the skirt a structural base/foundation in either report: "${card!.roleNote}"`);
+    }
+  });
+});
