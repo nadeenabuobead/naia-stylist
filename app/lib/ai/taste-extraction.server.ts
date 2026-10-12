@@ -325,6 +325,33 @@ interface BuySkipOutcomeForExtraction {
   createdAt:           Date | string;
 }
 
+// BuyOrSkipAnalysis.category is set from the Buy or Skip Step 2 dropdown
+// (app/routes/buyskip._index.tsx CATEGORIES: Top/Bottom/Dress/Outerwear/
+// Shoes/Bag/Accessory/Jewelry) — a different, singular vocabulary from the
+// ClosetCategory enum ClosetItem.category uses (TOPS/BOTTOMS/DRESSES/...).
+// Left unmapped, a customer's "favourite" TOPS in their Closet and a
+// "LOVE_IT" Buy-or-Skip outcome for a "Top" never aggregate into the same
+// garment-category observation — same real-world affinity, split into two
+// under-strength groups that each individually stay below CANDIDATE. This
+// table canonicalizes BUYSKIP_OUTCOME's value onto the same vocabulary
+// CLOSET_RELATIONSHIP already uses, so repeated signal on one category
+// combines (and earns the cross-source bonus) instead of fragmenting.
+const BUYSKIP_CATEGORY_TO_CLOSET_CATEGORY: Record<string, string> = {
+  TOP: "TOPS",
+  BOTTOM: "BOTTOMS",
+  DRESS: "DRESSES",
+  OUTERWEAR: "OUTERWEAR",
+  SHOES: "SHOES",
+  BAG: "BAGS",
+  ACCESSORY: "ACCESSORIES",
+  JEWELRY: "JEWELRY",
+};
+
+function canonicalizeBuySkipCategory(raw: string): string {
+  const upper = raw.trim().toUpperCase();
+  return BUYSKIP_CATEGORY_TO_CLOSET_CATEGORY[upper] ?? upper;
+}
+
 export function extractBuySkipEvidence(
   outcome: BuySkipOutcomeForExtraction,
 ): TasteEvidenceInsert[] {
@@ -338,13 +365,13 @@ export function extractBuySkipEvidence(
 
   const id  = outcome.id;
   const cid = outcome.customerId;
-  const cat = outcome.category;
+  const cat = canonicalizeBuySkipCategory(outcome.category);
   const at  = outcome.createdAt instanceof Date ? outcome.createdAt : new Date(outcome.createdAt);
 
   if (outcome.postPurchaseOutcome === "LOVE_IT") {
-    rows.push(makeRow(cid, "BUYSKIP_OUTCOME", id, "garment-category", cat, "positive", base * 1.0, at, "postPurchaseOutcome:LOVE_IT", ["postPurchaseOutcome", "category"], [outcome.postPurchaseOutcome, cat]));
+    rows.push(makeRow(cid, "BUYSKIP_OUTCOME", id, "garment-category", cat, "positive", base * 1.0, at, "postPurchaseOutcome:LOVE_IT", ["postPurchaseOutcome", "category"], [outcome.postPurchaseOutcome, outcome.category]));
   } else if (outcome.postPurchaseOutcome === "RETURNED_IT") {
-    rows.push(makeRow(cid, "BUYSKIP_OUTCOME", id, "garment-category", cat, "negative", base * 1.0, at, "postPurchaseOutcome:RETURNED_IT", ["postPurchaseOutcome", "category"], [outcome.postPurchaseOutcome, cat]));
+    rows.push(makeRow(cid, "BUYSKIP_OUTCOME", id, "garment-category", cat, "negative", base * 1.0, at, "postPurchaseOutcome:RETURNED_IT", ["postPurchaseOutcome", "category"], [outcome.postPurchaseOutcome, outcome.category]));
   }
 
   return dedupRows(rows);

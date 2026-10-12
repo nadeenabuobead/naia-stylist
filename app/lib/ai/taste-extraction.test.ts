@@ -381,6 +381,72 @@ describe("extractBuySkipEvidence", () => {
     const after = facts.map((f) => extractBuySkipEvidence(f));
     assert.deepEqual(after, before, "extractBuySkipEvidence's output must be unchanged whether or not the Phase 4 adapter was also called on the same facts");
   });
+
+  // E.4.7 — TEMP QA DIAGNOSTIC fix: What nAia Is Noticing, category fragmentation.
+  // BuyOrSkipAnalysis.category comes from the Buy or Skip Step 2 dropdown
+  // (buyskip._index.tsx CATEGORIES: Top/Bottom/Dress/Outerwear/Shoes/Bag/
+  // Accessory/Jewelry) — singular, title-case — while ClosetItem.category is
+  // the plural, all-caps ClosetCategory enum. Before this fix, a "Bottom"
+  // Buy-or-Skip outcome and a "BOTTOMS" Closet relationship produced two
+  // separate garment-category|value groups instead of one, each too thin to
+  // reach CANDIDATE on its own.
+  const BUYSKIP_TO_CLOSET = {
+    Top: "TOPS", Bottom: "BOTTOMS", Dress: "DRESSES", Outerwear: "OUTERWEAR",
+    Shoes: "SHOES", Bag: "BAGS", Accessory: "ACCESSORIES", Jewelry: "JEWELRY",
+  };
+  for (const [buySkipLabel, closetValue] of Object.entries(BUYSKIP_TO_CLOSET)) {
+    it(`E.4.7 "${buySkipLabel}" (Buy or Skip Step 2 vocabulary) canonicalizes onto ClosetCategory's "${closetValue}"`, () => {
+      const rows = extractBuySkipEvidence({
+        id: "bos-cat", customerId: CID,
+        postPurchaseOutcome: "LOVE_IT", category: buySkipLabel, createdAt: T,
+      });
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0].value, closetValue);
+    });
+  }
+
+  it("E.4.8 an already-canonical ClosetCategory value passes through unchanged", () => {
+    const rows = extractBuySkipEvidence({
+      id: "bos-cat2", customerId: CID,
+      postPurchaseOutcome: "RETURNED_IT", category: "ACTIVEWEAR", createdAt: T,
+    });
+    assert.equal(rows[0].value, "ACTIVEWEAR");
+  });
+
+  it("E.4.9 an unrecognized future category string falls back to uppercased as-is, never crashes", () => {
+    const rows = extractBuySkipEvidence({
+      id: "bos-cat3", customerId: CID,
+      postPurchaseOutcome: "LOVE_IT", category: "Swimwear", createdAt: T,
+    });
+    assert.equal(rows[0].value, "SWIMWEAR");
+  });
+
+  it("E.4.10 provenance.rawValues preserves the original (pre-canonicalization) category string", () => {
+    const rows = extractBuySkipEvidence({
+      id: "bos-cat4", customerId: CID,
+      postPurchaseOutcome: "LOVE_IT", category: "Bottom", createdAt: T,
+    });
+    assert.equal(rows[0].value, "BOTTOMS");
+    assert.deepEqual(rows[0].provenance.rawValues, ["LOVE_IT", "Bottom"]);
+  });
+
+  it("E.4.11 a Closet-relationship BOTTOMS claim and a Buy-or-Skip \"Bottom\" claim now share one observation key — the fragmentation this fix closes", () => {
+    const closetRows = extractClosetEvidence({
+      id: "closet1", customerId: CID, category: "BOTTOMS",
+      garmentRelationships: ["favourite"], updatedAt: T,
+    });
+    const buySkipRows = extractBuySkipEvidence({
+      id: "bos-cat5", customerId: CID,
+      postPurchaseOutcome: "LOVE_IT", category: "Bottom", createdAt: T,
+    });
+    assert.equal(closetRows[0].dimension, "garment-category");
+    assert.equal(buySkipRows[0].dimension, "garment-category");
+    assert.equal(
+      closetRows[0].value,
+      buySkipRows[0].value,
+      "same real-world category must produce the same (dimension, value) observation key regardless of which source reported it",
+    );
+  });
 });
 
 // ── §E.5 — Strength clamping ──────────────────────────────────────────────────
