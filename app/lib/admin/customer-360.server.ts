@@ -809,6 +809,32 @@ export interface AdminTrendEditUsageRow {
  * (@@unique(customerId, reportSlug, periodKey)), so this grows with calendar
  * time, not activity volume — low cardinality even after years of use.
  */
+/**
+ * Resolves a display title for a Trend Edit usage row: the snapshot's own
+ * reportTitle when one was captured, else a best-effort live lookup, else
+ * the raw slug as a last resort. Shared by the list and the detail fetcher
+ * so a historical row's title can never read differently in one place than
+ * the other — resolving a title is not the same as fabricating the
+ * generated content, which neither function ever attempts.
+ */
+async function resolveTrendEditReportTitle(reportSlug: string, snapshot: TrendEditSnapshot | null): Promise<string> {
+  if (snapshot?.reportTitle) return snapshot.reportTitle;
+  const report = await getEditorialReportBySlug(reportSlug);
+  return report?.title ?? reportSlug;
+}
+
+/** "2026-08" -> "August 2026". Parses an arbitrary STORED periodKey — unlike
+ *  getUsageWindow()/formatResetDate() (usage-window.server.ts), which only
+ *  ever describe the CURRENT window, this formats a historical one as
+ *  plain display text, never used for any count/boundary logic. */
+function formatPeriodKeyLabel(periodKey: string): string | null {
+  const match = /^(\d{4})-(\d{2})$/.exec(periodKey);
+  if (!match) return null;
+  const [, yearStr, monthStr] = match;
+  const asDate = new Date(Date.UTC(Number(yearStr), Number(monthStr) - 1, 1));
+  return asDate.toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
+}
+
 export async function getAdminCustomerTrendEditUsage(
   customerId: string,
 ): Promise<AdminTrendEditUsageRow[]> {
@@ -820,15 +846,10 @@ export async function getAdminCustomerTrendEditUsage(
 
   return Promise.all(rows.map(async (r: (typeof rows)[number]) => {
     const snapshot = r.snapshot as unknown as TrendEditSnapshot | null;
-    let reportTitle = snapshot?.reportTitle ?? null;
-    if (!reportTitle) {
-      const report = await getEditorialReportBySlug(r.reportSlug);
-      reportTitle = report?.title ?? r.reportSlug;
-    }
     return {
       id: r.id,
       reportSlug: r.reportSlug,
-      reportTitle,
+      reportTitle: await resolveTrendEditReportTitle(r.reportSlug, snapshot),
       periodKey: r.periodKey,
       createdAt: r.createdAt,
       hasSnapshot: snapshot != null,
@@ -836,24 +857,43 @@ export async function getAdminCustomerTrendEditUsage(
   }));
 }
 
+export interface AdminTrendEditDetail {
+  hasSnapshot: boolean;
+  snapshot: TrendEditSnapshot | null;
+  createdAt: Date;
+  /** Resolved the same way as the list row — real title even when hasSnapshot is false. */
+  reportTitle: string;
+  /** "August 2026" — null only if periodKey is somehow malformed. */
+  periodLabel: string | null;
+}
+
 /**
  * Full stored snapshot for one Personalised Trend Edit usage row, scoped to
  * the given customer — returns null (not the record) when the row belongs
  * to a different customer, same ownership-scoping pattern as every other
  * detail fetcher in this module. Returns { hasSnapshot: false } rather than
- * fabricated content when the row predates snapshot persistence.
+ * fabricated content when the row predates snapshot persistence — but
+ * reportTitle/periodLabel are always resolved for real, so a historical
+ * row's detail page can still show what report it was and when, just not
+ * the generated copy itself.
  */
 export async function getAdminCustomerTrendEditDetail(
   customerId: string,
   usageId: string,
-): Promise<{ hasSnapshot: boolean; snapshot: TrendEditSnapshot | null; createdAt: Date } | null> {
+): Promise<AdminTrendEditDetail | null> {
   const row = await prisma.personalisedTrendEditUsage.findUnique({
     where: { id: usageId },
-    select: { customerId: true, createdAt: true, snapshot: true },
+    select: { customerId: true, createdAt: true, snapshot: true, reportSlug: true, periodKey: true },
   });
   if (!row || row.customerId !== customerId) return null;
   const snapshot = row.snapshot as unknown as TrendEditSnapshot | null;
-  return { hasSnapshot: snapshot != null, snapshot, createdAt: row.createdAt };
+  return {
+    hasSnapshot: snapshot != null,
+    snapshot,
+    createdAt: row.createdAt,
+    reportTitle: await resolveTrendEditReportTitle(row.reportSlug, snapshot),
+    periodLabel: formatPeriodKeyLabel(row.periodKey),
+  };
 }
 
 // ── VTO / My nAia Model ───────────────────────────────────────────────────────

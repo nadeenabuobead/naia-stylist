@@ -939,7 +939,7 @@ describe("§C360.14 Trend Edits — every row is clickable in the admin route", 
 
   it("the trend-edit detail route still shows the historical-unavailable message for a null snapshot (unchanged)", () => {
     const src = readSource("app/routes/admin.naia.customers.$customerId.trend-edit.$usageId.tsx");
-    expect(src).toMatch(/Historical personalised content was not stored for this generation\./);
+    expect(src).toMatch(/Historical personalised content wasn't stored for this generation\./);
   });
 });
 
@@ -1000,13 +1000,13 @@ describe("§C360.13 getAdminCustomerTrendEditUsage resolves a title without fabr
 
 describe("§C360.13 getAdminCustomerTrendEditDetail — historical rows are never fabricated", () => {
   it("returns null when the usage row belongs to a different customer", async () => {
-    (prisma.personalisedTrendEditUsage.findUnique as any).mockResolvedValue({ customerId: "cust-B", createdAt: new Date(), snapshot: null });
+    (prisma.personalisedTrendEditUsage.findUnique as any).mockResolvedValue({ customerId: "cust-B", createdAt: new Date(), snapshot: null, reportSlug: "s", periodKey: "2026-09" });
     const result = await getAdminCustomerTrendEditDetail("cust-A", "u1");
     expect(result).toBeNull();
   });
 
   it("hasSnapshot is false and snapshot is null for a pre-snapshot historical row — never reconstructed", async () => {
-    (prisma.personalisedTrendEditUsage.findUnique as any).mockResolvedValue({ customerId: "cust-A", createdAt: new Date(), snapshot: null });
+    (prisma.personalisedTrendEditUsage.findUnique as any).mockResolvedValue({ customerId: "cust-A", createdAt: new Date(), snapshot: null, reportSlug: "s", periodKey: "2026-09" });
     const result = await getAdminCustomerTrendEditDetail("cust-A", "u1");
     expect(result!.hasSnapshot).toBe(false);
     expect(result!.snapshot).toBeNull();
@@ -1014,10 +1014,62 @@ describe("§C360.13 getAdminCustomerTrendEditDetail — historical rows are neve
 
   it("returns the full stored snapshot when present", async () => {
     const snapshot = { schemaVersion: "trend-edit-snapshot-v1", reportSlug: "s", reportTitle: "T", generatedAt: "2026-09-01T00:00:00Z", edit: { yourVersion: "x" }, nadineRecommendation: null };
-    (prisma.personalisedTrendEditUsage.findUnique as any).mockResolvedValue({ customerId: "cust-A", createdAt: new Date(), snapshot });
+    (prisma.personalisedTrendEditUsage.findUnique as any).mockResolvedValue({ customerId: "cust-A", createdAt: new Date(), snapshot, reportSlug: "s", periodKey: "2026-09" });
     const result = await getAdminCustomerTrendEditDetail("cust-A", "u1");
     expect(result!.hasSnapshot).toBe(true);
     expect(result!.snapshot).toEqual(snapshot);
+  });
+
+  it("reportTitle is resolved from the snapshot when present, even though hasSnapshot/snapshot are the main payload", async () => {
+    const snapshot = { schemaVersion: "trend-edit-snapshot-v1", reportSlug: "modern-tailoring", reportTitle: "Modern Tailoring", generatedAt: "2026-09-01T00:00:00Z", edit: { yourVersion: "x" }, nadineRecommendation: null };
+    (prisma.personalisedTrendEditUsage.findUnique as any).mockResolvedValue({ customerId: "cust-A", createdAt: new Date(), snapshot, reportSlug: "modern-tailoring", periodKey: "2026-09" });
+    const result = await getAdminCustomerTrendEditDetail("cust-A", "u1");
+    expect(result!.reportTitle).toBe("Modern Tailoring");
+  });
+
+  it("reportTitle is still the real title for a historical row with no snapshot — resolved live, not fabricated content", async () => {
+    (getEditorialReportBySlug as any).mockResolvedValue({ slug: "modern-tailoring", title: "Modern Tailoring" });
+    (prisma.personalisedTrendEditUsage.findUnique as any).mockResolvedValue({ customerId: "cust-A", createdAt: new Date(), snapshot: null, reportSlug: "modern-tailoring", periodKey: "2026-09" });
+    const result = await getAdminCustomerTrendEditDetail("cust-A", "u1");
+    expect(result!.reportTitle).toBe("Modern Tailoring");
+    expect(result!.hasSnapshot).toBe(false);
+  });
+
+  it("periodLabel formats the stored periodKey as a human-readable month/year", async () => {
+    (prisma.personalisedTrendEditUsage.findUnique as any).mockResolvedValue({ customerId: "cust-A", createdAt: new Date(), snapshot: null, reportSlug: "s", periodKey: "2026-08" });
+    const result = await getAdminCustomerTrendEditDetail("cust-A", "u1");
+    expect(result!.periodLabel).toBe("August 2026");
+  });
+
+  it("periodLabel is null (not a crash) for a malformed periodKey", async () => {
+    (prisma.personalisedTrendEditUsage.findUnique as any).mockResolvedValue({ customerId: "cust-A", createdAt: new Date(), snapshot: null, reportSlug: "s", periodKey: "not-a-period" });
+    const result = await getAdminCustomerTrendEditDetail("cust-A", "u1");
+    expect(result!.periodLabel).toBeNull();
+  });
+});
+
+describe("§C360.16 the historical Trend Edit detail page uses neutral informational styling, not a warning box", () => {
+  it("no longer uses the amber/warning na-provenance-unavailable class", () => {
+    const src = readSource("app/routes/admin.naia.customers.$customerId.trend-edit.$usageId.tsx");
+    expect(src).not.toContain("na-provenance-unavailable");
+  });
+
+  it("renders both the 'wasn't stored' sentence and the explanatory follow-up sentence", () => {
+    const src = readSource("app/routes/admin.naia.customers.$customerId.trend-edit.$usageId.tsx");
+    expect(src).toContain("Historical personalised content wasn't stored for this generation.");
+    expect(src).toContain("Full personalised Trend Edit history is available for generations created after snapshot storage was introduced.");
+  });
+
+  it("the H1 always uses the resolved reportTitle, never a generic fallback string", () => {
+    const src = readSource("app/routes/admin.naia.customers.$customerId.trend-edit.$usageId.tsx");
+    expect(src).toContain("{detail.reportTitle}");
+    expect(src).not.toContain('?? "Personalised Trend Edit"');
+  });
+
+  it("the Back to Customer link is unchanged", () => {
+    const src = readSource("app/routes/admin.naia.customers.$customerId.trend-edit.$usageId.tsx");
+    expect(src).toMatch(/← Customer/);
+    expect(src).toMatch(/\/admin\/naia\/customers\/\$\{customerId\}/);
   });
 });
 

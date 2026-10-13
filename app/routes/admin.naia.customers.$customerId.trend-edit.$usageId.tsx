@@ -12,6 +12,7 @@ import { Link, useLoaderData } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
 import {
   getAdminCustomerTrendEditDetail,
+  type AdminTrendEditDetail,
 } from "~/lib/admin/customer-360.server";
 import type { TrendEditSnapshot } from "~/lib/plan/personalised-trend-edit-usage.server";
 import { requireAdminSession } from "~/lib/internal-auth.server";
@@ -63,7 +64,7 @@ function ClosetItemsStrip({ items }: { items: TrendEditSnapshot["edit"]["evidenc
 export default function AdminTrendEditDetailPage() {
   const { customerId, detail } = useLoaderData() as {
     customerId: string;
-    detail: { hasSnapshot: boolean; snapshot: TrendEditSnapshot | null; createdAt: string };
+    detail: AdminTrendEditDetail & { createdAt: string };
   };
   const s = detail.snapshot;
 
@@ -76,17 +77,21 @@ export default function AdminTrendEditDetailPage() {
       </div>
 
       <h1 className="na-page-heading" style={{ marginBottom: "0.25rem" }}>
-        {s?.reportTitle ?? "Personalised Trend Edit"}
+        {detail.reportTitle}
       </h1>
       <p style={{ fontSize: "0.8rem", color: "#6b7280", marginBottom: "1.5rem" }}>
         Generated {displayDateTime(s?.generatedAt ?? detail.createdAt)}
+        {detail.periodLabel && ` · Period: ${detail.periodLabel}`}
       </p>
 
       {!detail.hasSnapshot || !s ? (
         <div className="na-card">
           <div className="na-card__body">
-            <p className="na-provenance-unavailable">
-              Historical personalised content was not stored for this generation.
+            <p style={{ fontSize: "0.85rem", color: "#6b7280", lineHeight: 1.6, margin: 0 }}>
+              Historical personalised content wasn't stored for this generation.
+            </p>
+            <p style={{ fontSize: "0.78rem", color: "#9ca3af", lineHeight: 1.6, margin: "0.6rem 0 0" }}>
+              Full personalised Trend Edit history is available for generations created after snapshot storage was introduced.
             </p>
           </div>
         </div>
