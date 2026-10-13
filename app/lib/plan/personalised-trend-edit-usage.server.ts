@@ -53,6 +53,32 @@ export async function recordPersonalisedTrendEditUsage(
   await prisma.personalisedTrendEditUsage.upsert({
     where: { customerId_reportSlug_periodKey: { customerId, reportSlug, periodKey } },
     create: { customerId, reportSlug, periodKey, snapshot: snapshot ?? undefined },
-    update: {}, // already recorded for this customer+report+period — no second write, no re-snapshot
+    // The caller (trends.my-edits.$slug.tsx) only ever reaches this function
+    // when getStoredTrendEditSnapshot found no stored snapshot for this
+    // period — either no row yet, or a legacy row from before snapshot
+    // persistence existed. In the legacy case this is a one-time backfill of
+    // that one row, not a second generation for an already-snapshotted
+    // period: this function is never called again once a snapshot exists.
+    update: { snapshot: snapshot ?? undefined },
   });
+}
+
+/**
+ * The stored snapshot for this customer+report+CURRENT period, if one
+ * exists. Used by the customer-facing route to decide "render what we
+ * already showed them" vs. "this is the first view this period, generate
+ * and persist" — see trends.my-edits.$slug.tsx. Returns null (not an
+ * empty/placeholder edit) when there is genuinely nothing stored yet, so
+ * the caller can tell "first view" apart from "stored but empty".
+ */
+export async function getStoredTrendEditSnapshot(
+  customerId: string,
+  reportSlug: string,
+): Promise<TrendEditSnapshot | null> {
+  const { periodKey } = getUsageWindow();
+  const row = await prisma.personalisedTrendEditUsage.findUnique({
+    where: { customerId_reportSlug_periodKey: { customerId, reportSlug, periodKey } },
+    select: { snapshot: true },
+  });
+  return (row?.snapshot as unknown as TrendEditSnapshot | null) ?? null;
 }

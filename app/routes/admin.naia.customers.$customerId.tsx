@@ -890,7 +890,7 @@ function usageBar(label: string, used: number, limit: number, lifetime?: number,
       <div className="na-usage-row">
         <span className="na-usage-row__label">{label} <span style={{ color: "#9ca3af", fontWeight: 400 }}>— this cycle</span></span>
         <div className="na-usage-row__bar"><div className="na-usage-row__fill" style={{ width: `${pct}%` }} /></div>
-        <span className="na-usage-row__count">{used} / {limit}</span>
+        <span className="na-usage-row__count">{used} used this cycle / {limit} included</span>
       </div>
       {lifetime != null && (
         <p style={{ fontSize: "0.68rem", color: "#9ca3af", margin: "0.1rem 0 0", paddingLeft: "0.1rem" }}>

@@ -18,7 +18,11 @@ import {
   type NadineProductRecommendation,
 } from "~/lib/trend-product-recommendation.server";
 import { checkEntitlement } from "~/lib/plan/entitlement.server";
-import { recordPersonalisedTrendEditUsage, type TrendEditSnapshot } from "~/lib/plan/personalised-trend-edit-usage.server";
+import {
+  recordPersonalisedTrendEditUsage,
+  getStoredTrendEditSnapshot,
+  type TrendEditSnapshot,
+} from "~/lib/plan/personalised-trend-edit-usage.server";
 import { getUsageWindow } from "~/lib/plan/usage-window.server";
 import {
   emitTrendEditGenerated,
@@ -60,6 +64,29 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   ]);
   if (!report) throw new Response("Not Found", { status: 404 });
   const reportIndex = allPublished.findIndex((r) => r.slug === report.slug);
+
+  // Frozen-at-first-generation behaviour: once this customer has a stored
+  // snapshot for this report in the current period, EVERY later view this
+  // period renders that exact stored snapshot — never a fresh regeneration
+  // from whatever Passport/Closet state happens to look like today. Without
+  // this, a customer could see Edit A on first visit while a changed Closet
+  // silently produced Edit B on a later visit, and Admin's stored snapshot
+  // (frozen at Edit A) would permanently disagree with what the customer is
+  // currently looking at. No second generation-history system here — this
+  // reads the same PersonalisedTrendEditUsage row the usage/quota logic
+  // already owns.
+  const stored = await getStoredTrendEditSnapshot(customer.id, report.slug);
+  if (stored) {
+    return {
+      report,
+      edit: stored.edit,
+      hasProfile: true,
+      generationFailed: false,
+      nadineRecommendation: stored.nadineRecommendation,
+      reportIndex,
+      membershipRequired: false,
+    } satisfies LoaderData;
+  }
 
   // Personalised Trend Edit is a membership feature. Behind ENTITLEMENT_ENFORCEMENT
   // (same rollout flag as StyleMe/BuySkip/VTO — disabled in production until the

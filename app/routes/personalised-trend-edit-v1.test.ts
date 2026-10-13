@@ -52,6 +52,7 @@ vi.mock("~/lib/plan/entitlement.server", () => ({
 
 vi.mock("~/lib/plan/personalised-trend-edit-usage.server", () => ({
   recordPersonalisedTrendEditUsage: vi.fn().mockResolvedValue(undefined),
+  getStoredTrendEditSnapshot: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("~/lib/plan/usage-window.server", () => ({
@@ -79,7 +80,7 @@ import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { getEditorialReportBySlug, getPublishedEditorialReports } from "~/lib/editorial-reports.server";
 import { getShopperEvidence, buildShopperEdit } from "~/lib/trend-evidence.server";
 import { checkEntitlement } from "~/lib/plan/entitlement.server";
-import { recordPersonalisedTrendEditUsage } from "~/lib/plan/personalised-trend-edit-usage.server";
+import { recordPersonalisedTrendEditUsage, getStoredTrendEditSnapshot } from "~/lib/plan/personalised-trend-edit-usage.server";
 import { recordJourneyEventAwaited } from "~/lib/ai/journey-events.server";
 import { loader } from "./trends.my-edits.$slug";
 
@@ -311,14 +312,77 @@ describe("§TREND-EDIT-V1 — canonical usage recording (PersonalisedTrendEditUs
     expect(recordPersonalisedTrendEditUsage).not.toHaveBeenCalled();
   });
 
-  it("refresh of the same completed report/month calls the writer again with the identical idempotent key material — the DB unique constraint, not this call count, is the dedup authority", async () => {
+});
+
+describe("§TREND-EDIT-V1 — frozen-at-first-generation (repeat-view immutability)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getEditorialReportBySlug).mockResolvedValue(REPORT as any);
+    vi.mocked(getPublishedEditorialReports).mockResolvedValue([REPORT] as any);
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValue(makeCustomer());
+    vi.mocked(getStoredTrendEditSnapshot).mockResolvedValue(null);
+  });
+
+  const FIRST_SNAPSHOT = {
+    schemaVersion: "trend-edit-snapshot-v1" as const,
+    reportSlug: REPORT.slug,
+    reportTitle: REPORT.title,
+    generatedAt: "2026-10-01T00:00:00.000Z",
+    edit: MOCK_EDIT as any,
+    nadineRecommendation: null,
+  };
+
+  it("first generation in the period persists the exact generated snapshot and renders it", async () => {
     vi.mocked(getShopperEvidence).mockResolvedValue({ hasProfile: true, closetItems: [] } as any);
     vi.mocked(buildShopperEdit).mockReturnValue(MOCK_EDIT as any);
+    const result = await callLoader();
+    expect(result.edit).toEqual(MOCK_EDIT);
+    expect(recordPersonalisedTrendEditUsage).toHaveBeenCalledWith(
+      "cust-1", REPORT.slug, expect.objectContaining({ edit: MOCK_EDIT }),
+    );
+  });
+
+  it("a repeat same-period view with a stored snapshot renders that stored snapshot, not a fresh one", async () => {
+    vi.mocked(getStoredTrendEditSnapshot).mockResolvedValue(FIRST_SNAPSHOT);
+    const result = await callLoader();
+    expect(result.edit).toEqual(FIRST_SNAPSHOT.edit);
+    expect(result.hasProfile).toBe(true);
+    expect(result.membershipRequired).toBe(false);
+  });
+
+  it("the generator (getShopperEvidence/buildShopperEdit) is never called on a repeat view with a stored snapshot", async () => {
+    vi.mocked(getStoredTrendEditSnapshot).mockResolvedValue(FIRST_SNAPSHOT);
     await callLoader();
+    expect(getShopperEvidence).not.toHaveBeenCalled();
+    expect(buildShopperEdit).not.toHaveBeenCalled();
+  });
+
+  it("the usage writer is never called again on a repeat view with a stored snapshot — no second generation, no second quota consumption", async () => {
+    vi.mocked(getStoredTrendEditSnapshot).mockResolvedValue(FIRST_SNAPSHOT);
     await callLoader();
-    expect(recordPersonalisedTrendEditUsage).toHaveBeenCalledTimes(2);
-    expect(recordPersonalisedTrendEditUsage).toHaveBeenNthCalledWith(1, "cust-1", REPORT.slug, expect.objectContaining({ reportSlug: REPORT.slug }));
-    expect(recordPersonalisedTrendEditUsage).toHaveBeenNthCalledWith(2, "cust-1", REPORT.slug, expect.objectContaining({ reportSlug: REPORT.slug }));
+    expect(recordPersonalisedTrendEditUsage).not.toHaveBeenCalled();
+  });
+
+  it("a changed Passport/Closet (different buildShopperEdit output) after first generation does not mutate what the repeat view renders", async () => {
+    // Simulates: Closet/Passport changed between visits. If the loader ever
+    // regenerated on repeat view, this mock would be what the customer saw —
+    // it must not be, since getStoredTrendEditSnapshot already found a row.
+    vi.mocked(getShopperEvidence).mockResolvedValue({ hasProfile: true, closetItems: [{ name: "New Item" }] } as any);
+    vi.mocked(buildShopperEdit).mockReturnValue({ subTitle: "Changed", yourVersion: "A completely different edit." } as any);
+    vi.mocked(getStoredTrendEditSnapshot).mockResolvedValue(FIRST_SNAPSHOT);
+
+    const result = await callLoader();
+    expect(result.edit).toEqual(FIRST_SNAPSHOT.edit);
+    expect(result.edit).not.toEqual({ subTitle: "Changed", yourVersion: "A completely different edit." });
+  });
+
+  it("a legacy row from before snapshot persistence (row exists, snapshot null) is treated as 'no stored snapshot' and generates once", async () => {
+    vi.mocked(getStoredTrendEditSnapshot).mockResolvedValue(null); // getStoredTrendEditSnapshot already normalizes a null-snapshot row to null
+    vi.mocked(getShopperEvidence).mockResolvedValue({ hasProfile: true, closetItems: [] } as any);
+    vi.mocked(buildShopperEdit).mockReturnValue(MOCK_EDIT as any);
+    const result = await callLoader();
+    expect(result.edit).toEqual(MOCK_EDIT);
+    expect(recordPersonalisedTrendEditUsage).toHaveBeenCalledTimes(1);
   });
 });
 

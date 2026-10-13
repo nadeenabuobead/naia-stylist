@@ -11,10 +11,13 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { upsertMock } = vi.hoisted(() => ({ upsertMock: vi.fn().mockResolvedValue({ id: "row-1" }) }));
+const { upsertMock, findUniqueMock } = vi.hoisted(() => ({
+  upsertMock: vi.fn().mockResolvedValue({ id: "row-1" }),
+  findUniqueMock: vi.fn().mockResolvedValue(null),
+}));
 
 vi.mock("~/db.server", () => ({
-  default: { personalisedTrendEditUsage: { upsert: upsertMock } },
+  default: { personalisedTrendEditUsage: { upsert: upsertMock, findUnique: findUniqueMock } },
 }));
 
 vi.mock("./usage-window.server", () => ({
@@ -26,7 +29,7 @@ vi.mock("./usage-window.server", () => ({
   })),
 }));
 
-import { recordPersonalisedTrendEditUsage } from "./personalised-trend-edit-usage.server";
+import { recordPersonalisedTrendEditUsage, getStoredTrendEditSnapshot } from "./personalised-trend-edit-usage.server";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -42,8 +45,8 @@ describe("§TREND-EDIT-USAGE — idempotent create-if-absent write", () => {
     expect(upsertMock).toHaveBeenCalledTimes(1);
     expect(upsertMock).toHaveBeenCalledWith({
       where: { customerId_reportSlug_periodKey: { customerId: "cust-1", reportSlug: "spring-2026-soft-structure", periodKey: "2026-10" } },
-      create: { customerId: "cust-1", reportSlug: "spring-2026-soft-structure", periodKey: "2026-10" },
-      update: {},
+      create: { customerId: "cust-1", reportSlug: "spring-2026-soft-structure", periodKey: "2026-10", snapshot: undefined },
+      update: { snapshot: undefined },
     });
   });
 
@@ -55,10 +58,6 @@ describe("§TREND-EDIT-USAGE — idempotent create-if-absent write", () => {
     const call1 = upsertMock.mock.calls[0][0];
     const call2 = upsertMock.mock.calls[1][0];
     expect(call1.where).toEqual(call2.where);
-    // "update: {}" on repeat — never a second logical write, just a no-op
-    // touch of the same already-existing row.
-    expect(call1.update).toEqual({});
-    expect(call2.update).toEqual({});
   });
 
   it("4. a distinct report in the same month produces a distinct upsert key — second, independent usage row", async () => {
@@ -87,12 +86,60 @@ describe("§TREND-EDIT-USAGE — idempotent create-if-absent write", () => {
     // A check-then-create pattern would read before writing; this function
     // must contain no such read — the upsert (and the DB's own unique
     // constraint on customerId+reportSlug+periodKey) is the only guard.
-    expect(source).not.toMatch(/findFirst|findUnique/);
-    expect(source).toMatch(/\.upsert\(/);
+    // Scoped to the write function's own body only — getStoredTrendEditSnapshot
+    // (a separate, dedicated read function below it) legitimately uses
+    // findUnique and must not trip this check.
+    const writeFnStart = source.indexOf("export async function recordPersonalisedTrendEditUsage");
+    const writeFnEnd = source.indexOf("\n}", writeFnStart);
+    const writeFnBody = source.slice(writeFnStart, writeFnEnd);
+    expect(writeFnBody).not.toMatch(/findFirst|findUnique/);
+    expect(writeFnBody).toMatch(/\.upsert\(/);
   });
 
   it("does not read a browser-submitted customer id — the function signature takes a trusted string, nothing resolved from params/query/body", () => {
     expect(source).not.toMatch(/params\.|searchParams|request\.body/);
+  });
+});
+
+describe("§TREND-EDIT-USAGE — snapshot persistence", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const SNAPSHOT = {
+    schemaVersion: "trend-edit-snapshot-v1" as const,
+    reportSlug: "spring-2026-soft-structure",
+    reportTitle: "Spring 2026 Soft Structure",
+    generatedAt: "2026-10-01T00:00:00.000Z",
+    edit: { subTitle: "x", yourVersion: "y" } as any,
+    nadineRecommendation: null,
+  };
+
+  it("passes the snapshot through to both create and update branches of the upsert", async () => {
+    await recordPersonalisedTrendEditUsage("cust-1", "spring-2026-soft-structure", SNAPSHOT);
+    const call = upsertMock.mock.calls[0][0];
+    expect(call.create.snapshot).toEqual(SNAPSHOT);
+    expect(call.update.snapshot).toEqual(SNAPSHOT);
+  });
+
+  it("getStoredTrendEditSnapshot reads by the same composite key, scoped to the current period", async () => {
+    findUniqueMock.mockResolvedValue({ snapshot: SNAPSHOT });
+    const result = await getStoredTrendEditSnapshot("cust-1", "spring-2026-soft-structure");
+    expect(findUniqueMock).toHaveBeenCalledWith({
+      where: { customerId_reportSlug_periodKey: { customerId: "cust-1", reportSlug: "spring-2026-soft-structure", periodKey: "2026-10" } },
+      select: { snapshot: true },
+    });
+    expect(result).toEqual(SNAPSHOT);
+  });
+
+  it("returns null when no usage row exists yet for this period (first view)", async () => {
+    findUniqueMock.mockResolvedValue(null);
+    const result = await getStoredTrendEditSnapshot("cust-1", "spring-2026-soft-structure");
+    expect(result).toBeNull();
+  });
+
+  it("returns null (not a crash) when a row exists but predates snapshot persistence", async () => {
+    findUniqueMock.mockResolvedValue({ snapshot: null });
+    const result = await getStoredTrendEditSnapshot("cust-1", "spring-2026-soft-structure");
+    expect(result).toBeNull();
   });
 });
 
