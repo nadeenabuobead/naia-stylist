@@ -24,7 +24,7 @@
     "test:dashboard": "node --test --import tsx/esm app/lib/designer-sample-data.validation.test.ts app/lib/ai/canonical-reconciliation.test.ts app/lib/ai/batch1-integration.test.ts app/lib/ai/batch2-integration.test.ts",
     "test:customer": "node --test --import tsx/esm app/routes/customer-routes.test.ts app/routes/customer-loaders.test.ts app/lib/ai/selfie-upload.test.ts",
     "test:trends": "vitest run app/lib/trend-evidence.server.test.ts",
-    "test:security": "npx vitest run app/routes/api.seed-staging.test.ts app/routes/naia-identity-security.test.ts app/lib/admin/closet-intelligence.test.ts app/lib/admin/buyskip-admin.test.ts",
+    "test:security": "npx vitest run app/routes/api.seed-staging.test.ts app/routes/naia-identity-security.test.ts app/lib/admin/closet-intelligence.test.ts app/lib/admin/buyskip-admin.test.ts app/lib/admin/customer-360.test.ts",
     "test:taste-evidence-deletion": "vitest run app/lib/ai/taste-evidence-deletion.test.ts",
     "test:taste-v1-completion": "vitest run app/lib/ai/taste-reemergence.behavior.test.ts app/lib/ai/taste-backfill-idempotency.test.ts app/lib/ai/taste-staleness-deferred.test.ts",
     "test:styleme-ui": "vitest run app/routes/style-me/source.anchor-rejection-render.test.tsx app/routes/admin.naia.phase3c-export.test.tsx",

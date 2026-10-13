@@ -494,7 +494,19 @@ model BuyOrSkipAnalysis {
   productUrl  String?          // Link to product
   productName String?
   productPrice Float?
-  
+
+  // Forward-compatible NADINE catalog identity. Nullable, additive — no
+  // current write path populates it: Buy/Skip today only accepts an
+  // arbitrary customer-uploaded photo (see analyzeItem() in
+  // api.wishlist.jsx), with no "evaluate this NADINE product" entry point.
+  // Mirrors the handle used as the catalog's own primary key
+  // (VerifiedMediaEntry.catalogHandle in naia-product-media.ts,
+  // VirtualTryOnJob.productHandle) rather than a Shopify-specific ID, since
+  // that handle — not a Shopify GID — is this codebase's one cross-system
+  // product key. Populate this once a NADINE-origin Buy/Skip entry point
+  // exists; existing and future arbitrary-upload analyses stay null.
+  catalogHandle String?
+
   // AI Analysis Result
   verdict     BuySkipVerdict
   reasoning   String           // Detailed explanation

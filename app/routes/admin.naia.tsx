@@ -549,6 +549,52 @@ const NAIA_ADMIN_CSS = `
   .na-btn-delete:hover:not(:disabled) { background: #dc2626; color: #fff; }
   .na-btn-delete:disabled { opacity: 0.5; cursor: not-allowed; }
 
+  /* ── Customer 360 — tab bar ── */
+  .na-tabbar {
+    display: flex;
+    gap: 0.2rem;
+    flex-wrap: wrap;
+    border-bottom: 1px solid #dde1e7;
+    margin-bottom: 1.25rem;
+  }
+  .na-tab {
+    cursor: pointer;
+    background: none;
+    border: none;
+    padding: 0.6rem 0.9rem;
+    font-size: 12px;
+    font-weight: 600;
+    color: #6b7280;
+    border-bottom: 2px solid transparent;
+    white-space: nowrap;
+  }
+  .na-tab:hover { color: #374151; }
+  .na-tab--active { color: #16213e; border-bottom-color: #16213e; }
+
+  /* ── Customer 360 — gallery grid (Closet tab) ── */
+  .na-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.75rem; }
+  .na-gallery-card { border: 1px solid #dde1e7; border-radius: 6px; overflow: hidden; background: #fff; }
+  .na-gallery-card__img { width: 100%; aspect-ratio: 3/4; object-fit: cover; background: #f3f4f6; display: block; }
+  .na-gallery-card__img--placeholder { aspect-ratio: 3/4; background: #f3f4f6; display: flex; align-items: center; justify-content: center; color: #9ca3af; font-size: 11px; }
+  .na-gallery-card__body { padding: 0.5rem 0.6rem; }
+  .na-gallery-card__name { font-size: 12px; font-weight: 600; color: #111; margin: 0 0 0.15rem; }
+  .na-gallery-card__meta { font-size: 11px; color: #6b7280; margin: 0; }
+
+  /* ── Customer 360 — timeline (Activity tab) ── */
+  .na-timeline { display: flex; flex-direction: column; }
+  .na-timeline-row { display: flex; gap: 0.75rem; padding: 0.55rem 0; border-bottom: 1px solid #f0f1f3; font-size: 12px; }
+  .na-timeline-row:last-child { border-bottom: none; }
+  .na-timeline-row__when { color: #9ca3af; min-width: 110px; flex-shrink: 0; }
+  .na-timeline-row__label { font-weight: 600; color: #111; }
+  .na-timeline-row__detail { color: #6b7280; }
+
+  /* ── Customer 360 — usage bars (Membership & Usage tab) ── */
+  .na-usage-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.4rem 0; }
+  .na-usage-row__label { font-size: 12px; color: #374151; min-width: 160px; flex-shrink: 0; }
+  .na-usage-row__bar { flex: 1; height: 6px; background: #f0f1f3; border-radius: 3px; overflow: hidden; }
+  .na-usage-row__fill { height: 100%; background: #16213e; border-radius: 3px; }
+  .na-usage-row__count { font-size: 11px; color: #6b7280; min-width: 60px; text-align: right; flex-shrink: 0; }
+
   /* Per-row delete button */
   .na-btn-row-delete {
     width: 24px;

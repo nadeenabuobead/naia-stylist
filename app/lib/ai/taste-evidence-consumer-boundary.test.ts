@@ -92,6 +92,13 @@ const ALLOWED_PRODUCTION_IMPORTERS = new Set([
   // scripts/qa-noticing-evidence-diagnostic.ts (a local CLI, not a
   // customer-facing route). Never writes evidence.
   "app/lib/ai/taste-evidence-diagnostic.server.ts",
+  // nAia Admin Customer 360 — Learning & Feedback tab. A new, separate,
+  // read-only admin surface over StyleTendency (all states, including
+  // REJECTED, unlike the CONFIRMED-only customer-facing reader). Never
+  // writes either table; never reachable from NADINE Designer Intelligence
+  // (see app/lib/ai/designer-intelligence.server.ts and friends, which do
+  // not import this file).
+  "app/lib/admin/customer-360.server.ts",
 ]);
 
 const SKIP_DIRS = new Set(["node_modules", ".git", "build", "dist", ".vercel"]);
