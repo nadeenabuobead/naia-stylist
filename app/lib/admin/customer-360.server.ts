@@ -542,7 +542,7 @@ export async function getAdminCustomerActivity(customerId: string): Promise<Admi
       where: { analysis: { customerId } },
       orderBy: { updatedAt: "desc" },
       take: ACTIVITY_SOURCE_LIMIT,
-      select: { updatedAt: true, decision: true },
+      select: { updatedAt: true, decision: true, postPurchaseOutcome: true },
     }),
     prisma.styleTendency.findMany({
       where: { customerId, customerFeedbackAt: { not: null } },
@@ -589,10 +589,21 @@ export async function getAdminCustomerActivity(customerId: string): Promise<Admi
     events.push({ timestamp: b.createdAt, label: "Buy/Skip analysis", detail: b.verdict });
   }
   for (const bo of buySkipOutcomes) {
+    // decision and postPurchaseOutcome are always written together in a
+    // single upsert (see recordOutcome() in api.wishlist.jsx), so there is
+    // exactly one durable timestamp for this row: updatedAt. That timestamp
+    // proves "the outcome row was last written at this instant" — it does
+    // NOT prove when the decision was first made versus when
+    // postPurchaseOutcome was added, since both can change in the same
+    // upsert. Labeling this "decision recorded" would overstate what's
+    // known; "outcome updated" with both current values in the detail is
+    // the truthful read of this one row.
+    const detailParts = [bo.decision.toLowerCase().replace(/_/g, " ")];
+    if (bo.postPurchaseOutcome) detailParts.push(bo.postPurchaseOutcome.toLowerCase().replace(/_/g, " "));
     events.push({
       timestamp: bo.updatedAt,
-      label: "Buy/Skip decision recorded",
-      detail: bo.decision.toLowerCase().replace(/_/g, " "),
+      label: "Buy/Skip outcome updated",
+      detail: detailParts.join(" · "),
     });
   }
   for (const t of tendencyFeedback) {

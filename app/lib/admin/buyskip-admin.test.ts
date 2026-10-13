@@ -31,6 +31,7 @@ vi.mock("~/db.server", () => ({
     buyOrSkipAnalysis: {
       findMany: vi.fn(),
       findUnique: vi.fn(),
+      count: vi.fn(),
     },
   },
 }));
@@ -66,6 +67,9 @@ beforeEach(() => {
   process.env.CLOUDINARY_CLOUD_NAME = "test-cloud";
   process.env.CLOUDINARY_API_KEY = "test-key";
   process.env.CLOUDINARY_API_SECRET = "test-secret";
+  // Default totalCount — most tests here only care about `items`; tests
+  // proving the bounded/total distinction override this explicitly.
+  (prisma.buyOrSkipAnalysis.count as any).mockResolvedValue(0);
 });
 
 afterEach(() => {
@@ -93,9 +97,35 @@ describe("§BSA.1 getAdminCustomerBuySkipUploads scopes to one customer", () => 
 
   it("Customer A's own uploads are returned", async () => {
     (prisma.buyOrSkipAnalysis.findMany as any).mockResolvedValue([makeRow({ id: "bos-a1" })]);
-    const uploads = await getAdminCustomerBuySkipUploads("cust-A");
+    const { items: uploads } = await getAdminCustomerBuySkipUploads("cust-A");
     expect(uploads).toHaveLength(1);
     expect(uploads[0].id).toBe("bos-a1");
+  });
+});
+
+// ── §BSA.12 — V1 bounding (pre-staging patch) ─────────────────────────────────
+
+describe("§BSA.12 getAdminCustomerBuySkipUploads is bounded like Closet/StyleMe/VTO", () => {
+  it("caps findMany with take: 25", async () => {
+    (prisma.buyOrSkipAnalysis.findMany as any).mockResolvedValue([]);
+    await getAdminCustomerBuySkipUploads("cust-A");
+    expect(prisma.buyOrSkipAnalysis.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ take: 25 }),
+    );
+  });
+
+  it("returns an accurate totalCount even when it exceeds the bounded items length", async () => {
+    (prisma.buyOrSkipAnalysis.findMany as any).mockResolvedValue([makeRow()]);
+    (prisma.buyOrSkipAnalysis.count as any).mockResolvedValue(143);
+    const result = await getAdminCustomerBuySkipUploads("cust-A");
+    expect(result.items).toHaveLength(1);
+    expect(result.totalCount).toBe(143);
+  });
+
+  it("count is scoped to the same customerId as findMany", async () => {
+    (prisma.buyOrSkipAnalysis.findMany as any).mockResolvedValue([]);
+    await getAdminCustomerBuySkipUploads("cust-A");
+    expect(prisma.buyOrSkipAnalysis.count).toHaveBeenCalledWith({ where: { customerId: "cust-A" } });
   });
 });
 
@@ -131,7 +161,7 @@ describe("§BSA.4 image resolution — S0 private asset", () => {
     (prisma.buyOrSkipAnalysis.findMany as any).mockResolvedValue([
       makeRow({ imagePublicId: "naia-wardrobe/cust-A/bos-1", imageFormat: "jpg", imageUrl: null }),
     ]);
-    const [upload] = await getAdminCustomerBuySkipUploads("cust-A");
+    const { items: [upload] } = await getAdminCustomerBuySkipUploads("cust-A");
     expect(upload.thumbnailUrl).toBeTruthy();
     expect(upload.thumbnailUrl).toMatch(/^https:\/\//);
   });
@@ -140,7 +170,7 @@ describe("§BSA.4 image resolution — S0 private asset", () => {
     (prisma.buyOrSkipAnalysis.findMany as any).mockResolvedValue([
       makeRow({ imagePublicId: "naia-wardrobe/cust-B/bos-1", imageFormat: "jpg", imageUrl: null }),
     ]);
-    const [upload] = await getAdminCustomerBuySkipUploads("cust-A");
+    const { items: [upload] } = await getAdminCustomerBuySkipUploads("cust-A");
     expect(upload.thumbnailUrl).toBeNull();
   });
 });
@@ -150,7 +180,7 @@ describe("§BSA.5 image resolution — legacy fallback", () => {
     (prisma.buyOrSkipAnalysis.findMany as any).mockResolvedValue([
       makeRow({ imagePublicId: null, imageFormat: null, imageUrl: "https://legacy.example.com/old.jpg" }),
     ]);
-    const [upload] = await getAdminCustomerBuySkipUploads("cust-A");
+    const { items: [upload] } = await getAdminCustomerBuySkipUploads("cust-A");
     expect(upload.thumbnailUrl).toBe("https://legacy.example.com/old.jpg");
   });
 });
@@ -160,7 +190,7 @@ describe("§BSA.6 image resolution — missing/deleted image graceful fallback",
     (prisma.buyOrSkipAnalysis.findMany as any).mockResolvedValue([
       makeRow({ imagePublicId: null, imageFormat: null, imageUrl: null }),
     ]);
-    const uploads = await getAdminCustomerBuySkipUploads("cust-A");
+    const { items: uploads } = await getAdminCustomerBuySkipUploads("cust-A");
     expect(uploads[0].thumbnailUrl).toBeNull();
   });
 
@@ -180,7 +210,7 @@ describe("§BSA.7 displayVerdict", () => {
     (prisma.buyOrSkipAnalysis.findMany as any).mockResolvedValue([
       makeRow({ verdict: "SKIP", fullAnalysis: { verdict: "SKIP FOR NOW" } }),
     ]);
-    const [upload] = await getAdminCustomerBuySkipUploads("cust-A");
+    const { items: [upload] } = await getAdminCustomerBuySkipUploads("cust-A");
     expect(upload.displayVerdict).toBe("SKIP FOR NOW");
   });
 
@@ -188,7 +218,7 @@ describe("§BSA.7 displayVerdict", () => {
     (prisma.buyOrSkipAnalysis.findMany as any).mockResolvedValue([
       makeRow({ verdict: "BUY", fullAnalysis: null }),
     ]);
-    const [upload] = await getAdminCustomerBuySkipUploads("cust-A");
+    const { items: [upload] } = await getAdminCustomerBuySkipUploads("cust-A");
     expect(upload.displayVerdict).toBe("BUY");
   });
 });
@@ -198,7 +228,7 @@ describe("§BSA.8 decision-evidence flags are safe on legacy records", () => {
     (prisma.buyOrSkipAnalysis.findMany as any).mockResolvedValue([
       makeRow({ fullAnalysis: { verdict: "BUY", itemType: "Blazer" } }),
     ]);
-    const [upload] = await getAdminCustomerBuySkipUploads("cust-A");
+    const { items: [upload] } = await getAdminCustomerBuySkipUploads("cust-A");
     expect(upload.hasDecisionEvidence).toBe(false);
     expect(upload.verdictOverridden).toBe(false);
   });
@@ -207,14 +237,18 @@ describe("§BSA.8 decision-evidence flags are safe on legacy records", () => {
     (prisma.buyOrSkipAnalysis.findMany as any).mockResolvedValue([
       makeRow({ fullAnalysis: null, verdict: "SKIP" }),
     ]);
-    await expect(getAdminCustomerBuySkipUploads("cust-A")).resolves.toHaveLength(1);
+    await expect(getAdminCustomerBuySkipUploads("cust-A")).resolves.toEqual(
+      expect.objectContaining({ items: expect.any(Array) }),
+    );
+    const { items } = await getAdminCustomerBuySkipUploads("cust-A");
+    expect(items).toHaveLength(1);
   });
 
   it("hasDecisionEvidence is true when the new foundation evidence is present", async () => {
     (prisma.buyOrSkipAnalysis.findMany as any).mockResolvedValue([
       makeRow({ fullAnalysis: { verdict: "BUY", decisionEvidence: { duplicateEvidence: { overlap: "unknown" } } } }),
     ]);
-    const [upload] = await getAdminCustomerBuySkipUploads("cust-A");
+    const { items: [upload] } = await getAdminCustomerBuySkipUploads("cust-A");
     expect(upload.hasDecisionEvidence).toBe(true);
   });
 });

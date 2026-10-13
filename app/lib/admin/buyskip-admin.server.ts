@@ -105,26 +105,44 @@ function toSummary(row: {
   };
 }
 
-/** Newest-first Buy/Skip submission history for one customer, for the admin customer-detail page. */
-export async function getAdminCustomerBuySkipUploads(customerId: string): Promise<AdminBuySkipUploadSummary[]> {
-  const rows = await prisma.buyOrSkipAnalysis.findMany({
-    where: { customerId },
-    orderBy: { createdAt: "desc" },
-    select: {
-      id: true,
-      createdAt: true,
-      verdict: true,
-      reasoning: true,
-      category: true,
-      confidence: true,
-      imagePublicId: true,
-      imageFormat: true,
-      imageUrl: true,
-      fullAnalysis: true,
-      outcome: { select: { decision: true, postPurchaseOutcome: true } },
-    },
-  });
-  return rows.map((r: (typeof rows)[number]) => toSummary(r, customerId));
+// V1 bounding — matches the same pattern used for Closet/StyleMe/VTO in
+// customer-360.server.ts: a Buy/Skip upload history grows with activity
+// volume, so the admin customer-detail page caps it to the most recent
+// BUYSKIP_RECENT_LIMIT submissions rather than loading full lifetime
+// history on every page open. No cursor/pagination — a static take + a
+// sibling totalCount so the tab can say "showing 25 of X".
+const BUYSKIP_RECENT_LIMIT = 25;
+
+/**
+ * Newest-first Buy/Skip submission history for one customer, for the admin
+ * customer-detail page. Bounded to the most recent BUYSKIP_RECENT_LIMIT
+ * rows; totalCount reports the true lifetime count alongside.
+ */
+export async function getAdminCustomerBuySkipUploads(
+  customerId: string,
+): Promise<{ items: AdminBuySkipUploadSummary[]; totalCount: number }> {
+  const [rows, totalCount] = await Promise.all([
+    prisma.buyOrSkipAnalysis.findMany({
+      where: { customerId },
+      orderBy: { createdAt: "desc" },
+      take: BUYSKIP_RECENT_LIMIT,
+      select: {
+        id: true,
+        createdAt: true,
+        verdict: true,
+        reasoning: true,
+        category: true,
+        confidence: true,
+        imagePublicId: true,
+        imageFormat: true,
+        imageUrl: true,
+        fullAnalysis: true,
+        outcome: { select: { decision: true, postPurchaseOutcome: true } },
+      },
+    }),
+    prisma.buyOrSkipAnalysis.count({ where: { customerId } }),
+  ]);
+  return { items: rows.map((r: (typeof rows)[number]) => toSummary(r, customerId)), totalCount };
 }
 
 /**

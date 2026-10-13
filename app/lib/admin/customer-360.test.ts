@@ -190,6 +190,113 @@ describe("§C360.7 high-volume lists are bounded with a visible totalCount", () 
   });
 });
 
+// ── §C360.9 — Activity global top-50 correctness (pre-staging patch) ─────────
+
+describe("§C360.9 the global Activity timeline is the true newest 50 across all sources", () => {
+  it("each source query requests take: 50, not 25", async () => {
+    await getAdminCustomerActivity("cust-A");
+    for (const model of [
+      "stylingSession", "styleMeOutcome", "postOutfitReview", "buyOrSkipAnalysis",
+      "buySkipOutcome", "styleTendency", "personalisedTrendEditUsage", "virtualTryOnJob", "savedLook",
+    ] as const) {
+      const query = (prisma[model].findMany as any).mock.calls[0][0];
+      expect(query.take, `${model} should request 50`).toBe(50);
+    }
+  });
+
+  it("a single source contributing more than 25 of the globally-newest events is not clipped to 25", async () => {
+    // 40 StylingSession rows, all newer than anything from any other source —
+    // the old take:25-per-source bug would have silently dropped events
+    // 26-40 even though they belong in the true newest 50.
+    const sessions = Array.from({ length: 40 }, (_, i) => ({
+      id: `s${i}`,
+      createdAt: new Date(2026, 5, 1, 0, 0, i), // seconds 0..39, all after everything else
+      occasion: null,
+    }));
+    (prisma.stylingSession.findMany as any).mockResolvedValue(sessions);
+    (prisma.buyOrSkipAnalysis.findMany as any).mockResolvedValue([
+      { id: "b-old", createdAt: new Date(2020, 0, 1), verdict: "BUY" },
+    ]);
+
+    const events = await getAdminCustomerActivity("cust-A");
+    const styleMeEvents = events.filter(e => e.label === "Started StyleMe");
+    expect(styleMeEvents).toHaveLength(40);
+  });
+
+  it("returns exactly the newest 50 events after merging sources that together exceed 50", async () => {
+    // 50 StylingSession rows (seconds 50..99, i.e. the newest half) +
+    // 50 BuyOrSkipAnalysis rows (seconds 0..49, the oldest half) = 100
+    // candidates; the correct result is the 50 StyleMe events only.
+    const sessions = Array.from({ length: 50 }, (_, i) => ({
+      id: `s${i}`,
+      createdAt: new Date(2026, 0, 1, 0, 0, 50 + i),
+      occasion: null,
+    }));
+    const analyses = Array.from({ length: 50 }, (_, i) => ({
+      id: `b${i}`,
+      createdAt: new Date(2026, 0, 1, 0, 0, i),
+      verdict: "BUY",
+    }));
+    (prisma.stylingSession.findMany as any).mockResolvedValue(sessions);
+    (prisma.buyOrSkipAnalysis.findMany as any).mockResolvedValue(analyses);
+
+    const events = await getAdminCustomerActivity("cust-A");
+    expect(events).toHaveLength(50);
+    expect(events.every(e => e.label === "Started StyleMe")).toBe(true);
+    // newest-first
+    expect(events[0].timestamp.getTime()).toBeGreaterThan(events[49].timestamp.getTime());
+  });
+});
+
+// ── §C360.10 — Buy/Skip timeline timestamp truth (pre-staging patch) ─────────
+
+describe("§C360.10 the Buy/Skip outcome event is labeled truthfully from updatedAt", () => {
+  it('uses "Buy/Skip outcome updated", not "decision recorded" (updatedAt cannot prove when the decision was first made)', async () => {
+    (prisma.buySkipOutcome.findMany as any).mockResolvedValue([{
+      updatedAt: new Date("2026-02-01T00:00:00Z"),
+      decision: "BOUGHT_IT",
+      postPurchaseOutcome: null,
+    }]);
+    const events = await getAdminCustomerActivity("cust-A");
+    const event = events.find(e => e.label.startsWith("Buy/Skip outcome"));
+    expect(event?.label).toBe("Buy/Skip outcome updated");
+    expect(events.some(e => e.label === "Buy/Skip decision recorded")).toBe(false);
+  });
+
+  it("includes both decision and postPurchaseOutcome in the detail when both are known", async () => {
+    (prisma.buySkipOutcome.findMany as any).mockResolvedValue([{
+      updatedAt: new Date("2026-02-01T00:00:00Z"),
+      decision: "BOUGHT_IT",
+      postPurchaseOutcome: "LOVE_IT",
+    }]);
+    const events = await getAdminCustomerActivity("cust-A");
+    const event = events.find(e => e.label.startsWith("Buy/Skip outcome"));
+    expect(event?.detail).toBe("bought it · love it");
+  });
+
+  it("omits the postPurchaseOutcome segment when it is not yet known", async () => {
+    (prisma.buySkipOutcome.findMany as any).mockResolvedValue([{
+      updatedAt: new Date("2026-02-01T00:00:00Z"),
+      decision: "STILL_DECIDING",
+      postPurchaseOutcome: null,
+    }]);
+    const events = await getAdminCustomerActivity("cust-A");
+    const event = events.find(e => e.label.startsWith("Buy/Skip outcome"));
+    expect(event?.detail).toBe("still deciding");
+  });
+
+  it("does not synthesize a separate event for postPurchaseOutcome — one row, one event, one timestamp", async () => {
+    (prisma.buySkipOutcome.findMany as any).mockResolvedValue([{
+      updatedAt: new Date("2026-02-01T00:00:00Z"),
+      decision: "BOUGHT_IT",
+      postPurchaseOutcome: "LOVE_IT",
+    }]);
+    const events = await getAdminCustomerActivity("cust-A");
+    const buySkipOutcomeEvents = events.filter(e => e.label.startsWith("Buy/Skip outcome"));
+    expect(buySkipOutcomeEvents).toHaveLength(1);
+  });
+});
+
 // ── §C360.8 — VTO timestamp truth (Activity must not pair createdAt with a later status) ──
 
 describe("§C360.8 Activity's VTO event uses completedAt once the job has actually finished", () => {

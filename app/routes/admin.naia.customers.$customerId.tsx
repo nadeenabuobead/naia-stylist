@@ -491,16 +491,20 @@ function displayDateTime(d: Date | string): string {
 function BuySkipUploadsSection({
   customerId,
   uploads,
+  totalCount,
 }: {
   customerId: string;
   uploads: AdminBuySkipUploadSummary[];
+  totalCount: number;
 }) {
   return (
     <div className="na-card">
       <div className="na-card__header">
         <h2 className="na-card__title">Buy / Skip Uploads</h2>
         <span style={{ fontSize: "0.65rem", background: "#1f2937", color: "#9ca3af", border: "1px solid #374151", borderRadius: "3px", padding: "0.05rem 0.35rem" }}>
-          {uploads.length} submission{uploads.length === 1 ? "" : "s"}
+          {totalCount > uploads.length
+            ? `Showing ${uploads.length} most recent of ${totalCount}`
+            : `${uploads.length} submission${uploads.length === 1 ? "" : "s"}`}
         </span>
       </div>
       <div className="na-card__body">
@@ -988,7 +992,7 @@ export default function AdminCustomerDetailPage() {
   } = useLoaderData() as {
     customer: AdminCustomerDetail;
     accountType: string;
-    buySkipUploads: AdminBuySkipUploadSummary[];
+    buySkipUploads: { items: AdminBuySkipUploadSummary[]; totalCount: number };
     closetGallery: { items: AdminClosetGalleryItem[]; totalCount: number };
     styleMeSessions: { items: AdminStyleMeSessionSummary[]; totalCount: number };
     learningFeedback: AdminLearningFeedbackRow[];
@@ -1082,7 +1086,7 @@ export default function AdminCustomerDetailPage() {
               customer={customer}
               accountType={currentType}
               latestStyleMe={styleMeSessions.items[0] ?? null}
-              latestBuySkip={buySkipUploads[0] ?? null}
+              latestBuySkip={buySkipUploads.items[0] ?? null}
               strongestTendency={strongestTendency}
               entitlement={entitlement}
             />
@@ -1100,7 +1104,7 @@ export default function AdminCustomerDetailPage() {
             </div>
           )}
           {activeTab === "StyleMe" && <StyleMeSection sessions={styleMeSessions.items} totalCount={styleMeSessions.totalCount} />}
-          {activeTab === "Buy or Skip" && <BuySkipUploadsSection customerId={customer.id} uploads={buySkipUploads} />}
+          {activeTab === "Buy or Skip" && <BuySkipUploadsSection customerId={customer.id} uploads={buySkipUploads.items} totalCount={buySkipUploads.totalCount} />}
           {activeTab === "Learning & Feedback" && <LearningFeedbackSection rows={learningFeedback} />}
           {activeTab === "Trend Edits" && <TrendEditsSection rows={trendEditUsage} />}
           {activeTab === "VTO / My nAia Model" && <VtoSection model={vtoHistory.model} jobs={vtoHistory.jobs} jobsTotalCount={vtoHistory.jobsTotalCount} />}
