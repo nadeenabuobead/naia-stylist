@@ -774,12 +774,12 @@ describe("§C360.14 no raw JSON ever appears in the StyleMe admin detail shape",
 });
 
 describe("§C360.14 legacy StyleMe outputs are never selected or returned", () => {
-  it("the Prisma select for suggestions never requests perfumeRec/hairstyleRec/makeupVibeRec/songRec or their notes/artist fields", async () => {
+  it("the Prisma select for suggestions never requests perfumeRec/hairstyleRec/makeupVibeRec/songRec, their notes/artist fields, or status", async () => {
     (prisma.stylingSession.findUnique as any).mockResolvedValue({ ...baseSession, suggestions: [], review: null });
     await getAdminCustomerStyleMeSessionDetail("cust-A", "s1");
     const query = (prisma.stylingSession.findUnique as any).mock.calls[0][0];
     const suggestionSelect = query.select.suggestions.select;
-    for (const legacyField of ["perfumeRec", "perfumeNotes", "hairstyleRec", "hairstyleNotes", "makeupVibeRec", "makeupNotes", "songRec", "songArtist"]) {
+    for (const legacyField of ["perfumeRec", "perfumeNotes", "hairstyleRec", "hairstyleNotes", "makeupVibeRec", "makeupNotes", "songRec", "songArtist", "status"]) {
       expect(suggestionSelect[legacyField], `${legacyField} must not be selected`).toBeUndefined();
     }
   });
@@ -793,13 +793,105 @@ describe("§C360.14 legacy StyleMe outputs are never selected or returned", () =
     expect(reviewSelect.didntWorkTags).toBeUndefined();
   });
 
-  it("the session-level select never requests currentMood/desiredFeeling/practicalIds/specificNeeds/bodyPreference/styleDNA/weather/timeOfDay (all dead/legacy)", async () => {
+  it("the session-level select never requests styleDNA (no confirmed write site at any point, and JSON-array-shaped)", async () => {
     (prisma.stylingSession.findUnique as any).mockResolvedValue({ ...baseSession, suggestions: [], review: null });
     await getAdminCustomerStyleMeSessionDetail("cust-A", "s1");
     const query = (prisma.stylingSession.findUnique as any).mock.calls[0][0];
-    for (const deadField of ["currentMood", "desiredFeeling", "practicalIds", "specificNeeds", "bodyPreference", "styleDNA", "weather", "timeOfDay"]) {
-      expect(query.select[deadField], `${deadField} must not be selected`).toBeUndefined();
+    expect(query.select.styleDNA, "styleDNA must not be selected").toBeUndefined();
+  });
+
+  it("moodDescription is not returned on any suggestion — removed in the prior pass, unaffected by this one", async () => {
+    (prisma.stylingSession.findUnique as any).mockResolvedValue({ ...baseSession, suggestions: [], review: null });
+    await getAdminCustomerStyleMeSessionDetail("cust-A", "s1");
+    const query = (prisma.stylingSession.findUnique as any).mock.calls[0][0];
+    expect(query.select.suggestions.select.moodDescription).toBeUndefined();
+  });
+});
+
+// ── §C360.15 — PENDING status fix + historical customer-selected inputs ──────
+
+describe("§C360.15 OutfitSuggestion.status is never selected or returned (always 'PENDING', zero information)", () => {
+  it("is absent from the suggestion select and from the returned shape", async () => {
+    (prisma.stylingSession.findUnique as any).mockResolvedValue({
+      ...baseSession,
+      suggestions: [{
+        id: "sg1", createdAt: new Date(), outfitName: "Look", whyThisWorks: null, confidenceBoost: null,
+        selected: true, savedAsLook: false, items: [], outcome: null,
+      }],
+      review: null,
+    });
+    const result = await getAdminCustomerStyleMeSessionDetail("cust-A", "s1");
+    expect(JSON.stringify(result)).not.toContain("PENDING");
+    expect((result!.suggestions[0] as any).status).toBeUndefined();
+  });
+});
+
+describe("§C360.15 historical pre-Rev-3 inputs render as human-readable labels when a session actually persisted them", () => {
+  it("an older session with real historical answers surfaces all of them, humanized where they're coded slugs", async () => {
+    (prisma.stylingSession.findUnique as any).mockResolvedValue({
+      ...baseSession,
+      occasion: "work",
+      formalityConditional: null,
+      currentMood: "feeling-a-bit-low",
+      desiredFeeling: "I want to feel put together for the meeting",
+      practicalIds: ["quick-to-style", "no-special-constraint"],
+      specificNeeds: "Needs to survive a long flight",
+      bodyPreference: "looser-fit",
+      weather: "cold-and-rainy",
+      timeOfDay: "morning",
+      suggestions: [],
+      review: null,
+    });
+    const result = await getAdminCustomerStyleMeSessionDetail("cust-A", "s1");
+    expect(result!.historicalMood).toBe("Feeling a bit low");
+    expect(result!.historicalDesiredFeeling).toBe("I want to feel put together for the meeting");
+    expect(result!.historicalPracticalNeeds).toEqual(["Quick to style", "No special constraint"]);
+    expect(result!.historicalSpecificNeeds).toBe("Needs to survive a long flight");
+    expect(result!.historicalBodyPreference).toBe("Looser fit");
+    expect(result!.historicalWeather).toBe("Cold and rainy");
+    expect(result!.historicalTimeOfDay).toBe("Morning");
+  });
+
+  it("a current Rev-3 session (all historical fields null/empty) returns null/[] for every historical field — nothing fabricated", async () => {
+    (prisma.stylingSession.findUnique as any).mockResolvedValue({
+      ...baseSession,
+      currentMood: null, desiredFeeling: null, practicalIds: [], specificNeeds: null,
+      bodyPreference: null, weather: null, timeOfDay: null,
+      suggestions: [], review: null,
+    });
+    const result = await getAdminCustomerStyleMeSessionDetail("cust-A", "s1");
+    expect(result!.historicalMood).toBeNull();
+    expect(result!.historicalDesiredFeeling).toBeNull();
+    expect(result!.historicalPracticalNeeds).toEqual([]);
+    expect(result!.historicalSpecificNeeds).toBeNull();
+    expect(result!.historicalBodyPreference).toBeNull();
+    expect(result!.historicalWeather).toBeNull();
+    expect(result!.historicalTimeOfDay).toBeNull();
+  });
+
+  it("the admin route renders a row for each present historical field, labeled without any 'Rev 3' or revision marker", () => {
+    const src = readSource("app/routes/admin.naia.customers.$customerId.styleme.$sessionId.tsx");
+    for (const label of ['label="Mood"', 'label="Desired feeling"', 'label="Practical needs"', 'label="Specific needs"', 'label="Body preference"', 'label="Weather"', 'label="Time of day"']) {
+      expect(src).toContain(label);
     }
+    expect(src).not.toMatch(/Rev 3/);
+  });
+
+  it("still never restores the legacy generated outputs (Perfume/Hairstyle/Makeup vibe/Song) alongside the historical inputs", () => {
+    const src = readSource("app/routes/admin.naia.customers.$customerId.styleme.$sessionId.tsx");
+    for (const legacyLabel of ['label="Perfume"', 'label="Hairstyle"', 'label="Makeup vibe"', 'label="Song"', 'label="Status"']) {
+      expect(src).not.toContain(legacyLabel);
+    }
+  });
+
+  it("free-text historical values (already containing spaces) are shown verbatim, never mangled by slug humanization", async () => {
+    (prisma.stylingSession.findUnique as any).mockResolvedValue({
+      ...baseSession,
+      specificNeeds: "Needs room to move for a dance class.",
+      suggestions: [], review: null,
+    });
+    const result = await getAdminCustomerStyleMeSessionDetail("cust-A", "s1");
+    expect(result!.historicalSpecificNeeds).toBe("Needs room to move for a dance class.");
   });
 });
 
@@ -860,8 +952,13 @@ describe("§C360.14 no Rev 3 revision labels leak into Customer 360", () => {
   });
 
   it("the StyleMe detail route never renders the legacy Perfume/Hairstyle/Makeup vibe/Song labels", () => {
+    // "Mood" is deliberately NOT in this exclusion list — a legitimate
+    // historical-input "Mood" field was added in §C360.15 (session.historicalMood,
+    // the customer's own pre-Rev-3 answer). What's excluded here is the OLD bug:
+    // moodDescription (an internal JSON metadata blob) rendered under a "Mood" label —
+    // that data source is covered separately (moodDescription is never selected at all).
     const src = readSource("app/routes/admin.naia.customers.$customerId.styleme.$sessionId.tsx");
-    for (const legacyLabel of ['label="Perfume"', 'label="Hairstyle"', 'label="Makeup vibe"', 'label="Song"', 'label="Mood"']) {
+    for (const legacyLabel of ['label="Perfume"', 'label="Hairstyle"', 'label="Makeup vibe"', 'label="Song"']) {
       expect(src).not.toContain(legacyLabel);
     }
   });

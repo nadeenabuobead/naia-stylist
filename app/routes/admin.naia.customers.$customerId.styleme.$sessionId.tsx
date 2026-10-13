@@ -74,6 +74,16 @@ export default function AdminStyleMeSessionDetailPage() {
                   <Field label="Formality" value={session.formality} />
                   <Field label="Fit / comfort" value={session.bodyNeeds} />
                   <Field label="Anchor source" value={session.anchorSource} />
+                  {/* Historical pre-Rev-3 inputs — only ever present when THIS
+                      session persisted a real answer; current sessions have
+                      none of these and the rows simply don't render. */}
+                  <Field label="Mood" value={session.historicalMood} />
+                  <Field label="Desired feeling" value={session.historicalDesiredFeeling} />
+                  <Field label="Practical needs" value={session.historicalPracticalNeeds} />
+                  <Field label="Specific needs" value={session.historicalSpecificNeeds} />
+                  <Field label="Body preference" value={session.historicalBodyPreference} />
+                  <Field label="Weather" value={session.historicalWeather} />
+                  <Field label="Time of day" value={session.historicalTimeOfDay} />
                 </tbody>
               </table>
             </div>
@@ -137,7 +147,6 @@ export default function AdminStyleMeSessionDetailPage() {
                   <tbody>
                     <Field label="Why this works" value={s.whyThisWorks} />
                     <Field label="Confidence boost" value={s.confidenceBoost} />
-                    <Field label="Status" value={s.status} />
                   </tbody>
                 </table>
 

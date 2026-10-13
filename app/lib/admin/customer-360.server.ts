@@ -93,6 +93,38 @@ function humanizeArray(ids: readonly string[]): string[] {
   return ids.map((id) => humanizeSlug(id));
 }
 
+/**
+ * Historical pre-Rev-3 StylingSession inputs (currentMood, desiredFeeling,
+ * practicalIds, specificNeeds, bodyPreference, weather, timeOfDay) have no
+ * current write site, and their own questionnaire screens (mood.tsx,
+ * feeling.tsx, comfort.tsx) have been fully retired — replaced with
+ * compatibility redirects that explicitly refuse to invent a mapping for
+ * the old IDs ("no approved mapping exists, and inventing one would
+ * silently change what the customer said" — see mood.tsx). There is
+ * therefore no canonical label vocabulary left for these columns to look
+ * up, unlike State/Intention/Occasion/Formality/Fit-Comfort.
+ *
+ * For a customer-360 historical record, the only honest options are:
+ * show the stored value as the customer's own words (already human text),
+ * or humanize it if it's clearly a coded slug (hyphen/underscore-joined,
+ * no spaces). Never fabricate what a retired screen's option would have
+ * displayed.
+ */
+function displayStoredValue(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  // A space anywhere means this is genuine free text (a sentence/phrase) —
+  // shown verbatim, exactly as the customer wrote it. No space means a
+  // single coded token, whether hyphen-joined ("cold-and-rainy") or a bare
+  // lowercase word ("morning") — either way it's humanized, never shown
+  // lowercase/raw.
+  return /\s/.test(raw) ? raw : humanizeSlug(raw);
+}
+
+function displayStoredValues(raw: readonly string[] | null | undefined): string[] {
+  if (!raw?.length) return [];
+  return raw.map((v) => displayStoredValue(v)).filter((v): v is string => !!v);
+}
+
 const THUMBNAIL_TRANSFORMATION = "w_160,h_160,c_fill,q_60";
 
 /**
@@ -398,7 +430,6 @@ export interface AdminStyleMeItemDetail {
 export interface AdminStyleMeSuggestionDetail {
   id: string;
   createdAt: Date;
-  status: string | null;
   outfitName: string | null;
   collageImages: string[];
   whyThisWorks: string | null;
@@ -433,6 +464,17 @@ export interface AdminStyleMeSessionDetail {
   bodyNeeds: string[];
   formality: string | null;
   anchorSource: string | null;
+  /** Historical pre-Rev-3 inputs — present only when THIS specific session
+   *  actually persisted a real answer; see displayStoredValue's doc comment
+   *  for why these have no canonical label lookup (their screens are
+   *  retired). Always absent on a current Rev-3 session. */
+  historicalMood: string | null;
+  historicalDesiredFeeling: string | null;
+  historicalPracticalNeeds: string[];
+  historicalSpecificNeeds: string | null;
+  historicalBodyPreference: string | null;
+  historicalWeather: string | null;
+  historicalTimeOfDay: string | null;
   suggestions: AdminStyleMeSuggestionDetail[];
   review: {
     overallFeeling: number | null;
@@ -459,19 +501,28 @@ export interface AdminStyleMeSessionDetail {
  * the same ownership-scoping pattern getAdminCustomerBuySkipUploadDetail
  * uses, so a guessed/stale URL cannot reach another customer's session.
  *
- * Shows only what is durably persisted and what the current frozen StyleMe
- * V1 product actually produces; never fabricates a field that is null
- * because it was never collected for that session. Deliberately does NOT
- * select or return: currentMood/desiredFeeling/specificNeeds/bodyPreference/
- * styleDNA/weather/timeOfDay (all hardcoded null at every current Rev-3
- * write site — dead/legacy, not part of the product the customer uses
- * today), practicalIds (a derived internal engine signal with no
- * customer-facing equivalent — the customer-chosen intentions it derives
- * from are already shown), moodDescription (an internal JSON metadata
- * envelope — schemaVersion/handles/alternatives — that was never real
- * customer-facing "mood" text despite the column name), the legacy
- * perfume/hairstyle/makeup/song outputs, workedTags/didntWorkTags (dead,
- * no current write site), and the raw closetAnchorId (a database ID).
+ * Customer 360 is a historical record, not just a mirror of the current
+ * StyleMe V1 product: currentMood/desiredFeeling/practicalIds/specificNeeds/
+ * bodyPreference/weather/timeOfDay ARE selected and returned (as
+ * historical*) whenever THIS session actually persisted a real value for
+ * one — a customer who went through the pre-Rev-3 flow genuinely answered
+ * those questions, even though today's flow no longer asks them. Every
+ * current-Rev-3 session simply has null/[] for all of them and they are
+ * correctly absent. styleDNA stays excluded: no current or historical
+ * write site was ever found for it (unlike the fields above), and its
+ * schema comment ("JSON array") means displaying it raw risks exactly the
+ * raw-JSON problem this tab must avoid.
+ *
+ * Still deliberately excluded regardless of session age: moodDescription
+ * (an internal JSON metadata envelope — schemaVersion/handles/alternatives
+ * — never real customer-facing "mood" text despite the column name), the
+ * legacy perfume/hairstyle/makeup/song outputs, workedTags/didntWorkTags
+ * (dead, no write site at any point), status (OutfitSuggestion.status is
+ * never written past its @default("PENDING") — see the create call sites
+ * in style-me/result.tsx, which explicitly comment "status left at
+ * @default" — so it carries zero information; the real customer outcome
+ * is StyleMeOutcome, shown separately), and the raw closetAnchorId (a
+ * database ID).
  */
 export async function getAdminCustomerStyleMeSessionDetail(
   customerId: string,
@@ -492,12 +543,22 @@ export async function getAdminCustomerStyleMeSessionDetail(
       bodyNeeds: true,
       formalityConditional: true,
       anchorProvenance: true,
+      // Historical pre-Rev-3 inputs — selected so a customer who answered
+      // these on the old flow still has their answer shown; see the
+      // function doc comment above for why current Rev-3 sessions always
+      // read null/[] here.
+      currentMood: true,
+      desiredFeeling: true,
+      practicalIds: true,
+      specificNeeds: true,
+      bodyPreference: true,
+      weather: true,
+      timeOfDay: true,
       suggestions: {
         orderBy: { createdAt: "asc" },
         select: {
           id: true,
           createdAt: true,
-          status: true,
           outfitName: true,
           whyThisWorks: true,
           confidenceBoost: true,
@@ -562,10 +623,16 @@ export async function getAdminCustomerStyleMeSessionDetail(
     bodyNeeds: session.bodyNeeds.map(fitComfortLabel),
     formality: styleMeFormalityLabel(session.formalityConditional),
     anchorSource: anchorSourceLabel(session.anchorProvenance),
+    historicalMood: displayStoredValue(session.currentMood),
+    historicalDesiredFeeling: displayStoredValue(session.desiredFeeling),
+    historicalPracticalNeeds: displayStoredValues(session.practicalIds),
+    historicalSpecificNeeds: displayStoredValue(session.specificNeeds),
+    historicalBodyPreference: displayStoredValue(session.bodyPreference),
+    historicalWeather: displayStoredValue(session.weather),
+    historicalTimeOfDay: displayStoredValue(session.timeOfDay),
     suggestions: session.suggestions.map((s: (typeof session.suggestions)[number]) => ({
       id: s.id,
       createdAt: s.createdAt,
-      status: s.status,
       outfitName: s.outfitName,
       collageImages: resolveCollageImages(s.items as ResolvableOutfitItem[], { customerId, cloudinaryConfig }).resolvedImages,
       whyThisWorks: s.whyThisWorks,
