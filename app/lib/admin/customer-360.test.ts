@@ -598,15 +598,16 @@ describe("§C360.12 getAdminCustomerStyleMeSessionDetail scoping", () => {
   });
 });
 
-describe("§C360.12 getAdminCustomerStyleMeSessionDetail renders outcome and post-wear review fully", () => {
-  const baseSession = {
-    id: "s1", customerId: "cust-A", createdAt: new Date(), occasion: "work", currentMood: null,
-    desiredFeeling: null, state: null, intentions: [], styleFrom: "BOTH", styleMeMode: "naia",
-    bodyNeeds: [], practicalIds: [], formalityConditional: null, specificNeeds: null,
-    bodyPreference: null, styleDNA: null, weather: null, timeOfDay: null,
-    closetAnchorId: null, anchorProvenance: null,
-  };
+// Shared fixture across §C360.12 and §C360.14 — a minimal valid StylingSession row.
+const baseSession = {
+  id: "s1", customerId: "cust-A", createdAt: new Date(), occasion: "work", currentMood: null,
+  desiredFeeling: null, state: null, intentions: [], styleFrom: "BOTH", styleMeMode: "naia",
+  bodyNeeds: [], practicalIds: [], formalityConditional: null, specificNeeds: null,
+  bodyPreference: null, styleDNA: null, weather: null, timeOfDay: null,
+  closetAnchorId: null, anchorProvenance: null,
+};
 
+describe("§C360.12 getAdminCustomerStyleMeSessionDetail renders outcome and post-wear review fully", () => {
   it("surfaces every StyleMeOutcome field — wore it, goal response, worked, felt off, customer comment", async () => {
     (prisma.stylingSession.findUnique as any).mockResolvedValue({
       ...baseSession,
@@ -627,9 +628,9 @@ describe("§C360.12 getAdminCustomerStyleMeSessionDetail renders outcome and pos
     });
     const result = await getAdminCustomerStyleMeSessionDetail("cust-A", "s1");
     const outcome = result!.suggestions[0].outcome!;
-    expect(outcome.outcomeStatus).toBe("wore-it");
-    expect(outcome.goalOutcome).toBe("yes");
-    expect(outcome.whatWorked).toEqual(["fit"]);
+    expect(outcome.outcomeStatus).toBe("Wore it");
+    expect(outcome.goalOutcome).toBe("Yes");
+    expect(outcome.whatWorked).toEqual(["Fit"]);
     expect(outcome.reasonOtherNote).toBe("Felt amazing all day.");
   });
 
@@ -656,6 +657,213 @@ describe("§C360.12 getAdminCustomerStyleMeSessionDetail renders outcome and pos
     (prisma.stylingSession.findUnique as any).mockResolvedValue({ ...baseSession, suggestions: [], review: null });
     const result = await getAdminCustomerStyleMeSessionDetail("cust-A", "s1");
     expect(result!.review).toBeNull();
+  });
+});
+
+// ── §C360.14 — StyleMe label fix / raw-JSON fix / legacy-field removal (final visual-QA pass) ──
+
+describe("§C360.14 StyleMe fields resolve to the exact customer-facing label, never a raw code", () => {
+  it("state resolves via STYLEME_STATE_LABELS — 'going-through-change' becomes the exact customer-facing copy", async () => {
+    (prisma.stylingSession.findUnique as any).mockResolvedValue({
+      ...baseSession, state: "going-through-change", suggestions: [], review: null,
+    });
+    const result = await getAdminCustomerStyleMeSessionDetail("cust-A", "s1");
+    expect(result!.state).toBe("I'm going through something");
+  });
+
+  it("intentions resolve via STYLEME_INTENTION_LABELS — 'give-energy' becomes the exact customer-facing copy", async () => {
+    (prisma.stylingSession.findUnique as any).mockResolvedValue({
+      ...baseSession, intentions: ["give-energy"], suggestions: [], review: null,
+    });
+    const result = await getAdminCustomerStyleMeSessionDetail("cust-A", "s1");
+    expect(result!.intentions).toEqual(["Bring some energy"]);
+  });
+
+  it("bodyNeeds (fit/comfort) resolve via STYLEME_FIT_COMFORT_LABELS — 'structured-shape' becomes the exact customer-facing copy", async () => {
+    (prisma.stylingSession.findUnique as any).mockResolvedValue({
+      ...baseSession, bodyNeeds: ["structured-shape"], suggestions: [], review: null,
+    });
+    const result = await getAdminCustomerStyleMeSessionDetail("cust-A", "s1");
+    expect(result!.bodyNeeds).toEqual(["More structure / definition"]);
+  });
+
+  it("occasion resolves the canonical stored ID back through the Rev 3 label, not the raw canonical slug", async () => {
+    (prisma.stylingSession.findUnique as any).mockResolvedValue({
+      ...baseSession, occasion: "date-night", suggestions: [], review: null,
+    });
+    const result = await getAdminCustomerStyleMeSessionDetail("cust-A", "s1");
+    expect(result!.occasion).toBe("Date");
+  });
+
+  it("formality resolves via STYLEME_FORMALITY_LABELS", async () => {
+    (prisma.stylingSession.findUnique as any).mockResolvedValue({
+      ...baseSession, formalityConditional: "formality-polished", suggestions: [], review: null,
+    });
+    const result = await getAdminCustomerStyleMeSessionDetail("cust-A", "s1");
+    expect(result!.formality).toBe("Polished");
+  });
+
+  it("anchor source is a plain-English label (AUTO/MANUAL), never the raw enum", async () => {
+    (prisma.stylingSession.findUnique as any).mockResolvedValue({
+      ...baseSession, anchorProvenance: "MANUAL", suggestions: [], review: null,
+    });
+    const result = await getAdminCustomerStyleMeSessionDetail("cust-A", "s1");
+    expect(result!.anchorSource).toBe("Customer selected it");
+    expect(result!.anchorSource).not.toMatch(/MANUAL|AUTO/);
+  });
+
+  it("an unrecognised slug falls back to humanized text, never raw dashes, and is never hidden", async () => {
+    (prisma.stylingSession.findUnique as any).mockResolvedValue({
+      ...baseSession, state: "some-brand-new-state-id", suggestions: [], review: null,
+    });
+    const result = await getAdminCustomerStyleMeSessionDetail("cust-A", "s1");
+    expect(result!.state).toBe("Some brand new state id");
+  });
+
+  it("does not expose the raw closetAnchorId (a database ID) anywhere in the returned shape", async () => {
+    (prisma.stylingSession.findUnique as any).mockResolvedValue({
+      ...baseSession, closetAnchorId: "ck_abc123_internal_id", suggestions: [], review: null,
+    });
+    const result = await getAdminCustomerStyleMeSessionDetail("cust-A", "s1");
+    expect(JSON.stringify(result)).not.toContain("ck_abc123_internal_id");
+  });
+
+  it("post-wear Phase 4B1 answers (didWearIt/feelingAnswer/fitFeedback/coverageFeedback/colourFeedback) resolve to the exact customer-facing option labels", async () => {
+    (prisma.stylingSession.findUnique as any).mockResolvedValue({
+      ...baseSession,
+      suggestions: [],
+      review: {
+        overallFeeling: null, feltLikeHer: null, desiredFeelingAchieved: null, wouldWearAgain: null,
+        physicallyComfortable: null, additionalNotes: null, objections: null,
+        confidenceBefore: null, confidenceAfter: null,
+        didWearIt: "not-yet", feelingAnswer: "not-great", fitFeedback: "mostly",
+        coverageFeedback: "yes", colourFeedback: "no", createdAt: new Date(),
+      },
+    });
+    const result = await getAdminCustomerStyleMeSessionDetail("cust-A", "s1");
+    expect(result!.review!.didWearIt).toBe("Not yet");
+    expect(result!.review!.feelingAnswer).toBe("Not great");
+    expect(result!.review!.fitFeedback).toBe("Mostly");
+    expect(result!.review!.coverageFeedback).toBe("Yes");
+    expect(result!.review!.colourFeedback).toBe("No");
+  });
+});
+
+describe("§C360.14 no raw JSON ever appears in the StyleMe admin detail shape", () => {
+  it("moodDescription (an internal metadata JSON envelope, not real mood text) is not selected or returned at all", async () => {
+    (prisma.stylingSession.findUnique as any).mockResolvedValue({ ...baseSession, suggestions: [], review: null });
+    await getAdminCustomerStyleMeSessionDetail("cust-A", "s1");
+    const query = (prisma.stylingSession.findUnique as any).mock.calls[0][0];
+    const suggestionSelect = query.select.suggestions.select;
+    expect(suggestionSelect.moodDescription).toBeUndefined();
+  });
+
+  it("no field in a full result ever contains the string 'schemaVersion' (the internal metadata marker)", async () => {
+    (prisma.stylingSession.findUnique as any).mockResolvedValue({
+      ...baseSession,
+      suggestions: [{
+        id: "sg1", createdAt: new Date(), status: "PENDING", outfitName: "Look",
+        whyThisWorks: "Balances proportions.", confidenceBoost: "Confident", selected: true, savedAsLook: false,
+        items: [], outcome: null,
+      }],
+      review: null,
+    });
+    const result = await getAdminCustomerStyleMeSessionDetail("cust-A", "s1");
+    expect(JSON.stringify(result)).not.toContain("schemaVersion");
+  });
+});
+
+describe("§C360.14 legacy StyleMe outputs are never selected or returned", () => {
+  it("the Prisma select for suggestions never requests perfumeRec/hairstyleRec/makeupVibeRec/songRec or their notes/artist fields", async () => {
+    (prisma.stylingSession.findUnique as any).mockResolvedValue({ ...baseSession, suggestions: [], review: null });
+    await getAdminCustomerStyleMeSessionDetail("cust-A", "s1");
+    const query = (prisma.stylingSession.findUnique as any).mock.calls[0][0];
+    const suggestionSelect = query.select.suggestions.select;
+    for (const legacyField of ["perfumeRec", "perfumeNotes", "hairstyleRec", "hairstyleNotes", "makeupVibeRec", "makeupNotes", "songRec", "songArtist"]) {
+      expect(suggestionSelect[legacyField], `${legacyField} must not be selected`).toBeUndefined();
+    }
+  });
+
+  it("the Prisma select for review never requests workedTags/didntWorkTags (dead fields, no current write site)", async () => {
+    (prisma.stylingSession.findUnique as any).mockResolvedValue({ ...baseSession, suggestions: [], review: null });
+    await getAdminCustomerStyleMeSessionDetail("cust-A", "s1");
+    const query = (prisma.stylingSession.findUnique as any).mock.calls[0][0];
+    const reviewSelect = query.select.review.select;
+    expect(reviewSelect.workedTags).toBeUndefined();
+    expect(reviewSelect.didntWorkTags).toBeUndefined();
+  });
+
+  it("the session-level select never requests currentMood/desiredFeeling/practicalIds/specificNeeds/bodyPreference/styleDNA/weather/timeOfDay (all dead/legacy)", async () => {
+    (prisma.stylingSession.findUnique as any).mockResolvedValue({ ...baseSession, suggestions: [], review: null });
+    await getAdminCustomerStyleMeSessionDetail("cust-A", "s1");
+    const query = (prisma.stylingSession.findUnique as any).mock.calls[0][0];
+    for (const deadField of ["currentMood", "desiredFeeling", "practicalIds", "specificNeeds", "bodyPreference", "styleDNA", "weather", "timeOfDay"]) {
+      expect(query.select[deadField], `${deadField} must not be selected`).toBeUndefined();
+    }
+  });
+});
+
+describe("§C360.14 StyleMe list cards distinguish a resolved image from no completed look", () => {
+  const listBase = { customerId: "cust-A", createdAt: new Date(), occasion: null, state: null, intentions: [], styleFrom: "BOTH", styleMeMode: "naia", review: null };
+
+  it("hasCompletedLook is true when the session has at least one persisted suggestion", async () => {
+    (prisma.stylingSession.findMany as any).mockResolvedValue([{
+      ...listBase, id: "s1",
+      suggestions: [{ id: "sg1", outfitName: "Look", selected: true, savedAsLook: false, items: [{ itemType: "TOPS", closetItemId: "c1", productTitle: null, productImageUrl: null, closetItem: { name: "Top", imageUrl: "https://legacy.example.com/top.jpg", imagePublicId: null, imageFormat: null } }], outcome: null }],
+    }]);
+    const result = await getAdminCustomerStyleMeSessions("cust-A");
+    expect(result.items[0].hasCompletedLook).toBe(true);
+    expect(result.items[0].suggestions[0].collageImages.length).toBeGreaterThan(0);
+  });
+
+  it("hasCompletedLook is true but collageImages is empty when the suggestion's items have no resolvable image", async () => {
+    (prisma.stylingSession.findMany as any).mockResolvedValue([{
+      ...listBase, id: "s2",
+      suggestions: [{ id: "sg2", outfitName: "Look", selected: true, savedAsLook: false, items: [{ itemType: "TOPS", closetItemId: "c2", productTitle: null, productImageUrl: null, closetItem: { name: "Top", imageUrl: null, imagePublicId: null, imageFormat: null } }], outcome: null }],
+    }]);
+    const result = await getAdminCustomerStyleMeSessions("cust-A");
+    expect(result.items[0].hasCompletedLook).toBe(true);
+    expect(result.items[0].suggestions[0].collageImages).toEqual([]);
+  });
+
+  it("hasCompletedLook is false when the session genuinely never produced a suggestion", async () => {
+    (prisma.stylingSession.findMany as any).mockResolvedValue([{ ...listBase, id: "s3", suggestions: [] }]);
+    const result = await getAdminCustomerStyleMeSessions("cust-A");
+    expect(result.items[0].hasCompletedLook).toBe(false);
+    expect(result.items[0].suggestions).toEqual([]);
+  });
+});
+
+describe("§C360.14 Trend Edits — every row is clickable in the admin route", () => {
+  it("the TrendEditsSection component renders a View link unconditionally — no hasSnapshot branch gating it", () => {
+    const src = readSource("app/routes/admin.naia.customers.$customerId.tsx");
+    const sectionStart = src.indexOf("function TrendEditsSection");
+    const sectionEnd = src.indexOf("\nfunction ", sectionStart + 1);
+    const sectionBody = src.slice(sectionStart, sectionEnd === -1 ? undefined : sectionEnd);
+    expect(sectionBody).toMatch(/View →/);
+    expect(sectionBody).not.toMatch(/r\.hasSnapshot\s*\?/);
+    expect(sectionBody).not.toMatch(/Not stored/);
+  });
+
+  it("the trend-edit detail route still shows the historical-unavailable message for a null snapshot (unchanged)", () => {
+    const src = readSource("app/routes/admin.naia.customers.$customerId.trend-edit.$usageId.tsx");
+    expect(src).toMatch(/Historical personalised content was not stored for this generation\./);
+  });
+});
+
+describe("§C360.14 no Rev 3 revision labels leak into Customer 360", () => {
+  it("the StyleMe detail route never renders 'State (Rev 3)' or 'Intentions (Rev 3)'", () => {
+    const src = readSource("app/routes/admin.naia.customers.$customerId.styleme.$sessionId.tsx");
+    expect(src).not.toMatch(/Rev 3/);
+    expect(src).toMatch(/label="State"/);
+    expect(src).toMatch(/label="Intention"/);
+  });
+
+  it("the StyleMe detail route never renders the legacy Perfume/Hairstyle/Makeup vibe/Song labels", () => {
+    const src = readSource("app/routes/admin.naia.customers.$customerId.styleme.$sessionId.tsx");
+    for (const legacyLabel of ['label="Perfume"', 'label="Hairstyle"', 'label="Makeup vibe"', 'label="Song"', 'label="Mood"']) {
+      expect(src).not.toContain(legacyLabel);
+    }
   });
 });
 

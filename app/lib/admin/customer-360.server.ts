@@ -37,6 +37,61 @@ import {
 import { resolveCollageImages, resolveItemImage, type ResolvableOutfitItem } from "~/lib/styleme/look-image-resolution.server";
 import { getEditorialReportBySlug } from "~/lib/editorial-reports.server";
 import type { TrendEditSnapshot } from "~/lib/plan/personalised-trend-edit-usage.server";
+import {
+  STYLEME_STATE_LABELS,
+  STYLEME_INTENTION_LABELS,
+  STYLEME_FIT_COMFORT_LABELS,
+  styleMeOccasionLabel,
+  styleMeFormalityLabel,
+  humanizeSlug,
+} from "~/lib/styleme/session-vocabulary";
+import {
+  POST_WEAR_WORE_IT_OPTIONS,
+  POST_WEAR_FEELING_OPTIONS,
+  POST_WEAR_COMFORT_OPTIONS,
+} from "~/routes/post-wear-review";
+
+// ── StyleMe admin-display label resolution ───────────────────────────────────
+//
+// Every StyleMe field Admin shows must read the same label the customer saw —
+// see session-vocabulary.ts (state/intention/fit-comfort/occasion/formality)
+// and post-wear-review.tsx (the post-wear answer scales) for the canonical
+// definitions. Where no canonical customer-facing label exists for a value —
+// it's a purely internal engine/provenance concept the customer never saw —
+// humanizeSlug formats the raw value into readable prose instead of hiding it
+// or inventing meaning that was never shown to anyone.
+
+function optionLabel(value: string | null | undefined, options: { value: string; label: string }[]): string | null {
+  if (!value) return null;
+  return options.find((o) => o.value === value)?.label ?? humanizeSlug(value);
+}
+
+function stateLabel(id: string | null): string | null {
+  if (!id) return null;
+  return STYLEME_STATE_LABELS[id] ?? humanizeSlug(id);
+}
+
+function intentionLabel(id: string): string {
+  return STYLEME_INTENTION_LABELS[id] ?? humanizeSlug(id);
+}
+
+function fitComfortLabel(id: string): string {
+  return STYLEME_FIT_COMFORT_LABELS[id] ?? humanizeSlug(id);
+}
+
+/** AnchorProvenance is an internal routing concept (schema.prisma) the
+ *  customer never sees as "AUTO"/"MANUAL" text — this is the one field with
+ *  no customer-facing equivalent to reuse, so it gets its own minimal,
+ *  plain-English translation rather than exposing the raw enum. */
+function anchorSourceLabel(provenance: string | null): string | null {
+  if (provenance === "AUTO") return "nAia chose it";
+  if (provenance === "MANUAL") return "Customer selected it";
+  return null;
+}
+
+function humanizeArray(ids: readonly string[]): string[] {
+  return ids.map((id) => humanizeSlug(id));
+}
 
 const THUMBNAIL_TRANSFORMATION = "w_160,h_160,c_fill,q_60";
 
@@ -202,17 +257,17 @@ export interface AdminStyleMeSuggestionSummary {
 export interface AdminStyleMeSessionSummary {
   id: string;
   createdAt: Date;
+  /** Human-readable — same label the customer saw, never the stored canonical/slug ID. */
   occasion: string | null;
-  currentMood: string | null;
-  desiredFeeling: string | null;
   state: string | null;
   intentions: string[];
   /** Closet-only, NADINE-eligible-included, or both — derived from styleFrom/styleMeMode, never guessed. */
   source: string;
+  /** True once this session actually produced a generated suggestion — distinguishes
+   *  "no image because nothing resolved" from "no image because nothing was ever generated". */
+  hasCompletedLook: boolean;
   suggestions: AdminStyleMeSuggestionSummary[];
   review: {
-    workedTags: string | null;
-    didntWorkTags: string | null;
     additionalNotes: string | null;
     objections: string | null;
     createdAt: Date;
@@ -252,8 +307,6 @@ export async function getAdminCustomerStyleMeSessions(
       id: true,
       createdAt: true,
       occasion: true,
-      currentMood: true,
-      desiredFeeling: true,
       state: true,
       intentions: true,
       styleFrom: true,
@@ -279,8 +332,6 @@ export async function getAdminCustomerStyleMeSessions(
       },
       review: {
         select: {
-          workedTags: true,
-          didntWorkTags: true,
           additionalNotes: true,
           objections: true,
           createdAt: true,
@@ -294,12 +345,11 @@ export async function getAdminCustomerStyleMeSessions(
   const mapped = sessions.map((session: (typeof sessions)[number]) => ({
     id: session.id,
     createdAt: session.createdAt,
-    occasion: session.occasion,
-    currentMood: session.currentMood,
-    desiredFeeling: session.desiredFeeling,
-    state: session.state,
-    intentions: session.intentions,
+    occasion: styleMeOccasionLabel(session.occasion),
+    state: stateLabel(session.state),
+    intentions: session.intentions.map(intentionLabel),
     source: describeStyleMeSource(session.styleFrom, session.styleMeMode),
+    hasCompletedLook: session.suggestions.length > 0,
     suggestions: session.suggestions.map((s: (typeof session.suggestions)[number]) => ({
       id: s.id,
       outfitName: s.outfitName,
@@ -309,19 +359,17 @@ export async function getAdminCustomerStyleMeSessions(
       collageImages: resolveCollageImages(s.items as ResolvableOutfitItem[], { customerId, cloudinaryConfig }).resolvedImages,
       outcome: s.outcome
         ? {
-            outcomeStatus: s.outcome.outcomeStatus,
-            goalOutcome: s.outcome.goalOutcome,
-            whatWorked: s.outcome.whatWorked,
-            whatFeltOff: s.outcome.whatFeltOff,
-            didntWearReasons: s.outcome.didntWearReasons,
+            outcomeStatus: humanizeSlug(s.outcome.outcomeStatus),
+            goalOutcome: optionLabel(s.outcome.goalOutcome, [{ value: "yes", label: "Yes" }, { value: "somewhat", label: "Somewhat" }, { value: "no", label: "No" }]),
+            whatWorked: humanizeArray(s.outcome.whatWorked),
+            whatFeltOff: humanizeArray(s.outcome.whatFeltOff),
+            didntWearReasons: humanizeArray(s.outcome.didntWearReasons),
             submittedAt: s.outcome.submittedAt,
           }
         : null,
     })),
     review: session.review
       ? {
-          workedTags: session.review.workedTags,
-          didntWorkTags: session.review.didntWorkTags,
           additionalNotes: session.review.additionalNotes,
           objections: session.review.objections,
           createdAt: session.review.createdAt,
@@ -355,15 +403,6 @@ export interface AdminStyleMeSuggestionDetail {
   collageImages: string[];
   whyThisWorks: string | null;
   confidenceBoost: string | null;
-  moodDescription: string | null;
-  perfumeRec: string | null;
-  perfumeNotes: string | null;
-  hairstyleRec: string | null;
-  hairstyleNotes: string | null;
-  makeupVibeRec: string | null;
-  makeupNotes: string | null;
-  songRec: string | null;
-  songArtist: string | null;
   selected: boolean;
   savedAsLook: boolean;
   items: AdminStyleMeItemDetail[];
@@ -384,22 +423,16 @@ export interface AdminStyleMeSuggestionDetail {
 export interface AdminStyleMeSessionDetail {
   id: string;
   createdAt: Date;
+  /** Every field below is human-readable — the same label the customer saw,
+   *  never the stored canonical ID/slug. See the label-resolution helpers
+   *  above (session-vocabulary.ts is the canonical source for all of them). */
   occasion: string | null;
-  currentMood: string | null;
-  desiredFeeling: string | null;
   state: string | null;
   intentions: string[];
   source: string;
   bodyNeeds: string[];
-  practicalIds: string[];
-  formalityConditional: string | null;
-  specificNeeds: string | null;
-  bodyPreference: string | null;
-  styleDNA: string | null;
-  weather: string | null;
-  timeOfDay: string | null;
-  closetAnchorId: string | null;
-  anchorProvenance: string | null;
+  formality: string | null;
+  anchorSource: string | null;
   suggestions: AdminStyleMeSuggestionDetail[];
   review: {
     overallFeeling: number | null;
@@ -407,8 +440,6 @@ export interface AdminStyleMeSessionDetail {
     desiredFeelingAchieved: string | null;
     wouldWearAgain: string | null;
     physicallyComfortable: string | null;
-    workedTags: string | null;
-    didntWorkTags: string | null;
     additionalNotes: string | null;
     objections: string | null;
     confidenceBefore: number | null;
@@ -428,9 +459,19 @@ export interface AdminStyleMeSessionDetail {
  * the same ownership-scoping pattern getAdminCustomerBuySkipUploadDetail
  * uses, so a guessed/stale URL cannot reach another customer's session.
  *
- * Shows only what is durably persisted; never fabricates a field that is
- * null because it was never collected for that session (e.g. a pre-Rev-3
- * session has no `intentions`, a session with no review has `review: null`).
+ * Shows only what is durably persisted and what the current frozen StyleMe
+ * V1 product actually produces; never fabricates a field that is null
+ * because it was never collected for that session. Deliberately does NOT
+ * select or return: currentMood/desiredFeeling/specificNeeds/bodyPreference/
+ * styleDNA/weather/timeOfDay (all hardcoded null at every current Rev-3
+ * write site — dead/legacy, not part of the product the customer uses
+ * today), practicalIds (a derived internal engine signal with no
+ * customer-facing equivalent — the customer-chosen intentions it derives
+ * from are already shown), moodDescription (an internal JSON metadata
+ * envelope — schemaVersion/handles/alternatives — that was never real
+ * customer-facing "mood" text despite the column name), the legacy
+ * perfume/hairstyle/makeup/song outputs, workedTags/didntWorkTags (dead,
+ * no current write site), and the raw closetAnchorId (a database ID).
  */
 export async function getAdminCustomerStyleMeSessionDetail(
   customerId: string,
@@ -444,21 +485,12 @@ export async function getAdminCustomerStyleMeSessionDetail(
       customerId: true,
       createdAt: true,
       occasion: true,
-      currentMood: true,
-      desiredFeeling: true,
       state: true,
       intentions: true,
       styleFrom: true,
       styleMeMode: true,
       bodyNeeds: true,
-      practicalIds: true,
       formalityConditional: true,
-      specificNeeds: true,
-      bodyPreference: true,
-      styleDNA: true,
-      weather: true,
-      timeOfDay: true,
-      closetAnchorId: true,
       anchorProvenance: true,
       suggestions: {
         orderBy: { createdAt: "asc" },
@@ -469,15 +501,6 @@ export async function getAdminCustomerStyleMeSessionDetail(
           outfitName: true,
           whyThisWorks: true,
           confidenceBoost: true,
-          moodDescription: true,
-          perfumeRec: true,
-          perfumeNotes: true,
-          hairstyleRec: true,
-          hairstyleNotes: true,
-          makeupVibeRec: true,
-          makeupNotes: true,
-          songRec: true,
-          songArtist: true,
           selected: true,
           savedAsLook: true,
           items: {
@@ -513,8 +536,6 @@ export async function getAdminCustomerStyleMeSessionDetail(
           desiredFeelingAchieved: true,
           wouldWearAgain: true,
           physicallyComfortable: true,
-          workedTags: true,
-          didntWorkTags: true,
           additionalNotes: true,
           objections: true,
           confidenceBefore: true,
@@ -534,22 +555,13 @@ export async function getAdminCustomerStyleMeSessionDetail(
   return {
     id: session.id,
     createdAt: session.createdAt,
-    occasion: session.occasion,
-    currentMood: session.currentMood,
-    desiredFeeling: session.desiredFeeling,
-    state: session.state,
-    intentions: session.intentions,
+    occasion: styleMeOccasionLabel(session.occasion),
+    state: stateLabel(session.state),
+    intentions: session.intentions.map(intentionLabel),
     source: describeStyleMeSource(session.styleFrom, session.styleMeMode),
-    bodyNeeds: session.bodyNeeds,
-    practicalIds: session.practicalIds,
-    formalityConditional: session.formalityConditional,
-    specificNeeds: session.specificNeeds,
-    bodyPreference: session.bodyPreference,
-    styleDNA: session.styleDNA,
-    weather: session.weather,
-    timeOfDay: session.timeOfDay,
-    closetAnchorId: session.closetAnchorId,
-    anchorProvenance: session.anchorProvenance,
+    bodyNeeds: session.bodyNeeds.map(fitComfortLabel),
+    formality: styleMeFormalityLabel(session.formalityConditional),
+    anchorSource: anchorSourceLabel(session.anchorProvenance),
     suggestions: session.suggestions.map((s: (typeof session.suggestions)[number]) => ({
       id: s.id,
       createdAt: s.createdAt,
@@ -558,15 +570,6 @@ export async function getAdminCustomerStyleMeSessionDetail(
       collageImages: resolveCollageImages(s.items as ResolvableOutfitItem[], { customerId, cloudinaryConfig }).resolvedImages,
       whyThisWorks: s.whyThisWorks,
       confidenceBoost: s.confidenceBoost,
-      moodDescription: s.moodDescription,
-      perfumeRec: s.perfumeRec,
-      perfumeNotes: s.perfumeNotes,
-      hairstyleRec: s.hairstyleRec,
-      hairstyleNotes: s.hairstyleNotes,
-      makeupVibeRec: s.makeupVibeRec,
-      makeupNotes: s.makeupNotes,
-      songRec: s.songRec,
-      songArtist: s.songArtist,
       selected: s.selected,
       savedAsLook: s.savedAsLook,
       items: s.items.map((it: (typeof s.items)[number]) => ({
@@ -582,14 +585,14 @@ export async function getAdminCustomerStyleMeSessionDetail(
       })),
       outcome: s.outcome
         ? {
-            outcomeStatus: s.outcome.outcomeStatus,
-            changeTypes: s.outcome.changeTypes,
+            outcomeStatus: humanizeSlug(s.outcome.outcomeStatus),
+            changeTypes: humanizeArray(s.outcome.changeTypes),
             otherChangeNote: s.outcome.otherChangeNote,
-            goalOutcome: s.outcome.goalOutcome,
-            selectedDirection: s.outcome.selectedDirection,
-            whatWorked: s.outcome.whatWorked,
-            whatFeltOff: s.outcome.whatFeltOff,
-            didntWearReasons: s.outcome.didntWearReasons,
+            goalOutcome: optionLabel(s.outcome.goalOutcome, [{ value: "yes", label: "Yes" }, { value: "somewhat", label: "Somewhat" }, { value: "no", label: "No" }]),
+            selectedDirection: s.outcome.selectedDirection ? humanizeSlug(s.outcome.selectedDirection) : null,
+            whatWorked: humanizeArray(s.outcome.whatWorked),
+            whatFeltOff: humanizeArray(s.outcome.whatFeltOff),
+            didntWearReasons: humanizeArray(s.outcome.didntWearReasons),
             reasonOtherNote: s.outcome.reasonOtherNote,
             submittedAt: s.outcome.submittedAt,
           }
@@ -602,17 +605,15 @@ export async function getAdminCustomerStyleMeSessionDetail(
           desiredFeelingAchieved: session.review.desiredFeelingAchieved,
           wouldWearAgain: session.review.wouldWearAgain,
           physicallyComfortable: session.review.physicallyComfortable,
-          workedTags: session.review.workedTags,
-          didntWorkTags: session.review.didntWorkTags,
           additionalNotes: session.review.additionalNotes,
           objections: session.review.objections,
           confidenceBefore: session.review.confidenceBefore,
           confidenceAfter: session.review.confidenceAfter,
-          didWearIt: session.review.didWearIt,
-          feelingAnswer: session.review.feelingAnswer,
-          fitFeedback: session.review.fitFeedback,
-          coverageFeedback: session.review.coverageFeedback,
-          colourFeedback: session.review.colourFeedback,
+          didWearIt: optionLabel(session.review.didWearIt, POST_WEAR_WORE_IT_OPTIONS),
+          feelingAnswer: optionLabel(session.review.feelingAnswer, POST_WEAR_FEELING_OPTIONS),
+          fitFeedback: optionLabel(session.review.fitFeedback, POST_WEAR_COMFORT_OPTIONS),
+          coverageFeedback: optionLabel(session.review.coverageFeedback, POST_WEAR_COMFORT_OPTIONS),
+          colourFeedback: optionLabel(session.review.colourFeedback, POST_WEAR_COMFORT_OPTIONS),
           createdAt: session.review.createdAt,
         }
       : null,

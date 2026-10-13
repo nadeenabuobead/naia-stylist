@@ -669,13 +669,17 @@ function StyleMeSection({
                   to={`/admin/naia/customers/${customerId}/styleme/${session.id}`}
                   style={{ display: "flex", gap: "0.75rem", alignItems: "center", padding: "0.6rem", border: "1px solid #dde1e7", borderRadius: "6px", textDecoration: "none", color: "inherit" }}
                 >
-                  <div style={{ display: "flex", flexShrink: 0 }}>
+                  <div style={{ display: "flex", flexShrink: 0, width: "52px", minHeight: "48px", alignItems: "center" }}>
                     {primary && primary.collageImages.length > 0 ? (
                       primary.collageImages.slice(0, 2).map((url, i) => (
                         <img key={i} src={url} alt="" style={{ width: "40px", height: "48px", objectFit: "cover", borderRadius: "4px", marginLeft: i > 0 ? "-12px" : 0, border: "1px solid #fff" }} />
                       ))
+                    ) : session.hasCompletedLook ? (
+                      <div className="na-thumb--placeholder" style={{ width: "52px", fontSize: "0.6rem" }} title="This session produced a look, but no item image resolved">No image</div>
                     ) : (
-                      <div className="na-thumb--placeholder" />
+                      <div className="na-thumb--placeholder" style={{ width: "52px", fontSize: "0.6rem", lineHeight: 1.2, textAlign: "center", padding: "0.2rem" }}>
+                        No completed look
+                      </div>
                     )}
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -685,11 +689,11 @@ function StyleMeSection({
                       {primary?.savedAsLook && <span className="na-badge na-badge--reviewed">SAVED</span>}
                     </div>
                     <p style={{ fontSize: "0.75rem", color: "#6b7280", margin: "0.15rem 0 0" }}>
-                      {[session.occasion, session.currentMood, session.desiredFeeling].filter(Boolean).join(" · ") || "No occasion/mood recorded."}
+                      {[session.occasion, session.state, ...session.intentions].filter(Boolean).join(" · ") || "No occasion recorded."}
                     </p>
                     {primary?.outcome && (
                       <p style={{ fontSize: "0.72rem", color: "#6b7280", margin: "0.15rem 0 0" }}>
-                        Outcome: {primary.outcome.outcomeStatus.replace(/-/g, " ")}
+                        Outcome: {primary.outcome.outcomeStatus}
                         {primary.outcome.goalOutcome ? ` · goal ${primary.outcome.goalOutcome}` : ""}
                       </p>
                     )}
@@ -778,11 +782,10 @@ function TrendEditsSection({ customerId, rows }: { customerId: string; rows: Adm
                     <td>{r.reportTitle}</td>
                     <td>{r.periodKey}</td>
                     <td>
-                      {r.hasSnapshot ? (
-                        <Link to={`/admin/naia/customers/${customerId}/trend-edit/${r.id}`} style={{ fontSize: "0.75rem" }}>View →</Link>
-                      ) : (
-                        <span style={{ fontSize: "0.68rem", color: "#9ca3af" }}>Not stored</span>
-                      )}
+                      {/* Every row opens — historical rows with no stored snapshot
+                          still show report/date/period and say plainly that the
+                          personalised content itself was never captured. */}
+                      <Link to={`/admin/naia/customers/${customerId}/trend-edit/${r.id}`} style={{ fontSize: "0.75rem" }}>View →</Link>
                     </td>
                   </tr>
                 ))}
@@ -978,7 +981,7 @@ function SummaryTab({
                 <th>Latest StyleMe</th>
                 <td>
                   {latestStyleMe
-                    ? `${displayDateTime(latestStyleMe.createdAt)} — ${latestStyleMe.suggestions[0]?.outcome?.outcomeStatus.replace(/-/g, " ") ?? "no outcome recorded"}`
+                    ? `${displayDateTime(latestStyleMe.createdAt)} — ${latestStyleMe.suggestions[0]?.outcome?.outcomeStatus ?? "no outcome recorded"}`
                     : <span className="na-null">none yet</span>}
                 </td>
               </tr>

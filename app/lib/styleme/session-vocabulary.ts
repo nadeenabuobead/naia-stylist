@@ -163,6 +163,44 @@ export const STYLEME_FIT_COMFORT_OPTIONS: readonly StyleMeOption[] = [
 export const STYLEME_FIT_COMFORT_EXCLUSIVE_ID = "nothing-specific";
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Step — Occasion / Formality: "Where are you headed?"
+// ─────────────────────────────────────────────────────────────────────────────
+// Moved here from style-me/occasion.tsx (the same consolidation this file
+// already did for State/Intention/Fit-Comfort) — occasion.tsx imports these
+// rather than keeping its own copy.
+
+export const STYLEME_OCCASION_OPTIONS: readonly StyleMeOption[] = [
+  { id: "work",            label: "Work or meetings" },
+  { id: "dinner",           label: "Dinner" },
+  { id: "date",             label: "Date" },
+  { id: "everyday",         label: "Everyday" },
+  { id: "event",            label: "Event / celebration" },
+  { id: "night-out",        label: "Night out / party" },
+  { id: "family",           label: "Family gathering" },
+  { id: "travel",           label: "Travel day" },
+] as const;
+
+/**
+ * Rev 3 UI occasion ID → canonical engine ID, applied at action time before
+ * session storage. StylingSession.occasion always holds the canonical form
+ * (e.g. "date-night"), never the UI ID ("date") — see occasion.tsx's action.
+ */
+export const STYLEME_OCCASION_REV3_TO_CANONICAL: Record<string, string> = {
+  "date": "date-night",
+  "event": "special-event",
+  "night-out": "girls-night",
+  "active-busy-day": "active",
+  "other": "not-sure",
+};
+
+export const STYLEME_FORMALITY_OPTIONS: readonly StyleMeOption[] = [
+  { id: "formality-relaxed",  label: "Keep it relaxed" },
+  { id: "formality-smart",    label: "Smart casual" },
+  { id: "formality-polished", label: "Polished" },
+  { id: "formality-occasion", label: "Dressy" },
+] as const;
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Derived lookups — never hand-maintain a parallel Record.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -173,10 +211,43 @@ function toLabelMap(options: readonly StyleMeOption[]): Record<string, string> {
 export const STYLEME_STATE_LABELS       = toLabelMap(STYLEME_STATE_OPTIONS);
 export const STYLEME_INTENTION_LABELS   = toLabelMap(STYLEME_INTENTION_OPTIONS);
 export const STYLEME_FIT_COMFORT_LABELS = toLabelMap(STYLEME_FIT_COMFORT_OPTIONS);
+export const STYLEME_OCCASION_LABELS    = toLabelMap(STYLEME_OCCASION_OPTIONS);
+export const STYLEME_FORMALITY_LABELS   = toLabelMap(STYLEME_FORMALITY_OPTIONS);
 
 export const STYLEME_STATE_IDS       = STYLEME_STATE_OPTIONS.map((o) => o.id);
 export const STYLEME_INTENTION_IDS   = STYLEME_INTENTION_OPTIONS.map((o) => o.id);
 export const STYLEME_FIT_COMFORT_IDS = STYLEME_FIT_COMFORT_OPTIONS.map((o) => o.id);
+
+/**
+ * Canonical occasion ID (as stored on StylingSession.occasion) → the Rev 3
+ * UI label the customer actually saw. Derived mechanically from
+ * STYLEME_OCCASION_REV3_TO_CANONICAL (never hand-maintained as a second
+ * table) so it can't drift from the forward map occasion.tsx's action uses.
+ * IDs that map to themselves (e.g. "everyday", "work") resolve directly
+ * against STYLEME_OCCASION_LABELS. Falls back to a humanized version of the
+ * raw ID for any value this vocabulary doesn't recognise — never raw JSON,
+ * never a database ID, but also never fabricated meaning.
+ */
+export function styleMeOccasionLabel(canonicalId: string | null | undefined): string | null {
+  if (!canonicalId) return null;
+  const canonicalToRev3 = Object.fromEntries(
+    Object.entries(STYLEME_OCCASION_REV3_TO_CANONICAL).map(([rev3Id, canon]) => [canon, rev3Id]),
+  );
+  const rev3Id = canonicalToRev3[canonicalId] ?? canonicalId;
+  return STYLEME_OCCASION_LABELS[rev3Id] ?? humanizeSlug(canonicalId);
+}
+
+export function styleMeFormalityLabel(formalityId: string | null | undefined): string | null {
+  if (!formalityId) return null;
+  return STYLEME_FORMALITY_LABELS[formalityId] ?? humanizeSlug(formalityId);
+}
+
+/** Humanizes an unrecognised slug (dashes → spaces, capitalized) — a safe
+ *  formatting fallback, never a source of new meaning. */
+export function humanizeSlug(slug: string): string {
+  const spaced = slug.replace(/[-_]+/g, " ").trim();
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Taxonomy activation gate — 12 live, 16 defined

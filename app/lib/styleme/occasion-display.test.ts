@@ -141,16 +141,26 @@ describe("OD-E — coverage of the canonical vocabulary", () => {
 // apart again silently.
 
 describe("OD-F — display labels are derived from the questionnaire, not written beside it", () => {
-  const src = readFileSync(join(ROOT, "app/routes/style-me/occasion.tsx"), "utf8");
+  // Moved from occasion.tsx into session-vocabulary.ts (the same consolidation
+  // session-vocabulary.ts already did for State/Intention/Fit-Comfort) —
+  // occasion.tsx now imports STYLEME_OCCASION_OPTIONS/STYLEME_OCCASION_REV3_TO_CANONICAL
+  // rather than declaring its own copy, so this test reads the real source there.
+  const src = readFileSync(join(ROOT, "app/lib/styleme/session-vocabulary.ts"), "utf8");
 
-  /** { id, label } pairs from the `occasions` array. */
-  const options = [...src.matchAll(/\{\s*id:\s*"([a-z-]+)"\s*,\s*label:\s*"([^"]+)"\s*\}/g)]
+  /** { id, label } pairs from the STYLEME_OCCASION_OPTIONS array only — sliced out
+   *  first since session-vocabulary.ts also declares State/Intention/Fit-Comfort/
+   *  Formality option arrays using the exact same { id, label } shape. */
+  const occasionOptionsBody = src.slice(
+    src.indexOf("export const STYLEME_OCCASION_OPTIONS"),
+    src.indexOf("] as const;", src.indexOf("export const STYLEME_OCCASION_OPTIONS")),
+  );
+  const options = [...occasionOptionsBody.matchAll(/\{\s*id:\s*"([a-z-]+)"\s*,\s*label:\s*"([^"]+)"\s*\}/g)]
     .map((m) => ({ id: m[1], label: m[2] }));
 
-  /** UI id → canonical id from REV3_OCCASION_MAP. */
+  /** UI id → canonical id from STYLEME_OCCASION_REV3_TO_CANONICAL. */
   const mapBody = src.slice(
-    src.indexOf("const REV3_OCCASION_MAP"),
-    src.indexOf("};", src.indexOf("const REV3_OCCASION_MAP")),
+    src.indexOf("export const STYLEME_OCCASION_REV3_TO_CANONICAL"),
+    src.indexOf("};", src.indexOf("export const STYLEME_OCCASION_REV3_TO_CANONICAL")),
   );
   const uiToCanonical = Object.fromEntries(
     [...mapBody.matchAll(/"([a-z-]+)":\s*"([a-z-]+)"/g)].map((m) => [m[1], m[2]]),

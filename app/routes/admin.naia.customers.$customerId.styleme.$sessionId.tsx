@@ -69,20 +69,11 @@ export default function AdminStyleMeSessionDetailPage() {
               <table className="na-field-table">
                 <tbody>
                   <Field label="Occasion" value={session.occasion} />
-                  <Field label="Current mood" value={session.currentMood} />
-                  <Field label="Desired feeling" value={session.desiredFeeling} />
-                  <Field label="State (Rev 3)" value={session.state} />
-                  <Field label="Intentions (Rev 3)" value={session.intentions} />
-                  <Field label="Formality" value={session.formalityConditional} />
-                  <Field label="Body needs" value={session.bodyNeeds} />
-                  <Field label="Practical-today needs" value={session.practicalIds} />
-                  <Field label="Specific needs (free text)" value={session.specificNeeds} />
-                  <Field label="Body preference" value={session.bodyPreference} />
-                  <Field label="Style DNA" value={session.styleDNA} />
-                  <Field label="Weather" value={session.weather} />
-                  <Field label="Time of day" value={session.timeOfDay} />
-                  <Field label="Anchor" value={session.closetAnchorId ? `Closet item ${session.closetAnchorId}` : null} />
-                  <Field label="Anchor chosen by" value={session.anchorProvenance} />
+                  <Field label="State" value={session.state} />
+                  <Field label="Intention" value={session.intentions} />
+                  <Field label="Formality" value={session.formality} />
+                  <Field label="Fit / comfort" value={session.bodyNeeds} />
+                  <Field label="Anchor source" value={session.anchorSource} />
                 </tbody>
               </table>
             </div>
@@ -105,8 +96,6 @@ export default function AdminStyleMeSessionDetailPage() {
                     <Field label="Coverage feedback" value={session.review.coverageFeedback} />
                     <Field label="Colour feedback" value={session.review.colourFeedback} />
                     <Field label="Confidence before → after" value={session.review.confidenceBefore != null && session.review.confidenceAfter != null ? `${session.review.confidenceBefore} → ${session.review.confidenceAfter}` : null} />
-                    <Field label="Worked tags" value={session.review.workedTags} />
-                    <Field label="Didn't work tags" value={session.review.didntWorkTags} />
                     <Field label="Additional notes" value={session.review.additionalNotes} />
                     <Field label="Objections" value={session.review.objections} />
                     <Field label="Submitted" value={displayDateTime(session.review.createdAt)} />
@@ -138,15 +127,16 @@ export default function AdminStyleMeSessionDetailPage() {
                   </div>
                 )}
 
+                {s.collageImages.length === 0 && (
+                  <p style={{ fontSize: "0.72rem", color: "#6b7280", fontStyle: "italic", marginBottom: "1rem" }}>
+                    {s.items.length > 0 ? "No item image resolved for this look." : "No completed look for this suggestion."}
+                  </p>
+                )}
+
                 <table className="na-field-table" style={{ marginBottom: "1rem" }}>
                   <tbody>
                     <Field label="Why this works" value={s.whyThisWorks} />
                     <Field label="Confidence boost" value={s.confidenceBoost} />
-                    <Field label="Mood" value={s.moodDescription} />
-                    <Field label="Perfume" value={s.perfumeRec} />
-                    <Field label="Hairstyle" value={s.hairstyleRec} />
-                    <Field label="Makeup vibe" value={s.makeupVibeRec} />
-                    <Field label="Song" value={s.songRec ? `${s.songRec}${s.songArtist ? ` — ${s.songArtist}` : ""}` : null} />
                     <Field label="Status" value={s.status} />
                   </tbody>
                 </table>
@@ -160,7 +150,7 @@ export default function AdminStyleMeSessionDetailPage() {
                       {it.imageUrl ? (
                         <img src={it.imageUrl} alt="" style={{ width: "36px", height: "36px", borderRadius: "4px", objectFit: "cover" }} />
                       ) : (
-                        <div className="na-thumb--placeholder" />
+                        <div className="na-thumb--placeholder" style={{ fontSize: "0.5rem" }}>No image</div>
                       )}
                       <div style={{ flex: 1 }}>
                         <span style={{ fontSize: "0.8rem", color: "#e5e7eb" }}>{it.name ?? "Unnamed item"}</span>
@@ -185,7 +175,7 @@ export default function AdminStyleMeSessionDetailPage() {
                     </p>
                     <table className="na-field-table">
                       <tbody>
-                        <Field label="Outcome" value={s.outcome.outcomeStatus.replace(/-/g, " ")} />
+                        <Field label="Outcome" value={s.outcome.outcomeStatus} />
                         <Field label="Goal response" value={s.outcome.goalOutcome} />
                         <Field label="Selected direction" value={s.outcome.selectedDirection} />
                         <Field label="What worked" value={s.outcome.whatWorked} />

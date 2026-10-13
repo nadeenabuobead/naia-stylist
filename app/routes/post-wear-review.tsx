@@ -45,6 +45,15 @@ const FEELING_VALUES   = new Set<string>(["great", "good", "okay", "not-great"])
 const COMFORT_VALUES   = new Set<string>(["yes", "mostly", "no"]);
 const WEAR_AGAIN_VALUES = new Set<string>(["definitely", "maybe", "probably-not"]);
 
+// Customer-facing option labels — the single copy (this file used to repeat
+// these as two separate literals, one for the summary view and one for the
+// edit form; also reused by the Customer 360 admin StyleMe detail view so
+// Admin always shows the exact same wording the customer saw).
+export const POST_WEAR_WORE_IT_OPTIONS  = [{ value: "yes", label: "Yes" }, { value: "not-yet", label: "Not yet" }, { value: "no", label: "No" }];
+export const POST_WEAR_FEELING_OPTIONS  = [{ value: "great", label: "Great" }, { value: "good", label: "Good" }, { value: "okay", label: "Okay" }, { value: "not-great", label: "Not great" }];
+export const POST_WEAR_COMFORT_OPTIONS  = [{ value: "yes", label: "Yes" }, { value: "mostly", label: "Mostly" }, { value: "no", label: "No" }];
+export const POST_WEAR_AGAIN_OPTIONS    = [{ value: "definitely", label: "Definitely" }, { value: "maybe", label: "Maybe" }, { value: "probably-not", label: "Probably not" }];
+
 function pick<T>(val: unknown, allowed: Set<string>): T | null {
   return typeof val === "string" && allowed.has(val) ? (val as T) : null;
 }
@@ -346,10 +355,10 @@ export default function PostWearReviewPage() {
   if (phase === "submitted") {
     const labelOf = (val: string | null, opts: { value: string; label: string }[]) =>
       opts.find((o) => o.value === val)?.label ?? "—";
-    const woreOpts = [{ value: "yes", label: "Yes" }, { value: "not-yet", label: "Not yet" }, { value: "no", label: "No" }];
-    const feltOpts = [{ value: "great", label: "Great" }, { value: "good", label: "Good" }, { value: "okay", label: "Okay" }, { value: "not-great", label: "Not great" }];
-    const comfortOpts = [{ value: "yes", label: "Yes" }, { value: "mostly", label: "Mostly" }, { value: "no", label: "No" }];
-    const againOpts = [{ value: "definitely", label: "Definitely" }, { value: "maybe", label: "Maybe" }, { value: "probably-not", label: "Probably not" }];
+    const woreOpts = POST_WEAR_WORE_IT_OPTIONS;
+    const feltOpts = POST_WEAR_FEELING_OPTIONS;
+    const comfortOpts = POST_WEAR_COMFORT_OPTIONS;
+    const againOpts = POST_WEAR_AGAIN_OPTIONS;
 
     return (
       <div style={{ minHeight: "100vh", background: "var(--naia-bg, #f4f4f1)" }}>
@@ -408,10 +417,10 @@ export default function PostWearReviewPage() {
 
   // ── Render: form (new or editing) ─────────────────────────────────────────
 
-  const woreOptions     = [{ value: "yes", label: "Yes" }, { value: "not-yet", label: "Not yet" }, { value: "no", label: "No" }];
-  const feltOptions     = [{ value: "great", label: "Great" }, { value: "good", label: "Good" }, { value: "okay", label: "Okay" }, { value: "not-great", label: "Not great" }];
-  const comfortOptions  = [{ value: "yes", label: "Yes" }, { value: "mostly", label: "Mostly" }, { value: "no", label: "No" }];
-  const againOptions    = [{ value: "definitely", label: "Definitely" }, { value: "maybe", label: "Maybe" }, { value: "probably-not", label: "Probably not" }];
+  const woreOptions     = POST_WEAR_WORE_IT_OPTIONS;
+  const feltOptions     = POST_WEAR_FEELING_OPTIONS;
+  const comfortOptions  = POST_WEAR_COMFORT_OPTIONS;
+  const againOptions    = POST_WEAR_AGAIN_OPTIONS;
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--naia-bg, #f4f4f1)" }}>

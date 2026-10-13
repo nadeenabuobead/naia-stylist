@@ -15,6 +15,11 @@ import prisma from "~/db.server";
 import { SmPage } from "~/components/style-me/SmPage";
 import { SmContinue } from "~/components/style-me/SmContinue";
 import naiaStyles from "~/styles/naia-design-system.css?url";
+import {
+  STYLEME_OCCASION_OPTIONS,
+  STYLEME_OCCASION_REV3_TO_CANONICAL,
+  STYLEME_FORMALITY_OPTIONS,
+} from "~/lib/styleme/session-vocabulary";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: naiaStyles },
@@ -22,28 +27,15 @@ export const links: LinksFunction = () => [
 
 // Rev 3 UI — exactly 8 approved customer-facing IDs.
 // Canonical IDs (date-night, special-event) are internal only; girls-night/not-sure/other removed from UI.
-const occasions = [
-  { id: "work",            label: "Work or meetings" },
-  { id: "dinner",          label: "Dinner" },
-  { id: "date",            label: "Date" },
-  { id: "everyday",        label: "Everyday" },
-  { id: "event",           label: "Event / celebration" },
-  { id: "night-out",       label: "Night out / party" },
-  { id: "family",          label: "Family gathering" },
-  { id: "travel",          label: "Travel day" },
-];
+// Single source of truth: app/lib/styleme/session-vocabulary.ts (also read by
+// the Customer 360 admin StyleMe detail view, so the two can never drift).
+const occasions = STYLEME_OCCASION_OPTIONS;
 
 // Rev 3 UI IDs → canonical engine IDs (applied at action time, before session storage).
 // "other" → "not-sure" kept for internal/legacy session compatibility even though "other" is
 // no longer a visible UI option — historical sessions or manually crafted requests must not
 // produce an unrecognized canonical value.
-const REV3_OCCASION_MAP: Record<string, string> = {
-  "date": "date-night",
-  "event": "special-event",
-  "night-out": "girls-night",
-  "active-busy-day": "active",
-  "other": "not-sure",
-};
+const REV3_OCCASION_MAP = STYLEME_OCCASION_REV3_TO_CANONICAL;
 
 // Reverse map: canonical engine ID → Rev 3 UI ID (for session hydration on Back navigation).
 // "everyday" is intentionally omitted — it maps to itself, no ambiguity needed.
@@ -53,12 +45,7 @@ const OCCASION_REVERSE_MAP: Record<string, string> = {
   "active": "active-busy-day",
 };
 
-const formalityOptions = [
-  { id: "formality-relaxed", label: "Keep it relaxed" },
-  { id: "formality-smart", label: "Smart casual" },
-  { id: "formality-polished", label: "Polished" },
-  { id: "formality-occasion", label: "Dressy" },
-];
+const formalityOptions = STYLEME_FORMALITY_OPTIONS;
 
 const VALID_OCCASION_IDS = new Set(occasions.map((o) => o.id));
 const VALID_FORMALITY_IDS = new Set(formalityOptions.map((f) => f.id));
