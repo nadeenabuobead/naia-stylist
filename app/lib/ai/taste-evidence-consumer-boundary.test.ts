@@ -65,10 +65,6 @@ const ALWAYS_ALLOWED_BASENAMES = new Set([
   // only to type the vi.mock() replacement; the module is fully mocked,
   // never the real implementation.
   "api.taste-observation-feedback.test.ts",
-  // Test for api.staging-noticing-qa-reset.ts (already an approved
-  // production importer below) — prisma and reconcileObservations are
-  // both fully mocked; this file never touches the real implementations.
-  "api.staging-noticing-qa-reset.test.ts",
 ]);
 
 // The ONLY production (non-test) files permitted to import any member of
@@ -91,15 +87,11 @@ const ALLOWED_PRODUCTION_IMPORTERS = new Set([
   "app/routes/passport.tsx",
   "scripts/backfill-taste-evidence.ts",
   "app/routes/api.seed-staging.jsx",
-  // TEMP QA DIAGNOSTIC (What nAia Is Noticing V1 evidence investigation) —
-  // read-only diagnostic engine shared by the local script and the
-  // staging-only authenticated route below. Neither writes evidence.
+  // Read-only diagnostic engine kept as reusable local tooling after the
+  // V1 Noticing/Passport QA round closed — used by
+  // scripts/qa-noticing-evidence-diagnostic.ts (a local CLI, not a
+  // customer-facing route). Never writes evidence.
   "app/lib/ai/taste-evidence-diagnostic.server.ts",
-  // TEMP STAGING QA RESET — session-scoped reset of the logged-in
-  // customer's own REJECTED tendencies, then re-runs the unmodified
-  // reconcileObservations. Delete alongside its routes.ts registration
-  // once manual QA is closed.
-  "app/routes/api.staging-noticing-qa-reset.ts",
 ]);
 
 const SKIP_DIRS = new Set(["node_modules", ".git", "build", "dist", ".vercel"]);

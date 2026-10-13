@@ -5,9 +5,9 @@
 // review activity still sees "STILL LEARNING" on /what-naia-is-noticing.
 //
 // All of the actual diagnostic logic lives in
-// app/lib/ai/taste-evidence-diagnostic.server.ts — shared with the staging-only
-// authenticated route (app/routes/api.staging-noticing-diagnostic.ts) so the two
-// call sites can never drift from each other or from the real engine's math.
+// app/lib/ai/taste-evidence-diagnostic.server.ts. A staging-only authenticated
+// route shared this same module during the V1 manual QA round; it has since
+// been removed, leaving this local script as the sole caller.
 //
 // This script only resolves which customer to run it for. It makes no writes —
 // see the shared module's own header comment for the full read-only contract.

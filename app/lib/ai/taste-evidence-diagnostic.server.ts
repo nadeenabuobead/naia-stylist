@@ -1,12 +1,12 @@
 // app/lib/ai/taste-evidence-diagnostic.server.ts
 // READ-ONLY diagnostic engine for "What nAia Is Noticing" (Taste & Evidence Layer V1).
 //
-// Shared by:
-//   - scripts/qa-noticing-evidence-diagnostic.ts        (local CLI, any customer by identifier)
-//   - app/routes/api.staging-noticing-diagnostic.ts     (TEMP QA DIAGNOSTIC route, session customer only)
-//
-// Single source of truth so the two call sites can never drift from each other
-// or from the real engine's math.
+// Kept as reusable local tooling after the V1 Noticing/Passport QA round
+// closed — see scripts/qa-noticing-evidence-diagnostic.ts for the CLI that
+// uses it. The staging-only HTTP route that also used this during manual
+// QA (api.staging-noticing-diagnostic.ts) has been removed along with the
+// rest of the TEMP QA tooling; this file exposes no customer-facing route
+// of its own.
 //
 // What this does:
 //   1. Reads the LIVE TasteEvidence + StyleTendency rows exactly as stored
