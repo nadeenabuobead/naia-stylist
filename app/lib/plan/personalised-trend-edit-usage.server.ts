@@ -39,11 +39,23 @@ export interface TrendEditSnapshot {
  * as the normal refresh path (there is none; a repeat call is a plain no-op
  * update of the same row).
  *
- * snapshot, when provided, is written only on the row's first creation this
- * period — a repeat view within the same period is already a no-op update
- * (no second usage count, so no second "what did they receive" moment
- * either). This mirrors the existing usage-counting philosophy exactly:
- * the first generation each period is the one that counts.
+ * snapshot is written ONLY on the row's first creation this period — the
+ * update branch never touches it. This is deliberate, not an oversight: the
+ * caller (trends.my-edits.$slug.tsx) only ever reaches this function when
+ * getStoredTrendEditSnapshot found nothing usable for this period, which
+ * happens for two different reasons —
+ *   (a) genuinely no row yet this period → create() writes the snapshot,
+ *       exactly once, for real.
+ *   (b) a row ALREADY EXISTS for this period with snapshot: null — a
+ *       historical row written before snapshot persistence existed. If the
+ *       update branch wrote a snapshot here, a customer revisiting within
+ *       the same calendar period as an old pre-snapshot generation would
+ *       silently overwrite that historical row with content regenerated
+ *       from TODAY's Passport/Closet/evidence — fabricated history wearing
+ *       the original row's createdAt. The schema's own doc comment on
+ *       PersonalisedTrendEditUsage.snapshot already states this must never
+ *       happen ("never backfilled/reconstructed"); update: {} is what
+ *       actually enforces it. A pre-snapshot row stays null forever.
  */
 export async function recordPersonalisedTrendEditUsage(
   customerId: string,
@@ -54,13 +66,7 @@ export async function recordPersonalisedTrendEditUsage(
   await prisma.personalisedTrendEditUsage.upsert({
     where: { customerId_reportSlug_periodKey: { customerId, reportSlug, periodKey } },
     create: { customerId, reportSlug, periodKey, snapshot: snapshot ?? undefined },
-    // The caller (trends.my-edits.$slug.tsx) only ever reaches this function
-    // when getStoredTrendEditSnapshot found no stored snapshot for this
-    // period — either no row yet, or a legacy row from before snapshot
-    // persistence existed. In the legacy case this is a one-time backfill of
-    // that one row, not a second generation for an already-snapshotted
-    // period: this function is never called again once a snapshot exists.
-    update: { snapshot: snapshot ?? undefined },
+    update: {},
   });
 }
 

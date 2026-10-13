@@ -46,7 +46,7 @@ describe("§TREND-EDIT-USAGE — idempotent create-if-absent write", () => {
     expect(upsertMock).toHaveBeenCalledWith({
       where: { customerId_reportSlug_periodKey: { customerId: "cust-1", reportSlug: "spring-2026-soft-structure", periodKey: "2026-10" } },
       create: { customerId: "cust-1", reportSlug: "spring-2026-soft-structure", periodKey: "2026-10", snapshot: undefined },
-      update: { snapshot: undefined },
+      update: {},
     });
   });
 
@@ -113,11 +113,22 @@ describe("§TREND-EDIT-USAGE — snapshot persistence", () => {
     nadineRecommendation: null,
   };
 
-  it("passes the snapshot through to both create and update branches of the upsert", async () => {
+  it("passes the snapshot to the create branch only — the update branch never writes it", async () => {
     await recordPersonalisedTrendEditUsage("cust-1", "spring-2026-soft-structure", SNAPSHOT);
     const call = upsertMock.mock.calls[0][0];
     expect(call.create.snapshot).toEqual(SNAPSHOT);
-    expect(call.update.snapshot).toEqual(SNAPSHOT);
+    expect(call.update).toEqual({});
+  });
+
+  it("a pre-snapshot historical row (snapshot: null) is never backfilled — calling this again for the same period cannot write new content onto it", async () => {
+    // Simulates the exact 08 Oct scenario: a legacy row with snapshot:null
+    // already exists for this (customerId, reportSlug, periodKey). Prisma's
+    // upsert would hit the update branch, not create — proving update: {}
+    // means the historical row's snapshot can never be set to anything,
+    // regardless of what a caller passes.
+    await recordPersonalisedTrendEditUsage("cust-1", "spring-2026-soft-structure", SNAPSHOT);
+    const call = upsertMock.mock.calls[0][0];
+    expect(call.update).not.toHaveProperty("snapshot");
   });
 
   it("getStoredTrendEditSnapshot reads by the same composite key, scoped to the current period", async () => {
