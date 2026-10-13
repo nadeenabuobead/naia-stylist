@@ -943,6 +943,21 @@ describe("§C360.14 Trend Edits — every row is clickable in the admin route", 
   });
 });
 
+describe("§C360.17 the actual Personalised Trend Edit report (not an Admin summary)", () => {
+  it("the Admin detail route renders the report through the SAME shared component as the customer's My Trend Edits page — they cannot drift", () => {
+    const adminSrc = readSource("app/routes/admin.naia.customers.$customerId.trend-edit.$usageId.tsx");
+    const customerSrc = readSource("app/routes/trends.my-edits.$slug.tsx");
+    expect(adminSrc).toMatch(/from "~\/components\/trends\/TrendEditReportBody"/);
+    expect(customerSrc).toMatch(/from "~\/components\/trends\/TrendEditReportBody"/);
+  });
+
+  it("the Admin detail route never hand-duplicates the report JSX — no generic Section-per-field table", () => {
+    const adminSrc = readSource("app/routes/admin.naia.customers.$customerId.trend-edit.$usageId.tsx");
+    expect(adminSrc).not.toMatch(/function Section\(/);
+    expect(adminSrc).not.toMatch(/function ClosetItemsStrip\(/);
+  });
+});
+
 describe("§C360.14 no Rev 3 revision labels leak into Customer 360", () => {
   it("the StyleMe detail route never renders 'State (Rev 3)' or 'Intentions (Rev 3)'", () => {
     const src = readSource("app/routes/admin.naia.customers.$customerId.styleme.$sessionId.tsx");
@@ -1045,6 +1060,29 @@ describe("§C360.13 getAdminCustomerTrendEditDetail — historical rows are neve
     (prisma.personalisedTrendEditUsage.findUnique as any).mockResolvedValue({ customerId: "cust-A", createdAt: new Date(), snapshot: null, reportSlug: "s", periodKey: "not-a-period" });
     const result = await getAdminCustomerTrendEditDetail("cust-A", "u1");
     expect(result!.periodLabel).toBeNull();
+  });
+
+  it("reportSeason is resolved from the snapshot when present — same resolution order as reportTitle", async () => {
+    const snapshot = { schemaVersion: "trend-edit-snapshot-v1", reportSlug: "modern-tailoring", reportTitle: "Modern Tailoring", reportSeason: "Spring 2026", generatedAt: "2026-09-01T00:00:00Z", edit: { yourVersion: "x" }, nadineRecommendation: null };
+    (prisma.personalisedTrendEditUsage.findUnique as any).mockResolvedValue({ customerId: "cust-A", createdAt: new Date(), snapshot, reportSlug: "modern-tailoring", periodKey: "2026-09" });
+    const result = await getAdminCustomerTrendEditDetail("cust-A", "u1");
+    expect(result!.reportSeason).toBe("Spring 2026");
+    expect(getEditorialReportBySlug).not.toHaveBeenCalled();
+  });
+
+  it("reportSeason falls back to a live editorial-report lookup when the snapshot predates the field", async () => {
+    const snapshot = { schemaVersion: "trend-edit-snapshot-v1", reportSlug: "modern-tailoring", reportTitle: "Modern Tailoring", generatedAt: "2026-09-01T00:00:00Z", edit: { yourVersion: "x" }, nadineRecommendation: null };
+    (getEditorialReportBySlug as any).mockResolvedValue({ slug: "modern-tailoring", title: "Modern Tailoring", season: "Spring 2026" });
+    (prisma.personalisedTrendEditUsage.findUnique as any).mockResolvedValue({ customerId: "cust-A", createdAt: new Date(), snapshot, reportSlug: "modern-tailoring", periodKey: "2026-09" });
+    const result = await getAdminCustomerTrendEditDetail("cust-A", "u1");
+    expect(result!.reportSeason).toBe("Spring 2026");
+  });
+
+  it("reportSeason is null (not fabricated) when neither the snapshot nor a live lookup can resolve it", async () => {
+    (getEditorialReportBySlug as any).mockResolvedValue(null);
+    (prisma.personalisedTrendEditUsage.findUnique as any).mockResolvedValue({ customerId: "cust-A", createdAt: new Date(), snapshot: null, reportSlug: "retired-report", periodKey: "2026-09" });
+    const result = await getAdminCustomerTrendEditDetail("cust-A", "u1");
+    expect(result!.reportSeason).toBeNull();
   });
 });
 

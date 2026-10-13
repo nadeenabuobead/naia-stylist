@@ -823,6 +823,16 @@ async function resolveTrendEditReportTitle(reportSlug: string, snapshot: TrendEd
   return report?.title ?? reportSlug;
 }
 
+/** Same resolution order as resolveTrendEditReportTitle, for the editorial
+ *  season line (e.g. "Spring 2026") shown alongside the report title in the
+ *  Admin detail hero — null only when neither the snapshot nor a live
+ *  lookup can resolve it. */
+async function resolveTrendEditReportSeason(reportSlug: string, snapshot: TrendEditSnapshot | null): Promise<string | null> {
+  if (snapshot?.reportSeason) return snapshot.reportSeason;
+  const report = await getEditorialReportBySlug(reportSlug);
+  return report?.season ?? null;
+}
+
 /** "2026-08" -> "August 2026". Parses an arbitrary STORED periodKey — unlike
  *  getUsageWindow()/formatResetDate() (usage-window.server.ts), which only
  *  ever describe the CURRENT window, this formats a historical one as
@@ -863,6 +873,8 @@ export interface AdminTrendEditDetail {
   createdAt: Date;
   /** Resolved the same way as the list row — real title even when hasSnapshot is false. */
   reportTitle: string;
+  /** Editorial season (e.g. "Spring 2026") — same resolution order as reportTitle. */
+  reportSeason: string | null;
   /** "August 2026" — null only if periodKey is somehow malformed. */
   periodLabel: string | null;
 }
@@ -892,6 +904,7 @@ export async function getAdminCustomerTrendEditDetail(
     snapshot,
     createdAt: row.createdAt,
     reportTitle: await resolveTrendEditReportTitle(row.reportSlug, snapshot),
+    reportSeason: await resolveTrendEditReportSeason(row.reportSlug, snapshot),
     periodLabel: formatPeriodKeyLabel(row.periodKey),
   };
 }

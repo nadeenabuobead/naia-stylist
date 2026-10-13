@@ -21,6 +21,7 @@ export interface TrendEditSnapshot {
   schemaVersion: "trend-edit-snapshot-v1";
   reportSlug: string;
   reportTitle: string;
+  reportSeason?: string; // optional — absent on rows written before this field existed
   generatedAt: string; // ISO timestamp
   edit: ShopperEdit;
   nadineRecommendation: NadineProductRecommendation | null;
