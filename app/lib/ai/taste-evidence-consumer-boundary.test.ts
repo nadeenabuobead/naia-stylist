@@ -65,6 +65,10 @@ const ALWAYS_ALLOWED_BASENAMES = new Set([
   // only to type the vi.mock() replacement; the module is fully mocked,
   // never the real implementation.
   "api.taste-observation-feedback.test.ts",
+  // Test for customer-360.server.ts (already an approved production
+  // importer below) — imports loadStrongestConfirmedTendency only to type
+  // the vi.mock() replacement; the real implementation is never called.
+  "customer-360.test.ts",
 ]);
 
 // The ONLY production (non-test) files permitted to import any member of

@@ -27,6 +27,27 @@
 import prisma from "~/db.server";
 import { loadStrongestConfirmedTendency } from "~/lib/ai/taste-reconcile.server";
 
+// ── Bounding — V1 protection against unbounded lifetime history ─────────────
+//
+// The Customer Profile page loads every tab's data up front on a single page
+// open. Closet, StyleMe, and VTO rows accumulate with customer activity over
+// time and have no natural upper bound, so each is capped to the most recent
+// RECENT_LIMIT rows (newest first — the ordering already in place) with a
+// sibling totalCount so the tab can say "showing 25 of 143" rather than
+// silently truncating. This is a static cap, not pagination: no cursor, no
+// "Load more". If an operator needs deeper history than this, that is a
+// follow-up, not a V1 requirement.
+//
+// StyleTendency (Learning & Feedback) and PersonalisedTrendEditUsage (Trend
+// Edits) are deliberately NOT capped here — their cardinality is bounded by
+// something other than activity volume (StyleTendency: distinct
+// dimension/value observation keys × generations-since-correction, typically
+// a few dozen rows even for a very active customer; PersonalisedTrendEditUsage:
+// one row per customer per report per calendar month, @@unique-enforced). Capping
+// either risks hiding real REJECTED/CONFIRMED history or a usage month for no
+// real protection.
+const RECENT_LIMIT = 25;
+
 // ── Closet gallery ───────────────────────────────────────────────────────────
 
 export interface AdminClosetGalleryItem {
@@ -55,47 +76,57 @@ export interface AdminClosetGalleryItem {
  * Does not recompute or re-derive anything Closet Intelligence already
  * classified (silhouette, formality, confidence, etc.) — this is the
  * customer-centric read of items already classified there, not a rebuild.
+ *
+ * Bounded to the most recent RECENT_LIMIT items (see note above) — returns
+ * totalCount alongside so the tab can show "showing N of total".
  */
 export async function getAdminCustomerClosetGallery(
   customerId: string,
-): Promise<AdminClosetGalleryItem[]> {
-  const items = await prisma.closetItem.findMany({
-    where: { customerId },
-    orderBy: { createdAt: "desc" },
-    select: {
-      id: true,
-      name: true,
-      brand: true,
-      category: true,
-      subcategory: true,
-      thumbnailUrl: true,
-      colors: true,
-      material: true,
-      garmentRelationships: true,
-      customerNote: true,
-      favorite: true,
-      timesWorn: true,
-      createdAt: true,
-      adminReview: { select: { reviewStatus: true } },
-    },
-  });
+): Promise<{ items: AdminClosetGalleryItem[]; totalCount: number }> {
+  const [items, totalCount] = await Promise.all([
+    prisma.closetItem.findMany({
+      where: { customerId },
+      orderBy: { createdAt: "desc" },
+      take: RECENT_LIMIT,
+      select: {
+        id: true,
+        name: true,
+        brand: true,
+        category: true,
+        subcategory: true,
+        thumbnailUrl: true,
+        colors: true,
+        material: true,
+        garmentRelationships: true,
+        customerNote: true,
+        favorite: true,
+        timesWorn: true,
+        createdAt: true,
+        adminReview: { select: { reviewStatus: true } },
+      },
+    }),
+    prisma.closetItem.count({ where: { customerId } }),
+  ]);
 
-  return items.map((item: (typeof items)[number]) => ({
-    id: item.id,
-    name: item.name,
-    brand: item.brand,
-    category: item.category,
-    subcategory: item.subcategory,
-    thumbnailUrl: item.thumbnailUrl,
-    colors: item.colors,
-    material: item.material,
-    garmentRelationships: item.garmentRelationships,
-    customerNote: item.customerNote,
-    favorite: item.favorite,
-    timesWorn: item.timesWorn,
-    reviewStatus: item.adminReview?.reviewStatus ?? "unreviewed",
-    createdAt: item.createdAt,
-  }));
+  return {
+    items: items.map((item: (typeof items)[number]) => ({
+      id: item.id,
+      name: item.name,
+      brand: item.brand,
+      category: item.category,
+      subcategory: item.subcategory,
+      thumbnailUrl: item.thumbnailUrl,
+      colors: item.colors,
+      material: item.material,
+      garmentRelationships: item.garmentRelationships,
+      customerNote: item.customerNote,
+      favorite: item.favorite,
+      timesWorn: item.timesWorn,
+      reviewStatus: item.adminReview?.reviewStatus ?? "unreviewed",
+      createdAt: item.createdAt,
+    })),
+    totalCount,
+  };
 }
 
 // ── StyleMe sessions ──────────────────────────────────────────────────────────
@@ -150,13 +181,19 @@ function describeStyleMeSource(styleFrom: string, styleMeMode: string | null): s
  * Every StyleMe session for one customer — what nAia gave them (occasion,
  * constraints, suggestion, outfit) and what they thought of it (StyleMeOutcome
  * + PostOutfitReview), newest first.
+ *
+ * Bounded to the most recent RECENT_LIMIT sessions — this is the heaviest
+ * query in the module (each session nests suggestions, each suggestion
+ * nests items + an outcome), so the cap matters most here.
  */
 export async function getAdminCustomerStyleMeSessions(
   customerId: string,
-): Promise<AdminStyleMeSessionSummary[]> {
-  const sessions = await prisma.stylingSession.findMany({
+): Promise<{ items: AdminStyleMeSessionSummary[]; totalCount: number }> {
+  const [sessions, totalCount] = await Promise.all([
+  prisma.stylingSession.findMany({
     where: { customerId },
     orderBy: { createdAt: "desc" },
+    take: RECENT_LIMIT,
     select: {
       id: true,
       createdAt: true,
@@ -197,9 +234,11 @@ export async function getAdminCustomerStyleMeSessions(
         },
       },
     },
-  });
+  }),
+  prisma.stylingSession.count({ where: { customerId } }),
+  ]);
 
-  return sessions.map((session: (typeof sessions)[number]) => ({
+  const mapped = sessions.map((session: (typeof sessions)[number]) => ({
     id: session.id,
     createdAt: session.createdAt,
     occasion: session.occasion,
@@ -236,6 +275,8 @@ export async function getAdminCustomerStyleMeSessions(
         }
       : null,
   }));
+
+  return { items: mapped, totalCount };
 }
 
 // ── Learning & Feedback (Taste & Evidence, admin read) ───────────────────────
@@ -269,6 +310,12 @@ export interface AdminLearningFeedbackRow {
  * Read-only: never writes StyleTendency, never touches TasteEvidence
  * directly (the evidence ledger, as opposed to the reconciled tendency, is
  * not needed for this tab).
+ *
+ * Not take-bounded: unlike Closet/StyleMe/VTO, StyleTendency rows don't grow
+ * with activity volume — reconcileObservations collapses evidence onto one
+ * row per (observationKey, generation), so even a very active customer has
+ * on the order of tens of rows, not one per feedback event. Capping it would
+ * risk hiding REJECTED history for no real protection.
  */
 export async function getAdminCustomerLearningFeedback(
   customerId: string,
@@ -310,6 +357,10 @@ export interface AdminTrendEditUsageRow {
  * Personalised Trend Edit usage history. Usage ledger only — the generated
  * report's content is not persisted anywhere in this codebase, so it is not
  * available here either. The tab must say so rather than reconstructing it.
+ *
+ * Not take-bounded: one row per customer per report per calendar month
+ * (@@unique(customerId, reportSlug, periodKey)), so this grows with calendar
+ * time, not activity volume — low cardinality even after years of use.
  */
 export async function getAdminCustomerTrendEditUsage(
   customerId: string,
@@ -349,11 +400,14 @@ export interface AdminVtoJobSummary {
  * an image archive: no Cloudinary public IDs or signed URLs are returned,
  * only the operational facts an operator needs (did a job run, did it
  * finish, what product).
+ *
+ * jobs is bounded to the most recent RECENT_LIMIT — one row per try-on
+ * attempt, so this does grow with activity volume.
  */
 export async function getAdminCustomerVtoHistory(
   customerId: string,
-): Promise<{ model: AdminNaiaModelSummary | null; jobs: AdminVtoJobSummary[] }> {
-  const [model, jobs] = await Promise.all([
+): Promise<{ model: AdminNaiaModelSummary | null; jobs: AdminVtoJobSummary[]; jobsTotalCount: number }> {
+  const [model, jobs, jobsTotalCount] = await Promise.all([
     prisma.naiaModel.findUnique({
       where: { customerId },
       select: {
@@ -369,6 +423,7 @@ export async function getAdminCustomerVtoHistory(
     prisma.virtualTryOnJob.findMany({
       where: { customerId },
       orderBy: { createdAt: "desc" },
+      take: RECENT_LIMIT,
       select: {
         id: true,
         productHandle: true,
@@ -379,6 +434,7 @@ export async function getAdminCustomerVtoHistory(
         errorCode: true,
       },
     }),
+    prisma.virtualTryOnJob.count({ where: { customerId } }),
   ]);
 
   return {
@@ -394,6 +450,7 @@ export async function getAdminCustomerVtoHistory(
         }
       : null,
     jobs,
+    jobsTotalCount,
   };
 }
 
@@ -405,12 +462,45 @@ export interface AdminActivityEvent {
   detail: string | null;
 }
 
+// Every event below is placed at a durable, already-persisted timestamp
+// field — never an inferred or reconstructed one. In particular:
+//   - VirtualTryOnJob uses completedAt when the job has actually finished,
+//     falling back to createdAt only while it's still in flight — pairing
+//     createdAt with a later-reached status (e.g. showing "COMPLETED" at the
+//     moment the job merely started) would misrepresent when that status was
+//     actually reached.
+//   - StyleTendency contributes only an explicit customer-feedback event at
+//     customerFeedbackAt (proven by that column being non-null) — it does
+//     NOT synthesize separate CREATED/CONFIRMED/REJECTED transition events,
+//     because no per-transition timestamp is durably stored; state changes
+//     silently inside reconcileObservations with only updatedAt moving, which
+//     is not reliable enough to label as a specific transition. Current state
+//     is shown independently in the Learning & Feedback tab instead.
+//   - BuySkipOutcome uses updatedAt deliberately: decision and
+//     postPurchaseOutcome are written together in a single upsert (see
+//     recordOutcome() in api.wishlist.jsx), so updatedAt genuinely is "when
+//     the currently-known decision was last written" — not a fabricated
+//     separate event.
+
+// Per-source cap feeding the merged timeline — keeps nine independent queries
+// each bounded before they're combined and re-sorted, rather than letting any
+// single source stream unbounded lifetime rows into memory.
+const ACTIVITY_SOURCE_LIMIT = 50;
+// Final cap on the merged, sorted timeline shown to the operator.
+const ACTIVITY_DISPLAY_LIMIT = 50;
+
 /**
  * A derived activity timeline — not a new source of truth. Merges the
  * domain tables that already record something the customer did or received,
  * sorted newest first. Deliberately excludes page views / clicks: every row
  * here corresponds to a real styling, purchase-decision, feedback, or
  * generation event.
+ *
+ * Each source query is independently bounded to the most recent
+ * ACTIVITY_SOURCE_LIMIT rows before merging, and the merged result is capped
+ * to ACTIVITY_DISPLAY_LIMIT — this is a lifetime-history source (nine tables,
+ * one page load), so it is the most important fetcher in this module to
+ * bound.
  */
 export async function getAdminCustomerActivity(customerId: string): Promise<AdminActivityEvent[]> {
   const [
@@ -426,38 +516,56 @@ export async function getAdminCustomerActivity(customerId: string): Promise<Admi
   ] = await Promise.all([
     prisma.stylingSession.findMany({
       where: { customerId },
+      orderBy: { createdAt: "desc" },
+      take: ACTIVITY_SOURCE_LIMIT,
       select: { id: true, createdAt: true, occasion: true },
     }),
     prisma.styleMeOutcome.findMany({
       where: { customerId },
+      orderBy: { submittedAt: "desc" },
+      take: ACTIVITY_SOURCE_LIMIT,
       select: { submittedAt: true, outcomeStatus: true },
     }),
     prisma.postOutfitReview.findMany({
       where: { customerId },
+      orderBy: { createdAt: "desc" },
+      take: ACTIVITY_SOURCE_LIMIT,
       select: { createdAt: true },
     }),
     prisma.buyOrSkipAnalysis.findMany({
       where: { customerId },
+      orderBy: { createdAt: "desc" },
+      take: ACTIVITY_SOURCE_LIMIT,
       select: { id: true, createdAt: true, verdict: true },
     }),
     prisma.buySkipOutcome.findMany({
       where: { analysis: { customerId } },
+      orderBy: { updatedAt: "desc" },
+      take: ACTIVITY_SOURCE_LIMIT,
       select: { updatedAt: true, decision: true },
     }),
     prisma.styleTendency.findMany({
       where: { customerId, customerFeedbackAt: { not: null } },
+      orderBy: { customerFeedbackAt: "desc" },
+      take: ACTIVITY_SOURCE_LIMIT,
       select: { customerFeedbackAt: true, customerFeedback: true, dimension: true, value: true },
     }),
     prisma.personalisedTrendEditUsage.findMany({
       where: { customerId },
+      orderBy: { createdAt: "desc" },
+      take: ACTIVITY_SOURCE_LIMIT,
       select: { createdAt: true, reportSlug: true },
     }),
     prisma.virtualTryOnJob.findMany({
       where: { customerId },
-      select: { createdAt: true, productHandle: true, status: true },
+      orderBy: { createdAt: "desc" },
+      take: ACTIVITY_SOURCE_LIMIT,
+      select: { createdAt: true, completedAt: true, productHandle: true, status: true },
     }),
     prisma.savedLook.findMany({
       where: { customerId },
+      orderBy: { createdAt: "desc" },
+      take: ACTIVITY_SOURCE_LIMIT,
       select: { createdAt: true, name: true },
     }),
   ]);
@@ -499,14 +607,21 @@ export async function getAdminCustomerActivity(customerId: string): Promise<Admi
     events.push({ timestamp: u.createdAt, label: "Personalised Trend Edit generated", detail: u.reportSlug });
   }
   for (const j of vtoJobs) {
-    events.push({ timestamp: j.createdAt, label: "Virtual try-on job", detail: `${j.productHandle} (${j.status})` });
+    // completedAt is only set once the job actually reaches a terminal
+    // state — use it when present so the event timestamp matches when that
+    // status was really reached, not when the job merely started.
+    if (j.completedAt) {
+      events.push({ timestamp: j.completedAt, label: "Virtual try-on job finished", detail: `${j.productHandle} (${j.status})` });
+    } else {
+      events.push({ timestamp: j.createdAt, label: "Virtual try-on job started", detail: `${j.productHandle} (${j.status})` });
+    }
   }
   for (const sl of savedLooks) {
     events.push({ timestamp: sl.createdAt, label: "Saved a look", detail: sl.name });
   }
 
   events.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-  return events;
+  return events.slice(0, ACTIVITY_DISPLAY_LIMIT);
 }
 
 // ── Summary — strongest current CONFIRMED Noticing observation ──────────────

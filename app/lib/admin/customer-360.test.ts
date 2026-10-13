@@ -21,12 +21,12 @@ function readSource(rel: string): string {
 
 vi.mock("~/db.server", () => ({
   default: {
-    closetItem: { findMany: vi.fn() },
-    stylingSession: { findMany: vi.fn() },
+    closetItem: { findMany: vi.fn(), count: vi.fn() },
+    stylingSession: { findMany: vi.fn(), count: vi.fn() },
     styleTendency: { findMany: vi.fn() },
     personalisedTrendEditUsage: { findMany: vi.fn() },
     naiaModel: { findUnique: vi.fn() },
-    virtualTryOnJob: { findMany: vi.fn() },
+    virtualTryOnJob: { findMany: vi.fn(), count: vi.fn() },
     styleMeOutcome: { findMany: vi.fn() },
     postOutfitReview: { findMany: vi.fn() },
     buyOrSkipAnalysis: { findMany: vi.fn() },
@@ -54,11 +54,14 @@ import {
 beforeEach(() => {
   vi.clearAllMocks();
   (prisma.closetItem.findMany as any).mockResolvedValue([]);
+  (prisma.closetItem.count as any).mockResolvedValue(0);
   (prisma.stylingSession.findMany as any).mockResolvedValue([]);
+  (prisma.stylingSession.count as any).mockResolvedValue(0);
   (prisma.styleTendency.findMany as any).mockResolvedValue([]);
   (prisma.personalisedTrendEditUsage.findMany as any).mockResolvedValue([]);
   (prisma.naiaModel.findUnique as any).mockResolvedValue(null);
   (prisma.virtualTryOnJob.findMany as any).mockResolvedValue([]);
+  (prisma.virtualTryOnJob.count as any).mockResolvedValue(0);
   (prisma.styleMeOutcome.findMany as any).mockResolvedValue([]);
   (prisma.postOutfitReview.findMany as any).mockResolvedValue([]);
   (prisma.buyOrSkipAnalysis.findMany as any).mockResolvedValue([]);
@@ -118,6 +121,102 @@ describe("§C360.1 every fetcher scopes to one customerId", () => {
     expect(prisma.buySkipOutcome.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { analysis: { customerId: "cust-A" } } }),
     );
+  });
+});
+
+// ── §C360.7 — bounded lists (V1 performance protection) ──────────────────────
+
+describe("§C360.7 high-volume lists are bounded with a visible totalCount", () => {
+  it("getAdminCustomerClosetGallery caps findMany with take and returns totalCount", async () => {
+    (prisma.closetItem.findMany as any).mockResolvedValue([{ id: "c1" }]);
+    (prisma.closetItem.count as any).mockResolvedValue(143);
+    const result = await getAdminCustomerClosetGallery("cust-A");
+    const query = (prisma.closetItem.findMany as any).mock.calls[0][0];
+    expect(query.take).toBe(25);
+    expect(query.orderBy).toEqual({ createdAt: "desc" });
+    expect(result.totalCount).toBe(143);
+    expect(result.items).toHaveLength(1);
+  });
+
+  it("getAdminCustomerStyleMeSessions caps findMany with take and returns totalCount", async () => {
+    (prisma.stylingSession.findMany as any).mockResolvedValue([]);
+    (prisma.stylingSession.count as any).mockResolvedValue(87);
+    const result = await getAdminCustomerStyleMeSessions("cust-A");
+    const query = (prisma.stylingSession.findMany as any).mock.calls[0][0];
+    expect(query.take).toBe(25);
+    expect(result.totalCount).toBe(87);
+  });
+
+  it("getAdminCustomerVtoHistory caps the job list with take and returns jobsTotalCount", async () => {
+    (prisma.virtualTryOnJob.findMany as any).mockResolvedValue([]);
+    (prisma.virtualTryOnJob.count as any).mockResolvedValue(61);
+    const result = await getAdminCustomerVtoHistory("cust-A");
+    const query = (prisma.virtualTryOnJob.findMany as any).mock.calls[0][0];
+    expect(query.take).toBe(25);
+    expect(result.jobsTotalCount).toBe(61);
+  });
+
+  it("getAdminCustomerLearningFeedback is NOT take-bounded (low-cardinality by construction)", async () => {
+    await getAdminCustomerLearningFeedback("cust-A");
+    const query = (prisma.styleTendency.findMany as any).mock.calls[0][0];
+    expect(query.take).toBeUndefined();
+  });
+
+  it("getAdminCustomerTrendEditUsage is NOT take-bounded (one row per customer per report per month)", async () => {
+    await getAdminCustomerTrendEditUsage("cust-A");
+    const query = (prisma.personalisedTrendEditUsage.findMany as any).mock.calls[0][0];
+    expect(query.take).toBeUndefined();
+  });
+
+  it("every source query feeding the Activity timeline is take-bounded", async () => {
+    await getAdminCustomerActivity("cust-A");
+    for (const model of [
+      "stylingSession", "styleMeOutcome", "postOutfitReview", "buyOrSkipAnalysis",
+      "buySkipOutcome", "styleTendency", "personalisedTrendEditUsage", "virtualTryOnJob", "savedLook",
+    ] as const) {
+      const query = (prisma[model].findMany as any).mock.calls[0][0];
+      expect(query.take, `${model} query should be take-bounded`).toBeDefined();
+    }
+  });
+
+  it("the merged Activity timeline is capped even when every source returns its full take", async () => {
+    const many = (n: number, build: (i: number) => Record<string, unknown>) =>
+      Array.from({ length: n }, (_, i) => build(i));
+    (prisma.stylingSession.findMany as any).mockResolvedValue(
+      many(50, i => ({ id: `s${i}`, createdAt: new Date(2026, 0, i + 1), occasion: null })),
+    );
+    const result = await getAdminCustomerActivity("cust-A");
+    expect(result.length).toBeLessThanOrEqual(50);
+  });
+});
+
+// ── §C360.8 — VTO timestamp truth (Activity must not pair createdAt with a later status) ──
+
+describe("§C360.8 Activity's VTO event uses completedAt once the job has actually finished", () => {
+  it("a COMPLETED job emits its event at completedAt, not createdAt", async () => {
+    (prisma.virtualTryOnJob.findMany as any).mockResolvedValue([{
+      createdAt: new Date("2026-01-01T00:00:00Z"),
+      completedAt: new Date("2026-01-04T00:00:00Z"),
+      productHandle: "midi-dress",
+      status: "COMPLETED",
+    }]);
+    const events = await getAdminCustomerActivity("cust-A");
+    const vtoEvent = events.find(e => e.label.startsWith("Virtual try-on job"));
+    expect(vtoEvent?.timestamp.toISOString()).toBe("2026-01-04T00:00:00.000Z");
+    expect(vtoEvent?.label).toBe("Virtual try-on job finished");
+  });
+
+  it("an in-flight job (no completedAt) emits its event at createdAt, labeled as started", async () => {
+    (prisma.virtualTryOnJob.findMany as any).mockResolvedValue([{
+      createdAt: new Date("2026-01-01T00:00:00Z"),
+      completedAt: null,
+      productHandle: "midi-dress",
+      status: "PROCESSING",
+    }]);
+    const events = await getAdminCustomerActivity("cust-A");
+    const vtoEvent = events.find(e => e.label.startsWith("Virtual try-on job"));
+    expect(vtoEvent?.timestamp.toISOString()).toBe("2026-01-01T00:00:00.000Z");
+    expect(vtoEvent?.label).toBe("Virtual try-on job started");
   });
 });
 

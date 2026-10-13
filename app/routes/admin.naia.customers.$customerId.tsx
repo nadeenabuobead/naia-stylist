@@ -579,12 +579,14 @@ function BuySkipUploadsSection({
 
 // ── Customer 360 — new tab sections ─────────────────────────────────────────
 
-function ClosetGallerySection({ items }: { items: AdminClosetGalleryItem[] }) {
+function ClosetGallerySection({ items, totalCount }: { items: AdminClosetGalleryItem[]; totalCount: number }) {
   return (
     <div className="na-card">
       <div className="na-card__header">
         <h2 className="na-card__title">Closet Gallery</h2>
-        <span className="na-card__subtitle">{items.length} item{items.length === 1 ? "" : "s"}</span>
+        <span className="na-card__subtitle">
+          {totalCount > items.length ? `Showing ${items.length} most recent of ${totalCount}` : `${items.length} item${items.length === 1 ? "" : "s"}`}
+        </span>
       </div>
       <div className="na-card__body">
         {items.length === 0 ? (
@@ -628,12 +630,14 @@ function ClosetGallerySection({ items }: { items: AdminClosetGalleryItem[] }) {
   );
 }
 
-function StyleMeSection({ sessions }: { sessions: AdminStyleMeSessionSummary[] }) {
+function StyleMeSection({ sessions, totalCount }: { sessions: AdminStyleMeSessionSummary[]; totalCount: number }) {
   return (
     <div className="na-card">
       <div className="na-card__header">
         <h2 className="na-card__title">StyleMe Sessions</h2>
-        <span className="na-card__subtitle">{sessions.length} session{sessions.length === 1 ? "" : "s"}</span>
+        <span className="na-card__subtitle">
+          {totalCount > sessions.length ? `Showing ${sessions.length} most recent of ${totalCount}` : `${sessions.length} session${sessions.length === 1 ? "" : "s"}`}
+        </span>
       </div>
       <div className="na-card__body">
         {sessions.length === 0 ? (
@@ -776,12 +780,22 @@ function TrendEditsSection({ rows }: { rows: AdminTrendEditUsageRow[] }) {
   );
 }
 
-function VtoSection({ model, jobs }: { model: AdminNaiaModelSummary | null; jobs: AdminVtoJobSummary[] }) {
+function VtoSection({
+  model,
+  jobs,
+  jobsTotalCount,
+}: {
+  model: AdminNaiaModelSummary | null;
+  jobs: AdminVtoJobSummary[];
+  jobsTotalCount: number;
+}) {
   return (
     <div className="na-card">
       <div className="na-card__header">
         <h2 className="na-card__title">VTO / My nAia Model</h2>
-        <span className="na-card__subtitle">{jobs.length} job{jobs.length === 1 ? "" : "s"}</span>
+        <span className="na-card__subtitle">
+          {jobsTotalCount > jobs.length ? `Showing ${jobs.length} most recent of ${jobsTotalCount}` : `${jobs.length} job${jobs.length === 1 ? "" : "s"}`}
+        </span>
       </div>
       <div className="na-card__body">
         <p style={{ fontSize: "0.65rem", color: "#4b5563", marginBottom: "1rem" }}>
@@ -975,11 +989,11 @@ export default function AdminCustomerDetailPage() {
     customer: AdminCustomerDetail;
     accountType: string;
     buySkipUploads: AdminBuySkipUploadSummary[];
-    closetGallery: AdminClosetGalleryItem[];
-    styleMeSessions: AdminStyleMeSessionSummary[];
+    closetGallery: { items: AdminClosetGalleryItem[]; totalCount: number };
+    styleMeSessions: { items: AdminStyleMeSessionSummary[]; totalCount: number };
     learningFeedback: AdminLearningFeedbackRow[];
     trendEditUsage: AdminTrendEditUsageRow[];
-    vtoHistory: { model: AdminNaiaModelSummary | null; jobs: AdminVtoJobSummary[] };
+    vtoHistory: { model: AdminNaiaModelSummary | null; jobs: AdminVtoJobSummary[]; jobsTotalCount: number };
     activity: AdminActivityEvent[];
     strongestTendency: AdminStrongestTendencySummary | null;
     entitlement: EntitlementSummary;
@@ -1067,7 +1081,7 @@ export default function AdminCustomerDetailPage() {
             <SummaryTab
               customer={customer}
               accountType={currentType}
-              latestStyleMe={styleMeSessions[0] ?? null}
+              latestStyleMe={styleMeSessions.items[0] ?? null}
               latestBuySkip={buySkipUploads[0] ?? null}
               strongestTendency={strongestTendency}
               entitlement={entitlement}
@@ -1082,14 +1096,14 @@ export default function AdminCustomerDetailPage() {
                 reviewedItems={customer.reviewedItemCount}
                 categoryBreakdown={customer.categoryBreakdown}
               />
-              <ClosetGallerySection items={closetGallery} />
+              <ClosetGallerySection items={closetGallery.items} totalCount={closetGallery.totalCount} />
             </div>
           )}
-          {activeTab === "StyleMe" && <StyleMeSection sessions={styleMeSessions} />}
+          {activeTab === "StyleMe" && <StyleMeSection sessions={styleMeSessions.items} totalCount={styleMeSessions.totalCount} />}
           {activeTab === "Buy or Skip" && <BuySkipUploadsSection customerId={customer.id} uploads={buySkipUploads} />}
           {activeTab === "Learning & Feedback" && <LearningFeedbackSection rows={learningFeedback} />}
           {activeTab === "Trend Edits" && <TrendEditsSection rows={trendEditUsage} />}
-          {activeTab === "VTO / My nAia Model" && <VtoSection model={vtoHistory.model} jobs={vtoHistory.jobs} />}
+          {activeTab === "VTO / My nAia Model" && <VtoSection model={vtoHistory.model} jobs={vtoHistory.jobs} jobsTotalCount={vtoHistory.jobsTotalCount} />}
           {activeTab === "Activity" && <ActivitySection events={activity} />}
           {activeTab === "Membership & Usage" && <MembershipUsageSection entitlement={entitlement} />}
         </div>
