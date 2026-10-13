@@ -6,6 +6,25 @@
 
 import prisma from "~/db.server";
 import { getUsageWindow } from "./usage-window.server";
+import type { ShopperEdit } from "~/lib/trend-evidence.server";
+import type { NadineProductRecommendation } from "~/lib/trend-product-recommendation.server";
+
+/**
+ * Exact customer-facing generated content for one Personalised Trend Edit —
+ * captured at generation time so it survives later Passport/Closet changes
+ * (the live page always regenerates from CURRENT state; this is the only
+ * durable record of what the customer actually saw on a given date).
+ * Every field here is already plain, serializable data — no re-derivation
+ * needed to store or to display it later.
+ */
+export interface TrendEditSnapshot {
+  schemaVersion: "trend-edit-snapshot-v1";
+  reportSlug: string;
+  reportTitle: string;
+  generatedAt: string; // ISO timestamp
+  edit: ShopperEdit;
+  nadineRecommendation: NadineProductRecommendation | null;
+}
 
 /**
  * Idempotent create-if-absent write for one genuinely completed Personalised
@@ -18,15 +37,22 @@ import { getUsageWindow } from "./usage-window.server";
  * it is not a check-then-create, and callers must not rely on a thrown P2002
  * as the normal refresh path (there is none; a repeat call is a plain no-op
  * update of the same row).
+ *
+ * snapshot, when provided, is written only on the row's first creation this
+ * period — a repeat view within the same period is already a no-op update
+ * (no second usage count, so no second "what did they receive" moment
+ * either). This mirrors the existing usage-counting philosophy exactly:
+ * the first generation each period is the one that counts.
  */
 export async function recordPersonalisedTrendEditUsage(
   customerId: string,
   reportSlug: string,
+  snapshot?: TrendEditSnapshot,
 ): Promise<void> {
   const { periodKey } = getUsageWindow();
   await prisma.personalisedTrendEditUsage.upsert({
     where: { customerId_reportSlug_periodKey: { customerId, reportSlug, periodKey } },
-    create: { customerId, reportSlug, periodKey },
-    update: {}, // already recorded for this customer+report+period — no second write
+    create: { customerId, reportSlug, periodKey, snapshot: snapshot ?? undefined },
+    update: {}, // already recorded for this customer+report+period — no second write, no re-snapshot
   });
 }

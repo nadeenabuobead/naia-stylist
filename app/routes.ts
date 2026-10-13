@@ -131,6 +131,8 @@ export default [
       route("customers", "routes/admin.naia.customers._index.tsx"),
       route("customers/:customerId", "routes/admin.naia.customers.$customerId.tsx"),
       route("customers/:customerId/buyskip/:analysisId", "routes/admin.naia.customers.$customerId.buyskip.$analysisId.tsx"),
+      route("customers/:customerId/styleme/:sessionId", "routes/admin.naia.customers.$customerId.styleme.$sessionId.tsx"),
+      route("customers/:customerId/trend-edit/:usageId", "routes/admin.naia.customers.$customerId.trend-edit.$usageId.tsx"),
       // Read-only JSON export of one customer's Closet (occasionFit / intentionPotentials
       // returned whole, nothing filtered). Admin-gated, GET only, no writes.
       route("customers/:customerId/closet-export", "routes/admin.naia.customers.$customerId.closet-export.tsx"),

@@ -803,6 +803,16 @@ model PersonalisedTrendEditUsage {
   periodKey  String
   createdAt  DateTime @default(now())
 
+  /// Additive, nullable — the exact customer-facing generated edit content,
+  /// captured once at first generation this period (trends.my-edits.$slug.tsx).
+  /// Null for every row written before this field existed and for rows
+  /// written before a future generation path populates it; never
+  /// backfilled/reconstructed, since the inputs that produced historical
+  /// content (Passport/Closet state at that moment) are not preserved
+  /// anywhere. Shape owned by the write path — see TrendEditSnapshot in
+  /// personalised-trend-edit-usage.server.ts.
+  snapshot   Json?
+
   @@unique([customerId, reportSlug, periodKey])
   @@index([customerId, createdAt])
 }

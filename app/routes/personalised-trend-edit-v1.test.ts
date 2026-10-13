@@ -257,7 +257,25 @@ describe("§TREND-EDIT-V1 — canonical usage recording (PersonalisedTrendEditUs
     vi.mocked(buildShopperEdit).mockReturnValue(MOCK_EDIT as any);
     await callLoader();
     expect(recordPersonalisedTrendEditUsage).toHaveBeenCalledTimes(1);
-    expect(recordPersonalisedTrendEditUsage).toHaveBeenCalledWith("cust-1", REPORT.slug);
+    // Third arg is the Trend Edit snapshot (see §C360.13 in customer-360.test.ts
+    // for the admin-side read path) — asserted loosely here since this test's
+    // focus is the usage-recording call itself, not the snapshot's shape.
+    expect(recordPersonalisedTrendEditUsage).toHaveBeenCalledWith("cust-1", REPORT.slug, expect.objectContaining({ reportSlug: REPORT.slug }));
+  });
+
+  it("the recorded snapshot captures the exact generated edit, report title/slug, and nadineRecommendation", async () => {
+    vi.mocked(getShopperEvidence).mockResolvedValue({ hasProfile: true, closetItems: [] } as any);
+    vi.mocked(buildShopperEdit).mockReturnValue(MOCK_EDIT as any);
+    await callLoader();
+    const [, , snapshot] = vi.mocked(recordPersonalisedTrendEditUsage).mock.calls[0];
+    expect(snapshot).toMatchObject({
+      schemaVersion: "trend-edit-snapshot-v1",
+      reportSlug: REPORT.slug,
+      reportTitle: REPORT.title,
+      edit: MOCK_EDIT,
+      nadineRecommendation: null,
+    });
+    expect(typeof snapshot!.generatedAt).toBe("string");
   });
 
   it("6. a public Trend Report view never calls the usage writer — it is only ever invoked from this (member) loader", () => {
@@ -299,8 +317,8 @@ describe("§TREND-EDIT-V1 — canonical usage recording (PersonalisedTrendEditUs
     await callLoader();
     await callLoader();
     expect(recordPersonalisedTrendEditUsage).toHaveBeenCalledTimes(2);
-    expect(recordPersonalisedTrendEditUsage).toHaveBeenNthCalledWith(1, "cust-1", REPORT.slug);
-    expect(recordPersonalisedTrendEditUsage).toHaveBeenNthCalledWith(2, "cust-1", REPORT.slug);
+    expect(recordPersonalisedTrendEditUsage).toHaveBeenNthCalledWith(1, "cust-1", REPORT.slug, expect.objectContaining({ reportSlug: REPORT.slug }));
+    expect(recordPersonalisedTrendEditUsage).toHaveBeenNthCalledWith(2, "cust-1", REPORT.slug, expect.objectContaining({ reportSlug: REPORT.slug }));
   });
 });
 

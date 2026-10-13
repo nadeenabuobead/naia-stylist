@@ -29,19 +29,21 @@ import {
 import {
   getAdminCustomerClosetGallery,
   getAdminCustomerStyleMeSessions,
-  getAdminCustomerLearningFeedback,
+  getAdminCustomerNoticingFeedback,
   getAdminCustomerTrendEditUsage,
   getAdminCustomerVtoHistory,
   getAdminCustomerActivity,
   getAdminCustomerStrongestTendency,
+  getAdminCustomerLifetimeUsage,
   type AdminClosetGalleryItem,
   type AdminStyleMeSessionSummary,
-  type AdminLearningFeedbackRow,
+  type AdminNoticingObservation,
   type AdminTrendEditUsageRow,
   type AdminNaiaModelSummary,
   type AdminVtoJobSummary,
   type AdminActivityEvent,
   type AdminStrongestTendencySummary,
+  type AdminLifetimeUsage,
 } from "~/lib/admin/customer-360.server";
 import { getEntitlementSummary, type EntitlementSummary } from "~/lib/plan/entitlement.server";
 import type { MembershipStatus } from "@prisma/client";
@@ -75,19 +77,21 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const [
     closetGallery,
     styleMeSessions,
-    learningFeedback,
+    noticingFeedback,
     trendEditUsage,
     vtoHistory,
     activity,
     strongestTendency,
+    lifetimeUsage,
   ] = await Promise.all([
     getAdminCustomerClosetGallery(customerId),
     getAdminCustomerStyleMeSessions(customerId),
-    getAdminCustomerLearningFeedback(customerId),
+    getAdminCustomerNoticingFeedback(customerId),
     getAdminCustomerTrendEditUsage(customerId),
     getAdminCustomerVtoHistory(customerId),
     getAdminCustomerActivity(customerId),
     getAdminCustomerStrongestTendency(customerId),
+    getAdminCustomerLifetimeUsage(customerId),
   ]);
 
   const entitlement = await getEntitlementSummary(customerId, customer.membershipStatus as MembershipStatus);
@@ -98,11 +102,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     buySkipUploads,
     closetGallery,
     styleMeSessions,
-    learningFeedback,
+    noticingFeedback,
     trendEditUsage,
     vtoHistory,
     activity,
     strongestTendency,
+    lifetimeUsage,
     entitlement,
   });
 }
@@ -634,7 +639,15 @@ function ClosetGallerySection({ items, totalCount }: { items: AdminClosetGallery
   );
 }
 
-function StyleMeSection({ sessions, totalCount }: { sessions: AdminStyleMeSessionSummary[]; totalCount: number }) {
+function StyleMeSection({
+  customerId,
+  sessions,
+  totalCount,
+}: {
+  customerId: string;
+  sessions: AdminStyleMeSessionSummary[];
+  totalCount: number;
+}) {
   return (
     <div className="na-card">
       <div className="na-card__header">
@@ -647,44 +660,45 @@ function StyleMeSection({ sessions, totalCount }: { sessions: AdminStyleMeSessio
         {sessions.length === 0 ? (
           <p className="na-empty">No StyleMe sessions.</p>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-            {sessions.map(session => (
-              <div key={session.id} style={{ border: "1px solid #dde1e7", borderRadius: "6px", padding: "0.75rem" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "0.4rem" }}>
-                  <strong style={{ fontSize: "0.85rem" }}>{displayDateTime(session.createdAt)}</strong>
-                  <span className="na-badge na-badge--not-analyzed">{session.source}</span>
-                </div>
-                <p style={{ fontSize: "0.78rem", color: "#374151", margin: "0 0 0.4rem" }}>
-                  {[session.occasion, session.currentMood, session.desiredFeeling].filter(Boolean).join(" · ") || "No occasion/mood recorded."}
-                </p>
-                {session.suggestions.map(s => (
-                  <div key={s.id} style={{ display: "flex", gap: "0.6rem", alignItems: "center", padding: "0.4rem 0", borderTop: "1px solid #f0f1f3" }}>
-                    {s.heroImageUrl ? (
-                      <img src={s.heroImageUrl} alt="" style={{ width: "36px", height: "36px", borderRadius: "4px", objectFit: "cover" }} />
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+            {sessions.map(session => {
+              const primary = session.suggestions[0];
+              return (
+                <Link
+                  key={session.id}
+                  to={`/admin/naia/customers/${customerId}/styleme/${session.id}`}
+                  style={{ display: "flex", gap: "0.75rem", alignItems: "center", padding: "0.6rem", border: "1px solid #dde1e7", borderRadius: "6px", textDecoration: "none", color: "inherit" }}
+                >
+                  <div style={{ display: "flex", flexShrink: 0 }}>
+                    {primary && primary.collageImages.length > 0 ? (
+                      primary.collageImages.slice(0, 2).map((url, i) => (
+                        <img key={i} src={url} alt="" style={{ width: "40px", height: "48px", objectFit: "cover", borderRadius: "4px", marginLeft: i > 0 ? "-12px" : 0, border: "1px solid #fff" }} />
+                      ))
                     ) : (
                       <div className="na-thumb--placeholder" />
                     )}
-                    <div style={{ flex: 1 }}>
-                      <span style={{ fontSize: "0.8rem", fontWeight: 600 }}>{s.outfitName ?? `Outfit (${s.itemCount} items)`}</span>
-                      {s.savedAsLook && <span className="na-badge na-badge--reviewed" style={{ marginLeft: "0.4rem" }}>SAVED</span>}
-                      {s.outcome && (
-                        <p style={{ fontSize: "0.72rem", color: "#6b7280", margin: "0.15rem 0 0" }}>
-                          Outcome: {s.outcome.outcomeStatus.replace(/-/g, " ")}
-                          {s.outcome.goalOutcome ? ` · goal ${s.outcome.goalOutcome}` : ""}
-                          {s.outcome.whatWorked.length > 0 ? ` · worked: ${s.outcome.whatWorked.join(", ")}` : ""}
-                          {s.outcome.whatFeltOff.length > 0 ? ` · felt off: ${s.outcome.whatFeltOff.join(", ")}` : ""}
-                        </p>
-                      )}
-                    </div>
                   </div>
-                ))}
-                {session.review && (
-                  <p style={{ fontSize: "0.72rem", color: "#6b7280", marginTop: "0.4rem", borderTop: "1px solid #f0f1f3", paddingTop: "0.4rem" }}>
-                    Post-outfit review: {session.review.additionalNotes ?? session.review.objections ?? "No notes."}
-                  </p>
-                )}
-              </div>
-            ))}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                      <strong style={{ fontSize: "0.85rem" }}>{primary?.outfitName ?? "StyleMe session"}</strong>
+                      <span className="na-badge na-badge--not-analyzed">{session.source}</span>
+                      {primary?.savedAsLook && <span className="na-badge na-badge--reviewed">SAVED</span>}
+                    </div>
+                    <p style={{ fontSize: "0.75rem", color: "#6b7280", margin: "0.15rem 0 0" }}>
+                      {[session.occasion, session.currentMood, session.desiredFeeling].filter(Boolean).join(" · ") || "No occasion/mood recorded."}
+                    </p>
+                    {primary?.outcome && (
+                      <p style={{ fontSize: "0.72rem", color: "#6b7280", margin: "0.15rem 0 0" }}>
+                        Outcome: {primary.outcome.outcomeStatus.replace(/-/g, " ")}
+                        {primary.outcome.goalOutcome ? ` · goal ${primary.outcome.goalOutcome}` : ""}
+                      </p>
+                    )}
+                    <span style={{ fontSize: "0.65rem", color: "#6b7280" }}>{displayDateTime(session.createdAt)}</span>
+                  </div>
+                  <span style={{ fontSize: "0.75rem", color: "#4b5563", flexShrink: 0 }}>View →</span>
+                </Link>
+              );
+            })}
           </div>
         )}
       </div>
@@ -692,57 +706,46 @@ function StyleMeSection({ sessions, totalCount }: { sessions: AdminStyleMeSessio
   );
 }
 
-function LearningFeedbackSection({ rows }: { rows: AdminLearningFeedbackRow[] }) {
+function NoticingFeedbackSection({ observations }: { observations: AdminNoticingObservation[] }) {
   return (
     <div className="na-card">
       <div className="na-card__header">
-        <h2 className="na-card__title">Learning &amp; Feedback</h2>
-        <span className="na-card__subtitle">{rows.length} observation{rows.length === 1 ? "" : "s"}</span>
+        <h2 className="na-card__title">What nAia Is Noticing &amp; Feedback</h2>
+        <span className="na-card__subtitle">{observations.length} observation{observations.length === 1 ? "" : "s"}</span>
       </div>
       <div className="na-card__body">
         <p style={{ fontSize: "0.65rem", color: "#4b5563", marginBottom: "1rem" }}>
-          Every Taste &amp; Evidence observation nAia has formed for this customer, including rejected ones.
-          Not shown on any NADINE dashboard — this is operational-admin only.
+          Every observation nAia actually showed this customer on their own "What nAia Is Noticing" page —
+          confirmed ones still showing today, and ones they later said weren't quite right. Not shown on any NADINE dashboard.
         </p>
-        {rows.length === 0 ? (
-          <p className="na-empty">No observations yet.</p>
+        {observations.length === 0 ? (
+          <p className="na-empty">Nothing surfaced to this customer yet.</p>
         ) : (
           <div className="na-table-wrap">
             <table className="na-table">
               <thead>
                 <tr>
                   <th>Observation</th>
-                  <th>State</th>
-                  <th>Support</th>
+                  <th>Status</th>
                   <th>Customer Feedback</th>
-                  <th>Updated</th>
+                  <th>Date</th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map(r => (
-                  <tr key={r.id}>
+                {observations.map(o => (
+                  <tr key={o.id}>
+                    <td>{o.observationText}</td>
                     <td>
-                      {r.claimText ?? `${r.dimension}: ${r.value}`}
-                      <div className="na-chips" style={{ marginTop: "0.2rem" }}>
-                        <span className="na-chip">{r.dimension}:{r.value}</span>
-                      </div>
-                    </td>
-                    <td>
-                      <span className={`na-badge na-badge--${r.state === "CONFIRMED" ? "reviewed" : r.state === "REJECTED" ? "failed" : "not-analyzed"}`}>
-                        {r.state}
+                      <span className={`na-badge na-badge--${o.status === "Confirmed" ? "reviewed" : "failed"}`}>
+                        {o.status}
                       </span>
                     </td>
-                    <td>{r.effectiveSupport.toFixed(1)} ({r.distinctSources} source{r.distinctSources === 1 ? "" : "s"})</td>
                     <td>
-                      {r.customerFeedback ? (
-                        <>
-                          {r.customerFeedback}
-                          {r.notQuiteReason && <div style={{ fontSize: "0.68rem", color: "#6b7280" }}>{r.notQuiteReason.replace(/-/g, " ")}</div>}
-                          {r.notQuiteNote && <div style={{ fontSize: "0.68rem", color: "#6b7280", fontStyle: "italic" }}>"{r.notQuiteNote}"</div>}
-                        </>
-                      ) : <span className="na-null">none</span>}
+                      {o.customerFeedback}
+                      {o.notQuiteReason && <div style={{ fontSize: "0.68rem", color: "#6b7280" }}>{o.notQuiteReason.replace(/-/g, " ")}</div>}
+                      {o.notQuiteNote && <div style={{ fontSize: "0.68rem", color: "#6b7280", fontStyle: "italic" }}>"{o.notQuiteNote}"</div>}
                     </td>
-                    <td>{displayDateTime(r.updatedAt)}</td>
+                    <td>{o.feedbackAt ? displayDateTime(o.feedbackAt) : displayDateTime(o.surfacedAt)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -754,7 +757,7 @@ function LearningFeedbackSection({ rows }: { rows: AdminLearningFeedbackRow[] })
   );
 }
 
-function TrendEditsSection({ rows }: { rows: AdminTrendEditUsageRow[] }) {
+function TrendEditsSection({ customerId, rows }: { customerId: string; rows: AdminTrendEditUsageRow[] }) {
   return (
     <div className="na-card">
       <div className="na-card__header">
@@ -762,22 +765,30 @@ function TrendEditsSection({ rows }: { rows: AdminTrendEditUsageRow[] }) {
         <span className="na-card__subtitle">{rows.length} generation{rows.length === 1 ? "" : "s"}</span>
       </div>
       <div className="na-card__body">
-        <p style={{ fontSize: "0.65rem", color: "#4b5563", marginBottom: "1rem" }}>
-          Usage history only — the generated report's content is not persisted anywhere and cannot be shown here.
-        </p>
         {rows.length === 0 ? (
           <p className="na-empty">No Personalised Trend Edits generated.</p>
         ) : (
-          <table className="na-field-table">
-            <tbody>
-              {rows.map(r => (
-                <tr key={r.id}>
-                  <th>{displayDateTime(r.createdAt)}</th>
-                  <td>{r.reportSlug} <span className="na-null">({r.periodKey})</span></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="na-table-wrap">
+            <table className="na-table">
+              <thead><tr><th>Date</th><th>Report</th><th>Period</th><th></th></tr></thead>
+              <tbody>
+                {rows.map(r => (
+                  <tr key={r.id}>
+                    <td>{displayDateTime(r.createdAt)}</td>
+                    <td>{r.reportTitle}</td>
+                    <td>{r.periodKey}</td>
+                    <td>
+                      {r.hasSnapshot ? (
+                        <Link to={`/admin/naia/customers/${customerId}/trend-edit/${r.id}`} style={{ fontSize: "0.75rem" }}>View →</Link>
+                      ) : (
+                        <span style={{ fontSize: "0.68rem", color: "#9ca3af" }}>Not stored</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>
@@ -867,30 +878,53 @@ function ActivitySection({ events }: { events: AdminActivityEvent[] }) {
   );
 }
 
-function usageBar(label: string, used: number, limit: number) {
+// used/limit here is ALWAYS the current membership cycle — every caller
+// passes entitlement.<feature>.monthlyUsed (from getEntitlementSummary,
+// itself scoped via getUsageWindow()), never a lifetime count. A lifetime
+// count renders on its own line underneath, explicitly labeled, never as
+// part of this ratio — see MembershipUsageSection below.
+function usageBar(label: string, used: number, limit: number, lifetime?: number, lifetimeNoun?: string) {
   const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
   return (
-    <div className="na-usage-row" key={label}>
-      <span className="na-usage-row__label">{label}</span>
-      <div className="na-usage-row__bar"><div className="na-usage-row__fill" style={{ width: `${pct}%` }} /></div>
-      <span className="na-usage-row__count">{used} / {limit}</span>
+    <div key={label} style={{ marginBottom: "0.6rem" }}>
+      <div className="na-usage-row">
+        <span className="na-usage-row__label">{label} <span style={{ color: "#9ca3af", fontWeight: 400 }}>— this cycle</span></span>
+        <div className="na-usage-row__bar"><div className="na-usage-row__fill" style={{ width: `${pct}%` }} /></div>
+        <span className="na-usage-row__count">{used} / {limit}</span>
+      </div>
+      {lifetime != null && (
+        <p style={{ fontSize: "0.68rem", color: "#9ca3af", margin: "0.1rem 0 0", paddingLeft: "0.1rem" }}>
+          Lifetime usage: {lifetime} {lifetimeNoun ?? ""}
+        </p>
+      )}
     </div>
   );
 }
 
-function MembershipUsageSection({ entitlement }: { entitlement: EntitlementSummary }) {
+function MembershipUsageSection({
+  entitlement,
+  lifetimeUsage,
+}: {
+  entitlement: EntitlementSummary;
+  lifetimeUsage: AdminLifetimeUsage;
+}) {
   return (
     <div className="na-card">
       <div className="na-card__header">
         <h2 className="na-card__title">Membership &amp; Usage</h2>
-        <span className="na-card__subtitle">{entitlement.membershipStatus} · resets {entitlement.windowLabel}</span>
+        <span className="na-card__subtitle">{entitlement.membershipStatus} · current cycle resets {entitlement.windowLabel}</span>
       </div>
       <div className="na-card__body">
-        {usageBar("StyleMe", entitlement.styleMe.monthlyUsed, entitlement.styleMe.monthlyLimit)}
-        {usageBar("Buy or Skip", entitlement.buySkip.monthlyUsed, entitlement.buySkip.monthlyLimit)}
-        {usageBar("Virtual Try-On", entitlement.vto.monthlyCompleted + entitlement.vto.monthlyInFlight, entitlement.vto.monthlyLimit)}
-        {usageBar("Closet", entitlement.closet.currentCount, entitlement.closet.limit)}
-        {usageBar("Personalised Trend Edit", entitlement.personalisedTrend.monthlyUsed, entitlement.personalisedTrend.monthlyLimit)}
+        {usageBar("StyleMe", entitlement.styleMe.monthlyUsed, entitlement.styleMe.monthlyLimit, lifetimeUsage.styleMeSessions, "sessions")}
+        {usageBar("Buy or Skip", entitlement.buySkip.monthlyUsed, entitlement.buySkip.monthlyLimit, lifetimeUsage.buySkipAnalyses, "analyses")}
+        {usageBar("Virtual Try-On", entitlement.vto.monthlyCompleted + entitlement.vto.monthlyInFlight, entitlement.vto.monthlyLimit, lifetimeUsage.vtoJobsCompleted, "completed jobs")}
+        {usageBar("Personalised Trend Edit", entitlement.personalisedTrend.monthlyUsed, entitlement.personalisedTrend.monthlyLimit, lifetimeUsage.personalisedTrendEdits, "generations")}
+        {/* Closet is current saved pieces vs capacity, not monthly usage — no "this cycle" label, no lifetime line. */}
+        <div className="na-usage-row">
+          <span className="na-usage-row__label">Closet <span style={{ color: "#9ca3af", fontWeight: 400 }}>— capacity</span></span>
+          <div className="na-usage-row__bar"><div className="na-usage-row__fill" style={{ width: `${entitlement.closet.limit > 0 ? Math.min(100, Math.round((entitlement.closet.currentCount / entitlement.closet.limit) * 100)) : 0}%` }} /></div>
+          <span className="na-usage-row__count">{entitlement.closet.currentCount} / {entitlement.closet.limit}</span>
+        </div>
         <p style={{ fontSize: "0.72rem", color: "#9ca3af", marginTop: "0.75rem" }}>
           Subscription / add-ons: not yet connected.
         </p>
@@ -906,6 +940,7 @@ function SummaryTab({
   latestBuySkip,
   strongestTendency,
   entitlement,
+  lifetimeUsage,
 }: {
   customer: AdminCustomerDetail;
   accountType: string;
@@ -913,6 +948,7 @@ function SummaryTab({
   latestBuySkip: AdminBuySkipUploadSummary | null;
   strongestTendency: AdminStrongestTendencySummary | null;
   entitlement: EntitlementSummary;
+  lifetimeUsage: AdminLifetimeUsage;
 }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
@@ -963,7 +999,7 @@ function SummaryTab({
         </div>
       </div>
 
-      <MembershipUsageSection entitlement={entitlement} />
+      <MembershipUsageSection entitlement={entitlement} lifetimeUsage={lifetimeUsage} />
     </div>
   );
 }
@@ -974,7 +1010,7 @@ const TABS = [
   "Closet",
   "StyleMe",
   "Buy or Skip",
-  "Learning & Feedback",
+  "What nAia Is Noticing & Feedback",
   "Trend Edits",
   "VTO / My nAia Model",
   "Activity",
@@ -987,19 +1023,20 @@ type TabId = (typeof TABS)[number];
 export default function AdminCustomerDetailPage() {
   const {
     customer, accountType, buySkipUploads,
-    closetGallery, styleMeSessions, learningFeedback, trendEditUsage,
-    vtoHistory, activity, strongestTendency, entitlement,
+    closetGallery, styleMeSessions, noticingFeedback, trendEditUsage,
+    vtoHistory, activity, strongestTendency, lifetimeUsage, entitlement,
   } = useLoaderData() as {
     customer: AdminCustomerDetail;
     accountType: string;
     buySkipUploads: { items: AdminBuySkipUploadSummary[]; totalCount: number };
     closetGallery: { items: AdminClosetGalleryItem[]; totalCount: number };
     styleMeSessions: { items: AdminStyleMeSessionSummary[]; totalCount: number };
-    learningFeedback: AdminLearningFeedbackRow[];
+    noticingFeedback: AdminNoticingObservation[];
     trendEditUsage: AdminTrendEditUsageRow[];
     vtoHistory: { model: AdminNaiaModelSummary | null; jobs: AdminVtoJobSummary[]; jobsTotalCount: number };
     activity: AdminActivityEvent[];
     strongestTendency: AdminStrongestTendencySummary | null;
+    lifetimeUsage: AdminLifetimeUsage;
     entitlement: EntitlementSummary;
   };
   const typeFetcher = useFetcher<{ ok: boolean; error?: string; accountType?: string }>();
@@ -1089,6 +1126,7 @@ export default function AdminCustomerDetailPage() {
               latestBuySkip={buySkipUploads.items[0] ?? null}
               strongestTendency={strongestTendency}
               entitlement={entitlement}
+              lifetimeUsage={lifetimeUsage}
             />
           )}
           {activeTab === "Passport" && <PassportSection ctx={customer.passport} />}
@@ -1103,13 +1141,13 @@ export default function AdminCustomerDetailPage() {
               <ClosetGallerySection items={closetGallery.items} totalCount={closetGallery.totalCount} />
             </div>
           )}
-          {activeTab === "StyleMe" && <StyleMeSection sessions={styleMeSessions.items} totalCount={styleMeSessions.totalCount} />}
+          {activeTab === "StyleMe" && <StyleMeSection customerId={customer.id} sessions={styleMeSessions.items} totalCount={styleMeSessions.totalCount} />}
           {activeTab === "Buy or Skip" && <BuySkipUploadsSection customerId={customer.id} uploads={buySkipUploads.items} totalCount={buySkipUploads.totalCount} />}
-          {activeTab === "Learning & Feedback" && <LearningFeedbackSection rows={learningFeedback} />}
-          {activeTab === "Trend Edits" && <TrendEditsSection rows={trendEditUsage} />}
+          {activeTab === "What nAia Is Noticing & Feedback" && <NoticingFeedbackSection observations={noticingFeedback} />}
+          {activeTab === "Trend Edits" && <TrendEditsSection customerId={customer.id} rows={trendEditUsage} />}
           {activeTab === "VTO / My nAia Model" && <VtoSection model={vtoHistory.model} jobs={vtoHistory.jobs} jobsTotalCount={vtoHistory.jobsTotalCount} />}
           {activeTab === "Activity" && <ActivitySection events={activity} />}
-          {activeTab === "Membership & Usage" && <MembershipUsageSection entitlement={entitlement} />}
+          {activeTab === "Membership & Usage" && <MembershipUsageSection entitlement={entitlement} lifetimeUsage={lifetimeUsage} />}
         </div>
 
         {/* Sidebar — identity */}

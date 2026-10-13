@@ -18,7 +18,7 @@ import {
   type NadineProductRecommendation,
 } from "~/lib/trend-product-recommendation.server";
 import { checkEntitlement } from "~/lib/plan/entitlement.server";
-import { recordPersonalisedTrendEditUsage } from "~/lib/plan/personalised-trend-edit-usage.server";
+import { recordPersonalisedTrendEditUsage, type TrendEditSnapshot } from "~/lib/plan/personalised-trend-edit-usage.server";
 import { getUsageWindow } from "~/lib/plan/usage-window.server";
 import {
   emitTrendEditGenerated,
@@ -122,7 +122,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     if (edit) {
       const { periodKey } = getUsageWindow();
       try {
-        await recordPersonalisedTrendEditUsage(customer.id, report.slug);
+        const snapshot: TrendEditSnapshot = {
+          schemaVersion: "trend-edit-snapshot-v1",
+          reportSlug: report.slug,
+          reportTitle: report.title,
+          generatedAt: new Date().toISOString(),
+          edit,
+          nadineRecommendation,
+        };
+        await recordPersonalisedTrendEditUsage(customer.id, report.slug, snapshot);
       } catch {
         /* never let usage recording block the response */
       }
