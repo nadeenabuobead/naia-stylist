@@ -20,19 +20,37 @@ if (host === "localhost") {
   hmrConfig = { protocol: "wss", host: host, port: parseInt(process.env.FRONTEND_PORT) || 8002, clientPort: 443 };
 }
 
-// For Vercel preview branch deployments SHOPIFY_APP_URL points to the
-// main-branch auto-alias, which won't have new-hash assets from the feature
-// branch. Normally we use the deployment-specific VERCEL_URL so the browser
-// fetches assets from the same build that served the HTML.
-// Exception: if ASSET_BASE_URL is set (staging project env), use it so that
-// assets are served from the canonical staging alias rather than the
-// deployment-specific URL (which sits behind its own Vercel SSO gate).
+// Environment-aware asset base — each case names the ONE host that should
+// win, rather than letting whichever env var happens to be set override the
+// others:
+//   - production  -> the canonical production app URL (SHOPIFY_APP_URL)
+//   - preview     -> this deployment's OWN unique host (VERCEL_URL), always
+//   - fallback    -> ASSET_BASE_URL / SHOPIFY_APP_URL, only if VERCEL_URL is
+//                    somehow unavailable (shouldn't happen on Vercel)
+//
+// VERCEL_URL must win for every preview deployment, full stop. SHOPIFY_APP_URL
+// and ASSET_BASE_URL both point at the shared staging alias
+// (naia-stylist-staging.vercel.app) — if a feature-branch preview's HTML
+// loaded its JS bundles from that shared host instead of its own, the client
+// router would hydrate against a DIFFERENT deployment's route manifest.
+// A route that exists on this branch but not on whatever is currently live
+// on the shared alias (e.g. /admin/naia/customers/:id/styleme/:sessionId)
+// would then be unrecognised by that mismatched client bundle, which can
+// bounce the browser back to that other build's root — the exact
+// "unique preview redirects to shared staging" bug this ordering prevents.
+// ASSET_BASE_URL exists only for the one deployment the shared alias is
+// actually pinned to, whose own assets might sit behind Vercel SSO — never
+// for a disposable feature-branch preview that already has its own
+// (unprotected) VERCEL_URL to serve from.
 const assetBase = (() => {
-  if (process.env.ASSET_BASE_URL) {
-    return `${process.env.ASSET_BASE_URL}/`;
+  if (process.env.VERCEL_ENV === "production") {
+    return process.env.SHOPIFY_APP_URL ? `${process.env.SHOPIFY_APP_URL}/` : "/";
   }
   if (process.env.VERCEL_ENV === "preview" && process.env.VERCEL_URL) {
     return `https://${process.env.VERCEL_URL}/`;
+  }
+  if (process.env.ASSET_BASE_URL) {
+    return `${process.env.ASSET_BASE_URL}/`;
   }
   return process.env.SHOPIFY_APP_URL
     ? `${process.env.SHOPIFY_APP_URL}/`
