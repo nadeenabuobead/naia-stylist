@@ -79,7 +79,7 @@ vi.mock("~/lib/plan/entitlement.server", () => ({
 
 vi.mock("~/lib/plan/personalised-trend-edit-usage.server", () => ({
   recordPersonalisedTrendEditUsage: vi.fn().mockResolvedValue(undefined),
-  getStoredTrendEditSnapshot: vi.fn().mockResolvedValue(null),
+  getTrendEditUsageState: vi.fn().mockResolvedValue({ status: "none" }),
 }));
 
 vi.mock("~/lib/plan/usage-window.server", () => ({

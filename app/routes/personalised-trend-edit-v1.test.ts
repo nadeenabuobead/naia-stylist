@@ -52,7 +52,7 @@ vi.mock("~/lib/plan/entitlement.server", () => ({
 
 vi.mock("~/lib/plan/personalised-trend-edit-usage.server", () => ({
   recordPersonalisedTrendEditUsage: vi.fn().mockResolvedValue(undefined),
-  getStoredTrendEditSnapshot: vi.fn().mockResolvedValue(null),
+  getTrendEditUsageState: vi.fn().mockResolvedValue({ status: "none" }),
 }));
 
 vi.mock("~/lib/plan/usage-window.server", () => ({
@@ -80,7 +80,7 @@ import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { getEditorialReportBySlug, getPublishedEditorialReports } from "~/lib/editorial-reports.server";
 import { getShopperEvidence, buildShopperEdit } from "~/lib/trend-evidence.server";
 import { checkEntitlement } from "~/lib/plan/entitlement.server";
-import { recordPersonalisedTrendEditUsage, getStoredTrendEditSnapshot } from "~/lib/plan/personalised-trend-edit-usage.server";
+import { recordPersonalisedTrendEditUsage, getTrendEditUsageState } from "~/lib/plan/personalised-trend-edit-usage.server";
 import { recordJourneyEventAwaited } from "~/lib/ai/journey-events.server";
 import { loader } from "./trends.my-edits.$slug";
 
@@ -320,7 +320,7 @@ describe("§TREND-EDIT-V1 — frozen-at-first-generation (repeat-view immutabili
     vi.mocked(getEditorialReportBySlug).mockResolvedValue(REPORT as any);
     vi.mocked(getPublishedEditorialReports).mockResolvedValue([REPORT] as any);
     vi.mocked(requireCurrentNaiaCustomer).mockResolvedValue(makeCustomer());
-    vi.mocked(getStoredTrendEditSnapshot).mockResolvedValue(null);
+    vi.mocked(getTrendEditUsageState).mockResolvedValue({ status: "none" });
   });
 
   const FIRST_SNAPSHOT = {
@@ -343,22 +343,23 @@ describe("§TREND-EDIT-V1 — frozen-at-first-generation (repeat-view immutabili
   });
 
   it("a repeat same-period view with a stored snapshot renders that stored snapshot, not a fresh one", async () => {
-    vi.mocked(getStoredTrendEditSnapshot).mockResolvedValue(FIRST_SNAPSHOT);
+    vi.mocked(getTrendEditUsageState).mockResolvedValue({ status: "snapshotted", snapshot: FIRST_SNAPSHOT });
     const result = await callLoader();
     expect(result.edit).toEqual(FIRST_SNAPSHOT.edit);
     expect(result.hasProfile).toBe(true);
     expect(result.membershipRequired).toBe(false);
+    expect(result.historicalUnavailable).toBe(false);
   });
 
   it("the generator (getShopperEvidence/buildShopperEdit) is never called on a repeat view with a stored snapshot", async () => {
-    vi.mocked(getStoredTrendEditSnapshot).mockResolvedValue(FIRST_SNAPSHOT);
+    vi.mocked(getTrendEditUsageState).mockResolvedValue({ status: "snapshotted", snapshot: FIRST_SNAPSHOT });
     await callLoader();
     expect(getShopperEvidence).not.toHaveBeenCalled();
     expect(buildShopperEdit).not.toHaveBeenCalled();
   });
 
   it("the usage writer is never called again on a repeat view with a stored snapshot — no second generation, no second quota consumption", async () => {
-    vi.mocked(getStoredTrendEditSnapshot).mockResolvedValue(FIRST_SNAPSHOT);
+    vi.mocked(getTrendEditUsageState).mockResolvedValue({ status: "snapshotted", snapshot: FIRST_SNAPSHOT });
     await callLoader();
     expect(recordPersonalisedTrendEditUsage).not.toHaveBeenCalled();
   });
@@ -366,22 +367,84 @@ describe("§TREND-EDIT-V1 — frozen-at-first-generation (repeat-view immutabili
   it("a changed Passport/Closet (different buildShopperEdit output) after first generation does not mutate what the repeat view renders", async () => {
     // Simulates: Closet/Passport changed between visits. If the loader ever
     // regenerated on repeat view, this mock would be what the customer saw —
-    // it must not be, since getStoredTrendEditSnapshot already found a row.
+    // it must not be, since getTrendEditUsageState already found a stored snapshot.
     vi.mocked(getShopperEvidence).mockResolvedValue({ hasProfile: true, closetItems: [{ name: "New Item" }] } as any);
     vi.mocked(buildShopperEdit).mockReturnValue({ subTitle: "Changed", yourVersion: "A completely different edit." } as any);
-    vi.mocked(getStoredTrendEditSnapshot).mockResolvedValue(FIRST_SNAPSHOT);
+    vi.mocked(getTrendEditUsageState).mockResolvedValue({ status: "snapshotted", snapshot: FIRST_SNAPSHOT });
 
     const result = await callLoader();
     expect(result.edit).toEqual(FIRST_SNAPSHOT.edit);
     expect(result.edit).not.toEqual({ subTitle: "Changed", yourVersion: "A completely different edit." });
   });
+});
 
-  it("a legacy row from before snapshot persistence (row exists, snapshot null) is treated as 'no stored snapshot' and generates once", async () => {
-    vi.mocked(getStoredTrendEditSnapshot).mockResolvedValue(null); // getStoredTrendEditSnapshot already normalizes a null-snapshot row to null
+describe("§TREND-EDIT-V1 — a legacy pre-snapshot row (status: legacy_no_snapshot) is NEVER regenerated or backfilled", () => {
+  // This is the exact 08 Oct 2026 scenario: a generation happened this
+  // calendar period before snapshot persistence existed. A collapsed
+  // null-means-no-row check would treat this identically to "nothing
+  // generated yet" and quietly regenerate from today's Passport/Closet,
+  // fabricating history under the original row's createdAt. The required
+  // behavior is the opposite: never call the generator, never call the
+  // writer, and show an honest historical-unavailable state.
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getEditorialReportBySlug).mockResolvedValue(REPORT as any);
+    vi.mocked(getPublishedEditorialReports).mockResolvedValue([REPORT] as any);
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValue(makeCustomer());
+    vi.mocked(getTrendEditUsageState).mockResolvedValue({ status: "legacy_no_snapshot" });
+  });
+
+  it("the generator (getShopperEvidence/buildShopperEdit) is never called", async () => {
+    await callLoader();
+    expect(getShopperEvidence).not.toHaveBeenCalled();
+    expect(buildShopperEdit).not.toHaveBeenCalled();
+  });
+
+  it("the usage writer is never called — the row is never touched again", async () => {
+    await callLoader();
+    expect(recordPersonalisedTrendEditUsage).not.toHaveBeenCalled();
+  });
+
+  it("the loader returns historicalUnavailable:true with edit:null — not a regenerated edit", async () => {
+    const result = await callLoader();
+    expect(result.historicalUnavailable).toBe(true);
+    expect(result.edit).toBeNull();
+    expect(result.generationFailed).toBe(false);
+    expect(result.membershipRequired).toBe(false);
+  });
+
+  it("even if evidence/builder mocks are set up to return content, nothing is generated — proves this isn't just an unset-mock accident", async () => {
+    vi.mocked(getShopperEvidence).mockResolvedValue({ hasProfile: true, closetItems: [] } as any);
+    vi.mocked(buildShopperEdit).mockReturnValue(MOCK_EDIT as any);
+    const result = await callLoader();
+    expect(result.edit).toBeNull();
+    expect(result.historicalUnavailable).toBe(true);
+    expect(getShopperEvidence).not.toHaveBeenCalled();
+  });
+
+  it("repeated visits to the same legacy row all return the identical historical-unavailable result — it never flips to a generated edit", async () => {
+    const first = await callLoader();
+    const second = await callLoader();
+    expect(first).toEqual(second);
+    expect(first.historicalUnavailable).toBe(true);
+  });
+});
+
+describe("§TREND-EDIT-V1 — a genuinely new generation (status: none) is unaffected by the legacy-row fix", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getEditorialReportBySlug).mockResolvedValue(REPORT as any);
+    vi.mocked(getPublishedEditorialReports).mockResolvedValue([REPORT] as any);
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValue(makeCustomer());
+    vi.mocked(getTrendEditUsageState).mockResolvedValue({ status: "none" });
+  });
+
+  it("no usage row at all still generates once and persists a real snapshot", async () => {
     vi.mocked(getShopperEvidence).mockResolvedValue({ hasProfile: true, closetItems: [] } as any);
     vi.mocked(buildShopperEdit).mockReturnValue(MOCK_EDIT as any);
     const result = await callLoader();
     expect(result.edit).toEqual(MOCK_EDIT);
+    expect(result.historicalUnavailable).toBe(false);
     expect(recordPersonalisedTrendEditUsage).toHaveBeenCalledTimes(1);
   });
 });

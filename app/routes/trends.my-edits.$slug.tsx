@@ -19,7 +19,7 @@ import {
 import { checkEntitlement } from "~/lib/plan/entitlement.server";
 import {
   recordPersonalisedTrendEditUsage,
-  getStoredTrendEditSnapshot,
+  getTrendEditUsageState,
   type TrendEditSnapshot,
 } from "~/lib/plan/personalised-trend-edit-usage.server";
 import { getUsageWindow } from "~/lib/plan/usage-window.server";
@@ -40,6 +40,10 @@ type LoaderData = {
   nadineRecommendation: NadineProductRecommendation | null;
   reportIndex: number;
   membershipRequired: boolean;
+  /** A generation happened this period, but predates snapshot persistence —
+   *  its exact content was never captured. Never regenerated, never
+   *  backfilled — see getTrendEditUsageState. */
+  historicalUnavailable: boolean;
 };
 
 export const links: LinksFunction = () => [
@@ -75,16 +79,36 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // currently looking at. No second generation-history system here — this
   // reads the same PersonalisedTrendEditUsage row the usage/quota logic
   // already owns.
-  const stored = await getStoredTrendEditSnapshot(customer.id, report.slug);
-  if (stored) {
+  //
+  // Three distinct states, not two: "no row yet" and "row exists but
+  // predates snapshot persistence" must never collapse into the same
+  // "generate" behavior — see getTrendEditUsageState. A legacy row
+  // (snapshot: null) means a generation already happened this period before
+  // snapshot capture existed; it is NEVER regenerated and NEVER backfilled —
+  // the customer sees an honest historical-unavailable state instead.
+  const usageState = await getTrendEditUsageState(customer.id, report.slug);
+  if (usageState.status === "snapshotted") {
     return {
       report,
-      edit: stored.edit,
+      edit: usageState.snapshot.edit,
       hasProfile: true,
       generationFailed: false,
-      nadineRecommendation: stored.nadineRecommendation,
+      nadineRecommendation: usageState.snapshot.nadineRecommendation,
       reportIndex,
       membershipRequired: false,
+      historicalUnavailable: false,
+    } satisfies LoaderData;
+  }
+  if (usageState.status === "legacy_no_snapshot") {
+    return {
+      report,
+      edit: null,
+      hasProfile: true,
+      generationFailed: false,
+      nadineRecommendation: null,
+      reportIndex,
+      membershipRequired: false,
+      historicalUnavailable: true,
     } satisfies LoaderData;
   }
 
@@ -104,6 +128,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         nadineRecommendation: null,
         reportIndex,
         membershipRequired: true,
+        historicalUnavailable: false,
       } satisfies LoaderData;
     }
   }
@@ -184,6 +209,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       nadineRecommendation,
       reportIndex,
       membershipRequired: false,
+      historicalUnavailable: false,
     } satisfies LoaderData;
   } catch (error) {
     console.error("Shopper trend edit generation failed:", error);
@@ -195,6 +221,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       nadineRecommendation: null,
       reportIndex,
       membershipRequired: false,
+      historicalUnavailable: false,
     } satisfies LoaderData;
   }
 }
@@ -410,7 +437,7 @@ export function ErrorBoundary() {
 }
 
 export default function MyTrendEditDetail() {
-  const { report, edit, hasProfile, generationFailed, nadineRecommendation, reportIndex, membershipRequired } = useLoaderData() as LoaderData;
+  const { report, edit, hasProfile, generationFailed, nadineRecommendation, reportIndex, membershipRequired, historicalUnavailable } = useLoaderData() as LoaderData;
   const tint = TINTS[Math.max(0, reportIndex) % TINTS.length];
   const num = String(Math.max(0, reportIndex)).padStart(2, "0");
 
@@ -533,6 +560,16 @@ export default function MyTrendEditDetail() {
             <Link to={`/trend-reports/${report.slug}`} className="tmd-state-btn">
               Back to the report →
             </Link>
+          </div>
+        ) : historicalUnavailable ? (
+          /* State: a generation happened earlier this period, before we
+             started saving the full edit — never regenerated, never
+             backfilled. */
+          <div className="tmd-state">
+            <p className="tmd-state-text">
+              You already received a nAia Edit for this report earlier this period, and we can&rsquo;t reopen it in its original form. Check back once this period resets for a fresh personalised edit.
+            </p>
+            <Link to="/trends/my-edits" className="tmd-state-btn">Back to My Trend Edits →</Link>
           </div>
         ) : !hasProfile ? (
           /* State: passport incomplete */

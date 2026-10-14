@@ -41,21 +41,15 @@ export interface TrendEditSnapshot {
  *
  * snapshot is written ONLY on the row's first creation this period — the
  * update branch never touches it. This is deliberate, not an oversight: the
- * caller (trends.my-edits.$slug.tsx) only ever reaches this function when
- * getStoredTrendEditSnapshot found nothing usable for this period, which
- * happens for two different reasons —
- *   (a) genuinely no row yet this period → create() writes the snapshot,
- *       exactly once, for real.
- *   (b) a row ALREADY EXISTS for this period with snapshot: null — a
- *       historical row written before snapshot persistence existed. If the
- *       update branch wrote a snapshot here, a customer revisiting within
- *       the same calendar period as an old pre-snapshot generation would
- *       silently overwrite that historical row with content regenerated
- *       from TODAY's Passport/Closet/evidence — fabricated history wearing
- *       the original row's createdAt. The schema's own doc comment on
- *       PersonalisedTrendEditUsage.snapshot already states this must never
- *       happen ("never backfilled/reconstructed"); update: {} is what
- *       actually enforces it. A pre-snapshot row stays null forever.
+ * caller (trends.my-edits.$slug.tsx) only calls this function for a genuine
+ * NEW generation, i.e. when getTrendEditUsageState returned "none". It must
+ * never be called for a "legacy_no_snapshot" row — but update: {} is kept as
+ * a second, structural line of defence: even if some future caller did call
+ * this on an existing row, the update branch still could not write a
+ * snapshot onto it. A row, once it exists, can only ever get its snapshot
+ * from the create branch — i.e. exactly once, at genuine first-generation
+ * time. The schema's own doc comment on PersonalisedTrendEditUsage.snapshot
+ * already states this must never happen ("never backfilled/reconstructed").
  */
 export async function recordPersonalisedTrendEditUsage(
   customerId: string,
@@ -71,21 +65,42 @@ export async function recordPersonalisedTrendEditUsage(
 }
 
 /**
- * The stored snapshot for this customer+report+CURRENT period, if one
- * exists. Used by the customer-facing route to decide "render what we
- * already showed them" vs. "this is the first view this period, generate
- * and persist" — see trends.my-edits.$slug.tsx. Returns null (not an
- * empty/placeholder edit) when there is genuinely nothing stored yet, so
- * the caller can tell "first view" apart from "stored but empty".
+ * The three — and only three — states a (customerId, reportSlug, CURRENT
+ * period) usage row can be in. Deliberately NOT collapsed into a nullable
+ * snapshot: "no row at all" and "row exists but predates snapshot
+ * persistence" must never be treated the same, because they call for
+ * opposite loader behavior —
+ *   - "none"               → genuinely nothing generated yet this period:
+ *                            generate, persist a real snapshot, render it.
+ *   - "legacy_no_snapshot" → a generation DID happen this period, but
+ *                            before snapshot persistence existed, so its
+ *                            exact content was never captured. Must NEVER
+ *                            regenerate (that would silently replace an old
+ *                            generation with a fresh one wearing the old
+ *                            row's createdAt — fabricated history) and must
+ *                            NEVER call the writer again (recordPersonalisedTrendEditUsage's
+ *                            update: {} already refuses to backfill it, but
+ *                            the loader should not even try). The honest
+ *                            outcome is a historical-unavailable state.
+ *   - "snapshotted"        → render the exact stored snapshot, never
+ *                            regenerate.
  */
-export async function getStoredTrendEditSnapshot(
+export type TrendEditUsageState =
+  | { status: "none" }
+  | { status: "legacy_no_snapshot" }
+  | { status: "snapshotted"; snapshot: TrendEditSnapshot };
+
+export async function getTrendEditUsageState(
   customerId: string,
   reportSlug: string,
-): Promise<TrendEditSnapshot | null> {
+): Promise<TrendEditUsageState> {
   const { periodKey } = getUsageWindow();
   const row = await prisma.personalisedTrendEditUsage.findUnique({
     where: { customerId_reportSlug_periodKey: { customerId, reportSlug, periodKey } },
     select: { snapshot: true },
   });
-  return (row?.snapshot as unknown as TrendEditSnapshot | null) ?? null;
+  if (!row) return { status: "none" };
+  const snapshot = row.snapshot as unknown as TrendEditSnapshot | null;
+  if (!snapshot) return { status: "legacy_no_snapshot" };
+  return { status: "snapshotted", snapshot };
 }

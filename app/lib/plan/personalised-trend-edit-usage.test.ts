@@ -29,7 +29,7 @@ vi.mock("./usage-window.server", () => ({
   })),
 }));
 
-import { recordPersonalisedTrendEditUsage, getStoredTrendEditSnapshot } from "./personalised-trend-edit-usage.server";
+import { recordPersonalisedTrendEditUsage, getTrendEditUsageState } from "./personalised-trend-edit-usage.server";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -86,7 +86,7 @@ describe("§TREND-EDIT-USAGE — idempotent create-if-absent write", () => {
     // A check-then-create pattern would read before writing; this function
     // must contain no such read — the upsert (and the DB's own unique
     // constraint on customerId+reportSlug+periodKey) is the only guard.
-    // Scoped to the write function's own body only — getStoredTrendEditSnapshot
+    // Scoped to the write function's own body only — getTrendEditUsageState
     // (a separate, dedicated read function below it) legitimately uses
     // findUnique and must not trip this check.
     const writeFnStart = source.indexOf("export async function recordPersonalisedTrendEditUsage");
@@ -131,26 +131,31 @@ describe("§TREND-EDIT-USAGE — snapshot persistence", () => {
     expect(call.update).not.toHaveProperty("snapshot");
   });
 
-  it("getStoredTrendEditSnapshot reads by the same composite key, scoped to the current period", async () => {
+  it("getTrendEditUsageState reads by the same composite key, scoped to the current period, and returns the exact stored snapshot", async () => {
     findUniqueMock.mockResolvedValue({ snapshot: SNAPSHOT });
-    const result = await getStoredTrendEditSnapshot("cust-1", "spring-2026-soft-structure");
+    const result = await getTrendEditUsageState("cust-1", "spring-2026-soft-structure");
     expect(findUniqueMock).toHaveBeenCalledWith({
       where: { customerId_reportSlug_periodKey: { customerId: "cust-1", reportSlug: "spring-2026-soft-structure", periodKey: "2026-10" } },
       select: { snapshot: true },
     });
-    expect(result).toEqual(SNAPSHOT);
+    expect(result).toEqual({ status: "snapshotted", snapshot: SNAPSHOT });
   });
 
-  it("returns null when no usage row exists yet for this period (first view)", async () => {
+  it("returns status:'none' when no usage row exists yet for this period (genuine first view)", async () => {
     findUniqueMock.mockResolvedValue(null);
-    const result = await getStoredTrendEditSnapshot("cust-1", "spring-2026-soft-structure");
-    expect(result).toBeNull();
+    const result = await getTrendEditUsageState("cust-1", "spring-2026-soft-structure");
+    expect(result).toEqual({ status: "none" });
   });
 
-  it("returns null (not a crash) when a row exists but predates snapshot persistence", async () => {
+  it("returns status:'legacy_no_snapshot' — distinct from 'none' — when a row exists but predates snapshot persistence", async () => {
     findUniqueMock.mockResolvedValue({ snapshot: null });
-    const result = await getStoredTrendEditSnapshot("cust-1", "spring-2026-soft-structure");
-    expect(result).toBeNull();
+    const result = await getTrendEditUsageState("cust-1", "spring-2026-soft-structure");
+    expect(result).toEqual({ status: "legacy_no_snapshot" });
+    // The two "nothing to render" states must never collapse into the same
+    // shape — a caller that only checked truthiness (the old null/non-null
+    // check) could no longer tell them apart and risked treating a legacy
+    // row exactly like a genuine first view.
+    expect(result.status).not.toBe("none");
   });
 });
 
