@@ -101,6 +101,49 @@ describe("§TREND-EDIT-USAGE — idempotent create-if-absent write", () => {
   });
 });
 
+describe("§TREND-EDIT-USAGE — no alternate pre-create path exists anywhere in the codebase", () => {
+  // Investigated after a 14 Oct 2026 report of a brand-new usage row with
+  // snapshot:null: a second writer that creates the row WITHOUT a snapshot
+  // (a "usage-only" reservation, an old pre-snapshot code path, a seed
+  // script, a raw SQL insert) would explain that symptom even though this
+  // file's own upsert is provably atomic-with-snapshot. This asserts the
+  // repo-wide search this investigation performed stays true going
+  // forward: exactly one write call against PersonalisedTrendEditUsage
+  // exists anywhere, and it is this file's upsert.
+  function grepRepo(pattern: RegExp): string[] {
+    const root = join(__dirname, "..", "..", "..");
+    const hits: string[] = [];
+    const SKIP_DIRS = new Set(["node_modules", ".git", "build", "scratch_wi_preview", "scratch_wi_static"]);
+    function walk(dir: string) {
+      const { readdirSync, statSync } = require("node:fs") as typeof import("node:fs");
+      for (const entry of readdirSync(dir)) {
+        if (SKIP_DIRS.has(entry)) continue;
+        const full = join(dir, entry);
+        const stat = statSync(full);
+        if (stat.isDirectory()) { walk(full); continue; }
+        if (!/\.(ts|tsx|js|jsx)$/.test(entry)) continue;
+        if (/\.test\.(ts|tsx|js|jsx)$/.test(entry)) continue; // test files mock, never write for real
+        const content = readFileSync(full, "utf8");
+        if (pattern.test(content)) hits.push(full.slice(root.length + 1));
+      }
+    }
+    walk(join(root, "app"));
+    return hits;
+  }
+
+  it("exactly one file calls a mutating prisma.personalisedTrendEditUsage operation — this one", () => {
+    const writers = grepRepo(/prisma\.personalisedTrendEditUsage\.(create|createMany|update|updateMany|upsert|delete|deleteMany)\s*\(/);
+    expect(writers).toEqual(["app/lib/plan/personalised-trend-edit-usage.server.ts"]);
+  });
+
+  it("exactly one production call site invokes recordPersonalisedTrendEditUsage — the customer-facing generation loader", () => {
+    const callers = grepRepo(/\brecordPersonalisedTrendEditUsage\s*\(/).filter(
+      (f) => !f.endsWith("personalised-trend-edit-usage.server.ts"),
+    );
+    expect(callers).toEqual(["app/routes/trends.my-edits.$slug.tsx"]);
+  });
+});
+
 describe("§TREND-EDIT-USAGE — snapshot persistence", () => {
   beforeEach(() => vi.clearAllMocks());
 
@@ -129,6 +172,27 @@ describe("§TREND-EDIT-USAGE — snapshot persistence", () => {
     await recordPersonalisedTrendEditUsage("cust-1", "spring-2026-soft-structure", SNAPSHOT);
     const call = upsertMock.mock.calls[0][0];
     expect(call.update).not.toHaveProperty("snapshot");
+  });
+
+  it("duplicate/concurrent calls for the same customer+report+period EACH carry a full snapshot in their own create branch — whichever one the DB's unique constraint lets win, the committed row has a real snapshot, never null", async () => {
+    // This models the exact race the 14 Oct null-snapshot row was suspected
+    // of: two requests reaching this function for the same composite key at
+    // once. Prisma's upsert resolves the conflict server-side (one INSERT
+    // wins, the other falls through to update:{}, a no-op) — but the
+    // application-level guarantee this test proves is that NEITHER call
+    // ever sends an empty/undefined create.snapshot. There is no call shape
+    // that could leave a freshly-created row null.
+    const snapshotA = { ...SNAPSHOT, generatedAt: "2026-10-14T10:47:00.000Z" };
+    const snapshotB = { ...SNAPSHOT, generatedAt: "2026-10-14T10:47:01.000Z" };
+    await Promise.all([
+      recordPersonalisedTrendEditUsage("cust-1", "spring-2026-soft-structure", snapshotA),
+      recordPersonalisedTrendEditUsage("cust-1", "spring-2026-soft-structure", snapshotB),
+    ]);
+    expect(upsertMock).toHaveBeenCalledTimes(2);
+    for (const call of upsertMock.mock.calls) {
+      expect(call[0].create.snapshot).toBeTruthy();
+      expect(call[0].create.snapshot.schemaVersion).toBe("trend-edit-snapshot-v1");
+    }
   });
 
   it("getTrendEditUsageState reads by the same composite key, scoped to the current period, and returns the exact stored snapshot", async () => {

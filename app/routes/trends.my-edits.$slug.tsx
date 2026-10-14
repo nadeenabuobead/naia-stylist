@@ -184,8 +184,26 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           nadineRecommendation,
         };
         await recordPersonalisedTrendEditUsage(customer.id, report.slug, snapshot);
-      } catch {
-        /* never let usage recording block the response */
+        // Defensive verification, not a retry/self-heal: a genuine first
+        // generation must never leave a row with a null snapshot. Nothing
+        // else in this codebase can tell "the write worked" apart from
+        // "it silently didn't" — the previous version of this code had no
+        // logging at all here, which is exactly why a prior null-snapshot
+        // row (14 Oct 2026) could not be traced to a cause. This never
+        // writes again on a bad result — see getTrendEditUsageState's own
+        // "legacy_no_snapshot" handling for why a stuck-null row must stay
+        // untouched rather than being retried into existing.
+        const verify = await getTrendEditUsageState(customer.id, report.slug);
+        if (verify.status !== "snapshotted") {
+          console.error(
+            `trend_edit_snapshot_write_unverified customer=${hashCustomerId(customer.id)} report=${report.slug} period=${periodKey} status=${verify.status}`,
+          );
+        }
+      } catch (writeError) {
+        console.error(
+          `trend_edit_snapshot_write_failed customer=${hashCustomerId(customer.id)} report=${report.slug} period=${periodKey}`,
+          writeError,
+        );
       }
       try {
         await recordJourneyEventAwaited(

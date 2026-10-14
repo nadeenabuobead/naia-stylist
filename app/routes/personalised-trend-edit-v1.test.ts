@@ -449,6 +449,83 @@ describe("§TREND-EDIT-V1 — a genuinely new generation (status: none) is unaff
   });
 });
 
+describe("§TREND-EDIT-V1 — write verification (diagnosis for the 14 Oct 2026 null-snapshot report)", () => {
+  // No code path was found that can produce a row existing with
+  // snapshot:null for a genuine new generation — recordPersonalisedTrendEditUsage's
+  // upsert always includes the snapshot in its create branch, and it is the
+  // only writer in the codebase (see personalised-trend-edit-usage.test.ts's
+  // repo-wide search). What WAS missing is any way to ever find out if this
+  // happens again: the write call was wrapped in a bare try/catch with zero
+  // logging. These tests prove the loader now verifies its own write and
+  // logs loudly — in both directions, so the diagnostic itself is trustworthy.
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getEditorialReportBySlug).mockResolvedValue(REPORT as any);
+    vi.mocked(getPublishedEditorialReports).mockResolvedValue([REPORT] as any);
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValue(makeCustomer());
+    vi.mocked(getShopperEvidence).mockResolvedValue({ hasProfile: true, closetItems: [] } as any);
+    vi.mocked(buildShopperEdit).mockReturnValue(MOCK_EDIT as any);
+    consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    consoleErrorSpy.mockRestore();
+  });
+
+  it("a write that verifiably persisted (read-after-write finds the snapshot) logs no error", async () => {
+    vi.mocked(getTrendEditUsageState)
+      .mockResolvedValueOnce({ status: "none" }) // initial read
+      .mockResolvedValueOnce({ // post-write verification read
+        status: "snapshotted",
+        snapshot: {
+          schemaVersion: "trend-edit-snapshot-v1",
+          reportSlug: REPORT.slug,
+          reportTitle: REPORT.title,
+          generatedAt: "2026-10-14T10:47:00.000Z",
+          edit: MOCK_EDIT as any,
+          nadineRecommendation: null,
+        },
+      });
+    await callLoader();
+    const unverifiedLogs = consoleErrorSpy.mock.calls.filter((c) => String(c[0]).includes("trend_edit_snapshot_write_unverified"));
+    expect(unverifiedLogs).toEqual([]);
+  });
+
+  it("a write that the upsert call itself throws on is logged with context — no silent swallow", async () => {
+    vi.mocked(getTrendEditUsageState).mockResolvedValueOnce({ status: "none" });
+    vi.mocked(recordPersonalisedTrendEditUsage).mockRejectedValueOnce(new Error("db unreachable"));
+    await callLoader();
+    const failedLogs = consoleErrorSpy.mock.calls.filter((c) => String(c[0]).includes("trend_edit_snapshot_write_failed"));
+    expect(failedLogs.length).toBe(1);
+    expect(String(failedLogs[0][0])).toContain(REPORT.slug);
+  });
+
+  it("a write the upsert call reports as successful, but a verification read still finds no snapshot, is logged loudly instead of silently accepted", async () => {
+    // This is the exact shape the 14 Oct row would have produced had it
+    // happened under this code: the write 'succeeds' (no thrown error) but
+    // somehow the row still isn't snapshotted. Before this fix there was no
+    // way to ever see that. After it, this is impossible to miss.
+    vi.mocked(getTrendEditUsageState)
+      .mockResolvedValueOnce({ status: "none" })
+      .mockResolvedValueOnce({ status: "legacy_no_snapshot" });
+    await callLoader();
+    const unverifiedLogs = consoleErrorSpy.mock.calls.filter((c) => String(c[0]).includes("trend_edit_snapshot_write_unverified"));
+    expect(unverifiedLogs.length).toBe(1);
+    expect(String(unverifiedLogs[0][0])).toContain(REPORT.slug);
+    expect(String(unverifiedLogs[0][0])).toContain("status=legacy_no_snapshot");
+  });
+
+  it("the verification read never blocks or alters the response the customer sees — the generated edit still renders even if verification itself finds a problem", async () => {
+    vi.mocked(getTrendEditUsageState)
+      .mockResolvedValueOnce({ status: "none" })
+      .mockResolvedValueOnce({ status: "none" });
+    const result = await callLoader();
+    expect(result.edit).toEqual(MOCK_EDIT);
+    expect(result.generationFailed).toBe(false);
+  });
+});
+
 describe("§TREND-EDIT-V1 — ownership and lane boundaries", () => {
   it("19. the entitlement service never reads JourneyEvent for Plan & Usage or quota — only PersonalisedTrendEditUsage", () => {
     const entSrc = route("../lib/plan/entitlement.server.ts");
