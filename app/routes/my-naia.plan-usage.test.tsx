@@ -153,7 +153,19 @@ describe("plan-usage component — MEMBER with partial usage", () => {
     const html = render(baseSummary());
     expect(html).toContain("3 of 8 used");
     expect(html).toContain("1 of 5 used");
-    expect(html).toContain("2 of 10 used");
+    // VTO uses its own always-"used · included this month" copy format,
+    // independent of usageLabel()'s "of"/over-limit split used by every
+    // other row — see my-naia.plan-usage.tsx's vtoValue.
+    expect(html).toContain("2 used · 10 included this month");
+  });
+
+  it("VTO always renders 'used · included this month', even exactly at or over the limit — not the 'of' phrasing the other rows use", () => {
+    const atLimit = render(baseSummary({ vto: { monthlyLimit: 10, monthlyCompleted: 10, monthlyInFlight: 0, resetDate: "1 October" } }));
+    expect(atLimit).toContain("10 used · 10 included this month");
+    expect(atLimit).not.toContain("10 of 10 used");
+
+    const overLimit = render(baseSummary({ vto: { monthlyLimit: 10, monthlyCompleted: 12, monthlyInFlight: 0, resetDate: "1 October" } }));
+    expect(overLimit).toContain("12 used · 10 included this month");
   });
 
   it("shows real closet item count against the real limit, not a monthly-usage framing", () => {

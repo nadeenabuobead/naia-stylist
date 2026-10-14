@@ -116,9 +116,14 @@ export default function PlanUsagePage() {
   const bsExhausted = buySkip.monthlyUsed >= buySkip.monthlyLimit;
 
   // ── VTO
+  // Copy-format consistency only: unlike usageLabel()'s "X of Y used" /
+  // over-limit split (still used by StyleMe, Buy or Skip, and Trend Edit
+  // below, unchanged), this row always renders the "used · included this
+  // month" shape regardless of whether the limit is exceeded. No arithmetic
+  // change — vtoUsed/vtoExhausted/the bar are unaffected.
   const vtoUsed = vto.monthlyCompleted;
   const vtoExhausted = vtoUsed >= vto.monthlyLimit;
-  const vtoValue = usageLabel(vtoUsed, vto.monthlyLimit, "try-ons");
+  const vtoValue = `${vtoUsed} used · ${vto.monthlyLimit} included this month`;
   const vtoSub = vto.monthlyInFlight > 0 ? `${vto.monthlyInFlight} generating` : undefined;
 
   // ── Closet
