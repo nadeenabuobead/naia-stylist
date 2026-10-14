@@ -834,10 +834,8 @@ const css = `
   .mn-page-sections>.mn-back-link{display:block;margin-bottom:1.75rem}
 
   /* ── Option A cl-* page content — calibrated for 880 px column ── */
-  /* Title: mirrors sp-shell-title breakpoints (2rem → 3rem → 4.25rem). */
-  .cl-headline{font-family:var(--naia-ff-display);font-size:2rem;font-weight:200;color:var(--naia-ink);line-height:0.92;letter-spacing:0.02em;text-transform:uppercase;margin:0 0 24px}
-  @media(min-width:640px){.cl-headline{font-size:3rem}}
-  @media(min-width:1024px){.cl-headline{font-size:4.25rem}}
+  /* Title: uses the shared sp-shell-title class directly (naia-design-system.css)
+     — see the h1 below. No local override; My Trend Edits is the source of truth. */
   /* Subtitle — shared editorial intro style */
   .cl-sub{font-family:var(--naia-ff-body);font-style:italic;font-size:1.05rem;line-height:1.75;color:rgba(40,21,12,0.65);margin:0 0 28px}
   /* Stats — 2-col grid (Brands removed: optional field, not meaningful as a summary stat). Padding 20px (was 24px) to tighten card density. */
@@ -1484,7 +1482,7 @@ export default function Closet() {
         </nav>
 
         {/* Option A page header */}
-        <h1 className="cl-headline">DIGITAL <span className="sp-shell-accent">closet.</span></h1>
+        <h1 className="sp-shell-title">DIGITAL <span className="sp-shell-accent">closet.</span></h1>
         <p className="cl-sub">Upload, save, and style your pieces.</p>
 
         {/* Option A: Total Pieces / Categories */}

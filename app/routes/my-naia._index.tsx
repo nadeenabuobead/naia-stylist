@@ -522,11 +522,11 @@ export default function MyNaiaOverview() {
 
         {/* Welcome */}
         <section>
-          <h2 style={{ fontFamily: "var(--ff-display)", fontWeight: 200, fontSize: "clamp(2.25rem,6vw,3.75rem)", lineHeight: 0.95, letterSpacing: "0.02em", textTransform: "uppercase" }}>
+          <h2 className="sp-shell-title">
             {firstName ? (
               <>
                 Welcome,{" "}
-                <span style={{ fontFamily: "var(--ff-editorial)", fontStyle: "italic", color: "var(--lipstick)", textTransform: "none", fontWeight: 400 }}>
+                <span className="sp-shell-accent">
                   {firstName}.
                 </span>
               </>

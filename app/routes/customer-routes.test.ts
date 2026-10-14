@@ -409,10 +409,10 @@ describe("H — Digital Closet: composed shell + content invariants", () => {
     assert.ok(!src.includes("cl-topbar-link"), "no cl-topbar-link");
   });
 
-  it("closet._index.tsx uses Digital Closet title from Option A", () => {
+  it("closet._index.tsx uses Digital Closet title from Option A, via the shared sp-shell-title class (unified headline system)", () => {
     const src = route("closet._index.tsx");
     assert.ok(src.includes("Digital Closet"), "cl-headline says Digital Closet");
-    assert.ok(src.includes("cl-headline"), "uses cl-headline class");
+    assert.ok(src.includes('<h1 className="sp-shell-title">DIGITAL'), "title uses the shared sp-shell-title class, not a locally-duplicated one");
   });
 
   it("closet._index.tsx has Total Pieces / Categories stats from Option A (Brands removed — optional field, not meaningful as a summary stat)", () => {

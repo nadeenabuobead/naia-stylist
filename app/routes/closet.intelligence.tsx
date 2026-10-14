@@ -844,7 +844,7 @@ export default function WardrobeIntelligencePage() {
           <p className="wip-eyebrow">My nAia / Wardrobe Intelligence</p>
           <div className="wip-hero">
             <header className="wip-header">
-              <h1 className="wip-h1">Your wardrobe, <em className="sp-shell-accent">understood.</em></h1>
+              <h1 className="sp-shell-title">Your wardrobe, <em className="sp-shell-accent">understood.</em></h1>
             </header>
 
         {model.confidence !== "unknown" && model.ready && (
@@ -1331,13 +1331,8 @@ const css = `
      squeezed beside the H1, so nothing competes with it for attention. */
   .wip-hero{display:block}
   .wip-header{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;flex-wrap:wrap}
-  /* Matches sp-shell-title's own breakpoints (2rem/3rem/4.25rem) — the H1
-     must read as the same scale of title as every other major nAia page,
-     unmistakably larger than every section heading below it. */
-  .wip-h1{font-family:var(--naia-ff-display);font-weight:200;font-size:2rem;letter-spacing:0.01em;text-transform:uppercase;line-height:1.05;margin:0}
-  @media(min-width:640px){.wip-h1{font-size:3rem}}
-  @media(min-width:1024px){.wip-h1{font-size:4.25rem}}
-  .wip-h1 em{font-family:var(--naia-ff-body);font-style:italic;text-transform:none}
+  /* The H1 uses the shared sp-shell-title class directly (naia-design-system.css)
+     — see the h1 below. No local override; My Trend Edits is the source of truth. */
   .wip-status{padding-top:6px}
   .wip-link{border:0;background:none;padding:0;font-family:var(--naia-ff-ui);font-size:11.5px;color:var(--naia-accent);text-decoration:underline;text-underline-offset:3px;cursor:pointer}
   .wip-life-main .wip-link{white-space:nowrap}
