@@ -2,21 +2,12 @@
 //
 // nAia Admin workspace shell.
 // Auth is inherited from admin.tsx parent — no independent auth call needed.
-// Nav items: most are placeholders until their respective phases ship.
 
 import { Outlet, NavLink, useNavigation } from "react-router";
 
-const NAV_ITEMS: Array<{
-  label: string;
-  to?: string;
-  active: boolean;
-  phase?: string;
-}> = [
-  { label: "Closet Intelligence", to: "/admin/naia/closet",     active: true },
-  { label: "Customers",           to: "/admin/naia/customers",   active: true },
-  { label: "StyleMe QA",          to: "/admin/naia/styleme",     active: false, phase: "Phase 4" },
-  { label: "Feedback",            active: false, phase: "Phase 5" },
-  { label: "Usage",               active: false, phase: "Phase 5" },
+const NAV_ITEMS: Array<{ label: string; to: string }> = [
+  { label: "Closet Intelligence", to: "/admin/naia/closet" },
+  { label: "Customers",           to: "/admin/naia/customers" },
 ];
 
 export default function NaiaAdminWorkspace() {
@@ -30,33 +21,18 @@ export default function NaiaAdminWorkspace() {
           <span className="naia-admin-nav__logo">nAia Admin</span>
         </div>
         <ul className="naia-admin-nav__links" role="list">
-          {NAV_ITEMS.map((item) =>
-            item.active && item.to ? (
-              <li key={item.label}>
-                <NavLink
-                  to={item.to}
-                  className={({ isActive }) =>
-                    `naia-admin-nav__link${isActive ? " naia-admin-nav__link--active" : ""}`
-                  }
-                >
-                  {item.label}
-                </NavLink>
-              </li>
-            ) : (
-              <li key={item.label}>
-                <span
-                  className="naia-admin-nav__link naia-admin-nav__link--disabled"
-                  title={item.phase ? `Coming in ${item.phase}` : "Coming soon"}
-                  aria-disabled="true"
-                >
-                  {item.label}
-                  {item.phase && (
-                    <span className="naia-admin-nav__soon">{item.phase}</span>
-                  )}
-                </span>
-              </li>
-            ),
-          )}
+          {NAV_ITEMS.map((item) => (
+            <li key={item.label}>
+              <NavLink
+                to={item.to}
+                className={({ isActive }) =>
+                  `naia-admin-nav__link${isActive ? " naia-admin-nav__link--active" : ""}`
+                }
+              >
+                {item.label}
+              </NavLink>
+            </li>
+          ))}
         </ul>
       </nav>
 
@@ -141,7 +117,7 @@ const NAIA_ADMIN_CSS = `
     user-select: none;
   }
 
-  .naia-admin-nav__link:not(.naia-admin-nav__link--disabled):hover {
+  .naia-admin-nav__link:hover {
     background: rgba(255,255,255,0.07);
     color: #e2e8f0;
   }
@@ -150,22 +126,6 @@ const NAIA_ADMIN_CSS = `
     background: rgba(212,168,67,0.15) !important;
     color: #d4a843 !important;
     font-weight: 600;
-  }
-
-  .naia-admin-nav__link--disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
-
-  .naia-admin-nav__soon {
-    font-size: 9px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    background: #1e3a5f;
-    color: #5a8dc0;
-    padding: 0.1rem 0.3rem;
-    border-radius: 2px;
   }
 
   .naia-admin-loader {
