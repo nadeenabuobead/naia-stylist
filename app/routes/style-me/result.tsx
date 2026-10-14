@@ -27,6 +27,7 @@ import {
 } from "~/lib/ai/styleme-result.server";
 import { autoSelectClosetAnchor, resolveActionAnchor, loadAllClosetItemsForEngine } from "~/lib/ai/styleme-anchor.server";
 import { parseSuggestionMetadata } from "~/lib/ai/styleme-result.types";
+import { resolveItemImage } from "~/lib/styleme/look-image-resolution.server";
 import { resolveStyleMeMode } from "~/lib/styleme/mode-resolution";
 import { occasionDisplayFor } from "~/lib/styleme/occasion-display";
 import { resolveResultSuggestionSelector } from "~/lib/styleme/history-saved-durability";
@@ -177,9 +178,45 @@ export async function loader({ request }: LoaderFunctionArgs) {
       // Priority: 1) fresh private signed URL (imagePublicId+imageFormat), 2) legacy imageUrl, 3) persisted productImageUrl.
       const cloudinaryConfig = getCloudinaryConfig();
       const rawSuggestion = session.suggestions[0] ?? null;
+
+      // The anchor-piece image is a separate case from the items above: it's
+      // not a DB column on OutfitSuggestionItem, it's baked into the
+      // moodDescription metadata JSON at generation time as anchorImageUrl —
+      // a Cloudinary private signed URL (buildPrivateDownloadUrl, 10-minute
+      // expiry). Any session viewed after that window shows a broken <img>
+      // for a closet-type anchor otherwise. Re-resolve it fresh from the
+      // closet item's current image fields (metadata.anchor.id is already
+      // persisted alongside the stale URL for exactly this) using the same
+      // priority as the items above; null — not the stale URL — if the item
+      // or its image no longer exists, so the page's existing
+      // `{anchorImageUrl && <img>}` guard omits the image instead of
+      // rendering a broken one. A "nadine" anchor has no closetItemId and
+      // is untouched — its image is a stable catalog URL, not a signed one.
+      let hydratedMoodDescription = rawSuggestion?.moodDescription ?? null;
+      if (rawSuggestion) {
+        const anchorMeta = parseSuggestionMetadata(rawSuggestion.moodDescription);
+        if (anchorMeta?.anchor?.type === "closet" && anchorMeta.anchor.id) {
+          const anchorItem = await prisma.closetItem.findUnique({
+            where: { id: anchorMeta.anchor.id, customerId: session.customerId },
+            select: { imageUrl: true, imagePublicId: true, imageFormat: true },
+          });
+          // Same canonical resolver Overview/StyleMe-history use for every
+          // other garment image (resolveItemImage) — not a second,
+          // hand-rolled copy of the ownership+signed-URL logic.
+          const freshAnchorImageUrl = resolveItemImage(
+            { closetItemId: anchorMeta.anchor.id, productImageUrl: null, closetItem: anchorItem },
+            { customerId: session.customerId, cloudinaryConfig },
+          );
+          if (freshAnchorImageUrl !== anchorMeta.anchorImageUrl) {
+            hydratedMoodDescription = JSON.stringify({ ...anchorMeta, anchorImageUrl: freshAnchorImageUrl });
+          }
+        }
+      }
+
       const hydratedSuggestion = rawSuggestion
         ? {
             ...rawSuggestion,
+            moodDescription: hydratedMoodDescription,
             items: rawSuggestion.items.map((item) => {
               if (item.closetItemId && item.closetItem) {
                 const ci = item.closetItem;
