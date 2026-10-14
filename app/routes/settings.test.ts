@@ -269,22 +269,21 @@ describe("J — Selfie Style Analysis is V1-deactivated; My nAia Model is body-o
     }
   });
 
-  it("Closet photos section now supports real individual and bulk photo removal — not just a link to delete the whole item", () => {
+  it("Closet photos section links to My Closet for individual management and offers a real bulk delete-all here", () => {
     assert.ok(src.includes("My Closet Photos"),               "has My Closet Photos section");
-    assert.ok(src.includes("Go to My Closet"),                "still has the secondary link to My Closet");
-    assert.ok(src.includes("delete-closet-photo"),             "real single-photo delete intent exists");
+    assert.ok(src.includes("Go to My Closet"),                "links out to My Closet for per-item management");
     assert.ok(src.includes("delete-all-closet-photos"),        "real bulk-delete-all intent exists");
-    // The old copy that told customers to delete the whole garment to
-    // remove its photo must be gone — that's exactly what this feature replaced.
+    // Settings & Privacy is a privacy/deletion control surface, not a photo
+    // gallery — no per-item thumbnails, selectors, or single-photo intent here.
+    assert.ok(!src.includes("delete-closet-photo\""),          "no single-photo delete intent in Settings — that lives in My Closet");
     assert.ok(
       !src.includes("delete the corresponding item from your Closet"),
       "old destructive-by-necessity copy must be removed",
     );
   });
 
-  it("the Closet photo deletion action is genuinely wired to the shared image-only privacy module, not a stub", () => {
+  it("the Closet bulk-delete action is genuinely wired to the shared image-only privacy module, not a stub", () => {
     assert.ok(src.includes("~/lib/closet-photo-privacy.server"), "imports the real closet-photo privacy module");
-    assert.ok(src.includes("deleteClosetItemPhoto"),             "calls the real single-item deletion function");
     assert.ok(src.includes("deleteAllClosetPhotos"),             "calls the real bulk deletion function");
   });
 });
@@ -356,14 +355,15 @@ describe("L — explicit destructive button labels", () => {
     );
   });
 
-  it("VTO section offers 'Manage previews' and 'Delete all previews' — no duplicated gallery here", () => {
-    assert.ok(src.includes("Manage previews"), "VTO links out to My nAia Model's preview management");
-    assert.ok(src.includes("Delete all previews"), "VTO still offers its own bulk-delete control");
+  it("VTO section offers 'Go to My nAia Model' and 'Remove all previews' — no duplicated gallery here", () => {
+    assert.ok(src.includes("Go to My nAia Model"), "VTO links out to My nAia Model's preview management");
+    assert.ok(src.includes("Remove all previews"), "VTO still offers its own bulk-delete control");
   });
 
-  it("BOS section offers 'Choose images to remove' and 'Remove all images', not an always-visible gallery", () => {
-    assert.ok(src.includes("Choose images to remove"), "BOS individual-selection entry point exists");
+  it("BOS section offers 'Go to Buy or Skip' and 'Remove all images' — no gallery/selector here", () => {
+    assert.ok(src.includes("Go to Buy or Skip"), "BOS links out to Buy or Skip for per-item management");
     assert.ok(src.includes("Remove all images"), "BOS bulk-delete control exists");
+    assert.ok(!src.includes("Choose images to remove"), "no individual-selection entry point in Settings");
   });
 });
 

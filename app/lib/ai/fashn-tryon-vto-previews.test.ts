@@ -22,6 +22,12 @@ vi.mock("~/db.server", () => ({
       findMany: vi.fn(),
       count: vi.fn(),
     },
+    closetItem: {
+      findMany: vi.fn(),
+    },
+    buyOrSkipAnalysis: {
+      findMany: vi.fn(),
+    },
   },
 }));
 
@@ -34,8 +40,13 @@ vi.mock("~/lib/cloudinary-admin.server", async (importOriginal) => {
   };
 });
 
+vi.mock("~/lib/ai/naia-catalog", () => ({
+  getProductByHandle: vi.fn(),
+}));
+
 import prisma from "~/db.server";
 import { deleteCloudinaryAsset } from "~/lib/cloudinary-admin.server";
+import { getProductByHandle } from "~/lib/ai/naia-catalog";
 import {
   deleteOneVtoResult,
   listCustomerVtoPreviews,
@@ -45,6 +56,9 @@ import {
 beforeEach(() => {
   vi.clearAllMocks();
   (deleteCloudinaryAsset as any).mockResolvedValue({ ok: true });
+  (prisma.closetItem.findMany as any).mockResolvedValue([]);
+  (prisma.buyOrSkipAnalysis.findMany as any).mockResolvedValue([]);
+  (getProductByHandle as any).mockReturnValue(undefined);
 });
 
 describe("deleteOneVtoResult() — single-preview deletion", () => {
@@ -106,24 +120,94 @@ describe("listCustomerVtoPreviews() — Try-On Previews gallery read", () => {
     (prisma.virtualTryOnJob.findMany as any).mockResolvedValue([
       { id: "job-1", productHandle: "collar-shirt", createdAt },
     ]);
+    (getProductByHandle as any).mockReturnValue({ parsed: { identity: { verifiedTitle: "Collar Shirt" } } });
     const result = await listCustomerVtoPreviews("cust-A");
     expect(result).toEqual([
-      { jobId: "job-1", productHandle: "collar-shirt", createdAt, previewUrl: expect.stringContaining("api.cloudinary.com") },
+      { jobId: "job-1", label: "Collar Shirt", createdAt, previewUrl: expect.stringContaining("api.cloudinary.com") },
     ]);
   });
 
-  it("never exposes internal storage identifiers — only jobId, productHandle, createdAt, and the signed URL are returned", async () => {
+  it("never exposes internal storage identifiers — only jobId, label, createdAt, and the signed URL are returned", async () => {
     (prisma.virtualTryOnJob.findMany as any).mockResolvedValue([
       { id: "job-1", productHandle: "collar-shirt", createdAt: new Date() },
     ]);
     const result = await listCustomerVtoPreviews("cust-A");
     const keys = Object.keys(result[0]);
-    expect(keys.sort()).toEqual(["createdAt", "jobId", "previewUrl", "productHandle"]);
+    expect(keys.sort()).toEqual(["createdAt", "jobId", "label", "previewUrl"]);
   });
 
   it("returns an empty list (not an error) for a customer with no completed jobs", async () => {
     (prisma.virtualTryOnJob.findMany as any).mockResolvedValue([]);
     const result = await listCustomerVtoPreviews("cust-A");
     expect(result).toEqual([]);
+  });
+
+  it("resolves a closet-sourced job's label to the Closet item's real name — never the raw 'closet:id' handle", async () => {
+    (prisma.virtualTryOnJob.findMany as any).mockResolvedValue([
+      { id: "job-1", productHandle: "closet:item-1", createdAt: new Date() },
+    ]);
+    (prisma.closetItem.findMany as any).mockResolvedValue([{ id: "item-1", name: "Beige Tailored Blazer" }]);
+    const result = await listCustomerVtoPreviews("cust-A");
+    expect(prisma.closetItem.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["item-1"] }, customerId: "cust-A" },
+      select: { id: true, name: true },
+    });
+    expect(result[0].label).toBe("Beige Tailored Blazer");
+    expect(result[0].label).not.toContain("closet:");
+    expect(result[0].label).not.toContain("item-1");
+  });
+
+  it("resolves a buyskip-sourced job's label to the analysis's productName — never the raw 'buyskip:id' handle", async () => {
+    (prisma.virtualTryOnJob.findMany as any).mockResolvedValue([
+      { id: "job-1", productHandle: "buyskip:analysis-1", createdAt: new Date() },
+    ]);
+    (prisma.buyOrSkipAnalysis.findMany as any).mockResolvedValue([{ id: "analysis-1", productName: "Denim Jacket" }]);
+    const result = await listCustomerVtoPreviews("cust-A");
+    expect(prisma.buyOrSkipAnalysis.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["analysis-1"] }, customerId: "cust-A" },
+      select: { id: true, productName: true },
+    });
+    expect(result[0].label).toBe("Denim Jacket");
+    expect(result[0].label).not.toContain("buyskip:");
+  });
+
+  it("falls back to a neutral label when the source record is missing (deleted Closet item / analysis) — never the raw id", async () => {
+    (prisma.virtualTryOnJob.findMany as any).mockResolvedValue([
+      { id: "job-1", productHandle: "closet:deleted-item", createdAt: new Date() },
+      { id: "job-2", productHandle: "buyskip:deleted-analysis", createdAt: new Date() },
+    ]);
+    (prisma.closetItem.findMany as any).mockResolvedValue([]); // item no longer exists
+    (prisma.buyOrSkipAnalysis.findMany as any).mockResolvedValue([]);
+    const result = await listCustomerVtoPreviews("cust-A");
+    expect(result[0].label).toBe("Virtual Try-On");
+    expect(result[1].label).toBe("Virtual Try-On");
+  });
+
+  it("resolves a NADINE catalog handle via the verified catalog title", async () => {
+    (prisma.virtualTryOnJob.findMany as any).mockResolvedValue([
+      { id: "job-1", productHandle: "modern-blazer", createdAt: new Date() },
+    ]);
+    (getProductByHandle as any).mockReturnValue({ parsed: { identity: { verifiedTitle: "The Modern Blazer" } } });
+    const result = await listCustomerVtoPreviews("cust-A");
+    expect(getProductByHandle).toHaveBeenCalledWith("modern-blazer");
+    expect(result[0].label).toBe("The Modern Blazer");
+  });
+
+  it("falls back to a neutral label for an unresolvable NADINE handle", async () => {
+    (prisma.virtualTryOnJob.findMany as any).mockResolvedValue([
+      { id: "job-1", productHandle: "retired-handle", createdAt: new Date() },
+    ]);
+    (getProductByHandle as any).mockReturnValue(undefined);
+    const result = await listCustomerVtoPreviews("cust-A");
+    expect(result[0].label).toBe("Virtual Try-On");
+  });
+
+  it("never looks up another customer's Closet item or Buy-or-Skip analysis — the id lookup is scoped by customerId", async () => {
+    (prisma.virtualTryOnJob.findMany as any).mockResolvedValue([
+      { id: "job-1", productHandle: "closet:item-1", createdAt: new Date() },
+    ]);
+    await listCustomerVtoPreviews("cust-A");
+    const call = (prisma.closetItem.findMany as any).mock.calls[0][0];
+    expect(call.where.customerId).toBe("cust-A");
   });
 });

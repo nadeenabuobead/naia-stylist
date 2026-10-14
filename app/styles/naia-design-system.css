@@ -2703,27 +2703,26 @@ a.mn-action:focus-visible,
 .set-closet-photo-name {
   font-family: var(--naia-ff-body); font-size: 13px; font-style: italic; line-height: 1.4;
   color: rgba(40, 21, 12, 0.75);
+  overflow-wrap: anywhere; /* a long but legitimate name wraps instead of overflowing the card */
 }
 
-/* Multi-select photo-management gallery — only rendered once the customer
-   explicitly opens it (Settings & Privacy's default view never shows every
-   stored photo). The checkbox overlays the thumbnail; the card's border
-   confirms the selection state without needing a separate label. */
-.set-select-card { position: relative; cursor: pointer; }
-.set-select-checkbox {
-  position: absolute; top: 8px; left: 8px; z-index: 2;
-  width: 18px; height: 18px; accent-color: var(--naia-accent);
+/* Your Try-On Previews grid (My nAia Model) — a controlled column count
+   rather than set-closet-photo-grid's auto-fill(120px), which would pack
+   far more (and far narrower) columns than this card's name/date/button
+   content can read in. */
+.vto-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
 }
-.set-select-card .set-closet-photo-img,
-.set-select-card .set-closet-photo-placeholder {
-  border: 2px solid var(--naia-border-mid); transition: border-color 0.15s;
-}
-.set-select-card--selected .set-closet-photo-img,
-.set-select-card--selected .set-closet-photo-placeholder {
-  border-color: var(--naia-accent);
-}
-.set-gallery-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 16px; align-items: center; }
-.set-gallery-count { font-family: var(--naia-ff-ui); font-size: 11px; letter-spacing: 0.1em; color: var(--naia-muted); }
+@media (min-width: 640px) { .vto-preview-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (min-width: 1024px) { .vto-preview-grid { grid-template-columns: repeat(4, 1fr); } }
+
+/* Settings & Privacy's per-section action row — "Go to <feature>" plus a
+   bulk "Remove all" button. Settings itself never renders item thumbnails
+   or a selector; individual management lives on the feature page the link
+   points to (My Closet, Buy or Skip, My nAia Model). */
+.set-action-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
 
 /* ── Personal Styling Analysis (psa-*) ───────────────────────────────────── */
 .psa-status-val { font-family: var(--naia-ff-display); font-weight: 300; font-size: clamp(20px, 3.5vw, 26px); color: var(--naia-accent); margin-top: 8px; line-height: 1.1; }

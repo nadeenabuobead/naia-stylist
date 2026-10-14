@@ -30,7 +30,6 @@ import {
   deleteCustomerVtoResults,
 } from "~/lib/ai/fashn-tryon-service.server";
 import NaiaModelPhotoUpload from "~/components/NaiaModelPhotoUpload";
-import { humanizeSlug } from "~/lib/styleme/session-vocabulary";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 
 export const links: LinksFunction = () => [
@@ -229,12 +228,12 @@ export default function MyNaiaModelRoute() {
           </p>
         ) : (
           <>
-            <div className="set-closet-photo-grid">
+            <div className="vto-preview-grid">
               {previews.map((preview) => (
                 <div key={preview.jobId} className="set-closet-photo-card">
                   <VtoPreviewThumb src={preview.previewUrl} />
                   <div className="set-closet-photo-name">
-                    {humanizeSlug(preview.productHandle)}
+                    {preview.label}
                     <br />
                     <span style={{ opacity: 0.6 }}>
                       {new Date(preview.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}

@@ -35,6 +35,7 @@ import {
   resolveComponentMedia,
   type FashnGarmentCategory,
 } from "./naia-product-media.js";
+import { getProductByHandle } from "./naia-catalog.js";
 import {
   createOrFindTryOnJob,
   advanceTryOnJob,
@@ -736,9 +737,58 @@ export async function deleteOneVtoResult(
 
 export interface CustomerVtoPreview {
   jobId: string;
-  productHandle: string;
+  /** Always a human-readable name — never the raw productHandle (which for
+   *  closet/buyskip-sourced jobs is an internal "source:recordId" string,
+   *  not a display label). See resolveVtoPreviewLabel. */
+  label: string;
   createdAt: Date;
   previewUrl: string | null;
+}
+
+// productHandle encodes its source as a prefix for closet/buyskip-originated
+// try-ons (see api.trigger-tryon.tsx: `closet:${item.id}`, `buyskip:${analysis.id}`).
+// A bare handle (no prefix) is a NADINE catalog handle. Resolving each into a
+// real name — rather than displaying the raw "source:id" string — is what
+// listCustomerVtoPreviews owes the customer-facing gallery; nothing here is
+// ever shown to the customer as an internal identifier.
+const CLOSET_SOURCE_PREFIX = "closet:";
+const BUYSKIP_SOURCE_PREFIX = "buyskip:";
+const FALLBACK_PREVIEW_LABEL = "Virtual Try-On";
+
+async function resolveVtoPreviewLabels(
+  customerId: string,
+  productHandles: string[],
+): Promise<Map<string, string>> {
+  const closetIds: string[] = [];
+  const buyskipIds: string[] = [];
+  for (const handle of productHandles) {
+    if (handle.startsWith(CLOSET_SOURCE_PREFIX)) closetIds.push(handle.slice(CLOSET_SOURCE_PREFIX.length));
+    else if (handle.startsWith(BUYSKIP_SOURCE_PREFIX)) buyskipIds.push(handle.slice(BUYSKIP_SOURCE_PREFIX.length));
+  }
+
+  // `id: { in: [] }` is a safe no-op query — no ternary/branch-type gymnastics needed.
+  const [closetItems, buyskipAnalyses] = await Promise.all([
+    prisma.closetItem.findMany({ where: { id: { in: closetIds }, customerId }, select: { id: true, name: true } }),
+    prisma.buyOrSkipAnalysis.findMany({ where: { id: { in: buyskipIds }, customerId }, select: { id: true, productName: true } }),
+  ]);
+  const closetNameById = new Map<string, string | null>(closetItems.map((i): [string, string | null] => [i.id, i.name]));
+  const buyskipNameById = new Map<string, string | null>(buyskipAnalyses.map((a): [string, string | null] => [a.id, a.productName]));
+
+  const labels = new Map<string, string>();
+  for (const handle of productHandles) {
+    if (handle.startsWith(CLOSET_SOURCE_PREFIX)) {
+      const name = closetNameById.get(handle.slice(CLOSET_SOURCE_PREFIX.length));
+      labels.set(handle, name ?? FALLBACK_PREVIEW_LABEL);
+    } else if (handle.startsWith(BUYSKIP_SOURCE_PREFIX)) {
+      const name = buyskipNameById.get(handle.slice(BUYSKIP_SOURCE_PREFIX.length));
+      labels.set(handle, name ?? FALLBACK_PREVIEW_LABEL);
+    } else {
+      // NADINE catalog handle — resolve the verified catalog title.
+      const title = getProductByHandle(handle)?.parsed.identity.verifiedTitle;
+      labels.set(handle, title ?? FALLBACK_PREVIEW_LABEL);
+    }
+  }
+  return labels;
 }
 
 export async function listCustomerVtoPreviews(customerId: string): Promise<CustomerVtoPreview[]> {
@@ -747,9 +797,10 @@ export async function listCustomerVtoPreviews(customerId: string): Promise<Custo
     select: { id: true, productHandle: true, createdAt: true },
     orderBy: { createdAt: "desc" },
   });
+  const labelByHandle = await resolveVtoPreviewLabels(customerId, jobs.map((j) => j.productHandle));
   return jobs.map((job) => ({
     jobId: job.id,
-    productHandle: job.productHandle,
+    label: labelByHandle.get(job.productHandle) ?? FALLBACK_PREVIEW_LABEL,
     createdAt: job.createdAt,
     previewUrl: buildTryOnResultUrl(customerId, job.id),
   }));
