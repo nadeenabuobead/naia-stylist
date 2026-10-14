@@ -310,7 +310,7 @@ export default function Settings() {
         <div className="set-section-eyebrow">My Closet Photos</div>
         <h2 className="set-section-title">My Closet Photos</h2>
         <p className="sp-shell-desc" style={{ marginBottom: "16px" }}>
-          To remove a specific Closet photo or item, manage it in My Closet. You can also remove all Closet photos here without deleting your Closet items.
+          To remove a specific Closet photo, manage it in My Closet. Or remove all Closet photos here at once. Your Closet items will remain.
         </p>
         <div className="set-action-row">
           <Link to="/closet" className="sp-btn-outline" style={{ display: "inline-block", textDecoration: "none" }}>
@@ -330,7 +330,7 @@ export default function Settings() {
           <div className="set-section-eyebrow">Virtual Try-On</div>
           <h2 className="set-section-title">Virtual Try-On Preview Images</h2>
           <p className="sp-shell-desc" style={{ marginBottom: "16px" }}>
-            To view or delete a specific try-on preview, manage it in My nAia Model. You can also remove all saved try-on previews here.
+            To view or delete a specific try-on preview, go to My nAia Model. Or remove all saved try-on previews here at once.
           </p>
           <div className="set-action-row">
             <Link to="/my-naia-model#try-on-previews" className="sp-btn-outline" style={{ textDecoration: "none" }}>
@@ -349,7 +349,7 @@ export default function Settings() {
           <div className="set-section-eyebrow">Buy or Skip</div>
           <h2 className="set-section-title">Buy or Skip Uploaded Images</h2>
           <p className="sp-shell-desc" style={{ marginBottom: "16px" }}>
-            To remove a specific uploaded image, manage it in Buy or Skip. You can also permanently remove all Buy or Skip uploaded images here. Your decisions, recommendations and history are kept.
+            To remove a specific uploaded image, open the relevant Buy or Skip result. Or remove all Buy or Skip uploaded images here at once. Your decisions, recommendations and history will remain.
           </p>
           <div className="set-action-row">
             <Link to="/my-naia/buying-decisions" className="sp-btn-outline" style={{ textDecoration: "none" }}>
@@ -368,12 +368,7 @@ export default function Settings() {
         <h2 className="set-section-title">Personalisation</h2>
         <p className="sp-shell-desc">
           {/* Data-sharing / marketing claims require sign-off from the Privacy Policy — omitted until approved. */}
-          nAia personalises your styling experience using information you provide directly — your Style Passport, your Closet, your post-wear feedback, and your interactions with StyleMe.
-        </p>
-        <p className="sp-shell-desc" style={{ marginTop: "12px" }}>
-          nAia may also use aggregated, coarsened patterns across customers — never your individual
-          Style Passport, Closet, Closet photographs, Taste observations, or named identity — to help
-          inform design decisions. See our Privacy Policy for details.
+          nAia personalises your styling experience using information you provide directly — your Style Passport, your Closet, your post-wear feedback and your interactions with StyleMe.
         </p>
       </section>
 

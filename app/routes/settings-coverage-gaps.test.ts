@@ -61,15 +61,12 @@ describe("P — NADINE design-pattern sharing has no customer-facing toggle", ()
     assert.ok(!settingsSrc.includes('"Turn on"') && !settingsSrc.includes(">Turn on<"));
   });
 
-  it("the Personalisation section states aggregated/coarsened patterns may inform design decisions, without naming individual customer data", () => {
+  it("the Personalisation section states only the direct-data-use sentence — the aggregated/coarsened design-sharing paragraph was deliberately removed as a copy simplification", () => {
     const idx = settingsSrc.indexOf("HOW YOUR INFORMATION IS USED");
     const block = settingsSrc.slice(idx, idx + 1200);
-    assert.ok(/aggregat/i.test(block), "mentions aggregation");
-    assert.ok(/coarsen/i.test(block), "mentions coarsening");
-    assert.ok(
-      !/your (individual )?(style passport|closet)\b.*\b(design|nadine)/i.test(block),
-      "does not imply individual Passport/Closet data reaches design decisions",
-    );
+    assert.ok(/post-wear feedback/i.test(block), "keeps the direct-data-use sentence");
+    assert.ok(!/aggregat/i.test(block), "aggregated/coarsened paragraph removed per explicit copy cleanup");
+    assert.ok(!/coarsen/i.test(block), "aggregated/coarsened paragraph removed per explicit copy cleanup");
   });
 
   it("the designResearchConsent DB field still exists in the schema (not deleted — backward compatibility pending legal review)", () => {

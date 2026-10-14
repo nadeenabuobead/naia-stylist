@@ -73,7 +73,7 @@ describe("Settings & Privacy — no item galleries, selectors, or per-item thumb
   it("Buy or Skip: links out to Buy or Skip for individual management, and offers bulk delete-all here", () => {
     (useLoaderData as any).mockReturnValue(BASE_LOADER_DATA);
     const html = renderToString(React.createElement(Settings));
-    expect(html).toContain("manage it in Buy or Skip");
+    expect(html).toContain("open the relevant Buy or Skip result");
     expect(html).toContain('href="/my-naia/buying-decisions"');
     expect(html).toContain("Go to Buy or Skip");
     expect(html).toContain("Remove all images");
@@ -88,7 +88,7 @@ describe("Settings & Privacy — no item galleries, selectors, or per-item thumb
   it("Virtual Try-On: links out to My nAia Model's preview management, and offers bulk delete-all here", () => {
     (useLoaderData as any).mockReturnValue(BASE_LOADER_DATA);
     const html = renderToString(React.createElement(Settings));
-    expect(html).toContain("manage it in My nAia Model");
+    expect(html).toContain("go to My nAia Model");
     expect(html).toContain('href="/my-naia-model#try-on-previews"');
     expect(html).toContain("Go to My nAia Model");
     expect(html).toContain("Remove all previews");
