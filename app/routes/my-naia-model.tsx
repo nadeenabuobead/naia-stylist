@@ -8,8 +8,9 @@
 //   - save-photo returns a signed previewUrl for immediate client display.
 //   - Deletion is Cloudinary-first (see deleteNaiaModelPhoto).
 
+import { useState, useEffect } from "react";
 import { data, type LinksFunction, type LoaderFunctionArgs, type ActionFunctionArgs } from "react-router";
-import { useLoaderData, Link } from "react-router";
+import { useLoaderData, useFetcher, useRevalidator, Link } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import {
@@ -23,7 +24,13 @@ import {
   buildModelPreviewUrl,
   POLICY_VERSION,
 } from "~/lib/ai/my-naia-model.server";
+import {
+  listCustomerVtoPreviews,
+  deleteOneVtoResult,
+  deleteCustomerVtoResults,
+} from "~/lib/ai/fashn-tryon-service.server";
 import NaiaModelPhotoUpload from "~/components/NaiaModelPhotoUpload";
+import { humanizeSlug } from "~/lib/styleme/session-vocabulary";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 
 export const links: LinksFunction = () => [
@@ -46,11 +53,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ? buildModelPreviewUrl(model.bodyPublicId, model.bodyFormat ?? null, model.deliveryType ?? "private")
     : null;
 
+  // Your Try-On Previews — conceptually and visually separate from the saved
+  // source photo above. Every entry here is a generated result, never the
+  // model photo itself. previewUrl is a fresh signed URL per request (see
+  // listCustomerVtoPreviews) — never persisted, same contract as bodyDeliveryUrl.
+  const previews = await listCustomerVtoPreviews(customer.id);
+
   return data({
     customerId: customer.id,
     bodyDeliveryUrl,
     saveModelConsentGiven: !!model?.saveModelConsentAt,
     readiness,
+    previews,
   });
 }
 
@@ -130,11 +144,52 @@ export async function action({ request }: ActionFunctionArgs) {
     return data({ ok: true });
   }
 
+  if (intent === "delete-one-preview") {
+    const jobId = formData.get("jobId") as string;
+    if (!jobId) return data({ ok: false, error: "Missing preview." }, { status: 400 });
+    const result = await deleteOneVtoResult(jobId, customer.id);
+    if (!result.deleted) return data({ ok: false, error: "Could not remove that preview. Please try again." }, { status: 404 });
+    return data({ ok: true });
+  }
+
+  if (intent === "delete-all-previews") {
+    // Removes every generated result image. Job rows (usage/history) and the
+    // saved source/model photo are both untouched.
+    await deleteCustomerVtoResults(customer.id);
+    return data({ ok: true });
+  }
+
   return data({ ok: false, error: "Unknown action." }, { status: 400 });
+}
+
+// Resolved previewUrl is already a fresh, ownership-checked signed URL (or
+// null when the job predates signed delivery) — see listCustomerVtoPreviews.
+// onError is the second line of defence: if a preview's image has been
+// deleted (individually or via bulk removal), the derived URL 404s and this
+// swaps to the same intentional "Preview removed" state rather than ever
+// showing a native broken-image icon.
+function VtoPreviewThumb({ src }: { src: string | null }) {
+  const [broken, setBroken] = useState(false);
+  if (!src || broken) {
+    return <div className="set-closet-photo-placeholder" aria-label="Preview removed">Preview removed</div>;
+  }
+  return <img src={src} alt="Your Virtual Try-On preview" className="set-closet-photo-img" onError={() => setBroken(true)} />;
 }
 
 export default function MyNaiaModelRoute() {
   const loaderData = useLoaderData<typeof loader>();
+  const { previews } = loaderData;
+  const fetcher = useFetcher();
+  const revalidator = useRevalidator();
+  const [pending, setPending] = useState<{ intent: "delete-one-preview" | "delete-all-previews"; jobId?: string } | null>(null);
+  const isSubmitting = fetcher.state !== "idle";
+
+  useEffect(() => {
+    if ((fetcher.data as { ok?: boolean } | undefined)?.ok) {
+      setPending(null);
+      revalidator.revalidate();
+    }
+  }, [fetcher.data]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <MyNaiaLayout>
@@ -152,7 +207,102 @@ export default function MyNaiaModelRoute() {
         </p>
       </div>
 
-      <NaiaModelPhotoUpload {...loaderData} />
+      {/* ── Your nAia Model Photo ─────────────────────────────────────────── */}
+      <section className="bos-section">
+        <div className="set-section-eyebrow">Your nAia Model Photo</div>
+        <h2 className="set-section-title">Your nAia Model Photo</h2>
+        <NaiaModelPhotoUpload {...loaderData} />
+      </section>
+
+      {/* ── Your Try-On Previews ──────────────────────────────────────────── */}
+      <section className="bos-section">
+        <div className="set-section-eyebrow">Your Try-On Previews</div>
+        <h2 className="set-section-title">Your Try-On Previews</h2>
+        <p className="sp-shell-desc" style={{ marginBottom: "16px" }}>
+          These are the Virtual Try-On previews nAia has generated for you. They are separate from
+          your saved nAia Model photo above — removing a preview never affects that photo.
+        </p>
+
+        {previews.length === 0 ? (
+          <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "15px", fontStyle: "italic", color: "var(--naia-muted)" }}>
+            You have no saved Try-On previews yet.
+          </p>
+        ) : (
+          <>
+            <div className="set-closet-photo-grid">
+              {previews.map((preview) => (
+                <div key={preview.jobId} className="set-closet-photo-card">
+                  <VtoPreviewThumb src={preview.previewUrl} />
+                  <div className="set-closet-photo-name">
+                    {humanizeSlug(preview.productHandle)}
+                    <br />
+                    <span style={{ opacity: 0.6 }}>
+                      {new Date(preview.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="sp-btn-outline"
+                    style={{ width: "100%", fontSize: "11px", padding: "7px 10px" }}
+                    onClick={() => setPending({ intent: "delete-one-preview", jobId: preview.jobId })}
+                  >
+                    Delete Preview
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div style={{ marginTop: "16px" }}>
+              <button
+                type="button"
+                className="sp-btn-outline"
+                onClick={() => setPending({ intent: "delete-all-previews" })}
+              >
+                Delete All Try-On Previews
+              </button>
+            </div>
+          </>
+        )}
+      </section>
+
+      {/* ── Confirmation modal ────────────────────────────────────────────── */}
+      {pending && (
+        <div className="dc-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="vto-confirm-title">
+          <div className="dc-modal">
+            <div className="dc-modal-eyebrow">Confirm</div>
+            <h3 id="vto-confirm-title" className="dc-modal-title">
+              {pending.intent === "delete-one-preview" ? "Delete this preview" : "Delete all Try-On previews"}
+            </h3>
+            <p className="dc-modal-desc">
+              {pending.intent === "delete-one-preview"
+                ? "This generated preview will be permanently deleted. Your other previews, your saved nAia Model photo, and your try-on history are not affected."
+                : "All of your generated Try-On previews will be permanently deleted. Your saved nAia Model photo and your try-on history are not affected."}
+            </p>
+            <p style={{ fontFamily: "var(--naia-ff-ui)", fontSize: "11px", color: "var(--naia-muted)", marginBottom: "8px" }}>
+              This action cannot be undone.
+            </p>
+            <div className="dc-modal-actions">
+              <button type="button" className="sp-btn-ghost" onClick={() => setPending(null)} disabled={isSubmitting}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="sp-btn-primary"
+                disabled={isSubmitting}
+                onClick={() =>
+                  fetcher.submit(
+                    pending.intent === "delete-one-preview"
+                      ? { intent: "delete-one-preview", jobId: pending.jobId! }
+                      : { intent: "delete-all-previews" },
+                    { method: "post" },
+                  )
+                }
+              >
+                {isSubmitting ? "Deleting…" : pending.intent === "delete-one-preview" ? "Delete preview" : "Delete all previews"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </MyNaiaLayout>
   );
 }

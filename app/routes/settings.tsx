@@ -7,13 +7,17 @@
 //   - The selfie-based visual-analysis feature is V1-deactivated — no controls for it here
 //   - Provides honest mailto links for data export and account deletion requests
 //   - Explains how nAia personalises the experience (informational only)
-//   - Explains Closet photo management (delete via My Closet)
+//   - Exposes real server-backed Closet photo removal — individually
+//     (delete-closet-photo, image fields only, garment kept) and in bulk
+//     (delete-all-closet-photos) — see closet-photo-privacy.server.ts
+//   - Exposes real server-backed deletion for VTO result images (bulk; job
+//     records are preserved)
+//   - Exposes real server-backed deletion for Buy or Skip uploaded images
+//     (verdict/history preserved)
 //
 // What is intentionally absent:
 //   - Communication preferences (no schema or backend — removed until built)
 //   - Shopify address management (managed by NADINE/Shopify — not a nAia setting)
-//   - VTO result image deletion (no deletion helper exists — privacy gap, flagged separately)
-//   - BuyOrSkip image deletion (no customer-facing deletion path — privacy gap)
 //   - Immediate account deletion (requires cross-feature cascade audit)
 //   - Personalisation opt-out (no backend preference exists)
 
@@ -36,6 +40,11 @@ import {
   deleteCustomerBosImages,
   customerHasBosImages,
 } from "~/lib/buy-or-skip-privacy.server";
+import {
+  deleteClosetItemPhoto,
+  deleteAllClosetPhotos,
+  listCustomerClosetPhotos,
+} from "~/lib/closet-photo-privacy.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 
@@ -52,13 +61,14 @@ export function meta() {
 export async function loader({ request }: LoaderFunctionArgs) {
   const customer = await requireCurrentNaiaCustomer(request);
 
-  const [modelRecord, hasVtoResults, hasBosImages] = await Promise.all([
+  const [modelRecord, hasVtoResults, hasBosImages, closetPhotos] = await Promise.all([
     prisma.naiaModel.findUnique({
       where: { customerId: customer.id },
       select: { facePublicId: true, bodyPublicId: true, saveModelConsentAt: true },
     }),
     customerHasVtoResults(customer.id),
     customerHasBosImages(customer.id),
+    listCustomerClosetPhotos(customer.id),
   ]);
 
   // Derive public-safe booleans — private IDs never leave the server.
@@ -75,6 +85,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     model:         modelRecord  !== null ? { hasFace,  hasBody }     : null,
     hasVtoResults,
     hasBosImages,
+    closetPhotos,
   });
 }
 
@@ -85,21 +96,27 @@ const VALID_INTENTS = new Set([
   "delete-model-all",
   "delete-vto-results",
   "delete-bos-images",
+  "delete-closet-photo",
+  "delete-all-closet-photos",
 ]);
 
 type DestructiveIntent =
   | "delete-model-body"
   | "delete-model-all"
   | "delete-vto-results"
-  | "delete-bos-images";
+  | "delete-bos-images"
+  | "delete-closet-photo"
+  | "delete-all-closet-photos";
 
 type Intent = DestructiveIntent;
 
 const SUCCESS_MESSAGES: Record<Intent, string> = {
-  "delete-model-body":      "Your saved body photo has been removed from your nAia Model.",
-  "delete-model-all":       "Your saved nAia Model photos and consent have been permanently removed.",
-  "delete-vto-results":     "Your saved Virtual Try-On preview images have been permanently removed.",
-  "delete-bos-images":      "Your Buy or Skip uploaded images have been removed. Your decision history has been kept.",
+  "delete-model-body":        "Your saved body photo has been removed from your nAia Model.",
+  "delete-model-all":         "Your saved nAia Model photos and consent have been permanently removed.",
+  "delete-vto-results":       "Your saved Virtual Try-On preview images have been permanently removed.",
+  "delete-bos-images":        "Your Buy or Skip uploaded images have been removed. Your decision history has been kept.",
+  "delete-closet-photo":      "Your Closet photo has been removed. The item is kept.",
+  "delete-all-closet-photos": "All your Closet photos have been removed. Your Closet items and their details are kept.",
 };
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -136,6 +153,21 @@ export async function action({ request }: ActionFunctionArgs) {
       await deleteCustomerBosImages(customer.id);
       break;
     }
+    case "delete-closet-photo": {
+      const itemId = formData.get("itemId");
+      if (typeof itemId !== "string" || !itemId) {
+        return data({ ok: false as const, error: "Missing item." }, { status: 400 });
+      }
+      const r = await deleteClosetItemPhoto(itemId, customer.id);
+      if (!r.deleted) return data({ ok: false as const, error: "Could not remove that photo. Please try again." }, { status: 404 });
+      break;
+    }
+    case "delete-all-closet-photos": {
+      // Removes every uploaded Closet image. Items, names, categories, and all
+      // other garment details are preserved — only the image fields are cleared.
+      await deleteAllClosetPhotos(customer.id);
+      break;
+    }
   }
 
   return data({ ok: true as const, intent: typed, message: SUCCESS_MESSAGES[typed] });
@@ -163,6 +195,16 @@ const CONFIRM: Record<DestructiveIntent, { title: string; body: string; cta: str
     title: "Remove Buy or Skip uploaded images",
     body:  "The garment photos you uploaded for Buy or Skip analyses will be permanently deleted. Your Buy or Skip decisions, verdicts, and reasoning are kept — only the uploaded images are removed.",
     cta:   "Remove uploaded images",
+  },
+  "delete-closet-photo": {
+    title: "Remove this Closet photo",
+    body:  "This item's photo will be permanently deleted. The item itself — its name, category, and details — stays in your Closet, along with any StyleMe, Trend Edit, or Buy or Skip history that references it.",
+    cta:   "Remove photo",
+  },
+  "delete-all-closet-photos": {
+    title: "Remove all Closet photos",
+    body:  "Every photo you've uploaded to your Closet will be permanently deleted. Your Closet items and their details are kept — only the photos are removed.",
+    cta:   "Remove all Closet photos",
   },
 };
 
@@ -194,15 +236,33 @@ function ControlRow({
   );
 }
 
+// Resolved thumbnailUrl is already a fresh, ownership-checked signed URL (or
+// null when nothing could be resolved) — see listCustomerClosetPhotos. The
+// onError handler is the second line of defence: if that URL still 404s by
+// the time the browser requests it (e.g. the signed URL's short window
+// elapsed between render and paint), this swaps to the same intentional
+// placeholder rather than ever showing a native broken-image icon.
+function ClosetPhotoThumb({ src, alt }: { src: string | null; alt: string }) {
+  const [broken, setBroken] = useState(false);
+  if (!src || broken) {
+    return <div className="set-closet-photo-placeholder" aria-label="No image">No image</div>;
+  }
+  return <img src={src} alt={alt} className="set-closet-photo-img" onError={() => setBroken(true)} />;
+}
+
 // ── Component ────────────────────────────────────────────────────────────────
 
 export default function Settings() {
-  const { firstName, lastName, email, model, hasVtoResults, hasBosImages } = useLoaderData<typeof loader>();
+  const { firstName, lastName, email, model, hasVtoResults, hasBosImages, closetPhotos } = useLoaderData<typeof loader>();
   const fetcher     = useFetcher<typeof action>();
   const revalidator = useRevalidator();
   // Only destructive actions open the confirmation modal; consent is
-  // reversible and applies immediately.
-  const [pending, setPending] = useState<DestructiveIntent | null>(null);
+  // reversible and applies immediately. itemId/itemName carry the specific
+  // Closet item for delete-closet-photo only — every other intent ignores them.
+  const [pending, setPending] = useState<{ intent: DestructiveIntent; itemId?: string; itemName?: string | null } | null>(null);
+  const openConfirm = (intent: DestructiveIntent) => setPending({ intent });
+  const openConfirmForItem = (intent: DestructiveIntent, itemId: string, itemName: string | null) =>
+    setPending({ intent, itemId, itemName });
 
   const fullName    = [firstName, conciseFamilyName(lastName)].filter(Boolean).join(" ") || null;
   const isSubmitting = fetcher.state !== "idle";
@@ -262,7 +322,7 @@ export default function Settings() {
                 label="Remove saved body photo"
                 description="Permanently deletes your body photo from your nAia Model. Your face photo is kept."
                 buttonLabel="Remove body photo"
-                onOpen={setPending}
+                onOpen={openConfirm}
               />
             )}
             {(model.hasFace || model.hasBody) && (
@@ -271,7 +331,7 @@ export default function Settings() {
                 label="Remove all saved nAia Model photos"
                 description="Permanently deletes both your face and body photos and withdraws consent to save them."
                 buttonLabel="Remove all photos"
-                onOpen={setPending}
+                onOpen={openConfirm}
               />
             )}
             {!model.hasFace && !model.hasBody && (
@@ -288,11 +348,41 @@ export default function Settings() {
         <div className="set-section-eyebrow">My Closet Photos</div>
         <h2 className="set-section-title">My Closet Photos</h2>
         <p className="sp-shell-desc" style={{ marginBottom: "16px" }}>
-          Photos you have uploaded to your Closet are stored privately. To remove a Closet photo, delete the corresponding item from your Closet — the photo is removed with it.
+          Photos you upload to your Closet are stored privately. You can remove individual photos or remove them all without deleting your Closet items.
         </p>
-        <Link to="/closet" className="sp-btn-outline" style={{ display: "inline-block", textDecoration: "none" }}>
-          Go to My Closet
-        </Link>
+
+        {closetPhotos.length > 0 ? (
+          <>
+            <div className="set-closet-photo-grid">
+              {closetPhotos.map((item) => (
+                <div key={item.id} className="set-closet-photo-card">
+                  <ClosetPhotoThumb src={item.thumbnailUrl} alt={item.name ?? "Closet item"} />
+                  <div className="set-closet-photo-name">{item.name ?? "Untitled item"}</div>
+                  <button
+                    type="button"
+                    className="sp-btn-outline"
+                    style={{ width: "100%", fontSize: "11px", padding: "7px 10px" }}
+                    onClick={() => openConfirmForItem("delete-closet-photo", item.id, item.name)}
+                  >
+                    Remove Photo
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "12px", marginTop: "16px" }}>
+              <button type="button" className="sp-btn-outline" onClick={() => openConfirm("delete-all-closet-photos")}>
+                Remove All Closet Photos
+              </button>
+              <Link to="/closet" className="sp-btn-outline" style={{ display: "inline-block", textDecoration: "none" }}>
+                Go to My Closet
+              </Link>
+            </div>
+          </>
+        ) : (
+          <Link to="/closet" className="sp-btn-outline" style={{ display: "inline-block", textDecoration: "none" }}>
+            Go to My Closet
+          </Link>
+        )}
       </section>
 
       {/* ── Virtual Try-On Preview Images ─────────────────────────────────── */}
@@ -309,7 +399,7 @@ export default function Settings() {
               label="Remove Virtual Try-On preview images"
               description="Permanently deletes all generated try-on previews. Your nAia Model and try-on history are kept."
               buttonLabel="Remove previews"
-              onOpen={setPending}
+              onOpen={openConfirm}
             />
           </div>
         </section>
@@ -329,7 +419,7 @@ export default function Settings() {
               label="Remove Buy or Skip uploaded images"
               description="Permanently removes your uploaded garment photos. Your Buy or Skip decisions and history are kept."
               buttonLabel="Remove uploaded images"
-              onOpen={setPending}
+              onOpen={openConfirm}
             />
           </div>
         </section>
@@ -407,8 +497,8 @@ export default function Settings() {
         <div className="dc-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="settings-confirm-title">
           <div className="dc-modal">
             <div className="dc-modal-eyebrow">Confirm</div>
-            <h3 id="settings-confirm-title" className="dc-modal-title">{CONFIRM[pending].title}</h3>
-            <p className="dc-modal-desc">{CONFIRM[pending].body}</p>
+            <h3 id="settings-confirm-title" className="dc-modal-title">{CONFIRM[pending.intent].title}</h3>
+            <p className="dc-modal-desc">{CONFIRM[pending.intent].body}</p>
             <p style={{ fontFamily: "var(--naia-ff-ui)", fontSize: "11px", color: "var(--naia-muted)", marginBottom: "8px" }}>
               This action cannot be undone.
             </p>
@@ -426,10 +516,13 @@ export default function Settings() {
                 className="sp-btn-primary"
                 disabled={isSubmitting}
                 onClick={() =>
-                  fetcher.submit({ intent: pending }, { method: "post" })
+                  fetcher.submit(
+                    pending.itemId ? { intent: pending.intent, itemId: pending.itemId } : { intent: pending.intent },
+                    { method: "post" },
+                  )
                 }
               >
-                {isSubmitting ? "Removing…" : CONFIRM[pending].cta}
+                {isSubmitting ? "Removing…" : CONFIRM[pending.intent].cta}
               </button>
             </div>
           </div>

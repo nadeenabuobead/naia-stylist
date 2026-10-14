@@ -2687,6 +2687,24 @@ a.mn-action:focus-visible,
   .set-control-row > button { flex-shrink: 0; }
 }
 
+/* Closet photo grid — auto-fill is inherently mobile-safe: columns collapse
+   on their own as the viewport narrows, no extra breakpoint needed. */
+.set-closet-photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; }
+.set-closet-photo-card { display: flex; flex-direction: column; gap: 8px; }
+.set-closet-photo-img, .set-closet-photo-placeholder {
+  width: 100%; aspect-ratio: 3 / 4; object-fit: cover;
+  border: 1px solid var(--naia-border-mid); background: var(--naia-surface);
+}
+.set-closet-photo-placeholder {
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.2em; text-transform: uppercase;
+  color: var(--naia-muted);
+}
+.set-closet-photo-name {
+  font-family: var(--naia-ff-body); font-size: 13px; font-style: italic; line-height: 1.4;
+  color: rgba(40, 21, 12, 0.75);
+}
+
 /* ── Personal Styling Analysis (psa-*) ───────────────────────────────────── */
 .psa-status-val { font-family: var(--naia-ff-display); font-weight: 300; font-size: clamp(20px, 3.5vw, 26px); color: var(--naia-accent); margin-top: 8px; line-height: 1.1; }
 .psa-progress-track { height: 3px; background: rgba(40, 21, 12, 0.08); max-width: 360px; overflow: hidden; margin-bottom: 24px; }

@@ -696,3 +696,61 @@ export async function customerHasVtoResults(customerId: string): Promise<boolean
   });
   return count > 0;
 }
+
+// ── Single-preview deletion ───────────────────────────────────────────────────
+//
+// Deletes the Cloudinary result asset for exactly one job. Same contract as
+// deleteCustomerVtoResults, scoped to one jobId: ownership-checked, job row
+// and status untouched (so usage/history stays accurate), idempotent.
+
+export type DeleteOneVtoResultResult =
+  | { deleted: true }
+  | { deleted: false; errorCode: "NOT_FOUND" };
+
+export async function deleteOneVtoResult(
+  jobId: string,
+  customerId: string,
+  _deleteAsset: DeleteAssetFn = deleteCloudinaryAsset,
+): Promise<DeleteOneVtoResultResult> {
+  // Ownership check: only this customer's own COMPLETED job matches.
+  const job = await prisma.virtualTryOnJob.findFirst({
+    where: { id: jobId, customerId, status: "COMPLETED" },
+    select: { id: true },
+  });
+  if (!job) return { deleted: false, errorCode: "NOT_FOUND" };
+
+  const publicId = deriveTryOnResultPublicId(customerId, job.id);
+  await _deleteAsset(publicId, "private");
+  // Job row is never mutated — the derived publicId simply 404s from
+  // Cloudinary afterward; the customer-facing page treats that as the
+  // "preview removed" state (onError fallback), not an error.
+  return { deleted: true };
+}
+
+// ── Preview listing for the customer-facing gallery ───────────────────────────
+//
+// One entry per COMPLETED job — productHandle/createdAt come straight from
+// the job row; previewUrl is a fresh signed URL built the same way the VTO
+// experience itself renders a result (buildTryOnResultUrl). No new storage:
+// everything here is already derivable from VirtualTryOnJob.
+
+export interface CustomerVtoPreview {
+  jobId: string;
+  productHandle: string;
+  createdAt: Date;
+  previewUrl: string | null;
+}
+
+export async function listCustomerVtoPreviews(customerId: string): Promise<CustomerVtoPreview[]> {
+  const jobs = await prisma.virtualTryOnJob.findMany({
+    where: { customerId, status: "COMPLETED" },
+    select: { id: true, productHandle: true, createdAt: true },
+    orderBy: { createdAt: "desc" },
+  });
+  return jobs.map((job) => ({
+    jobId: job.id,
+    productHandle: job.productHandle,
+    createdAt: job.createdAt,
+    previewUrl: buildTryOnResultUrl(customerId, job.id),
+  }));
+}

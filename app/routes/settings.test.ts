@@ -269,10 +269,23 @@ describe("J — Selfie Style Analysis is V1-deactivated; My nAia Model is body-o
     }
   });
 
-  it("Closet photos section explains deletion via My Closet (not a delete button)", () => {
-    assert.ok(src.includes("My Closet Photos"),          "has My Closet Photos section");
-    assert.ok(src.includes("Go to My Closet"),           "has link to My Closet");
-    assert.ok(!src.includes("delete-closet"),            "no fake delete-closet intent");
+  it("Closet photos section now supports real individual and bulk photo removal — not just a link to delete the whole item", () => {
+    assert.ok(src.includes("My Closet Photos"),               "has My Closet Photos section");
+    assert.ok(src.includes("Go to My Closet"),                "still has the secondary link to My Closet");
+    assert.ok(src.includes("delete-closet-photo"),             "real single-photo delete intent exists");
+    assert.ok(src.includes("delete-all-closet-photos"),        "real bulk-delete-all intent exists");
+    // The old copy that told customers to delete the whole garment to
+    // remove its photo must be gone — that's exactly what this feature replaced.
+    assert.ok(
+      !src.includes("delete the corresponding item from your Closet"),
+      "old destructive-by-necessity copy must be removed",
+    );
+  });
+
+  it("the Closet photo deletion action is genuinely wired to the shared image-only privacy module, not a stub", () => {
+    assert.ok(src.includes("~/lib/closet-photo-privacy.server"), "imports the real closet-photo privacy module");
+    assert.ok(src.includes("deleteClosetItemPhoto"),             "calls the real single-item deletion function");
+    assert.ok(src.includes("deleteAllClosetPhotos"),             "calls the real bulk deletion function");
   });
 });
 
