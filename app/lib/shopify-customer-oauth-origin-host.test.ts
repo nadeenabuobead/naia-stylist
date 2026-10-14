@@ -1,0 +1,265 @@
+// app/lib/shopify-customer-oauth-origin-host.test.ts
+//
+// Root cause: a customer starting a Shopify OAuth login/callback flow from a
+// unique Vercel preview never returned to that preview. Ephemeral preview
+// URLs can't be registered as a Shopify redirect_uri, so the whole
+// login/callback round trip is forced onto the fixed STOREFRONT_HOST — and
+// without remembering where the flow actually started, the final
+// redirect(returnTo) call used a bare relative path, which resolves against
+// whatever host served the response (STOREFRONT_HOST), silently stranding
+// the customer there instead of back on the preview that initiated the
+// flow. On staging this manifested as a customer generating a Personalised
+// Trend Edit on the shared alias's old build instead of the snapshot-aware
+// preview they thought they were testing.
+//
+// validateOriginHost is the open-redirect guard added to fix this: it only
+// ever accepts a bare hostname matching this app's own Vercel preview
+// naming convention, the configured storefront host, or the canonical
+// production app host. requireCurrentNaiaCustomer / auth.shopify.login /
+// auth.shopify.callback thread it through so the final post-auth redirect
+// can become an absolute URL back to the originating preview.
+//
+// Run: node --test --import tsx/esm app/lib/shopify-customer-oauth-origin-host.test.ts
+
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { describe, it, beforeEach, afterEach } from "node:test";
+import { validateOriginHost } from "./shopify-customer-oauth.server.ts";
+import { requireCurrentNaiaCustomer } from "./naia-session.server.ts";
+
+const LOGIN_PATH    = resolve(import.meta.dirname, "../routes/auth.shopify.login.tsx");
+const CALLBACK_PATH = resolve(import.meta.dirname, "../routes/auth.shopify.callback.tsx");
+const SESSION_PATH  = resolve(import.meta.dirname, "naia-session.server.ts");
+const loginSrc    = readFileSync(LOGIN_PATH, "utf-8");
+const callbackSrc = readFileSync(CALLBACK_PATH, "utf-8");
+const sessionSrc  = readFileSync(SESSION_PATH, "utf-8");
+
+// ── validateOriginHost — the open-redirect guard itself ────────────────────
+
+describe("validateOriginHost()", () => {
+  const savedEnv = { STOREFRONT_HOST: process.env.STOREFRONT_HOST, SHOPIFY_APP_URL: process.env.SHOPIFY_APP_URL };
+  beforeEach(() => {
+    delete process.env.STOREFRONT_HOST;
+    delete process.env.SHOPIFY_APP_URL;
+  });
+  afterEach(() => {
+    if (savedEnv.STOREFRONT_HOST !== undefined) process.env.STOREFRONT_HOST = savedEnv.STOREFRONT_HOST; else delete process.env.STOREFRONT_HOST;
+    if (savedEnv.SHOPIFY_APP_URL !== undefined) process.env.SHOPIFY_APP_URL = savedEnv.SHOPIFY_APP_URL; else delete process.env.SHOPIFY_APP_URL;
+  });
+
+  it("rejects null/empty", () => {
+    assert.equal(validateOriginHost(null), null);
+    assert.equal(validateOriginHost(""), null);
+  });
+
+  it("accepts the bare shared-alias form of this project's own preview host", () => {
+    assert.equal(validateOriginHost("naia-stylist-staging.vercel.app"), "naia-stylist-staging.vercel.app");
+  });
+
+  it("accepts this project's own unique-preview host pattern (hash + org slug)", () => {
+    assert.equal(
+      validateOriginHost("naia-stylist-staging-l1e919a8p-nadeenabuobeads-projects.vercel.app"),
+      "naia-stylist-staging-l1e919a8p-nadeenabuobeads-projects.vercel.app",
+    );
+    assert.equal(
+      validateOriginHost("naia-stylist-staging-6099bhpow-nadeenabuobeads-projects.vercel.app"),
+      "naia-stylist-staging-6099bhpow-nadeenabuobeads-projects.vercel.app",
+    );
+  });
+
+  it("is case-insensitive for the own-preview pattern", () => {
+    assert.equal(
+      validateOriginHost("NAIA-STYLIST-STAGING-ABC123-nadeenabuobeads-projects.VERCEL.APP"),
+      "NAIA-STYLIST-STAGING-ABC123-nadeenabuobeads-projects.VERCEL.APP",
+    );
+  });
+
+  it("rejects a different project's preview host under the same vercel.app suffix — not an open redirect to arbitrary vercel.app apps", () => {
+    assert.equal(validateOriginHost("some-other-app-abc123-someoneelse.vercel.app"), null);
+  });
+
+  it("rejects a host that merely contains the project name as a substring rather than as the exact prefix", () => {
+    assert.equal(validateOriginHost("evil-naia-stylist-staging.vercel.app"), null);
+    assert.equal(validateOriginHost("naia-stylist-staging.vercel.app.evil.com"), null);
+  });
+
+  it("rejects a value carrying a scheme, path, port, or credentials — bare hostname only", () => {
+    assert.equal(validateOriginHost("https://naia-stylist-staging.vercel.app"), null);
+    assert.equal(validateOriginHost("naia-stylist-staging.vercel.app/evil"), null);
+    assert.equal(validateOriginHost("naia-stylist-staging.vercel.app:8080"), null);
+    assert.equal(validateOriginHost("user@naia-stylist-staging.vercel.app"), null);
+  });
+
+  it("rejects an overlong value", () => {
+    assert.equal(validateOriginHost("naia-stylist-staging-" + "a".repeat(200) + "-x.vercel.app"), null);
+  });
+
+  it("rejects a plain external host", () => {
+    assert.equal(validateOriginHost("evil.com"), null);
+    assert.equal(validateOriginHost("attacker.example"), null);
+  });
+
+  it("accepts an exact match against the configured STOREFRONT_HOST, whatever its shape", () => {
+    process.env.STOREFRONT_HOST = "some-storefront-host-value";
+    assert.equal(validateOriginHost("some-storefront-host-value"), "some-storefront-host-value");
+    assert.equal(validateOriginHost("not-the-configured-value"), null);
+  });
+
+  it("accepts an exact match against SHOPIFY_APP_URL's hostname", () => {
+    process.env.SHOPIFY_APP_URL = "https://naia-stylist.vercel.app";
+    assert.equal(validateOriginHost("naia-stylist.vercel.app"), "naia-stylist.vercel.app");
+  });
+
+  it("does not throw and returns null when SHOPIFY_APP_URL is malformed", () => {
+    process.env.SHOPIFY_APP_URL = "not a url";
+    assert.equal(validateOriginHost("evil.com"), null);
+  });
+});
+
+// ── requireCurrentNaiaCustomer — capture + gate + forward ──────────────────
+
+describe("requireCurrentNaiaCustomer source wiring", () => {
+  it("captures url.hostname and validates it through validateOriginHost before ever using it", () => {
+    assert.match(sessionSrc, /validateOriginHost\(url\.hostname\)/);
+  });
+
+  it("only computes an origin host outside production — VERCEL_ENV === \"production\" gates it off, leaving production's redirect byte-identical to before this fix", () => {
+    assert.match(sessionSrc, /process\.env\.VERCEL_ENV !== "production"\s*\?\s*validateOriginHost/);
+  });
+
+  it("only appends origin_host to the storefront redirect when it differs from sfHost — a flow that starts ON the storefront host stays there via the unchanged relative-redirect path", () => {
+    assert.match(sessionSrc, /originHost\s*&&\s*originHost\s*!==\s*sfHost/);
+  });
+
+  it("the non-storefront (no STOREFRONT_HOST configured) branch is untouched — still a bare relative redirect", () => {
+    const idx = sessionSrc.indexOf('throw redirect(`/auth/shopify/login?return_to=${returnTo}`)');
+    assert.ok(idx > -1, "the original fallback redirect must still exist unchanged");
+  });
+});
+
+// ── requireCurrentNaiaCustomer — functional redirect construction ─────────
+// A request with no cookie header never reaches Prisma (extractRawToken
+// short-circuits), so this is a genuine functional test, not a structural
+// proxy, with no DB mocking required.
+
+describe("requireCurrentNaiaCustomer() — functional redirect construction", () => {
+  const savedEnv = {
+    STOREFRONT_HOST: process.env.STOREFRONT_HOST,
+    SHOPIFY_APP_URL: process.env.SHOPIFY_APP_URL,
+    VERCEL_ENV: process.env.VERCEL_ENV,
+  };
+  afterEach(() => {
+    for (const [k, v] of Object.entries(savedEnv)) {
+      if (v !== undefined) process.env[k] = v; else delete process.env[k];
+    }
+  });
+
+  async function captureRedirectLocation(requestUrl) {
+    process.env.STOREFRONT_HOST = "naia-stylist-staging.vercel.app";
+    try {
+      await requireCurrentNaiaCustomer(new Request(requestUrl));
+      assert.fail("expected requireCurrentNaiaCustomer to throw a redirect");
+    } catch (thrown) {
+      assert.ok(thrown instanceof Response, "must throw a Response (redirect)");
+      return thrown.headers.get("Location");
+    }
+  }
+
+  it("unique preview login preserves the unique preview host — origin_host is appended, pointing back at the exact requesting host", async () => {
+    process.env.VERCEL_ENV = "preview";
+    const location = await captureRedirectLocation(
+      "https://naia-stylist-staging-l1e919a8p-nadeenabuobeads-projects.vercel.app/trends/my-edits/spring-2026-colour-direction",
+    );
+    assert.match(location, /^https:\/\/naia-stylist-staging\.vercel\.app\/auth\/shopify\/login\?/);
+    assert.match(location, /origin_host=naia-stylist-staging-l1e919a8p-nadeenabuobeads-projects\.vercel\.app/);
+  });
+
+  it("relative return path survives the round trip — return_to carries the exact original pathname, not just the host", async () => {
+    process.env.VERCEL_ENV = "preview";
+    const location = await captureRedirectLocation(
+      "https://naia-stylist-staging-l1e919a8p-nadeenabuobeads-projects.vercel.app/trends/my-edits/spring-2026-colour-direction",
+    );
+    const url = new URL(location);
+    assert.equal(decodeURIComponent(url.searchParams.get("return_to")), "/trends/my-edits/spring-2026-colour-direction");
+  });
+
+  it("shared staging stays shared staging — a request that already arrives on STOREFRONT_HOST appends no origin_host at all", async () => {
+    process.env.VERCEL_ENV = "preview";
+    const location = await captureRedirectLocation(
+      "https://naia-stylist-staging.vercel.app/trends/my-edits/spring-2026-colour-direction",
+    );
+    assert.ok(!location.includes("origin_host="), "a flow starting on the storefront host must not redundantly carry itself as the origin");
+  });
+
+  it("production stays canonical production — VERCEL_ENV=production never computes or appends origin_host, regardless of request host", async () => {
+    process.env.VERCEL_ENV = "production";
+    const location = await captureRedirectLocation(
+      "https://naia-stylist-staging-l1e919a8p-nadeenabuobeads-projects.vercel.app/trends/my-edits/spring-2026-colour-direction",
+    );
+    assert.ok(!location.includes("origin_host="), "production must never thread an origin host through — behavior must be byte-identical to before this fix");
+  });
+
+  it("external/malicious return host is rejected — a request whose Host does not match any approved pattern appends no origin_host", async () => {
+    process.env.VERCEL_ENV = "preview";
+    const location = await captureRedirectLocation("https://evil.example.com/trends/my-edits/spring-2026-colour-direction");
+    assert.ok(!location.includes("origin_host="), "an unapproved host must never be threaded through as a redirect target");
+  });
+
+  it("falls back to the original bare relative redirect when STOREFRONT_HOST is unset — unchanged from before this fix", async () => {
+    delete process.env.STOREFRONT_HOST;
+    process.env.VERCEL_ENV = "preview";
+    try {
+      await requireCurrentNaiaCustomer(new Request("https://naia-stylist-staging-l1e919a8p-nadeenabuobeads-projects.vercel.app/trends/my-edits/spring-2026-colour-direction"));
+      assert.fail("expected a thrown redirect");
+    } catch (thrown) {
+      assert.equal(thrown.headers.get("Location"), "/auth/shopify/login?return_to=%2Ftrends%2Fmy-edits%2Fspring-2026-colour-direction");
+    }
+  });
+});
+
+// ── auth.shopify.login.tsx — read, validate, store, forward ────────────────
+
+describe("auth.shopify.login.tsx source wiring", () => {
+  it("reads origin_host from the query string and validates it", () => {
+    assert.match(loginSrc, /validateOriginHost\(url\.searchParams\.get\("origin_host"\)\)/);
+  });
+
+  it("forwards origin_host through its own early storefront-redirect branch — a request that arrives here without _sf=1 must not drop the origin host on the floor", () => {
+    const branchStart = loginSrc.indexOf('if (storefrontHost && !url.searchParams.has("_sf"))');
+    const branchEnd = loginSrc.indexOf("}", loginSrc.indexOf("return redirect(sfLogin.toString()", branchStart));
+    const branchBody = loginSrc.slice(branchStart, branchEnd);
+    assert.match(branchBody, /sfLogin\.searchParams\.set\("origin_host"/);
+  });
+
+  it("stores origin_host in the signed handshake session so it survives the Shopify round trip", () => {
+    assert.match(loginSrc, /session\.set\("origin_host",\s*originHost\)/);
+  });
+
+  it("builds an absolute final-return target from originHost + returnTo, used for the already-has-a-session short-circuit", () => {
+    assert.match(loginSrc, /const finalReturnTarget = originHost \? `https:\/\/\$\{originHost\}\$\{returnTo\}` : returnTo;/);
+    assert.match(loginSrc, /return redirect\(finalReturnTarget\);/);
+  });
+});
+
+// ── auth.shopify.callback.tsx — read back, re-validate, build absolute redirect ──
+
+describe("auth.shopify.callback.tsx source wiring", () => {
+  it("re-validates origin_host read back from the session — defense in depth, not blind trust of a previously-stored value", () => {
+    assert.match(callbackSrc, /validateOriginHost\(session\.get\("origin_host"\)/);
+  });
+
+  it("clears origin_host from the session alongside the other one-shot PKCE/return_to fields", () => {
+    assert.match(callbackSrc, /session\.unset\("origin_host"\)/);
+  });
+
+  it("the final successful-login redirect uses the computed absolute target, not the bare relative returnTo", () => {
+    assert.match(callbackSrc, /return redirect\(finalReturnTarget, \{ headers \}\);/);
+    assert.ok(!/return redirect\(returnTo, \{ headers \}\);/.test(callbackSrc),
+      "must not still redirect to the bare relative returnTo for the success path");
+  });
+
+  it("finalReturnTarget falls back to the existing relative returnTo when no origin host was captured — shared-staging-initiated and production flows are unchanged", () => {
+    assert.match(callbackSrc, /const finalReturnTarget = originHost \? `https:\/\/\$\{originHost\}\$\{returnTo\}` : returnTo;/);
+  });
+});

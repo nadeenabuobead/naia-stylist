@@ -260,3 +260,41 @@ export function validateReturnTo(raw: string | null): string {
   }
   return "/";
 }
+
+// ---------------------------------------------------------------------------
+// origin_host validation — the host a PREVIEW-initiated auth flow should
+// return to once Shopify's OAuth callback lands on the fixed storefront
+// host (ephemeral preview URLs can't be registered as a Shopify redirect_uri,
+// so the whole login/callback round trip is forced onto STOREFRONT_HOST;
+// without this, the post-auth redirect silently stays on STOREFRONT_HOST
+// instead of the preview that actually started the flow).
+//
+// Open-redirect prevention: only ever a bare hostname (no scheme, no path,
+// no credentials, no port) matching either this app's own Vercel preview
+// naming convention, the configured storefront host, or the canonical
+// production app host — never an arbitrary external host. A rejected or
+// absent value returns null, and every caller must treat null as "no
+// origin host" (falls back to the existing relative-redirect behavior).
+// ---------------------------------------------------------------------------
+
+const OWN_PREVIEW_HOST_PATTERN = /^naia-stylist-staging(-[a-z0-9]+-[a-z0-9-]+)?\.vercel\.app$/i;
+
+export function validateOriginHost(raw: string | null): string | null {
+  if (!raw) return null;
+  if (raw.length > 100) return null;
+  if (!/^[a-z0-9.-]+$/i.test(raw)) return null; // bare hostname only — no scheme/path/port/credentials
+
+  if (OWN_PREVIEW_HOST_PATTERN.test(raw)) return raw;
+
+  const storefrontHost = process.env.STOREFRONT_HOST ?? "";
+  if (storefrontHost && raw === storefrontHost) return raw;
+
+  try {
+    const appHost = process.env.SHOPIFY_APP_URL ? new URL(process.env.SHOPIFY_APP_URL).hostname : "";
+    if (appHost && raw === appHost) return raw;
+  } catch {
+    /* SHOPIFY_APP_URL unset or malformed — appHost check simply doesn't match */
+  }
+
+  return null;
+}

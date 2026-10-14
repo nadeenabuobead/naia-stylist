@@ -5,13 +5,20 @@ import {
   generatePkceBundle,
   buildAuthorizationUrl,
   validateReturnTo,
+  validateOriginHost,
 } from "~/lib/shopify-customer-oauth.server";
 import { getSession, commitSession } from "~/lib/session.server";
 import { resolveNaiaSession }        from "~/lib/naia-session.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const url      = new URL(request.url);
-  const returnTo = validateReturnTo(url.searchParams.get("return_to"));
+  const url        = new URL(request.url);
+  const returnTo   = validateReturnTo(url.searchParams.get("return_to"));
+  const originHost = validateOriginHost(url.searchParams.get("origin_host"));
+  // The absolute target to land on once auth succeeds — the originating
+  // preview host + the relative return path, when one was captured and
+  // validated; otherwise the existing relative-path behavior (stays on
+  // whichever host serves this response, unchanged from before this fix).
+  const finalReturnTarget = originHost ? `https://${originHost}${returnTo}` : returnTo;
 
   // When STOREFRONT_HOST is configured, the PKCE cookie must be set on the
   // storefront domain — because that is where Shopify will send the callback.
@@ -28,12 +35,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const sfLogin = new URL(`https://${storefrontHost}/auth/shopify/login`);
     sfLogin.searchParams.set("return_to", returnTo);
     sfLogin.searchParams.set("_sf", "1");
+    if (originHost) sfLogin.searchParams.set("origin_host", originHost);
     return redirect(sfLogin.toString(), 302);
   }
 
   // If caller already has a valid nAia session skip OAuth entirely
   const existing = await resolveNaiaSession(request);
-  if (existing) return redirect(returnTo);
+  if (existing) return redirect(finalReturnTarget);
 
   const oidcConfig   = await getOidcConfig();
   const pkce         = generatePkceBundle();
@@ -53,6 +61,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   session.set("pkce_state",    pkce.state);
   session.set("pkce_nonce",    pkce.nonce);
   session.set("return_to",     returnTo);
+  if (originHost) session.set("origin_host", originHost);
 
   // Return a 200 page with a JS redirect instead of a 302.
   // Mobile Safari's bounce-tracking mitigation can drop cookies set in a

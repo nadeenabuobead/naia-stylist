@@ -7,6 +7,7 @@ import {
   validateIdToken,
   fetchCustomerProfile,
   validateReturnTo,
+  validateOriginHost,
 } from "~/lib/shopify-customer-oauth.server";
 import { usableName, resolveNameUpdate } from "~/lib/shopify-customer-name-sync.server";
 import { getSession, commitSession } from "~/lib/session.server";
@@ -26,11 +27,23 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const storedVerifier = session.get("pkce_verifier") as string | undefined;
   const storedNonce    = session.get("pkce_nonce")    as string | undefined;
   const returnTo       = validateReturnTo(session.get("return_to") as string | null);
+  // Re-validated here too (defense in depth), even though it already passed
+  // through this same check on the way into the signed session in
+  // auth.shopify.login — see validateOriginHost for why this can only ever
+  // be this app's own preview host, the storefront host, or the canonical
+  // app host, never an arbitrary external one.
+  const originHost     = validateOriginHost(session.get("origin_host") as string | null);
+  // The final redirect target: back to the preview that actually started
+  // this flow when one was captured, otherwise the existing relative-path
+  // behavior (stays on whichever host serves this callback — unchanged for
+  // production and for flows that started on the storefront host itself).
+  const finalReturnTarget = originHost ? `https://${originHost}${returnTo}` : returnTo;
 
   session.unset("pkce_state");
   session.unset("pkce_verifier");
   session.unset("pkce_nonce");
   session.unset("return_to");
+  session.unset("origin_host");
 
   const clearedSessionCookie = await commitSession(session);
 
@@ -189,5 +202,5 @@ export async function loader({ request }: LoaderFunctionArgs) {
   headers.append("Set-Cookie", clearedSessionCookie);
   headers.append("Set-Cookie", buildSessionCookieHeader(rawToken));
 
-  return redirect(returnTo, { headers });
+  return redirect(finalReturnTarget, { headers });
 }
