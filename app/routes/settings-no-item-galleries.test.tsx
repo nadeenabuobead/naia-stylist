@@ -1,10 +1,11 @@
 // app/routes/settings-gallery-ux.test.tsx
 //
-// Settings & Privacy's image sections must default to clean controls, not an
-// always-visible photo gallery — the gallery only renders once the customer
-// explicitly chooses to manage individual photos. Proves the DEFAULT render
-// (before any interaction) never leaks a Closet/Buy-or-Skip thumbnail or
-// item name, and that the clean-control copy is present instead.
+// Settings & Privacy is a privacy/deletion control surface, not a photo
+// gallery: it must never render per-item thumbnails, selectors, or
+// checkboxes for Closet photos, Buy or Skip images, or VTO previews.
+// Individual management belongs on the feature page itself (My Closet, Buy
+// or Skip, My nAia Model); Settings only offers a "Go to <feature>" link
+// plus a bulk "Remove all" action.
 
 import { describe, it, expect, vi } from "vitest";
 import { renderToString } from "react-dom/server";
@@ -39,74 +40,65 @@ const BASE_LOADER_DATA = {
   model: { hasFace: false, hasBody: true },
   hasVtoResults: true,
   hasBosImages: true,
-  closetPhotos: [
-    { id: "closet-1", name: "Cream Wide-Leg Trouser", thumbnailUrl: "https://example.com/closet-1.jpg" },
-    { id: "closet-2", name: "Linen Blazer", thumbnailUrl: "https://example.com/closet-2.jpg" },
-  ],
-  bosPhotos: [
-    { id: "bos-1", productName: "Denim Jacket", thumbnailUrl: "https://example.com/bos-1.jpg" },
-  ],
+  hasClosetPhotos: true,
 };
 
-describe("Settings & Privacy — image sections default to clean controls, not an always-visible gallery", () => {
-  it("never renders the Closet photo grid or any Closet item name on the default render", () => {
+describe("Settings & Privacy — no item galleries, selectors, or per-item thumbnails anywhere", () => {
+  it("never renders a photo grid, checkbox, or thumbnail of any kind", () => {
     (useLoaderData as any).mockReturnValue(BASE_LOADER_DATA);
     const html = renderToString(React.createElement(Settings));
     expect(html).not.toContain("set-closet-photo-grid");
-    expect(html).not.toContain("Cream Wide-Leg Trouser");
-    expect(html).not.toContain("Linen Blazer");
-    expect(html).not.toContain("https://example.com/closet-1.jpg");
+    expect(html).not.toContain('type="checkbox"');
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain("Choose photos to remove");
+    expect(html).not.toContain("Choose images to remove");
   });
 
-  it("never renders the Buy or Skip photo grid or any Buy or Skip item name on the default render", () => {
+  it("My Closet Photos: links out to My Closet for individual management, and offers bulk delete-all here", () => {
     (useLoaderData as any).mockReturnValue(BASE_LOADER_DATA);
     const html = renderToString(React.createElement(Settings));
-    expect(html).not.toContain("Denim Jacket");
-    expect(html).not.toContain("https://example.com/bos-1.jpg");
-  });
-
-  it("shows the clean default controls for Closet photos — choose + remove-all, not thumbnails", () => {
-    (useLoaderData as any).mockReturnValue(BASE_LOADER_DATA);
-    const html = renderToString(React.createElement(Settings));
-    expect(html).toContain("Choose photos to remove");
-    expect(html).toContain("Remove all photos");
+    expect(html).toContain("manage it in My Closet");
+    expect(html).toContain('href="/closet"');
     expect(html).toContain("Go to My Closet");
+    expect(html).toContain("Remove all Closet photos");
   });
 
-  it("shows the clean default controls for Buy or Skip images — choose + remove-all, not thumbnails", () => {
+  it("My Closet Photos: hides the bulk delete-all button when there are no Closet photos, but keeps the link", () => {
+    (useLoaderData as any).mockReturnValue({ ...BASE_LOADER_DATA, hasClosetPhotos: false });
+    const html = renderToString(React.createElement(Settings));
+    expect(html).toContain("Go to My Closet");
+    expect(html).not.toContain("Remove all Closet photos");
+  });
+
+  it("Buy or Skip: links out to Buy or Skip for individual management, and offers bulk delete-all here", () => {
     (useLoaderData as any).mockReturnValue(BASE_LOADER_DATA);
     const html = renderToString(React.createElement(Settings));
-    expect(html).toContain("Choose images to remove");
+    expect(html).toContain("manage it in Buy or Skip");
+    expect(html).toContain('href="/my-naia/buying-decisions"');
+    expect(html).toContain("Go to Buy or Skip");
     expect(html).toContain("Remove all images");
   });
 
-  it("VTO section links out to My nAia Model's preview management instead of duplicating a gallery here", () => {
-    (useLoaderData as any).mockReturnValue(BASE_LOADER_DATA);
+  it("Buy or Skip section is hidden entirely when the customer has no uploaded images", () => {
+    (useLoaderData as any).mockReturnValue({ ...BASE_LOADER_DATA, hasBosImages: false });
     const html = renderToString(React.createElement(Settings));
-    expect(html).toContain("Manage previews");
-    expect(html).toContain('href="/my-naia-model#try-on-previews"');
-    expect(html).toContain("Delete all previews");
+    expect(html).not.toContain("Buy or Skip Uploaded Images");
   });
 
-  it("My nAia Model keeps a single-photo control — no individual/bulk distinction for one photo", () => {
+  it("Virtual Try-On: links out to My nAia Model's preview management, and offers bulk delete-all here", () => {
+    (useLoaderData as any).mockReturnValue(BASE_LOADER_DATA);
+    const html = renderToString(React.createElement(Settings));
+    expect(html).toContain("manage it in My nAia Model");
+    expect(html).toContain('href="/my-naia-model#try-on-previews"');
+    expect(html).toContain("Go to My nAia Model");
+    expect(html).toContain("Remove all previews");
+  });
+
+  it("My nAia Model keeps a single consolidated 'Remove photo' control — no face/body or individual/bulk distinction for one photo", () => {
     (useLoaderData as any).mockReturnValue(BASE_LOADER_DATA);
     const html = renderToString(React.createElement(Settings));
     expect(html).toContain("Remove saved nAia Model photo");
-    expect(html).not.toContain("Choose photos to remove".replace("photos", "model photos"));
-  });
-
-  it("hides the Closet choose/remove-all controls when there are no Closet photos, but keeps the link", () => {
-    (useLoaderData as any).mockReturnValue({ ...BASE_LOADER_DATA, closetPhotos: [] });
-    const html = renderToString(React.createElement(Settings));
-    expect(html).not.toContain("Choose photos to remove");
-    expect(html).not.toContain("Remove all photos");
-    expect(html).toContain("Go to My Closet");
-  });
-
-  it("hides the whole Buy or Skip section when the customer has no uploaded images", () => {
-    (useLoaderData as any).mockReturnValue({ ...BASE_LOADER_DATA, hasBosImages: false, bosPhotos: [] });
-    const html = renderToString(React.createElement(Settings));
-    expect(html).not.toContain("Choose images to remove");
-    expect(html).not.toContain("Buy or Skip Uploaded Images");
+    expect(html).not.toContain("face photo");
+    expect(html).not.toContain("Remove all saved nAia Model photos");
   });
 });

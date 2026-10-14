@@ -1,6 +1,6 @@
 import { useState } from "react";
-import type { LinksFunction, LoaderFunctionArgs } from "react-router";
-import { Link, useLoaderData } from "react-router";
+import type { ActionFunctionArgs, LinksFunction, LoaderFunctionArgs } from "react-router";
+import { Link, useLoaderData, useFetcher, redirect, data } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import type { TrendReportData } from "~/lib/trend-reports";
 import {
@@ -21,6 +21,7 @@ import { checkEntitlement } from "~/lib/plan/entitlement.server";
 import {
   recordPersonalisedTrendEditUsage,
   getTrendEditUsageState,
+  getMostRecentArchivedSnapshot,
   type TrendEditSnapshot,
 } from "~/lib/plan/personalised-trend-edit-usage.server";
 import { getUsageWindow } from "~/lib/plan/usage-window.server";
@@ -45,6 +46,13 @@ type LoaderData = {
    *  its exact content was never captured. Never regenerated, never
    *  backfilled — see getTrendEditUsageState. */
   historicalUnavailable: boolean;
+  /** Set when `edit` is the customer's own archive from an earlier period —
+   *  nothing was generated yet this period, so getMostRecentArchivedSnapshot
+   *  supplied this instead of a fresh generation. Reopening it never writes,
+   *  never regenerates, and never counts against this period's allowance.
+   *  The customer can still explicitly generate a fresh edit for the
+   *  current period via the "generate-new" action below. */
+  archivedPeriodLabel: string | null;
 };
 
 export const links: LinksFunction = () => [
@@ -60,84 +68,22 @@ export function meta({ data }: { data?: LoaderData }) {
   return [{ title: `My Edit — ${data.report.title} | My nAia` }];
 }
 
-export async function loader({ request, params }: LoaderFunctionArgs) {
-  const customer = await requireCurrentNaiaCustomer(request);
-
-  const [report, allPublished] = await Promise.all([
-    getEditorialReportBySlug(params.slug ?? ""),
-    getPublishedEditorialReports(),
-  ]);
-  if (!report) throw new Response("Not Found", { status: 404 });
-  const reportIndex = allPublished.findIndex((r) => r.slug === report.slug);
-
-  // Frozen-at-first-generation behaviour: once this customer has a stored
-  // snapshot for this report in the current period, EVERY later view this
-  // period renders that exact stored snapshot — never a fresh regeneration
-  // from whatever Passport/Closet state happens to look like today. Without
-  // this, a customer could see Edit A on first visit while a changed Closet
-  // silently produced Edit B on a later visit, and Admin's stored snapshot
-  // (frozen at Edit A) would permanently disagree with what the customer is
-  // currently looking at. No second generation-history system here — this
-  // reads the same PersonalisedTrendEditUsage row the usage/quota logic
-  // already owns.
-  //
-  // Three distinct states, not two: "no row yet" and "row exists but
-  // predates snapshot persistence" must never collapse into the same
-  // "generate" behavior — see getTrendEditUsageState. A legacy row
-  // (snapshot: null) means a generation already happened this period before
-  // snapshot capture existed; it is NEVER regenerated and NEVER backfilled —
-  // the customer sees an honest historical-unavailable state instead.
-  const usageState = await getTrendEditUsageState(customer.id, report.slug);
-  if (usageState.status === "snapshotted") {
-    // Re-resolves Closet images fresh from the stored snapshot's
-    // closetItemIds — never rewrites the snapshot itself. See
-    // hydrateShopperEditImages for why the persisted imageUrl can be stale.
-    const hydratedEdit = await hydrateShopperEditImages(usageState.snapshot.edit, customer.id);
-    return {
-      report,
-      edit: hydratedEdit,
-      hasProfile: true,
-      generationFailed: false,
-      nadineRecommendation: usageState.snapshot.nadineRecommendation,
-      reportIndex,
-      membershipRequired: false,
-      historicalUnavailable: false,
-    } satisfies LoaderData;
-  }
-  if (usageState.status === "legacy_no_snapshot") {
-    return {
-      report,
-      edit: null,
-      hasProfile: true,
-      generationFailed: false,
-      nadineRecommendation: null,
-      reportIndex,
-      membershipRequired: false,
-      historicalUnavailable: true,
-    } satisfies LoaderData;
-  }
-
-  // Personalised Trend Edit is a membership feature. Behind ENTITLEMENT_ENFORCEMENT
-  // (same rollout flag as StyleMe/BuySkip/VTO — disabled in production until the
-  // upgrade flow exists) a non-member sees a clear membership-required state
-  // instead of the full personalised edit. No Closet/Passport read happens for a
-  // blocked customer — nothing to leak, nothing generated, nothing to count.
-  if (process.env.ENTITLEMENT_ENFORCEMENT === "true") {
-    const entitlement = await checkEntitlement(customer.id, customer.membershipStatus, "personalisedTrend");
-    if (!entitlement.allowed) {
-      return {
-        report,
-        edit: null,
-        hasProfile: false,
-        generationFailed: false,
-        nadineRecommendation: null,
-        reportIndex,
-        membershipRequired: true,
-        historicalUnavailable: false,
-      } satisfies LoaderData;
-    }
-  }
-
+// Generates (or re-generates, for the explicit "generate-new" action) a
+// fresh edit from CURRENT Passport/Closet state and records it as this
+// period's usage row. Shared by the loader's auto-generate-on-first-view
+// path (no archive exists yet for this report) and the action's explicit
+// "generate this month's edit" path (an archive exists, but the customer
+// chose to produce a new one anyway) — the generation + write logic must
+// never diverge between the two callers.
+async function generateAndRecordEdit(
+  customer: { id: string },
+  report: TrendReportData,
+): Promise<{
+  edit: ShopperEdit | null;
+  nadineRecommendation: NadineProductRecommendation | null;
+  hasProfile: boolean;
+  generationFailed: boolean;
+}> {
   try {
     const evidence = await getShopperEvidence(customer.id);
     const rawEdit = evidence.hasProfile ? buildShopperEdit(report, evidence) : null;
@@ -190,14 +136,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         };
         await recordPersonalisedTrendEditUsage(customer.id, report.slug, snapshot);
         // Defensive verification, not a retry/self-heal: a genuine first
-        // generation must never leave a row with a null snapshot. Nothing
-        // else in this codebase can tell "the write worked" apart from
-        // "it silently didn't" — the previous version of this code had no
-        // logging at all here, which is exactly why a prior null-snapshot
-        // row (14 Oct 2026) could not be traced to a cause. This never
-        // writes again on a bad result — see getTrendEditUsageState's own
-        // "legacy_no_snapshot" handling for why a stuck-null row must stay
-        // untouched rather than being retried into existing.
+        // generation must never leave a row with a null snapshot. This
+        // never writes again on a bad result — see getTrendEditUsageState's
+        // own "legacy_no_snapshot" handling for why a stuck-null row must
+        // stay untouched rather than being retried into existing.
         const verify = await getTrendEditUsageState(customer.id, report.slug);
         if (verify.status !== "snapshotted") {
           console.error(
@@ -224,29 +166,160 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       }
     }
 
+    return { edit, nadineRecommendation, hasProfile: evidence.hasProfile, generationFailed: false };
+  } catch (error) {
+    console.error("Shopper trend edit generation failed:", error);
+    return { edit: null, nadineRecommendation: null, hasProfile: false, generationFailed: true };
+  }
+}
+
+export async function loader({ request, params }: LoaderFunctionArgs) {
+  const customer = await requireCurrentNaiaCustomer(request);
+
+  const [report, allPublished] = await Promise.all([
+    getEditorialReportBySlug(params.slug ?? ""),
+    getPublishedEditorialReports(),
+  ]);
+  if (!report) throw new Response("Not Found", { status: 404 });
+  const reportIndex = allPublished.findIndex((r) => r.slug === report.slug);
+
+  // Frozen-at-first-generation behaviour: once this customer has a stored
+  // snapshot for this report in the current period, EVERY later view this
+  // period renders that exact stored snapshot — never a fresh regeneration
+  // from whatever Passport/Closet state happens to look like today. Without
+  // this, a customer could see Edit A on first visit while a changed Closet
+  // silently produced Edit B on a later visit, and Admin's stored snapshot
+  // (frozen at Edit A) would permanently disagree with what the customer is
+  // currently looking at. No second generation-history system here — this
+  // reads the same PersonalisedTrendEditUsage row the usage/quota logic
+  // already owns.
+  //
+  // Three distinct states, not two: "no row yet" and "row exists but
+  // predates snapshot persistence" must never collapse into the same
+  // "generate" behavior — see getTrendEditUsageState. A legacy row
+  // (snapshot: null) means a generation already happened this period before
+  // snapshot capture existed; it is NEVER regenerated and NEVER backfilled —
+  // the customer sees an honest historical-unavailable state instead.
+  const usageState = await getTrendEditUsageState(customer.id, report.slug);
+  if (usageState.status === "snapshotted") {
+    // Re-resolves Closet images fresh from the stored snapshot's
+    // closetItemIds — never rewrites the snapshot itself. See
+    // hydrateShopperEditImages for why the persisted imageUrl can be stale.
+    const hydratedEdit = await hydrateShopperEditImages(usageState.snapshot.edit, customer.id);
     return {
       report,
-      edit,
-      hasProfile: evidence.hasProfile,
+      edit: hydratedEdit,
+      hasProfile: true,
       generationFailed: false,
-      nadineRecommendation,
+      nadineRecommendation: usageState.snapshot.nadineRecommendation,
       reportIndex,
       membershipRequired: false,
       historicalUnavailable: false,
+      archivedPeriodLabel: null,
     } satisfies LoaderData;
-  } catch (error) {
-    console.error("Shopper trend edit generation failed:", error);
+  }
+  if (usageState.status === "legacy_no_snapshot") {
     return {
       report,
       edit: null,
-      hasProfile: false,
-      generationFailed: true,
+      hasProfile: true,
+      generationFailed: false,
       nadineRecommendation: null,
       reportIndex,
       membershipRequired: false,
-      historicalUnavailable: false,
+      historicalUnavailable: true,
+      archivedPeriodLabel: null,
     } satisfies LoaderData;
   }
+
+  // usageState.status === "none" — nothing generated yet THIS period. Before
+  // auto-generating, check the customer's own archive: "My Trend Edits must
+  // work as a real archive" — a report generated in an earlier period must
+  // stay reopenable anytime, and reopening it must never write a new row,
+  // regenerate, or count against this period's one-generation allowance.
+  // Only when no archive exists at all (a genuinely first-ever view of this
+  // report) does the page fall through to auto-generating below — the
+  // existing, unchanged first-time behavior.
+  const archived = await getMostRecentArchivedSnapshot(customer.id, report.slug);
+  if (archived) {
+    const hydratedEdit = await hydrateShopperEditImages(archived.snapshot.edit, customer.id);
+    return {
+      report,
+      edit: hydratedEdit,
+      hasProfile: true,
+      generationFailed: false,
+      nadineRecommendation: archived.snapshot.nadineRecommendation,
+      reportIndex,
+      membershipRequired: false,
+      historicalUnavailable: false,
+      archivedPeriodLabel: archived.periodLabel,
+    } satisfies LoaderData;
+  }
+
+  // Personalised Trend Edit is a membership feature. Behind ENTITLEMENT_ENFORCEMENT
+  // (same rollout flag as StyleMe/BuySkip/VTO — disabled in production until the
+  // upgrade flow exists) a non-member sees a clear membership-required state
+  // instead of the full personalised edit. No Closet/Passport read happens for a
+  // blocked customer — nothing to leak, nothing generated, nothing to count.
+  if (process.env.ENTITLEMENT_ENFORCEMENT === "true") {
+    const entitlement = await checkEntitlement(customer.id, customer.membershipStatus, "personalisedTrend");
+    if (!entitlement.allowed) {
+      return {
+        report,
+        edit: null,
+        hasProfile: false,
+        generationFailed: false,
+        nadineRecommendation: null,
+        reportIndex,
+        membershipRequired: true,
+        historicalUnavailable: false,
+        archivedPeriodLabel: null,
+      } satisfies LoaderData;
+    }
+  }
+
+  const generated = await generateAndRecordEdit(customer, report);
+  return {
+    report,
+    reportIndex,
+    membershipRequired: false,
+    historicalUnavailable: false,
+    archivedPeriodLabel: null,
+    ...generated,
+  } satisfies LoaderData;
+}
+
+// Explicit customer action, only reachable from the "archived" state's own
+// button: produces a genuinely NEW generation for the current period from
+// current Passport/Closet state, consuming this period's one-generation
+// allowance. Re-checks state server-side rather than trusting the client —
+// if the current period already has its own row by the time this runs (a
+// race, or a stale view), this is a safe no-op; the redirect's reload
+// resolves to whatever the server-side state actually is.
+export async function action({ request, params }: ActionFunctionArgs) {
+  const customer = await requireCurrentNaiaCustomer(request);
+  const report = await getEditorialReportBySlug(params.slug ?? "");
+  if (!report) throw new Response("Not Found", { status: 404 });
+
+  const formData = await request.formData();
+  if (formData.get("intent") !== "generate-new") {
+    return data({ ok: false as const, error: "Invalid request." }, { status: 400 });
+  }
+
+  const usageState = await getTrendEditUsageState(customer.id, report.slug);
+  if (usageState.status === "none") {
+    if (process.env.ENTITLEMENT_ENFORCEMENT !== "true") {
+      await generateAndRecordEdit(customer, report);
+    } else {
+      const entitlement = await checkEntitlement(customer.id, customer.membershipStatus, "personalisedTrend");
+      if (entitlement.allowed) {
+        await generateAndRecordEdit(customer, report);
+      }
+      // Blocked — reload shows the archive again rather than a new edit.
+    }
+  }
+
+  return redirect(request.url);
 }
 
 const TINTS = ["#efeae0", "#e6dccb", "#d9c9b5", "#efe6d7", "#e2d3bf", "#ede2cf"];
@@ -358,6 +431,27 @@ const css = `
   }
   .tmd-hero-public-link:hover { opacity: 1; }
 
+  /* ── Archive banner — shown only when nothing has been generated yet
+     this period and the page is instead reopening a past period's edit ── */
+  .tmd-archive-banner {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 16px;
+    padding: 20px 24px; margin-bottom: 32px;
+    background: rgba(26,17,9,0.04); border: 1px solid rgba(26,17,9,0.12);
+  }
+  .tmd-archive-banner-text {
+    flex: 1; min-width: 220px;
+    font-family: 'Cormorant Garamond', serif; font-style: italic; font-size: 0.95rem;
+    line-height: 1.6; color: rgba(26,17,9,0.75); margin: 0;
+  }
+  .tmd-archive-banner-btn {
+    flex-shrink: 0; border: 1px solid rgba(26,17,9,0.6); border-radius: 9999px;
+    padding: 10px 20px; background: transparent; cursor: pointer;
+    font-family: 'Space Mono', monospace; font-size: 0.58rem; letter-spacing: 0.24em;
+    text-transform: uppercase; color: #1a1109; transition: background 0.2s, color 0.2s;
+  }
+  .tmd-archive-banner-btn:hover { background: #1a1109; color: #f5f0e8; }
+  .tmd-archive-banner-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
   /* Divider, section labels, body text, reading box, evidence panel,
      closet items, low-data notice, and bullet lists now live in
      TREND_EDIT_REPORT_BODY_CSS (app/components/trends/TrendEditReportBody),
@@ -460,11 +554,13 @@ export function ErrorBoundary() {
 }
 
 export default function MyTrendEditDetail() {
-  const { report, edit, hasProfile, generationFailed, nadineRecommendation, reportIndex, membershipRequired, historicalUnavailable } = useLoaderData() as LoaderData;
+  const { report, edit, hasProfile, generationFailed, nadineRecommendation, reportIndex, membershipRequired, historicalUnavailable, archivedPeriodLabel } = useLoaderData() as LoaderData;
   const tint = TINTS[Math.max(0, reportIndex) % TINTS.length];
   const num = String(Math.max(0, reportIndex)).padStart(2, "0");
 
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "error">("idle");
+  const generateFetcher = useFetcher();
+  const isGenerating = generateFetcher.state !== "idle";
 
   const copyLink = async () => {
     if (typeof window === "undefined") return;
@@ -605,6 +701,23 @@ export default function MyTrendEditDetail() {
         ) : edit ? (
           /* Full edit */
           <>
+            {archivedPeriodLabel && (
+              /* Nothing has been generated yet THIS period — this is the
+                 customer's own archive from an earlier one. Reopening it
+                 never regenerated or consumed this period's allowance;
+                 this is the only path that does. */
+              <div className="tmd-archive-banner">
+                <p className="tmd-archive-banner-text">
+                  This is the edit nAia generated for you in {archivedPeriodLabel}. Your Style Passport or Closet may have changed since then.
+                </p>
+                <generateFetcher.Form method="post">
+                  <input type="hidden" name="intent" value="generate-new" />
+                  <button type="submit" className="tmd-archive-banner-btn" disabled={isGenerating}>
+                    {isGenerating ? "Generating…" : "Generate this month’s edit"}
+                  </button>
+                </generateFetcher.Form>
+              </div>
+            )}
             <TrendEditReportBody edit={edit} nadineRecommendation={nadineRecommendation} />
 
             {/* Footer CTA */}

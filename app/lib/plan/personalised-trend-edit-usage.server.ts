@@ -104,3 +104,55 @@ export async function getTrendEditUsageState(
   if (!snapshot) return { status: "legacy_no_snapshot" };
   return { status: "snapshotted", snapshot };
 }
+
+// "2026-08" -> "August 2026". Same parsing as admin/customer-360.server.ts's
+// formatPeriodKeyLabel — duplicated rather than imported so this
+// customer-facing module never depends on the admin layer. Purely a display
+// formatter, never used for any count/boundary logic.
+function formatPeriodKeyLabel(periodKey: string): string {
+  const match = /^(\d{4})-(\d{2})$/.exec(periodKey);
+  if (!match) return periodKey;
+  const [, yearStr, monthStr] = match;
+  const asDate = new Date(Date.UTC(Number(yearStr), Number(monthStr) - 1, 1));
+  return asDate.toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
+}
+
+export interface ArchivedTrendEditSnapshot {
+  periodKey: string;
+  periodLabel: string;
+  snapshot: TrendEditSnapshot;
+}
+
+/**
+ * The customer's own archive: the most recent PAST generation that actually
+ * captured a snapshot for this report, regardless of period — the
+ * customer-facing equivalent of Admin's per-usageId history access
+ * (getAdminCustomerTrendEditUsage lists every row; this is its one-result,
+ * customer-safe counterpart).
+ *
+ * Only ever called when the CURRENT period's own state is "none" (no row
+ * yet this period) — "My Trend Edits must work as a real archive": a
+ * customer who generated August's edit must still be able to reopen it in
+ * October, without that reopen regenerating anything, writing a new row, or
+ * counting against this period's one-generation allowance. If the current
+ * period already has its own row (snapshotted or legacy_no_snapshot),
+ * getTrendEditUsageState's result is authoritative and this is never
+ * consulted — this never overrides or competes with that state.
+ */
+export async function getMostRecentArchivedSnapshot(
+  customerId: string,
+  reportSlug: string,
+): Promise<ArchivedTrendEditSnapshot | null> {
+  const rows = await prisma.personalisedTrendEditUsage.findMany({
+    where: { customerId, reportSlug },
+    orderBy: { createdAt: "desc" },
+    select: { periodKey: true, snapshot: true },
+  });
+  for (const row of rows) {
+    const snapshot = row.snapshot as unknown as TrendEditSnapshot | null;
+    if (snapshot) {
+      return { periodKey: row.periodKey, periodLabel: formatPeriodKeyLabel(row.periodKey), snapshot };
+    }
+  }
+  return null;
+}

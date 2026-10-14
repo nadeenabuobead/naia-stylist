@@ -35,6 +35,12 @@ vi.mock("react-router", async (importOriginal) => {
       generationFailed: false,
     })),
     useLocation: vi.fn(() => ({ pathname: "/trends/my-edits/spring-2026-soft-structure" })),
+    useFetcher: vi.fn(() => ({
+      Form: ({ children, ...rest }: { children: unknown }) => createElement("form", rest as any, children as React.ReactNode),
+      submit: vi.fn(),
+      state: "idle",
+      data: undefined,
+    })),
     UNSAFE_withComponentProps: (c: unknown) => c,
   };
 });
@@ -81,6 +87,7 @@ vi.mock("~/lib/plan/entitlement.server", () => ({
 vi.mock("~/lib/plan/personalised-trend-edit-usage.server", () => ({
   recordPersonalisedTrendEditUsage: vi.fn().mockResolvedValue(undefined),
   getTrendEditUsageState: vi.fn().mockResolvedValue({ status: "none" }),
+  getMostRecentArchivedSnapshot: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("~/lib/plan/usage-window.server", () => ({
@@ -113,9 +120,13 @@ import React from "react";
 import { useLoaderData } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { getShopperEvidence, buildShopperEdit, hydrateShopperEditImages } from "~/lib/trend-evidence.server";
-import { getTrendEditUsageState } from "~/lib/plan/personalised-trend-edit-usage.server";
+import {
+  getTrendEditUsageState,
+  getMostRecentArchivedSnapshot,
+  recordPersonalisedTrendEditUsage,
+} from "~/lib/plan/personalised-trend-edit-usage.server";
 import { matchNadineProduct } from "~/lib/trend-product-recommendation.server";
-import MyTrendEditDetail, { loader } from "./trends.my-edits.$slug";
+import MyTrendEditDetail, { loader, action } from "./trends.my-edits.$slug";
 
 const MOCK_REPORT = {
   slug: "spring-2026-soft-structure",
@@ -270,6 +281,105 @@ describe("trends/my-edits/:slug loader", () => {
     // A repeat view never re-generates or re-counts usage.
     expect(getShopperEvidence).not.toHaveBeenCalled();
   });
+
+  // ── Archive access (My Trend Edits as a real, period-independent archive) ──
+
+  it("reopens a previous-period saved edit when nothing has been generated yet this period — the customer's own archive, not the current period's state", async () => {
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({ id: "cust-1" } as any);
+    vi.mocked(getTrendEditUsageState).mockResolvedValueOnce({ status: "none" });
+    const archivedEdit = { ...MOCK_EDIT, subTitle: "August's read" };
+    vi.mocked(getMostRecentArchivedSnapshot).mockResolvedValueOnce({
+      periodKey: "2026-08",
+      periodLabel: "August 2026",
+      snapshot: { edit: archivedEdit, nadineRecommendation: null },
+    } as any);
+    vi.mocked(hydrateShopperEditImages).mockResolvedValueOnce(archivedEdit as any);
+
+    const result = await loader({
+      request: new Request("http://localhost/trends/my-edits/spring-2026-soft-structure"),
+      params: { slug: "spring-2026-soft-structure" },
+      context: {},
+    });
+
+    expect(getMostRecentArchivedSnapshot).toHaveBeenCalledWith("cust-1", "spring-2026-soft-structure");
+    expect(result.edit).toEqual(archivedEdit);
+    expect((result as any).archivedPeriodLabel).toBe("August 2026");
+    expect(result.historicalUnavailable).toBe(false);
+    expect(result.hasProfile).toBe(true);
+  });
+
+  it("reopening an archived edit never regenerates and never increments usage", async () => {
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({ id: "cust-1" } as any);
+    vi.mocked(getTrendEditUsageState).mockResolvedValueOnce({ status: "none" });
+    vi.mocked(getMostRecentArchivedSnapshot).mockResolvedValueOnce({
+      periodKey: "2026-08",
+      periodLabel: "August 2026",
+      snapshot: { edit: MOCK_EDIT, nadineRecommendation: null },
+    } as any);
+    vi.mocked(hydrateShopperEditImages).mockResolvedValueOnce(MOCK_EDIT as any);
+
+    await loader({
+      request: new Request("http://localhost/trends/my-edits/spring-2026-soft-structure"),
+      params: { slug: "spring-2026-soft-structure" },
+      context: {},
+    });
+
+    expect(getShopperEvidence).not.toHaveBeenCalled();
+    expect(buildShopperEdit).not.toHaveBeenCalled();
+    expect(recordPersonalisedTrendEditUsage).not.toHaveBeenCalled();
+  });
+
+  it("falls through to a genuinely fresh generation when there is no row this period AND no archive at all (first-ever view of this report)", async () => {
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({ id: "cust-1" } as any);
+    vi.mocked(getTrendEditUsageState).mockResolvedValueOnce({ status: "none" });
+    vi.mocked(getMostRecentArchivedSnapshot).mockResolvedValueOnce(null);
+    vi.mocked(getShopperEvidence).mockResolvedValueOnce({ hasProfile: true } as any);
+    vi.mocked(buildShopperEdit).mockReturnValueOnce(MOCK_EDIT as any);
+
+    const result = await loader({
+      request: new Request("http://localhost/trends/my-edits/spring-2026-soft-structure"),
+      params: { slug: "spring-2026-soft-structure" },
+      context: {},
+    });
+
+    expect(result.edit).toEqual(MOCK_EDIT);
+    expect((result as any).archivedPeriodLabel).toBeNull();
+    expect(recordPersonalisedTrendEditUsage).toHaveBeenCalled();
+  });
+
+  it("'generate-new' action produces and records a fresh generation for the current period", async () => {
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({ id: "cust-1" } as any);
+    vi.mocked(getTrendEditUsageState).mockResolvedValueOnce({ status: "none" });
+    vi.mocked(getShopperEvidence).mockResolvedValueOnce({ hasProfile: true } as any);
+    vi.mocked(buildShopperEdit).mockReturnValueOnce(MOCK_EDIT as any);
+
+    const formData = new FormData();
+    formData.set("intent", "generate-new");
+    const response = await action({
+      request: new Request("http://localhost/trends/my-edits/spring-2026-soft-structure", { method: "POST", body: formData }),
+      params: { slug: "spring-2026-soft-structure" },
+      context: {},
+    });
+
+    expect(recordPersonalisedTrendEditUsage).toHaveBeenCalled();
+    expect((response as Response).status).toBe(302);
+  });
+
+  it("'generate-new' action is a safe no-op when the current period already has its own row (race / stale view)", async () => {
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({ id: "cust-1" } as any);
+    vi.mocked(getTrendEditUsageState).mockResolvedValueOnce({ status: "snapshotted", snapshot: { edit: MOCK_EDIT, nadineRecommendation: null } } as any);
+
+    const formData = new FormData();
+    formData.set("intent", "generate-new");
+    await action({
+      request: new Request("http://localhost/trends/my-edits/spring-2026-soft-structure", { method: "POST", body: formData }),
+      params: { slug: "spring-2026-soft-structure" },
+      context: {},
+    });
+
+    expect(getShopperEvidence).not.toHaveBeenCalled();
+    expect(recordPersonalisedTrendEditUsage).not.toHaveBeenCalled();
+  });
 });
 
 // ── Component tests ───────────────────────────────────────────────────────────
@@ -375,6 +485,34 @@ describe("MyTrendEditDetail component", () => {
     expect(html).toContain("Worth investing in");
     expect(html).toContain("Hold off on");
     expect(html).toContain(MOCK_EDIT.yourVersion);
+  });
+
+  it("shows the archive banner with a 'generate this month's edit' action when rendering a previous period's edit", () => {
+    vi.mocked(useLoaderData).mockReturnValueOnce({
+      report: MOCK_REPORT,
+      edit: MOCK_EDIT,
+      hasProfile: true,
+      generationFailed: false,
+      nadineRecommendation: null,
+      archivedPeriodLabel: "August 2026",
+    });
+    const html = renderToString(React.createElement(MyTrendEditDetail));
+    expect(html).toContain("August 2026");
+    expect(html).toContain("Generate this month");
+  });
+
+  it("does not show the archive banner for a current-period edit", () => {
+    vi.mocked(useLoaderData).mockReturnValueOnce({
+      report: MOCK_REPORT,
+      edit: MOCK_EDIT,
+      hasProfile: true,
+      generationFailed: false,
+      nadineRecommendation: null,
+      archivedPeriodLabel: null,
+    });
+    const html = renderToString(React.createElement(MyTrendEditDetail));
+    expect(html).not.toContain("Generate this month");
+    expect(html).not.toContain('class="tmd-archive-banner"');
   });
 
   it("does not render any professional lens navigation", () => {
