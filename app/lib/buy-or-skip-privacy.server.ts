@@ -13,7 +13,47 @@
 //   - "not found" from Cloudinary is treated as ok (idempotent).
 
 import prisma from "../db.server.js";
-import { deleteCloudinaryAsset, type DeleteAssetFn } from "./cloudinary-admin.server.js";
+import {
+  deleteCloudinaryAsset,
+  getCloudinaryConfig,
+  validatePublicIdOwnership,
+  buildPrivateDownloadUrl,
+  type DeleteAssetFn,
+} from "./cloudinary-admin.server.js";
+
+// ── Individual-item deletion ("Remove photo" on one Buy or Skip item) ─────────
+
+export type DeleteBosImageResult =
+  | { deleted: true }
+  | { deleted: false; errorCode: "NOT_FOUND" };
+
+export async function deleteOneBosImage(
+  analysisId: string,
+  customerId: string,
+  _deleteAsset: DeleteAssetFn = deleteCloudinaryAsset,
+): Promise<DeleteBosImageResult> {
+  // Ownership check + the only fields needed, in one query.
+  const analysis = await prisma.buyOrSkipAnalysis.findFirst({
+    where: { id: analysisId, customerId },
+    select: { id: true, imagePublicId: true },
+  });
+  if (!analysis) return { deleted: false, errorCode: "NOT_FOUND" };
+
+  if (analysis.imagePublicId) {
+    await _deleteAsset(analysis.imagePublicId, "private");
+    // Non-blocking: the DB fields are cleared regardless so the item never
+    // renders a reference to a deleted/unreachable asset.
+  }
+
+  // Verdict, reasoning, fullAnalysis, outcome, and every other field are
+  // preserved — only the image reference is cleared.
+  await prisma.buyOrSkipAnalysis.update({
+    where: { id: analysis.id },
+    data: { imagePublicId: null, imageFormat: null, imageUrl: null },
+  });
+
+  return { deleted: true };
+}
 
 export interface DeleteBosImagesResult {
   deletedCount: number;  // images successfully removed from Cloudinary
@@ -78,6 +118,41 @@ export async function deleteCustomerBosImages(
   }
 
   return { deletedCount, clearedCount, failedAssets };
+}
+
+// ── Reads for the Settings & Privacy UI ────────────────────────────────────────
+
+export interface BosPhotoListItem {
+  id: string;
+  productName: string | null;
+  thumbnailUrl: string | null; // fresh, resolved — never the stale persisted field directly
+}
+
+export async function listCustomerBosImages(customerId: string): Promise<BosPhotoListItem[]> {
+  const analyses = await prisma.buyOrSkipAnalysis.findMany({
+    where: {
+      customerId,
+      OR: [{ imagePublicId: { not: null } }, { imageUrl: { not: null } }],
+    },
+    select: { id: true, productName: true, imageUrl: true, imagePublicId: true, imageFormat: true },
+    orderBy: { createdAt: "desc" },
+  });
+
+  const cloudinaryConfig = getCloudinaryConfig();
+  return analyses.map((analysis) => {
+    // Same resolution order as the Buy or Skip result page (buyskip.$id.tsx):
+    // S0 private asset first (ownership re-verified), legacy public URL otherwise.
+    let thumbnailUrl: string | null = null;
+    if (analysis.imagePublicId && analysis.imageFormat && cloudinaryConfig) {
+      const ownership = validatePublicIdOwnership(analysis.imagePublicId, customerId);
+      if (ownership.ok) {
+        thumbnailUrl = buildPrivateDownloadUrl(cloudinaryConfig, analysis.imagePublicId, analysis.imageFormat, "private");
+      }
+    } else if (analysis.imageUrl) {
+      thumbnailUrl = analysis.imageUrl;
+    }
+    return { id: analysis.id, productName: analysis.productName, thumbnailUrl };
+  });
 }
 
 // ── State check for loader ────────────────────────────────────────────────────

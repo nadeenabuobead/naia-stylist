@@ -10,6 +10,7 @@ import {
 import {
   getShopperEvidence,
   buildShopperEdit,
+  hydrateShopperEditImages,
   type ShopperEdit,
 } from "~/lib/trend-evidence.server";
 import {
@@ -88,9 +89,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // the customer sees an honest historical-unavailable state instead.
   const usageState = await getTrendEditUsageState(customer.id, report.slug);
   if (usageState.status === "snapshotted") {
+    // Re-resolves Closet images fresh from the stored snapshot's
+    // closetItemIds — never rewrites the snapshot itself. See
+    // hydrateShopperEditImages for why the persisted imageUrl can be stale.
+    const hydratedEdit = await hydrateShopperEditImages(usageState.snapshot.edit, customer.id);
     return {
       report,
-      edit: usageState.snapshot.edit,
+      edit: hydratedEdit,
       hasProfile: true,
       generationFailed: false,
       nadineRecommendation: usageState.snapshot.nadineRecommendation,

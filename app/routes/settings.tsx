@@ -39,6 +39,8 @@ import {
 import {
   deleteCustomerBosImages,
   customerHasBosImages,
+  deleteOneBosImage,
+  listCustomerBosImages,
 } from "~/lib/buy-or-skip-privacy.server";
 import {
   deleteClosetItemPhoto,
@@ -61,7 +63,7 @@ export function meta() {
 export async function loader({ request }: LoaderFunctionArgs) {
   const customer = await requireCurrentNaiaCustomer(request);
 
-  const [modelRecord, hasVtoResults, hasBosImages, closetPhotos] = await Promise.all([
+  const [modelRecord, hasVtoResults, hasBosImages, closetPhotos, bosPhotos] = await Promise.all([
     prisma.naiaModel.findUnique({
       where: { customerId: customer.id },
       select: { facePublicId: true, bodyPublicId: true, saveModelConsentAt: true },
@@ -69,6 +71,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     customerHasVtoResults(customer.id),
     customerHasBosImages(customer.id),
     listCustomerClosetPhotos(customer.id),
+    listCustomerBosImages(customer.id),
   ]);
 
   // Derive public-safe booleans — private IDs never leave the server.
@@ -86,6 +89,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     hasVtoResults,
     hasBosImages,
     closetPhotos,
+    bosPhotos,
   });
 }
 
@@ -96,6 +100,7 @@ const VALID_INTENTS = new Set([
   "delete-model-all",
   "delete-vto-results",
   "delete-bos-images",
+  "delete-bos-image",
   "delete-closet-photo",
   "delete-all-closet-photos",
 ]);
@@ -105,6 +110,7 @@ type DestructiveIntent =
   | "delete-model-all"
   | "delete-vto-results"
   | "delete-bos-images"
+  | "delete-bos-image"
   | "delete-closet-photo"
   | "delete-all-closet-photos";
 
@@ -115,6 +121,7 @@ const SUCCESS_MESSAGES: Record<Intent, string> = {
   "delete-model-all":         "Your saved nAia Model photos and consent have been permanently removed.",
   "delete-vto-results":       "Your saved Virtual Try-On preview images have been permanently removed.",
   "delete-bos-images":        "Your Buy or Skip uploaded images have been removed. Your decision history has been kept.",
+  "delete-bos-image":         "Your Buy or Skip photo has been removed. The decision is kept.",
   "delete-closet-photo":      "Your Closet photo has been removed. The item is kept.",
   "delete-all-closet-photos": "All your Closet photos have been removed. Your Closet items and their details are kept.",
 };
@@ -153,6 +160,15 @@ export async function action({ request }: ActionFunctionArgs) {
       await deleteCustomerBosImages(customer.id);
       break;
     }
+    case "delete-bos-image": {
+      const analysisId = formData.get("itemId");
+      if (typeof analysisId !== "string" || !analysisId) {
+        return data({ ok: false as const, error: "Missing item." }, { status: 400 });
+      }
+      const r = await deleteOneBosImage(analysisId, customer.id);
+      if (!r.deleted) return data({ ok: false as const, error: "Could not remove that photo. Please try again." }, { status: 404 });
+      break;
+    }
     case "delete-closet-photo": {
       const itemId = formData.get("itemId");
       if (typeof itemId !== "string" || !itemId) {
@@ -178,23 +194,28 @@ export async function action({ request }: ActionFunctionArgs) {
 const CONFIRM: Record<DestructiveIntent, { title: string; body: string; cta: string }> = {
   "delete-model-body": {
     title: "Remove saved body photo",
-    body:  "Your saved body photo will be permanently deleted from your nAia Model. Virtual try-ons that use this photo will require a new one. Your face photo and styling history are not affected.",
+    body:  "Your saved body photo will be permanently deleted from your nAia Model. Virtual try-ons that use this photo will require a new one. Your styling history is not affected.",
     cta:   "Remove body photo",
   },
   "delete-model-all": {
-    title: "Remove all saved nAia Model photos",
-    body:  "Both your saved face and body photos will be permanently deleted and your consent to save them will be withdrawn. Virtual previews will no longer be available until you upload new photos. Your styling history and Closet are not affected.",
-    cta:   "Remove all model photos",
+    title: "Remove saved nAia Model photo",
+    body:  "This is the photo you saved for virtual try-ons. Removing it stops virtual previews until you upload a new one. Your styling history and Closet are not affected.",
+    cta:   "Remove photo",
   },
   "delete-vto-results": {
     title: "Remove Virtual Try-On preview images",
-    body:  "All generated Virtual Try-On preview images will be permanently deleted. Your nAia Model face and body photos are not affected — only the generated previews are removed. Your try-on history (dates and products tried) remains on your account.",
+    body:  "All generated Virtual Try-On preview images will be permanently deleted. Your saved nAia Model photo is not affected — only the generated previews are removed. Your try-on history (dates and products tried) remains on your account.",
     cta:   "Remove preview images",
   },
   "delete-bos-images": {
     title: "Remove Buy or Skip uploaded images",
     body:  "The garment photos you uploaded for Buy or Skip analyses will be permanently deleted. Your Buy or Skip decisions, verdicts, and reasoning are kept — only the uploaded images are removed.",
     cta:   "Remove uploaded images",
+  },
+  "delete-bos-image": {
+    title: "Remove this Buy or Skip photo",
+    body:  "This item's uploaded photo will be permanently deleted. Its decision, verdict, and reasoning stay in your Buy or Skip history.",
+    cta:   "Remove photo",
   },
   "delete-closet-photo": {
     title: "Remove this Closet photo",
@@ -253,12 +274,13 @@ function ClosetPhotoThumb({ src, alt }: { src: string | null; alt: string }) {
 // ── Component ────────────────────────────────────────────────────────────────
 
 export default function Settings() {
-  const { firstName, lastName, email, model, hasVtoResults, hasBosImages, closetPhotos } = useLoaderData<typeof loader>();
+  const { firstName, lastName, email, model, hasVtoResults, hasBosImages, closetPhotos, bosPhotos } = useLoaderData<typeof loader>();
   const fetcher     = useFetcher<typeof action>();
   const revalidator = useRevalidator();
   // Only destructive actions open the confirmation modal; consent is
   // reversible and applies immediately. itemId/itemName carry the specific
-  // Closet item for delete-closet-photo only — every other intent ignores them.
+  // Closet item (delete-closet-photo) or Buy or Skip analysis
+  // (delete-bos-image) — every other intent ignores them.
   const [pending, setPending] = useState<{ intent: DestructiveIntent; itemId?: string; itemName?: string | null } | null>(null);
   const openConfirm = (intent: DestructiveIntent) => setPending({ intent });
   const openConfirmForItem = (intent: DestructiveIntent, itemId: string, itemName: string | null) =>
@@ -313,24 +335,15 @@ export default function Settings() {
           <div className="set-section-eyebrow">My nAia Model</div>
           <h2 className="set-section-title">My nAia Model</h2>
           <p className="sp-shell-desc" style={{ marginBottom: "20px" }}>
-            These are the photos you saved to enable virtual try-ons. Removing them stops virtual previews until you upload new ones. Your styling history and Closet are not affected.
+            This is the photo you saved for virtual try-ons. Removing it stops virtual previews until you upload a new one. Your styling history and Closet are not affected.
           </p>
           <div className="set-controls">
-            {model.hasBody && (
-              <ControlRow
-                intent="delete-model-body"
-                label="Remove saved body photo"
-                description="Permanently deletes your body photo from your nAia Model. Your face photo is kept."
-                buttonLabel="Remove body photo"
-                onOpen={openConfirm}
-              />
-            )}
             {(model.hasFace || model.hasBody) && (
               <ControlRow
                 intent="delete-model-all"
-                label="Remove all saved nAia Model photos"
-                description="Permanently deletes both your face and body photos and withdraws consent to save them."
-                buttonLabel="Remove all photos"
+                label="Remove saved nAia Model photo"
+                description="Permanently deletes the photo you saved for your nAia Model."
+                buttonLabel="Remove photo"
                 onOpen={openConfirm}
               />
             )}
@@ -410,10 +423,30 @@ export default function Settings() {
         <section className="bos-section">
           <div className="set-section-eyebrow">Buy or Skip</div>
           <h2 className="set-section-title">Buy or Skip Uploaded Images</h2>
-          <p className="sp-shell-desc" style={{ marginBottom: "20px" }}>
-            Photos you uploaded for Buy or Skip analyses are stored privately. Removing them keeps your decisions and recommendations but deletes the uploaded images.
+          <p className="sp-shell-desc" style={{ marginBottom: "16px" }}>
+            Photos you uploaded for Buy or Skip analyses are stored privately. You can remove individual photos or remove them all — your decisions and history are always kept.
           </p>
-          <div className="set-controls">
+
+          {bosPhotos.length > 0 && (
+            <div className="set-closet-photo-grid">
+              {bosPhotos.map((item) => (
+                <div key={item.id} className="set-closet-photo-card">
+                  <ClosetPhotoThumb src={item.thumbnailUrl} alt={item.productName ?? "Buy or Skip item"} />
+                  <div className="set-closet-photo-name">{item.productName ?? "Untitled item"}</div>
+                  <button
+                    type="button"
+                    className="sp-btn-outline"
+                    style={{ width: "100%", fontSize: "11px", padding: "7px 10px" }}
+                    onClick={() => openConfirmForItem("delete-bos-image", item.id, item.productName)}
+                  >
+                    Remove Photo
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="set-controls" style={{ marginTop: bosPhotos.length > 0 ? "16px" : 0 }}>
             <ControlRow
               intent="delete-bos-images"
               label="Remove Buy or Skip uploaded images"

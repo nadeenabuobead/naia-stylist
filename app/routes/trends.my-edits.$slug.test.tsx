@@ -67,6 +67,7 @@ vi.mock("~/lib/editorial-reports.server", () => ({
 vi.mock("~/lib/trend-evidence.server", () => ({
   getShopperEvidence: vi.fn(),
   buildShopperEdit: vi.fn(),
+  hydrateShopperEditImages: vi.fn(async (edit: unknown) => edit),
 }));
 
 vi.mock("~/lib/trend-product-recommendation.server", () => ({
@@ -111,7 +112,8 @@ vi.mock("~/components/my-naia/MyNaiaLayout", () => ({
 import React from "react";
 import { useLoaderData } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
-import { getShopperEvidence, buildShopperEdit } from "~/lib/trend-evidence.server";
+import { getShopperEvidence, buildShopperEdit, hydrateShopperEditImages } from "~/lib/trend-evidence.server";
+import { getTrendEditUsageState } from "~/lib/plan/personalised-trend-edit-usage.server";
 import { matchNadineProduct } from "~/lib/trend-product-recommendation.server";
 import MyTrendEditDetail, { loader } from "./trends.my-edits.$slug";
 
@@ -241,6 +243,32 @@ describe("trends/my-edits/:slug loader", () => {
 
     expect(result.generationFailed).toBe(true);
     expect(result.edit).toBeNull();
+  });
+
+  it("re-resolves images through hydrateShopperEditImages on a repeat view with a stored snapshot, without altering any other snapshot content", async () => {
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({ id: "cust-1" } as any);
+    const snapshotEdit = { ...MOCK_EDIT, evidenceClosetItems: [{ name: "Blazer", imageUrl: "https://stale.example.com/old.jpg", closetItemId: "item-1", category: "TOPS", roleNote: "anchor" }] };
+    vi.mocked(getTrendEditUsageState).mockResolvedValueOnce({
+      status: "snapshotted",
+      snapshot: { edit: snapshotEdit, nadineRecommendation: null },
+    } as any);
+    vi.mocked(hydrateShopperEditImages).mockResolvedValueOnce({
+      ...snapshotEdit,
+      evidenceClosetItems: [{ ...snapshotEdit.evidenceClosetItems[0], imageUrl: "https://fresh.example.com/new.jpg" }],
+    } as any);
+
+    const result = await loader({
+      request: new Request("http://localhost/trends/my-edits/spring-2026-soft-structure"),
+      params: { slug: "spring-2026-soft-structure" },
+      context: {},
+    });
+
+    expect(hydrateShopperEditImages).toHaveBeenCalledWith(snapshotEdit, "cust-1");
+    expect(result.edit?.evidenceClosetItems[0].imageUrl).toBe("https://fresh.example.com/new.jpg");
+    expect(result.edit?.evidenceClosetItems[0].name).toBe("Blazer");
+    expect(result.edit?.yourVersion).toBe(MOCK_EDIT.yourVersion);
+    // A repeat view never re-generates or re-counts usage.
+    expect(getShopperEvidence).not.toHaveBeenCalled();
   });
 });
 

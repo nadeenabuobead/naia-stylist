@@ -2,6 +2,7 @@ import prisma from "../db.server";
 import type { TrendReportData } from "./trend-reports";
 import { buildPrivateDownloadUrl, getCloudinaryConfig } from "./cloudinary-admin.server";
 import { scoreItemAttributes, dimensionIdsForSlug } from "./trend-evidence-attribute-scoring.server";
+import { resolveItemImage } from "./styleme/look-image-resolution.server";
 // Used by buildColorMaterialSuffix (Colour Direction's neutral/accent copy
 // boundary) — the same canonical resolver scoreItemAttributes uses, so a
 // garment's role is decided identically everywhere in this file.
@@ -27,6 +28,11 @@ export type ShopperProfileEvidence = {
 };
 
 export type ShopperClosetItemEvidence = {
+  // Optional — absent in pre-existing test fixtures across this file's other
+  // suites. Only used to re-resolve a fresh image at read time
+  // (hydrateShopperEditImages); every scoring/selection rule below already
+  // ignores it entirely.
+  id?: string;
   name: string | null;
   imageUrl: string | null;
   category: string;
@@ -101,6 +107,7 @@ export async function getShopperEvidence(customerId: string): Promise<ShopperEvi
         take: 250,
         orderBy: { createdAt: "desc" },
         select: {
+          id: true,
           name: true,
           imageUrl: true,
           imagePublicId: true,
@@ -175,6 +182,7 @@ export async function getShopperEvidence(customerId: string): Promise<ShopperEvi
       becoming: profile.becoming ?? [],
     } : null,
     closetItems: customer.closetItems.map((item) => ({
+      id: item.id,
       name: item.name,
       imageUrl: item.imageUrl
         ?? (item.imagePublicId && item.imageFormat && cloudinaryCfg
@@ -2271,6 +2279,12 @@ type CustomerStyleEvidence = {
 export type EvidenceClosetItem = {
   name: string;
   imageUrl: string | null;
+  // The ClosetItem this item's image was resolved from — null for the rare
+  // item with no name (filtered upstream) or for snapshots persisted before
+  // this field existed. Lets hydrateShopperEditImages re-resolve a fresh,
+  // non-expired image for an item that's still in the Closet at read time,
+  // without ever rewriting the stored snapshot itself.
+  closetItemId: string | null;
   category: string;
   roleNote: string;
 };
@@ -2522,6 +2536,7 @@ export function buildShopperEdit(
   const toEvidenceClosetItem = ({ item }: DimensionScoredItem): EvidenceClosetItem => ({
     name: item.name!,
     imageUrl: item.imageUrl,
+    closetItemId: item.id ?? null,
     category: item.category,
     roleNote: buildEvidenceItemRoleNote(item, slug),
   });
@@ -2704,5 +2719,65 @@ export function buildShopperEdit(
     worthInvestingStatement,
     coveredClosetCategories,
     partToLeave,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// hydrateShopperEditImages — re-resolves a ShopperEdit's Closet images fresh,
+// at READ TIME, using the same canonical resolver StyleMe/Overview use
+// (resolveItemImage). buildShopperEdit/getShopperEvidence bake a private
+// Closet image into a signed URL that expires 10 minutes after it's built
+// (buildPrivateDownloadUrl) — fine for the response that just generated it,
+// but dead by the time it's read back later: a repeat view this period (the
+// snapshotted branch below) or Admin's historical detail view both read a
+// persisted snapshot that may be hours or weeks old.
+//
+// This NEVER rewrites the stored snapshot — only the in-memory ShopperEdit
+// object handed to the renderer for this one response. Report text, item
+// names, role notes, and scoring are untouched; only which image URL is
+// drawn for an item still present in the customer's Closet changes. An item
+// deleted from the Closet since generation (or an old snapshot predating
+// closetItemId) renders with no image — TrendEditReportBody already omits
+// the <img> entirely when imageUrl is null, so this is the same intentional
+// "name + note, no broken icon" fallback used everywhere else in Trend Edit.
+// ---------------------------------------------------------------------------
+
+export async function hydrateShopperEditImages(
+  edit: ShopperEdit,
+  customerId: string,
+): Promise<ShopperEdit> {
+  const ids = new Set<string>();
+  for (const item of [...edit.evidenceClosetItems, ...edit.routeInItems, ...edit.lookToTryItems]) {
+    if (item.closetItemId) ids.add(item.closetItemId);
+  }
+  if (ids.size === 0) return edit;
+
+  const rows = await prisma.closetItem.findMany({
+    where: { id: { in: [...ids] }, customerId },
+    select: { id: true, imageUrl: true, imagePublicId: true, imageFormat: true },
+  });
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const cloudinaryConfig = getCloudinaryConfig();
+
+  const rehydrate = (item: EvidenceClosetItem): EvidenceClosetItem => {
+    if (!item.closetItemId) return item;
+    const closetItem = byId.get(item.closetItemId);
+    // Deleted since generation — stale baked URL would be broken anyway;
+    // null gives the intentional no-image fallback instead.
+    if (!closetItem) return { ...item, imageUrl: null };
+    return {
+      ...item,
+      imageUrl: resolveItemImage(
+        { closetItemId: item.closetItemId, productImageUrl: null, closetItem },
+        { customerId, cloudinaryConfig },
+      ),
+    };
+  };
+
+  return {
+    ...edit,
+    evidenceClosetItems: edit.evidenceClosetItems.map(rehydrate),
+    routeInItems: edit.routeInItems.map(rehydrate),
+    lookToTryItems: edit.lookToTryItems.map(rehydrate),
   };
 }

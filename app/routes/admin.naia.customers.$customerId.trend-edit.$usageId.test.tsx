@@ -15,7 +15,7 @@
 //   - no raw JSON, schemaVersion, or internal id ever appears in the
 //     rendered HTML
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderToString } from "react-dom/server";
 
 vi.mock("react-router", async (importOriginal) => {
@@ -32,9 +32,12 @@ vi.mock("react-router", async (importOriginal) => {
 });
 vi.mock("~/lib/internal-auth.server", () => ({ requireAdminSession: vi.fn() }));
 vi.mock("~/lib/admin/customer-360.server", () => ({ getAdminCustomerTrendEditDetail: vi.fn() }));
+vi.mock("~/lib/trend-evidence.server", () => ({ hydrateShopperEditImages: vi.fn() }));
 
 import { useLoaderData } from "react-router";
-import AdminTrendEditDetailPage from "./admin.naia.customers.$customerId.trend-edit.$usageId";
+import { getAdminCustomerTrendEditDetail } from "~/lib/admin/customer-360.server";
+import { hydrateShopperEditImages } from "~/lib/trend-evidence.server";
+import AdminTrendEditDetailPage, { loader } from "./admin.naia.customers.$customerId.trend-edit.$usageId";
 import React from "react";
 
 const BASE_EDIT = {
@@ -155,5 +158,55 @@ describe("Admin Trend Edit detail — full snapshot renders the actual report", 
     // the customerId does not appear anywhere else in the markup.
     const withoutBackLink = html.replace('href="/admin/naia/customers/cust-A"', "");
     expect(withoutBackLink).not.toContain("cust-A");
+  });
+});
+
+describe("Admin Trend Edit detail — loader re-resolves images without touching the stored snapshot", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("renders the exact saved snapshot with a freshly re-resolved image, not the (possibly dead) persisted one", async () => {
+    const storedDetail = detailWith({ edit: { ...BASE_EDIT, evidenceClosetItems: [{ name: "Blazer", imageUrl: "https://stale.example.com/old.jpg", closetItemId: "item-1", category: "TOPS", roleNote: "anchor" }] } });
+    // Captured before the loader runs: it reassigns detail.snapshot.edit
+    // (same object reference as storedDetail) to the rehydrated result, so
+    // asserting against storedDetail.snapshot.edit afterwards would compare
+    // against the already-rehydrated value instead of the pre-call one.
+    const originalEditSnapshot = JSON.parse(JSON.stringify(storedDetail.snapshot.edit));
+    (getAdminCustomerTrendEditDetail as any).mockResolvedValue(storedDetail);
+    (hydrateShopperEditImages as any).mockImplementation(async (edit: any) => ({
+      ...edit,
+      evidenceClosetItems: edit.evidenceClosetItems.map((item: any) => ({ ...item, imageUrl: "https://fresh.example.com/new.jpg" })),
+    }));
+
+    const response = await loader({
+      request: new Request("http://localhost/admin/naia/customers/cust-A/trend-edit/usage-1"),
+      params: { customerId: "cust-A", usageId: "usage-1" },
+      context: {} as any,
+    } as any);
+    const body = await (response as Response).json();
+
+    expect(hydrateShopperEditImages).toHaveBeenCalledWith(originalEditSnapshot, "cust-A");
+    expect(body.detail.snapshot.edit.evidenceClosetItems[0].imageUrl).toBe("https://fresh.example.com/new.jpg");
+    // Everything else about the stored snapshot — text, names, role notes — is untouched.
+    expect(body.detail.snapshot.edit.yourVersion).toBe(BASE_EDIT.yourVersion);
+    expect(body.detail.snapshot.edit.evidenceClosetItems[0].name).toBe("Blazer");
+  });
+
+  it("never calls hydrateShopperEditImages for a historical row with no stored snapshot", async () => {
+    (getAdminCustomerTrendEditDetail as any).mockResolvedValue({
+      hasSnapshot: false,
+      snapshot: null,
+      reportTitle: "Modern Tailoring",
+      reportSeason: null,
+      periodLabel: "September 2026",
+      createdAt: "2026-09-01T00:00:00.000Z",
+    });
+
+    await loader({
+      request: new Request("http://localhost/admin/naia/customers/cust-A/trend-edit/usage-2"),
+      params: { customerId: "cust-A", usageId: "usage-2" },
+      context: {} as any,
+    } as any);
+
+    expect(hydrateShopperEditImages).not.toHaveBeenCalled();
   });
 });

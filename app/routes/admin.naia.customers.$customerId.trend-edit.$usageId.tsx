@@ -19,6 +19,7 @@ import {
   getAdminCustomerTrendEditDetail,
   type AdminTrendEditDetail,
 } from "~/lib/admin/customer-360.server";
+import { hydrateShopperEditImages } from "~/lib/trend-evidence.server";
 import { requireAdminSession } from "~/lib/internal-auth.server";
 import TrendEditReportBody, { TREND_EDIT_REPORT_BODY_CSS } from "~/components/trends/TrendEditReportBody";
 
@@ -30,6 +31,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // returns null here, never the record, so a guessed/stale URL can't leak it.
   const detail = await getAdminCustomerTrendEditDetail(customerId, usageId);
   if (!detail) throw new Response("Not found", { status: 404 });
+  // Renders the exact stored snapshot — only the image URLs are re-resolved
+  // fresh for this response (see hydrateShopperEditImages); the snapshot
+  // itself, and everything getAdminCustomerTrendEditDetail returned, is
+  // untouched.
+  if (detail.snapshot) {
+    detail.snapshot.edit = await hydrateShopperEditImages(detail.snapshot.edit, customerId);
+  }
   return Response.json({ customerId, detail });
 }
 

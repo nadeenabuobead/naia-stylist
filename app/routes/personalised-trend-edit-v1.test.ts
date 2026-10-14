@@ -40,6 +40,9 @@ vi.mock("~/lib/editorial-reports.server", () => ({
 vi.mock("~/lib/trend-evidence.server", () => ({
   getShopperEvidence: vi.fn(),
   buildShopperEdit: vi.fn(),
+  // Identity passthrough — this suite exercises usage/snapshot immutability,
+  // not image resolution (covered separately in trend-evidence-hydrate.test.ts).
+  hydrateShopperEditImages: vi.fn(async (edit: unknown) => edit),
 }));
 
 vi.mock("~/lib/trend-product-recommendation.server", () => ({

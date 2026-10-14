@@ -345,17 +345,14 @@ describe("L — explicit destructive button labels", () => {
     );
   });
 
-  it("Remove body photo button label is 'Remove body photo'", () => {
+  it("My nAia Model has one consolidated 'Remove photo' control — single-photo product truth, not separate body/all-photos controls", () => {
     assert.ok(
-      src.includes('buttonLabel="Remove body photo"'),
-      "body photo ControlRow has explicit buttonLabel",
+      src.includes('buttonLabel="Remove photo"'),
+      "consolidated nAia Model ControlRow has explicit buttonLabel",
     );
-  });
-
-  it("Remove all photos button label is 'Remove all photos'", () => {
     assert.ok(
-      src.includes('buttonLabel="Remove all photos"'),
-      "remove-all ControlRow has explicit buttonLabel",
+      !src.includes('buttonLabel="Remove body photo"') && !src.includes('buttonLabel="Remove all photos"'),
+      "the old two-control body/all-photos buttonLabels are gone — collapsed to one control",
     );
   });
 
