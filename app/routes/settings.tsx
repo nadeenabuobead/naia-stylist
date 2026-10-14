@@ -101,7 +101,9 @@ const VALID_INTENTS = new Set([
   "delete-vto-results",
   "delete-bos-images",
   "delete-bos-image",
+  "delete-selected-bos-images",
   "delete-closet-photo",
+  "delete-selected-closet-photos",
   "delete-all-closet-photos",
 ]);
 
@@ -111,7 +113,9 @@ type DestructiveIntent =
   | "delete-vto-results"
   | "delete-bos-images"
   | "delete-bos-image"
+  | "delete-selected-bos-images"
   | "delete-closet-photo"
+  | "delete-selected-closet-photos"
   | "delete-all-closet-photos";
 
 type Intent = DestructiveIntent;
@@ -122,9 +126,27 @@ const SUCCESS_MESSAGES: Record<Intent, string> = {
   "delete-vto-results":       "Your saved Virtual Try-On preview images have been permanently removed.",
   "delete-bos-images":        "Your Buy or Skip uploaded images have been removed. Your decision history has been kept.",
   "delete-bos-image":         "Your Buy or Skip photo has been removed. The decision is kept.",
+  "delete-selected-bos-images": "The selected Buy or Skip photos have been removed. Your decisions and history are kept.",
   "delete-closet-photo":      "Your Closet photo has been removed. The item is kept.",
+  "delete-selected-closet-photos": "The selected Closet photos have been removed. Your Closet items are kept.",
   "delete-all-closet-photos": "All your Closet photos have been removed. Your Closet items and their details are kept.",
 };
+
+// Parses the JSON-array-of-ids formData field used by the multi-select
+// "remove selected photos" intents. Returns null for anything that isn't a
+// non-empty array of non-empty strings — the caller treats that as a 400.
+function parseItemIds(raw: FormDataEntryValue | null): string[] | null {
+  if (typeof raw !== "string" || !raw) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) return null;
+  if (!parsed.every((id) => typeof id === "string" && id.length > 0)) return null;
+  return parsed;
+}
 
 export async function action({ request }: ActionFunctionArgs) {
   const customer = await requireCurrentNaiaCustomer(request);
@@ -169,6 +191,17 @@ export async function action({ request }: ActionFunctionArgs) {
       if (!r.deleted) return data({ ok: false as const, error: "Could not remove that photo. Please try again." }, { status: 404 });
       break;
     }
+    case "delete-selected-bos-images": {
+      const itemIds = parseItemIds(formData.get("itemIds"));
+      if (!itemIds) return data({ ok: false as const, error: "No photos selected." }, { status: 400 });
+      let removed = 0;
+      for (const id of itemIds) {
+        const r = await deleteOneBosImage(id, customer.id);
+        if (r.deleted) removed++;
+      }
+      if (removed === 0) return data({ ok: false as const, error: "Could not remove the selected photos. Please try again." }, { status: 404 });
+      break;
+    }
     case "delete-closet-photo": {
       const itemId = formData.get("itemId");
       if (typeof itemId !== "string" || !itemId) {
@@ -176,6 +209,17 @@ export async function action({ request }: ActionFunctionArgs) {
       }
       const r = await deleteClosetItemPhoto(itemId, customer.id);
       if (!r.deleted) return data({ ok: false as const, error: "Could not remove that photo. Please try again." }, { status: 404 });
+      break;
+    }
+    case "delete-selected-closet-photos": {
+      const itemIds = parseItemIds(formData.get("itemIds"));
+      if (!itemIds) return data({ ok: false as const, error: "No photos selected." }, { status: 400 });
+      let removed = 0;
+      for (const id of itemIds) {
+        const r = await deleteClosetItemPhoto(id, customer.id);
+        if (r.deleted) removed++;
+      }
+      if (removed === 0) return data({ ok: false as const, error: "Could not remove the selected photos. Please try again." }, { status: 404 });
       break;
     }
     case "delete-all-closet-photos": {
@@ -217,10 +261,20 @@ const CONFIRM: Record<DestructiveIntent, { title: string; body: string; cta: str
     body:  "This item's uploaded photo will be permanently deleted. Its decision, verdict, and reasoning stay in your Buy or Skip history.",
     cta:   "Remove photo",
   },
+  "delete-selected-bos-images": {
+    title: "Remove selected photos",
+    body:  "The photos you selected will be permanently deleted. Your Buy or Skip decisions, verdicts, and reasoning are kept — only the selected images are removed.",
+    cta:   "Remove selected",
+  },
   "delete-closet-photo": {
     title: "Remove this Closet photo",
     body:  "This item's photo will be permanently deleted. The item itself — its name, category, and details — stays in your Closet, along with any StyleMe, Trend Edit, or Buy or Skip history that references it.",
     cta:   "Remove photo",
+  },
+  "delete-selected-closet-photos": {
+    title: "Remove selected photos",
+    body:  "The photos you selected will be permanently deleted. Your Closet items and their details are kept — only the selected photos are removed.",
+    cta:   "Remove selected",
   },
   "delete-all-closet-photos": {
     title: "Remove all Closet photos",
@@ -278,13 +332,29 @@ export default function Settings() {
   const fetcher     = useFetcher<typeof action>();
   const revalidator = useRevalidator();
   // Only destructive actions open the confirmation modal; consent is
-  // reversible and applies immediately. itemId/itemName carry the specific
-  // Closet item (delete-closet-photo) or Buy or Skip analysis
-  // (delete-bos-image) — every other intent ignores them.
-  const [pending, setPending] = useState<{ intent: DestructiveIntent; itemId?: string; itemName?: string | null } | null>(null);
+  // reversible and applies immediately. itemIds carries the gallery's
+  // multi-select batch (delete-selected-*) — every other intent ignores it.
+  const [pending, setPending] = useState<{ intent: DestructiveIntent; itemIds?: string[] } | null>(null);
   const openConfirm = (intent: DestructiveIntent) => setPending({ intent });
-  const openConfirmForItem = (intent: DestructiveIntent, itemId: string, itemName: string | null) =>
-    setPending({ intent, itemId, itemName });
+  const openConfirmForSelection = (intent: DestructiveIntent, itemIds: string[]) => setPending({ intent, itemIds });
+
+  // Which photo-management gallery (if any) is currently expanded. Settings
+  // & Privacy's default view never shows every stored photo — the gallery
+  // only opens once the customer explicitly chooses to manage individual
+  // photos, per the "clean controls, not a photo gallery" product direction.
+  const [expandedGallery, setExpandedGallery] = useState<"closet" | "bos" | null>(null);
+  const [closetSelected, setClosetSelected] = useState<Set<string>>(new Set());
+  const [bosSelected, setBosSelected] = useState<Set<string>>(new Set());
+  const toggleSelected = (set: Set<string>, setSet: (s: Set<string>) => void, id: string) => {
+    const next = new Set(set);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    setSet(next);
+  };
+  const closeGallery = () => {
+    setExpandedGallery(null);
+    setClosetSelected(new Set());
+    setBosSelected(new Set());
+  };
 
   const fullName    = [firstName, conciseFamilyName(lastName)].filter(Boolean).join(" ") || null;
   const isSubmitting = fetcher.state !== "idle";
@@ -294,6 +364,9 @@ export default function Settings() {
   useEffect(() => {
     if (actionData?.ok) {
       setPending(null);
+      setExpandedGallery(null);
+      setClosetSelected(new Set());
+      setBosSelected(new Set());
       revalidator.revalidate();
     }
   }, [actionData]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -361,40 +434,65 @@ export default function Settings() {
         <div className="set-section-eyebrow">My Closet Photos</div>
         <h2 className="set-section-title">My Closet Photos</h2>
         <p className="sp-shell-desc" style={{ marginBottom: "16px" }}>
-          Photos you upload to your Closet are stored privately. You can remove individual photos or remove them all without deleting your Closet items.
+          Photos you upload to your Closet are stored privately. You can remove individual photos without deleting the Closet item, or remove all Closet photos at once.
         </p>
 
-        {closetPhotos.length > 0 ? (
+        {expandedGallery !== "closet" ? (
+          <div className="set-gallery-actions" style={{ marginTop: 0 }}>
+            {closetPhotos.length > 0 && (
+              <>
+                <button type="button" className="sp-btn-outline" onClick={() => setExpandedGallery("closet")}>
+                  Choose photos to remove
+                </button>
+                <button type="button" className="sp-btn-outline" onClick={() => openConfirm("delete-all-closet-photos")}>
+                  Remove all photos
+                </button>
+              </>
+            )}
+            <Link to="/closet" className="sp-btn-outline" style={{ display: "inline-block", textDecoration: "none" }}>
+              Go to My Closet
+            </Link>
+          </div>
+        ) : (
           <>
             <div className="set-closet-photo-grid">
-              {closetPhotos.map((item) => (
-                <div key={item.id} className="set-closet-photo-card">
-                  <ClosetPhotoThumb src={item.thumbnailUrl} alt={item.name ?? "Closet item"} />
-                  <div className="set-closet-photo-name">{item.name ?? "Untitled item"}</div>
-                  <button
-                    type="button"
-                    className="sp-btn-outline"
-                    style={{ width: "100%", fontSize: "11px", padding: "7px 10px" }}
-                    onClick={() => openConfirmForItem("delete-closet-photo", item.id, item.name)}
+              {closetPhotos.map((item) => {
+                const selected = closetSelected.has(item.id);
+                return (
+                  <div
+                    key={item.id}
+                    className={`set-closet-photo-card set-select-card${selected ? " set-select-card--selected" : ""}`}
+                    onClick={() => toggleSelected(closetSelected, setClosetSelected, item.id)}
                   >
-                    Remove Photo
-                  </button>
-                </div>
-              ))}
+                    <input
+                      type="checkbox"
+                      className="set-select-checkbox"
+                      checked={selected}
+                      onChange={() => toggleSelected(closetSelected, setClosetSelected, item.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      aria-label={`Select ${item.name ?? "Closet item"}`}
+                    />
+                    <ClosetPhotoThumb src={item.thumbnailUrl} alt={item.name ?? "Closet item"} />
+                    <div className="set-closet-photo-name">{item.name ?? "Untitled item"}</div>
+                  </div>
+                );
+              })}
             </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "12px", marginTop: "16px" }}>
-              <button type="button" className="sp-btn-outline" onClick={() => openConfirm("delete-all-closet-photos")}>
-                Remove All Closet Photos
+            <div className="set-gallery-actions">
+              <span className="set-gallery-count">{closetSelected.size} selected</span>
+              <button
+                type="button"
+                className="sp-btn-primary"
+                disabled={closetSelected.size === 0}
+                onClick={() => openConfirmForSelection("delete-selected-closet-photos", [...closetSelected])}
+              >
+                Remove selected
               </button>
-              <Link to="/closet" className="sp-btn-outline" style={{ display: "inline-block", textDecoration: "none" }}>
-                Go to My Closet
-              </Link>
+              <button type="button" className="sp-btn-ghost" onClick={closeGallery}>
+                Cancel
+              </button>
             </div>
           </>
-        ) : (
-          <Link to="/closet" className="sp-btn-outline" style={{ display: "inline-block", textDecoration: "none" }}>
-            Go to My Closet
-          </Link>
         )}
       </section>
 
@@ -404,16 +502,15 @@ export default function Settings() {
           <div className="set-section-eyebrow">Virtual Try-On</div>
           <h2 className="set-section-title">Virtual Try-On Preview Images</h2>
           <p className="sp-shell-desc" style={{ marginBottom: "20px" }}>
-            Generated try-on preview images are stored privately on your account. Removing them does not affect your nAia Model photos or your try-on history.
+            Generated try-on previews are stored privately on your account. View or remove individual previews in My nAia Model — removing them does not affect your saved nAia Model photo or your try-on history.
           </p>
-          <div className="set-controls">
-            <ControlRow
-              intent="delete-vto-results"
-              label="Remove Virtual Try-On preview images"
-              description="Permanently deletes all generated try-on previews. Your nAia Model and try-on history are kept."
-              buttonLabel="Remove previews"
-              onOpen={openConfirm}
-            />
+          <div className="set-gallery-actions" style={{ marginTop: 0 }}>
+            <Link to="/my-naia-model#try-on-previews" className="sp-btn-outline" style={{ textDecoration: "none" }}>
+              Manage previews
+            </Link>
+            <button type="button" className="sp-btn-outline" onClick={() => openConfirm("delete-vto-results")}>
+              Delete all previews
+            </button>
           </div>
         </section>
       )}
@@ -424,37 +521,59 @@ export default function Settings() {
           <div className="set-section-eyebrow">Buy or Skip</div>
           <h2 className="set-section-title">Buy or Skip Uploaded Images</h2>
           <p className="sp-shell-desc" style={{ marginBottom: "16px" }}>
-            Photos you uploaded for Buy or Skip analyses are stored privately. You can remove individual photos or remove them all — your decisions and history are always kept.
+            Images you upload for Buy or Skip are stored privately. You can remove individual uploaded images or remove them all. Your decisions, recommendations and history are kept.
           </p>
 
-          {bosPhotos.length > 0 && (
-            <div className="set-closet-photo-grid">
-              {bosPhotos.map((item) => (
-                <div key={item.id} className="set-closet-photo-card">
-                  <ClosetPhotoThumb src={item.thumbnailUrl} alt={item.productName ?? "Buy or Skip item"} />
-                  <div className="set-closet-photo-name">{item.productName ?? "Untitled item"}</div>
-                  <button
-                    type="button"
-                    className="sp-btn-outline"
-                    style={{ width: "100%", fontSize: "11px", padding: "7px 10px" }}
-                    onClick={() => openConfirmForItem("delete-bos-image", item.id, item.productName)}
-                  >
-                    Remove Photo
-                  </button>
-                </div>
-              ))}
+          {expandedGallery !== "bos" ? (
+            <div className="set-gallery-actions" style={{ marginTop: 0 }}>
+              <button type="button" className="sp-btn-outline" onClick={() => setExpandedGallery("bos")}>
+                Choose images to remove
+              </button>
+              <button type="button" className="sp-btn-outline" onClick={() => openConfirm("delete-bos-images")}>
+                Remove all images
+              </button>
             </div>
+          ) : (
+            <>
+              <div className="set-closet-photo-grid">
+                {bosPhotos.map((item) => {
+                  const selected = bosSelected.has(item.id);
+                  return (
+                    <div
+                      key={item.id}
+                      className={`set-closet-photo-card set-select-card${selected ? " set-select-card--selected" : ""}`}
+                      onClick={() => toggleSelected(bosSelected, setBosSelected, item.id)}
+                    >
+                      <input
+                        type="checkbox"
+                        className="set-select-checkbox"
+                        checked={selected}
+                        onChange={() => toggleSelected(bosSelected, setBosSelected, item.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        aria-label={`Select ${item.productName ?? "Buy or Skip item"}`}
+                      />
+                      <ClosetPhotoThumb src={item.thumbnailUrl} alt={item.productName ?? "Buy or Skip item"} />
+                      <div className="set-closet-photo-name">{item.productName ?? "Untitled item"}</div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="set-gallery-actions">
+                <span className="set-gallery-count">{bosSelected.size} selected</span>
+                <button
+                  type="button"
+                  className="sp-btn-primary"
+                  disabled={bosSelected.size === 0}
+                  onClick={() => openConfirmForSelection("delete-selected-bos-images", [...bosSelected])}
+                >
+                  Remove selected
+                </button>
+                <button type="button" className="sp-btn-ghost" onClick={closeGallery}>
+                  Cancel
+                </button>
+              </div>
+            </>
           )}
-
-          <div className="set-controls" style={{ marginTop: bosPhotos.length > 0 ? "16px" : 0 }}>
-            <ControlRow
-              intent="delete-bos-images"
-              label="Remove Buy or Skip uploaded images"
-              description="Permanently removes your uploaded garment photos. Your Buy or Skip decisions and history are kept."
-              buttonLabel="Remove uploaded images"
-              onOpen={openConfirm}
-            />
-          </div>
         </section>
       )}
 
@@ -550,7 +669,9 @@ export default function Settings() {
                 disabled={isSubmitting}
                 onClick={() =>
                   fetcher.submit(
-                    pending.itemId ? { intent: pending.intent, itemId: pending.itemId } : { intent: pending.intent },
+                    pending.itemIds
+                      ? { intent: pending.intent, itemIds: JSON.stringify(pending.itemIds) }
+                      : { intent: pending.intent },
                     { method: "post" },
                   )
                 }

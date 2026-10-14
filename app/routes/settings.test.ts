@@ -356,18 +356,14 @@ describe("L — explicit destructive button labels", () => {
     );
   });
 
-  it("VTO button label is 'Remove previews'", () => {
-    assert.ok(
-      src.includes('buttonLabel="Remove previews"'),
-      "VTO ControlRow has explicit buttonLabel",
-    );
+  it("VTO section offers 'Manage previews' and 'Delete all previews' — no duplicated gallery here", () => {
+    assert.ok(src.includes("Manage previews"), "VTO links out to My nAia Model's preview management");
+    assert.ok(src.includes("Delete all previews"), "VTO still offers its own bulk-delete control");
   });
 
-  it("BOS button label is 'Remove uploaded images'", () => {
-    assert.ok(
-      src.includes('buttonLabel="Remove uploaded images"'),
-      "BOS ControlRow has explicit buttonLabel",
-    );
+  it("BOS section offers 'Choose images to remove' and 'Remove all images', not an always-visible gallery", () => {
+    assert.ok(src.includes("Choose images to remove"), "BOS individual-selection entry point exists");
+    assert.ok(src.includes("Remove all images"), "BOS bulk-delete control exists");
   });
 });
 

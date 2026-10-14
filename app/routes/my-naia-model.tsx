@@ -215,7 +215,7 @@ export default function MyNaiaModelRoute() {
       </section>
 
       {/* ── Your Try-On Previews ──────────────────────────────────────────── */}
-      <section className="bos-section">
+      <section className="bos-section" id="try-on-previews">
         <div className="set-section-eyebrow">Your Try-On Previews</div>
         <h2 className="set-section-title">Your Try-On Previews</h2>
         <p className="sp-shell-desc" style={{ marginBottom: "16px" }}>

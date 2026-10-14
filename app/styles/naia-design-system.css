@@ -2705,6 +2705,26 @@ a.mn-action:focus-visible,
   color: rgba(40, 21, 12, 0.75);
 }
 
+/* Multi-select photo-management gallery — only rendered once the customer
+   explicitly opens it (Settings & Privacy's default view never shows every
+   stored photo). The checkbox overlays the thumbnail; the card's border
+   confirms the selection state without needing a separate label. */
+.set-select-card { position: relative; cursor: pointer; }
+.set-select-checkbox {
+  position: absolute; top: 8px; left: 8px; z-index: 2;
+  width: 18px; height: 18px; accent-color: var(--naia-accent);
+}
+.set-select-card .set-closet-photo-img,
+.set-select-card .set-closet-photo-placeholder {
+  border: 2px solid var(--naia-border-mid); transition: border-color 0.15s;
+}
+.set-select-card--selected .set-closet-photo-img,
+.set-select-card--selected .set-closet-photo-placeholder {
+  border-color: var(--naia-accent);
+}
+.set-gallery-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 16px; align-items: center; }
+.set-gallery-count { font-family: var(--naia-ff-ui); font-size: 11px; letter-spacing: 0.1em; color: var(--naia-muted); }
+
 /* ── Personal Styling Analysis (psa-*) ───────────────────────────────────── */
 .psa-status-val { font-family: var(--naia-ff-display); font-weight: 300; font-size: clamp(20px, 3.5vw, 26px); color: var(--naia-accent); margin-top: 8px; line-height: 1.1; }
 .psa-progress-track { height: 3px; background: rgba(40, 21, 12, 0.08); max-width: 360px; overflow: hidden; margin-bottom: 24px; }

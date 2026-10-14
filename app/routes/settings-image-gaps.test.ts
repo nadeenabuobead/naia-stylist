@@ -384,17 +384,17 @@ describe("settings.tsx — VTO and BOS wiring", () => {
     );
   });
 
-  it("component passes delete-vto-results intent to ControlRow", () => {
+  it("VTO's 'delete all previews' control submits the delete-vto-results intent", () => {
     assert.ok(
-      settingsSrc.includes('intent="delete-vto-results"'),
-      "ControlRow for VTO must have intent delete-vto-results",
+      settingsSrc.includes('openConfirm("delete-vto-results")'),
+      "VTO delete-all control must still drive the delete-vto-results intent",
     );
   });
 
-  it("component passes delete-bos-images intent to ControlRow", () => {
+  it("BOS's 'remove all images' control submits the delete-bos-images intent", () => {
     assert.ok(
-      settingsSrc.includes('intent="delete-bos-images"'),
-      "ControlRow for BOS must have intent delete-bos-images",
+      settingsSrc.includes('openConfirm("delete-bos-images")'),
+      "BOS delete-all control must still drive the delete-bos-images intent",
     );
   });
 });
