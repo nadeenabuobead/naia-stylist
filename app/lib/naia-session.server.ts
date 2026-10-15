@@ -75,8 +75,55 @@ export async function createNaiaSession(
 }
 
 // ---------------------------------------------------------------------------
+// Transient database connectivity — a live staging incident proved this
+// must NEVER be collapsed into "no session". The two are different states:
+// "not authenticated" (a real, valid DB answer: no row) must send the
+// customer to sign in; "couldn't even check" (the DB itself was
+// unreachable) must not — a currently-signed-in customer must never be
+// bounced into fresh Shopify authentication just because the database had
+// a bad moment. DatabaseUnavailableError exists so the distinction survives
+// all the way up to wherever it's actually handled (the root ErrorBoundary,
+// not requireCurrentNaiaCustomer's login-redirect branch).
+// ---------------------------------------------------------------------------
+
+const TRANSIENT_PRISMA_ERROR_CODES = new Set([
+  "P1001", // Can't reach database server
+  "P1002", // The database server was reached but timed out
+  "P1008", // Operations timed out
+  "P1017", // Server has closed the connection
+]);
+
+export class DatabaseUnavailableError extends Error {
+  constructor(cause: unknown) {
+    super("Database temporarily unavailable");
+    this.name = "DatabaseUnavailableError";
+    this.cause = cause;
+  }
+}
+
+function isTransientDatabaseError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const code = (error as { code?: string }).code;
+  if (code && TRANSIENT_PRISMA_ERROR_CODES.has(code)) return true;
+  // Connection-pool exhaustion surfaces as a PrismaClientInitializationError
+  // with no stable .code at all — recognized by name + the exact phrase
+  // Prisma emits ("Timed out fetching a new connection from the connection
+  // pool"), not by code, since there isn't one.
+  const name = (error as { name?: string }).name;
+  const message = (error as { message?: string }).message ?? "";
+  if (name === "PrismaClientInitializationError" && /connection pool/i.test(message)) return true;
+  return false;
+}
+
+// ---------------------------------------------------------------------------
 // Resolve a session from an inbound request.
-// Returns the Customer (with onboardingProfile) or null.
+// Returns the Customer (with onboardingProfile), or null — strictly for the
+// case where the database was successfully reached and genuinely has no
+// matching, unexpired row. A transient connectivity failure throws
+// DatabaseUnavailableError instead of returning null, so a caller can never
+// mistake "couldn't check" for "not signed in". Any other, unclassified
+// error is rethrown as-is — only the known transient-connectivity class
+// gets this special treatment.
 // ---------------------------------------------------------------------------
 
 export async function resolveNaiaSession(request: Request) {
@@ -85,10 +132,16 @@ export async function resolveNaiaSession(request: Request) {
 
   const tokenHash = hashToken(rawToken);
 
-  const session = await prisma.naiaSession.findUnique({
-    where:   { tokenHash },
-    include: { customer: { include: { onboardingProfile: true } } },
-  });
+  let session;
+  try {
+    session = await prisma.naiaSession.findUnique({
+      where:   { tokenHash },
+      include: { customer: { include: { onboardingProfile: true } } },
+    });
+  } catch (error) {
+    if (isTransientDatabaseError(error)) throw new DatabaseUnavailableError(error);
+    throw error;
+  }
 
   if (!session) return null;
 

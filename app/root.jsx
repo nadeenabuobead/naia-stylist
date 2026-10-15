@@ -1,4 +1,4 @@
-import { Links, Meta, Outlet, Scripts, ScrollRestoration, useLocation } from "react-router";
+import { Links, Meta, Outlet, Scripts, ScrollRestoration, useLocation, useRouteError, isRouteErrorResponse } from "react-router";
 import { useEffect } from "react";
 
 function ScrollToTop() {
@@ -11,7 +11,13 @@ export function meta() {
   return [{ title: "nAia" }];
 }
 
-export default function App() {
+// Exported separately from the default App component (rather than inlined
+// in one function) so the full <html>/<head>/<body> document shell is
+// guaranteed to wrap BOTH the normal route tree and the ErrorBoundary below
+// — React Router's documented pattern for this. Without it, an error
+// bubbling up from deep in the route tree would leave the ErrorBoundary
+// with no document shell to render into.
+export function Layout({ children }) {
   return (
     <html lang="en">
       <head>
@@ -59,10 +65,80 @@ export default function App() {
       <body>
         <script dangerouslySetInnerHTML={{ __html: `(function(){document.cookie='naia_customer_data=; path=/; max-age=0; SameSite=Lax';try{sessionStorage.removeItem('naia_token');}catch(e){}if(window.self!==window.top){document.addEventListener('click',function(e){var a=e.target.closest('a');if(a&&a.href&&a.href.startsWith(window.location.origin)){e.preventDefault();window.location.href=a.href;}});}})();` }} />
         <ScrollToTop />
-        <Outlet />
+        {children}
         <ScrollRestoration />
         <Scripts />
       </body>
     </html>
+  );
+}
+
+export default function App() {
+  return <Outlet />;
+}
+
+// Root-level ErrorBoundary — catches any uncaught loader/action/render
+// error from anywhere in the route tree that doesn't have its own more
+// specific boundary. This is deliberately the ONE shared boundary for the
+// whole app rather than one per route.
+//
+// Never renders error.message, error.stack, a Prisma error, or any
+// internal ID — a transient database outage (the proven live case this was
+// added for) and any other unexpected exception both get the exact same
+// generic, branded copy. TRY AGAIN does a full page reload of the current
+// URL — the simplest, most reliable retry: it re-runs every loader fresh,
+// including whatever failed the first time.
+export function ErrorBoundary() {
+  const error = useRouteError();
+  const is404 = isRouteErrorResponse(error) && error.status === 404;
+
+  const heading = is404 ? "Page not found" : "Something went wrong";
+  const message = is404
+    ? "This page doesn't exist."
+    : "We couldn't load this right now. Please try again.";
+
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "24px",
+        textAlign: "center",
+        fontFamily: "var(--ff-body)",
+        background: "var(--c-bg)",
+        color: "var(--c-ink)",
+      }}
+    >
+      <div>
+        <p style={{ fontFamily: "var(--ff-display)", fontSize: "1.1rem", fontWeight: 600, opacity: 0.85, margin: "0 0 8px" }}>
+          {heading}
+        </p>
+        <p style={{ fontSize: "0.95rem", opacity: 0.7, margin: "0 0 28px" }}>
+          {message}
+        </p>
+        {!is404 && (
+          <button
+            type="button"
+            onClick={() => { if (typeof window !== "undefined") window.location.reload(); }}
+            style={{
+              fontFamily: "var(--ff-ui)",
+              fontSize: "0.85rem",
+              fontWeight: 600,
+              letterSpacing: "0.02em",
+              color: "var(--c-burg)",
+              background: "transparent",
+              border: "1px solid var(--c-burg)",
+              borderRadius: "999px",
+              padding: "11px 28px",
+              cursor: "pointer",
+            }}
+          >
+            TRY AGAIN
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
