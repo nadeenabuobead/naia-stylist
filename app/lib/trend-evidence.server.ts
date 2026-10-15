@@ -713,7 +713,7 @@ const PERSONAL_EDIT_RULES: Record<string, PersonalEditRules> = {
       },
     ],
     lookToTryPassportOnly:
-      "Wear a tailored wide-leg trouser with a fine knit above. One structured piece alongside one relaxed counterpart — keep the shoe flat and accessories simple.",
+      "Wear a tailored wide-leg trouser with a fine knit above. One structured piece alongside one relaxed counterpart — keep the shoe simple and accessories minimal.",
   },
 
   "spring-2026-colour-direction": {
@@ -798,7 +798,7 @@ const PERSONAL_EDIT_RULES: Record<string, PersonalEditRules> = {
       },
     ],
     lookToTryPassportOnly:
-      "Wear cream trousers and a simple knit, or washed denim with a fine top — add one clear accent through a bag or flat. One considered note; everything else calm.",
+      "Wear cream trousers and a simple knit, or washed denim with a fine top — add one clear accent through a bag or shoe. One considered note; everything else calm.",
   },
 };
 
@@ -1302,6 +1302,76 @@ function categoriesAreWearablePair(catA: string, catB: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Garment-compatibility guard (beyond category).
+//
+// categoriesAreWearablePair only catches a clothing-category clash — any
+// ACCESSORIES/BAGS/SHOES item passes through unconditionally regardless of
+// what it actually is. That let Colour Direction combine a necktie with a
+// half-zip knit sweater (QA: "Cream Half-Zip Knit Sweater + Burgundy Wool
+// Tie" — a tie has no collar to knot around) purely because TOPS+ACCESSORIES
+// is a legal category pair. It also let Soft Structure/Modern Tailoring
+// combine a structured blazer with a bulky-neckline knit (half-zip,
+// turtleneck, cable) without accounting for the layering bulk at the collar.
+//
+// This guard is ANDed with categoriesAreWearablePair at every pairing call
+// site. It fails conservatively — a positive match of a known-incompatible
+// combination returns false; anything it can't recognize (missing
+// subcategory, an item type it has no rule for) passes through unaffected,
+// same as the category guard above.
+// ---------------------------------------------------------------------------
+
+const NECKWEAR_PATTERN = /\bties?\b|necktie|bow[\s-]?tie|cravat|ascot/i;
+const COLLARED_TOP_PATTERN = /\b(shirts?|blouses?|oxford|button[\s-]?(down|up)|popover|polo)\b/i;
+const BULKY_KNIT_NECKLINE_PATTERN = /half[\s-]?zip|turtle[\s-]?neck|roll[\s-]?neck|funnel[\s-]?neck|mock[\s-]?neck|cowl[\s-]?neck|chunky|cable[\s-]?knit/i;
+const TAILORED_OUTER_PATTERN = /blazer|suit jacket|tailored (jacket|coat)/i;
+
+function isNeckwear(item: ShopperClosetItemEvidence): boolean {
+  return NECKWEAR_PATTERN.test(item.subcategory ?? "");
+}
+
+function hasCollar(item: ShopperClosetItemEvidence): boolean {
+  return COLLARED_TOP_PATTERN.test(item.subcategory ?? "") || COLLARED_TOP_PATTERN.test(item.name ?? "");
+}
+
+function isBulkyKnitNeckline(item: ShopperClosetItemEvidence): boolean {
+  return BULKY_KNIT_NECKLINE_PATTERN.test(item.subcategory ?? "") || BULKY_KNIT_NECKLINE_PATTERN.test(item.material ?? "");
+}
+
+function isStructuredTailoredOuter(item: ShopperClosetItemEvidence): boolean {
+  if (item.category !== "OUTERWEAR") return false;
+  if (TAILORED_OUTER_PATTERN.test(item.subcategory ?? "") || TAILORED_OUTER_PATTERN.test(item.name ?? "")) return true;
+  return item.fitProfile === "tailored" || item.fitProfile === "structured";
+}
+
+function garmentsAreCompatiblePair(a: ShopperClosetItemEvidence, b: ShopperClosetItemEvidence): boolean {
+  // Neckwear only makes sense against a collared top — a knit, a dress, or
+  // an outerwear piece gives it nothing to sit against.
+  const neckwear = isNeckwear(a) ? a : isNeckwear(b) ? b : null;
+  if (neckwear) {
+    const partner = neckwear === a ? b : a;
+    if (!hasCollar(partner)) return false;
+  }
+
+  // A bulky knit neckline (half-zip, turtleneck, cable, etc.) adds exactly
+  // the kind of bulk a tailored blazer's collar/lapel needs to sit flat
+  // against — don't recommend the two layered together.
+  const tailored = isStructuredTailoredOuter(a) ? a : isStructuredTailoredOuter(b) ? b : null;
+  if (tailored) {
+    const partner = tailored === a ? b : a;
+    if (partner.category === "TOPS" && isBulkyKnitNeckline(partner)) return false;
+  }
+
+  return true;
+}
+
+// Combined gate used at every pairing call site: category compatibility AND
+// garment-level compatibility. Takes the full items (not just effective
+// category strings) so the garment-level checks above have what they need.
+function itemsAreWearablePair(a: ShopperClosetItemEvidence, b: ShopperClosetItemEvidence, catA: string, catB: string): boolean {
+  return categoriesAreWearablePair(catA, catB) && garmentsAreCompatiblePair(a, b);
+}
+
+// ---------------------------------------------------------------------------
 // Section-specific evidence selection.
 //
 // Root-cause fix: the old pipeline computed one ranked top-2 array and
@@ -1359,7 +1429,7 @@ function pickWearablePartner(
 ): DimensionScoredItem | null {
   for (const m of pool) {
     if (m.item === anchor.item || exclude.has(m.item)) continue;
-    if (categoriesAreWearablePair(getEffectiveCategory(anchor.item, slug), getEffectiveCategory(m.item, slug))) {
+    if (itemsAreWearablePair(anchor.item, m.item, getEffectiveCategory(anchor.item, slug), getEffectiveCategory(m.item, slug))) {
       return m;
     }
   }
@@ -1470,7 +1540,7 @@ function pickDiverseRoleMatch(
     m.item !== anchor.item &&
     !exclude.has(m.item) &&
     m.dimensionId === dimensionId &&
-    categoriesAreWearablePair(getEffectiveCategory(anchor.item, slug), getEffectiveCategory(m.item, slug)),
+    itemsAreWearablePair(anchor.item, m.item, getEffectiveCategory(anchor.item, slug), getEffectiveCategory(m.item, slug)),
   );
   return pickBestDistinct(candidates, avoidSignatures, slug);
 }
@@ -1607,7 +1677,7 @@ function buildALookToTry(
   const secondEffCat = second ? getEffectiveCategory(second, slug) : null;
 
   // Two named items — only combine if categories are wearable together.
-  const pairOk = second && categoriesAreWearablePair(topEffCat, secondEffCat!);
+  const pairOk = second && itemsAreWearablePair(top, second, topEffCat, secondEffCat!);
 
   if (pairOk && second) {
     const secName = second.name!;
@@ -1618,20 +1688,20 @@ function buildALookToTry(
       const outerName = top.category === "OUTERWEAR" ? name : secName;
       const innerName = top.category === "OUTERWEAR" ? secName : name;
       if (isLayerPair) {
-        return `Your ${outerName} open over a simple fine knit, worn with your ${innerName} and a clean flat. Keep the shoe simple so the proportion carries.${ctxClose(true)}`;
+        return `Your ${outerName} open over a simple fine knit, worn with your ${innerName} and a clean flat or loafer. Keep the shoe simple so the proportion carries.${ctxClose(true)}`;
       }
       if (top.category === "DRESSES" && second.category === "OUTERWEAR") {
-        return `Your ${name} with your ${secName} worn open above. Clean flat or pointed shoe; no other additions needed.${ctxClose(true)}`;
+        return `Your ${name} with your ${secName} worn open above. A clean flat, loafer, or minimal sneaker; no other additions needed.${ctxClose(true)}`;
       }
-      return `Your ${name} with your ${secName}. A clean pointed flat and no further additions — one proportion statement per look.${ctxClose(true)}`;
+      return `Your ${name} with your ${secName}. A simple leather shoe or loafer and no further additions — one proportion statement per look.${ctxClose(true)}`;
     }
     if (slug === "modern-tailoring-spring-2026") {
       const hasBottom = top.category === "BOTTOMS" || second.category === "BOTTOMS";
       const hasDress = top.category === "DRESSES" || second.category === "DRESSES";
       if (!hasBottom && !hasDress) {
-        return `Your ${name} with your ${secName}, worn with wide-leg denim or a fluid trouser below. Clean flat; keep everything else — bag, jewellery — minimal so the proportion contrast reads.${ctxClose(true)}`;
+        return `Your ${name} with your ${secName}, worn with wide-leg denim or a fluid trouser below. A clean flat or loafer; keep everything else — bag, jewellery — minimal so the proportion contrast reads.${ctxClose(true)}`;
       }
-      return `Your ${name} with your ${secName}. Clean flat or simple leather shoe; keep everything else — bag, jewellery — minimal so the proportion contrast reads.${ctxClose(true)}`;
+      return `Your ${name} with your ${secName}. A clean flat, loafer, or simple leather shoe; keep everything else — bag, jewellery — minimal so the proportion contrast reads.${ctxClose(true)}`;
     }
     if (slug === "spring-2026-colour-direction") {
       // Role-aware (see buildBestRouteIn's colour-direction branch for the
@@ -1654,31 +1724,31 @@ function buildALookToTry(
   // Incompatible pair or single match — use strongest item + generic complement.
   if (slug === "spring-2026-soft-structure") {
     if (top.category === "OUTERWEAR") {
-      return `Your ${name} worn open over a fine knit or simple top, with a fluid wide-leg trouser and a clean flat. The shape does the work — keep everything underneath quiet.${ctxClose(false)}`;
+      return `Your ${name} worn open over a fine knit or simple top, with a fluid wide-leg trouser and a clean flat or loafer. The shape does the work — keep everything underneath quiet.${ctxClose(false)}`;
     }
     if (top.category === "BOTTOMS") {
-      return `Your ${name} with a fine knit or simple tucked top above, and a clean flat. Keep the top contained so the cut at the bottom carries.${ctxClose(false)}`;
+      return `Your ${name} with a fine knit or simple tucked top above, and a clean flat or loafer. Keep the top contained so the cut at the bottom carries.${ctxClose(false)}`;
     }
     if (top.category === "DRESSES") {
-      return `Your ${name} worn alone with a clean pointed flat. One piece covers the whole direction — no other additions needed.${ctxClose(false)}`;
+      return `Your ${name} worn alone with a simple leather shoe or loafer. One piece covers the whole direction — no other additions needed.${ctxClose(false)}`;
     }
-    return `Your ${name} with a clean wide-leg trouser and a flat. Keep everything above the trouser quieter so the proportion reads.${ctxClose(false)}`;
+    return `Your ${name} with a clean wide-leg trouser and a simple flat or loafer. Keep everything above the trouser quieter so the proportion reads.${ctxClose(false)}`;
   }
 
   if (slug === "modern-tailoring-spring-2026") {
     if (topEffCat === "OUTERWEAR") {
-      return `Your ${name} over a relaxed knit or jersey, with wide-leg denim or a fluid skirt and a clean flat. One structured piece; everything else stays relaxed.${ctxClose(false)}`;
+      return `Your ${name} over a relaxed knit or jersey, with wide-leg denim or a fluid skirt and a clean flat or loafer. One structured piece; everything else stays relaxed.${ctxClose(false)}`;
     }
     if (topEffCat === "BOTTOMS") {
-      return `Your ${name} with a fine knit or soft jersey above and a clean flat shoe. The contrast between the two pieces is the complete look.${ctxClose(false)}`;
+      return `Your ${name} with a fine knit or soft jersey above and a clean flat or loafer. The contrast between the two pieces is the complete look.${ctxClose(false)}`;
     }
-    return `Your ${name} with a structured jacket or wide-leg trouser as the tailored anchor. Clean flat; everything else minimal.${ctxClose(false)}`;
+    return `Your ${name} with a structured jacket or wide-leg trouser as the tailored anchor. A clean flat or loafer; everything else minimal.${ctxClose(false)}`;
   }
 
   if (slug === "spring-2026-colour-direction") {
     if (topRole === "accent-colour") {
       if (top.category === "BAGS") {
-        return `Your ${name} as the accent note — pair with a quiet base of cream trousers and a simple white or ivory top, and a flat shoe. One colour note; everything else neutral.`;
+        return `Your ${name} as the accent note — pair with a quiet base of cream trousers and a simple white or ivory top, and a simple flat or loafer. One colour note; everything else neutral.`;
       }
       if (top.category === "SHOES") {
         return `Your ${name} at ground level against a quiet outfit — cream or stone trousers, a fine white knit, and no further colour. One note from the ground up.`;
@@ -1688,7 +1758,7 @@ function buildALookToTry(
     return `Your ${name} as the base — add one clear accent in a single deliberate colour, whether a bag, shoe, top, skirt, or trouser. Keep the rest neutral.`;
   }
 
-  return `Your ${name} with quieter, simpler pieces. Clean flat shoe; keep accessories minimal.`;
+  return `Your ${name} with quieter, simpler pieces. A simple flat or loafer; keep accessories minimal.`;
 }
 
 // Soft Structure previously had an OUTCOME C override here: its old
@@ -1762,7 +1832,7 @@ function buildBestRouteIn(
 
   if (slug === "spring-2026-soft-structure") {
     if (second) {
-      const pairOk = categoriesAreWearablePair(top.category, second.category);
+      const pairOk = itemsAreWearablePair(top, second, top.category, second.category);
       if (pairOk) {
         const outerwearName = top.category === "OUTERWEAR" ? name : second.name!;
         const otherName = top.category === "OUTERWEAR" ? second.name! : name;
@@ -1791,7 +1861,7 @@ function buildBestRouteIn(
   if (slug === "modern-tailoring-spring-2026") {
     const topEffCat = getEffectiveCategory(top, slug);
     if (second) {
-      const pairOk = categoriesAreWearablePair(topEffCat, getEffectiveCategory(second, slug));
+      const pairOk = itemsAreWearablePair(top, second, topEffCat, getEffectiveCategory(second, slug));
       if (pairOk) {
         return `Your ${name} ${clothingVerb(name)} the tailored anchor. Your ${second.name!} ${clothingVerb(second.name!)} the relaxed counterpart. The principle is contrast between the two — the structured piece and the easy piece — not matching formality across the outfit.`;
       }
@@ -2141,54 +2211,54 @@ const PASSPORT_LOOK_VARIANTS: Partial<Record<
 >> = {
   "spring-2026-soft-structure": {
     "work-meetings": {
-      "clean-polished": "A wide-leg trouser with a fine knit tucked in, flat shoe. The trouser carries the proportion — keep everything above it simpler. This holds as-is for work or meetings.",
-      "fluid-ease":     "A wide-leg trouser with a soft tucked knit above, flat shoe. The ease is in the width — keep the top contained so the shape reads. This holds for work or meetings without further adjustment.",
+      "clean-polished": "A wide-leg trouser with a fine knit tucked in, flat or loafer. The trouser carries the proportion — keep everything above it simpler. This holds as-is for work or meetings.",
+      "fluid-ease":     "A wide-leg trouser with a soft tucked knit above, flat or loafer. The ease is in the width — keep the top contained so the shape reads. This holds for work or meetings without further adjustment.",
       "expressive":     "A wide-leg trouser with one considered piece above — a fine knit or a clean top with a single detail. Keep everything else plain. This holds for work or meetings.",
-      "neutral":        "A wide-leg trouser with a simple fine knit above, flat shoe. One proportioned piece; everything else calm. This holds for work or meetings.",
+      "neutral":        "A wide-leg trouser with a simple fine knit above, flat or loafer. One proportioned piece; everything else calm. This holds for work or meetings.",
     },
     "events": {
       "clean-polished": "A fluid midi dress in a fabric that holds its line — crepe, viscose, or dry-hand jersey. One piece covers the direction. Keep shoe simple and accessories minimal.",
-      "fluid-ease":     "A draped midi dress worn alone with a clean flat. The ease is already in the drape — nothing needs to be added.",
+      "fluid-ease":     "A draped midi dress worn alone with a clean flat or loafer. The ease is already in the drape — nothing needs to be added.",
       "expressive":     "A midi dress in a fabric with movement — worn with a single considered accessory. One gesture; everything else quiet.",
       "neutral":        "A fluid midi dress worn alone with a clean shoe. One piece, full direction.",
     },
     "work-meetings-events": {
-      "clean-polished": "A longline blazer open over a fine knit with wide-leg trousers, clean flat. Keep the shoe simple and accessories minimal so the shape carries. This moves from work to evening without adjustment.",
+      "clean-polished": "A longline blazer open over a fine knit with wide-leg trousers, clean flat or loafer. Keep the shoe simple and accessories minimal so the shape carries. This moves from work to evening without adjustment.",
       "fluid-ease":     "Wide-leg trousers with a soft knit and a longline open blazer. The ease is in the bottom; the blazer adds structure above. This range works from meetings to dinner.",
-      "expressive":     "A longline blazer open over a fine knit, wide-leg trousers, clean flat. One composed gesture; everything else quiet. Holds from work to events.",
+      "expressive":     "A longline blazer open over a fine knit, wide-leg trousers, clean flat or loafer. One composed gesture; everything else quiet. Holds from work to events.",
       "neutral":        "A longline blazer open over a fine knit, wide trousers, simple shoe. One proportioned look that moves across most contexts.",
     },
     "none": {
       "clean-polished": "A longline blazer open over a fine knit with wide-leg trousers. Keep the shoe simple and accessories minimal so the shape carries.",
-      "fluid-ease":     "A wide-leg trouser with a soft fine knit above, clean flat. One proportioned piece; everything around it quieter.",
+      "fluid-ease":     "A wide-leg trouser with a soft fine knit above, clean flat or loafer. One proportioned piece; everything around it quieter.",
       "expressive":     "A wide-leg trouser or draped midi dress, paired with a single contained top. One gesture; everything else plain.",
       "neutral":        "A longline blazer open over a fine knit and wide-leg trousers. Keep the shoe simple and accessories minimal so the shape carries.",
     },
   },
   "modern-tailoring-spring-2026": {
     "work-meetings": {
-      "clean-polished": "A well-cut blazer over a fine knit, wide-leg trouser, flat shoe. One tailored piece against one relaxed counterpart — the contrast between them holds for work without the rigidity of a suit.",
-      "fluid-ease":     "A wide-leg trouser with a soft jersey or fine knit above, flat. The relaxed top is the contrast the tailored bottom needs. Holds for work as-is.",
+      "clean-polished": "A well-cut blazer over a fine knit, wide-leg trouser, flat or loafer. One tailored piece against one relaxed counterpart — the contrast between them holds for work without the rigidity of a suit.",
+      "fluid-ease":     "A wide-leg trouser with a soft jersey or fine knit above, flat or loafer. The relaxed top is the contrast the tailored bottom needs. Holds for work as-is.",
       "expressive":     "A longline blazer over a loose, fluid jersey or oversized knit, wide trouser. One structured piece; the relaxed counterpart is deliberate, not casual. Holds for work.",
-      "neutral":        "A tailored wide-leg trouser with a fine knit above, flat shoe. One structured piece against one relaxed — the contrast is the look. Holds for work.",
+      "neutral":        "A tailored wide-leg trouser with a fine knit above, flat or loafer. One structured piece against one relaxed — the contrast is the look. Holds for work.",
     },
     "events": {
-      "clean-polished": "A tailored wide-leg trouser with a fine knit or simple silk top, clean heel or pointed flat. The tailored bottom carries the occasion register without suiting.",
+      "clean-polished": "A tailored wide-leg trouser with a fine knit or simple silk top, clean heel or simple leather shoe. The tailored bottom carries the occasion register without suiting.",
       "fluid-ease":     "A longline blazer over a fluid trouser or skirt, simple top underneath. The blazer is the tailored note; everything else stays soft.",
       "expressive":     "A waistcoat over a fluid wide-leg trouser or skirt, with a simple top underneath. The waistcoat reads as the considered element; the rest stays relaxed.",
-      "neutral":        "A tailored wide-leg trouser with a simple knit above, clean pointed shoe. One tailored piece; one relaxed counterpart. The contrast does the work.",
+      "neutral":        "A tailored wide-leg trouser with a simple knit above, clean leather shoe. One tailored piece; one relaxed counterpart. The contrast does the work.",
     },
     "work-meetings-events": {
-      "clean-polished": "A well-cut blazer over a fine knit, wide-leg trouser, clean flat or low heel. The contrast between the tailored piece and the relaxed knit holds from work to dinner.",
-      "fluid-ease":     "A wide-leg tailored trouser with a soft knit or jersey above, flat. The ease in the top is the contrast the structured bottom needs. Works across professional and evening contexts.",
-      "expressive":     "A tailored trouser with a considered top — something relaxed but intentional — flat shoe. One structured piece; the counterpart is where the expression lives.",
-      "neutral":        "A tailored wide-leg trouser with a fine knit above, clean flat. One piece carries the register; the counterpart keeps it wearable across more contexts.",
+      "clean-polished": "A well-cut blazer over a fine knit, wide-leg trouser, a simple flat, loafer, or low heel. The contrast between the tailored piece and the relaxed knit holds from work to dinner.",
+      "fluid-ease":     "A wide-leg tailored trouser with a soft knit or jersey above, flat or loafer. The ease in the top is the contrast the structured bottom needs. Works across professional and evening contexts.",
+      "expressive":     "A tailored trouser with a considered top — something relaxed but intentional — flat or loafer. One structured piece; the counterpart is where the expression lives.",
+      "neutral":        "A tailored wide-leg trouser with a fine knit above, clean flat or loafer. One piece carries the register; the counterpart keeps it wearable across more contexts.",
     },
     "none": {
-      "clean-polished": "A tailored wide-leg trouser with a fine knit above. One structured piece alongside one relaxed counterpart — keep the shoe flat and accessories simple.",
+      "clean-polished": "A tailored wide-leg trouser with a fine knit above. One structured piece alongside one relaxed counterpart — keep the shoe simple and accessories minimal.",
       "fluid-ease":     "A longline blazer over a relaxed knit or jersey with wide-leg denim or a fluid skirt. One structured piece; everything else stays relaxed.",
       "expressive":     "A tailored trouser with a considered relaxed top — a loose knit or fluid jersey. The proportion contrast between them is the look.",
-      "neutral":        "A tailored wide-leg trouser with a fine knit above. One structured piece alongside one relaxed counterpart — keep the shoe flat and accessories simple.",
+      "neutral":        "A tailored wide-leg trouser with a fine knit above. One structured piece alongside one relaxed counterpart — keep the shoe simple and accessories minimal.",
     },
   },
   "spring-2026-colour-direction": {

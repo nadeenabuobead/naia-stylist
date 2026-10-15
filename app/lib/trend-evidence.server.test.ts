@@ -827,6 +827,179 @@ describe("buildShopperEdit — correction-pass fixes", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Garment-compatibility guard (QA: manual Trend Edit quality review)
+//
+// categoriesAreWearablePair only ever checked clothing-category clash — any
+// ACCESSORIES/BAGS/SHOES item passed through unconditionally regardless of
+// what it actually was. Two live QA failures confirmed this: a necktie
+// combined with a half-zip knit sweater with no collar to knot around
+// (Colour Direction), and a tailored blazer combined with the same bulky
+// half-zip knit with no account for layering bulk at the collar (Soft
+// Structure). Both must now fall back to a single-item recommendation
+// instead of asserting the incompatible pair.
+// ---------------------------------------------------------------------------
+
+describe("buildShopperEdit — garment-compatibility guard", () => {
+  it("Colour Direction: a necktie does not combine with a half-zip knit sweater (no collar to knot around)", () => {
+    const evidence = makeEvidence({
+      closetItems: [
+        {
+          name: "Cream Half-Zip Knit Sweater",
+          imageUrl: null,
+          category: "TOPS",
+          subcategory: "half-zip",
+          primaryColor: "cream",
+          styleTags: [],
+          occasions: [],
+          material: "wool",
+        },
+        {
+          name: "Burgundy Wool Tie",
+          imageUrl: null,
+          category: "ACCESSORIES",
+          subcategory: "tie",
+          primaryColor: "burgundy",
+          styleTags: [],
+          occasions: [],
+          material: "wool",
+        },
+      ],
+    });
+    const edit = buildShopperEdit(COLOUR_DIRECTION_REPORT, evidence);
+    expect(edit.aLookToTry).toContain("Cream Half-Zip Knit Sweater");
+    expect(edit.aLookToTry).not.toMatch(/tie/i);
+    expect(edit.yourBestRouteIn).not.toMatch(/tie/i);
+  });
+
+  it("Colour Direction: a necktie DOES combine with a collared shirt — the guard isn't a blanket neckwear ban", () => {
+    const evidence = makeEvidence({
+      closetItems: [
+        {
+          name: "White Oxford Shirt",
+          imageUrl: null,
+          category: "TOPS",
+          subcategory: "shirt",
+          primaryColor: "white",
+          styleTags: [],
+          occasions: [],
+          material: "cotton",
+        },
+        {
+          name: "Burgundy Wool Tie",
+          imageUrl: null,
+          category: "ACCESSORIES",
+          subcategory: "tie",
+          primaryColor: "burgundy",
+          styleTags: [],
+          occasions: [],
+          material: "wool",
+        },
+      ],
+    });
+    const edit = buildShopperEdit(COLOUR_DIRECTION_REPORT, evidence);
+    expect(edit.aLookToTry).toContain("White Oxford Shirt");
+    expect(edit.aLookToTry).toContain("Burgundy Wool Tie");
+  });
+
+  it("Soft Structure: a tailored blazer does not combine with a bulky half-zip knit (collar/layering bulk)", () => {
+    const evidence = makeEvidence({
+      closetItems: [
+        {
+          name: "Navy Tailored Blazer",
+          imageUrl: null,
+          category: "OUTERWEAR",
+          subcategory: "blazer",
+          primaryColor: "navy",
+          styleTags: [],
+          occasions: [],
+          material: "wool",
+          fitProfile: "tailored",
+        },
+        {
+          name: "Cream Half-Zip Knit",
+          imageUrl: null,
+          category: "TOPS",
+          subcategory: "half-zip",
+          primaryColor: "cream",
+          styleTags: [],
+          occasions: [],
+          material: "wool",
+          fitProfile: "relaxed",
+        },
+      ],
+    });
+    const edit = buildShopperEdit(SOFT_STRUCTURE_REPORT, evidence);
+    expect(edit.aLookToTry).toContain("Navy Tailored Blazer");
+    expect(edit.aLookToTry).not.toMatch(/half-zip/i);
+    expect(edit.yourBestRouteIn).not.toMatch(/half-zip/i);
+  });
+
+  it("Soft Structure: a tailored blazer DOES combine with an ordinary (non-bulky) knit — the bulk guard isn't a blanket knit ban", () => {
+    const evidence = makeEvidence({
+      closetItems: [
+        {
+          name: "Navy Tailored Blazer",
+          imageUrl: null,
+          category: "OUTERWEAR",
+          subcategory: "blazer",
+          primaryColor: "navy",
+          styleTags: [],
+          occasions: [],
+          material: "wool",
+          fitProfile: "tailored",
+        },
+        {
+          name: "Fine Crewneck Knit",
+          imageUrl: null,
+          category: "TOPS",
+          subcategory: "crewneck",
+          primaryColor: "cream",
+          styleTags: [],
+          occasions: [],
+          material: "jersey",
+          fitProfile: "relaxed",
+        },
+      ],
+    });
+    const edit = buildShopperEdit(SOFT_STRUCTURE_REPORT, evidence);
+    expect(edit.aLookToTry).toContain("Navy Tailored Blazer");
+    expect(edit.aLookToTry).toContain("Fine Crewneck Knit");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Footwear copy (QA: manual Trend Edit quality review)
+//
+// "pointed flat" / "pointed shoe" / bare "flat" default to a specifically
+// feminine shoe type regardless of who the report is for. Generated copy
+// must use gender-neutral footwear language instead.
+// ---------------------------------------------------------------------------
+
+describe("buildShopperEdit — footwear copy is gender-neutral", () => {
+  it("single-item Soft Structure fallback never says 'pointed flat' or bare 'flat' — uses neutral footwear language", () => {
+    const evidence = makeEvidence({
+      closetItems: [
+        {
+          name: "Navy Tailored Blazer",
+          imageUrl: null,
+          category: "OUTERWEAR",
+          subcategory: "blazer",
+          primaryColor: "navy",
+          styleTags: [],
+          occasions: [],
+          material: "wool",
+          fitProfile: "tailored",
+        },
+      ],
+    });
+    const edit = buildShopperEdit(SOFT_STRUCTURE_REPORT, evidence);
+    expect(edit.aLookToTry).not.toMatch(/pointed/i);
+    expect(edit.aLookToTry).not.toMatch(/\bflats?\b(?!,? (or|,) loafer)/i);
+    expect(edit.aLookToTry).toMatch(/loafer|sneaker|leather shoe/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Modern Tailoring narrative consistency
 // When the shopper's only qualifying closet item is a TOP, the personalised
 // copy must NOT describe that item as the tailored anchor while simultaneously
