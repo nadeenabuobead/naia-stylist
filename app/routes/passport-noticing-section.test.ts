@@ -167,49 +167,56 @@ describe("Not Quite — first click opens an inline form, does not submit immedi
   });
 });
 
-describe("QA BUG regression — a successful not-quite submission must not unmount the card before its confirmation is seen", () => {
-  const mergeDisplayListStart = passportSrc.indexOf("export function mergeDisplayList");
-  const sectionSrc = passportSrc.slice(mergeDisplayListStart, passportSrc.indexOf("\n// ─", mergeDisplayListStart));
+describe("QA BUG regression — a not-quite (REJECTED) observation must stay visible after refresh/revisit, not just mid-session", () => {
+  // Superseded fix: an earlier commit papered over the same-session flash
+  // with a client-only carriedOverRejected/mergeDisplayList/onResolvedNotQuite
+  // mechanism that explicitly reset on refresh — i.e. it reproduced the exact
+  // "disappears on revisit" bug this one closes. The real fix moved
+  // visibility to the server: loadConfirmedTendencies' own state filter now
+  // includes REJECTED, so the row renders identically on first load, right
+  // after submission, and on every subsequent refresh or revisit — no
+  // client-side carry-over of any kind is needed.
+  const sectionSrc = passportSrc.slice(passportSrc.indexOf("function NoticingSection"));
   const cardOnly = passportSrc.slice(
     passportSrc.indexOf("NOT_QUITE_REASON_OPTIONS"),
-    mergeDisplayListStart,
+    passportSrc.indexOf("function NoticingSection"),
+  );
+  const reconcileSrc = readFileSync(join(__dirname, "../lib/ai/taste-reconcile.server.ts"), "utf8");
+  const loaderBody = reconcileSrc.slice(
+    reconcileSrc.indexOf("export async function loadConfirmedTendencies"),
+    reconcileSrc.indexOf("export async function loadConfirmedTendencies") + 2500,
   );
 
-  it("the card reports a successful not-quite resolution upward via a callback, exactly once per resolution", () => {
-    assert.ok(cardOnly.includes("onResolvedNotQuite"), "card accepts an onResolvedNotQuite callback prop");
-    assert.ok(/useEffect\(\(\)\s*=>\s*\{[\s\S]*?savedFeedback === "not-quite"[\s\S]*?onResolvedNotQuite/.test(cardOnly), "reports upward when savedFeedback becomes not-quite");
-    assert.ok(cardOnly.includes("reportedRef"), "guards against reporting more than once for the same resolution");
+  it("the removed workaround is gone — no carriedOverRejected state, no mergeDisplayList helper, no onResolvedNotQuite callback", () => {
+    assert.ok(!passportSrc.includes("carriedOverRejected"), "no client-side carry-over state for just-rejected tendencies");
+    assert.ok(!passportSrc.includes("mergeDisplayList"), "no merge helper reconciling loader data with stale client state");
+    assert.ok(!cardOnly.includes("onResolvedNotQuite"), "the card no longer reports a resolution upward — there is no parent-held list left to update");
+    assert.ok(!cardOnly.includes("reportedRef"), "no once-only reporting guard — nothing to report");
   });
 
-  it("the section tracks carried-over rejected tendencies in its own state, independent of the loader's confirmed list", () => {
-    assert.ok(sectionSrc.includes("carriedOverRejected"), "section-level state for carry-over");
-    assert.ok(sectionSrc.includes("useState<NoticingObservation[]>"), "typed as a list of observations");
+  it("NoticingSection renders the loader's confirmed list directly — the list itself is the single source of truth", () => {
+    assert.ok(sectionSrc.includes("const displayList = confirmed;"), "displayList is exactly the loader's confirmed list, with no transformation");
+    assert.ok(sectionSrc.includes("displayList.map(t =>"), "maps over that list for rendering");
+    assert.ok(sectionSrc.includes("displayList.length > 0"), "the has-cards branch reads off that same list");
   });
 
-  it("mergeDisplayList combines the fresh confirmed list with any carry-over not already present, never duplicating", () => {
-    assert.ok(sectionSrc.includes("export function mergeDisplayList"), "pure, exported merge function — testable in isolation");
-    assert.ok(sectionSrc.includes("!confirmedIds.has(t.id)"), "filters out anything already present in the fresh list");
+  it("loadConfirmedTendencies — the real server authority — selects REJECTED alongside CANDIDATE/CONFIRMED, and never selects SUPPRESSED", () => {
+    assert.match(
+      loaderBody,
+      /state:\s*\{\s*in:\s*\[\s*"CANDIDATE",\s*"CONFIRMED",\s*"REJECTED"\s*\]\s*\}/,
+      "REJECTED is selected by the loader — it is never filtered out of the customer's own visible history",
+    );
+    assert.ok(!loaderBody.includes('"SUPPRESSED"'), "SUPPRESSED is never selected — it remains the only state actually excluded from this query");
   });
 
-  it("the section renders the merged displayList, not the loader's confirmed list directly", () => {
-    assert.ok(sectionSrc.includes("const displayList = mergeDisplayList(confirmed, carriedOverRejected)"), "computes the merged list");
-    assert.ok(sectionSrc.includes("displayList.map(t =>"), "maps over the merged list for rendering");
-    assert.ok(sectionSrc.includes("displayList.length > 0"), "the has-cards branch condition also accounts for carry-overs");
-    // Only the render JSX (the NoticingSection function body, after the
-    // merge helper) must avoid mapping the raw loader list directly —
-    // mergeDisplayList itself legitimately does `confirmed.map(t => t.id)`
-    // to build its exclusion set, which is not the bug this guards against.
-    const noticingSectionBody = sectionSrc.slice(sectionSrc.indexOf("function NoticingSection"));
-    assert.ok(!noticingSectionBody.includes("confirmed.map(t =>"), "render JSX no longer maps directly over the raw loader confirmed list");
+  it("a REJECTED tendency's feedback state is itself the persisted source of the confirmation UI — nothing about it resets on revalidation", () => {
+    assert.ok(cardOnly.includes('savedFeedback === "not-quite"'), "renders the not-quite confirmation branch whenever the row's own persisted feedback says not-quite");
+    assert.ok(cardOnly.includes("Got it — nAia will be more cautious with this observation."), "confirmation copy renders identically on first load and on every later revisit");
   });
 
-  it("does not weaken loadConfirmedTendencies' own REJECTED filter — the carry-over is purely a client-side display concern", () => {
-    // loadConfirmedTendencies itself (taste-reconcile.server.ts) is
-    // untouched by this fix — asserted again here, at the call site, as a
-    // belt-and-suspenders guard against ever threading a "show REJECTED
-    // rows" flag through to the loader.
-    assert.ok(passportSrc.includes("loadConfirmedTendencies(customer.id)"), "still calls the real, unmodified loader function");
-    assert.ok(!passportSrc.includes("includeRejected"), "no flag added to surface REJECTED rows from the server");
+  it("still calls the real, unmodified loader function — no flag threaded through to change what it selects", () => {
+    assert.ok(passportSrc.includes("loadConfirmedTendencies(customer.id)"), "calls the real loader function");
+    assert.ok(!passportSrc.includes("includeRejected"), "no ad-hoc flag added to the call site — visibility is the loader's own unconditional behavior now");
   });
 });
 
