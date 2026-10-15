@@ -9,15 +9,16 @@ import { deleteNaiaSession, buildClearSessionCookieHeader } from "~/lib/naia-ses
 export async function action({ request }: ActionFunctionArgs) {
   await deleteNaiaSession(request);
 
-  // Always a same-host relative redirect to nAia's own login entry point —
-  // never the raw Shopify store domain. Shopify is only the auth mechanism
-  // underneath; a signed-out customer must never see the Shopify storefront.
-  // Relative (not an absolute STOREFRONT_HOST URL) so this redirect lands on
-  // whichever host the customer actually just signed out from — it is then
-  // auth.shopify.login's own shouldBounceToStorefront guard, not this route,
-  // that decides whether a further hop to STOREFRONT_HOST is still needed;
-  // on the canonical host (STOREFRONT_HOST === this host) it never is.
-  return redirect("/auth/shopify/login", {
+  // Always a same-host relative redirect to nAia's own signed-out landing —
+  // never the raw Shopify store domain, and never straight into
+  // /auth/shopify/login. That route, with no existing nAia session,
+  // immediately starts a fresh Shopify OAuth authorization — which, if the
+  // browser still carries an active Shopify customer session (the normal
+  // case right after a customer was just using the app), silently
+  // re-authenticates the same account with no explicit Sign In click at
+  // all. /auth/signed-out is deliberately inert: it shows the customer is
+  // signed out and waits for them to click Sign In before any OAuth starts.
+  return redirect("/auth/signed-out", {
     headers: { "Set-Cookie": buildClearSessionCookieHeader() },
   });
 }

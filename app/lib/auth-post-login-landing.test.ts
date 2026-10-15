@@ -70,13 +70,13 @@ describe("auth.logout action (POST — the real Sign Out button)", () => {
     delete process.env.SHOPIFY_STORE_DOMAIN;
   });
 
-  it("redirects to nAia's own login entry point, never the Shopify store domain", async () => {
+  it("redirects to nAia's own signed-out landing, never the Shopify store domain", async () => {
     process.env.SHOPIFY_STORE_DOMAIN = "some-test-store.myshopify.com";
     const response = await logoutAction({
       request: new Request("https://naia-stylist-staging.vercel.app/auth/logout", { method: "POST" }),
     } as any);
     assert.ok(response instanceof Response);
-    assert.equal(response.headers.get("Location"), "/auth/shopify/login");
+    assert.equal(response.headers.get("Location"), "/auth/signed-out");
     assert.ok(!(response.headers.get("Location") ?? "").includes("myshopify.com"));
   });
 
@@ -93,7 +93,20 @@ describe("auth.logout action (POST — the real Sign Out button)", () => {
     const response = await logoutAction({
       request: new Request("https://naia-stylist-staging.vercel.app/auth/logout", { method: "POST" }),
     } as any);
-    assert.equal(response.headers.get("Location"), "/auth/shopify/login");
+    assert.equal(response.headers.get("Location"), "/auth/signed-out");
+  });
+
+  it("REGRESSION — never redirects straight into /auth/shopify/login, which would silently restart OAuth with no explicit Sign In click", async () => {
+    // With the nAia session just destroyed but the browser's own Shopify
+    // customer session still active, a redirect straight into
+    // /auth/shopify/login would let Shopify silently re-authenticate the
+    // same account within seconds — the exact live regression this route
+    // exists to close. See app/routes/auth.signed-out.test.ts for the full
+    // signed-out-landing coverage.
+    const response = await logoutAction({
+      request: new Request("https://naia-stylist-staging.vercel.app/auth/logout", { method: "POST" }),
+    } as any);
+    assert.notEqual(response.headers.get("Location"), "/auth/shopify/login");
   });
 });
 
@@ -220,7 +233,7 @@ describe("auth.shopify.login loader — self-bounce guard", () => {
 // configured as (correct OR stale), closing the loop for good rather than
 // only for today's corrected env value.
 
-describe("logout -> login stays on the canonical host (regression)", () => {
+describe("logout -> signed-out (regression — no auto-restarted OAuth)", () => {
   const CANONICAL = "naia-stylist-staging.vercel.app";
   const saved = { STOREFRONT_HOST: process.env.STOREFRONT_HOST, SHOPIFY_STORE_DOMAIN: process.env.SHOPIFY_STORE_DOMAIN };
   afterEach(() => {
@@ -229,7 +242,22 @@ describe("logout -> login stays on the canonical host (regression)", () => {
     }
   });
 
-  it("with the corrected STOREFRONT_HOST (pointing at the canonical host itself), logout's redirect never leaves it", async () => {
+  it("logout's destination is /auth/signed-out regardless of STOREFRONT_HOST — it no longer depends on, or is affected by, that value at all", async () => {
+    for (const storefrontHost of [CANONICAL, "nadine-storefront.vercel.app", ""]) {
+      if (storefrontHost) process.env.STOREFRONT_HOST = storefrontHost; else delete process.env.STOREFRONT_HOST;
+      const logoutResponse = await logoutAction({
+        request: new Request(`https://${CANONICAL}/auth/logout`, { method: "POST" }),
+      } as any);
+      assert.equal(logoutResponse.headers.get("Location"), "/auth/signed-out");
+    }
+  });
+
+  it("REGRESSION — the live failure: logout must never land somewhere that immediately starts a fresh Shopify OAuth authorization with no explicit Sign In click", async () => {
+    // Previously: logout -> /auth/shopify/login, which (no nAia session,
+    // by construction — logout just destroyed it) unconditionally starts a
+    // fresh OAuth authorization. If the browser's own Shopify customer
+    // session was still active, Shopify silently re-authenticated the same
+    // account within seconds — Sign Out appeared to do nothing.
     process.env.STOREFRONT_HOST = CANONICAL;
     delete process.env.SHOPIFY_STORE_DOMAIN;
 
@@ -237,36 +265,37 @@ describe("logout -> login stays on the canonical host (regression)", () => {
       request: new Request(`https://${CANONICAL}/auth/logout`, { method: "POST" }),
     } as any);
     const logoutLocation = logoutResponse.headers.get("Location") ?? "";
-    assert.equal(logoutLocation, "/auth/shopify/login", "logout's own redirect is same-host relative");
-
-    // The browser follows that relative redirect on the SAME host it was
-    // already on — simulate that next request directly.
-    await assert.rejects(
-      () => loginLoader({ request: new Request(`https://${CANONICAL}${logoutLocation}`) } as any),
-      /SHOPIFY_STORE_DOMAIN/,
-      "must fall through to the real flow on the canonical host, not bounce anywhere else",
-    );
+    assert.equal(logoutLocation, "/auth/signed-out");
+    assert.notEqual(logoutLocation, "/auth/shopify/login");
   });
 
-  it("REGRESSION — even with a stale STOREFRONT_HOST still configured (the live failure), logout's own redirect lands back on the canonical host, never the stale one", async () => {
+  it("the explicit Sign In click (not logout) is what reaches /auth/shopify/login, and that still stays on the canonical host — even with a stale STOREFRONT_HOST configured", async () => {
     process.env.STOREFRONT_HOST = "nadine-storefront.vercel.app"; // the stale value observed live
     delete process.env.SHOPIFY_STORE_DOMAIN;
 
-    const logoutResponse = await logoutAction({
-      request: new Request(`https://${CANONICAL}/auth/logout`, { method: "POST" }),
+    // /auth/signed-out's Sign In control always points at the canonical
+    // host's own /auth/shopify/login (a plain <a href>, see
+    // auth.signed-out.test.ts) — simulate that explicit click directly.
+    const loginResponse = await loginLoader({
+      request: new Request(`https://${CANONICAL}/auth/shopify/login?return_to=%2Fmy-naia`),
     } as any);
-    const logoutLocation = logoutResponse.headers.get("Location") ?? "";
-    assert.equal(logoutLocation, "/auth/shopify/login", "logout's own redirect is same-host relative regardless of STOREFRONT_HOST");
-
-    // Pre-fix, this next hop would have bounced to the stale host. Post-fix,
-    // the self-bounce guard only protects a request already on
-    // STOREFRONT_HOST — a stale STOREFRONT_HOST still legitimately bounces a
-    // DIFFERENT host's request away, which is why fixing the env value (not
-    // just this code guard) remains required. This test pins down that the
-    // guard alone is not a substitute for the env correction.
-    const loginResponse = await loginLoader({ request: new Request(`https://${CANONICAL}${logoutLocation}`) } as any);
     assert.ok(loginResponse instanceof Response);
+    // A stale STOREFRONT_HOST still legitimately bounces this request
+    // elsewhere — the self-bounce guard only protects a request already on
+    // STOREFRONT_HOST, it is not a substitute for the env correction. This
+    // pins down that fact rather than asserting away a real, separate risk.
     assert.equal(new URL(loginResponse.headers.get("Location") ?? "").hostname, "nadine-storefront.vercel.app");
+  });
+
+  it("with the corrected STOREFRONT_HOST (pointing at the canonical host itself), the explicit Sign In click never leaves it", async () => {
+    process.env.STOREFRONT_HOST = CANONICAL;
+    delete process.env.SHOPIFY_STORE_DOMAIN;
+
+    await assert.rejects(
+      () => loginLoader({ request: new Request(`https://${CANONICAL}/auth/shopify/login?return_to=%2Fmy-naia`) } as any),
+      /SHOPIFY_STORE_DOMAIN/,
+      "must fall through to the real same-host flow, not bounce anywhere else",
+    );
   });
 });
 

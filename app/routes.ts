@@ -87,6 +87,7 @@ export default [
   route("auth/shopify/login", "routes/auth.shopify.login.tsx"),
   route("auth/shopify/callback", "routes/auth.shopify.callback.tsx"),
   route("auth/logout", "routes/auth.logout.tsx"),
+  route("auth/signed-out", "routes/auth.signed-out.tsx"),
   route("auth/*", "routes/auth.$.jsx"),
   route("webhooks/app/scopes_update", "routes/webhooks.app.scopes_update.jsx"),
   route("webhooks/app/uninstalled", "routes/webhooks.app.uninstalled.jsx"),
