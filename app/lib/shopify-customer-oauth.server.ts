@@ -135,11 +135,42 @@ export async function exchangeCodeForTokens(
   });
 
   if (!res.ok) {
-    const body = await res.text().catch(() => "<unreadable>");
-    throw new Error(`Token exchange failed: ${res.status}`);
+    throw new Error(buildTokenExchangeFailureMessage(res.status, await res.text().catch(() => null)));
   }
 
   return res.json() as Promise<TokenResponse>;
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostic-only: turn a failed token-endpoint response into a safe error
+// message — never the authorization code, code_verifier, client secret, or
+// any token (none of those are even present in Shopify's own error response
+// body in the first place). Shopify's standard OAuth error shape (RFC 6749
+// §5.2) is { error, error_description } — those are THIS provider's own
+// words describing what it rejected and why, not an echo of our request, so
+// pulling just those two named fields (never the raw body) is the safety
+// boundary here. Exported for direct testing — exchangeCodeForTokens itself
+// needs network access this test suite can't reach.
+// ---------------------------------------------------------------------------
+
+export function buildTokenExchangeFailureMessage(status: number, rawBody: string | null): string {
+  let shopifyError = "<none>";
+  let shopifyErrorDescription = "<unavailable>";
+
+  if (rawBody) {
+    try {
+      const parsed = JSON.parse(rawBody);
+      if (parsed && typeof parsed === "object") {
+        if (typeof parsed.error === "string") shopifyError = parsed.error.slice(0, 80);
+        if (typeof parsed.error_description === "string") shopifyErrorDescription = parsed.error_description.slice(0, 200);
+      }
+    } catch {
+      // Not JSON — a short, truncated snippet only, never the full body.
+      shopifyErrorDescription = `<non-JSON response: ${rawBody.slice(0, 120)}>`;
+    }
+  }
+
+  return `Shopify token exchange failed: status=${status} error=${shopifyError} error_description=${shopifyErrorDescription}`;
 }
 
 // ---------------------------------------------------------------------------

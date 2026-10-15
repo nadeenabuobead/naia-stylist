@@ -115,7 +115,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
   let tokens;
   try {
     tokens = await exchangeCodeForTokens(code, storedVerifier, redirectUri, oidcConfig);
-  } catch {
+  } catch (error) {
+    // Diagnostic only — server-side log, never surfaced to the browser.
+    // error.message already carries nothing beyond status/error/
+    // error_description (see buildTokenExchangeFailureMessage); presence
+    // booleans here, never the actual code/verifier/state/nonce values.
+    console.error("shopify_token_exchange_failed", JSON.stringify({
+      message: error instanceof Error ? error.message : String(error),
+      callbackHostname: url.hostname,
+      redirectUri,
+      codePresent: !!code,
+      codeVerifierPresent: !!storedVerifier,
+      storedStatePresent: !!storedState,
+      storedNoncePresent: !!storedNonce,
+    }));
     return fail(502, "Token exchange failed");
   }
 
