@@ -446,18 +446,28 @@ export async function loadStrongestConfirmedTendency(customerId: string) {
 // ── Load observations for What nAia Is Noticing page ─────────────────────────
 
 export async function loadConfirmedTendencies(customerId: string) {
-  // Per concept (observationKey), return highest-generation non-REJECTED row.
-  // customerFeedback is null until the customer gives feedback — Prisma's
-  // `{ not: "not-quite" }` on PostgreSQL excludes NULL rows too (verified
-  // against a real Postgres instance, not assumed), which silently dropped
-  // every CONFIRMED/CANDIDATE tendency nobody had reacted to yet — i.e.
-  // nearly all of them. The three-way OR below is the only form that
-  // actually keeps null alongside the one real non-"not-quite" value.
-  const allActive = await prisma.styleTendency.findMany({
+  // Per concept (observationKey), return the highest-generation row that is
+  // part of the customer's visible Noticing history: CONFIRMED (nAia/the
+  // customer still supports it) and REJECTED (the customer said "Not
+  // quite" — nAia treats it more cautiously internally, via computeState's
+  // `customerFeedback === "not-quite" → REJECTED`, but that is an internal
+  // trust signal, not a visibility switch; see taste-feedback-engine.ts).
+  // REJECTED must keep rendering here — it must never disappear from the
+  // customer's own history just because they answered honestly.
+  //
+  // SUPPRESSED is the only state actually hidden from the customer: it means
+  // the evidence itself no longer supports the observation (contradicted, or
+  // its source was withdrawn — see taste-evidence-deletion.test.ts), which is
+  // a different lifecycle case from a customer's "Not quite".
+  //
+  // No customerFeedback filter is needed: state is the sole authority on
+  // whether a row made this list, so an unreacted-to (null) row is never at
+  // risk of the NULL-exclusion bug this file hit once before (Prisma's
+  // `{ not: "not-quite" }` on PostgreSQL excludes NULL rows too).
+  const allRows = await prisma.styleTendency.findMany({
     where: {
       customerId,
-      state: { in: ["CANDIDATE", "CONFIRMED"] },
-      OR: [{ customerFeedback: null }, { customerFeedback: "accurate" }],
+      state: { in: ["CANDIDATE", "CONFIRMED", "REJECTED"] },
     },
     orderBy: [
       { observationKey: "asc" },
@@ -467,13 +477,16 @@ export async function loadConfirmedTendencies(customerId: string) {
 
   // Deduplicate: take highest generation per observationKey
   const seen = new Set<string>();
-  const deduped = allActive.filter(t => {
+  const deduped = allRows.filter(t => {
     if (seen.has(t.observationKey)) return false;
     seen.add(t.observationKey);
     return true;
   });
 
-  const confirmed = deduped.filter(t => t.state === "CONFIRMED").slice(0, 5);
+  // Customer-visible history: CONFIRMED and REJECTED both render as cards.
+  // Kept under the `confirmed` key for callers (Passport's loader) — it now
+  // means "visible Noticing observations", not "only state === CONFIRMED".
+  const confirmed = deduped.filter(t => t.state === "CONFIRMED" || t.state === "REJECTED").slice(0, 5);
   const candidateCount = deduped.filter(t => t.state === "CANDIDATE").length;
 
   return { confirmed, candidateCount };

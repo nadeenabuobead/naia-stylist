@@ -34,14 +34,7 @@
 // tsx/esm cannot resolve — same reason my-naia._index.test.tsx uses vitest.
 
 import { describe, it, expect } from "vitest";
-import { resolveSavedFeedback, mergeDisplayList } from "./passport";
-
-type FakeTendency = { id: string; dimension: string; value: string; customerFeedback: string | null };
-const tendency = (id: string, over: Partial<FakeTendency> = {}): any => ({
-  id, dimension: "comfort", value: "comfort", observationFamily: "WORKS_WELL",
-  headline: "h", body: "b", learningNote: "l", rationaleText: null,
-  customerFeedback: null, passportEvolutionNote: null, ...over,
-});
+import { resolveSavedFeedback } from "./passport";
 
 describe("resolveSavedFeedback — ACCURATE", () => {
   it("initial load, nothing submitted yet, no prior feedback → null (buttons render)", () => {
@@ -134,61 +127,11 @@ describe("resolveSavedFeedback — FAILED SUBMISSION", () => {
   });
 });
 
-// ── mergeDisplayList ───────────────────────────────────────────────────────
-//
-// QA BUG regression — "successful NOT QUITE confirmation flashes, then the
-// entire observation card disappears immediately."
-//
-// Verified root cause (react-router's default behavior, not assumed): any
-// fetcher action revalidates every active loader on the page. The instant a
-// not-quite submission succeeds, Passport's own loader re-runs
-// loadConfirmedTendencies, which correctly excludes the now-REJECTED row —
-// that server-side filter is never weakened by this fix. But
-// NoticingSection mapped directly over that revalidated `confirmed` array,
-// so the card — along with its whole component instance, local state, and
-// fetcher — unmounted the instant the fresh (shorter) array replaced the
-// old one, before the confirmation had been on screen long enough to see.
-//
-// mergeDisplayList is the fix's core logic: the fresh `confirmed` list stays
-// authoritative, but a carried-over just-rejected tendency not present in
-// it is appended once, by id, so React keeps the same key (same component
-// instance, same fetcher.data) across the revalidation instead of
-// unmounting it.
-
-describe("mergeDisplayList — keeps a just-rejected card visible through loader revalidation", () => {
-  it("no carry-over: a plain confirmed list passes through unchanged", () => {
-    const confirmed = [tendency("a"), tendency("b")];
-    expect(mergeDisplayList(confirmed, [])).toEqual(confirmed);
-  });
-
-  it("REGRESSION — a tendency rejected this session, now absent from the revalidated confirmed list, is still included", () => {
-    const confirmed = [tendency("b")]; // "a" was just rejected and dropped by loadConfirmedTendencies
-    const carriedOver = [tendency("a")];
-    const result = mergeDisplayList(confirmed, carriedOver);
-    expect(result.map(t => t.id)).toEqual(["b", "a"]);
-  });
-
-  it("a carried-over tendency that IS still present in confirmed (e.g. Accurate, never removed) is not duplicated", () => {
-    const confirmed = [tendency("a"), tendency("b")];
-    const carriedOver = [tendency("a")];
-    const result = mergeDisplayList(confirmed, carriedOver);
-    expect(result.map(t => t.id)).toEqual(["a", "b"]);
-    expect(result.filter(t => t.id === "a")).toHaveLength(1);
-  });
-
-  it("multiple carry-overs across a session all remain, each exactly once", () => {
-    const confirmed: any[] = [];
-    const carriedOver = [tendency("a"), tendency("b"), tendency("c")];
-    const result = mergeDisplayList(confirmed, carriedOver);
-    expect(result.map(t => t.id).sort()).toEqual(["a", "b", "c"]);
-  });
-
-  it("empty confirmed + empty carry-over → empty (the genuine Still Learning state, not fabricated)", () => {
-    expect(mergeDisplayList([], [])).toEqual([]);
-  });
-
-  it("a fresh page load (no carry-over state at all, by construction after a refresh) reduces to the loader's confirmed list exactly", () => {
-    const confirmed = [tendency("a")];
-    expect(mergeDisplayList(confirmed, [])).toEqual(confirmed);
-  });
-});
+// mergeDisplayList / carriedOverRejected (removed): that client-only carry-over
+// existed solely to keep a just-rejected card on screen through loader
+// revalidation, because loadConfirmedTendencies used to drop REJECTED rows
+// from its query entirely. It intentionally reset on refresh/revisit — which
+// is exactly the now-fixed product bug (see taste-reconcile.journeys.test.ts).
+// Now that the loader itself keeps returning a REJECTED row (customer-visible
+// history, not just a transient confirmation), the client-side carry-over has
+// nothing left to compensate for and was removed from passport.tsx.

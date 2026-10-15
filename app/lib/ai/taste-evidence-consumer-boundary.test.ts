@@ -229,7 +229,7 @@ describe("Taste & Evidence — production-consumer boundary", () => {
     assert.ok(/tasteEvidence:\s*["']unavailable["']/.test(content));
   });
 
-  it("the two allowed customer-facing readers only ever read CONFIRMED-scoped tendency data", () => {
+  it("the two allowed customer-facing readers are passport.tsx and my-naia._index.tsx, and the old standalone route only redirects", () => {
     // "What nAia Is Noticing" lives inside Style Passport now (V1 UX
     // restructure) — passport.tsx is the real reader; the old standalone
     // route only redirects there and no longer imports the taste engine.

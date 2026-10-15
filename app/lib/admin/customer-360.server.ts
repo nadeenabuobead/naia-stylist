@@ -701,8 +701,10 @@ export async function getAdminCustomerStyleMeSessionDetail(
 //   - REJECTED is reached ONLY via computeState's
 //     `if (customerFeedback === "not-quite") return "REJECTED"` branch — i.e.
 //     only after the customer saw a CONFIRMED card and told nAia it was
-//     wrong. It is therefore also a genuinely customer-facing moment, even
-//     though the card then disappears from their live page.
+//     wrong. It remains a customer-facing moment in the fullest sense: the
+//     card stays on the customer's own live Noticing history too (REJECTED
+//     is in loadConfirmedTendencies' visible state set), just rendered with
+//     the "Not quite" acknowledgement instead of the original claim.
 // CANDIDATE is deliberately excluded: loadConfirmedTendencies only ever
 // returns a bare count for CANDIDATE rows (`candidateCount`), never
 // individual claimText — the customer has never actually read a CANDIDATE

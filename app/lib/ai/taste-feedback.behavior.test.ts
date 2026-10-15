@@ -10,7 +10,7 @@
 //   BV.3  Ownership and security — cross-customer, nonexistent, invalid ID
 //   BV.4  Idempotency — ALREADY_REJECTED guard; repeated calls
 //   BV.5  REJECTED row invariants — writeFeedback not called on guarded paths
-//   BV.6  Customer-facing exclusion — post-rejection row invisible to queries
+//   BV.6  Customer-facing visibility — REJECTED stays visible, SUPPRESSED does not
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -286,7 +286,7 @@ describe("BV.5 — REJECTED row preserved: state/feedback/timestamp immutable", 
   });
 });
 
-// ── BV.6 — Customer-facing exclusion ─────────────────────────────────────────
+// ── BV.6 — Customer-facing visibility ────────────────────────────────────────
 
 // Slice out one exported function's own source body, so a source-string
 // assertion actually checks the function it names rather than matching
@@ -300,12 +300,12 @@ function sliceFunctionSrc(name: string): string {
   return reconcileSrc.slice(start, nextExport === -1 ? undefined : nextExport);
 }
 
-describe("BV.6 — REJECTED tendency excluded from customer-facing queries", () => {
-  it("BV.6.1 loadConfirmedTendencies includes null/'accurate', excludes 'not-quite' (not via a NULL-excluding Prisma `not`)", () => {
+describe("BV.6 — customer-facing visibility: REJECTED stays visible, SUPPRESSED does not", () => {
+  it("BV.6.1 loadConfirmedTendencies' state filter includes REJECTED alongside CANDIDATE/CONFIRMED", () => {
     const fnSrc = sliceFunctionSrc("loadConfirmedTendencies");
     assert.ok(
-      fnSrc.includes('OR: [{ customerFeedback: null }, { customerFeedback: "accurate" }]'),
-      "loadConfirmedTendencies must use the null-inclusive OR form, not Prisma's `not` (which excludes NULL on Postgres)",
+      fnSrc.includes('state: { in: ["CANDIDATE", "CONFIRMED", "REJECTED"] }'),
+      "loadConfirmedTendencies must include REJECTED in its visible state set — a 'Not quite' observation stays in the customer's own history",
     );
     assert.ok(
       !fnSrc.includes('customerFeedback: { not: "not-quite" }'),
@@ -313,15 +313,26 @@ describe("BV.6 — REJECTED tendency excluded from customer-facing queries", () 
     );
   });
 
-  it("BV.6.2 loadConfirmedTendencies Prisma query restricts state to CANDIDATE/CONFIRMED", () => {
-    // REJECTED state is excluded at the state level too — double guard
+  it("BV.6.2 loadConfirmedTendencies' state filter excludes SUPPRESSED", () => {
+    // SUPPRESSED (evidence contradicted or fully withdrawn) is the one state
+    // that stays hidden — a different lifecycle case from a customer's
+    // "Not quite", which only lowers internal trust, not visibility. Checks
+    // the actual `state: { in: [...] }` array literal, not just "does the
+    // word SUPPRESSED appear anywhere" — this function's own doc comment
+    // legitimately names SUPPRESSED to explain why it's absent from the list.
+    const fnSrc = sliceFunctionSrc("loadConfirmedTendencies");
+    const stateFilterMatch = fnSrc.match(/state:\s*\{\s*in:\s*\[([^\]]*)\]\s*\}/);
+    assert.ok(stateFilterMatch, "loadConfirmedTendencies must have a `state: { in: [...] }` filter");
     assert.ok(
-      reconcileSrc.includes('state: { in: ["CANDIDATE", "CONFIRMED"] }'),
-      "loadConfirmedTendencies restricts state to CANDIDATE/CONFIRMED",
+      !stateFilterMatch![1].includes("SUPPRESSED"),
+      "the state filter's own array must not include SUPPRESSED",
     );
   });
 
   it("BV.6.3 loadStrongestConfirmedTendency includes null/'accurate', excludes 'not-quite' (not via a NULL-excluding Prisma `not`)", () => {
+    // Unchanged, separate function — the Overview teaser's "one strongest
+    // highlight" stays CONFIRMED-only; this fix only widens the dedicated
+    // Noticing history page (loadConfirmedTendencies above).
     const fnSrc = sliceFunctionSrc("loadStrongestConfirmedTendency");
     assert.ok(
       fnSrc.includes('state: "CONFIRMED"') &&
@@ -334,30 +345,30 @@ describe("BV.6 — REJECTED tendency excluded from customer-facing queries", () 
     );
   });
 
-  it("BV.6.4 in-memory: a REJECTED row is excluded from CONFIRMED/CANDIDATE scan", () => {
-    // Simulate what loadConfirmedTendencies does: filter by state in CANDIDATE|CONFIRMED
-    // and customerFeedback != 'not-quite'
+  it("BV.6.4 in-memory: a REJECTED row is now INCLUDED in the customer-facing scan, a SUPPRESSED row is not", () => {
+    // Simulate what loadConfirmedTendencies now does: filter by
+    // state in CANDIDATE|CONFIRMED|REJECTED, no customerFeedback condition.
+    const suppressed: StoreRow = { id: "t4", customerId: "cust-1", state: "SUPPRESSED", customerFeedback: null, customerFeedbackAt: null };
     const allRows = [
       confirmed("t1"),
       rejected("t2"),
       candidate("t3"),
+      suppressed,
     ];
-    const customerFacing = allRows.filter(
-      r => ["CANDIDATE", "CONFIRMED"].includes(r.state) && r.customerFeedback !== "not-quite",
-    );
-    assert.equal(customerFacing.length, 2, "REJECTED row is excluded");
-    assert.ok(!customerFacing.some(r => r.id === "t2"), "t2 (REJECTED) not in results");
+    const customerFacing = allRows.filter(r => ["CANDIDATE", "CONFIRMED", "REJECTED"].includes(r.state));
+    assert.equal(customerFacing.length, 3, "REJECTED is now visible; only SUPPRESSED is excluded");
+    assert.ok(customerFacing.some(r => r.id === "t2"), "t2 (REJECTED) must be in results — 'Not quite' stays in the customer's history");
     assert.ok(customerFacing.some(r => r.id === "t1"), "t1 (CONFIRMED) in results");
     assert.ok(customerFacing.some(r => r.id === "t3"), "t3 (CANDIDATE) in results");
+    assert.ok(!customerFacing.some(r => r.id === "t4"), "t4 (SUPPRESSED) not in results — evidence withdrawn is a different case from a customer's assessment");
   });
 
-  it("BV.6.5 accurate-feedback row stays visible to customer-facing query", () => {
-    // An 'accurate' row should remain CONFIRMED and be included
+  it("BV.6.5 accurate-feedback row stays visible to customer-facing query, and a rejected row's own state is never rewritten", () => {
     const accurateRow: StoreRow = { id: "t1", customerId: "cust-1", state: "CONFIRMED", customerFeedback: "accurate", customerFeedbackAt: new Date() };
-    const customerFacing = [accurateRow].filter(
-      r => ["CANDIDATE", "CONFIRMED"].includes(r.state) && r.customerFeedback !== "not-quite",
-    );
-    assert.equal(customerFacing.length, 1, "accurate-feedback CONFIRMED row is visible");
+    const rejectedRow = rejected("t2");
+    const customerFacing = [accurateRow, rejectedRow].filter(r => ["CANDIDATE", "CONFIRMED", "REJECTED"].includes(r.state));
+    assert.equal(customerFacing.length, 2, "both the accurate-CONFIRMED row and the not-quite-REJECTED row are visible");
+    assert.equal(rejectedRow.state, "REJECTED", "assessment changes visibility semantics, never the row's own recorded state — REJECTED is not silently promoted back to CONFIRMED");
   });
 });
 

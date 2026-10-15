@@ -14,6 +14,16 @@
 // the bug is specifically in how the real query engine treats NULL, which a
 // mock has no opinion on. Only a real database proves it.
 //
+// Second fix (same function, separate bug): loadConfirmedTendencies also
+// used to filter the query to `state: { in: ["CANDIDATE", "CONFIRMED"] }`,
+// which meant a "Not quite" observation — state flips to REJECTED the
+// instant the customer answers — vanished from their own Noticing history
+// for good. Product truth: an assessment changes how nAia treats an
+// observation internally, it must not erase it from the customer-facing
+// page. REJECTED is now included in the visible set; only SUPPRESSED
+// (evidence contradicted or fully withdrawn — a different lifecycle case)
+// stays hidden.
+//
 // Requires an isolated database. Skipped entirely without one, so the normal
 // suite stays offline — same convention as wardrobe-journeys.test.ts, with
 // one addition: loadConfirmedTendencies() isn't dependency-injected, it
@@ -105,7 +115,7 @@ describe("loadConfirmedTendencies — real-Postgres regression for the STILL LEA
     assert.equal(candidateCount, 0);
   });
 
-  it("a CONFIRMED tendency explicitly marked customerFeedback: 'not-quite' stays excluded — the fix must not reopen rejected rows", async () => {
+  it("a REJECTED/'not-quite' tendency remains in the customer's visible Noticing history — assessment changes trust, not visibility", async () => {
     const customer = await db.customer.create({ data: { shopifyCustomerId: "journey-rejected" } });
     await db.styleTendency.create({
       data: tendencyRow(customer.id, { state: "REJECTED", customerFeedback: "not-quite", customerFeedbackAt: new Date() }),
@@ -113,8 +123,33 @@ describe("loadConfirmedTendencies — real-Postgres regression for the STILL LEA
 
     const { confirmed, candidateCount } = await loadConfirmedTendencies(customer.id);
 
-    assert.equal(confirmed.length, 0, "a REJECTED/'not-quite' tendency must never resurface");
+    assert.equal(confirmed.length, 1, "a 'Not quite' observation must stay visible to the customer, not disappear");
+    assert.equal(confirmed[0].state, "REJECTED", "it must still read as REJECTED internally — feedback is never silently promoted back to CONFIRMED");
+    assert.equal(confirmed[0].customerFeedback, "not-quite");
     assert.equal(candidateCount, 0);
+  });
+
+  it("a SUPPRESSED tendency (evidence contradicted or withdrawn) stays excluded — a different lifecycle case from a customer's 'Not quite'", async () => {
+    const customer = await db.customer.create({ data: { shopifyCustomerId: "journey-suppressed" } });
+    await db.styleTendency.create({
+      data: tendencyRow(customer.id, { state: "SUPPRESSED", observationKey: "tendency-v1|fit:oversized", dimension: "fit", value: "oversized" }),
+    });
+
+    const { confirmed, candidateCount } = await loadConfirmedTendencies(customer.id);
+
+    assert.equal(confirmed.length, 0, "SUPPRESSED must never render — its evidence no longer supports it at all");
+    assert.equal(candidateCount, 0);
+  });
+
+  it("feedback never deletes the underlying row — REJECTED is a state change, the StyleTendency row itself persists", async () => {
+    const customer = await db.customer.create({ data: { shopifyCustomerId: "journey-rejected-persists" } });
+    const created = await db.styleTendency.create({
+      data: tendencyRow(customer.id, { state: "REJECTED", customerFeedback: "not-quite", customerFeedbackAt: new Date() }),
+    });
+
+    const stillThere = await db.styleTendency.findUnique({ where: { id: created.id } });
+    assert.ok(stillThere, "the row must still exist in the DB after rejection");
+    assert.equal(stillThere!.state, "REJECTED");
   });
 
   it("a CONFIRMED tendency explicitly marked customerFeedback: 'accurate' is still returned (the one real non-null, non-'not-quite' value)", async () => {
