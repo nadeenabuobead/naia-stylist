@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { ActionFunctionArgs, LinksFunction, LoaderFunctionArgs } from "react-router";
 import { Link, useLoaderData, useFetcher, redirect, data } from "react-router";
+import type { MembershipStatus } from "@prisma/client";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import type { TrendReportData } from "~/lib/trend-reports";
 import {
@@ -17,7 +18,7 @@ import {
   matchNadineProduct,
   type NadineProductRecommendation,
 } from "~/lib/trend-product-recommendation.server";
-import { checkEntitlement } from "~/lib/plan/entitlement.server";
+import { checkEntitlement, type EntitlementCheck } from "~/lib/plan/entitlement.server";
 import {
   recordPersonalisedTrendEditUsage,
   getTrendEditUsageState,
@@ -41,7 +42,17 @@ type LoaderData = {
   generationFailed: boolean;
   nadineRecommendation: NadineProductRecommendation | null;
   reportIndex: number;
+  /** Customer has no personalised-trend entitlement at all (never a member,
+   *  or a membership tier with a zero allowance) — show the membership
+   *  upsell. Mutually exclusive with monthlyQuotaExhausted; see
+   *  resolveTrendEditBlockState for how the two are told apart. */
   membershipRequired: boolean;
+  /** Customer IS entitled, but has already used this period's one
+   *  Personalised Trend Edit — on ANY report, since the allowance is
+   *  account-wide, not per-report (see checkEntitlement's personalisedTrend
+   *  case). Must never show the membership upsell to a customer who is
+   *  already a member. */
+  monthlyQuotaExhausted: boolean;
   /** A generation happened this period, but predates snapshot persistence —
    *  its exact content was never captured. Never regenerated, never
    *  backfilled — see getTrendEditUsageState. */
@@ -54,6 +65,32 @@ type LoaderData = {
    *  current period via the "generate-new" action below. */
   archivedPeriodLabel: string | null;
 };
+
+/**
+ * Tells a genuinely non-member apart from a MEMBER who has simply used this
+ * period's one allowance — checkEntitlement's personalisedTrend case returns
+ * the SAME reason ("quota_exceeded") for both a zero-allowance NONE customer
+ * and a MEMBER whose count has reached their limit of 1 (see
+ * entitlement.server.ts's `limits.personalisedTrendPerMonth <= 0` short
+ * circuit), so the reason string alone cannot distinguish them — membership
+ * status is the only reliable signal.
+ *
+ * "at_capacity" is a distinct EntitlementCheck reason used by other features
+ * (e.g. closet) — personalisedTrend's own switch case never actually returns
+ * it today, so this branch is defensive only. If it ever did, this routes it
+ * explicitly to the same monthly-allowance state rather than letting it fall
+ * through unexamined: a MEMBER blocked for any reason must never see the
+ * membership upsell, since they already have the membership it's asking them
+ * to join.
+ */
+function resolveTrendEditBlockState(
+  membershipStatus: MembershipStatus,
+  reason: EntitlementCheck["reason"],
+): "membership_required" | "monthly_quota_exhausted" {
+  if (membershipStatus !== "MEMBER") return "membership_required";
+  void reason; // every reason a MEMBER can be blocked for maps to the same message today
+  return "monthly_quota_exhausted";
+}
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: naiaStyles },
@@ -214,6 +251,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       nadineRecommendation: usageState.snapshot.nadineRecommendation,
       reportIndex,
       membershipRequired: false,
+      monthlyQuotaExhausted: false,
       historicalUnavailable: false,
       archivedPeriodLabel: null,
     } satisfies LoaderData;
@@ -227,6 +265,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       nadineRecommendation: null,
       reportIndex,
       membershipRequired: false,
+      monthlyQuotaExhausted: false,
       historicalUnavailable: true,
       archivedPeriodLabel: null,
     } satisfies LoaderData;
@@ -251,19 +290,27 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       nadineRecommendation: archived.snapshot.nadineRecommendation,
       reportIndex,
       membershipRequired: false,
+      monthlyQuotaExhausted: false,
       historicalUnavailable: false,
       archivedPeriodLabel: archived.periodLabel,
     } satisfies LoaderData;
   }
 
-  // Personalised Trend Edit is a membership feature. Behind ENTITLEMENT_ENFORCEMENT
-  // (same rollout flag as StyleMe/BuySkip/VTO — disabled in production until the
-  // upgrade flow exists) a non-member sees a clear membership-required state
-  // instead of the full personalised edit. No Closet/Passport read happens for a
-  // blocked customer — nothing to leak, nothing generated, nothing to count.
+  // Personalised Trend Edit is a membership feature, AND a MEMBER only gets
+  // one NEW generation per month, account-wide across every report (see
+  // checkEntitlement's personalisedTrend case — the count has no reportSlug
+  // filter). Behind ENTITLEMENT_ENFORCEMENT (same rollout flag as
+  // StyleMe/BuySkip/VTO — disabled in production until the upgrade flow
+  // exists), a blocked customer sees one of two distinct states —
+  // never-a-member gets the membership upsell, an already-entitled MEMBER
+  // who used this month's allowance (possibly on a different report) gets an
+  // honest monthly-allowance message instead — see resolveTrendEditBlockState.
+  // No Closet/Passport read happens for either blocked state — nothing to
+  // leak, nothing generated, nothing to count.
   if (process.env.ENTITLEMENT_ENFORCEMENT === "true") {
     const entitlement = await checkEntitlement(customer.id, customer.membershipStatus, "personalisedTrend");
     if (!entitlement.allowed) {
+      const blockState = resolveTrendEditBlockState(customer.membershipStatus, entitlement.reason);
       return {
         report,
         edit: null,
@@ -271,7 +318,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         generationFailed: false,
         nadineRecommendation: null,
         reportIndex,
-        membershipRequired: true,
+        membershipRequired: blockState === "membership_required",
+        monthlyQuotaExhausted: blockState === "monthly_quota_exhausted",
         historicalUnavailable: false,
         archivedPeriodLabel: null,
       } satisfies LoaderData;
@@ -283,6 +331,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     report,
     reportIndex,
     membershipRequired: false,
+    monthlyQuotaExhausted: false,
     historicalUnavailable: false,
     archivedPeriodLabel: null,
     ...generated,
@@ -554,7 +603,7 @@ export function ErrorBoundary() {
 }
 
 export default function MyTrendEditDetail() {
-  const { report, edit, hasProfile, generationFailed, nadineRecommendation, reportIndex, membershipRequired, historicalUnavailable, archivedPeriodLabel } = useLoaderData() as LoaderData;
+  const { report, edit, hasProfile, generationFailed, nadineRecommendation, reportIndex, membershipRequired, monthlyQuotaExhausted, historicalUnavailable, archivedPeriodLabel } = useLoaderData() as LoaderData;
   const tint = TINTS[Math.max(0, reportIndex) % TINTS.length];
   const num = String(Math.max(0, reportIndex)).padStart(2, "0");
 
@@ -663,13 +712,26 @@ export default function MyTrendEditDetail() {
           </div>
         </div>
 
-        {/* State: membership required */}
+        {/* State: membership required — never a member, or a zero-allowance tier */}
         {membershipRequired ? (
           <div className="tmd-state">
             <p className="tmd-state-text">
               Your Personalised Trend Edit is a nAia Membership feature. Join to see this direction read through your own Style Passport and Closet.
             </p>
             <Link to="/my-naia/plan-usage" className="tmd-state-btn">Explore nAia Membership →</Link>
+          </div>
+        ) : monthlyQuotaExhausted ? (
+          /* State: already a MEMBER, but this period's one allowance is used —
+             possibly by a different report entirely, since the allowance is
+             account-wide. Must never show the "Join" upsell to a customer
+             who is already a member. */
+          <div className="tmd-state">
+            <p className="tmd-state-text">
+              You&rsquo;ve used this month&rsquo;s Personalised Trend Edit.
+              <br /><br />
+              Your next new edit will be available next month. You can still revisit your saved edits in My Trend Edits.
+            </p>
+            <Link to="/trends/my-edits" className="tmd-state-btn">Back to My Trend Edits →</Link>
           </div>
         ) : generationFailed ? (
           <div className="tmd-state">

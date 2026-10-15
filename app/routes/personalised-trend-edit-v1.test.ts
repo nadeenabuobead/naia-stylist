@@ -148,6 +148,11 @@ describe("§TREND-EDIT-V1 — membership gating", () => {
 
     const result: any = await callLoader();
     expect(result.membershipRequired).toBe(true);
+    // A never-a-member customer gets the membership upsell, never the
+    // monthly-allowance message — even though checkEntitlement happens to
+    // report the same "quota_exceeded" reason for both cases (see
+    // entitlement.server.ts's zero-allowance short circuit).
+    expect(result.monthlyQuotaExhausted).toBe(false);
     expect(result.edit).toBeNull();
     // 10. no fabricated personalization for a blocked customer — Closet/Passport
     // are never even read, so nothing could be fabricated from them either.
@@ -164,6 +169,86 @@ describe("§TREND-EDIT-V1 — membership gating", () => {
     expect(checkEntitlement).not.toHaveBeenCalled();
     expect(result.membershipRequired).toBe(false);
     expect(result.edit).toEqual(MOCK_EDIT);
+  });
+});
+
+// QA regression — 15 Oct 2026: a MEMBER who generated Colour Direction first
+// (consuming October's one account-wide allowance) opened Modern Tailoring
+// next and was wrongly shown the non-member "Join nAia Membership" upsell.
+// Root cause: checkEntitlement's personalisedTrend case returns the exact
+// same reason ("quota_exceeded") whether the customer was never a member
+// (zero allowance) or is a MEMBER who simply used this period's one
+// allowance already — and the loader collapsed both into a single
+// `membershipRequired: true` boolean, discarding which one it actually was.
+describe("§TREND-EDIT-V1 — monthly quota exhausted is a distinct state from membership required", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getEditorialReportBySlug).mockResolvedValue(REPORT as any);
+    vi.mocked(getPublishedEditorialReports).mockResolvedValue([REPORT] as any);
+    // vi.clearAllMocks() clears call history but not a previously-set
+    // mockResolvedValue — explicitly restore the "nothing generated yet this
+    // period" default before each test, since one test below deliberately
+    // overrides it to "snapshotted" and must not leak that into any other
+    // test in this file (this block's own afterEach restores it again on
+    // the way out, for exactly the same reason).
+    vi.mocked(getTrendEditUsageState).mockResolvedValue({ status: "none" });
+  });
+  afterEach(() => {
+    delete process.env.ENTITLEMENT_ENFORCEMENT;
+    vi.mocked(getTrendEditUsageState).mockResolvedValue({ status: "none" });
+  });
+
+  it("a MEMBER who already used this period's allowance (e.g. on a different report) sees the monthly-allowance state, never the membership upsell", async () => {
+    process.env.ENTITLEMENT_ENFORCEMENT = "true";
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValue(makeCustomer("MEMBER"));
+    // The exact reason a NONE customer also gets — proves the loader cannot
+    // be relying on the reason string alone to tell the two cases apart.
+    vi.mocked(checkEntitlement).mockResolvedValue({ allowed: false, reason: "quota_exceeded" });
+
+    const result: any = await callLoader("modern-tailoring-spring-2026");
+    expect(result.monthlyQuotaExhausted).toBe(true);
+    expect(result.membershipRequired).toBe(false);
+    expect(result.edit).toBeNull();
+    // No Closet/Passport read for a blocked MEMBER either — nothing to
+    // fabricate, nothing to leak.
+    expect(getShopperEvidence).not.toHaveBeenCalled();
+  });
+
+  it("the quota_exceeded reason is never collapsed into membershipRequired for an entitled MEMBER", async () => {
+    process.env.ENTITLEMENT_ENFORCEMENT = "true";
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValue(makeCustomer("MEMBER"));
+    vi.mocked(checkEntitlement).mockResolvedValue({ allowed: false, reason: "quota_exceeded" });
+
+    const result: any = await callLoader("modern-tailoring-spring-2026");
+    // The two flags are mutually exclusive, and it is specifically
+    // membershipRequired that must be false here — a paying MEMBER must
+    // never see "Join nAia Membership" for running out of their own quota.
+    expect(result.membershipRequired).toBe(false);
+    expect(result.monthlyQuotaExhausted).toBe(true);
+  });
+
+  it("an existing saved snapshot still opens normally even after the monthly quota is exhausted — reopening never consults the entitlement check at all", async () => {
+    process.env.ENTITLEMENT_ENFORCEMENT = "true";
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValue(makeCustomer("MEMBER"));
+    const snapshot = {
+      schemaVersion: "trend-edit-snapshot-v1" as const,
+      reportSlug: "spring-2026-colour-direction",
+      reportTitle: "Spring 2026 Colour Direction",
+      generatedAt: "2026-10-01T00:00:00.000Z",
+      edit: MOCK_EDIT as any,
+      nadineRecommendation: null,
+    };
+    vi.mocked(getTrendEditUsageState).mockResolvedValue({ status: "snapshotted", snapshot });
+    // Defensive: even if the entitlement check WOULD block (allowance
+    // already used), the already-snapshotted branch must return before ever
+    // reaching it — reopening a past generation must never be gated.
+    vi.mocked(checkEntitlement).mockResolvedValue({ allowed: false, reason: "quota_exceeded" });
+
+    const result: any = await callLoader("spring-2026-colour-direction");
+    expect(result.edit).toEqual(MOCK_EDIT);
+    expect(result.membershipRequired).toBe(false);
+    expect(result.monthlyQuotaExhausted).toBe(false);
+    expect(checkEntitlement).not.toHaveBeenCalled();
   });
 });
 

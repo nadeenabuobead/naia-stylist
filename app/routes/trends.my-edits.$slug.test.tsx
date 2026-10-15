@@ -458,6 +458,48 @@ describe("MyTrendEditDetail component", () => {
     expect(html).not.toContain("Your nAia Evidence");
   });
 
+  // QA regression — 15 Oct 2026: a MEMBER who had already used this period's
+  // one account-wide Personalised Trend Edit allowance (generated on a
+  // different report) was shown the non-member "Join nAia Membership"
+  // upsell when opening a report they hadn't generated yet this period.
+  it("renders the non-member membership upsell, with its Join CTA, when membershipRequired is true", () => {
+    vi.mocked(useLoaderData).mockReturnValueOnce({
+      report: MOCK_REPORT,
+      edit: null,
+      hasProfile: false,
+      generationFailed: false,
+      nadineRecommendation: null,
+      membershipRequired: true,
+      monthlyQuotaExhausted: false,
+    });
+    const html = renderToString(React.createElement(MyTrendEditDetail));
+    expect(html).toContain("nAia Membership feature");
+    expect(html).toContain("Join to see this");
+    expect(html).toContain('href="/my-naia/plan-usage"');
+    expect(html).not.toContain("used this month");
+  });
+
+  it("renders a distinct monthly-allowance state, with NO Join CTA, when monthlyQuotaExhausted is true", () => {
+    vi.mocked(useLoaderData).mockReturnValueOnce({
+      report: MOCK_REPORT,
+      edit: null,
+      hasProfile: false,
+      generationFailed: false,
+      nadineRecommendation: null,
+      membershipRequired: false,
+      monthlyQuotaExhausted: true,
+    });
+    const html = renderToString(React.createElement(MyTrendEditDetail));
+    expect(html).toContain("used this month");
+    expect(html).toContain("Back to My Trend Edits");
+    expect(html).toContain('href="/trends/my-edits"');
+    // The exact defect this closes: a MEMBER running out of their own quota
+    // must never be told to "Join" the membership they already have.
+    expect(html).not.toContain("Join");
+    expect(html).not.toContain("nAia Membership feature");
+    expect(html).not.toContain('href="/my-naia/plan-usage"');
+  });
+
   it("renders generation-error state when generationFailed is true", () => {
     vi.mocked(useLoaderData).mockReturnValueOnce({
       report: MOCK_REPORT,
