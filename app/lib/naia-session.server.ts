@@ -118,13 +118,27 @@ export async function deleteNaiaSession(request: Request): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Logout's own entry point: read back the session's stored Shopify
-// id_token_hint BEFORE destroying the row, then destroy it via the same
-// deleteNaiaSession this app already uses. The read must happen first —
-// once deleted, the hint is gone. Returns null (never throws) whenever
-// there's nothing to hand back: no cookie at all, no matching row, or an
-// older session that predates this field — callers must treat null as
-// "local logout still happened, there is just no provider session to end."
+// Logout's own entry point: destroy the session and hand back its stored
+// Shopify id_token_hint in a single round trip — Prisma's delete() with a
+// select returns the deleted row's fields, so there is no separate read
+// step that could see the row before a later delete fails, or vice versa.
+//
+// Contract callers may actually rely on: returns the hint, or null —
+// NEVER throws, no matter why. "No hint" and "couldn't even check" are
+// deliberately collapsed into the same null: Sign Out is not allowed to
+// treat a transient DB failure any differently from an older session that
+// simply never stored a hint. Every case below resolves to null, not a
+// thrown error:
+//   - no cookie at all (no rawToken to look up)
+//   - the row doesn't exist any more (Prisma P2025 — already deleted,
+//     expired and reaped elsewhere, or a stale/invalid token)
+//   - the database is temporarily unreachable (P1001, pool exhaustion,
+//     or any other failure) — logged, never rethrown
+// In the DB-failure case specifically, the row is NOT confirmed deleted —
+// only the cookie clear in auth.logout's action actually logs the customer
+// out of nAia from their own browser's perspective for that attempt. That
+// is the documented, accepted tradeoff: Sign Out must never fail the
+// customer just because the database had a bad moment.
 // ---------------------------------------------------------------------------
 
 export async function destroySessionAndGetHint(request: Request): Promise<string | null> {
@@ -132,14 +146,23 @@ export async function destroySessionAndGetHint(request: Request): Promise<string
   if (!rawToken) return null;
   const tokenHash = hashToken(rawToken);
 
-  const session = await prisma.naiaSession.findUnique({
-    where: { tokenHash },
-    select: { shopifyIdTokenHint: true },
-  });
-
-  await deleteNaiaSession(request);
-
-  return session?.shopifyIdTokenHint ?? null;
+  try {
+    const deleted = await prisma.naiaSession.delete({
+      where: { tokenHash },
+      select: { shopifyIdTokenHint: true },
+    });
+    return deleted.shopifyIdTokenHint ?? null;
+  } catch (error) {
+    // Expected, routine case (Prisma P2025 — no such row) and genuine
+    // infrastructure failures (P1001 and friends) both land here. Only the
+    // latter is worth a log line; a plain not-found is normal traffic
+    // (double-submits, an already-expired session, a stale cookie).
+    const code = (error as { code?: string } | null)?.code;
+    if (code !== "P2025") {
+      console.error("destroySessionAndGetHint: session delete failed, continuing local logout without a hint:", error);
+    }
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
