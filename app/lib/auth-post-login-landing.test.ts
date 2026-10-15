@@ -28,6 +28,8 @@ import { describe, it, afterEach } from "node:test";
 import { validateReturnTo } from "./shopify-customer-oauth.server.ts";
 import { action as logoutAction, loader as logoutLoader } from "../routes/auth.logout.tsx";
 import { loader as loginLoader } from "../routes/auth.shopify.login.tsx";
+import { loader as rootLoader } from "../routes/_index.tsx";
+import { requireCurrentNaiaCustomer } from "./naia-session.server.ts";
 
 // ── validateReturnTo() — open-redirect guard + default landing route ──────
 
@@ -150,5 +152,48 @@ describe("auth.shopify.login loader — default return_to", () => {
     const url = new URL(location);
     assert.equal(url.hostname, "naia-stylist-staging.vercel.app");
     assert.equal(url.searchParams.get("return_to"), "/my-naia");
+  });
+});
+
+// ── root route (/) — pre-Lovable temporary redirect ────────────────────────
+// `/` used to render a legacy dashboard (routes/_index.tsx). Until the
+// Lovable public site takes over this path, any request to `/` — whether
+// from a stale bookmark, an old in-app link, or an explicit return_to=/ —
+// must never render that dashboard, and the hop it takes must not loop back.
+
+describe("root route (/) redirect", () => {
+  it("GET / redirects to /my-naia", async () => {
+    const response = await rootLoader({
+      request: new Request("https://naia-stylist-staging.vercel.app/"),
+    } as any);
+    assert.ok(response instanceof Response);
+    assert.equal(response.status, 302);
+    assert.equal(response.headers.get("Location"), "/my-naia");
+  });
+
+  it("preserves a query string onto /my-naia rather than dropping it", async () => {
+    const response = await rootLoader({
+      request: new Request("https://naia-stylist-staging.vercel.app/?foo=bar"),
+    } as any);
+    assert.equal(response.headers.get("Location"), "/my-naia?foo=bar");
+  });
+
+  it("/my-naia's own auth gate never sends an unauthenticated visitor back to /", async () => {
+    // my-naia._index.tsx's loader calls this same helper first, before any
+    // profile/DB lookup; its redirect target is built from the pathname of
+    // the request actually being served (/my-naia), never a hardcoded "/".
+    // No __naia_tok cookie — resolves to no session without touching the DB.
+    delete process.env.STOREFRONT_HOST; // force the plain relative-redirect branch
+    await assert.rejects(
+      () => requireCurrentNaiaCustomer(new Request("https://naia-stylist-staging.vercel.app/my-naia")),
+      (thrown: unknown) => {
+        assert.ok(thrown instanceof Response);
+        const location = (thrown as Response).headers.get("Location") ?? "";
+        assert.ok(location.startsWith("/auth/shopify/login"));
+        assert.equal(new URL(location, "https://naia-stylist-staging.vercel.app").searchParams.get("return_to"), "/my-naia");
+        assert.notEqual(location, "/");
+        return true;
+      },
+    );
   });
 });
