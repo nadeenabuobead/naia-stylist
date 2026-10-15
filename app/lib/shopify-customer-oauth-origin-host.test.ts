@@ -25,7 +25,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, it, beforeEach, afterEach } from "node:test";
-import { validateOriginHost, shouldBounceToStorefront } from "./shopify-customer-oauth.server.ts";
+import { validateOriginHost, shouldBounceToStorefront, buildProviderLogoutUrl } from "./shopify-customer-oauth.server.ts";
 import { requireCurrentNaiaCustomer } from "./naia-session.server.ts";
 
 const LOGIN_PATH    = resolve(import.meta.dirname, "../routes/auth.shopify.login.tsx");
@@ -176,6 +176,49 @@ describe("shouldBounceToStorefront()", () => {
     // actual env change), a request already there never bounces at all —
     // closing the loop for good regardless of future drift.
     assert.equal(shouldBounceToStorefront(canonicalHost, canonicalHost, false), false);
+  });
+});
+
+// ── buildProviderLogoutUrl() — RP-Initiated Logout URL construction ────────
+//
+// The confirmed, Shopify-documented mechanism for ending the customer's
+// session at Shopify's own identity provider (not just this app's local
+// NaiaSession) — verified against this store's live OIDC discovery document
+// and Shopify's own docs: end_session_endpoint with id_token_hint and
+// post_logout_redirect_uri as the two required parameters. No invented
+// prompt=login/select_account here — Shopify's discovery metadata exposes
+// no prompt_values_supported at all.
+
+describe("buildProviderLogoutUrl()", () => {
+  const END_SESSION_ENDPOINT = "https://shopify.com/authentication/99810082948/logout";
+  const REDIRECT_URI = "https://naia-stylist-staging.vercel.app/auth/logout";
+
+  it("builds the end_session_endpoint URL with id_token_hint and post_logout_redirect_uri", () => {
+    const url = buildProviderLogoutUrl(END_SESSION_ENDPOINT, "the-id-token-jwt", REDIRECT_URI);
+    assert.ok(url);
+    const parsed = new URL(url!);
+    assert.equal(parsed.origin + parsed.pathname, END_SESSION_ENDPOINT);
+    assert.equal(parsed.searchParams.get("id_token_hint"), "the-id-token-jwt");
+    assert.equal(parsed.searchParams.get("post_logout_redirect_uri"), REDIRECT_URI);
+  });
+
+  it("returns null — fails safe, never throws — when end_session_endpoint is missing (OIDC discovery failed or unavailable)", () => {
+    assert.equal(buildProviderLogoutUrl(undefined, "a-hint", REDIRECT_URI), null);
+    assert.equal(buildProviderLogoutUrl(null, "a-hint", REDIRECT_URI), null);
+    assert.equal(buildProviderLogoutUrl("", "a-hint", REDIRECT_URI), null);
+  });
+
+  it("returns null when idTokenHint is missing — an older session with no stored hint must fall back to local-only logout, never throw or block it", () => {
+    assert.equal(buildProviderLogoutUrl(END_SESSION_ENDPOINT, null, REDIRECT_URI), null);
+    assert.equal(buildProviderLogoutUrl(END_SESSION_ENDPOINT, undefined, REDIRECT_URI), null);
+    assert.equal(buildProviderLogoutUrl(END_SESSION_ENDPOINT, "", REDIRECT_URI), null);
+  });
+
+  it("does not invent or add any other parameter — no prompt=login, no select_account, no max_age", () => {
+    const url = buildProviderLogoutUrl(END_SESSION_ENDPOINT, "hint", REDIRECT_URI);
+    const parsed = new URL(url!);
+    const keys = [...parsed.searchParams.keys()].sort();
+    assert.deepEqual(keys, ["id_token_hint", "post_logout_redirect_uri"]);
   });
 });
 

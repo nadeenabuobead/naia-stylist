@@ -899,6 +899,15 @@ model NaiaSession {
   lastSeenAt  DateTime @default(now())
   expiresAt   DateTime
   userAgent   String?
+  // Shopify OIDC id_token from the login that created this session — kept
+  // only to pass as id_token_hint to Shopify's end_session_endpoint on
+  // logout, so Shopify's own identity-provider session actually ends (not
+  // just this row). Never read for anything else, never returned to the
+  // client. Nullable: older sessions created before this field existed
+  // simply have none, and logout must still succeed locally for them —
+  // see destroySessionAndGetHint in naia-session.server.ts. @db.Text since
+  // a JWT can exceed a default varchar limit.
+  shopifyIdTokenHint String? @db.Text
 
   @@index([customerId])
   @@index([expiresAt])

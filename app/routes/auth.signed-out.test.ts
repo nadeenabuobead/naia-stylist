@@ -90,22 +90,36 @@ describe("/auth/signed-out — shows signed-out state and a Sign In control", ()
   });
 });
 
-describe("auth.logout — redirects into the signed-out landing, not straight into OAuth", () => {
+describe("auth.logout — never redirects straight into /auth/shopify/login (OAuth), on either path", () => {
+  // Full behavioral coverage (hint present/absent, OIDC-failure fallback,
+  // the account-switching regression) lives in app/routes/auth.logout.test.ts
+  // (vitest, mocked DB/OIDC). These are the structural invariants that hold
+  // regardless of DB state — kept here, next to the rest of the
+  // /auth/signed-out destination's own coverage.
   const actionBody = LOGOUT_SRC.slice(LOGOUT_SRC.indexOf("export async function action"), LOGOUT_SRC.indexOf("export async function loader"));
+  const loaderBody = LOGOUT_SRC.slice(LOGOUT_SRC.indexOf("export async function loader"));
 
-  it("the action's redirect target is /auth/signed-out, never /auth/shopify/login", () => {
-    assert.match(actionBody, /return redirect\("\/auth\/signed-out"/);
-    assert.ok(!actionBody.includes('redirect("/auth/shopify/login"'),
-      "the action branch must not redirect into /auth/shopify/login directly — only the unrelated GET loader (direct navigation to /auth/logout) may still reference it");
+  it("the action never redirects into /auth/shopify/login directly — only to /auth/signed-out or (best-effort) Shopify's own end_session_endpoint", () => {
+    assert.ok(!actionBody.includes('redirect("/auth/shopify/login"'), "action must not redirect into /auth/shopify/login directly");
+    assert.match(actionBody, /redirect\(providerLogoutUrl\s*\?\?\s*"\/auth\/signed-out"/);
   });
 
-  it("still clears the session cookie on the same response as the signed-out redirect", () => {
-    const actionBody = LOGOUT_SRC.slice(LOGOUT_SRC.indexOf("export async function action"), LOGOUT_SRC.indexOf("export async function loader"));
-    assert.match(actionBody, /redirect\("\/auth\/signed-out",\s*\{\s*headers:\s*\{\s*"Set-Cookie":\s*buildClearSessionCookieHeader\(\)/s);
+  it("the action reads the session's stored hint via destroySessionAndGetHint before building any provider-logout redirect", () => {
+    assert.match(actionBody, /const idTokenHint = await destroySessionAndGetHint\(request\)/);
   });
 
-  it("still destroys the nAia session before redirecting", () => {
-    const actionBody = LOGOUT_SRC.slice(LOGOUT_SRC.indexOf("export async function action"), LOGOUT_SRC.indexOf("export async function loader"));
-    assert.match(actionBody, /await deleteNaiaSession\(request\)/);
+  it("clears the session cookie on the same response regardless of which redirect target was chosen", () => {
+    assert.match(actionBody, /headers:\s*clearCookieHeaders/);
+    assert.match(actionBody, /clearCookieHeaders\s*=\s*\{\s*"Set-Cookie":\s*buildClearSessionCookieHeader\(\)/);
+  });
+
+  it("a provider-logout failure (OIDC discovery, URL construction) is caught and never allowed to block the redirect", () => {
+    assert.match(actionBody, /try\s*\{[\s\S]*getOidcConfig\(\)[\s\S]*\}\s*catch\s*\{\s*providerLogoutUrl = null;/);
+  });
+
+  it("the GET loader always terminates at /auth/signed-out — never /auth/shopify/login, and never re-reads a session or re-triggers provider logout", () => {
+    assert.match(loaderBody, /return redirect\("\/auth\/signed-out"\)/);
+    assert.ok(!loaderBody.includes("destroySessionAndGetHint"), "GET must not read any session — it has none to read");
+    assert.ok(!loaderBody.includes("getOidcConfig"), "GET must not re-trigger provider logout — that would risk a loop");
   });
 });

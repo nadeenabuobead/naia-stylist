@@ -49,7 +49,13 @@ export function buildClearSessionCookieHeader(): string {
 
 export async function createNaiaSession(
   customerId: string,
-  request:    Request
+  request:    Request,
+  // The Shopify OIDC id_token from the login that created this session —
+  // kept only so logout can later pass it as id_token_hint to Shopify's
+  // end_session_endpoint. Optional: callers that have no id_token (none
+  // today, but the type stays honest) simply store no hint, same as an
+  // older session created before this field existed.
+  shopifyIdTokenHint?: string | null,
 ): Promise<string> {
   const rawToken = generateRawToken();
   const tokenHash = hashToken(rawToken);
@@ -61,6 +67,7 @@ export async function createNaiaSession(
       customerId,
       expiresAt,
       userAgent: request.headers.get("User-Agent") ?? undefined,
+      shopifyIdTokenHint: shopifyIdTokenHint ?? undefined,
     },
   });
 
@@ -108,6 +115,31 @@ export async function deleteNaiaSession(request: Request): Promise<void> {
   if (!rawToken) return;
   const tokenHash = hashToken(rawToken);
   await prisma.naiaSession.deleteMany({ where: { tokenHash } });
+}
+
+// ---------------------------------------------------------------------------
+// Logout's own entry point: read back the session's stored Shopify
+// id_token_hint BEFORE destroying the row, then destroy it via the same
+// deleteNaiaSession this app already uses. The read must happen first —
+// once deleted, the hint is gone. Returns null (never throws) whenever
+// there's nothing to hand back: no cookie at all, no matching row, or an
+// older session that predates this field — callers must treat null as
+// "local logout still happened, there is just no provider session to end."
+// ---------------------------------------------------------------------------
+
+export async function destroySessionAndGetHint(request: Request): Promise<string | null> {
+  const rawToken = extractRawToken(request);
+  if (!rawToken) return null;
+  const tokenHash = hashToken(rawToken);
+
+  const session = await prisma.naiaSession.findUnique({
+    where: { tokenHash },
+    select: { shopifyIdTokenHint: true },
+  });
+
+  await deleteNaiaSession(request);
+
+  return session?.shopifyIdTokenHint ?? null;
 }
 
 // ---------------------------------------------------------------------------

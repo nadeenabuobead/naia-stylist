@@ -329,3 +329,34 @@ export function shouldBounceToStorefront(
   if (hasSfParam) return false;
   return requestHostname !== storefrontHost;
 }
+
+// ---------------------------------------------------------------------------
+// Provider (RP-initiated) logout URL — the confirmed, documented Shopify
+// mechanism for ending the customer's session at Shopify's own identity
+// provider, not just this app's local NaiaSession. Deleting NaiaSession and
+// clearing __naia_tok only ever logs the customer out of nAia; Shopify's own
+// SSO cookie at its identity-provider domain survives that unless this is
+// also invoked, which is why an explicit Sign In right after Sign Out used
+// to silently re-authenticate the same account. No invented parameters here
+// like prompt=login/select_account — Shopify's live OIDC discovery document
+// advertises no prompt_values_supported at all; end_session_endpoint with
+// id_token_hint + post_logout_redirect_uri is the one Shopify actually
+// documents and supports for this.
+//
+// Fails safe by design: returns null (never throws) whenever either input
+// is missing, so a caller with no endSessionEndpoint (OIDC discovery failed)
+// or no idTokenHint (an older session, or discovery never ran) can fall
+// straight back to a local-only logout instead of being blocked.
+// ---------------------------------------------------------------------------
+
+export function buildProviderLogoutUrl(
+  endSessionEndpoint: string | null | undefined,
+  idTokenHint: string | null | undefined,
+  postLogoutRedirectUri: string,
+): string | null {
+  if (!endSessionEndpoint || !idTokenHint) return null;
+  const url = new URL(endSessionEndpoint);
+  url.searchParams.set("id_token_hint", idTokenHint);
+  url.searchParams.set("post_logout_redirect_uri", postLogoutRedirectUri);
+  return url.toString();
+}

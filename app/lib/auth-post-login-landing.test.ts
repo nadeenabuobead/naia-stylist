@@ -110,10 +110,10 @@ describe("auth.logout action (POST — the real Sign Out button)", () => {
   });
 });
 
-describe("auth.logout loader (GET — direct navigation to /auth/logout)", () => {
-  it("redirects straight to the login entry point", async () => {
+describe("auth.logout loader (GET — direct navigation to /auth/logout, and Shopify's own post-logout return)", () => {
+  it("redirects to the stable signed-out landing, never straight into OAuth", async () => {
     const response = await logoutLoader();
-    assert.equal(response.headers.get("Location"), "/auth/shopify/login");
+    assert.equal(response.headers.get("Location"), "/auth/signed-out");
   });
 });
 

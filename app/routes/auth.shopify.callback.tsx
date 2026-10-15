@@ -191,9 +191,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   // ── Create the nAia session ──
+  // tokens.id_token is already validated above (validateIdToken) — stored
+  // only as logout's future id_token_hint for Shopify's end_session_endpoint,
+  // never logged, never returned in any loader data, never sent to the
+  // client.
   let rawToken: string;
   try {
-    rawToken = await createNaiaSession(customer.id, request);
+    rawToken = await createNaiaSession(customer.id, request, tokens.id_token);
   } catch {
     return fail(502, "Session creation failed");
   }
