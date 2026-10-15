@@ -9,12 +9,10 @@ import { deleteNaiaSession, buildClearSessionCookieHeader } from "~/lib/naia-ses
 export async function action({ request }: ActionFunctionArgs) {
   await deleteNaiaSession(request);
 
-  const storeDomain = process.env.SHOPIFY_STORE_DOMAIN ?? "";
-  const storeHome   = storeDomain
-    ? `https://${storeDomain}`
-    : "/auth/shopify/login";
-
-  return redirect(storeHome, {
+  // Always a same-host relative redirect to nAia's own login entry point —
+  // never the raw Shopify store domain. Shopify is only the auth mechanism
+  // underneath; a signed-out customer must never see the Shopify storefront.
+  return redirect("/auth/shopify/login", {
     headers: { "Set-Cookie": buildClearSessionCookieHeader() },
   });
 }

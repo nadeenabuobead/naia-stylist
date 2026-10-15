@@ -253,12 +253,18 @@ export async function fetchCustomerProfile(accessToken: string): Promise<Shopify
 // return_to URL validation (open-redirect prevention)
 // ---------------------------------------------------------------------------
 
+// Default landing route for a successful login that carried no (or an
+// invalid) return_to — the current MY nAia Overview, never the legacy `/`
+// dashboard route (routes/_index.tsx, superseded by /my-naia and no longer
+// linked from customer-facing navigation).
+const DEFAULT_RETURN_TO = "/my-naia";
+
 export function validateReturnTo(raw: string | null): string {
-  if (!raw) return "/";
+  if (!raw) return DEFAULT_RETURN_TO;
   if (raw.startsWith("/") && !raw.startsWith("//") && raw.length <= 200) {
     return raw;
   }
-  return "/";
+  return DEFAULT_RETURN_TO;
 }
 
 // ---------------------------------------------------------------------------
