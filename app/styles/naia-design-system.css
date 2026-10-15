@@ -2583,6 +2583,11 @@ a.mn-action:focus-visible,
 .bos-decision-verdict--maybe { color: rgba(40,21,12,.65); }
 .bos-decision-category { font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--naia-muted); }
 .bos-decision-confidence { font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.18em; color: var(--naia-muted); }
+/* Secondary outcome/status metadata (e.g. "BOUGHT IT · LOVE IT") — had no rule of
+   its own, so it inherited the much larger body serif and competed with the
+   BUY/SKIP verdict above it. Sized and spaced like the other metadata rows
+   (category, date), never the verdict's wider letter-spacing or semantic color. */
+.bos-decision-outcome { font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--naia-muted); }
 .bos-decision-date { font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.14em; color: var(--naia-muted); margin-top: 2px; }
 .bos-decisions-empty { padding: 60px 0; display: flex; flex-direction: column; align-items: flex-start; gap: 24px; }
 .bos-decisions-empty-text { font-family: var(--naia-ff-body); font-size: 16px; font-style: italic; color: var(--naia-muted); }

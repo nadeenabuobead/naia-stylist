@@ -986,9 +986,21 @@ export default function Closet() {
   const MALE_HIDDEN = new Set(["DRESSES", "LOUNGEWEAR"]);
   const visibleCategories = isMale ? CATEGORIES.filter(c => !MALE_HIDDEN.has(c)) : CATEGORIES;
 
-  const fetcher    = useFetcher();  // delete only
+  const fetcher    = useFetcher<{ success?: boolean; error?: string }>();  // delete only
   const addFetcher = useFetcher<{ success?: boolean; error?: string; retryImage?: boolean }>();
   const addPendingRef = useRef(false);   // true while we are waiting for addFetcher to settle
+
+  const [pendingDeleteItemId, setPendingDeleteItemId] = useState<string | null>(null);
+  const isDeleting = fetcher.state !== "idle";
+
+  useEffect(() => {
+    if (fetcher.data?.success) setPendingDeleteItemId(null);
+  }, [fetcher.data]);
+
+  const confirmDeleteItem = () => {
+    if (!pendingDeleteItemId) return;
+    fetcher.submit({ intent: "delete", itemId: pendingDeleteItemId }, { method: "post" });
+  };
 
   const [showAddForm, setShowAddForm] = useState(false);
   const addBtnRef = useRef<HTMLButtonElement>(null);
@@ -2107,7 +2119,7 @@ export default function Closet() {
                     type="button"
                     className="cl-delete"
                     aria-label={`Remove ${item.name}`}
-                    onClick={() => fetcher.submit({ intent: "delete", itemId: item.id }, { method: "post" })}
+                    onClick={() => setPendingDeleteItemId(item.id)}
                   >
                     ×
                   </button>
@@ -2122,6 +2134,37 @@ export default function Closet() {
           <Link to="/style-me" className="cl-cta-btn">Style Me →</Link>
         </div>
       </div>
+
+      {/* ── Delete confirmation modal — same pattern as Buy or Skip's decision delete ── */}
+      {pendingDeleteItemId && (
+        <div className="dc-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="cl-delete-confirm-title">
+          <div className="dc-modal">
+            <div className="dc-modal-eyebrow">Confirm</div>
+            <h3 id="cl-delete-confirm-title" className="dc-modal-title">Remove this item?</h3>
+            <p className="dc-modal-desc">
+              This will remove this item from My Closet.
+            </p>
+            <div className="dc-modal-actions">
+              <button
+                type="button"
+                className="sp-btn-ghost"
+                onClick={() => setPendingDeleteItemId(null)}
+                disabled={isDeleting}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="sp-btn-primary"
+                disabled={isDeleting}
+                onClick={confirmDeleteItem}
+              >
+                {isDeleting ? "Removing…" : "Remove"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </MyNaiaLayout>
   );
 }

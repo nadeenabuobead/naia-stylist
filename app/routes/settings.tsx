@@ -310,7 +310,7 @@ export default function Settings() {
         <div className="set-section-eyebrow">My Closet Photos</div>
         <h2 className="set-section-title">My Closet Photos</h2>
         <p className="sp-shell-desc" style={{ marginBottom: "16px" }}>
-          To remove a specific Closet photo, manage it in My Closet. Or remove all Closet photos here at once. Your Closet items will remain.
+          To remove a specific Closet photo, manage that item in My Closet. Or remove all Closet photos here at once. This removes the photos only — your saved Closet items and their details will stay.
         </p>
         <div className="set-action-row">
           <Link to="/closet" className="sp-btn-outline" style={{ display: "inline-block", textDecoration: "none" }}>
