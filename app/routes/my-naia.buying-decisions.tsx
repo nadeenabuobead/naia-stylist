@@ -1,4 +1,13 @@
-import { Link, useLoaderData, type LinksFunction, type LoaderFunctionArgs } from "react-router";
+import { useState, useEffect } from "react";
+import {
+  Link,
+  useLoaderData,
+  useFetcher,
+  useRevalidator,
+  type ActionFunctionArgs,
+  type LinksFunction,
+  type LoaderFunctionArgs,
+} from "react-router";
 import { data } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import prisma from "~/db.server";
@@ -7,6 +16,7 @@ import {
   validatePublicIdOwnership,
   buildPrivateDownloadUrl,
 } from "~/lib/cloudinary-admin.server";
+import { deleteOneBosDecision } from "~/lib/buy-or-skip-privacy.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 
@@ -95,8 +105,52 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
 }
 
+// Deletes one complete Buy or Skip decision/history entry. Distinct from
+// Settings & Privacy's "Remove all images" (which clears uploaded images only
+// and keeps decisions, recommendations, and history) — this removes the
+// decision itself, scoped to the authenticated customer.
+export async function action({ request }: ActionFunctionArgs) {
+  const naiaCustomer = await requireCurrentNaiaCustomer(request);
+  const formData = await request.formData();
+  const intent = formData.get("intent");
+
+  if (intent !== "delete-decision") {
+    return data({ ok: false as const, error: "Invalid request." }, { status: 400 });
+  }
+
+  const analysisId = formData.get("analysisId");
+  if (typeof analysisId !== "string" || !analysisId) {
+    return data({ ok: false as const, error: "Invalid request." }, { status: 400 });
+  }
+
+  const result = await deleteOneBosDecision(analysisId, naiaCustomer.id);
+  if (!result.deleted) {
+    return data({ ok: false as const, error: "Decision not found." }, { status: 404 });
+  }
+
+  return data({ ok: true as const, analysisId });
+}
+
 export default function BuyingDecisions() {
   const { decisions } = useLoaderData<typeof loader>();
+  const fetcher = useFetcher<typeof action>();
+  const revalidator = useRevalidator();
+  const [pending, setPending] = useState<string | null>(null);
+
+  const isSubmitting = fetcher.state !== "idle";
+  const actionData = fetcher.data;
+
+  useEffect(() => {
+    if (actionData?.ok) {
+      setPending(null);
+      revalidator.revalidate();
+    }
+  }, [actionData]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const confirmRemove = () => {
+    if (!pending) return;
+    fetcher.submit({ intent: "delete-decision", analysisId: pending }, { method: "post" });
+  };
 
   return (
     <MyNaiaLayout compact>
@@ -118,28 +172,38 @@ export default function BuyingDecisions() {
       ) : (
         <div className="bos-decisions-grid">
           {decisions.map(d => (
-            <Link key={d.id} to={`/buyskip/${d.id}`} className="bos-decision-card">
-              <div className="bos-decision-thumb-wrap">
-                {d.resolvedImageUrl
-                  ? <img src={d.resolvedImageUrl} alt="Assessed item" className="bos-decision-thumb" />
-                  : <div className="bos-decision-thumb-placeholder">◇</div>
-                }
-              </div>
-              <div className="bos-decision-body">
-                <div className={`bos-decision-verdict bos-decision-verdict--${d.verdict.toLowerCase()}`}>
-                  {d.verdict}
+            <div key={d.id} className="bos-decision-card-wrap">
+              <Link to={`/buyskip/${d.id}`} className="bos-decision-card">
+                <div className="bos-decision-thumb-wrap">
+                  {d.resolvedImageUrl
+                    ? <img src={d.resolvedImageUrl} alt="Assessed item" className="bos-decision-thumb" />
+                    : <div className="bos-decision-thumb-placeholder">◇</div>
+                  }
                 </div>
-                {d.category && <div className="bos-decision-category">{d.category}</div>}
-                {d.outcomeSummary && (
-                  <div className="bos-decision-outcome" data-testid="bos-decision-outcome">
-                    {d.outcomeSummary}
+                <div className="bos-decision-body">
+                  <div className={`bos-decision-verdict bos-decision-verdict--${d.verdict.toLowerCase()}`}>
+                    {d.verdict}
                   </div>
-                )}
-                <div className="bos-decision-date">
-                  {new Date(d.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                  {d.category && <div className="bos-decision-category">{d.category}</div>}
+                  {d.outcomeSummary && (
+                    <div className="bos-decision-outcome" data-testid="bos-decision-outcome">
+                      {d.outcomeSummary}
+                    </div>
+                  )}
+                  <div className="bos-decision-date">
+                    {new Date(d.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                  </div>
                 </div>
-              </div>
-            </Link>
+              </Link>
+              <button
+                type="button"
+                className="bos-decision-remove"
+                aria-label="Remove this decision"
+                onClick={() => setPending(d.id)}
+              >
+                ×
+              </button>
+            </div>
           ))}
         </div>
       )}
@@ -147,6 +211,37 @@ export default function BuyingDecisions() {
       <div style={{ marginTop: "40px" }}>
         <Link to="/buyskip" className="sp-btn-primary">Assess Another Piece</Link>
       </div>
+
+      {/* ── Confirmation modal ────────────────────────────────────────────── */}
+      {pending && (
+        <div className="dc-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="bos-decision-confirm-title">
+          <div className="dc-modal">
+            <div className="dc-modal-eyebrow">Confirm</div>
+            <h3 id="bos-decision-confirm-title" className="dc-modal-title">Remove this decision?</h3>
+            <p className="dc-modal-desc">
+              This will remove this Buy or Skip decision from your history.
+            </p>
+            <div className="dc-modal-actions">
+              <button
+                type="button"
+                className="sp-btn-ghost"
+                onClick={() => setPending(null)}
+                disabled={isSubmitting}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="sp-btn-primary"
+                disabled={isSubmitting}
+                onClick={confirmRemove}
+              >
+                {isSubmitting ? "Removing…" : "Remove"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </MyNaiaLayout>
   );
 }

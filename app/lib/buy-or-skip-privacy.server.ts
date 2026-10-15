@@ -55,6 +55,41 @@ export async function deleteOneBosImage(
   return { deleted: true };
 }
 
+// ── Full decision deletion ("×" on a card in My Decisions) ────────────────────
+//
+// Distinct from deleteOneBosImage/deleteCustomerBosImages above, which only
+// clear the uploaded image and keep the analysis, verdict, and outcome. This
+// removes the entire BuyOrSkipAnalysis record — the decision/history entry
+// itself — which cascades to its BuySkipOutcome via the schema relation.
+// Used only by the My Decisions page's per-card remove control; Settings &
+// Privacy's "Remove all images" never calls this.
+
+export type DeleteBosDecisionResult =
+  | { deleted: true }
+  | { deleted: false; errorCode: "NOT_FOUND" };
+
+export async function deleteOneBosDecision(
+  analysisId: string,
+  customerId: string,
+  _deleteAsset: DeleteAssetFn = deleteCloudinaryAsset,
+): Promise<DeleteBosDecisionResult> {
+  // Ownership check + the only field needed, in one query.
+  const analysis = await prisma.buyOrSkipAnalysis.findFirst({
+    where: { id: analysisId, customerId },
+    select: { id: true, imagePublicId: true },
+  });
+  if (!analysis) return { deleted: false, errorCode: "NOT_FOUND" };
+
+  if (analysis.imagePublicId) {
+    await _deleteAsset(analysis.imagePublicId, "private");
+    // Non-blocking: the record is deleted regardless of Cloudinary outcome.
+  }
+
+  await prisma.buyOrSkipAnalysis.delete({ where: { id: analysis.id } });
+
+  return { deleted: true };
+}
+
 export interface DeleteBosImagesResult {
   deletedCount: number;  // images successfully removed from Cloudinary
   clearedCount:  number;  // DB records whose image references were cleared

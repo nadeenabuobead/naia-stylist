@@ -14,6 +14,7 @@ vi.mock("~/db.server", () => ({
       findFirst: vi.fn(),
       findMany: vi.fn(),
       update: vi.fn(),
+      delete: vi.fn(),
     },
   },
 }));
@@ -29,7 +30,7 @@ vi.mock("~/lib/cloudinary-admin.server", async (importOriginal) => {
 
 import prisma from "~/db.server";
 import { deleteCloudinaryAsset } from "~/lib/cloudinary-admin.server";
-import { deleteOneBosImage, listCustomerBosImages } from "./buy-or-skip-privacy.server";
+import { deleteOneBosImage, deleteOneBosDecision, listCustomerBosImages } from "./buy-or-skip-privacy.server";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -84,6 +85,52 @@ describe("deleteOneBosImage() — single-item image removal", () => {
     (deleteCloudinaryAsset as any).mockResolvedValue({ ok: false });
     const result = await deleteOneBosImage("analysis-1", "cust-A");
     expect(prisma.buyOrSkipAnalysis.update).toHaveBeenCalled();
+    expect(result).toEqual({ deleted: true });
+  });
+});
+
+describe("deleteOneBosDecision() — My Decisions '×' full decision removal", () => {
+  it("returns NOT_FOUND for a different customer's analysis — cross-customer deletion is rejected", async () => {
+    (prisma.buyOrSkipAnalysis.findFirst as any).mockResolvedValue(null);
+    const result = await deleteOneBosDecision("analysis-1", "cust-A");
+    expect(result).toEqual({ deleted: false, errorCode: "NOT_FOUND" });
+    expect(prisma.buyOrSkipAnalysis.delete).not.toHaveBeenCalled();
+  });
+
+  it("scopes the lookup to id AND customerId together — ownership enforced at the query, not after", async () => {
+    (prisma.buyOrSkipAnalysis.findFirst as any).mockResolvedValue({ id: "analysis-1", imagePublicId: null });
+    await deleteOneBosDecision("analysis-1", "cust-A");
+    expect(prisma.buyOrSkipAnalysis.findFirst).toHaveBeenCalledWith({
+      where: { id: "analysis-1", customerId: "cust-A" },
+      select: { id: true, imagePublicId: true },
+    });
+  });
+
+  it("deletes the entire record, not just the image fields", async () => {
+    (prisma.buyOrSkipAnalysis.findFirst as any).mockResolvedValue({ id: "analysis-1", imagePublicId: null });
+    await deleteOneBosDecision("analysis-1", "cust-A");
+    expect(prisma.buyOrSkipAnalysis.delete).toHaveBeenCalledWith({ where: { id: "analysis-1" } });
+    expect(prisma.buyOrSkipAnalysis.update).not.toHaveBeenCalled();
+  });
+
+  it("deletes the Cloudinary asset when an imagePublicId exists", async () => {
+    (prisma.buyOrSkipAnalysis.findFirst as any).mockResolvedValue({ id: "analysis-1", imagePublicId: "naia-wardrobe/cust-A/analysis-1" });
+    await deleteOneBosDecision("analysis-1", "cust-A");
+    expect(deleteCloudinaryAsset).toHaveBeenCalledWith("naia-wardrobe/cust-A/analysis-1", "private");
+  });
+
+  it("deletes the record even when the analysis has no imagePublicId", async () => {
+    (prisma.buyOrSkipAnalysis.findFirst as any).mockResolvedValue({ id: "analysis-1", imagePublicId: null });
+    const result = await deleteOneBosDecision("analysis-1", "cust-A");
+    expect(deleteCloudinaryAsset).not.toHaveBeenCalled();
+    expect(result).toEqual({ deleted: true });
+  });
+
+  it("deletes the record even when the Cloudinary delete fails", async () => {
+    (prisma.buyOrSkipAnalysis.findFirst as any).mockResolvedValue({ id: "analysis-1", imagePublicId: "naia-wardrobe/cust-A/analysis-1" });
+    (deleteCloudinaryAsset as any).mockResolvedValue({ ok: false });
+    const result = await deleteOneBosDecision("analysis-1", "cust-A");
+    expect(prisma.buyOrSkipAnalysis.delete).toHaveBeenCalled();
     expect(result).toEqual({ deleted: true });
   });
 });
