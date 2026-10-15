@@ -12,6 +12,11 @@ export async function action({ request }: ActionFunctionArgs) {
   // Always a same-host relative redirect to nAia's own login entry point —
   // never the raw Shopify store domain. Shopify is only the auth mechanism
   // underneath; a signed-out customer must never see the Shopify storefront.
+  // Relative (not an absolute STOREFRONT_HOST URL) so this redirect lands on
+  // whichever host the customer actually just signed out from — it is then
+  // auth.shopify.login's own shouldBounceToStorefront guard, not this route,
+  // that decides whether a further hop to STOREFRONT_HOST is still needed;
+  // on the canonical host (STOREFRONT_HOST === this host) it never is.
   return redirect("/auth/shopify/login", {
     headers: { "Set-Cookie": buildClearSessionCookieHeader() },
   });

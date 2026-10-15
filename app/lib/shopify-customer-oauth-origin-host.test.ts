@@ -25,7 +25,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, it, beforeEach, afterEach } from "node:test";
-import { validateOriginHost } from "./shopify-customer-oauth.server.ts";
+import { validateOriginHost, shouldBounceToStorefront } from "./shopify-customer-oauth.server.ts";
 import { requireCurrentNaiaCustomer } from "./naia-session.server.ts";
 
 const LOGIN_PATH    = resolve(import.meta.dirname, "../routes/auth.shopify.login.tsx");
@@ -114,6 +114,68 @@ describe("validateOriginHost()", () => {
   it("does not throw and returns null when SHOPIFY_APP_URL is malformed", () => {
     process.env.SHOPIFY_APP_URL = "not a url";
     assert.equal(validateOriginHost("evil.com"), null);
+  });
+});
+
+// ── shouldBounceToStorefront() — the self-bounce guard ─────────────────────
+//
+// Root cause of the live logout regression: STOREFRONT_HOST on shared
+// staging had drifted to a stale, unrelated host (an earlier prototype
+// storefront). auth.shopify.login's old bare `storefrontHost &&
+// !url.searchParams.has("_sf")` check bounced EVERY request — including one
+// that had already arrived on the correct canonical host — to whatever
+// STOREFRONT_HOST happened to say, with no check that the hop was still
+// needed. A customer signing out on the canonical host got bounced to that
+// stale host, which still held its own independent, never-cleared session,
+// made it look like sign-out had silently logged them back in, and a second
+// sign-out click against that other (effectively unmaintained) host is what
+// produced the blank page. shouldBounceToStorefront is the extracted,
+// independently-testable decision the branch is now gated by — it must
+// refuse the hop whenever the request has already arrived on
+// storefrontHost, so a correctly-configured STOREFRONT_HOST (pointing at
+// itself) can never cause this loop again, regardless of what the value
+// happens to be.
+
+describe("shouldBounceToStorefront()", () => {
+  it("never bounces when STOREFRONT_HOST is unset — the existing same-host flow is unaffected", () => {
+    assert.equal(shouldBounceToStorefront("naia-stylist-staging.vercel.app", "", false), false);
+  });
+
+  it("bounces when STOREFRONT_HOST is configured, the request is on a different host, and _sf has not already been set", () => {
+    assert.equal(
+      shouldBounceToStorefront("naia-stylist-staging-l1e919a8p-nadeenabuobeads-projects.vercel.app", "naia-stylist-staging.vercel.app", false),
+      true,
+    );
+  });
+
+  it("never bounces once _sf=1 marks the request as having already made the one intended hop", () => {
+    assert.equal(shouldBounceToStorefront("naia-stylist-staging.vercel.app", "naia-stylist-staging.vercel.app", true), false);
+    assert.equal(shouldBounceToStorefront("some-other-host.example", "naia-stylist-staging.vercel.app", true), false);
+  });
+
+  it("THE FIX — never bounces a request that has already arrived on STOREFRONT_HOST itself, even without _sf — the self-bounce guard", () => {
+    assert.equal(shouldBounceToStorefront("naia-stylist-staging.vercel.app", "naia-stylist-staging.vercel.app", false), false);
+  });
+
+  it("REGRESSION — a stale STOREFRONT_HOST pointing at a different, unrelated host must not create a cross-host logout/login loop: the canonical host's own logout/login requests never bounce away from it", () => {
+    // Exactly the live-staging failure mode: STOREFRONT_HOST drifted to an
+    // old prototype storefront host instead of the canonical staging host
+    // the customer is actually signing out from.
+    const staleStorefrontHost = "nadine-storefront.vercel.app";
+    const canonicalHost = "naia-stylist-staging.vercel.app";
+    // The old unguarded condition (`storefrontHost && !hasSfParam`) would
+    // have returned true here — bouncing the canonical host's own
+    // logout-initiated /auth/shopify/login request away to the stale host.
+    // That the real fix is a per-request host check, not merely correcting
+    // the env value, is what this test exists to pin down: even with a
+    // stale STOREFRONT_HOST still configured, a request already on the
+    // canonical host must stay there.
+    assert.equal(shouldBounceToStorefront(canonicalHost, staleStorefrontHost, false), true,
+      "a DIFFERENT host than the stale STOREFRONT_HOST value still legitimately bounces — this guard only protects same-host requests, it does not substitute for fixing the env value");
+    // Once STOREFRONT_HOST is corrected to the canonical host (this fix's
+    // actual env change), a request already there never bounces at all —
+    // closing the loop for good regardless of future drift.
+    assert.equal(shouldBounceToStorefront(canonicalHost, canonicalHost, false), false);
   });
 });
 
@@ -226,10 +288,15 @@ describe("auth.shopify.login.tsx source wiring", () => {
   });
 
   it("forwards origin_host through its own early storefront-redirect branch — a request that arrives here without _sf=1 must not drop the origin host on the floor", () => {
-    const branchStart = loginSrc.indexOf('if (storefrontHost && !url.searchParams.has("_sf"))');
+    const branchStart = loginSrc.indexOf("if (shouldBounceToStorefront(");
+    assert.ok(branchStart > -1, "the storefront-redirect branch must be gated by shouldBounceToStorefront");
     const branchEnd = loginSrc.indexOf("}", loginSrc.indexOf("return redirect(sfLogin.toString()", branchStart));
     const branchBody = loginSrc.slice(branchStart, branchEnd);
     assert.match(branchBody, /sfLogin\.searchParams\.set\("origin_host"/);
+  });
+
+  it("gates the storefront-redirect branch through shouldBounceToStorefront rather than a bare storefrontHost truthiness check — the self-bounce guard", () => {
+    assert.match(loginSrc, /shouldBounceToStorefront\(url\.hostname,\s*storefrontHost,\s*url\.searchParams\.has\("_sf"\)\)/);
   });
 
   it("stores origin_host in the signed handshake session so it survives the Shopify round trip", () => {

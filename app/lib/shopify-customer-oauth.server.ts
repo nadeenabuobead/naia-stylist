@@ -304,3 +304,28 @@ export function validateOriginHost(raw: string | null): string | null {
 
   return null;
 }
+
+// ---------------------------------------------------------------------------
+// Storefront self-bounce guard — auth.shopify.login's one-hop detour onto
+// STOREFRONT_HOST (ephemeral previews can't be a registered redirect_uri, so
+// the whole PKCE round trip is forced onto that fixed host) must never fire
+// when the request has already arrived ON that exact host — otherwise a
+// request already sitting on the correct canonical host (the normal case
+// once STOREFRONT_HOST points at itself, and the exact failure mode seen
+// when it instead pointed at a stale, unrelated host) gets redirected to
+// itself for no reason, or — worse, with a stale value — bounced to a
+// different host entirely that may hold its own independent, never-cleared
+// session. _sf already guards against re-entering this branch after the one
+// intended hop; this guards against ever needing that hop in the first
+// place when there's nowhere left to go.
+// ---------------------------------------------------------------------------
+
+export function shouldBounceToStorefront(
+  requestHostname: string,
+  storefrontHost: string,
+  hasSfParam: boolean,
+): boolean {
+  if (!storefrontHost) return false;
+  if (hasSfParam) return false;
+  return requestHostname !== storefrontHost;
+}

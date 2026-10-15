@@ -109,6 +109,12 @@ describe("auth.logout loader (GET — direct navigation to /auth/logout)", () =>
 // before any network call (OIDC discovery) — matches the shared-staging
 // topology the bug was found on, and mirrors the existing test-file
 // convention in shopify-customer-oauth-origin-host.test.ts.
+//
+// These three requests arrive on a DIFFERENT host than STOREFRONT_HOST —
+// e.g. a genuine preview host — so the bounce branch still fires and these
+// stay fast, network-free tests of param forwarding through it. A request
+// that already arrives ON STOREFRONT_HOST is covered separately below: the
+// self-bounce guard means it must NOT take this branch at all.
 
 describe("auth.shopify.login loader — default return_to", () => {
   const saved = { STOREFRONT_HOST: process.env.STOREFRONT_HOST };
@@ -117,10 +123,12 @@ describe("auth.shopify.login loader — default return_to", () => {
     else delete process.env.STOREFRONT_HOST;
   });
 
+  const PREVIEW_HOST = "naia-stylist-staging-l1e919a8p-nadeenabuobeads-projects.vercel.app";
+
   it("a login request with no return_to carries the MY nAia Overview default through to the storefront", async () => {
     process.env.STOREFRONT_HOST = "naia-stylist-staging.vercel.app";
     const response = await loginLoader({
-      request: new Request("https://naia-stylist-staging.vercel.app/auth/shopify/login"),
+      request: new Request(`https://${PREVIEW_HOST}/auth/shopify/login`),
     } as any);
     assert.ok(response instanceof Response);
     const location = response.headers.get("Location") ?? "";
@@ -133,7 +141,7 @@ describe("auth.shopify.login loader — default return_to", () => {
     process.env.STOREFRONT_HOST = "naia-stylist-staging.vercel.app";
     const response = await loginLoader({
       request: new Request(
-        "https://naia-stylist-staging.vercel.app/auth/shopify/login?return_to=%2Ftrends%2Fmy-edits%2Fspring-2026",
+        `https://${PREVIEW_HOST}/auth/shopify/login?return_to=%2Ftrends%2Fmy-edits%2Fspring-2026`,
       ),
     } as any);
     const location = response.headers.get("Location") ?? "";
@@ -141,17 +149,124 @@ describe("auth.shopify.login loader — default return_to", () => {
     assert.equal(url.searchParams.get("return_to"), "/trends/my-edits/spring-2026");
   });
 
+  it("an explicit return_to of /my-naia is preserved unchanged, not treated as the no-value default", async () => {
+    process.env.STOREFRONT_HOST = "naia-stylist-staging.vercel.app";
+    const response = await loginLoader({
+      request: new Request(`https://${PREVIEW_HOST}/auth/shopify/login?return_to=%2Fmy-naia`),
+    } as any);
+    const location = response.headers.get("Location") ?? "";
+    assert.equal(new URL(location).searchParams.get("return_to"), "/my-naia");
+  });
+
   it("a malicious external return_to is rejected before it ever reaches the storefront redirect", async () => {
     process.env.STOREFRONT_HOST = "naia-stylist-staging.vercel.app";
     const response = await loginLoader({
       request: new Request(
-        "https://naia-stylist-staging.vercel.app/auth/shopify/login?return_to=https%3A%2F%2Fevil.example.com",
+        `https://${PREVIEW_HOST}/auth/shopify/login?return_to=https%3A%2F%2Fevil.example.com`,
       ),
     } as any);
     const location = response.headers.get("Location") ?? "";
     const url = new URL(location);
     assert.equal(url.hostname, "naia-stylist-staging.vercel.app");
     assert.equal(url.searchParams.get("return_to"), "/my-naia");
+  });
+});
+
+// ── auth/shopify/login — self-bounce guard (the live logout-regression fix) ─
+// A request that has ALREADY arrived on STOREFRONT_HOST must fall straight
+// through to the real same-host flow, never redirect to itself (or, with a
+// stale STOREFRONT_HOST value, to some other host entirely). Proven here
+// without a network call: with SHOPIFY_STORE_DOMAIN deliberately unset,
+// falling through means the loader reaches getOidcConfig() and rejects with
+// its own "env var is not set" error — a bounce, by contrast, would have
+// returned a 302 Response and never reached that line at all. Rejecting
+// with that specific error is the signal that no bounce happened.
+
+describe("auth.shopify.login loader — self-bounce guard", () => {
+  const saved = { STOREFRONT_HOST: process.env.STOREFRONT_HOST, SHOPIFY_STORE_DOMAIN: process.env.SHOPIFY_STORE_DOMAIN };
+  afterEach(() => {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v !== undefined) process.env[k] = v; else delete process.env[k];
+    }
+  });
+
+  it("does not self-bounce when the request hostname already equals STOREFRONT_HOST — falls through to the real flow instead of redirecting to itself", async () => {
+    process.env.STOREFRONT_HOST = "naia-stylist-staging.vercel.app";
+    delete process.env.SHOPIFY_STORE_DOMAIN;
+    await assert.rejects(
+      () => loginLoader({
+        request: new Request("https://naia-stylist-staging.vercel.app/auth/shopify/login"),
+      } as any),
+      /SHOPIFY_STORE_DOMAIN/,
+    );
+  });
+
+  it("normal login still works — a request on a genuinely different host still takes the one intended hop to STOREFRONT_HOST", async () => {
+    process.env.STOREFRONT_HOST = "naia-stylist-staging.vercel.app";
+    const response = await loginLoader({
+      request: new Request("https://naia-stylist-staging-l1e919a8p-nadeenabuobeads-projects.vercel.app/auth/shopify/login"),
+    } as any);
+    assert.ok(response instanceof Response);
+    assert.equal(new URL(response.headers.get("Location") ?? "").hostname, "naia-stylist-staging.vercel.app");
+  });
+});
+
+// ── logout → login — the full live-regression chain, on the canonical host ─
+// Reproduces the exact live failure end-to-end at the loader/action level:
+// POST /auth/logout on the canonical host, follow its relative Location
+// into a fresh GET /auth/shopify/login on that SAME host (simulating the
+// browser's own redirect-follow), and confirm that second hop never leaves
+// the canonical host — regardless of what STOREFRONT_HOST happens to be
+// configured as (correct OR stale), closing the loop for good rather than
+// only for today's corrected env value.
+
+describe("logout -> login stays on the canonical host (regression)", () => {
+  const CANONICAL = "naia-stylist-staging.vercel.app";
+  const saved = { STOREFRONT_HOST: process.env.STOREFRONT_HOST, SHOPIFY_STORE_DOMAIN: process.env.SHOPIFY_STORE_DOMAIN };
+  afterEach(() => {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v !== undefined) process.env[k] = v; else delete process.env[k];
+    }
+  });
+
+  it("with the corrected STOREFRONT_HOST (pointing at the canonical host itself), logout's redirect never leaves it", async () => {
+    process.env.STOREFRONT_HOST = CANONICAL;
+    delete process.env.SHOPIFY_STORE_DOMAIN;
+
+    const logoutResponse = await logoutAction({
+      request: new Request(`https://${CANONICAL}/auth/logout`, { method: "POST" }),
+    } as any);
+    const logoutLocation = logoutResponse.headers.get("Location") ?? "";
+    assert.equal(logoutLocation, "/auth/shopify/login", "logout's own redirect is same-host relative");
+
+    // The browser follows that relative redirect on the SAME host it was
+    // already on — simulate that next request directly.
+    await assert.rejects(
+      () => loginLoader({ request: new Request(`https://${CANONICAL}${logoutLocation}`) } as any),
+      /SHOPIFY_STORE_DOMAIN/,
+      "must fall through to the real flow on the canonical host, not bounce anywhere else",
+    );
+  });
+
+  it("REGRESSION — even with a stale STOREFRONT_HOST still configured (the live failure), logout's own redirect lands back on the canonical host, never the stale one", async () => {
+    process.env.STOREFRONT_HOST = "nadine-storefront.vercel.app"; // the stale value observed live
+    delete process.env.SHOPIFY_STORE_DOMAIN;
+
+    const logoutResponse = await logoutAction({
+      request: new Request(`https://${CANONICAL}/auth/logout`, { method: "POST" }),
+    } as any);
+    const logoutLocation = logoutResponse.headers.get("Location") ?? "";
+    assert.equal(logoutLocation, "/auth/shopify/login", "logout's own redirect is same-host relative regardless of STOREFRONT_HOST");
+
+    // Pre-fix, this next hop would have bounced to the stale host. Post-fix,
+    // the self-bounce guard only protects a request already on
+    // STOREFRONT_HOST — a stale STOREFRONT_HOST still legitimately bounces a
+    // DIFFERENT host's request away, which is why fixing the env value (not
+    // just this code guard) remains required. This test pins down that the
+    // guard alone is not a substitute for the env correction.
+    const loginResponse = await loginLoader({ request: new Request(`https://${CANONICAL}${logoutLocation}`) } as any);
+    assert.ok(loginResponse instanceof Response);
+    assert.equal(new URL(loginResponse.headers.get("Location") ?? "").hostname, "nadine-storefront.vercel.app");
   });
 });
 

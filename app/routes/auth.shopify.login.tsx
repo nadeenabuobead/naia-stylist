@@ -6,6 +6,7 @@ import {
   buildAuthorizationUrl,
   validateReturnTo,
   validateOriginHost,
+  shouldBounceToStorefront,
 } from "~/lib/shopify-customer-oauth.server";
 import { getSession, commitSession } from "~/lib/session.server";
 import { resolveNaiaSession }        from "~/lib/naia-session.server";
@@ -30,8 +31,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // storefront domain. Relying on X-Forwarded-Host is not viable: Vercel does not
   // reliably forward that header in inter-project rewrites, and using it caused
   // an infinite redirect loop when the proxy re-requested the same URL internally.
+  //
+  // shouldBounceToStorefront also refuses this hop when the request has
+  // already arrived on STOREFRONT_HOST itself — otherwise this would
+  // redirect a request to the exact host it is already on (a no-op at best),
+  // or, with a stale STOREFRONT_HOST value pointing at a different, defunct
+  // host, silently strand both login AND logout on that other host instead
+  // of the one actually serving this request.
   const storefrontHost = process.env.STOREFRONT_HOST ?? "";
-  if (storefrontHost && !url.searchParams.has("_sf")) {
+  if (shouldBounceToStorefront(url.hostname, storefrontHost, url.searchParams.has("_sf"))) {
     const sfLogin = new URL(`https://${storefrontHost}/auth/shopify/login`);
     sfLogin.searchParams.set("return_to", returnTo);
     sfLogin.searchParams.set("_sf", "1");
