@@ -49,6 +49,35 @@ describe("B — reuses the existing logout action, no second implementation", ()
   });
 });
 
+describe("G — Sign Out performs a real full-document submission, not a client-side transition", () => {
+  // Root cause of a live blank-page regression: auth.shopify.login.tsx
+  // (the page Sign Out's /auth/logout redirects into) returns a complete,
+  // terminal HTML document containing the inline script that actually
+  // launches the Shopify OAuth redirect — not React Router loader data, and
+  // the route has no component to render loader data into even if it were.
+  // That only works for a genuine top-level browser document request. A
+  // plain client-managed <Form> (React Router's Single Fetch data router)
+  // instead follows the logout action's redirect with its own internal
+  // loader fetch, gets back that raw HTML where it expects structured route
+  // data, and has nothing to render — a blank page, with the inline script
+  // (and therefore the Shopify redirect) never executing at all.
+  // reloadDocument forces a true browser-level form submission for both the
+  // POST to /auth/logout and the GET it redirects into, so the browser
+  // actually loads and parses that HTML as a document.
+
+  it("both Sign Out Forms set reloadDocument — every /auth/logout submission is a real document navigation", () => {
+    const formTags = SRC.match(/<Form\s+method="post"\s+action="\/auth\/logout"[^>]*>/g) ?? [];
+    assert.ok(formTags.length >= 2, "expected both the sidebar and mobile Sign Out Forms");
+    for (const tag of formTags) {
+      assert.ok(/\breloadDocument\b/.test(tag), `Sign Out Form must set reloadDocument: ${tag}`);
+    }
+  });
+
+  it("reloadDocument sits alongside the unchanged method/action — the fix adds a prop, it does not replace the existing submission target", () => {
+    assert.match(SRC, /<Form\s+method="post"\s+action="\/auth\/logout"\s+reloadDocument\s+style=/);
+  });
+});
+
 describe("C — rendered in both the desktop sidebar and the mobile nav", () => {
   it("the desktop sidebar loop renders the logout item as a submit button inside the Form", () => {
     const sidebarIdx = SRC.indexOf("mn-sidebar-nav");

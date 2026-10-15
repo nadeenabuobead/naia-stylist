@@ -182,7 +182,7 @@ export default function MyNaiaLayout({ children, compact = false }: Props) {
                     if (item.logout) {
                       return (
                         <li key={item.to}>
-                          <Form method="post" action="/auth/logout" style={{ display: "contents" }}>
+                          <Form method="post" action="/auth/logout" reloadDocument style={{ display: "contents" }}>
                             <button
                               type="submit"
                               onClick={() => setMobileOpen(false)}
@@ -228,7 +228,7 @@ export default function MyNaiaLayout({ children, compact = false }: Props) {
                       if (item.logout) {
                         return (
                           <li key={item.to} className="mn-sidebar-nav-item">
-                            <Form method="post" action="/auth/logout" style={{ display: "contents" }}>
+                            <Form method="post" action="/auth/logout" reloadDocument style={{ display: "contents" }}>
                               <button type="submit" className="mn-sidebar-nav-link mn-nav-button-reset">
                                 <span className="mn-sidebar-nav-line" aria-hidden="true" />
                                 {item.label}
