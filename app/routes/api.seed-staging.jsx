@@ -477,6 +477,47 @@ export async function action({ request }) {
     });
   }
 
+  // ── setOnboardingProfile — QA fixture only ───────────────────────────────
+  // Upserts arbitrary OnboardingProfile fields for a test customer so WI /
+  // Passport-dependent QA can be set up deterministically, without walking
+  // the full onboarding questionnaire by hand. Same staging-only + secret
+  // gate as every other action in this file.
+  if (act === "setOnboardingProfile") {
+    const { customerId, profile } = body ?? {};
+    if (!customerId || !profile || typeof profile !== "object") {
+      return Response.json({ error: "customerId and profile object required" }, { status: 400 });
+    }
+    const data = { completed: true, ...profile };
+    const saved = await prisma.onboardingProfile.upsert({
+      where: { customerId: String(customerId) },
+      create: { customerId: String(customerId), ...data },
+      update: data,
+      select: { id: true, completed: true },
+    });
+    return Response.json({ ok: true, profileId: saved.id, completed: saved.completed });
+  }
+
+  // ── createClosetItemDetailed — QA fixture only ───────────────────────────
+  // Creates a ClosetItem with caller-supplied garment-intelligence fields
+  // (colour, silhouette, coverage vocab, etc.) and analysisStatus "ready" by
+  // default, so WI QA can exercise specific real wardrobe shapes without a
+  // vision-model photo round trip.
+  if (act === "createClosetItemDetailed") {
+    const { customerId, item } = body ?? {};
+    if (!customerId || !item || typeof item !== "object") {
+      return Response.json({ error: "customerId and item object required" }, { status: 400 });
+    }
+    const created = await prisma.closetItem.create({
+      data: {
+        customerId: String(customerId),
+        analysisStatus: "ready",
+        ...item,
+      },
+      select: { id: true, category: true, primaryColor: true },
+    });
+    return Response.json({ closetItemId: created.id, category: created.category, primaryColor: created.primaryColor });
+  }
+
   // ── cleanup ───────────────────────────────────────────────────────────────
   if (act === "cleanup") {
     const { shopifyCustomerId } = body ?? {};
