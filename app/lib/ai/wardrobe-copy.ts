@@ -525,6 +525,9 @@ export function lifestyleMatch(displays: RegisterDisplay[]): MatchDimension | nu
  */
 const COMPARISON_DIMENSION: Readonly<Record<string, string>> = {
   structure: "Shape",
+  // Favourite colours ("colour") are covered better by the palette reading
+  // above; avoided colours have no existing display, so they surface here.
+  "colour-avoid": "Colours to avoid",
 };
 
 export function comparisonDimension(

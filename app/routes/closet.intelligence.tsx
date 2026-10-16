@@ -297,9 +297,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
       }
     : null;
 
+  // ── Real combinations available, for "Your wardrobe at a glance" ────────
+  // intelligence.pairings.totalFound is the engine's own count of supported
+  // combinations across every register — not recomputed or estimated here.
+  const combosCount = intelligence.pairings.state === "available" ? intelligence.pairings.totalFound : null;
+
+  // ── Advisory-only "worth reconsidering" list, never an auto-removal ─────
+  // needs.reconsider.entries already carries the real evidence (outside a
+  // stated preference, a near-duplicate, or one of several near-identical
+  // pieces) — see buildReconsiderAdvisory() in wardrobe-needs.ts.
+  const reconsiderEntries = needs.reconsider.entries.map((e) => ({
+    garmentId: e.garmentId,
+    reasons: e.reasons,
+  }));
+
   return data({
     page, garmentCards, glanceRegisters, allRegisterReadings, neutralSharePct,
     enoughCluster, enoughClusters, rediscoverPieces, bestByRegisterPreview, moodboardLooks, recommendationDetail,
+    combosCount, reconsiderEntries,
   });
 }
 
@@ -586,6 +601,7 @@ export default function WardrobeIntelligencePage() {
   const {
     page, garmentCards, glanceRegisters, allRegisterReadings, neutralSharePct,
     enoughCluster, enoughClusters, rediscoverPieces, bestByRegisterPreview, moodboardLooks, recommendationDetail,
+    combosCount, reconsiderEntries,
   } = useLoaderData<typeof loader>() as {
     page: WardrobePage; garmentCards: GarmentCard[];
     glanceRegisters: Array<{ heading: string; stateText: string }>;
@@ -604,6 +620,8 @@ export default function WardrobeIntelligencePage() {
       resolvingSilhouettes: string[];
       unlocksIds: string[];
     } | null;
+    combosCount: number | null;
+    reconsiderEntries: Array<{ garmentId: string; reasons: string[] }>;
   };
   const byId = new Map(garmentCards.map((c) => [c.id, c]));
   // The completeness question is a first-visit card; once answered it collapses to a
@@ -774,7 +792,15 @@ export default function WardrobeIntelligencePage() {
             })}
           </div>
           <p className="wip-combo-text">{look.reason}</p>
-          <a className="wip-link" href="/style-me">Style this look in StyleMe →</a>
+          {/* Same real handoff as the single-piece CTA below — a combination has no
+              separate multi-item preload in StyleMe today, so the look's first (anchor)
+              piece is pre-selected and StyleMe builds the rest of the look around it. */}
+          <Form method="post" action="/api/wi-style-this">
+            <input type="hidden" name="closetItemId" value={look.garmentIds[0]} />
+            <button type="submit" className="wip-link wi-style-cta">
+              Style this look in StyleMe →
+            </button>
+          </Form>
         </DialogShell>
       );
     }
@@ -883,14 +909,29 @@ export default function WardrobeIntelligencePage() {
                 nAia&rsquo;s perspective on what you own, how you wear it, and where to focus next.{" "}
                 {page.reading ?? "Find more in what you own. See what deserves your attention."}
               </p>
-              {/* Only a real stat is shown — the engine has no "possible
-                  outfits" or "Passport match %" metric, so those are omitted
-                  rather than approximated. */}
+              {/* Only real stats are shown — the engine has no "Passport
+                  match %" metric, so that is omitted rather than
+                  approximated. Combinations and reconsider counts are the
+                  engine's own totalFound / reconsider.entries — never
+                  estimated — and each is hidden rather than shown as zero
+                  when nAia doesn't yet have enough to say so honestly. */}
               <div className="wip-hero-stats">
                 <div className="wip-hero-stat">
                   <strong>{garmentCards.length}</strong>
                   <span>Pieces in closet</span>
                 </div>
+                {combosCount !== null && combosCount > 0 && (
+                  <div className="wip-hero-stat">
+                    <strong>{combosCount}</strong>
+                    <span>Outfit combinations</span>
+                  </div>
+                )}
+                {reconsiderEntries.length > 0 && (
+                  <div className="wip-hero-stat">
+                    <strong>{reconsiderEntries.length}</strong>
+                    <span>Worth reconsidering</span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1226,6 +1267,30 @@ export default function WardrobeIntelligencePage() {
             </div>
           </section>
 
+          {/* ── Section 6b: worth reconsidering — advisory only ──────────────
+              nAia never removes, hides or down-ranks a piece on the strength
+              of this. It says what it noticed and the real evidence behind
+              it; the customer decides. See buildReconsiderAdvisory() in
+              wardrobe-needs.ts. ──────────────────────────────────────────── */}
+          {reconsiderEntries.length > 0 && (
+            <section className="wip-section">
+              <h2 className="wip-section-title">Worth reconsidering.</h2>
+              <p className="wip-section-sub">nAia&rsquo;s own noticing — not a decision. Nothing is removed or hidden.</p>
+              <div className="wip-piece-grid">
+                {reconsiderEntries.slice(0, 6).map((entry) => {
+                  const card = byId.get(entry.garmentId);
+                  return (
+                    <div key={entry.garmentId} className="wip-piece-card">
+                      <div className="wip-piece-thumb"><Thumb card={card} height={170} /></div>
+                      <h3>{cardLabel(card)}</h3>
+                      {entry.reasons.map((reason) => <p key={reason}>{reason}</p>)}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
           {/* ── Section 7: shop smarter ─────────────────────────────────────── */}
           {(worthConsidering || lowPriority) && (
             <section className="wip-section">
@@ -1257,6 +1322,13 @@ export default function WardrobeIntelligencePage() {
                         <span className="wip-shop-why-label">Why nAia recommends this</span>
                         <p>{whyNaiaLines.join(" ")}</p>
                       </div>
+                    )}
+                    {/* The real evidenced count behind THIS recommendation — same
+                        register, same finding — not a separate estimate. workFinding
+                        is needs.couldUseMore[0]; matched by register, not by index,
+                        so it only shows when it genuinely backs this recommendation. */}
+                    {workFinding && recommendationDetail && workFinding.claim === `depth-gap:${recommendationDetail.register}` && (
+                      <p className="wip-shop-quantity">{workFinding.body}</p>
                     )}
                   </div>
                 )}

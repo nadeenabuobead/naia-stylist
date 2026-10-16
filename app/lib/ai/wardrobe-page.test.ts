@@ -115,6 +115,7 @@ function baseInput(over: Partial<WardrobePageInput> = {}): WardrobePageInput {
       { id: "need-work-repetition", text: "You have work pieces, but fewer ways to combine them", source: "depth", evidence: [] },
       { id: "f1", text: "You already have enough everyday neutral tops", source: "depth", evidence: [] },
     ],
+    reconsider: { state: "available", entries: [] },
   } as never;
 
   const recommendations = {
@@ -1244,5 +1245,70 @@ describe("§WP-20 register-demand migration — clean 90-day layer, decoupled fr
     const entry = block.entries.find((e) => e.id === "dress-level")!;
     assert.equal(entry.body, "Over the last 90 days, 73 of the 109 StyleMe requests nAia could classify were on the more everyday, relaxed side.");
     assert.doesNotMatch(entry.body, /999|work-ready/, "no raw request count or raw top-register wording leaks into the migrated copy");
+  });
+});
+
+// ── §WP-21 — Worth reconsidering is advisory, lives in "attention" ───────────
+
+describe("§WP-21 worth reconsidering", () => {
+  it("renders nothing when there's nothing to reconsider", () => {
+    const page = buildWardrobePage(baseInput());
+    const attention = page.sections.find((s) => s.id === "attention")!;
+    assert.equal(attention.blocks.some((b) => b.id === "reconsider"), false);
+  });
+
+  it("renders one entry per reconsider finding, owned by the attention section", () => {
+    const input = baseInput();
+    (input.needs as unknown as { reconsider: unknown }).reconsider = {
+      state: "available",
+      entries: [
+        {
+          garmentId: "g9",
+          reasons: ["A near-duplicate of pieces you already have enough of."],
+          evidence: [{ signal: "garment-fact", field: "slot + colour + formality", detail: "x", garmentIds: ["g9"] }],
+        },
+      ],
+    };
+    const page = buildWardrobePage(input);
+    assert.equal(ownerOf("reconsider:g9"), "attention");
+
+    const attention = page.sections.find((s) => s.id === "attention")!;
+    const block = attention.blocks.find((b) => b.id === "reconsider")!;
+    assert.ok(block, "expected a reconsider block in the attention section");
+    const entry = block.entries.find((e) => e.id === "reconsider-g9")!;
+    assert.equal(entry.claim, "reconsider:g9");
+    assert.equal(entry.body, "A near-duplicate of pieces you already have enough of.");
+    assert.deepEqual(entry.garmentIds, ["g9"]);
+    // Advisory only — nothing here may read as a removal instruction.
+    assert.doesNotMatch(entry.body, /\bremove\b|\bdonate\b|\bget rid of\b|\bdelete\b/i);
+  });
+});
+
+// ── §WP-22 — Coverage discloses what it cannot yet check ─────────────────────
+
+describe("§WP-22 coverage block discloses unmeasurable preferences", () => {
+  it("still renders when nothing is blocked, as long as something is undisclosed", () => {
+    const input = baseInput();
+    (input.intelligence as unknown as { passportView: unknown }).passportView = {
+      state: "available", comparisons: [], notYetMeasurable: ["avoid shorts"],
+    };
+    const page = buildWardrobePage(input);
+    const attention = page.sections.find((s) => s.id === "attention")!;
+    const block = attention.blocks.find((b) => b.id === "coverage")!;
+    assert.ok(block, "expected a coverage block even with zero blocked pieces");
+    const entry = block.entries[0];
+    assert.match(entry.body, /avoid shorts/);
+    assert.match(entry.body, /can't yet check/);
+  });
+
+  it("renders nothing at all when there is nothing blocked and nothing undisclosed", () => {
+    const input = baseInput();
+    (input.needs as unknown as { registers: unknown }).registers = [];
+    (input.intelligence as unknown as { passportView: unknown }).passportView = {
+      state: "available", comparisons: [], notYetMeasurable: [],
+    };
+    const page = buildWardrobePage(input);
+    const attention = page.sections.find((s) => s.id === "attention")!;
+    assert.equal(attention.blocks.some((b) => b.id === "coverage"), false);
   });
 });

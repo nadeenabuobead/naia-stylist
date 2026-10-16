@@ -41,6 +41,7 @@
 //      block returns state "learning" with an honest reason — never a placeholder.
 
 import { evidenceTierRank, type FormulaSupportState, type GarmentPositiveEvidence } from "~/lib/ai/wardrobe-feedback-evidence";
+import { DRESSING_REQUIREMENTS_NOTE_TRIGGER_ID } from "~/lib/passport/rev7-vocabulary";
 
 // ── Signal model ──────────────────────────────────────────────────────────────
 
@@ -440,6 +441,12 @@ export interface WardrobePassportView {
   state: BlockState;
   learningNote?: string;
   comparisons: PassportComparison[];
+  /**
+   * Stated dressing preferences nAia cannot yet check against the Closet
+   * because no garment field backs them (e.g. opacity, trouser-specific
+   * length). Honest next-action copy, never a fabricated comparison.
+   */
+  notYetMeasurable: string[];
 }
 
 export interface SignalAvailability {
@@ -744,6 +751,56 @@ function passportColourFamilies(tokens: string[]): Set<string> {
     for (const family of PASSPORT_COLOUR_FAMILIES[norm(token) ?? ""] ?? []) families.add(family);
   }
   return families;
+}
+
+// ── Dressing preferences vs how the wardrobe actually reads ───────────────────
+//
+// Only the tokens classifyUsability() can actually check against a garment
+// field are comparable. The rest (opacity, back coverage, a trouser-specific
+// length distinct from hemLength, the modesty composite) have no garment-side
+// signal today — stating a match or mismatch for them would be a guess, so
+// they surface as an honest "not yet measurable" note instead.
+
+/** How each dressingPreferences token reads in a sentence (mirrors quiz-data.ts labels). */
+const DRESSING_PREFERENCE_LABEL: Readonly<Record<string, string>> = {
+  "dresses-modestly": "dress modestly",
+  "arms-covered": "keep your arms covered",
+  "chest-neckline-covered": "keep your chest / neckline covered",
+  "legs-covered": "keep your legs covered",
+  "avoid-sleeveless": "avoid sleeveless styles",
+  "no-cropped-tops": "avoid cropped tops",
+  "avoid-shorts": "avoid shorts",
+  "avoid-sheer": "avoid sheer / see-through styles",
+  "avoid-open-back": "avoid low or open backs",
+  "prefer-higher-necklines": "prefer higher necklines",
+  "longer-tops": "prefer longer tops / shirts",
+  "prefer-full-length-trousers": "prefer full-length trousers",
+  "looser-fitting": "prefer looser-fitting clothes",
+  "wears-hijab": "wear hijab",
+  "usually-wears-abayas": "wear abayas",
+  "kanduras-thobes": "wear kanduras / thobes",
+};
+
+/** Tokens classifyUsability() can actually check against a garment field. */
+const DRESSING_PREFERENCE_SUPPORTED: ReadonlySet<string> = new Set([
+  "arms-covered",
+  "avoid-sleeveless",
+  "chest-neckline-covered",
+  "prefer-higher-necklines",
+  "legs-covered",
+  "longer-tops",
+  "no-cropped-tops",
+  "looser-fitting",
+]);
+
+/** Stated tokens with no garment-side signal — never guessed, always disclosed. */
+function unmeasurableDressingPreferences(stated: string[]): string[] {
+  return stated.filter(
+    (id) =>
+      id !== "no-dressing-requirements" &&
+      id !== DRESSING_REQUIREMENTS_NOTE_TRIGGER_ID &&
+      !DRESSING_PREFERENCE_SUPPORTED.has(id),
+  );
 }
 
 export const PASSPORT_COLOUR_TOKENS = Object.keys(PASSPORT_COLOUR_FAMILIES);
@@ -3393,6 +3450,7 @@ function buildPassportView(
       state: "learning",
       learningNote: "Complete your Style Passport and nAia can show you how it compares with what you actually own.",
       comparisons: [],
+      notYetMeasurable: [],
     };
   }
 
@@ -3444,6 +3502,55 @@ function buildPassportView(
       });
     }
   }
+
+  // Colours she asked nAia to avoid — a separate, explicit Passport signal
+  // (avoidColors), never inferred from what she simply owns less of.
+  if (coverage.colourCoverage >= COVERAGE_THRESHOLD && passport.avoidColors.length > 0) {
+    const stated = passport.avoidColors.filter((id) => PASSPORT_COLOUR_FAMILIES[norm(id) ?? ""]);
+    const colourTotal = items.filter((i) => norm(i.primaryColor) !== null).length;
+    if (stated.length > 0 && colourTotal > 0) {
+      const matched: WardrobeGarment[] = [];
+      for (const item of items) {
+        const family = closetColourFamily(item.primaryColor);
+        if (!family) continue;
+        if (stated.some((token) => (PASSPORT_COLOUR_FAMILIES[norm(token) ?? ""] ?? []).includes(family))) {
+          matched.push(item);
+        }
+      }
+      const owned = matched.length;
+      const label = (token: string) => PASSPORT_COLOUR_LABEL[norm(token) ?? ""] ?? token;
+      comparisons.push({
+        id: "colour-avoid",
+        stated: `You told nAia to leave out ${joinList(stated.map(label))}.`,
+        observed:
+          owned === 0
+            ? `None of the ${colourTotal} colour-tagged pieces in your Closet are in that range.`
+            : `${owned} of the ${colourTotal} colour-tagged pieces in your Closet ${owned === 1 ? "is" : "are"} in that range.`,
+        reading:
+          owned === 0
+            ? "Your Closet matches that — nothing to flag."
+            : `Worth knowing before nAia styles you with ${owned === 1 ? "it" : "them"}.`,
+        evidence: [
+          ev("passport-signal", "OnboardingProfile.avoidColors", `Stated tokens: ${stated.join(", ")}.`, []),
+          ev("garment-fact", "primaryColor", `${owned} of ${colourTotal} colour-tagged pieces fall in an avoided family.`, matched.map((g) => g.id)),
+        ],
+        strength: gradeStrength(
+          [ev("passport-signal", "", "", []), ev("garment-fact", "", "", [])],
+          colourTotal,
+        ),
+      });
+    }
+  }
+
+  // Dressing preferences vs how the wardrobe actually reads. The comparison
+  // itself is NOT duplicated here — wardrobe-copy.ts's coverageMatch() already
+  // reads needs.registers[].blockedCount/usableCount (built from this file's
+  // own classifyUsability()) into exactly this reading, register by register.
+  // Only the honest "not yet measurable" disclosure lives here, because it is
+  // a Passport-vocabulary fact, not a per-register wardrobe reading.
+  const statedDressingPrefs = (passport.dressingPreferences ?? []).filter(
+    (id) => id !== "no-dressing-requirements" && id !== DRESSING_REQUIREMENTS_NOTE_TRIGGER_ID,
+  );
 
   // Structure.
   const structureToken = norm(passport.structure);
@@ -3518,16 +3625,21 @@ function buildPassportView(
     }
   }
 
+  const notYetMeasurable = unmeasurableDressingPreferences(statedDressingPrefs).map(
+    (id) => DRESSING_PREFERENCE_LABEL[id] ?? id,
+  );
+
   if (comparisons.length === 0) {
     return {
       state: "learning",
       learningNote:
         "nAia needs a little more detail across your pieces before it can compare your Passport with your Closet fairly.",
       comparisons: [],
+      notYetMeasurable,
     };
   }
 
-  return { state: "available", comparisons };
+  return { state: "available", comparisons, notYetMeasurable };
 }
 
 // ── Wear intelligence — prepared, never faked ─────────────────────────────────
@@ -3645,6 +3757,7 @@ export function computeWardrobeIntelligence(input: WardrobeIntelligenceInput): W
         state: "learning",
         learningNote: "nAia compares your Passport with your Closet once there's enough of a Closet to compare.",
         comparisons: [],
+        notYetMeasurable: [],
       },
       wear: buildWearIntelligence(items),
     };

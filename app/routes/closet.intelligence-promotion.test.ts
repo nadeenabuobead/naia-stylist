@@ -157,6 +157,33 @@ describe("CIP-C — the handoff is a working form, not a label", () => {
   });
 });
 
+// ── CIP-G: the moodboard "Style this look" handoff is a working form too ──
+//
+// This dialog's CTA was still the decorative <a href="/style-me"> the rest of
+// CIP-C exists to retire — missed because it is a combination (multiple
+// garment ids), not a single piece, so the earlier promotion only re-attached
+// the single-piece button.
+
+describe("CIP-G — the moodboard combination handoff is a working form, not a label", () => {
+  test("CIP-G.1 the dead <a href=\"/style-me\"> is gone", () => {
+    assert.doesNotMatch(read(LIVE), /<a className="wip-link" href="\/style-me">/);
+  });
+
+  test("CIP-G.2 it posts to /api/wi-style-this with a real closetItemId from the look", () => {
+    const src = read(LIVE);
+    const idx = src.indexOf("A real combination from what you already own.");
+    assert.notEqual(idx, -1, "expected the moodboard dialog to still exist");
+    const scope = src.slice(idx, src.indexOf("</DialogShell>", idx));
+    assert.match(scope, /<Form method="post" action="\/api\/wi-style-this">/);
+    assert.match(scope, /<input type="hidden" name="closetItemId" value=\{look\.garmentIds\[0\]\}/);
+    assert.match(scope, /type="submit"/, "decorative text would be a regression, not a fix");
+  });
+
+  test("CIP-G.3 the label says 'look', not the single-piece label verbatim", () => {
+    assert.match(read(LIVE), /Style this look in StyleMe →/);
+  });
+});
+
 // ── CIP-D: locked copy is not collateral damage ───────────────────────────
 
 describe("CIP-D — wardrobe-page.ts locked copy is untouched", () => {

@@ -288,6 +288,25 @@ export interface DepthFinding {
 }
 
 /**
+ * ADVISORY ONLY. nAia never removes, hides or down-ranks a garment on the
+ * strength of this — it only tells the customer what it noticed, so she can
+ * decide. Composed entirely from evidence this file already computes
+ * (blocked pieces, redundant clusters, low-range repetition); no new scoring.
+ */
+export interface ReconsiderEntry {
+  garmentId: string;
+  /** One sentence per reason this piece surfaced, never a verdict. */
+  reasons: string[];
+  evidence: Evidence[];
+}
+
+export interface ReconsiderAdvisory {
+  state: BlockState;
+  learningNote?: string;
+  entries: ReconsiderEntry[];
+}
+
+/**
  * "uneven" is alignment WITHOUT coverage: everything she owns sits inside the
  * palette she named, but only part of that palette is actually present. It is
  * deliberately not "alignment", because calling it a strong match would tell
@@ -479,6 +498,8 @@ export interface WardrobeNeeds {
    * `styleMe`/`intentions` above; does not replace or feed either one. */
   demand: StyleMeDemandReading;
   headlines: Headline[];
+  /** Advisory-only "worth reconsidering" list. Never auto-removes anything. */
+  reconsider: ReconsiderAdvisory;
 }
 
 // ── Passport reading ──────────────────────────────────────────────────────────
@@ -1066,6 +1087,77 @@ function buildFindings(
   return { enough: enough.slice(0, 3), couldUseMore: couldUseMore.slice(0, 3) };
 }
 
+// ── Reconsider / let go — advisory only ───────────────────────────────────────
+//
+// Composed entirely from evidence already computed above:
+//   - blockedPieces   → sits outside a preference she stated
+//   - "enough" clusters → a near-duplicate of pieces she already has plenty of
+//   - "repetition" findings → one of many near-identical pieces that collapse
+//     into the same one or two looks, so it adds little on its own
+// nAia never says "remove" or "donate" here — only what it noticed, with the
+// evidence behind it, so she can decide for herself.
+function buildReconsiderAdvisory(
+  registers: RegisterReading[],
+  enough: DepthFinding[],
+  couldUseMore: DepthFinding[],
+): ReconsiderAdvisory {
+  const byGarment = new Map<string, { reasons: string[]; evidence: Evidence[] }>();
+
+  const note = (garmentId: string, reason: string, evidence: Evidence) => {
+    const entry = byGarment.get(garmentId) ?? { reasons: [], evidence: [] };
+    if (!entry.reasons.includes(reason)) entry.reasons.push(reason);
+    entry.evidence.push(evidence);
+    byGarment.set(garmentId, entry);
+  };
+
+  for (const register of registers) {
+    for (const blocked of register.blockedPieces) {
+      note(
+        blocked.garmentId,
+        `Sits outside a preference you stated — ${blocked.reason}.`,
+        ev("passport-signal", "dressingPreferences / avoidColors", blocked.reason, [blocked.garmentId]),
+      );
+    }
+  }
+
+  for (const finding of enough) {
+    for (const garmentId of finding.garmentIds) {
+      note(
+        garmentId,
+        "A near-duplicate of pieces you already have enough of.",
+        ev("garment-fact", "slot + colour + formality", finding.body, finding.garmentIds),
+      );
+    }
+  }
+
+  for (const finding of couldUseMore) {
+    if (finding.kind !== "repetition") continue;
+    for (const garmentId of finding.garmentIds) {
+      note(
+        garmentId,
+        "One of several near-identical pieces, so it doesn't add much on its own.",
+        ev("garment-fact", "shape + colour + fit", finding.body, finding.garmentIds),
+      );
+    }
+  }
+
+  if (byGarment.size === 0) {
+    return {
+      state: "learning",
+      learningNote:
+        "nAia hasn't found anything worth flagging yet. Add more Closet pieces, or complete more of your Style Passport, and nAia can look more closely.",
+      entries: [],
+    };
+  }
+
+  const entries: ReconsiderEntry[] = Array.from(byGarment.entries())
+    .map(([garmentId, { reasons, evidence }]) => ({ garmentId, reasons, evidence }))
+    .sort((a, b) => b.reasons.length - a.reasons.length || a.garmentId.localeCompare(b.garmentId))
+    .slice(0, 12);
+
+  return { state: "available", entries };
+}
+
 // ── Passport ↔ Closet synthesis ───────────────────────────────────────────────
 
 /**
@@ -1483,11 +1575,17 @@ export function computeWardrobeNeeds(input: WardrobeNeedsInput): WardrobeNeeds {
     intentions: buildIntentionReading(items, styleMeSessions),
     demand: buildStyleMeDemandReading(styleMeDemandFacts, []),
     headlines: [],
+    reconsider: {
+      state: "learning",
+      learningNote: `nAia reads your wardrobe as a whole once there are at least ${MIN_WARDROBE_SIZE} pieces in it.`,
+      entries: [],
+    },
   };
   if (items.length < MIN_WARDROBE_SIZE) return empty;
 
   const registers = readRegisters(items, passport);
   const { enough, couldUseMore } = buildFindings(items, passport, registers);
+  const reconsider = buildReconsiderAdvisory(registers, enough, couldUseMore);
   const synthesis = buildSynthesis(items, passport);
   const styleMe = buildStyleMeReading(items, styleMeSessions, registers);
   const outcomeReading = buildOutcomeReading(outcomes);
@@ -1508,6 +1606,7 @@ export function computeWardrobeNeeds(input: WardrobeNeedsInput): WardrobeNeeds {
     synthesis, styleMe, outcomes: outcomeReading,
     intentions: buildIntentionReading(items, styleMeSessions),
     demand: buildStyleMeDemandReading(styleMeDemandFacts, registers),
+    reconsider,
   };
 
   return { ...withoutHeadlines, headlines: buildHeadlines(withoutHeadlines) };

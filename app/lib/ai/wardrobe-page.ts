@@ -171,6 +171,9 @@ const CLAIM_OWNER: Readonly<Record<string, SectionId>> = {
   // preferences"), not background provenance — it sits with the work-variety
   // finding, not in the profile.
   coverage: "attention",
+  // Advisory-only — nAia never removes anything on the strength of this, it
+  // only says what it noticed. Sits with the other actionable findings.
+  reconsider: "attention",
   recommendation: "shop",
   "not-a-priority": "shop",
   "low-priority": "shop",
@@ -354,6 +357,10 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
     // Coverage: an actionable limitation, so it sits beside the other thing
     // that deserves attention, not in the profile as background provenance.
     add("attention", buildCoverageBlock(input));
+    // Worth reconsidering: advisory only. nAia never removes or hides a
+    // garment on the strength of this — see buildReconsiderAdvisory() in
+    // wardrobe-needs.ts for exactly which evidence can surface a piece here.
+    add("attention", buildReconsiderBlock(input));
   }
 
   // ── Wear what you already own (combinations) ───────────────────────────────
@@ -1337,7 +1344,7 @@ function naturalShapeTitle(rec: { title: string; register: string }): string {
  * the per-piece detail is the customer's choice to open.
  */
 function buildCoverageBlock(input: WardrobePageInput): PageBlock | null {
-  const { needs } = input;
+  const { needs, intelligence } = input;
   const registers = needs.registers.filter((r) => r.rawCount > 0 || r.needed);
 
   const blocked = registers.flatMap((r) => r.blockedPieces ?? []);
@@ -1351,8 +1358,34 @@ function buildCoverageBlock(input: WardrobePageInput): PageBlock | null {
       layers: b.rescuedBy.map((id) => input.garmentName?.(id) ?? "a layer you own"),
       layerIds: b.rescuedBy,
     }));
-  if (blockedDetail.length === 0) return null;
+  // Stated dressing preferences nAia cannot check against any garment field —
+  // disclosed honestly rather than silently skipped. See notYetMeasurable in
+  // buildPassportView() (wardrobe-intelligence.ts).
+  const notYetMeasurable = intelligence.passportView.notYetMeasurable ?? [];
+  if (blockedDetail.length === 0 && notYetMeasurable.length === 0) return null;
   const rescued = blockedDetail.filter((b) => b.layers.length > 0);
+
+  const notYetMeasurableNote =
+    notYetMeasurable.length > 0
+      ? ` nAia can't yet check ${joinWithAnd(notYetMeasurable)} against your photos — that will improve as garment analysis grows.`
+      : "";
+
+  if (blockedDetail.length === 0) {
+    return {
+      id: "coverage",
+      label: "Coverage",
+      kind: "coverage",
+      entries: [
+        {
+          id: "coverage-detail",
+          claim: "coverage",
+          role: "full",
+          body: `Every piece nAia has read meets the dressing preferences it can check.${notYetMeasurableNote}`,
+          garmentIds: [],
+        },
+      ],
+    };
+  }
 
   return {
     id: "coverage",
@@ -1367,7 +1400,7 @@ function buildCoverageBlock(input: WardrobePageInput): PageBlock | null {
           rescued.length > 0
             ? ` nAia found a potential layering option in your Closet for ${rescued.length === 1 ? "one of them" : `${numberWord(rescued.length)} of them`}.`
             : ""
-        }`,
+        }${notYetMeasurableNote}`,
         garmentIds: blockedDetail.map((b) => b.garmentId),
         action: {
           kind: "reveal",
@@ -1378,6 +1411,34 @@ function buildCoverageBlock(input: WardrobePageInput): PageBlock | null {
         meta: { blockedDetail },
       },
     ],
+  };
+}
+
+/**
+ * Worth reconsidering — advisory only.
+ *
+ * nAia never removes, hides or down-ranks a garment on the strength of this.
+ * It states what it noticed, and the real evidence behind it, so the
+ * customer can decide for herself. See buildReconsiderAdvisory() in
+ * wardrobe-needs.ts for exactly which signals can surface a piece here.
+ */
+function buildReconsiderBlock(input: WardrobePageInput): PageBlock | null {
+  const { needs } = input;
+  const entries = needs.reconsider.entries;
+  if (entries.length === 0) return null;
+
+  return {
+    id: "reconsider",
+    label: "Worth reconsidering",
+    kind: "reconsider",
+    entries: entries.map((entry) => ({
+      id: `reconsider-${entry.garmentId}`,
+      claim: `reconsider:${entry.garmentId}` as ClaimKey,
+      role: "full" as EntryRole,
+      title: input.garmentName?.(entry.garmentId) ?? "This piece",
+      body: entry.reasons.join(" "),
+      garmentIds: [entry.garmentId],
+    })),
   };
 }
 

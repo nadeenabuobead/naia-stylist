@@ -1070,3 +1070,103 @@ describe("§CIA-WI-7 Phase 3 wardrobe adapter has zero effect on WI's own output
     assert.deepEqual(after, before, "WI's output must be byte-identical whether or not the Phase 3 adapter was also called on its output");
   });
 });
+
+// ── §WN-14 Reconsider / let go — advisory only ────────────────────────────────
+//
+// Composed entirely from signals this file already computes and already
+// tests elsewhere (blockedPieces, "enough" clusters, "repetition" findings).
+// The one new rule asserted here: nAia states what it noticed, never a
+// removal verdict — no "remove", "donate", "get rid of" or "delete" may ever
+// appear in a reconsider reason.
+const BANNED_REMOVAL_LANGUAGE = /\bremove\b|\bdonate\b|\bget rid of\b|\bdelete\b|\bdiscard\b|\btoss\b/i;
+
+describe("§WN-14 reconsider / let go — advisory only", () => {
+  it("14a — a piece blocked by a stated dressing preference surfaces with the real reason, never a verdict", () => {
+    const occasion = [
+      ...makeLook("evening", 1, { hemLength: "maxi" }),
+      ...Array.from({ length: 6 }, () =>
+        makeGarment({ slot: "dress", category: "DRESSES", formality: "evening", sleeveLength: "sleeveless", hemLength: "maxi" }),
+      ),
+    ];
+    const needs = run([...makeLook("casual", 6), ...occasion], {
+      passport: makePassport({
+        lifestyle: ["dinners-going-out", "everyday-casual"],
+        dressingPreferences: ["arms-covered"],
+      }),
+    });
+
+    const occasionRegister = registerOf(needs, "occasion");
+    assert.ok(occasionRegister.blockedPieces.length > 0, "sanity: this fixture produces real blocked pieces");
+
+    const blockedId = occasionRegister.blockedPieces[0].garmentId;
+    const entry = needs.reconsider.entries.find((e) => e.garmentId === blockedId);
+    assert.ok(entry, "a blocked piece must surface as a reconsider entry");
+    assert.match(entry!.reasons.join(" "), /outside a preference you stated/);
+    assert.match(entry!.reasons.join(" "), /arms covered/);
+    for (const reason of entry!.reasons) assert.doesNotMatch(reason, BANNED_REMOVAL_LANGUAGE);
+  });
+
+  it("14b — an 'enough' cluster's own members surface as near-duplicates", () => {
+    const needs = run(variedLooks("casual", 5), { passport: makePassport({ lifestyle: ["everyday-casual"] }) });
+    assert.ok(needs.enough.length > 0, "sanity: this fixture produces a real 'enough' cluster");
+
+    const memberId = needs.enough[0].garmentIds[0];
+    const entry = needs.reconsider.entries.find((e) => e.garmentId === memberId);
+    assert.ok(entry, "a member of an 'enough' cluster must surface as a reconsider entry");
+    assert.match(entry!.reasons.join(" "), /near-duplicate of pieces you already have enough of/);
+    for (const reason of entry!.reasons) assert.doesNotMatch(reason, BANNED_REMOVAL_LANGUAGE);
+  });
+
+  it("14c — a repetition finding's pieces surface as reconsider entries, never as a 'buy more' signal", () => {
+    const needs = run(makeLook("casual", 13), { passport: makePassport({ lifestyle: ["everyday-casual"] }) });
+    const finding = needs.couldUseMore.find((f) => f.kind === "repetition");
+    assert.ok(finding, "sanity: this fixture produces a real repetition finding");
+
+    const memberId = finding!.garmentIds[0];
+    const entry = needs.reconsider.entries.find((e) => e.garmentId === memberId);
+    assert.ok(entry, "a repetition finding's piece must surface as a reconsider entry");
+    assert.match(entry!.reasons.join(" "), /near-identical pieces/);
+    for (const reason of entry!.reasons) assert.doesNotMatch(reason, BANNED_REMOVAL_LANGUAGE);
+  });
+
+  it("14d — with nothing evidenced, reconsider reports a learning state with a real next action, never a fabricated list", () => {
+    // 16 interchangeable pieces, no Passport at all: no blocked pieces, and
+    // distinctLooks (1) never clears DEEP_LOOKS, so no 'enough' cluster either.
+    const needs = run(makeLook("casual", 8), { passport: null });
+    assert.equal(needs.reconsider.state, "learning");
+    assert.equal(needs.reconsider.entries.length, 0);
+    assert.ok(needs.reconsider.learningNote && needs.reconsider.learningNote.length > 0);
+  });
+
+  it("14e — below the minimum wardrobe size, reconsider is learning, not empty-by-coincidence", () => {
+    const needs = run([makeGarment(), makeGarment()], { passport: makePassport({ lifestyle: ["everyday-casual"] }) });
+    assert.equal(needs.reconsider.state, "learning");
+    assert.equal(needs.reconsider.entries.length, 0);
+  });
+
+  it("14f — every reason across every fixture avoids removal language", () => {
+    const fixtures: Array<[WardrobeGarment[], WardrobePassport | null]> = [
+      [makeLook("casual", 13), makePassport({ lifestyle: ["everyday-casual"] })],
+      [variedLooks("casual", 5), makePassport({ lifestyle: ["everyday-casual"] })],
+    ];
+    for (const [items, passport] of fixtures) {
+      const needs = run(items, { passport });
+      for (const entry of needs.reconsider.entries) {
+        for (const reason of entry.reasons) {
+          assert.doesNotMatch(reason, BANNED_REMOVAL_LANGUAGE, `banned removal language in: "${reason}"`);
+        }
+      }
+    }
+  });
+
+  it("14g — a reconsider entry always carries real, signal-tagged evidence", () => {
+    const needs = run(makeLook("casual", 13), { passport: makePassport({ lifestyle: ["everyday-casual"] }) });
+    assert.ok(needs.reconsider.entries.length > 0, "sanity");
+    for (const entry of needs.reconsider.entries) {
+      assert.ok(entry.evidence.length > 0, `entry for ${entry.garmentId} has no evidence`);
+      for (const ev of entry.evidence) {
+        assert.ok(ev.garmentIds.length > 0, "evidence must name the garments it's about");
+      }
+    }
+  });
+});
