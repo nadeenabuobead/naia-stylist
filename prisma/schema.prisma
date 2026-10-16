@@ -7,8 +7,17 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  // NAIA_DATABASE_URL: the freshly-created Prisma Postgres POOLED
+  // connection string — used by Prisma Client (app/db.server.js) for all
+  // application traffic.
+  // DATABASE_URL: the pre-existing, Vercel/Prisma-managed DIRECT
+  // connection (resolves to db.prisma.io, not the pooled host) — reused
+  // here as directUrl for the Prisma CLI only (migrate, introspect,
+  // studio, db pull). Application code never reads this field's value;
+  // only the Prisma CLI does.
+  url       = env("NAIA_DATABASE_URL")
+  directUrl = env("DATABASE_URL")
 }
 // ============================================
 // SHOPIFY SESSION (Required for Shopify App)
