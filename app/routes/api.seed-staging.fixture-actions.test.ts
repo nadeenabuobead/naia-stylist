@@ -12,9 +12,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("../db.server", () => ({
   default: {
-    customer: { findUnique: vi.fn() },
+    customer: { findUnique: vi.fn(), create: vi.fn() },
     onboardingProfile: { upsert: vi.fn() },
     closetItem: { create: vi.fn() },
+    naiaSession: { create: vi.fn() },
   },
 }));
 
@@ -24,9 +25,13 @@ vi.mock("../lib/ai/journey-events.server", () => ({
 }));
 
 import prisma from "../db.server";
-import { action } from "./api.seed-staging";
+import { action, loader } from "./api.seed-staging";
 
 const STAGING_SECRET = "test-secret-abc123";
+
+function makeLoaderRequest(search: string): Parameters<typeof loader>[0] {
+  return { request: new Request(`https://example.com/api/seed-staging${search}`) } as any;
+}
 
 function makeActionRequest(body: object): Parameters<typeof action>[0] {
   return {
@@ -121,5 +126,116 @@ describe("§S4 seed-staging fixture actions — scoped to test-batch1- customers
       makeActionRequest({ _action: "setOnboardingProfile", customerId: "tricky-id", profile: {} }),
     );
     expect((res as Response).status).toBe(403);
+  });
+});
+
+// ── §S5 Login tickets — secret-free, short-lived, single-use ─────────────────
+
+describe("§S5 seed-staging login tickets", () => {
+  const originalVariant = process.env.NAIA_PROJECT_VARIANT;
+  const originalSecret = process.env.STAGING_SEED_SECRET;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.NAIA_PROJECT_VARIANT = "staging";
+    process.env.STAGING_SEED_SECRET = STAGING_SECRET;
+  });
+
+  afterEach(() => {
+    process.env.NAIA_PROJECT_VARIANT = originalVariant;
+    process.env.STAGING_SEED_SECRET = originalSecret;
+  });
+
+  it("S501 — createLoginLink refuses a shopifyCustomerId without the test-batch1- prefix", async () => {
+    const res = await action(
+      makeActionRequest({ _action: "createLoginLink", shopifyCustomerId: "real-123", email: "x@example.com" }),
+    );
+    expect((res as Response).status).toBe(400);
+    expect(prisma.customer.create).not.toHaveBeenCalled();
+  });
+
+  it("S502 — createLoginLink's returned URL contains a ticket and never the raw secret", async () => {
+    (prisma.customer.findUnique as any).mockResolvedValueOnce(null);
+    (prisma.customer.create as any).mockResolvedValueOnce({ id: "fixture-id" });
+    const res = await action(
+      makeActionRequest({ _action: "createLoginLink", shopifyCustomerId: "test-batch1-wi-a-populated", email: "wi-qa-a@example.com", to: "/closet/intelligence" }),
+    );
+    expect((res as Response).status).toBe(200);
+    const json = await (res as Response).json();
+    expect(json.url).toMatch(/\?ticket=/);
+    expect(json.url).not.toContain("secret=");
+    expect(json.url).not.toContain(STAGING_SECRET);
+  });
+
+  it("S503 — a freshly issued ticket redeems once: sets the cookie, redirects, and cannot be reused", async () => {
+    (prisma.customer.findUnique as any).mockResolvedValueOnce(null);
+    (prisma.customer.create as any).mockResolvedValueOnce({ id: "fixture-id" });
+    const createRes = await action(
+      makeActionRequest({ _action: "createLoginLink", shopifyCustomerId: "test-batch1-wi-a-populated", email: "wi-qa-a@example.com", to: "/closet/intelligence" }),
+    );
+    const { url } = await (createRes as Response).json();
+    const ticket = new URL(url).searchParams.get("ticket")!;
+
+    (prisma.customer.findUnique as any).mockResolvedValueOnce({ id: "fixture-id" });
+    (prisma.naiaSession.create as any).mockResolvedValueOnce({});
+    const firstRedeem = await loader(makeLoaderRequest(`?ticket=${encodeURIComponent(ticket)}`));
+    expect((firstRedeem as Response).status).toBe(302);
+    expect((firstRedeem as Response).headers.get("Location")).toBe("/closet/intelligence");
+    expect((firstRedeem as Response).headers.get("Set-Cookie")).toMatch(/^__naia_tok=/);
+
+    // Same ticket again — must be refused, not silently re-honoured.
+    const secondRedeem = await loader(makeLoaderRequest(`?ticket=${encodeURIComponent(ticket)}`));
+    expect((secondRedeem as Response).status).toBe(410);
+  });
+
+  it("S504 — a tampered ticket (flipped signature) is rejected outright", async () => {
+    (prisma.customer.findUnique as any).mockResolvedValueOnce(null);
+    (prisma.customer.create as any).mockResolvedValueOnce({ id: "fixture-id" });
+    const createRes = await action(
+      makeActionRequest({ _action: "createLoginLink", shopifyCustomerId: "test-batch1-wi-a-populated", email: "wi-qa-a@example.com" }),
+    );
+    const { url } = await (createRes as Response).json();
+    const ticket = new URL(url).searchParams.get("ticket")!;
+    const [payload] = ticket.split(".");
+    const tampered = `${payload}.not-the-real-signature`;
+
+    const res = await loader(makeLoaderRequest(`?ticket=${encodeURIComponent(tampered)}`));
+    expect((res as Response).status).toBe(410);
+    expect(prisma.naiaSession.create).not.toHaveBeenCalled();
+  });
+
+  it("S505 — an expired ticket is rejected, even with the server's own 30s floor on requested TTL", async () => {
+    (prisma.customer.findUnique as any).mockResolvedValueOnce(null);
+    (prisma.customer.create as any).mockResolvedValueOnce({ id: "fixture-id" });
+    const createRes = await action(
+      makeActionRequest({ _action: "createLoginLink", shopifyCustomerId: "test-batch1-wi-a-populated", email: "wi-qa-a@example.com", ttlSeconds: 1 }),
+    );
+    const { url } = await (createRes as Response).json();
+    const ticket = new URL(url).searchParams.get("ticket")!;
+
+    // A requested 1s TTL is clamped up to the server's 30s floor — simulate
+    // real time passing well beyond even that, instead of a slow real sleep.
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.now() + 60_000);
+    try {
+      const res = await loader(makeLoaderRequest(`?ticket=${encodeURIComponent(ticket)}`));
+      expect((res as Response).status).toBe(410);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("S506 — a ticket signed with a different secret is rejected", async () => {
+    (prisma.customer.findUnique as any).mockResolvedValueOnce(null);
+    (prisma.customer.create as any).mockResolvedValueOnce({ id: "fixture-id" });
+    const createRes = await action(
+      makeActionRequest({ _action: "createLoginLink", shopifyCustomerId: "test-batch1-wi-a-populated", email: "wi-qa-a@example.com" }),
+    );
+    const { url } = await (createRes as Response).json();
+    const ticket = new URL(url).searchParams.get("ticket")!;
+
+    process.env.STAGING_SEED_SECRET = "a-completely-different-secret";
+    const res = await loader(makeLoaderRequest(`?ticket=${encodeURIComponent(ticket)}`));
+    expect((res as Response).status).toBe(410);
   });
 });
