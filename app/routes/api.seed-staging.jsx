@@ -5,7 +5,9 @@ import { extractStyleMeEvidence, extractPostWearEvidence, extractClosetEvidence,
 import { writeSourceEvidence, reconcileObservations } from "../lib/ai/taste-reconcile.server";
 
 // Staging-only fixture and diagnostic endpoint.
-// Requires STAGING_SEED_SECRET env var + matching x-seed-secret header.
+// Requires STAGING_SEED_SECRET (legacy) OR WI_QA_LOGIN_SECRET (dedicated to
+// the Wardrobe Intelligence QA workflow, kept intentionally separate — see
+// isValidSeedSecret) env var + matching x-seed-secret header.
 //
 // Supported _action values:
 //   "createCustomer"     — create Customer record (idempotent on shopifyCustomerId)
@@ -26,6 +28,37 @@ function hashToken(raw) {
 
 function generateRawToken() {
   return randomBytes(32).toString("base64url");
+}
+
+/**
+ * WI_QA_LOGIN_SECRET is a dedicated secret for the Wardrobe Intelligence QA
+ * workflow, intentionally separate from the long-standing STAGING_SEED_SECRET
+ * — set it (Preview-only) to stop depending on that older shared secret
+ * entirely. Every header-authenticated action below accepts either one, so
+ * nothing here breaks if only one of the two is configured. Constant-time
+ * comparison: these gate real writes, so a timing side-channel is worth
+ * closing even though the Forbidden path already does almost no work.
+ */
+function timingSafeStringEqual(a, b) {
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  const aBuf = Buffer.from(a);
+  const bBuf = Buffer.from(b);
+  if (aBuf.length !== bBuf.length) return false;
+  return timingSafeEqual(aBuf, bBuf);
+}
+
+function isValidSeedSecret(provided) {
+  if (!provided) return false;
+  const candidates = [process.env.STAGING_SEED_SECRET, process.env.WI_QA_LOGIN_SECRET].filter(Boolean);
+  return candidates.some((candidate) => timingSafeStringEqual(provided, candidate));
+}
+
+/** The one secret used to sign/verify login tickets — prefers the dedicated
+ * WI_QA_LOGIN_SECRET so tickets stop depending on STAGING_SEED_SECRET as
+ * soon as the dedicated one is configured; falls back so nothing breaks
+ * before that. */
+function ticketSigningSecret() {
+  return process.env.WI_QA_LOGIN_SECRET || process.env.STAGING_SEED_SECRET;
 }
 
 /** Standard prefix every fixture record in this file must carry. */
@@ -78,7 +111,7 @@ function sweepConsumedNonces() {
 }
 
 function signTicketPayload(payloadB64) {
-  return createHmac("sha256", process.env.STAGING_SEED_SECRET).update(payloadB64).digest("base64url");
+  return createHmac("sha256", ticketSigningSecret()).update(payloadB64).digest("base64url");
 }
 
 function createLoginTicket({ customerId, to, ttlSeconds }) {
@@ -389,9 +422,12 @@ export async function action({ request }) {
     return Response.json({ ok: true, updated: updated.count });
   }
 
-  // All other actions require x-seed-secret
+  // All other actions require x-seed-secret, matching EITHER the long-
+  // standing STAGING_SEED_SECRET or the dedicated WI_QA_LOGIN_SECRET (see
+  // isValidSeedSecret below). Both are header-only — never accepted from a
+  // query string on this path.
   const secret = request.headers.get("x-seed-secret");
-  if (!process.env.STAGING_SEED_SECRET || secret !== process.env.STAGING_SEED_SECRET) {
+  if (!isValidSeedSecret(secret)) {
     return new Response("Forbidden", { status: 403 });
   }
 

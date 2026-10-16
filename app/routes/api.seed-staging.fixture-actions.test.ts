@@ -239,3 +239,91 @@ describe("§S5 seed-staging login tickets", () => {
     expect((res as Response).status).toBe(410);
   });
 });
+
+// ── §S6 WI_QA_LOGIN_SECRET — dedicated, independent of STAGING_SEED_SECRET ───
+
+function makeActionRequestWithSecret(body: object, secretHeader: string): Parameters<typeof action>[0] {
+  return {
+    request: new Request("https://example.com/api/seed-staging", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-seed-secret": secretHeader },
+      body: JSON.stringify(body),
+    }),
+  } as any;
+}
+
+describe("§S6 seed-staging — dedicated WI_QA_LOGIN_SECRET", () => {
+  const originalVariant = process.env.NAIA_PROJECT_VARIANT;
+  const originalSeedSecret = process.env.STAGING_SEED_SECRET;
+  const originalWiSecret = process.env.WI_QA_LOGIN_SECRET;
+  const WI_SECRET = "dedicated-wi-qa-secret-xyz";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.NAIA_PROJECT_VARIANT = "staging";
+  });
+
+  afterEach(() => {
+    process.env.NAIA_PROJECT_VARIANT = originalVariant;
+    process.env.STAGING_SEED_SECRET = originalSeedSecret;
+    process.env.WI_QA_LOGIN_SECRET = originalWiSecret;
+  });
+
+  it("S601 — WI_QA_LOGIN_SECRET alone (STAGING_SEED_SECRET unset) authorizes a header-authenticated action", async () => {
+    delete process.env.STAGING_SEED_SECRET;
+    process.env.WI_QA_LOGIN_SECRET = WI_SECRET;
+    (prisma.customer.findUnique as any).mockResolvedValueOnce({
+      id: "fixture-id",
+      shopifyCustomerId: "test-batch1-wi-a-populated",
+    });
+    (prisma.onboardingProfile.upsert as any).mockResolvedValueOnce({ id: "profile-1", completed: true });
+    const res = await action(
+      makeActionRequestWithSecret({ _action: "setOnboardingProfile", customerId: "fixture-id", profile: {} }, WI_SECRET),
+    );
+    expect((res as Response).status).toBe(200);
+  });
+
+  it("S602 — the OLD STAGING_SEED_SECRET value no longer works if it's wrong, but WI_QA_LOGIN_SECRET still does — proving independence", async () => {
+    process.env.STAGING_SEED_SECRET = "stale-or-rotated-value-the-caller-no-longer-has";
+    process.env.WI_QA_LOGIN_SECRET = WI_SECRET;
+    (prisma.customer.findUnique as any).mockResolvedValueOnce({
+      id: "fixture-id",
+      shopifyCustomerId: "test-batch1-wi-a-populated",
+    });
+    (prisma.onboardingProfile.upsert as any).mockResolvedValueOnce({ id: "profile-1", completed: true });
+    const res = await action(
+      makeActionRequestWithSecret({ _action: "setOnboardingProfile", customerId: "fixture-id", profile: {} }, WI_SECRET),
+    );
+    expect((res as Response).status).toBe(200);
+  });
+
+  it("S603 — a wrong value for both secrets is still rejected", async () => {
+    process.env.STAGING_SEED_SECRET = "real-value-a";
+    process.env.WI_QA_LOGIN_SECRET = "real-value-b";
+    const res = await action(
+      makeActionRequestWithSecret({ _action: "setOnboardingProfile", customerId: "fixture-id", profile: {} }, "guessed-wrong-value"),
+    );
+    expect((res as Response).status).toBe(403);
+  });
+
+  it("S604 — a login ticket created and verified entirely under WI_QA_LOGIN_SECRET needs no STAGING_SEED_SECRET at all", async () => {
+    delete process.env.STAGING_SEED_SECRET;
+    process.env.WI_QA_LOGIN_SECRET = WI_SECRET;
+    (prisma.customer.findUnique as any).mockResolvedValueOnce(null);
+    (prisma.customer.create as any).mockResolvedValueOnce({ id: "fixture-id" });
+    const createRes = await action(
+      makeActionRequestWithSecret(
+        { _action: "createLoginLink", shopifyCustomerId: "test-batch1-wi-a-populated", email: "wi-qa-a@example.com", to: "/closet/intelligence" },
+        WI_SECRET,
+      ),
+    );
+    expect((createRes as Response).status).toBe(200);
+    const { url } = await (createRes as Response).json();
+    const ticket = new URL(url).searchParams.get("ticket")!;
+
+    (prisma.customer.findUnique as any).mockResolvedValueOnce({ id: "fixture-id" });
+    (prisma.naiaSession.create as any).mockResolvedValueOnce({});
+    const redeemRes = await loader(makeLoaderRequest(`?ticket=${encodeURIComponent(ticket)}`));
+    expect((redeemRes as Response).status).toBe(302);
+  });
+});
