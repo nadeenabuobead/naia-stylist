@@ -25,6 +25,28 @@ function generateRawToken() {
   return randomBytes(32).toString("base64url");
 }
 
+/** Standard prefix every fixture record in this file must carry. */
+const TEST_CUSTOMER_PREFIX = "test-batch1-";
+
+/**
+ * Resolves customerId to its shopifyCustomerId and confirms it's a fixture
+ * customer. Used by every action below that mutates data scoped to an
+ * EXISTING customerId (as opposed to createCustomer/createSession/
+ * loginRedirect, which only ever create a brand-new test-prefixed customer
+ * or look one up by its own test-prefixed shopifyCustomerId) — so a wrong or
+ * mistyped id can never write into a real customer's data.
+ */
+async function requireTestCustomer(customerId) {
+  const customer = await prisma.customer.findUnique({
+    where: { id: String(customerId) },
+    select: { id: true, shopifyCustomerId: true },
+  });
+  if (!customer || !customer.shopifyCustomerId?.startsWith(TEST_CUSTOMER_PREFIX)) {
+    return null;
+  }
+  return customer;
+}
+
 // Staging GET login helper: /api/seed-staging?secret=…&id=…&email=…&to=…
 // Sets the __naia_tok cookie and redirects — allows browser-based test login.
 export async function loader({ request }) {
@@ -89,14 +111,23 @@ export async function loader({ request }) {
     });
   }
 
+  // Optional ?ttl=<seconds> — a QA caller can request a much shorter-lived
+  // session than the 30-day default (clamped 60s..30d either way). Every
+  // existing caller that omits it keeps today's exact 30-day behaviour.
+  const DEFAULT_TTL_SECONDS = 30 * 24 * 60 * 60;
+  const ttlParam = Number.parseInt(url.searchParams.get("ttl") ?? "", 10);
+  const ttlSeconds = Number.isFinite(ttlParam)
+    ? Math.min(Math.max(ttlParam, 60), DEFAULT_TTL_SECONDS)
+    : DEFAULT_TTL_SECONDS;
+
   const rawToken = generateRawToken();
   const tokenHash = hashToken(rawToken);
-  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+  const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
   await prisma.naiaSession.create({
     data: { tokenHash, customerId: customer.id, expiresAt },
   });
 
-  const cookieHeader = `__naia_tok=${rawToken}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${30 * 24 * 60 * 60}`;
+  const cookieHeader = `__naia_tok=${rawToken}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${ttlSeconds}`;
   return new Response(null, {
     status: 302,
     headers: { "Set-Cookie": cookieHeader, Location: to },
@@ -487,6 +518,9 @@ export async function action({ request }) {
     if (!customerId || !profile || typeof profile !== "object") {
       return Response.json({ error: "customerId and profile object required" }, { status: 400 });
     }
+    if (!(await requireTestCustomer(customerId))) {
+      return Response.json({ error: "customerId must belong to a test-batch1- fixture customer" }, { status: 403 });
+    }
     const data = { completed: true, ...profile };
     const saved = await prisma.onboardingProfile.upsert({
       where: { customerId: String(customerId) },
@@ -506,6 +540,9 @@ export async function action({ request }) {
     const { customerId, item } = body ?? {};
     if (!customerId || !item || typeof item !== "object") {
       return Response.json({ error: "customerId and item object required" }, { status: 400 });
+    }
+    if (!(await requireTestCustomer(customerId))) {
+      return Response.json({ error: "customerId must belong to a test-batch1- fixture customer" }, { status: 403 });
     }
     const created = await prisma.closetItem.create({
       data: {
