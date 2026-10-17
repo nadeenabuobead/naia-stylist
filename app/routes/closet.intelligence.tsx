@@ -212,6 +212,27 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ? Math.round(intelligence.dna.palette.filter((p) => p.neutral).reduce((sum, p) => sum + p.share, 0) * 100)
     : null;
 
+  // Which TEMPERATURE of neutral actually dominates — previously this line
+  // always said "warm neutrals" regardless of the real palette, which was
+  // wrong for a black/navy/grey wardrobe (cool neutrals). Classified from
+  // the same real per-colour share already computed above; "neutrals" with
+  // no temperature word when there's no clear majority, rather than guessing.
+  const neutralColourShares = intelligence.dna.palette.filter((p) => p.neutral);
+  const warmShare = neutralColourShares
+    .filter((p) => WARM_NEUTRAL_COLOURS.has(p.colour.toLowerCase()))
+    .reduce((sum, p) => sum + p.share, 0);
+  const coolShare = neutralColourShares
+    .filter((p) => COOL_NEUTRAL_COLOURS.has(p.colour.toLowerCase()))
+    .reduce((sum, p) => sum + p.share, 0);
+  const neutralTemperature: "warm" | "cool" | null =
+    warmShare === 0 && coolShare === 0
+      ? null
+      : warmShare > coolShare * 1.2
+        ? "warm"
+        : coolShare > warmShare * 1.2
+          ? "cool"
+          : null;
+
   // ── The real "enough" clusters behind the low-priority finding ───────────
   // notAPriority.body only explains why ONE cluster is LOW priority (thinner
   // area elsewhere); needs.enough already computes up to 3 real repetition
@@ -312,7 +333,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }));
 
   return data({
-    page, garmentCards, glanceRegisters, allRegisterReadings, neutralSharePct,
+    page, garmentCards, glanceRegisters, allRegisterReadings, neutralSharePct, neutralTemperature,
     enoughCluster, enoughClusters, rediscoverPieces, bestByRegisterPreview, moodboardLooks, recommendationDetail,
     combosCount, reconsiderEntries,
   });
@@ -393,6 +414,19 @@ type GarmentCard = {
   id: string; name: string | null; category: string; subcategory: string | null;
   primaryColor: string | null; imageUrl: string | null; hemLength: string | null;
 };
+
+// Which of the engine's wardrobe-neutral colours (see NEUTRAL_COLORS in
+// garment-intelligence-v1.server.ts) read as warm vs cool — used only to
+// pick the right word in "N% of your pieces are {warm|cool} neutrals",
+// never to change which colours count as neutral in the first place.
+const WARM_NEUTRAL_COLOURS: ReadonlySet<string> = new Set([
+  "beige", "cream", "ivory", "off-white", "stone", "taupe", "tan", "camel",
+  "nude", "khaki", "brown", "dark brown",
+]);
+const COOL_NEUTRAL_COLOURS: ReadonlySet<string> = new Set([
+  "black", "white", "grey", "gray", "navy", "charcoal", "dark grey",
+  "dark gray", "off-black", "charcoal grey", "charcoal gray", "silver",
+]);
 
 const SWATCH: Readonly<Record<string, string>> = {
   black: "#1A1512", white: "#E3DDD2", cream: "#EFE6D8", ivory: "#F2EAD9",
@@ -599,7 +633,7 @@ function DialogShell({
 
 export default function WardrobeIntelligencePage() {
   const {
-    page, garmentCards, glanceRegisters, allRegisterReadings, neutralSharePct,
+    page, garmentCards, glanceRegisters, allRegisterReadings, neutralSharePct, neutralTemperature,
     enoughCluster, enoughClusters, rediscoverPieces, bestByRegisterPreview, moodboardLooks, recommendationDetail,
     combosCount, reconsiderEntries,
   } = useLoaderData<typeof loader>() as {
@@ -607,6 +641,7 @@ export default function WardrobeIntelligencePage() {
     glanceRegisters: Array<{ heading: string; stateText: string }>;
     allRegisterReadings: Array<{ register: RegisterId; usableCount: number; heading: string; state: DepthState; stateText: string; plain: string }>;
     neutralSharePct: number | null;
+    neutralTemperature: "warm" | "cool" | null;
     enoughCluster: { title: string; body: string; garmentIds: string[]; count: number } | null;
     enoughClusters: Array<{ title: string; body: string; garmentIds: string[]; count: number }>;
     rediscoverPieces: Array<{ garmentId: string; matchIds: string[]; insight: string }>;
@@ -1004,7 +1039,9 @@ export default function WardrobeIntelligencePage() {
               <h2 className="wip-section-title">What your wardrobe looks like.</h2>
               <div className="wip-card-shell wip-looks-card">
                 {neutralSharePct !== null && neutralSharePct >= 40 && (
-                  <p className="wip-looks-headline">{neutralSharePct}% of your pieces are warm neutrals — easy to combine, though outfits can start to feel similar.</p>
+                  <p className="wip-looks-headline">
+                    {neutralSharePct}% of your pieces are {neutralTemperature ? `${neutralTemperature} ` : ""}neutrals — easy to combine, though outfits can start to feel similar.
+                  </p>
                 )}
                 {paletteRows.length > 0 && (
                   <div className="wip-colour-bar">
@@ -1024,15 +1061,31 @@ export default function WardrobeIntelligencePage() {
                       ))}
                     </div>
                   )}
-                  {shapeChips.length > 0 && (
-                    <div className="wip-silhouette-group">
-                      <span className="wip-eyebrow-accent">Silhouettes</span>
-                      <div className="wip-chips">
-                        {shapeChips.map((s) => <span key={s.label} className="wip-chip">{s.label} · {s.count}</span>)}
-                      </div>
-                    </div>
-                  )}
                 </div>
+                {shapeChips.length > 0 && (
+                  <div className="wip-silhouette-group">
+                    <span className="wip-eyebrow-accent">Silhouettes</span>
+                    <div className="wip-shape-rows">
+                      {shapeChips.map((s) => {
+                        const pct = garmentCards.length > 0 ? Math.min((s.count / garmentCards.length) * 100, 100) : 0;
+                        return (
+                          <div key={s.label} className="wip-shape-row">
+                            <div className="wip-shape-row-label">
+                              <span>{s.label}</span>
+                              <span>{s.count} {s.count === 1 ? "piece" : "pieces"}</span>
+                            </div>
+                            <div className="wip-shape-bar"><div className="wip-shape-bar-fill" style={{ width: `${pct}%` }} /></div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {/* Real design fact, not a caveat to hide: silhouette and fit are two
+                        separate readings (§WI-19), so a piece can count in both — bars are
+                        each piece's true share of the whole Closet, never forced to sum to
+                        100%, so this is never a misleading stacked distribution. */}
+                    <p className="wip-shape-note">Each bar is its own share of your {garmentCards.length} pieces — a piece can have both a silhouette and a fit reading, so these can add up to more than your total.</p>
+                  </div>
+                )}
               </div>
             </section>
           )}
@@ -1476,7 +1529,8 @@ const css = `
 
   /* What your wardrobe looks like — a segmented proportional colour bar
      (each piece's real share as its width) instead of a row of equal
-     circular swatches, plus the existing silhouette chips alongside it. */
+     circular swatches, with the silhouette bars (below) in the same
+     visual language — same card, same thin-bar-on-muted-track idiom. */
   .wip-looks-headline{font-family:var(--naia-ff-ui);font-weight:600;font-size:13.5px;line-height:1.5;color:var(--naia-ink);margin:0 0 14px}
   .wip-colour-bar{display:flex;width:100%;height:14px;border-radius:7px;overflow:hidden;background:var(--naia-muted-bg)}
   .wip-colour-bar span{display:block;height:100%}
@@ -1485,7 +1539,21 @@ const css = `
   .wip-legend-item{display:flex;align-items:center;gap:6px;font-family:var(--naia-ff-ui);font-size:11px;color:rgba(40,21,12,0.6)}
   .wip-legend-item em{font-style:normal;color:rgba(40,21,12,0.4)}
   .wip-legend-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
-  .wip-silhouette-group{flex-shrink:0}
+
+  /* Silhouettes — individual proportional bars, each a real share of the
+     whole Closet (never normalised to sum to 100%, since silhouette and
+     fit are two separate readings and a piece can count in both — see
+     §WI-19 — so a stacked 100% bar would misrepresent real overlap as a
+     clean partition). Same accent/track colours as "Ways to get dressed"
+     elsewhere on this page, just full-width here instead of capped at
+     180px, since this section is this chart's whole purpose. */
+  .wip-silhouette-group{margin-top:28px;padding-top:24px;border-top:1px solid var(--naia-border)}
+  .wip-shape-rows{display:flex;flex-direction:column;gap:14px;margin-top:14px}
+  .wip-shape-row-label{display:flex;justify-content:space-between;align-items:baseline;font-family:var(--naia-ff-ui);font-size:12.5px;color:var(--naia-ink);margin-bottom:5px}
+  .wip-shape-row-label span:last-child{font-size:11px;color:rgba(40,21,12,0.5)}
+  .wip-shape-bar{height:6px;background:var(--naia-muted-bg);border-radius:3px;overflow:hidden}
+  .wip-shape-bar-fill{height:100%;background:var(--naia-accent);border-radius:3px}
+  .wip-shape-note{font-family:var(--naia-ff-ui);font-size:10.5px;line-height:1.5;color:rgba(40,21,12,0.45);margin:14px 0 0}
 
   /* Your Closet, styled (Moodboard V1) — one contained editorial composition
      per look, not a grid of separate photos: a single shared cream surface
@@ -1692,9 +1760,12 @@ const css = `
   .wip-legal{font-family:var(--naia-ff-ui);font-size:9.5px;color:rgba(40,21,12,0.45);margin-top:10px}
   .wip-empty{font-family:var(--naia-ff-ui);font-size:13px;color:rgba(40,21,12,0.6);padding:40px 0}
 
-  .wip-thumb{width:100%;display:flex;align-items:center;justify-content:center;background:var(--naia-muted-bg);border-radius:4px;overflow:hidden;flex-shrink:0}
+  .wip-thumb{width:100%;display:flex;align-items:center;justify-content:center;background:var(--naia-muted-bg);border:1px solid var(--naia-border);border-radius:4px;overflow:hidden;flex-shrink:0}
   .wip-thumb img{width:100%;height:100%;object-fit:contain}
-  .wip-thumb-fallback{font-family:var(--naia-ff-ui);font-size:11px;color:rgba(40,21,12,0.4)}
+  /* No photo yet — a deliberate monogram, not an empty box. Same display
+     face as the page's own headings, sized to read clearly at any of this
+     page's thumbnail sizes without dominating the smallest ones. */
+  .wip-thumb-fallback{font-family:var(--naia-ff-display);font-weight:300;font-size:22px;letter-spacing:0.04em;color:rgba(40,21,12,0.35)}
 
   @media(max-width:700px){
     .wip-header{display:block}

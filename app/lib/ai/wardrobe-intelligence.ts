@@ -1713,6 +1713,14 @@ function classifyUsability(
   // trench coat unusable, and inflating the customer-facing count of pieces
   // that "don't meet" her preferences.
   const coversLegs = BOTTOM_SLOTS.has(garment.slot) || ONE_PIECE_SLOTS.has(garment.slot);
+  // Same false-positive, different slot: trousers, shoes and bags have no
+  // sleeves to judge at all. Without this the arms-covered/avoid-sleeveless
+  // checks below ran unconditionally on every garment, so a pair of
+  // trousers or a tote (sleeveLength genuinely never applies and is never
+  // read) reported "unknown — coverage not read yet" against a preference
+  // that was never about them, inflating the "still being read" count with
+  // pieces that were never going to have that field in the first place.
+  const canHaveSleeves = CORE_SLOTS.has(garment.slot) && garment.slot !== "bottom";
 
   // Each check: "n/a" means the field does not apply to this garment type and is
   // exempt. A null value on an otherwise-read garment is unknown, not blocked.
@@ -1730,13 +1738,13 @@ function classifyUsability(
 
   const checks = [
     check(
-      prefs.has("arms-covered"),
+      prefs.has("arms-covered") && canHaveSleeves,
       garment.sleeveLength,
       (v) => v === "full" || v === "three-quarter",
       "keeping your arms covered",
     ),
     check(
-      prefs.has("avoid-sleeveless") && !prefs.has("arms-covered"),
+      prefs.has("avoid-sleeveless") && !prefs.has("arms-covered") && canHaveSleeves,
       garment.sleeveLength,
       (v) => v !== "sleeveless",
       "avoiding sleeveless styles",

@@ -397,6 +397,31 @@ describe("§WN-4 effective depth", () => {
       "unknown",
     );
   });
+
+  it("4d — arms-covered never judges a garment that structurally has no sleeves", () => {
+    // Same false-positive class as the legs-covered/trench-coat fix above:
+    // trousers, shoes and bags have no sleeveLength to read, and never will.
+    // Found via real QA data — these were reporting "unknown — coverage not
+    // read yet" against a preference that was never about them, inflating
+    // the customer-facing "still being read" count.
+    const passport = makePassport({ dressingPreferences: ["arms-covered"] });
+    for (const slot of ["bottom", "shoes", "bag", "accessory", "jewelry"]) {
+      assert.equal(
+        classifyUsability(makeGarment({ slot, sleeveLength: undefined }), passport).usability,
+        "usable",
+        `${slot} with no sleeveLength must be exempt, not unknown`,
+      );
+    }
+    // A top, outerwear piece, dress or set genuinely can have sleeves, so the
+    // check must stay active for them.
+    for (const slot of ["top", "outerwear", "dress", "set"]) {
+      assert.equal(
+        classifyUsability(makeGarment({ slot, sleeveLength: undefined }), passport).usability,
+        "unknown",
+        `${slot} with no sleeveLength must still read as unknown — it genuinely isn't read yet`,
+      );
+    }
+  });
 });
 
 // ── §WN-5 Small but sufficient ────────────────────────────────────────────────
