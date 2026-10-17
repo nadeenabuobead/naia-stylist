@@ -844,17 +844,21 @@ export default function WardrobeIntelligencePage() {
     return null;
   }
 
-  if (rediscoverPieces.length === 0) {
-    // No dynamic rediscovery candidate for this Closet — the preview has
-    // nothing honest to lead with. Real state, not an error.
+  if (!model.ready) {
+    // Genuinely not enough Closet yet for ANY of the nine modules to say
+    // something real — the only condition that should hide the whole page.
+    // Previously this checked rediscoverPieces.length === 0, which hid every
+    // module (coverage, colour, pairings, reconsider, shop smarter...) for
+    // any Closet that simply had no self-reported "rarely-wear"/"struggle"
+    // tag or StyleMe history yet — a much narrower condition than "nothing
+    // to say", and wrong for a full, well-analysed Closet with none of that.
     return (
       <MyNaiaLayout compact>
         <style>{css}</style>
         <div className="wip-app">
           <main className="wip-main">
             <p className="wip-empty">
-              Nothing to preview yet — this Closet doesn&rsquo;t currently have a &ldquo;piece worth
-              rediscovering&rdquo; finding to lead with.
+              {model.readyNote ?? "Add a few more pieces and nAia can start reading your wardrobe as a whole."}
             </p>
           </main>
         </div>
@@ -1136,6 +1140,7 @@ export default function WardrobeIntelligencePage() {
           })()}
 
           {/* ── Section 5: pieces worth rediscovering ──────────────────────── */}
+          {rediscoverPieces.length > 0 && (
           <section className="wip-section">
             <h2 className="wip-section-title">Pieces worth rediscovering.</h2>
             <p className="wip-section-sub">You have more ways to wear these than you think.</p>
@@ -1167,6 +1172,7 @@ export default function WardrobeIntelligencePage() {
               })}
             </div>
           </section>
+          )}
 
           {/* ── Section 6: two-column analysis ─────────────────────────────── */}
           <section className="wip-section wip-analysis">

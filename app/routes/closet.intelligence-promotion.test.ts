@@ -253,3 +253,37 @@ describe("CIP-F — nothing fake came across with the presentation", () => {
     assert.match(src, /name="closetCompleteness"/, "the real control posts to the action");
   });
 });
+
+// ── CIP-H: the whole page must not hide behind one narrow sub-feature ────
+//
+// The top-level empty-state gate used to be `rediscoverPieces.length === 0`
+// — meaning a Closet with real coverage/colour/pairing/reconsider findings
+// but no self-reported "rarely-wear"/"struggle" tag and no StyleMe history
+// yet (so zero rediscover candidates) showed NOTHING: not one of the nine
+// modules, just "Nothing to preview yet". Found via a real test customer
+// with a full, analysed Closet and a complete Passport during QA.
+
+describe("CIP-H — the page gates on real readiness, not on one narrow sub-feature", () => {
+  test("CIP-H.1 the top-level empty-state check is the page's real readiness flag", () => {
+    const src = read(LIVE);
+    assert.match(src, /if \(!model\.ready\) \{/, "must gate on model.ready, not a single sub-feature's emptiness");
+    assert.doesNotMatch(src, /if \(rediscoverPieces\.length === 0\) \{/, "the old, too-narrow gate must be gone");
+  });
+
+  test("CIP-H.2 the not-ready message uses the engine's own readyNote, not a rediscover-specific sentence", () => {
+    const src = read(LIVE);
+    const gateIdx = src.indexOf("if (!model.ready) {");
+    assert.notEqual(gateIdx, -1);
+    const scope = src.slice(gateIdx, src.indexOf("return (", gateIdx) + 500);
+    assert.match(scope, /model\.readyNote/);
+    assert.doesNotMatch(scope, /piece worth/i, "the old rediscover-specific copy must not survive as the general not-ready message");
+  });
+
+  test("CIP-H.3 'Pieces worth rediscovering' only renders when there's a real candidate", () => {
+    const src = read(LIVE);
+    const headingIdx = src.indexOf("Pieces worth rediscovering.");
+    assert.notEqual(headingIdx, -1);
+    const before = src.slice(Math.max(0, headingIdx - 400), headingIdx);
+    assert.match(before, /\{rediscoverPieces\.length > 0 && \(/, "the section itself must be conditional now that the page no longer bails out earlier");
+  });
+});
