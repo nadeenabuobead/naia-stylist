@@ -287,3 +287,27 @@ describe("CIP-H — the page gates on real readiness, not on one narrow sub-feat
     assert.match(before, /\{rediscoverPieces\.length > 0 && \(/, "the section itself must be conditional now that the page no longer bails out earlier");
   });
 });
+
+// ── CIP-I: "Strongest" is never claimed for a register that's itself thin ────
+//
+// Found during Persona A QA: a customer whose every needed register was
+// under-supported still saw "STRONGEST: Work wardrobe — Fewer combinations"
+// — self-contradictory on its face. "Strongest" must only fire when the
+// best-of-her-needed-registers is itself in a genuinely good state.
+
+describe("CIP-I — the glance headline never calls a thin register 'Strongest'", () => {
+  test("CIP-I.1 isGenuinelyStrong gates the kicker label, not a hardcoded 'Strongest'", () => {
+    const src = read(LIVE);
+    assert.match(src, /isGenuinelyStrong \? "Strongest" : "Most supported"/);
+  });
+
+  test("CIP-I.2 isGenuinelyStrong is computed from the register's own depth rank, not assumed true", () => {
+    const src = read(LIVE);
+    assert.match(src, /const isGenuinelyStrong = DEPTH_RANK\[best\.state\] <= 1;/);
+  });
+
+  test("CIP-I.3 the 'what nAia has learned' support sentence carries the same honesty", () => {
+    const src = read(LIVE);
+    assert.match(src, /glanceRegisters\[0\]\.isGenuinelyStrong \? "its strongest support" : "relatively more support"/);
+  });
+});

@@ -184,12 +184,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
     .filter((r) => r.needed)
     .map(registerDisplay)
     .filter((d) => d.state !== "learning");
-  const glanceRegisters: Array<{ heading: string; stateText: string }> = [];
+  const glanceRegisters: Array<{ heading: string; stateText: string; isGenuinelyStrong: boolean }> = [];
   if (glanceCandidates.length > 0) {
     const best = [...glanceCandidates].sort((a, b) => DEPTH_RANK[a.state] - DEPTH_RANK[b.state])[0];
     const worst = [...glanceCandidates].sort((a, b) => DEPTH_RANK[b.state] - DEPTH_RANK[a.state])[0];
-    glanceRegisters.push({ heading: best.heading, stateText: best.stateText });
-    if (worst.heading !== best.heading) glanceRegisters.push({ heading: worst.heading, stateText: worst.stateText });
+    // The best of her needed registers can still itself read as thin (e.g.
+    // "needs-range") when EVERY needed register is under-supported — found
+    // during QA: a "Strongest: Work — Fewer combinations" card read as
+    // self-contradictory. "Strongest" only when that's true in absolute
+    // terms too (DEPTH_RANK 0-1); otherwise it's honestly just the
+    // relatively-better of two still-thin areas.
+    const isGenuinelyStrong = DEPTH_RANK[best.state] <= 1;
+    glanceRegisters.push({ heading: best.heading, stateText: best.stateText, isGenuinelyStrong });
+    if (worst.heading !== best.heading) glanceRegisters.push({ heading: worst.heading, stateText: worst.stateText, isGenuinelyStrong: false });
   }
 
   // ── Every register's real reading, for "How your wardrobe supports your life" ──
@@ -529,9 +536,16 @@ function Thumb({ card, height = 220 }: { card: GarmentCard | undefined; height?:
   if (!card) return null;
   return (
     <div className="wip-thumb" style={{ height }}>
-      {card.imageUrl
-        ? <img src={card.imageUrl} alt={cardLabel(card)} loading="lazy" />
-        : <span className="wip-thumb-fallback">{card.category.slice(0, 2)}</span>}
+      {card.imageUrl ? (
+        <img src={card.imageUrl} alt={cardLabel(card)} loading="lazy" />
+      ) : (
+        <div className="wip-thumb-fallback-stack">
+          <span className="wip-thumb-fallback">{card.category.slice(0, 2)}</span>
+          {/* Only on thumbs tall enough for it to read as a caption, not a
+              cramped afterthought, in the smallest evidence-row frames. */}
+          {height >= 150 && <span className="wip-thumb-fallback-caption">No photo yet</span>}
+        </div>
+      )}
     </div>
   );
 }
@@ -638,7 +652,7 @@ export default function WardrobeIntelligencePage() {
     combosCount, reconsiderEntries,
   } = useLoaderData<typeof loader>() as {
     page: WardrobePage; garmentCards: GarmentCard[];
-    glanceRegisters: Array<{ heading: string; stateText: string }>;
+    glanceRegisters: Array<{ heading: string; stateText: string; isGenuinelyStrong: boolean }>;
     allRegisterReadings: Array<{ register: RegisterId; usableCount: number; heading: string; state: DepthState; stateText: string; plain: string }>;
     neutralSharePct: number | null;
     neutralTemperature: "warm" | "cool" | null;
@@ -979,7 +993,9 @@ export default function WardrobeIntelligencePage() {
             <div className="wip-cards">
               {glanceRegisters[0] && (
                 <div className="wip-card">
-                  <span className="wip-card-kicker wip-card-kicker--positive">Strongest</span>
+                  <span className={`wip-card-kicker${glanceRegisters[0].isGenuinelyStrong ? " wip-card-kicker--positive" : ""}`}>
+                    {glanceRegisters[0].isGenuinelyStrong ? "Strongest" : "Most supported"}
+                  </span>
                   <h3>{glanceRegisters[0].heading} wardrobe</h3>
                   <p>{glanceRegisters[0].stateText}</p>
                 </div>
@@ -1103,7 +1119,7 @@ export default function WardrobeIntelligencePage() {
             ].filter((l): l is string => Boolean(l));
             const feedbackBody = profileEntries.find((e) => e.id === "outcome-feedback")?.body;
             const supportSentence = glanceRegisters[0]
-              ? `Your current Closet gives you the strongest support for ${glanceRegisters[0].heading.toLowerCase()} dressing` +
+              ? `Your current Closet gives you ${glanceRegisters[0].isGenuinelyStrong ? "its strongest support" : "relatively more support"} for ${glanceRegisters[0].heading.toLowerCase()} dressing` +
                 (glanceRegisters[1] ? `, with fewer combinations for ${glanceRegisters[1].heading.toLowerCase()}.` : ".")
               : null;
             if (patternLines.length === 0 && styleLines.length === 0 && !feedbackBody && !supportSentence) return null;
@@ -1765,7 +1781,9 @@ const css = `
   /* No photo yet — a deliberate monogram, not an empty box. Same display
      face as the page's own headings, sized to read clearly at any of this
      page's thumbnail sizes without dominating the smallest ones. */
+  .wip-thumb-fallback-stack{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px}
   .wip-thumb-fallback{font-family:var(--naia-ff-display);font-weight:300;font-size:22px;letter-spacing:0.04em;color:rgba(40,21,12,0.35)}
+  .wip-thumb-fallback-caption{font-family:var(--naia-ff-ui);font-size:9.5px;letter-spacing:0.06em;text-transform:uppercase;color:rgba(40,21,12,0.3)}
 
   @media(max-width:700px){
     .wip-header{display:block}
