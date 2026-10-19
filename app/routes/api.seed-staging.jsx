@@ -650,6 +650,42 @@ export async function action({ request }) {
     });
   }
 
+  // ── getFixtureSnapshot — QA fixture only, read-only ──────────────────────
+  // Full closet + Style Passport dump for a test-batch1- customer, so QA
+  // audits can be written against the real seeded data instead of assumed
+  // or re-derived values. Read-only — touches nothing. Same requireTestCustomer
+  // gate as every mutating action in this file.
+  if (act === "getFixtureSnapshot") {
+    const { customerId } = body ?? {};
+    if (!customerId) return Response.json({ error: "customerId required" }, { status: 400 });
+    const customer = await requireTestCustomer(customerId);
+    if (!customer) {
+      return Response.json({ error: "customerId must belong to a test-batch1- fixture customer" }, { status: 403 });
+    }
+    const [profile, closetItems] = await Promise.all([
+      prisma.onboardingProfile.findUnique({ where: { customerId: String(customerId) } }),
+      prisma.closetItem.findMany({
+        where: { customerId: String(customerId) },
+        orderBy: { createdAt: "asc" },
+        select: {
+          id: true, name: true, category: true, subcategory: true,
+          colors: true, primaryColor: true, pattern: true, material: true,
+          styleTags: true, seasons: true, occasions: true,
+          silhouette: true, fitProfile: true, hemLength: true, topLength: true,
+          sleeveLength: true, necklineCoverage: true, shoulderCoverage: true,
+          midriffExposed: true, waistShape: true, formality: true, stylePersonality: true,
+          garmentRelationships: true, analysisStatus: true, timesWorn: true, favorite: true,
+        },
+      }),
+    ]);
+    return Response.json({
+      customer: { id: customer.id, shopifyCustomerId: customer.shopifyCustomerId },
+      profile,
+      closetItemCount: closetItems.length,
+      closetItems,
+    });
+  }
+
   // ── createSuggestion ──────────────────────────────────────────────────────
   // Creates a minimal OutfitSuggestion for a StylingSession so that look_saved
   // and in_session_review_submitted tests can run.
