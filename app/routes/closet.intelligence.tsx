@@ -1573,11 +1573,15 @@ const css = `
   .wip-hero-stat strong{font-family:var(--naia-ff-display);font-weight:300;font-size:2rem;color:var(--naia-ink);line-height:1}
   .wip-hero-stat span{font-family:var(--naia-ff-ui);font-size:9.5px;letter-spacing:1.4px;text-transform:uppercase;color:rgba(40,21,12,0.5);margin-top:4px}
   /* flex-shrink:0 on 3 right-aligned stats is fine once .wip-summary-row
-     has already wrapped them below the summary text (520px+), but below
-     that the stats row itself still refuses to shrink or wrap, running
-     ~100px past the viewport edge. Let it wrap and left-align there. */
+     has already wrapped them below the summary text (520px+) — but
+     flex-shrink:0 also means .wip-hero-stats keeps its full content
+     width (~444px) once alone on its own line, so flex-wrap:wrap on it
+     had nothing to react to: none of its children ever got squeezed
+     below the space available, so none of them wrapped either, and the
+     ~444px box just overflowed the viewport. Capping its own width is
+     what actually forces the 3 stats to wrap below that breakpoint. */
   @media(max-width:520px){
-    .wip-hero-stats{flex-wrap:wrap;row-gap:16px}
+    .wip-hero-stats{flex-shrink:1;flex-wrap:wrap;row-gap:16px;width:100%;max-width:100%}
     .wip-hero-stat{align-items:flex-start;text-align:left}
   }
 
