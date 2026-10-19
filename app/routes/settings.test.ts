@@ -212,20 +212,25 @@ describe("G — no fake request-success behavior", () => {
 });
 
 // ── H. Privacy contact ────────────────────────────────────────────────────────
+//
+// 2026-10-19: data export and account deletion are now real, immediate,
+// authenticated actions (app/lib/customer-privacy.server.ts) — not mailto
+// requests. This section previously asserted the opposite; updated per an
+// explicit, repeated, multi-turn request to implement exactly this, not an
+// accidental regression. The mailto link remains for genuinely unhandled
+// "other queries" only — see section N below for the real mechanism checks.
 
-describe("H — privacy contact uses verified email", () => {
-  it("data export link uses privacy@naiabynadine.com mailto", () => {
+describe("H — privacy contact email remains for other queries only", () => {
+  it("still offers privacy@naiabynadine.com for queries outside export/deletion", () => {
     assert.ok(src.includes("mailto:privacy@naiabynadine.com"), "uses correct privacy email");
   });
 
-  it("account deletion request link uses privacy@naiabynadine.com mailto", () => {
-    const count = (src.match(/mailto:privacy@naiabynadine\.com/g) ?? []).length;
-    assert.ok(count >= 2, `at least 2 privacy email mailto links (found ${count})`);
-  });
-
-  it("does not have a fake account-deletion modal that claims to submit a request", () => {
-    assert.ok(!src.includes("account deletion request has been received"), "no fake deletion confirmation");
-    assert.ok(!src.includes("data export request has been received"),      "no fake export confirmation");
+  it("does not fabricate a fake success message independent of the real action result", () => {
+    // The real success copy ("permanently deleted") comes from
+    // SUCCESS_MESSAGES / CONFIRM, driven by an actual eraseCustomerData call —
+    // this just guards against a second, hardcoded claim existing alongside it.
+    assert.ok(!src.includes("account deletion request has been received"), "no stale fake-mailto-era confirmation copy");
+    assert.ok(!src.includes("data export request has been received"),      "no stale fake-mailto-era confirmation copy");
   });
 });
 
@@ -423,23 +428,45 @@ describe("M — account details", () => {
 });
 
 // ── N. Data requests ──────────────────────────────────────────────────────────
+//
+// 2026-10-19: both are now real actions, not mailto links — see the header
+// note on section H above for why this flips the prior assertions.
 
-describe("N — data request buttons are mailto links", () => {
-  it("data export button is a mailto link, not a form submit", () => {
+describe("N — data export and account deletion are real, authenticated actions", () => {
+  it("VALID_INTENTS includes request-data-export and delete-account", () => {
+    assert.ok(src.includes('"request-data-export"'), "export intent registered");
+    assert.ok(src.includes('"delete-account"'),       "deletion intent registered");
+  });
+
+  it("export calls compileCustomerExport, deletion calls eraseCustomerData — both from the shared privacy module", () => {
+    assert.ok(src.includes("compileCustomerExport(customer.id)"), "export uses the shared compile function");
+    assert.ok(src.includes("eraseCustomerData(customer.id)"),     "deletion uses the shared erase function");
+    assert.ok(src.includes('from "~/lib/customer-privacy.server"'), "imports from the one shared module, not a one-off implementation");
+  });
+
+  it("export button submits via fetcher, not a mailto link", () => {
     assert.ok(
-      src.includes("mailto:privacy@naiabynadine.com?subject=Data%20export%20request"),
-      "data export button is a mailto link",
+      src.includes('exportFetcher.submit({ intent: "request-data-export" }'),
+      "export button is a real form submission",
     );
   });
 
-  it("account deletion request is a mailto link, not a form submit", () => {
-    assert.ok(
-      src.includes("mailto:privacy@naiabynadine.com?subject=Account%20deletion%20request"),
-      "account deletion is a mailto link",
-    );
+  it("deletion goes through the same confirm-modal flow as every other destructive action, not a bare click", () => {
+    assert.ok(src.includes('openConfirm("delete-account")'), "deletion opens the confirm modal first");
+    assert.ok(src.includes('"delete-account": {'),            "delete-account has its own CONFIRM entry with real warning copy");
   });
 
-  it("page does not claim to automatically process requests", () => {
+  it("account deletion clears the session cookie and redirects — it does not leave the deleted customer's session active", () => {
+    assert.ok(src.includes("buildClearSessionCookieHeader()"), "clears the NaiaSession cookie on deletion");
+    assert.ok(src.includes('redirect("/auth/signed-out"'),     "redirects to signed-out after deletion");
+  });
+
+  it("deletion warning copy explicitly distinguishes account deletion from subscription cancellation", () => {
+    const confirmBlock = src.slice(src.indexOf('"delete-account": {'), src.indexOf('"delete-account": {') + 600);
+    assert.ok(/cancel|subscription|membership/i.test(confirmBlock), "warning copy addresses the cancellation-vs-deletion distinction");
+  });
+
+  it("page does not claim to automatically email or mail anything for these two actions", () => {
     assert.ok(
       !src.includes("Your request has been submitted"),
       "no false automatic-submission claim",
@@ -447,13 +474,6 @@ describe("N — data request buttons are mailto links", () => {
     assert.ok(
       !src.includes("We will process your request"),
       "no false processing claim",
-    );
-  });
-
-  it("data section copy positions buttons as primary mechanism", () => {
-    assert.ok(
-      src.includes("Use the options below"),
-      "buttons are described as the primary mechanism",
     );
   });
 });

@@ -7,7 +7,12 @@
 //     a single "Remove saved nAia Model photo" control (one source photo,
 //     no face/body distinction)
 //   - The selfie-based visual-analysis feature is V1-deactivated — no controls for it here
-//   - Provides honest mailto links for data export and account deletion requests
+//   - 2026-10-19: real data export (instant client-side download, built from
+//     app/lib/customer-privacy.server.ts) and real, immediate account
+//     deletion — no longer mailto links. See the "delete-account" and
+//     "request-data-export" intents below. Account deletion is entirely
+//     independent of any subscription/billing state (no Stripe integration
+//     exists yet, and this must stay a separate concern once one does).
 //   - Explains how nAia personalises the experience (informational only)
 //   - Exposes real server-backed BULK deletion for Closet photos, Buy or
 //     Skip uploaded images, and VTO previews. Individual (per-item) removal
@@ -22,14 +27,14 @@
 // What is intentionally absent:
 //   - Communication preferences (no schema or backend — removed until built)
 //   - Shopify address management (managed by NADINE/Shopify — not a nAia setting)
-//   - Immediate account deletion (requires cross-feature cascade audit)
 //   - Personalisation opt-out (no backend preference exists)
 
 import { useState, useEffect } from "react";
 import type { ActionFunctionArgs, LinksFunction, LoaderFunctionArgs } from "react-router";
 import { useLoaderData, useFetcher, useRevalidator, Link } from "react-router";
-import { data } from "react-router";
-import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
+import { data, redirect } from "react-router";
+import { requireCurrentNaiaCustomer, buildClearSessionCookieHeader } from "~/lib/naia-session.server";
+import { compileCustomerExport, eraseCustomerData } from "~/lib/customer-privacy.server";
 import prisma from "~/db.server";
 import { conciseFamilyName } from "~/lib/customer-name-display";
 import {
@@ -101,6 +106,8 @@ const VALID_INTENTS = new Set([
   "delete-vto-results",
   "delete-bos-images",
   "delete-all-closet-photos",
+  "request-data-export",
+  "delete-account",
 ]);
 
 type DestructiveIntent =
@@ -108,16 +115,18 @@ type DestructiveIntent =
   | "delete-model-all"
   | "delete-vto-results"
   | "delete-bos-images"
-  | "delete-all-closet-photos";
+  | "delete-all-closet-photos"
+  | "delete-account";
 
-type Intent = DestructiveIntent;
+type Intent = DestructiveIntent | "request-data-export";
 
-const SUCCESS_MESSAGES: Record<Intent, string> = {
+const SUCCESS_MESSAGES: Record<DestructiveIntent, string> = {
   "delete-model-body":        "Your saved body photo has been removed from your nAia Model.",
   "delete-model-all":         "Your saved nAia Model photos and consent have been permanently removed.",
   "delete-vto-results":       "Your saved Virtual Try-On preview images have been permanently removed.",
   "delete-bos-images":        "Your Buy or Skip uploaded images have been removed. Your decision history has been kept.",
   "delete-all-closet-photos": "All your Closet photos have been removed. Your Closet items and their details are kept.",
+  "delete-account":           "Your account and all associated data have been permanently deleted.",
 };
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -160,6 +169,29 @@ export async function action({ request }: ActionFunctionArgs) {
       await deleteAllClosetPhotos(customer.id);
       break;
     }
+    case "request-data-export": {
+      // Self-service version of the same compile step the Shopify
+      // customers/data_request webhook triggers — one implementation,
+      // two entry points (see customer-privacy.server.ts). Returned
+      // directly in the response for a client-side download; nothing is
+      // emailed, nothing is written to disk server-side.
+      const exportData = await compileCustomerExport(customer.id);
+      return data({ ok: true as const, intent: "request-data-export" as const, exportData });
+    }
+    case "delete-account": {
+      // Entirely independent of any subscription/billing state — there is
+      // no Stripe integration yet, and this must never be conflated with a
+      // cancellation flow even once one exists. eraseCustomerData deletes
+      // this exact Customer row (and, via cascade, everything referencing
+      // it), which also invalidates the NaiaSession this very request is
+      // authenticated by — so the response clears the session cookie and
+      // redirects, the same pattern /auth/logout already uses, rather than
+      // returning to a page for a customer who no longer has an account.
+      await eraseCustomerData(customer.id);
+      return redirect("/auth/signed-out", {
+        headers: { "Set-Cookie": buildClearSessionCookieHeader() },
+      });
+    }
   }
 
   return data({ ok: true as const, intent: typed, message: SUCCESS_MESSAGES[typed] });
@@ -192,6 +224,11 @@ const CONFIRM: Record<DestructiveIntent, { title: string; body: string; cta: str
     title: "Remove all Closet photos",
     body:  "Every photo you've uploaded to your Closet will be permanently deleted. Your Closet items and their details are kept — only the photos are removed.",
     cta:   "Remove all Closet photos",
+  },
+  "delete-account": {
+    title: "Permanently delete your account",
+    body:  "This deletes your account and everything in it — Style Passport, Closet, StyleMe history, Buy or Skip decisions, Virtual Try-On results, and your nAia Model photo. This cannot be undone, and there is no recovery period. You'll be signed out immediately. This is separate from any subscription — it does not cancel a membership, and cancelling a membership does not delete your account.",
+    cta:   "Permanently delete my account",
   },
 };
 
@@ -228,6 +265,10 @@ function ControlRow({
 export default function Settings() {
   const { firstName, lastName, email, model, hasVtoResults, hasBosImages, hasClosetPhotos } = useLoaderData<typeof loader>();
   const fetcher     = useFetcher<typeof action>();
+  // Separate fetcher for data export — it's not destructive, doesn't use the
+  // confirm modal, and triggering a client-side download on its response
+  // shouldn't be entangled with the delete-flow's modal-close/revalidate logic.
+  const exportFetcher = useFetcher<typeof action>();
   const revalidator = useRevalidator();
   // Only destructive actions open the confirmation modal; consent is
   // reversible and applies immediately. Every intent here is a bulk action —
@@ -240,12 +281,30 @@ export default function Settings() {
   const actionData  = fetcher.data;
 
   // Close modal and refresh loader state after a successful deletion.
+  // delete-account redirects server-side (new session, signed out) and never
+  // reaches this component again, so it needs no special case here.
   useEffect(() => {
     if (actionData?.ok) {
       setPending(null);
       revalidator.revalidate();
     }
   }, [actionData]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Data export: build the download entirely client-side from the JSON the
+  // action already returned — no server-side file, no email, nothing to clean up.
+  useEffect(() => {
+    if (exportFetcher.data?.ok && exportFetcher.data.intent === "request-data-export") {
+      const blob = new Blob([JSON.stringify(exportFetcher.data.exportData, null, 2)], { type: "application/json" });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      a.href = url;
+      a.download = `naia-data-export-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+  }, [exportFetcher.data]);
 
   const hasModelSection  = model  !== null;
 
@@ -377,7 +436,7 @@ export default function Settings() {
         <div className="set-section-eyebrow">Your Data & Privacy</div>
         <h2 className="set-section-title">Your Data</h2>
         <p className="sp-shell-desc" style={{ marginBottom: "20px" }}>
-          Use the options below to request a copy of your data or to request deletion of your account. Requests are processed within 30 days in accordance with our Privacy Policy. For other queries, contact{" "}
+          Download a copy of your data instantly, or permanently delete your account below, in accordance with our Privacy Policy. For other queries, contact{" "}
           <a
             href="mailto:privacy@naiabynadine.com"
             style={{ color: "var(--naia-accent)" }}
@@ -387,20 +446,22 @@ export default function Settings() {
           .
         </p>
         <div style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
-          <a
-            href="mailto:privacy@naiabynadine.com?subject=Data%20export%20request%20—%20nAia"
+          <button
+            type="button"
             className="sp-btn-outline"
-            style={{ textDecoration: "none" }}
+            disabled={exportFetcher.state !== "idle"}
+            onClick={() => exportFetcher.submit({ intent: "request-data-export" }, { method: "post" })}
           >
-            Request a copy of my data
-          </a>
-          <a
-            href="mailto:privacy@naiabynadine.com?subject=Account%20deletion%20request%20—%20nAia"
+            {exportFetcher.state !== "idle" ? "Preparing…" : "Download a copy of my data"}
+          </button>
+          <button
+            type="button"
             className="sp-btn-outline"
-            style={{ textDecoration: "none" }}
+            style={{ color: "var(--naia-danger, #b3261e)", borderColor: "var(--naia-danger, #b3261e)" }}
+            onClick={() => openConfirm("delete-account")}
           >
-            Request account deletion
-          </a>
+            Permanently delete my account
+          </button>
         </div>
       </section>
 

@@ -5,7 +5,7 @@
 //
 //   P. Design-research consent — real wiring, not a silent no-op
 //   Q. No fake notification / marketing / AI-training controls
-//   R. No fake delete-account button (mailto request is the only mechanism)
+//   R. Account deletion is real (2026-10-19) — confirm-modal-gated, session-terminating
 //   S. No provider/internal IDs leaked from the loader
 //   T. Ownership — no customer-id route param or client-supplied override
 //   U. Legal links degrade safely — no link to an unregistered route
@@ -111,24 +111,33 @@ describe("Q — no fabricated preference controls", () => {
   });
 });
 
-// ── R. No fake delete-account button ─────────────────────────────────────────
+// ── R. Account deletion is real, confirmed, and session-terminating ──────────
+//
+// 2026-10-19: this section previously asserted account deletion was
+// deliberately NOT implemented (mailto-only). That was true until this exact
+// gap was closed per an explicit, repeated, multi-turn request — flipped
+// here accordingly, not an accidental regression. See app/lib/
+// customer-privacy.server.ts and the matching checks in settings.test.ts
+// section N for the fuller behavioral coverage; this section keeps the
+// original "not a bare destructive click" framing, now pointed at the real
+// confirm-then-submit flow instead of a mailto link.
 
-describe("R — account deletion is a request, not a destructive action", () => {
-  it("VALID_INTENTS has no delete-account / delete-customer intent", () => {
-    assert.ok(!settingsSrc.includes('"delete-account"'),  "no delete-account intent");
-    assert.ok(!settingsSrc.includes('"delete-customer"'), "no delete-customer intent");
+describe("R — account deletion is real, but gated behind the same confirm flow as every other destructive action", () => {
+  it("VALID_INTENTS has delete-account and request-data-export intents", () => {
+    assert.ok(settingsSrc.includes('"delete-account"'),       "delete-account intent registered");
+    assert.ok(settingsSrc.includes('"request-data-export"'),  "request-data-export intent registered");
   });
 
-  it("account deletion is a mailto link, never a <Form method=\"post\"> submit", () => {
+  it("account deletion is never a bare click — it requires the confirm modal, same as every other destructive control", () => {
     const dataSectionIdx = settingsSrc.indexOf("Your Data & Privacy");
-    // Sign Out no longer has its own section in this file (it moved to the
-    // nav — see MyNaiaLayout.tsx) — the next stable marker after the data
-    // section is the server-backed success-feedback comment.
     const nextSectionIdx = settingsSrc.indexOf("── Server-backed success feedback");
     const dataSection = settingsSrc.slice(dataSectionIdx, nextSectionIdx);
-    assert.ok(dataSection.includes("mailto:privacy@naiabynadine.com"), "deletion request uses mailto");
-    assert.ok(!dataSection.includes("<Form"), "no <Form> element in the data/deletion section");
-    assert.ok(!dataSection.includes("fetcher.submit"), "no fetcher.submit in the data/deletion section");
+    assert.ok(dataSection.includes('openConfirm("delete-account")'), "deletion button opens the confirm modal, not an inline submit");
+    assert.ok(!dataSection.includes("fetcher.submit"), "no direct fetcher.submit in the button itself — submission happens from the confirm modal");
+  });
+
+  it("deletion is wired to the real erase function, not a UI-only placeholder", () => {
+    assert.ok(settingsSrc.includes("eraseCustomerData(customer.id)"), "action actually calls eraseCustomerData");
   });
 });
 
