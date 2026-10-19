@@ -1804,6 +1804,105 @@ function classifyUsability(
 }
 
 /**
+ * Every dressing-preference check this garment fails — not just the first.
+ * classifyUsability() only needs one reason for counting (usable/blocked),
+ * so it stops at the first match; a piece that fails on BOTH arms AND legs
+ * coverage, say, was only ever explained by whichever check happened to run
+ * first. Customer-facing surfaces that explain WHY a piece is blocked (the
+ * Style Passport coverage dialog) use this instead, so a piece that fails
+ * more than one stated preference is explained fully.
+ *
+ * Mirrors classifyUsability()'s checks exactly — same vocabulary, same
+ * thresholds, same avoid-colours guard, same canHaveSleeves/coversLegs
+ * exemptions — so the two can never disagree about what's wrong with a
+ * piece. A future change to one must be made to both.
+ */
+export function allBlockedReasons(
+  garment: WardrobeGarment,
+  passport: WardrobePassport | null,
+): string[] {
+  const read = garment.analysisStatus === "ready" || garment.intelligenceSource === "curated";
+  if (!read || !passport) return [];
+
+  const reasons: string[] = [];
+
+  if (passport.avoidColors.length > 0) {
+    const family = closetColourFamily(garment.primaryColor);
+    if (family) {
+      for (const token of passport.avoidColors) {
+        const families = PASSPORT_COLOUR_FAMILIES[norm(token) ?? ""] ?? [];
+        if (families.includes(family)) {
+          reasons.push("avoiding colours you asked nAia to leave out");
+          break;
+        }
+      }
+    }
+  }
+
+  const prefs = new Set(passport.dressingPreferences ?? []);
+  const isTopLike = TOP_SLOTS.has(garment.slot) || garment.slot === "set";
+  const coversLegs = BOTTOM_SLOTS.has(garment.slot) || ONE_PIECE_SLOTS.has(garment.slot);
+  const canHaveSleeves = CORE_SLOTS.has(garment.slot) && garment.slot !== "bottom";
+
+  const check = (
+    active: boolean,
+    value: string | null | undefined,
+    safe: (v: string) => boolean,
+    reason: string,
+  ) => {
+    if (!active) return;
+    if (value === undefined || value === null) return; // not read yet — never a violation
+    if (value === "n/a") return;
+    if (!safe(value)) reasons.push(reason);
+  };
+
+  check(
+    prefs.has("arms-covered") && canHaveSleeves,
+    garment.sleeveLength,
+    (v) => v === "full" || v === "three-quarter",
+    "keeping your arms covered",
+  );
+  check(
+    prefs.has("avoid-sleeveless") && !prefs.has("arms-covered") && canHaveSleeves,
+    garment.sleeveLength,
+    (v) => v !== "sleeveless",
+    "avoiding sleeveless styles",
+  );
+  check(
+    prefs.has("chest-neckline-covered") || prefs.has("prefer-higher-necklines"),
+    garment.necklineCoverage,
+    (v) => v === "high" || v === "crew" || v === "mock" || v === "cowl-high",
+    "keeping your neckline covered",
+  );
+  check(
+    prefs.has("legs-covered") && coversLegs,
+    garment.hemLength,
+    (v) => v === "full" || v === "maxi",
+    "keeping your legs covered",
+  );
+  check(
+    prefs.has("longer-tops") && isTopLike,
+    garment.topLength,
+    (v) => v === "hip-length" || v === "longline" || v === "tunic",
+    "preferring longer tops",
+  );
+  check(
+    prefs.has("no-cropped-tops") && isTopLike,
+    garment.topLength,
+    (v) => v !== "cropped",
+    "avoiding cropped tops",
+  );
+  check(
+    prefs.has("looser-fitting"),
+    garment.fitProfile,
+    (v) => v === "relaxed" || v === "loose" || v === "oversized" || v === "flowy",
+    "preferring looser-fitting clothes",
+  );
+
+  return reasons;
+}
+
+/**
  * Layers she owns that genuinely resolve why a piece is blocked.
  *
  * Deliberately narrow. A layer can cover a cropped top, a bare neckline or bare

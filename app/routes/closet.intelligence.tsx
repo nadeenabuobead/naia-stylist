@@ -748,7 +748,7 @@ export default function WardrobeIntelligencePage() {
   const profileEntries = (profileBlock?.entries ?? []).filter((e) => e.id !== "closet-capability" && !e.id.startsWith("hero-"));
 
   const blockedDetail = (coverage?.meta?.blockedDetail ?? []) as Array<{
-    garmentId: string; name: string; reason: string; layers: string[];
+    garmentId: string; name: string; reason: string; allReasons: string[]; layers: string[];
   }>;
 
   const recColourAttr = recommendationDetail?.attributes.find((a) => a.kind === "colour");
@@ -890,7 +890,16 @@ export default function WardrobeIntelligencePage() {
           <div className="wip-coverage-list">
             {blockedDetail.map((b) => {
               const card = byId.get(b.garmentId);
-              const state = coverageContext(b.reason, b.layers.length > 0, card?.category, card?.hemLength ?? null);
+              // Every stated preference this piece fails, not just one — a
+              // piece that fails on both arms AND legs coverage is now
+              // explained fully instead of only by whichever reason
+              // happened to be found first. The badge reflects the worst
+              // (most confirmed) of the set: "may depend" only when EVERY
+              // reason is genuinely conditional, never when even one is a
+              // confirmed mismatch.
+              const reasons = b.allReasons.length > 0 ? b.allReasons : [b.reason];
+              const states = reasons.map((r) => coverageContext(r, b.layers.length > 0, card?.category, card?.hemLength ?? null));
+              const state = states.includes("doesnt-match") ? "doesnt-match" : "may-depend";
               return (
                 <div key={b.garmentId} className="wip-coverage-item">
                   <Thumb card={card} height={120} />
@@ -899,11 +908,11 @@ export default function WardrobeIntelligencePage() {
                       {state === "may-depend" ? "May depend on how you wear it" : "Outside your usual preference"}
                     </span>
                     <h3>{b.name}</h3>
-                    <p>
-                      {card?.category === "ACTIVEWEAR"
-                        ? "You've tagged this as activewear, so your everyday coverage preference may not apply in the same way."
-                        : coverageReasonSentence(b.reason, card?.hemLength ?? null)}
-                    </p>
+                    {card?.category === "ACTIVEWEAR" ? (
+                      <p>You&rsquo;ve tagged this as activewear, so your everyday coverage preference may not apply in the same way.</p>
+                    ) : (
+                      reasons.map((r) => <p key={r}>{coverageReasonSentence(r, card?.hemLength ?? null)}</p>)
+                    )}
                     {b.layers.length > 0 && <p className="wip-coverage-rescue">Worn with your {b.layers[0]}, it could still work.</p>}
                   </div>
                 </div>

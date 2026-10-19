@@ -472,6 +472,29 @@ describe("§WN-4e a midi hem against legs-covered is conditional, not confirmed 
     const work = registerOf(needs, "work");
     assert.match(work.depthNote, /1 of them doesn't currently meet/, "exactly one confirmed-blocked piece must read as singular");
   });
+
+  it("4h — a piece failing BOTH arms and legs coverage lists both reasons, not just the first one found", () => {
+    // Found during Persona A QA: the coverage dialog mentioned uncovered
+    // arms but not the short hemline for a piece that genuinely fails both
+    // stated preferences — classifyUsability()'s reason only ever carries
+    // the FIRST check that fails, which is correct for counting but not
+    // for fully explaining why a piece is blocked.
+    const passport = makePassport({ lifestyle: ["dinners-going-out"], dressingPreferences: ["arms-covered", "legs-covered"] });
+    const items = [
+      ...variedLooks("casual", 4),
+      makeGarment({ slot: "dress", category: "DRESSES", formality: "evening", sleeveLength: "sleeveless", hemLength: "mini" }),
+    ];
+    const needs = run(items, { passport });
+    const occasion = registerOf(needs, "occasion");
+    const piece = occasion.blockedPieces[0];
+    assert.ok(piece, "sanity: this fixture produces a real blocked piece");
+    assert.equal(piece.reason, "keeping your arms covered", "sanity: the single `reason` is still just the first check, unchanged");
+    assert.deepEqual(
+      piece.allReasons,
+      ["keeping your arms covered", "keeping your legs covered"],
+      "allReasons must list every failed check, in the order they're evaluated",
+    );
+  });
 });
 
 // ── §WN-5 Small but sufficient ────────────────────────────────────────────────

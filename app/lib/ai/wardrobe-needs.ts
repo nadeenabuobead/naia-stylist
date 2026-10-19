@@ -52,6 +52,7 @@ import {
   INTENTION_LABELS,
   classifyUsability,
   layersThatResolve,
+  allBlockedReasons,
   type WardrobeGarment,
   type WardrobePassport,
   type Evidence,
@@ -246,6 +247,14 @@ export interface BlockedPiece {
    * own counts can't say two different things about the same piece.
    */
   isConditional: boolean;
+  /**
+   * Every stated preference this piece fails, not just `reason` (the first
+   * one classifyUsability() found — enough for counting, not enough for
+   * explaining). A piece that fails on both arms AND legs coverage, say,
+   * is only explained fully if the dialog reads this instead of `reason`
+   * alone. See allBlockedReasons() in wardrobe-intelligence.ts.
+   */
+  allReasons: string[];
 }
 
 export interface RegisterReading {
@@ -969,6 +978,7 @@ function readRegisters(
           reason,
           rescuedBy: layersThatResolve(g, items, passport).map((l) => l.id),
           isConditional: isConditionalBlock(g, reason, items, passport),
+          allReasons: allBlockedReasons(g, passport),
         };
       }),
       unknownCount: unknown.length,

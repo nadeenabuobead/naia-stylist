@@ -1355,6 +1355,11 @@ function buildCoverageBlock(input: WardrobePageInput): PageBlock | null {
       garmentId: b.garmentId,
       name: input.garmentName?.(b.garmentId) ?? "This piece",
       reason: b.reason,
+      // Every stated preference this piece fails, not just the first one —
+      // a piece that fails on both arms AND legs coverage, say, is only
+      // fully explained if the dialog reads all of them. Falls back to the
+      // single `reason` if somehow empty, so there's always at least one.
+      allReasons: b.allReasons.length > 0 ? b.allReasons : [b.reason],
       layers: b.rescuedBy.map((id) => input.garmentName?.(id) ?? "a layer you own"),
       layerIds: b.rescuedBy,
     }));
