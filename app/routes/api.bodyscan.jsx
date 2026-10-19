@@ -1,17 +1,27 @@
 import prisma from "../db.server";
+import { getCurrentNaiaCustomer } from "../lib/naia-session.server";
+
+// Bodygram body-scan integration — under product review, not rebuilt or
+// removed (2026-10-19 audit). Both handlers below now require an
+// authenticated session and ignore any customerId the client supplies:
+// customer identity is always resolved server-side via getCurrentNaiaCustomer,
+// so one customer's session can no longer read or overwrite another
+// customer's OnboardingProfile row. Scan-token creation and measurement
+// persistence logic is otherwise unchanged.
 
 const BODYGRAM_API_KEY = process.env.BODYGRAM_API_KEY;
 const BODYGRAM_ORG_ID = process.env.BODYGRAM_ORG_ID;
 const BASE_URL = `https://platform.bodygram.com/api/orgs/${BODYGRAM_ORG_ID}`;
 
+function authRequired() {
+  return Response.json({ error: "Authentication required" }, { status: 401 });
+}
+
 export async function action({ request }) {
+  const customer = await getCurrentNaiaCustomer(request);
+  if (!customer) return authRequired();
+
   try {
-    const { customerId } = await request.json();
-
-    if (!customerId) {
-      return Response.json({ error: "customerId required" }, { status: 400 });
-    }
-
     const res = await fetch(`${BASE_URL}/scan-tokens`, {
       method: "POST",
       headers: {
@@ -20,12 +30,12 @@ export async function action({ request }) {
       },
       body: JSON.stringify({
         scope: ["api.platform.bodygram.com/scans:create"],
-        metadata: { naiaCustomerId: customerId },
+        metadata: { naiaCustomerId: customer.id },
       }),
     });
 
     const data = await res.json();
-    console.log("Bodygram response:", JSON.stringify(data));
+    console.log("Bodygram response: token present =", Boolean(data.token));
 
     if (!data.token) {
       return Response.json({ error: data.message || "Failed to create scan token" }, { status: 400 });
@@ -39,13 +49,15 @@ export async function action({ request }) {
 }
 
 export async function loader({ request }) {
+  const customer = await getCurrentNaiaCustomer(request);
+  if (!customer) return authRequired();
+
   try {
     const url = new URL(request.url);
     const sessionId = url.searchParams.get("sessionId");
-    const customerId = url.searchParams.get("customerId");
 
-    if (!sessionId || !customerId) {
-      return Response.json({ error: "sessionId and customerId required" }, { status: 400 });
+    if (!sessionId) {
+      return Response.json({ error: "sessionId required" }, { status: 400 });
     }
 
     const res = await fetch(`${BASE_URL}/scans/${sessionId}`, {
@@ -55,7 +67,7 @@ export async function loader({ request }) {
     });
 
     const data = await res.json();
-    console.log("Bodygram scan result:", JSON.stringify(data));
+    console.log("Bodygram scan result: status =", data.status ?? (data.error ? "error" : "unknown"));
 
     if (data.status === "pending") {
       return Response.json({ status: "pending" });
@@ -73,8 +85,10 @@ export async function loader({ request }) {
       });
     }
 
+    // customer.id (session-derived) — never the request's customerId — is the
+    // only identity this write can target.
     await prisma.onboardingProfile.upsert({
-      where: { customerId },
+      where: { customerId: customer.id },
       update: {
         chestCm: mm(measurements.BUST_GIRTH),
         waistCm: mm(measurements.WAIST_GIRTH),
@@ -84,7 +98,7 @@ export async function loader({ request }) {
         avatarCreatedAt: new Date(),
       },
       create: {
-        customerId,
+        customerId: customer.id,
         completed: false,
         chestCm: mm(measurements.BUST_GIRTH),
         waistCm: mm(measurements.WAIST_GIRTH),

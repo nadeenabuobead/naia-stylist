@@ -72,7 +72,7 @@ export async function action({ request }) {
 
   // ─── ADD a single item ─────────────────────────────────────────────────────
   if (act === "add") {
-    const { name, category, image } = body;
+    const { name, category } = body;
     if (!name?.trim()) {
       return Response.json({ error: "Name required" }, { status: 400, headers: CORS });
     }
@@ -80,12 +80,17 @@ export async function action({ request }) {
     if (!capacityCheck.allowed) {
       return Response.json({ error: "Your closet is full. Remove some items to add new ones." }, { status: 403, headers: CORS });
     }
+    // A client-supplied `image` value is never trusted here — this path has no
+    // Cloudinary ownership check and no Layer 2/3 moderation, so it must not
+    // be able to attach an arbitrary, unscreened image to a closet item. Items
+    // added through this path can have a photo attached afterwards through the
+    // canonical, moderated upload flow in closet._index.tsx (same ClosetItem row).
     const item = await prisma.closetItem.create({
       data: {
         customerId: customer.id,
         name: name.trim(),
         category: normalizeCategory(category),
-        imageUrl: image ?? null,
+        imageUrl: null,
       },
     });
     return Response.json({ item }, { headers: CORS });
@@ -109,6 +114,8 @@ export async function action({ request }) {
     });
     const existingSet = new Set(existing.map(e => `${e.name}::${e.category}`));
 
+    // See the "add" action above — client-supplied image data is never
+    // trusted on this unmoderated legacy path.
     const toCreate = items
       .filter(i => {
         if (!i.name?.trim()) return false;
@@ -119,7 +126,7 @@ export async function action({ request }) {
         customerId: customer.id,
         name: i.name.trim(),
         category: normalizeCategory(i.category),
-        imageUrl: i.image ?? null,
+        imageUrl: null,
       }));
 
     if (toCreate.length > 0) {

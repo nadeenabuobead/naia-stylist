@@ -92,13 +92,18 @@ export default [
   route("webhooks/app/scopes_update", "routes/webhooks.app.scopes_update.jsx"),
   route("webhooks/app/uninstalled", "routes/webhooks.app.uninstalled.jsx"),
   route("quick-style", "routes/quick-style/_index.tsx"),
-  route("api/quick-style", "routes/api.quick-style.jsx"),
+  // api/quick-style retired 2026-10-19 — Phase 1 security lockdown. No live
+  // caller (the /quick-style page above posts to its own route action); this
+  // file called Anthropic directly with no auth and no entitlement checks.
   route("full-style-profile", "routes/full-style-profile/_index.tsx"),
   route("api/full-style-profile", "routes/api.full-style-profile.jsx"),
   route("api/save-look", "routes/api.save-look.jsx"),
   route("buyskip", "routes/buyskip._index.tsx"),
   route("buyskip/:id", "routes/buyskip.$id.tsx"),
-  route("api/tryon", "routes/api.tryon.jsx"),
+  // api/tryon retired 2026-10-19 — Phase 1 security lockdown. No live caller
+  // (TryOnButton.tsx is never imported/rendered); had no auth, did an
+  // unsigned public Cloudinary upload, and skipped all moderation. The
+  // canonical, hardened VTO path is api/trigger-tryon + api/tryon-status.
   route("api/body-scan", "routes/api.bodyscan.jsx"),
   route("account", "routes/account.jsx"),
   route("api/recommendation-feedback", "routes/api.recommendation-feedback.tsx"),
