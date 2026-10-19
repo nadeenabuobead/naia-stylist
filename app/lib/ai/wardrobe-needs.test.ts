@@ -495,6 +495,49 @@ describe("§WN-4e a midi hem against legs-covered is conditional, not confirmed 
       "allReasons must list every failed check, in the order they're evaluated",
     );
   });
+
+  it("4i — a colour named in BOTH favoriteColors and avoidColors is never a confident avoid-colour block", () => {
+    // Found live on Persona E (favoriteColors: ["black"], avoidColors: ["black"])
+    // — the exact same colour stated as both loved and avoided. A black
+    // piece with no other violation was being flagged "blocked" purely for
+    // matching avoidColors, silently ignoring that the identical colour was
+    // also her stated favourite. Self-contradictory data must not produce a
+    // confident negative claim in either direction.
+    const passport = makePassport({
+      lifestyle: ["office"],
+      favoriteColors: ["black"],
+      avoidColors: ["black"],
+      dressingPreferences: [],
+    });
+    const items = [
+      ...variedLooks("casual", 4),
+      makeGarment({ slot: "bottom", category: "BOTTOMS", formality: "business-casual", primaryColor: "black", hemLength: "full" }),
+    ];
+    const needs = run(items, { passport });
+    const work = registerOf(needs, "work");
+    const trousers = work.blockedPieces.find((b) => b.allReasons.some((r) => /avoid.*colour/i.test(r)));
+    assert.equal(trousers, undefined, "a genuinely conflicted colour must never block an otherwise-compliant piece");
+  });
+
+  it("4j — avoidColors still blocks a colour that is NOT also a stated favourite", () => {
+    // Same fixture shape as 4i, but the avoided colour is unambiguous
+    // (never stated as a favourite) — confirms 4i's fix didn't just disable
+    // the avoidColors check entirely.
+    const passport = makePassport({
+      lifestyle: ["office"],
+      favoriteColors: ["navy"],
+      avoidColors: ["black"],
+      dressingPreferences: [],
+    });
+    const items = [
+      ...variedLooks("casual", 4),
+      makeGarment({ slot: "bottom", category: "BOTTOMS", formality: "business-casual", primaryColor: "black", hemLength: "full" }),
+    ];
+    const needs = run(items, { passport });
+    const work = registerOf(needs, "work");
+    const trousers = work.blockedPieces.find((b) => b.allReasons.some((r) => /avoid.*colour/i.test(r)));
+    assert.ok(trousers, "an unambiguously avoided colour must still block");
+  });
 });
 
 // ── §WN-5 Small but sufficient ────────────────────────────────────────────────

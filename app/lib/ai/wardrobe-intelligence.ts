@@ -1696,6 +1696,25 @@ type Usability = "usable" | "blocked" | "unknown";
  * that does not exist. So absent metadata resolves to "unknown", which is
  * counted and shown but never used as evidence of a gap.
  */
+/**
+ * A colour family genuinely avoided — named in avoidColors and NOT also
+ * named in favoriteColors. Both lists are self-reported; when the same
+ * colour appears in both (found live: favoriteColors and avoidColors both
+ * containing "black"), the data is self-contradictory, not an avoid-colour
+ * violation, and must never produce a confident "blocked" verdict — that
+ * would silently pick one side of a conflict the customer never resolved.
+ */
+function isGenuinelyAvoidedColourFamily(family: string, passport: WardrobePassport): boolean {
+  const avoided = passport.avoidColors.some(
+    (token) => (PASSPORT_COLOUR_FAMILIES[norm(token) ?? ""] ?? []).includes(family),
+  );
+  if (!avoided) return false;
+  const favourited = passport.favoriteColors.some(
+    (token) => (PASSPORT_COLOUR_FAMILIES[norm(token) ?? ""] ?? []).includes(family),
+  );
+  return !favourited;
+}
+
 // Blocked reasons are written as gerund phrases ("keeping your arms covered")
 // because they are consumed inside a sentence: "…only 2 currently meet your
 // stated coverage preferences — including keeping your arms covered."
@@ -1710,13 +1729,8 @@ function classifyUsability(
   // Colours she asked nAia to avoid.
   if (passport.avoidColors.length > 0) {
     const family = closetColourFamily(garment.primaryColor);
-    if (family) {
-      for (const token of passport.avoidColors) {
-        const families = PASSPORT_COLOUR_FAMILIES[norm(token) ?? ""] ?? [];
-        if (families.includes(family)) {
-          return { usability: "blocked", reason: `avoiding colours you asked nAia to leave out` };
-        }
-      }
+    if (family && isGenuinelyAvoidedColourFamily(family, passport)) {
+      return { usability: "blocked", reason: `avoiding colours you asked nAia to leave out` };
     }
   }
 
@@ -1828,14 +1842,8 @@ export function allBlockedReasons(
 
   if (passport.avoidColors.length > 0) {
     const family = closetColourFamily(garment.primaryColor);
-    if (family) {
-      for (const token of passport.avoidColors) {
-        const families = PASSPORT_COLOUR_FAMILIES[norm(token) ?? ""] ?? [];
-        if (families.includes(family)) {
-          reasons.push("avoiding colours you asked nAia to leave out");
-          break;
-        }
-      }
+    if (family && isGenuinelyAvoidedColourFamily(family, passport)) {
+      reasons.push("avoiding colours you asked nAia to leave out");
     }
   }
 
