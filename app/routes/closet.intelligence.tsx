@@ -29,7 +29,7 @@
 //
 // Pinned by app/routes/closet.intelligence-promotion.test.ts.
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link, useLoaderData, Form, useNavigation } from "react-router";
 import { data, redirect, type LoaderFunctionArgs, type ActionFunctionArgs, type LinksFunction } from "react-router";
 import prisma from "../db.server";
@@ -713,6 +713,23 @@ export default function WardrobeIntelligencePage() {
   const navigation = useNavigation();
   const saving = navigation.state !== "idle";
   const model = page as WardrobePage;
+
+  // Found live on Persona A: clicking "Change"/"Update" opens the question
+  // panel, but nothing ever closed it again after a fresh answer was
+  // submitted — the compact status line and the full question both stayed
+  // visible together for the rest of the session. navigation.formData is
+  // only populated while a submission is in flight, so the in-flight check
+  // (not "closetCompleteness" itself) has to be captured in a ref to survive
+  // into the idle transition, when the reset actually needs to happen.
+  const submittingCompleteness = navigation.formData?.has("closetCompleteness") ?? false;
+  const wasSubmittingCompleteness = useRef(false);
+  if (submittingCompleteness) wasSubmittingCompleteness.current = true;
+  useEffect(() => {
+    if (navigation.state === "idle" && wasSubmittingCompleteness.current) {
+      setEditingCompleteness(false);
+      wasSubmittingCompleteness.current = false;
+    }
+  }, [navigation.state]);
 
   // Same locked labels wardrobe-copy.ts already uses for these three real
   // registers — not new vocabulary, just named here too since that constant

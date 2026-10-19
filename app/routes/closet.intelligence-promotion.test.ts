@@ -521,3 +521,23 @@ describe("CIP-Q — the empty-wardrobe state links directly to My Closet, not ju
     assert.match(block, /<Link to="\/closet"/);
   });
 });
+
+// ── CIP-R: the completeness question collapses again after a fresh answer ─────
+//
+// Found live on Persona A: clicking "Change"/"Update" opens the question
+// panel (editingCompleteness=true), but nothing ever reset it after a new
+// answer was submitted — the compact status line and the full question
+// stayed visible together for the rest of the session.
+
+describe("CIP-R — editingCompleteness resets once a fresh answer actually lands, not left open forever", () => {
+  test("CIP-R.1 an effect resets editingCompleteness to false on the idle transition after a closetCompleteness submission", () => {
+    const src = read(LIVE);
+    assert.match(src, /submittingCompleteness\s*=\s*navigation\.formData\?\.has\("closetCompleteness"\)/);
+    assert.match(src, /wasSubmittingCompleteness\.current\s*=\s*true/);
+    const idx = src.indexOf("useEffect(() => {");
+    assert.notEqual(idx, -1, "an effect must exist to perform the reset");
+    const block = src.slice(idx, idx + 300);
+    assert.match(block, /navigation\.state === "idle" && wasSubmittingCompleteness\.current/);
+    assert.match(block, /setEditingCompleteness\(false\)/);
+  });
+});
