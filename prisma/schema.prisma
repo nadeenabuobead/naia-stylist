@@ -1481,3 +1481,18 @@ model StylingSessionAdminReview {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+/// Priority 5 (2026-10-19) — auditability for the internal admin portal's
+/// destructive/bulk maintenance actions (currently just the two retention
+/// purges — app/routes/admin.maintenance.tsx). performedBy is the admin
+/// identity's email from the session (never client input, same
+/// "reviewedBy" convention as StylingSessionAdminReview above).
+model AdminAuditLog {
+  id          String   @id @default(cuid())
+  performedBy String
+  action      String
+  detail      Json?
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
+}

@@ -1,18 +1,24 @@
 // app/routes/admin.maintenance.test.ts
 // Priority 5 (2026-10-19) — admin-triggered retention purge route.
 //
-// Mocked internal-auth.server and data-retention.server — no real admin
-// session, no real DB. Verifies: both loader and action require a valid
-// admin session (belt-and-suspenders, same convention as
-// admin.naia.phase3c-export.tsx), each intent calls the correct purge
-// function, and an invalid intent is rejected without calling either.
+// Mocked internal-auth.server, data-retention.server, and
+// admin-audit-log.server — no real admin session, no real DB. Verifies:
+// both loader and action require a valid admin session AND the "owner"
+// role specifically (same convention as admin.naia.phase3c-export.tsx for
+// belt-and-suspenders auth); each intent calls the correct purge function;
+// an invalid intent is rejected without calling either; every successful
+// purge is recorded in the audit log with the session's email, never
+// client input; recent actions are loaded for display.
 //
 // Run: npx vitest run app/routes/admin.maintenance.test.ts
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("~/lib/internal-auth.server", () => ({
-  requireAdminSession: vi.fn().mockResolvedValue({ authenticated: true, identity: { id: "owner", email: "a", role: "owner" } }),
+  requireAdminSession: vi.fn().mockResolvedValue({
+    authenticated: true,
+    identity: { id: "owner", email: "owner@naiabynadine.com", role: "owner" },
+  }),
 }));
 
 vi.mock("~/lib/data-retention.server", () => ({
@@ -20,12 +26,20 @@ vi.mock("~/lib/data-retention.server", () => ({
   purgeExpiredNaiaSessions: vi.fn().mockResolvedValue({ count: 0 }),
 }));
 
+vi.mock("~/lib/admin-audit-log.server", () => ({
+  recordAdminAction: vi.fn().mockResolvedValue(undefined),
+  listRecentAdminActions: vi.fn().mockResolvedValue([]),
+}));
+
 import { requireAdminSession } from "~/lib/internal-auth.server";
 import { purgeExpiredJourneyEvents, purgeExpiredNaiaSessions } from "~/lib/data-retention.server";
+import { recordAdminAction, listRecentAdminActions } from "~/lib/admin-audit-log.server";
 
 const mockRequireAdmin = () => requireAdminSession as ReturnType<typeof vi.fn>;
 const mockPurgeJourney = () => purgeExpiredJourneyEvents as ReturnType<typeof vi.fn>;
 const mockPurgeSessions = () => purgeExpiredNaiaSessions as ReturnType<typeof vi.fn>;
+const mockRecordAction = () => recordAdminAction as ReturnType<typeof vi.fn>;
+const mockListActions = () => listRecentAdminActions as ReturnType<typeof vi.fn>;
 
 function actionRequest(intent: string) {
   const body = new URLSearchParams({ intent });
@@ -38,11 +52,13 @@ function actionRequest(intent: string) {
 
 beforeEach(() => vi.clearAllMocks());
 
-describe("admin.maintenance — loader and action both require a valid admin session", () => {
-  it("loader calls requireAdminSession", async () => {
+describe("admin.maintenance — session and role requirements", () => {
+  it("loader calls requireAdminSession and loads recent actions", async () => {
     const { loader } = await import("./admin.maintenance.tsx");
-    await loader({ request: new Request("http://localhost/admin/maintenance") } as any);
+    const result = await loader({ request: new Request("http://localhost/admin/maintenance") } as any);
     expect(mockRequireAdmin()).toHaveBeenCalled();
+    expect(mockListActions()).toHaveBeenCalledWith(20);
+    expect(result).toEqual({ recentActions: [] });
   });
 
   it("action rejects before running any purge when the session check rejects", async () => {
@@ -54,7 +70,24 @@ describe("admin.maintenance — loader and action both require a valid admin ses
     expect(mockPurgeSessions()).not.toHaveBeenCalled();
   });
 
-  it("purge-journey-events calls only purgeExpiredJourneyEvents", async () => {
+  it("a valid session that is NOT role 'owner' is rejected with 403, before any purge", async () => {
+    mockRequireAdmin().mockResolvedValueOnce({ authenticated: true, identity: { id: "x", email: "staff@naiabynadine.com", role: "staff" } });
+    const { action } = await import("./admin.maintenance.tsx");
+
+    await expect(action({ request: actionRequest("purge-journey-events") } as any)).rejects.toMatchObject({ status: 403 });
+    expect(mockPurgeJourney()).not.toHaveBeenCalled();
+  });
+
+  it("the loader also enforces the owner role", async () => {
+    mockRequireAdmin().mockResolvedValueOnce({ authenticated: true, identity: { id: "x", email: "staff@naiabynadine.com", role: "staff" } });
+    const { loader } = await import("./admin.maintenance.tsx");
+
+    await expect(loader({ request: new Request("http://localhost/admin/maintenance") } as any)).rejects.toMatchObject({ status: 403 });
+  });
+});
+
+describe("admin.maintenance — purge actions and auditability", () => {
+  it("purge-journey-events calls only purgeExpiredJourneyEvents and records the audit entry with the session's email", async () => {
     mockPurgeJourney().mockResolvedValueOnce({ count: 12 });
     const { action } = await import("./admin.maintenance.tsx");
 
@@ -63,9 +96,10 @@ describe("admin.maintenance — loader and action both require a valid admin ses
     expect(mockPurgeJourney()).toHaveBeenCalled();
     expect(mockPurgeSessions()).not.toHaveBeenCalled();
     expect((result as any).message).toMatch(/12/);
+    expect(mockRecordAction()).toHaveBeenCalledWith("owner@naiabynadine.com", "purge-journey-events", { count: 12 });
   });
 
-  it("purge-sessions calls only purgeExpiredNaiaSessions", async () => {
+  it("purge-sessions calls only purgeExpiredNaiaSessions and records the audit entry", async () => {
     mockPurgeSessions().mockResolvedValueOnce({ count: 3 });
     const { action } = await import("./admin.maintenance.tsx");
 
@@ -74,14 +108,16 @@ describe("admin.maintenance — loader and action both require a valid admin ses
     expect(mockPurgeSessions()).toHaveBeenCalled();
     expect(mockPurgeJourney()).not.toHaveBeenCalled();
     expect((result as any).message).toMatch(/3/);
+    expect(mockRecordAction()).toHaveBeenCalledWith("owner@naiabynadine.com", "purge-sessions", { count: 3 });
   });
 
-  it("an invalid intent is rejected without calling either purge function", async () => {
+  it("an invalid intent is rejected without calling either purge function or recording anything", async () => {
     const { action } = await import("./admin.maintenance.tsx");
     const result = await action({ request: actionRequest("something-else") } as any);
 
     expect((result as any).ok).toBe(false);
     expect(mockPurgeJourney()).not.toHaveBeenCalled();
     expect(mockPurgeSessions()).not.toHaveBeenCalled();
+    expect(mockRecordAction()).not.toHaveBeenCalled();
   });
 });
