@@ -21,16 +21,22 @@ api_version = "2026-04"
   # not yet pushed live via `shopify app deploy` — that is a separate,
   # not-yet-authorised step. See webhooks.customers.data_request.tsx,
   # webhooks.customers.redact.tsx, webhooks.shop.redact.tsx.
+  #
+  # These three MUST use `compliance_topics`, not `topics` — Shopify treats
+  # that as a distinct mandatory-compliance subscription kind (confirmed
+  # against current shopify.dev docs 2026-10-19). An earlier version of this
+  # file used `topics` by mistake, which is exactly the shape Shopify's own
+  # MISSING_COMPLIANCE_WEBHOOKS app-store review check flags as absent.
   [[webhooks.subscriptions]]
-  topics = [ "customers/data_request" ]
+  compliance_topics = [ "customers/data_request" ]
   uri = "/webhooks/customers/data_request"
 
   [[webhooks.subscriptions]]
-  topics = [ "customers/redact" ]
+  compliance_topics = [ "customers/redact" ]
   uri = "/webhooks/customers/redact"
 
   [[webhooks.subscriptions]]
-  topics = [ "shop/redact" ]
+  compliance_topics = [ "shop/redact" ]
   uri = "/webhooks/shop/redact"
 
 [access_scopes]

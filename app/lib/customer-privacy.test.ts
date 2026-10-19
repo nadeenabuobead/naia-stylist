@@ -196,3 +196,34 @@ describe("compileCustomerExport — synthetic customer, mocked DB", () => {
     expect(result!.note).toMatch(/FASHN|Anthropic|Bodygram/); // honest about what this export does NOT cover
   });
 });
+
+describe("billing safety — tripwire for a currently-nonexistent risk", () => {
+  // There is no live payment processor wired into this app today (Clerk +
+  // Stripe is approved for PLANNING only — see the frozen v4 auth/billing
+  // spec — not implemented). membershipStatus is an internal-only enum
+  // (NONE | MEMBER, prisma/schema.prisma) with no external subscription id,
+  // so deleting the Customer row cannot leave a live subscription billing a
+  // deleted customer: there is nothing external to orphan yet.
+  //
+  // This test is a tripwire, not a feature test: the moment a real billing
+  // integration adds a field like stripeCustomerId/stripeSubscriptionId to
+  // Customer, this test starts failing — which is the intended signal that
+  // eraseCustomerData must be updated to cancel/handle that subscription
+  // BEFORE deleting the row, not an oversight to silently work around.
+  it("Customer has no external billing/subscription identifier for eraseCustomerData to account for yet", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join, dirname } = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const __dirname = dirname(fileURLToPath(import.meta.url));
+    const schema = readFileSync(join(__dirname, "../../prisma/schema.prisma"), "utf8");
+
+    const customerBlock = schema.slice(
+      schema.indexOf("\nmodel Customer {"),
+      schema.indexOf("\n}", schema.indexOf("\nmodel Customer {")),
+    );
+
+    for (const billingField of ["stripeCustomerId", "stripeSubscriptionId", "paymentMethodId", "billingProviderId"]) {
+      expect(customerBlock).not.toContain(billingField);
+    }
+  });
+});
