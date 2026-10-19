@@ -502,3 +502,22 @@ describe("CIP-P — the recommendation-reason sentence reads correctly for every
     assert.match(block, /"less-than-it-looks":\s*"is smaller than it looks"/);
   });
 });
+
+// ── CIP-Q: the empty-wardrobe message gives a real path to add a piece ────────
+//
+// Found live on Persona D (0 Closet items, complete Style Passport): the
+// !model.ready empty state showed only a sentence of plain text — no link,
+// no button — leaving the sidebar's always-present "My Closet" nav item as
+// the only way in. Not a fabrication bug, but a confirmed functional gap
+// against "provides a useful, functioning path to add the first garment."
+
+describe("CIP-Q — the empty-wardrobe state links directly to My Closet, not just the sentence", () => {
+  test("CIP-Q.1 the !model.ready branch renders a Link to /closet, not text alone", () => {
+    const src = read(LIVE);
+    const idx = src.indexOf("if (!model.ready)");
+    assert.notEqual(idx, -1);
+    const block = src.slice(idx, idx + 1200);
+    assert.match(block, /wip-empty/);
+    assert.match(block, /<Link to="\/closet"/);
+  });
+});

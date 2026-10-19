@@ -962,6 +962,7 @@ export default function WardrobeIntelligencePage() {
             <p className="wip-empty">
               {model.readyNote ?? "Add a few more pieces and nAia can start reading your wardrobe as a whole."}
             </p>
+            <Link to="/closet" className="wip-link">Add a piece to your Closet →</Link>
           </main>
         </div>
       </MyNaiaLayout>
@@ -1859,7 +1860,8 @@ const css = `
      (smaller, muted) rather than reading as another full finding. */
   .wip-method-body{font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.65;color:rgba(40,21,12,0.6);margin:0 0 10px;max-width:640px}
   .wip-legal{font-family:var(--naia-ff-ui);font-size:9.5px;color:rgba(40,21,12,0.45);margin-top:10px}
-  .wip-empty{font-family:var(--naia-ff-ui);font-size:13px;color:rgba(40,21,12,0.6);padding:40px 0}
+  .wip-empty{font-family:var(--naia-ff-ui);font-size:13px;color:rgba(40,21,12,0.6);padding:40px 0 0}
+  .wip-empty + .wip-link{display:inline-block;margin:10px 0 40px}
 
   .wip-thumb{width:100%;display:flex;align-items:center;justify-content:center;background:var(--naia-muted-bg);border:1px solid var(--naia-border);border-radius:4px;overflow:hidden;flex-shrink:0}
   .wip-thumb img{width:100%;height:100%;object-fit:contain}
