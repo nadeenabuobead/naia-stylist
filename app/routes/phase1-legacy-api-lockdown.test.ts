@@ -46,6 +46,7 @@ function readRootFile(rel: string): string {
 
 const routesConfig = readRootFile("app/routes.ts");
 const bodyscan = readRoute("api.bodyscan.jsx");
+const bindingModule = readRootFile("app/lib/bodyscan-session-binding.server.ts");
 
 // ── §A: retired routes are gone and unregistered ──────────────────────────────
 
@@ -215,20 +216,20 @@ describe("§B — scan sessionId is cryptographically bound to the customer it w
   });
 
   it("B17 — loader() rejects a missing sig with 403 before calling Bodygram", async () => {
-    const { sessionOwnershipValid } = await import("./api.bodyscan.jsx");
+    const { sessionOwnershipValid } = await import("../lib/bodyscan-session-binding.server.ts");
     assert.equal(sessionOwnershipValid("sess-1", "cust-A", undefined), false);
     assert.equal(sessionOwnershipValid("sess-1", "cust-A", null), false);
     assert.equal(sessionOwnershipValid("sess-1", "cust-A", ""), false);
   });
 
   it("B18 — a valid signature for (sessionId, customer) verifies", async () => {
-    const { signSessionOwnership, sessionOwnershipValid } = await import("./api.bodyscan.jsx");
+    const { signSessionOwnership, sessionOwnershipValid } = await import("../lib/bodyscan-session-binding.server.ts");
     const sig = signSessionOwnership("sess-1", "cust-A");
     assert.equal(sessionOwnershipValid("sess-1", "cust-A", sig), true);
   });
 
   it("B19 — customer B cannot use a sig issued for customer A's session (the actual exploit this closes)", async () => {
-    const { signSessionOwnership, sessionOwnershipValid } = await import("./api.bodyscan.jsx");
+    const { signSessionOwnership, sessionOwnershipValid } = await import("../lib/bodyscan-session-binding.server.ts");
     // Customer A legitimately creates a scan and receives sig_A for sess-1.
     const sigForA = signSessionOwnership("sess-1", "cust-A");
     // Customer B authenticates as themselves and tries to poll A's sessionId,
@@ -241,13 +242,13 @@ describe("§B — scan sessionId is cryptographically bound to the customer it w
   });
 
   it("B20 — a sig for one sessionId does not transfer to a different sessionId for the same customer", async () => {
-    const { signSessionOwnership, sessionOwnershipValid } = await import("./api.bodyscan.jsx");
+    const { signSessionOwnership, sessionOwnershipValid } = await import("../lib/bodyscan-session-binding.server.ts");
     const sigForSessX = signSessionOwnership("sess-X", "cust-A");
     assert.equal(sessionOwnershipValid("sess-Y", "cust-A", sigForSessX), false);
   });
 
   it("B21 — a tampered signature (same length, different bytes) is rejected", async () => {
-    const { signSessionOwnership, sessionOwnershipValid } = await import("./api.bodyscan.jsx");
+    const { signSessionOwnership, sessionOwnershipValid } = await import("../lib/bodyscan-session-binding.server.ts");
     const sig = signSessionOwnership("sess-1", "cust-A");
     const tampered = sig.slice(0, -1) + (sig.at(-1) === "A" ? "B" : "A");
     assert.equal(sessionOwnershipValid("sess-1", "cust-A", tampered), false);
@@ -269,12 +270,25 @@ describe("§B — scan sessionId is cryptographically bound to the customer it w
   });
 
   it("B24 — comparison uses timingSafeEqual, not a plain string/== compare (no timing oracle)", () => {
-    assert.ok(bodyscan.includes("timingSafeEqual"));
-    assert.ok(!bodyscan.includes("providedSig === expected"), "must not use a non-constant-time comparison");
+    assert.ok(bindingModule.includes("timingSafeEqual"));
+    assert.ok(!bindingModule.includes("providedSig === expected"), "must not use a non-constant-time comparison");
+  });
+
+  it("B24b — the binding logic lives in a .server.ts module, not exported from the route", () => {
+    // Confirmed by hitting it directly during this work: a named export from
+    // a route file is bundled into the CLIENT build by React Router's
+    // convention, which pulls Node's `crypto` into the browser bundle and
+    // breaks the production build. .server.ts is this codebase's existing
+    // convention for code that must never reach the client.
+    assert.ok(
+      bodyscan.includes('from "../lib/bodyscan-session-binding.server"'),
+      "api.bodyscan.jsx must import the binding functions, not define/export them itself",
+    );
+    assert.ok(!bodyscan.includes("createHmac"), "route file itself must not import Node's crypto module directly");
   });
 
   it("B25 — fails closed when SESSION_SECRET is not configured", async () => {
-    const { sessionOwnershipValid, signSessionOwnership } = await import("./api.bodyscan.jsx");
+    const { sessionOwnershipValid, signSessionOwnership } = await import("../lib/bodyscan-session-binding.server.ts");
     const saved = process.env.SESSION_SECRET;
     try {
       const sig = signSessionOwnership("sess-1", "cust-A"); // signed while secret present

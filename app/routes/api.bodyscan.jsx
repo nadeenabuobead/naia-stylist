@@ -1,6 +1,6 @@
-import { createHmac, timingSafeEqual } from "crypto";
 import prisma from "../db.server";
 import { getCurrentNaiaCustomer } from "../lib/naia-session.server";
+import { signSessionOwnership, sessionOwnershipValid } from "../lib/bodyscan-session-binding.server";
 
 // Bodygram body-scan integration — under product review, not rebuilt or
 // removed (2026-10-19 audit). Both handlers below now require an
@@ -25,32 +25,6 @@ import { getCurrentNaiaCustomer } from "../lib/naia-session.server";
 const BODYGRAM_API_KEY = process.env.BODYGRAM_API_KEY;
 const BODYGRAM_ORG_ID = process.env.BODYGRAM_ORG_ID;
 const BASE_URL = `https://platform.bodygram.com/api/orgs/${BODYGRAM_ORG_ID}`;
-
-const SIG_LABEL = "bodyscan-session-v1";
-
-// Exported for direct unit testing of the binding logic (see
-// phase1-legacy-api-lockdown.test.ts) — not used by any other route.
-export function signSessionOwnership(sessionId, customerId) {
-  const secret = process.env.SESSION_SECRET;
-  if (!secret) throw new Error("SESSION_SECRET is not configured");
-  return createHmac("sha256", secret)
-    .update(`${SIG_LABEL}:${sessionId}:${customerId}`)
-    .digest("base64url");
-}
-
-export function sessionOwnershipValid(sessionId, customerId, providedSig) {
-  if (!providedSig || typeof providedSig !== "string") return false;
-  let expected;
-  try {
-    expected = signSessionOwnership(sessionId, customerId);
-  } catch {
-    return false; // fail closed if SESSION_SECRET is missing
-  }
-  const a = Buffer.from(providedSig);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length) return false; // timingSafeEqual requires equal length
-  return timingSafeEqual(a, b);
-}
 
 function authRequired() {
   return Response.json({ error: "Authentication required" }, { status: 401 });
