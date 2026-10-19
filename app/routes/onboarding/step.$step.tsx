@@ -6,6 +6,7 @@ import { getQuestionByStep, getTotalSteps, quizQuestions, getGroupLabel } from "
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { prisma } from "~/lib/prisma.server";
 import { readPendingSave, clearPendingSave } from "~/lib/pending-save.server";
+import { hasConfirmedCurrentAge } from "~/lib/age-confirmation.server";
 
 // Valid option IDs per draft key — built from onboarding quiz data at module load time
 const VALID_DRAFT_IDS: Record<string, Set<string>> = {};
@@ -134,6 +135,19 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   if (!question) return redirect("/onboarding/step/1");
 
   const customer = await requireCurrentNaiaCustomer(request);
+
+  // Priority 5 (2026-10-19) — mandatory age declaration. Gated here, at the
+  // one choke point every onboarding step load passes through, rather than
+  // inserted as a new numbered Passport question — doing so would shift
+  // every later step number in quiz-data.ts. Does not touch totalSteps,
+  // the question bank, or any existing step's content/order. next=
+  // preserves the step the customer actually asked for (including a deep
+  // link straight to a later step) so confirming returns them exactly
+  // where they were headed, not always to step 1.
+  if (!hasConfirmedCurrentAge(customer)) {
+    return redirect(`/onboarding/age-confirm?next=${encodeURIComponent(`/onboarding/step/${step}`)}`);
+  }
+
   const op = customer.onboardingProfile;
   const existingAnswers: OnboardingAnswers = {};
   if (op) {
