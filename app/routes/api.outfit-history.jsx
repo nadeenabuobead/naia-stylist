@@ -51,8 +51,10 @@ export async function action({ request }) {
   try {
     const body = await request.json();
     const { mood, feeling, event, result, styleDNA, bodyPref, closetItemIds, naiaPiece, closetItems } = body;
-    console.log("OUTFIT-HISTORY DEBUG:", JSON.stringify({ hasClosetItems: !!closetItems, hasNaiaPiece: !!naiaPiece, closetItemsLength: closetItems?.length, naiaPieceTitle: naiaPiece?.title }));
-  console.log("Outfit history received:", { hasClosetItems: !!closetItems, hasNaiaPiece: !!naiaPiece, closetItems, naiaPiece });
+    // 2026-10-19 privacy review: previously logged the full closetItems/naiaPiece
+    // payloads (garment details, style preferences) on every call. Presence/count
+    // only — matches the pattern already applied to api.bodyscan.jsx in Phase 1.
+    console.log("OUTFIT-HISTORY DEBUG:", JSON.stringify({ hasClosetItems: !!closetItems, hasNaiaPiece: !!naiaPiece, closetItemsLength: closetItems?.length }));
 
     const session = await prisma.stylingSession.create({
       data: {
@@ -69,7 +71,7 @@ export async function action({ request }) {
     
     // Save the outfit items as a suggestion
     if (closetItems || naiaPiece) {
-      console.log("SAVING SUGGESTIONS - closetItems:", closetItems, "naiaPiece:", naiaPiece);
+      console.log("SAVING SUGGESTIONS:", { closetItemCount: closetItems?.length ?? 0, hasNaiaPiece: !!naiaPiece });
       try {
         const suggestionItems = [];
         
