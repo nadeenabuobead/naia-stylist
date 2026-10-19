@@ -39,7 +39,7 @@ export async function callClaude({
     const data = await response.json();
     
     if (!response.ok) {
-      console.error("Claude API Error:", data);
+      console.error("Claude API Error:", { status: response.status, errorType: data?.error?.type });
       throw new Error(data.error?.message || "Claude API failed");
     }
 
@@ -89,7 +89,7 @@ export async function callClaudeJSON<T>({
     return JSON.parse(cleanResponse) as T;
   } catch (error) {
     console.error("JSON parse error:", error);
-    console.error("Raw response:", response);
+    console.error("Raw response length:", response.length);
     throw new Error("Failed to parse response as JSON");
   }
 }

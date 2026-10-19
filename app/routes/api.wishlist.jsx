@@ -909,7 +909,7 @@ Respond ONLY with valid JSON, no markdown:
     // ── 6. Parse AI response ───────────────────────────────────────────────────
     const aiData = await analysisResponse.json();
     if (!aiData.content || !aiData.content[0]) {
-      console.error("[buy-skip] Unexpected AI response shape:", JSON.stringify(aiData).slice(0, 200));
+      console.error("[buy-skip] Unexpected AI response shape:", Object.keys(aiData || {}));
       return json({ error: "Analysis failed. Please try again." }, { status: 502 });
     }
 

@@ -85,7 +85,7 @@ Respond ONLY with valid JSON, no markdown, no explanation:
     const analysisData = await analysisResponse.json();
 
     if (!analysisResponse.ok) {
-      console.error("Claude error:", analysisData);
+      console.error("Claude error:", { status: analysisResponse.status, errorType: analysisData?.error?.type });
       return Response.json({ error: "Analysis failed", details: analysisData.error?.message }, { status: 500 });
     }
 

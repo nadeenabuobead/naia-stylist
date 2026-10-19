@@ -154,7 +154,7 @@ try {
     const anthropicData = await anthropicResponse.json();
     
     if (!anthropicResponse.ok) {
-      console.error("Anthropic API Error:", anthropicData);
+      console.error("Anthropic API Error:", { status: anthropicResponse.status, errorType: anthropicData?.error?.type });
       return Response.json({
         result: buildFallback({ mood: safeMood, feeling: safeFeeling, closetItem, naiaPiece, outfit: finalOutfit }),
         error: anthropicData.error?.message || "Anthropic API error",
