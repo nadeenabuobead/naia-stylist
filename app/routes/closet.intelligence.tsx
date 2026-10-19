@@ -40,7 +40,7 @@ import { getCloudinaryConfig, buildPrivateDownloadUrl } from "~/lib/cloudinary-a
 import { loadWardrobeIntelligence } from "~/lib/ai/wardrobe-intelligence.server";
 import { readAndRecordChange } from "~/lib/ai/wardrobe-snapshot.server";
 import { readClosetConfidence, recordClosetConfidence } from "~/lib/ai/wardrobe-confidence.server";
-import { buildWardrobePage, type WardrobePage, type PageEntry } from "~/lib/ai/wardrobe-page";
+import { buildWardrobePage, hedge, type WardrobePage, type PageEntry } from "~/lib/ai/wardrobe-page";
 import { registerDisplay, type DepthState } from "~/lib/ai/wardrobe-copy";
 import { type RegisterId } from "~/lib/ai/wardrobe-needs";
 import { SILHOUETTE_LABELS } from "~/lib/ai/wardrobe-intelligence";
@@ -209,7 +209,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // duplicated here.
   const allRegisterReadings = needs.registers
     .filter((r) => r.needed)
-    .map((r) => ({ register: r.register, usableCount: r.usableCount, ...registerDisplay(r) }))
+    .map((r) => ({ register: r.register, usableCount: r.usableCount, conditionallyUsableCount: r.conditionallyUsableCount, ...registerDisplay(r) }))
     .filter((d) => d.state !== "learning");
 
   // ── Real neutral share, for "What your wardrobe looks like" ─────────────
@@ -671,7 +671,7 @@ export default function WardrobeIntelligencePage() {
   } = useLoaderData<typeof loader>() as {
     page: WardrobePage; garmentCards: GarmentCard[];
     glanceRegisters: Array<{ heading: string; stateText: string; isGenuinelyStrong: boolean }>;
-    allRegisterReadings: Array<{ register: RegisterId; usableCount: number; heading: string; state: DepthState; stateText: string; plain: string }>;
+    allRegisterReadings: Array<{ register: RegisterId; usableCount: number; conditionallyUsableCount: number; heading: string; state: DepthState; stateText: string; plain: string }>;
     neutralSharePct: number | null;
     neutralTemperature: "warm" | "cool" | null;
     enoughCluster: { title: string; body: string; garmentIds: string[]; count: number } | null;
@@ -1079,7 +1079,7 @@ export default function WardrobeIntelligencePage() {
               <div className="wip-card-shell wip-looks-card">
                 {neutralSharePct !== null && neutralSharePct >= 40 && (
                   <p className="wip-looks-headline">
-                    {neutralSharePct}% of your pieces are {neutralTemperature ? `${neutralTemperature} ` : ""}neutrals — easy to combine, though outfits can start to feel similar.
+                    {neutralSharePct}% of your wardrobe is neutral{neutralTemperature ? `, predominantly ${neutralTemperature}-toned` : ""} — easy to combine, though outfits can start to feel similar.
                   </p>
                 )}
                 {paletteRows.length > 0 && (
@@ -1295,7 +1295,11 @@ export default function WardrobeIntelligencePage() {
                       <div className="wip-life-heading">
                         <h3>{REGISTER_LABEL[register]}</h3>
                         <span className="wip-life-state">{reading.stateText}</span>
-                        <span className="wip-life-count">{reading.usableCount} usable pieces</span>
+                        <span className="wip-life-count">
+                          {reading.usableCount} usable pieces
+                          {reading.conditionallyUsableCount > 0 &&
+                            ` (+${reading.conditionallyUsableCount} may work depending on styling)`}
+                        </span>
                       </div>
                       <div className="wip-life-bar"><div className="wip-life-bar-fill" style={{ width: `${DEPTH_FILL[reading.state]}%` }} /></div>
                       <p className="wip-life-text">{interpretation}</p>
@@ -1435,11 +1439,7 @@ export default function WardrobeIntelligencePage() {
                         client-side). Nothing shown while she hasn't answered the
                         completeness question yet, or has said she's still adding. */}
                     {model.confidence !== "mostly" && (
-                      <p className="wip-shop-hedge">
-                        {model.confidence === "still-adding"
-                          ? "You've told nAia you're still adding pieces, so treat this as a first read rather than a final answer."
-                          : "This is based on what's in your Closet so far — if you own more than you've added, it could change."}
-                      </p>
+                      <p className="wip-shop-hedge">{hedge(undefined, model.confidence)}</p>
                     )}
                   </div>
                 )}

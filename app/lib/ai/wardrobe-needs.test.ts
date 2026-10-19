@@ -424,6 +424,56 @@ describe("§WN-4 effective depth", () => {
   });
 });
 
+// ── §WN-4e Conditional vs confirmed incompatibility ───────────────────────────
+
+describe("§WN-4e a midi hem against legs-covered is conditional, not confirmed incompatible", () => {
+  it("4e — the register's own count and note agree with the Style Passport dialog's 'may depend' framing", () => {
+    // Found during Persona A QA: the coverage dialog already said "may depend
+    // on how you wear it" for a midi dress, while this register's own count
+    // and depthNote said "0 usable pieces... don't currently meet" — flatly
+    // contradicting the dialog about the exact same piece.
+    const passport = makePassport({ lifestyle: ["dinners-going-out"], dressingPreferences: ["legs-covered"] });
+    const items = [
+      ...variedLooks("casual", 4), // pad past MIN_WARDROBE_SIZE, irrelevant register
+      makeGarment({ slot: "dress", category: "DRESSES", formality: "evening", hemLength: "midi" }),
+    ];
+    const needs = run(items, { passport });
+    const occasion = registerOf(needs, "occasion");
+
+    assert.equal(occasion.confirmedBlockedCount, 0, "a midi hem is never a confirmed violation on its own");
+    assert.equal(occasion.conditionallyUsableCount, 1);
+    assert.equal(occasion.usableCount, 0, "not folded into confirmed usable — nAia still isn't certain either way");
+    assert.doesNotMatch(occasion.depthNote, /don't currently meet/, "must not flatly contradict the dialog's hedged framing");
+    assert.match(occasion.depthNote, /may work depending on how you style/);
+    assert.equal(occasion.blockedPieces.length, 1);
+    assert.equal(occasion.blockedPieces[0].isConditional, true);
+  });
+
+  it("4f — an objectively sleeveless piece against arms-covered is still confirmed, never softened", () => {
+    const passport = makePassport({ lifestyle: ["office"], dressingPreferences: ["arms-covered"] });
+    const items = [
+      ...variedLooks("casual", 4),
+      makeGarment({ slot: "top", category: "TOPS", formality: "business-casual", sleeveLength: "sleeveless" }),
+    ];
+    const needs = run(items, { passport });
+    const work = registerOf(needs, "work");
+    const sleeveless = work.blockedPieces.find((b) => b.reason === "keeping your arms covered");
+    assert.ok(sleeveless, "the sleeveless piece must still be flagged");
+    assert.equal(sleeveless!.isConditional, false, "a genuinely sleeveless top is confirmed incompatible, not a styling question");
+  });
+
+  it("4g — singular vs plural grammar in the depthNote matches the real confirmed-blocked count", () => {
+    const passport = makePassport({ lifestyle: ["office"], dressingPreferences: ["arms-covered"] });
+    const items = [
+      ...variedLooks("casual", 4),
+      makeGarment({ slot: "top", category: "TOPS", formality: "business-casual", sleeveLength: "sleeveless" }),
+    ];
+    const needs = run(items, { passport });
+    const work = registerOf(needs, "work");
+    assert.match(work.depthNote, /1 of them doesn't currently meet/, "exactly one confirmed-blocked piece must read as singular");
+  });
+});
+
 // ── §WN-5 Small but sufficient ────────────────────────────────────────────────
 
 describe("§WN-5 a small wardrobe that works is not a gap", () => {

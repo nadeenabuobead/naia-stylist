@@ -233,6 +233,19 @@ export interface BlockedPiece {
   garmentId: string;
   reason: string;
   rescuedBy: string[];
+  /**
+   * The evidence doesn't actually resolve to confirmed incompatibility —
+   * either the category is one nAia already treats loosely (activewear), a
+   * garment she owns genuinely resolves it as a layer, or (legs-covered
+   * specifically) the hem is "midi": closer to full coverage than to a
+   * mini/knee length, and whether it reads as "covered" depends on how she
+   * styles it (tights, boots), which nAia was never told and never assumes.
+   * Same three criteria the Style Passport coverage dialog already uses
+   * (coverageContext() in closet.intelligence.tsx) — kept in sync here so
+   * the dialog's "may depend on how you wear it" framing and this register's
+   * own counts can't say two different things about the same piece.
+   */
+  isConditional: boolean;
 }
 
 export interface RegisterReading {
@@ -254,6 +267,16 @@ export interface RegisterReading {
   usableCount: number;
   /** Read, and contradicts something she has told nAia. */
   blockedCount: number;
+  /**
+   * Of blockedCount, the pieces whose evidence doesn't actually confirm
+   * incompatibility (see BlockedPiece.isConditional). Not folded into
+   * usableCount — nAia isn't confident enough to count on them for depth —
+   * but kept distinct from confirmedBlockedCount so "X usable pieces" never
+   * states more certainty than the evidence supports in either direction.
+   */
+  conditionallyUsableCount: number;
+  /** blockedCount - conditionallyUsableCount. The genuinely confirmed ones. */
+  confirmedBlockedCount: number;
   /**
    * The pieces that contradict a stated dressing preference, each with the
    * reason and whether something she owns can genuinely resolve it. Carried so
@@ -835,6 +858,28 @@ function countCombinations(pool: WardrobeGarment[]): number {
   return pairs + onePieces.length;
 }
 
+/**
+ * Mirrors coverageContext() in closet.intelligence.tsx exactly — same three
+ * criteria, one on each side so the register's own counts and the Style
+ * Passport coverage dialog's "may depend on how you wear it" framing can
+ * never contradict each other about the same piece. Not a new judgement:
+ * activewear is already read loosely elsewhere, a genuine rescuing layer is
+ * already surfaced as `rescuedBy`, and a midi hem is already worded as an
+ * open styling question, not an asserted failure — this only makes the
+ * COUNT agree with language that already existed.
+ */
+function isConditionalBlock(
+  garment: WardrobeGarment,
+  reason: string | null,
+  items: WardrobeGarment[],
+  passport: WardrobePassport | null,
+): boolean {
+  if (garment.category === "ACTIVEWEAR") return true;
+  if (reason === "keeping your legs covered" && garment.hemLength === "midi") return true;
+  if (layersThatResolve(garment, items, passport).length > 0) return true;
+  return false;
+}
+
 function readRegisters(
   items: WardrobeGarment[],
   passport: WardrobePassport | null,
@@ -848,6 +893,10 @@ function readRegisters(
     const blocked = classified.filter((c) => c.usability === "blocked").map((c) => c.g);
     const unknown = classified.filter((c) => c.usability === "unknown").map((c) => c.g);
     const need = needs.get(register);
+
+    const blockedWithReason = classified.filter((c) => c.usability === "blocked");
+    const conditional = blockedWithReason.filter((c) => isConditionalBlock(c.g, c.reason, items, passport));
+    const confirmedBlocked = blockedWithReason.filter((c) => !isConditionalBlock(c.g, c.reason, items, passport));
 
     const distinctLooks = countDistinctLooks(usable);
     const shortNoun = register === "everyday" ? "everyday" : register === "work" ? "work" : "occasion";
@@ -870,11 +919,25 @@ function readRegisters(
       depthNote = need
         ? `You've told nAia that ${need.phrase} is part of your life, and there's nothing in your Closet that reads this way.`
         : `Nothing in your Closet reads this way — and nothing you've told nAia suggests it needs to.`;
+    } else if (blocked.length > 0 && blocked.length >= usable.length && confirmedBlocked.length === 0) {
+      // Every blocked piece here is conditional — nAia isn't confident
+      // enough to count on it, but it was never confirmed incompatible
+      // either. Say that, not "don't currently meet".
+      depthLabel = `Your ${shortNoun} wardrobe looks bigger than it really is`;
+      depthNote = `You own ${pool.length} ${shortNoun} ${pool.length === 1 ? "piece" : "pieces"}. ${
+        conditional.length === 1 ? "It" : `${conditional.length} of them`
+      } may work depending on how you style ${conditional.length === 1 ? "it" : "them"} — nAia can't confirm ${
+        conditional.length === 1 ? "it meets" : "they meet"
+      } the way you've told it you prefer to dress yet.`;
     } else if (blocked.length > 0 && blocked.length >= usable.length) {
       depthLabel = `Your ${shortNoun} wardrobe looks bigger than it really is`;
       depthNote = `You own ${pool.length} ${shortNoun} ${
         pool.length === 1 ? "piece" : "pieces"
-      }, but ${blocked.length} of them don't currently meet the way you've told nAia you prefer to dress.`;
+      }, but ${confirmedBlocked.length} of them ${confirmedBlocked.length === 1 ? "doesn't" : "don't"} currently meet the way you've told nAia you prefer to dress${
+        conditional.length > 0
+          ? ` (${conditional.length} more may work depending on how you style ${conditional.length === 1 ? "it" : "them"})`
+          : ""
+      }.`;
     } else if (distinctLooks >= DEEP_LOOKS) {
       depthLabel = `Strong ${shortNoun} depth`;
       depthNote = `You already have plenty of usable combinations here, so more similar pieces are unlikely to add much to your wardrobe.`;
@@ -897,11 +960,17 @@ function readRegisters(
       rawCount: pool.length,
       usableCount: usable.length,
       blockedCount: blocked.length,
-      blockedPieces: blocked.map((g) => ({
-        garmentId: g.id,
-        reason: classifyUsability(g, passport).reason ?? "does not meet a stated preference",
-        rescuedBy: layersThatResolve(g, items, passport).map((l) => l.id),
-      })),
+      conditionallyUsableCount: conditional.length,
+      confirmedBlockedCount: confirmedBlocked.length,
+      blockedPieces: blocked.map((g) => {
+        const reason = classifyUsability(g, passport).reason ?? "does not meet a stated preference";
+        return {
+          garmentId: g.id,
+          reason,
+          rescuedBy: layersThatResolve(g, items, passport).map((l) => l.id),
+          isConditional: isConditionalBlock(g, reason, items, passport),
+        };
+      }),
       unknownCount: unknown.length,
       distinctLooks,
       combinations: countCombinations(usable),

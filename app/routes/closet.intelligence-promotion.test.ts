@@ -406,9 +406,17 @@ describe("CIP-M — Shop Smarter's 'why' text is hedged by closet completeness, 
     assert.match(src, /wip-shop-hedge/);
   });
 
-  test("CIP-M.2 the still-adding and unknown-completeness cases get distinct, real wording — not a placeholder", () => {
+  test("CIP-M.2 the hedge text is reused from wardrobe-page.ts's hedge(), not a second hardcoded copy", () => {
+    // Was two independent copies of the same two sentences (one here, one in
+    // wardrobe-page.ts) — exactly the drift risk this codebase keeps running
+    // into. Now sourced once: the route calls hedge(), and the actual
+    // sentences are asserted against wardrobe-page.ts, where they live.
     const src = read(LIVE);
-    assert.match(src, /You've told nAia you're still adding pieces, so treat this as a first read rather than a final answer\./);
-    assert.match(src, /This is based on what's in your Closet so far — if you own more than you've added, it could change\./);
+    assert.match(src, /\{hedge\(undefined, model\.confidence\)\}/);
+    assert.match(src, /import \{ buildWardrobePage, hedge, /);
+
+    const pageSrc = read("app/lib/ai/wardrobe-page.ts");
+    assert.match(pageSrc, /You've told nAia you're still adding pieces, so treat this as a first read rather than a final answer\./);
+    assert.match(pageSrc, /This is based on what's in your Closet so far — if you own more than you've added, it could change\./);
   });
 });

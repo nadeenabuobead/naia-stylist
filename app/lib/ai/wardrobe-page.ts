@@ -1087,7 +1087,7 @@ function buildVerdictBlock(
  * nAia is reading what has been uploaded, which is not necessarily everything
  * owned. Until she has been told otherwise she says so.
  */
-function hedge(base: string | undefined, confidence: ClosetConfidence): string {
+export function hedge(base: string | undefined, confidence: ClosetConfidence): string {
   const suffix =
     confidence === "mostly"
       ? ""
