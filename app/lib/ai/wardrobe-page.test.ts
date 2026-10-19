@@ -1178,6 +1178,18 @@ describe("§WP-12 the profile's colour line is generic — abundance-to-low-prio
     for (const line of lines) assert.doesNotMatch(line, /colours? you like/i);
     assert.ok(lines.some((l) => /colour makeup of your closet/i.test(l)));
   });
+
+  it("§WP-12d names a self-contradictory colour instead of asserting 'colours you like' — found live on Persona E (favoriteColors and avoidColors both naming 'black')", () => {
+    const input = inputWithPalette([{ colour: "Black", count: 4, share: 0.8, neutral: true }]);
+    input.hasStatedColourPreference = true;
+    input.contradictedColours = ["black"];
+    const page = buildWardrobePage(input);
+    const block = page.sections.find((s) => s.id === "profile")!.blocks.find((b) => b.id === "profile")!;
+    const lines = (block.meta as Record<string, unknown>).summaryLines as string[];
+    for (const line of lines) assert.doesNotMatch(line, /^mostly colours you like/i);
+    assert.ok(lines.some((l) => /both like and want to avoid black/i.test(l)));
+    assert.ok(lines.some((l) => /won't assume/i.test(l)));
+  });
 });
 
 // ── §WP-20 — register-demand migration: clean 90-day layer, decoupled from styleMe.state ──

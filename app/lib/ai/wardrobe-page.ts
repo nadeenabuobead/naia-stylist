@@ -287,6 +287,15 @@ export interface WardrobePageInput {
    * evidenced. Defaults to false (no stated preference assumed).
    */
   hasStatedColourPreference?: boolean;
+  /**
+   * Colour tokens named in BOTH favoriteColors and avoidColors — found live
+   * on Persona E (both naming "black"). A genuine self-contradiction in
+   * what the customer told nAia, not a wardrobe fact; takes priority over
+   * hasStatedColourPreference in the profile summary, because asserting
+   * "colours you like" would silently pick one side of a conflict she
+   * never resolved. Defaults to empty (no contradiction assumed).
+   */
+  contradictedColours?: readonly string[];
 }
 
 // ── Builder ───────────────────────────────────────────────────────────────────
@@ -1120,6 +1129,14 @@ function singularizeLast(phrase: string): string {
   return [...words, singular].join(" ");
 }
 
+/** Local copy of wardrobe-intelligence.ts's joinList — not exported there. */
+function joinListLocal(parts: string[]): string {
+  if (parts.length === 0) return "";
+  if (parts.length === 1) return parts[0];
+  if (parts.length === 2) return `${parts[0]} and ${parts[1]}`;
+  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+}
+
 /**
  * The wardrobe profile: colours, silhouettes, StyleMe history and wear
  * behaviour, always visible at one line each; the Passport comparison,
@@ -1130,7 +1147,7 @@ function singularizeLast(phrase: string): string {
  * reveal, as the evidence behind that reading, never as a second headline).
  */
 function buildProfileBlock(input: WardrobePageInput): PageBlock | null {
-  const { intelligence, needs, hasStatedColourPreference } = input;
+  const { intelligence, needs, hasStatedColourPreference, contradictedColours } = input;
   const { passportView, dna } = intelligence;
 
   const summaryLines: string[] = [];
@@ -1143,12 +1160,19 @@ function buildProfileBlock(input: WardrobePageInput): PageBlock | null {
     // appear unless the customer actually named colours to match against.
     // dna.palette only means the wardrobe itself has readable colour data,
     // which says nothing about whether a preference exists to compare it to.
+    //
+    // A colour named in BOTH favoriteColors and avoidColors takes priority
+    // over that check entirely: asserting "colours you like" (or staying
+    // silent about it) would silently resolve a contradiction she stated
+    // herself, in either direction, without ever telling her it exists.
     summaryLines.push(
-      !hasStatedColourPreference
-        ? "Here's the colour makeup of your Closet."
-        : thin?.thinLabel
-          ? `Mostly colours you like; ${thin.thinLabel.toLowerCase()} appears less often.`
-          : "Mostly colours you like.",
+      (contradictedColours?.length ?? 0) > 0
+        ? `You've told nAia you both like and want to avoid ${joinListLocal([...contradictedColours!])} — nAia won't assume which one wins.`
+        : !hasStatedColourPreference
+          ? "Here's the colour makeup of your Closet."
+          : thin?.thinLabel
+            ? `Mostly colours you like; ${thin.thinLabel.toLowerCase()} appears less often.`
+            : "Mostly colours you like.",
     );
   }
   if (dna.shapes.length > 0) {

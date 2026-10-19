@@ -156,6 +156,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
     change,
     lifestyle: profile?.lifestyle ?? [],
     hasStatedColourPreference: (profile?.favoriteColors?.length ?? 0) > 0,
+    // Found live on Persona E: favoriteColors and avoidColors both named
+    // "black" — the exact same colour stated as both loved and avoided.
+    // Raw-token overlap (not family-normalised) because this is reporting
+    // what she literally typed, not resolving it against the wardrobe.
+    contradictedColours: (profile?.favoriteColors ?? []).filter((c: string) =>
+      (profile?.avoidColors ?? []).some((a: string) => a.toLowerCase() === c.toLowerCase()),
+    ),
   });
 
   const garmentCards = garments.map((g) => ({
