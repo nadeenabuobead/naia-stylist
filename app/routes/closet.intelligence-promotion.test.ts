@@ -428,3 +428,27 @@ describe("CIP-M — Shop Smarter's 'why' text is hedged by closet completeness, 
     assert.match(pageSrc, /This is based on what's in your Closet so far — if you own more than you've added, it could change\./);
   });
 });
+
+// ── CIP-N: fewer cards than grid columns must not centre, leaving dead space ──
+//
+// Found during Persona A QA: Worth Reconsidering's single card sat centred
+// in a 3-column grid, with large empty margins on both sides instead of
+// starting under the section's own left-aligned heading/description.
+
+describe("CIP-N — wip-piece-grid left-aligns instead of centring a short row", () => {
+  test("CIP-N.1 justify-content is start, not center", () => {
+    const src = read(LIVE);
+    const gridIdx = src.indexOf(".wip-piece-grid{");
+    assert.notEqual(gridIdx, -1);
+    const rule = src.slice(gridIdx, src.indexOf("}", gridIdx));
+    assert.match(rule, /justify-content:start/);
+    assert.doesNotMatch(rule, /justify-content:center/);
+  });
+
+  test("CIP-N.2 a single card never stretches full-width — the grid still caps each card's own column width", () => {
+    const src = read(LIVE);
+    const gridIdx = src.indexOf(".wip-piece-grid{");
+    const rule = src.slice(gridIdx, src.indexOf("}", gridIdx));
+    assert.match(rule, /minmax\(0,180px\)/, "columns stay capped, so a lone card keeps its real card width, not 100%");
+  });
+});

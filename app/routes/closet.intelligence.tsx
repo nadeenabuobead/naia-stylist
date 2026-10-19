@@ -1684,7 +1684,12 @@ const css = `
      curated edit rather than three cards; the margin-bottom is the gap
      before the analysis cards below, which previously relied only on
      the next section's own top padding and read as too sudden. */
-  .wip-piece-grid{display:grid;grid-template-columns:repeat(3,minmax(0,180px));gap:22px;justify-content:center;margin-bottom:16px}
+  /* justify-content:start (not center) — with fewer cards than columns
+     (e.g. Worth Reconsidering's one piece), centering left large empty
+     margins on both sides instead of sitting under the section's own
+     left-aligned heading/description. Shared by Worth Reconsidering and
+     Pieces Worth Rediscovering — same grid, same fix for both. */
+  .wip-piece-grid{display:grid;grid-template-columns:repeat(3,minmax(0,180px));gap:22px;justify-content:start;margin-bottom:16px}
   @media(max-width:900px){.wip-piece-grid{grid-template-columns:repeat(2,minmax(0,180px))}}
   @media(max-width:600px){.wip-piece-grid{grid-template-columns:minmax(0,220px)}}
   .wip-piece-card{display:flex;flex-direction:column}
