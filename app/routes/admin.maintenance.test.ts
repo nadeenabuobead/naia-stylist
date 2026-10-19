@@ -24,6 +24,7 @@ vi.mock("~/lib/internal-auth.server", () => ({
 vi.mock("~/lib/data-retention.server", () => ({
   purgeExpiredJourneyEvents: vi.fn().mockResolvedValue({ count: 0 }),
   purgeExpiredNaiaSessions: vi.fn().mockResolvedValue({ count: 0 }),
+  purgeUnconfirmedSelfiePhotos: vi.fn().mockResolvedValue({ count: 0, attempted: 0 }),
 }));
 
 vi.mock("~/lib/admin-audit-log.server", () => ({
@@ -32,12 +33,13 @@ vi.mock("~/lib/admin-audit-log.server", () => ({
 }));
 
 import { requireAdminSession } from "~/lib/internal-auth.server";
-import { purgeExpiredJourneyEvents, purgeExpiredNaiaSessions } from "~/lib/data-retention.server";
+import { purgeExpiredJourneyEvents, purgeExpiredNaiaSessions, purgeUnconfirmedSelfiePhotos } from "~/lib/data-retention.server";
 import { recordAdminAction, listRecentAdminActions } from "~/lib/admin-audit-log.server";
 
 const mockRequireAdmin = () => requireAdminSession as ReturnType<typeof vi.fn>;
 const mockPurgeJourney = () => purgeExpiredJourneyEvents as ReturnType<typeof vi.fn>;
 const mockPurgeSessions = () => purgeExpiredNaiaSessions as ReturnType<typeof vi.fn>;
+const mockPurgeSelfies = () => purgeUnconfirmedSelfiePhotos as ReturnType<typeof vi.fn>;
 const mockRecordAction = () => recordAdminAction as ReturnType<typeof vi.fn>;
 const mockListActions = () => listRecentAdminActions as ReturnType<typeof vi.fn>;
 
@@ -111,6 +113,28 @@ describe("admin.maintenance — purge actions and auditability", () => {
     expect(mockRecordAction()).toHaveBeenCalledWith("owner@naiabynadine.com", "purge-sessions", { count: 3 });
   });
 
+  it("purge-unconfirmed-selfies calls only purgeUnconfirmedSelfiePhotos and records the full result as detail", async () => {
+    mockPurgeSelfies().mockResolvedValueOnce({ count: 5, attempted: 5 });
+    const { action } = await import("./admin.maintenance.tsx");
+
+    const result = await action({ request: actionRequest("purge-unconfirmed-selfies") } as any);
+
+    expect(mockPurgeSelfies()).toHaveBeenCalled();
+    expect(mockPurgeJourney()).not.toHaveBeenCalled();
+    expect(mockPurgeSessions()).not.toHaveBeenCalled();
+    expect((result as any).message).toMatch(/5/);
+    expect(mockRecordAction()).toHaveBeenCalledWith("owner@naiabynadine.com", "purge-unconfirmed-selfies", { count: 5, attempted: 5 });
+  });
+
+  it("purge-unconfirmed-selfies surfaces a partial failure in its message rather than hiding it", async () => {
+    mockPurgeSelfies().mockResolvedValueOnce({ count: 3, attempted: 5 });
+    const { action } = await import("./admin.maintenance.tsx");
+
+    const result = await action({ request: actionRequest("purge-unconfirmed-selfies") } as any);
+    expect((result as any).message).toMatch(/3 of 5/);
+    expect((result as any).message).toMatch(/2 failed/);
+  });
+
   it("an invalid intent is rejected without calling either purge function or recording anything", async () => {
     const { action } = await import("./admin.maintenance.tsx");
     const result = await action({ request: actionRequest("something-else") } as any);
@@ -118,6 +142,7 @@ describe("admin.maintenance — purge actions and auditability", () => {
     expect((result as any).ok).toBe(false);
     expect(mockPurgeJourney()).not.toHaveBeenCalled();
     expect(mockPurgeSessions()).not.toHaveBeenCalled();
+    expect(mockPurgeSelfies()).not.toHaveBeenCalled();
     expect(mockRecordAction()).not.toHaveBeenCalled();
   });
 });

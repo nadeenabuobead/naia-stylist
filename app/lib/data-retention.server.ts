@@ -19,6 +19,7 @@
 // cron (or equivalent scheduled job) is approved and added.
 
 import prisma from "../db.server";
+import { deleteSelfiePhoto } from "./ai/selfie-persistence.server";
 
 /// How long a JourneyEvent row is kept before it's eligible for purge.
 /// This is a product/retention-policy choice, not a technical one — 180
@@ -39,4 +40,47 @@ export async function purgeExpiredJourneyEvents(
 /// never sees (sessions that are never presented again).
 export async function purgeExpiredNaiaSessions(): Promise<{ count: number }> {
   return prisma.naiaSession.deleteMany({ where: { expiresAt: { lt: new Date() } } });
+}
+
+/// Approved policy (2026-10-19): a selfie photo with no explicit keep/delete
+/// decision is auto-deleted after this many days. Every one of the
+/// existing explicit decisions (keep-both, keep-analysis, delete-both)
+/// already clears SelfieAnalysis.photoPublicId as part of executing that
+/// decision — so "photoPublicId still set" IS the "never decided" signal;
+/// no separate decision-tracking field is needed. A customer who chose
+/// keep-both has their photo transferred to NaiaModel instead (its own,
+/// already-consented, separately-deletable record) — this purge only
+/// ever touches undecided SelfieAnalysis rows, never NaiaModel.
+export const SELFIE_PHOTO_RETENTION_DAYS = 30;
+
+export interface PurgeUnconfirmedSelfiesResult {
+  /// Photos successfully deleted.
+  count: number;
+  /// Rows that matched the age cutoff, including any Cloudinary deletion
+  /// failures below — surfaced so a stuck asset isn't silently invisible.
+  attempted: number;
+}
+
+/// Deletes the stored photo (never the analysis text) for every
+/// SelfieAnalysis row whose photo has sat undecided past the retention
+/// window. Mirrors exactly what "Keep Analysis Only" already does for a
+/// customer who chooses it themselves — this is that same, existing
+/// outcome applied automatically once the window lapses, not a new or
+/// more destructive behavior.
+export async function purgeUnconfirmedSelfiePhotos(
+  retentionDays: number = SELFIE_PHOTO_RETENTION_DAYS,
+  _deleteSelfiePhoto: typeof deleteSelfiePhoto = deleteSelfiePhoto,
+): Promise<PurgeUnconfirmedSelfiesResult> {
+  const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+  const stale = await prisma.selfieAnalysis.findMany({
+    where: { photoPublicId: { not: null }, photoDeletedAt: null, updatedAt: { lt: cutoff } },
+    select: { customerId: true },
+  });
+
+  let count = 0;
+  for (const { customerId } of stale) {
+    const result = await _deleteSelfiePhoto(customerId);
+    if (result.ok) count++;
+  }
+  return { count, attempted: stale.length };
 }

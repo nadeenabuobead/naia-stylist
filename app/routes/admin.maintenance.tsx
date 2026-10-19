@@ -27,7 +27,7 @@ import type { FormEvent } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { useActionData, useLoaderData } from "react-router";
 import { requireAdminSession } from "~/lib/internal-auth.server";
-import { purgeExpiredJourneyEvents, purgeExpiredNaiaSessions } from "~/lib/data-retention.server";
+import { purgeExpiredJourneyEvents, purgeExpiredNaiaSessions, purgeUnconfirmedSelfiePhotos } from "~/lib/data-retention.server";
 import { recordAdminAction, listRecentAdminActions } from "~/lib/admin-audit-log.server";
 
 async function requireOwner(request: Request) {
@@ -60,6 +60,18 @@ export async function action({ request }: ActionFunctionArgs) {
     const result = await purgeExpiredNaiaSessions();
     await recordAdminAction(identity.email, "purge-sessions", { count: result.count });
     return { ok: true as const, intent, message: `Purged ${result.count} expired session(s).` };
+  }
+
+  if (intent === "purge-unconfirmed-selfies") {
+    const result = await purgeUnconfirmedSelfiePhotos();
+    await recordAdminAction(identity.email, "purge-unconfirmed-selfies", result);
+    return {
+      ok: true as const,
+      intent,
+      message: result.attempted === result.count
+        ? `Purged ${result.count} unconfirmed selfie photo(s).`
+        : `Purged ${result.count} of ${result.attempted} unconfirmed selfie photo(s) — ${result.attempted - result.count} failed and will retry next run.`,
+    };
   }
 
   return { ok: false as const, error: "Invalid request." };
@@ -103,6 +115,17 @@ export default function AdminMaintenance() {
           </button>
           <span style={{ fontSize: "12px", color: "#6b7280" }}>
             Deletes NaiaSession rows whose expiresAt has already passed.
+          </span>
+        </form>
+
+        <form method="post" style={{ display: "flex", alignItems: "center", gap: "1rem" }}
+          onSubmit={e => confirmPurge(e, "Purge unconfirmed selfie photos")}>
+          <input type="hidden" name="intent" value="purge-unconfirmed-selfies" />
+          <button type="submit" style={maintenanceButtonStyle}>
+            Purge unconfirmed selfie photos
+          </button>
+          <span style={{ fontSize: "12px", color: "#6b7280" }}>
+            Deletes the stored photo (analysis text preserved) for selfies with no keep/delete decision after 30 days.
           </span>
         </form>
 
