@@ -1372,7 +1372,7 @@ export default function WardrobeIntelligencePage() {
               <h2 className="wip-section-title">Shop smarter.</h2>
               <div className="wip-paired-grid">
                 {worthConsidering && (
-                  <div className="wip-card-shell wip-paired-card wip-shop-col">
+                  <div className={`wip-card-shell wip-paired-card wip-shop-col${!lowPriority ? " wip-shop-col--solo" : ""}`}>
                     <span className="wip-shop-col-label wip-shop-col-label--buy">Worth adding</span>
                     <h3>{recTitle}</h3>
                     {(recBullets.length > 0 || recColourLead) && (
@@ -1408,7 +1408,7 @@ export default function WardrobeIntelligencePage() {
                   </div>
                 )}
                 {lowPriority && (
-                  <div className="wip-card-shell wip-paired-card wip-shop-col">
+                  <div className={`wip-card-shell wip-paired-card wip-shop-col${!worthConsidering ? " wip-shop-col--solo" : ""}`}>
                     <span className="wip-shop-col-label">Skip for now</span>
                     <h3>{(lowPriority.title ?? "").replace(/^Another (similar |of your )?/i, "Another ")}</h3>
                     <p>{enoughCluster?.body ?? lowPriority.body}</p>
@@ -1694,6 +1694,13 @@ const css = `
      Desktop only — mobile/tablet stacks to natural height:auto. */
   @media(min-width:901px){.wip-paired-card{height:436px}}
   .wip-analysis-card{flex:1}
+  /* Found during Persona A QA: when Shop Smarter has only ONE card (no
+     "Skip for now" to match), the fixed height above has nothing to stay
+     symmetrical WITH — a thin "direction"-tier recommendation (no evidence
+     thumbnails yet) left a ~250px dead gap under its own title. The fixed
+     height's whole purpose — keeping two side-by-side cards level — does
+     not apply to a lone card, so it grows to its real content instead. */
+  @media(min-width:901px){.wip-shop-col--solo{height:auto}}
 
   /* How your wardrobe supports your life */
   .wip-life-row{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:9px 0;border-top:1px solid var(--naia-border)}

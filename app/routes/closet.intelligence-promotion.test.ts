@@ -311,3 +311,32 @@ describe("CIP-I — the glance headline never calls a thin register 'Strongest'"
     assert.match(src, /glanceRegisters\[0\]\.isGenuinelyStrong \? "its strongest support" : "relatively more support"/);
   });
 });
+
+// ── CIP-J: Shop Smarter's fixed card height only applies when symmetry is real ──
+//
+// Found during Persona A QA: a lone "Worth adding" card (no "Skip for now"
+// to match) with a thin, honest "direction"-tier recommendation (no
+// evidence thumbnails) left a ~250px blank gap under its own title — the
+// fixed 436px height's purpose (matching a sibling card) doesn't apply
+// when there's no sibling.
+
+describe("CIP-J — Shop Smarter's fixed height doesn't force a lone card to be mostly empty", () => {
+  test("CIP-J.1 a lone worth-adding card (no lowPriority) is marked solo", () => {
+    const src = read(LIVE);
+    assert.match(src, /wip-shop-col\$\{!lowPriority \? " wip-shop-col--solo" : ""\}/);
+  });
+
+  test("CIP-J.2 a lone skip-for-now card (no worthConsidering) is marked solo", () => {
+    const src = read(LIVE);
+    assert.match(src, /wip-shop-col\$\{!worthConsidering \? " wip-shop-col--solo" : ""\}/);
+  });
+
+  test("CIP-J.3 the solo override comes after the fixed-height rule, so it wins", () => {
+    const src = read(LIVE);
+    const fixedHeightIdx = src.indexOf(".wip-paired-card{height:436px}");
+    const soloOverrideIdx = src.indexOf(".wip-shop-col--solo{height:auto}");
+    assert.notEqual(fixedHeightIdx, -1);
+    assert.notEqual(soloOverrideIdx, -1);
+    assert.ok(soloOverrideIdx > fixedHeightIdx, "the solo override must be declared after the fixed height to win the cascade");
+  });
+});
