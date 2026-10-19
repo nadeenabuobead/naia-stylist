@@ -27,6 +27,9 @@ export interface DbSelfieRecord {
   id: string;
   customerId: string;
   consentAt: Date;
+  /// Which consent wording was agreed to, so a future wording change can
+  /// re-ask. Nullable: rows created before this field existed have none.
+  consentVersion: string | null;
   photoPublicId: string | null;
   photoFormat: string | null;
   photoDeletedAt: Date | null;
@@ -91,9 +94,17 @@ export type BeginSelfieResult =
   | { blocked: true }
   | { blocked: false; record: DbSelfieRecord };
 
+/// Bump when the selfie consent wording changes — a customer who
+/// consented under an old version must be asked again. Distinct from
+/// Closet/BOS's CURRENT_PHOTO_CONSENT_VERSION (photo-consent.server.ts):
+/// the wording differs per feature, so each feature's version is
+/// independent — bumping one must never force a re-ask on the others.
+export const CURRENT_SELFIE_CONSENT_VERSION = "v1";
+
 export async function beginSelfieAnalysis(
   customerId: string,
   consentAt: Date,
+  consentVersion: string,
   photoPublicId: string | null,
   photoFormat: string | null,
   options?: { forceReplace?: boolean },
@@ -108,6 +119,7 @@ export async function beginSelfieAnalysis(
 
   const record = await _upsertFn(customerId, {
     consentAt,
+    consentVersion,
     photoPublicId,
     photoFormat,
     photoDeletedAt: null,  // clear stale deletion flag from any prior deleteSelfiePhoto call
@@ -272,6 +284,10 @@ export interface SelfieModerationCredentials {
   publicId: string;
   format: string;
   consentAt: string;
+  /// Null for a record created before consentVersion existed — the
+  /// caller re-stamps CURRENT_SELFIE_CONSENT_VERSION in that case rather
+  /// than carrying a missing version forward.
+  consentVersion: string | null;
   analysisStatus: string;
 }
 
@@ -285,6 +301,7 @@ export async function getSelfieForModeration(
     publicId: record.photoPublicId,
     format: record.photoFormat,
     consentAt: record.consentAt.toISOString(),
+    consentVersion: record.consentVersion,
     analysisStatus: record.analysisStatus,
   };
 }

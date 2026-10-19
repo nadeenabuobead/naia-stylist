@@ -42,6 +42,7 @@ import {
 } from "~/lib/ai/selfie-upload.server";
 import {
   beginSelfieAnalysis,
+  CURRENT_SELFIE_CONSENT_VERSION,
   completeSelfieAnalysis,
   failSelfieAnalysis,
   deleteSelfiePhoto,
@@ -286,6 +287,7 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
       await beginSelfieAnalysis(
         customer.id,
         new Date(creds.consentAt),
+        creds.consentVersion ?? CURRENT_SELFIE_CONSENT_VERSION,
         creds.publicId,
         creds.format,
         { forceReplace: true },
@@ -353,7 +355,7 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
       // Write the model's facePublicId into SA so photoExists becomes true after analysis.
       // This enables the same 4-choice flow for both fresh-upload and model-selfie analyses.
       // The ownership guard in keep-analysis and delete-both handles the shared-asset case.
-      await beginSelfieAnalysis(customer.id, new Date(), model.facePublicId, model.faceFormat, { forceReplace: true });
+      await beginSelfieAnalysis(customer.id, new Date(), CURRENT_SELFIE_CONSENT_VERSION, model.facePublicId, model.faceFormat, { forceReplace: true });
     } catch (err) {
       console.error("[selfie-action] analyse-model-selfie begin failed:", err instanceof Error ? err.message : String(err));
       return { intent: "analyse-model-selfie", outcome: { status: "system-failure", internalNote: "begin failed" } };
@@ -425,6 +427,7 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
     begin = await beginSelfieAnalysis(
       customer.id,
       consentAt,
+      CURRENT_SELFIE_CONSENT_VERSION,
       null,
       null,
       { forceReplace: isReplace },
@@ -456,6 +459,7 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
     const begin2 = await beginSelfieAnalysis(
       customer.id,
       consentAt,
+      CURRENT_SELFIE_CONSENT_VERSION,
       upload.publicId,
       upload.format,
       { forceReplace: true },

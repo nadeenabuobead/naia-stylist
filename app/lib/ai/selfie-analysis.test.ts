@@ -403,6 +403,7 @@ describe("extractImageDimensions", () => {
 
 import {
   beginSelfieAnalysis,
+  CURRENT_SELFIE_CONSENT_VERSION,
   completeSelfieAnalysis,
   failSelfieAnalysis,
   deleteSelfiePhoto,
@@ -422,6 +423,7 @@ function makeDbRecord(overrides: Partial<DbSelfieRecord> = {}): DbSelfieRecord {
     id: "rec-1",
     customerId: CUST,
     consentAt: new Date("2026-07-17T10:00:00Z"),
+    consentVersion: CURRENT_SELFIE_CONSENT_VERSION,
     photoPublicId: `naia-wardrobe/${CUST}/selfie`,
     photoFormat: "jpg",
     photoDeletedAt: null,
@@ -469,6 +471,7 @@ describe("beginSelfieAnalysis", () => {
     const result = await beginSelfieAnalysis(
       CUST,
       new Date("2026-07-17T10:00:00Z"),
+      CURRENT_SELFIE_CONSENT_VERSION,
       `naia-wardrobe/${CUST}/selfie`,
       "jpg",
       {},
@@ -484,8 +487,14 @@ describe("beginSelfieAnalysis", () => {
   it("pa-2: consent timestamp is stored in the record", async () => {
     const { fn: upsert, captured } = capturingUpsert();
     const consentAt = new Date("2026-07-17T10:00:00Z");
-    await beginSelfieAnalysis(CUST, consentAt, null, null, {}, nullFind(), upsert);
+    await beginSelfieAnalysis(CUST, consentAt, CURRENT_SELFIE_CONSENT_VERSION, null, null, {}, nullFind(), upsert);
     assert.deepEqual(captured[0].consentAt, consentAt);
+  });
+
+  it("pa-2b: consent version is stored in the record", async () => {
+    const { fn: upsert, captured } = capturingUpsert();
+    await beginSelfieAnalysis(CUST, new Date(), CURRENT_SELFIE_CONSENT_VERSION, null, null, {}, nullFind(), upsert);
+    assert.equal(captured[0].consentVersion, CURRENT_SELFIE_CONSENT_VERSION);
   });
 
   it("pa-3: blocked when existing status is pending (duplicate guard)", async () => {
@@ -493,6 +502,7 @@ describe("beginSelfieAnalysis", () => {
     const result = await beginSelfieAnalysis(
       CUST,
       new Date(),
+      CURRENT_SELFIE_CONSENT_VERSION,
       null,
       null,
       {},
@@ -506,7 +516,7 @@ describe("beginSelfieAnalysis", () => {
     const existing = makeDbRecord({ analysisStatus: "pending" });
     const { fn: upsert, captured } = capturingUpsert();
     const result = await beginSelfieAnalysis(
-      CUST, new Date(), null, null,
+      CUST, new Date(), CURRENT_SELFIE_CONSENT_VERSION, null, null,
       { forceReplace: true },
       recordFind(existing),
       upsert,
@@ -518,7 +528,7 @@ describe("beginSelfieAnalysis", () => {
   it("pa-5: non-pending existing record (failed) is not blocked", async () => {
     const existing = makeDbRecord({ analysisStatus: "failed" });
     const { fn: upsert, captured } = capturingUpsert();
-    const result = await beginSelfieAnalysis(CUST, new Date(), null, null, {}, recordFind(existing), upsert);
+    const result = await beginSelfieAnalysis(CUST, new Date(), CURRENT_SELFIE_CONSENT_VERSION, null, null, {}, recordFind(existing), upsert);
     assert.equal(result.blocked, false);
     assert.equal(captured[0].analysisStatus, "pending");
   });
@@ -528,7 +538,7 @@ describe("beginSelfieAnalysis", () => {
     // so loadSelfieForDisplay returns hasPhoto:true after the new photo is confirmed.
     const existing = makeDbRecord({ photoPublicId: null, photoDeletedAt: new Date("2026-08-01T10:00:00Z") });
     const { fn: upsert, captured } = capturingUpsert();
-    await beginSelfieAnalysis(CUST, new Date(), `naia-wardrobe/${CUST}/selfie`, "jpg", {}, recordFind(existing), upsert);
+    await beginSelfieAnalysis(CUST, new Date(), CURRENT_SELFIE_CONSENT_VERSION, `naia-wardrobe/${CUST}/selfie`, "jpg", {}, recordFind(existing), upsert);
     assert.equal(captured[0].photoDeletedAt, null);
   });
 
@@ -722,7 +732,7 @@ describe("re-analysis and replace", () => {
   it("ra-1: failed status does not block a new analysis", async () => {
     const existing = makeDbRecord({ analysisStatus: "failed" });
     const { fn: upsert, captured } = capturingUpsert();
-    const result = await beginSelfieAnalysis(CUST, new Date(), null, null, {}, recordFind(existing), upsert);
+    const result = await beginSelfieAnalysis(CUST, new Date(), CURRENT_SELFIE_CONSENT_VERSION, null, null, {}, recordFind(existing), upsert);
     assert.equal(result.blocked, false);
     assert.equal(captured[0].analysisStatus, "pending");
   });
@@ -730,7 +740,7 @@ describe("re-analysis and replace", () => {
   it("ra-2: replace clears old analysisResult before new analysis begins", async () => {
     const existing = makeDbRecord({ analysisStatus: "completed" });
     const { fn: upsert, captured } = capturingUpsert();
-    await beginSelfieAnalysis(CUST, new Date(), null, null, { forceReplace: true }, recordFind(existing), upsert);
+    await beginSelfieAnalysis(CUST, new Date(), CURRENT_SELFIE_CONSENT_VERSION, null, null, { forceReplace: true }, recordFind(existing), upsert);
     assert.equal(captured[0].analysisResult, null, "old result must be cleared on replace");
     assert.equal(captured[0].analysisStatus, "pending");
   });
