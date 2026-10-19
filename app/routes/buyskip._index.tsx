@@ -122,6 +122,7 @@ export default function BuyOrSkip() {
   const [unsureAbout, setUnsureAbout] = React.useState("");
   const [colorNote, setColorNote] = React.useState("");
   const [size, setSize] = React.useState("");
+  const [photoConsentGiven, setPhotoConsentGiven] = React.useState(false); // required before upload or analysis
 
   // Revoke the blob preview URL when the component unmounts to avoid memory leaks.
   React.useEffect(() => {
@@ -210,7 +211,7 @@ export default function BuyOrSkip() {
       const response = await fetch("/api/wishlist?action=analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ publicId: imagePublicId, category, color, brand, forOccasion, whatLike, unsureAbout, colorNote, size }),
+        body: JSON.stringify({ publicId: imagePublicId, category, color, brand, forOccasion, whatLike, unsureAbout, colorNote, size, photoConsentGiven }),
       });
       if (response.status === 401) {
         setAnalyzeError("Your session has expired. Please sign in again.");
@@ -246,7 +247,7 @@ export default function BuyOrSkip() {
     }
   };
 
-  const canAnalyze = imagePublicId && category && color.length > 0 && !analyzing;
+  const canAnalyze = imagePublicId && category && color.length > 0 && photoConsentGiven && !analyzing;
 
   // Loading screen — same pattern as Style Me result.tsx: return before MyNaiaLayout.
   // sm-loading-wrap fills 100vh so no fixed/portal positioning needed.
@@ -296,6 +297,18 @@ export default function BuyOrSkip() {
             </button>
           ))}
         </div>
+        <div style={{ marginBottom: "12px", padding: "12px 16px", background: "rgba(34,21,22,0.03)", border: "1px solid var(--naia-border)" }}>
+          <label className="psa-consent-row">
+            <input
+              type="checkbox"
+              id="bos-photo-consent"
+              className="psa-consent-check"
+              checked={photoConsentGiven}
+              onChange={e => setPhotoConsentGiven(e.target.checked)}
+            />
+            <span>I consent to nAia analysing this photo to give a Buy or Skip recommendation.</span>
+          </label>
+        </div>
         <div className="bos-upload-rows">
           <UploadRow
             label={source === "upload" ? "Screenshot or Product Image" : "Photograph — Front View"}
@@ -303,7 +316,7 @@ export default function BuyOrSkip() {
             imageUrl={imageUrl || undefined}
             uploading={uploading}
             error={uploadError || undefined}
-            onFile={handleUpload}
+            onFile={photoConsentGiven ? handleUpload : undefined}
             capture={source === "photograph" ? "environment" : undefined}
             buttonLabel={source === "photograph" ? "Take Photo" : "Choose File"}
             inputRef={mainFileInputRef}

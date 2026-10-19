@@ -17,6 +17,7 @@ import { splitStyleExpression } from "../lib/passport/rev7-vocabulary";
 import { checkEntitlement } from "../lib/plan/entitlement.server";
 import { moderateImageContent } from "../lib/image-moderation.server";
 import { screenGarmentSuitability } from "../lib/image-suitability.server";
+import { extractConsentGiven, buildConsentStamp } from "../lib/photo-consent.server";
 import { loadWardrobeIntelligence } from "../lib/ai/wardrobe-intelligence.server";
 import { closetItemToSlot } from "../lib/ai/closet-slot";
 import { resolveCustomerIntelligence } from "../lib/ai/customer-intelligence-resolver.server";
@@ -399,6 +400,15 @@ async function analyzeItem(request) {
 
   if (!publicId || typeof publicId !== "string" || publicId.trim().length === 0) {
     return json({ error: "image_required", message: "Image upload reference required." }, { status: 400 });
+  }
+
+  // ── 2b. Photo consent (2026-10-19) — required before any AI analysis of ───
+  // the photo runs. Checked before ownership is even confirmed, so the
+  // asset is NOT deleted here — same reasoning as "asset_not_owned" below
+  // not deleting an asset that may not actually belong to this customer.
+  const consentGiven = extractConsentGiven(body);
+  if (!consentGiven) {
+    return json({ error: "consent_required", message: "Photo consent is required before analysis." }, { status: 400 });
   }
 
   // ── 3. Cloudinary config — required before any verification or analysis ────
@@ -1081,6 +1091,7 @@ Respond ONLY with valid JSON, no markdown:
             source: "buy-or-skip",
             schemaVersion: "2.0",
             idempotencyKey,
+            ...buildConsentStamp(consentGiven),
             // Batch 3 — rich fields
             // A vetoed verdict has no AI confidence of its own (see applyVerdictOverride) —
             // the scalar column's own contract is "AI confidence 0-100", which no longer

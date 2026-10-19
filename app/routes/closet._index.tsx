@@ -16,6 +16,7 @@ import { computeClosetCharacterLine } from "~/lib/ai/wardrobe-intelligence.serve
 import { normalizeGarmentRelationships, GARMENT_RELATIONSHIP_LABELS, GARMENT_RELATIONSHIP_MAX } from "~/lib/ai/first-naia-read";
 import { moderateImageContent } from "~/lib/image-moderation.server";
 import { screenGarmentSuitability } from "~/lib/image-suitability.server";
+import { extractConsentGiven, buildConsentStamp } from "~/lib/photo-consent.server";
 import { extractClosetEvidence } from "~/lib/ai/taste-extraction.server";
 import { writeSourceEvidence } from "~/lib/ai/taste-reconcile.server";
 import { loadNaiaModel, computeModelReadinessFromRecord } from "~/lib/ai/my-naia-model.server";
@@ -280,6 +281,18 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!category) return data({ error: "Category required" }, { status: 400 });
     if (!publicId) return data({ error: "Image upload reference required." }, { status: 400 });
 
+    // ── Photo consent (2026-10-19) ─────────────────────────────────────────────
+    // The UI gates the upload itself behind this same checkbox (see
+    // handleAdd/uploadToCloudinary below), but a client-side gate alone is
+    // not enforcement — this is the real check. The already-uploaded
+    // Cloudinary asset is deleted on rejection, same as every other
+    // pre-DB-write check in this action.
+    const consentGiven = extractConsentGiven({ photoConsentGiven: formData.get("photoConsentGiven") === "true" });
+    if (!consentGiven) {
+      await deleteCloudinaryAsset(publicId, "private");
+      return data({ error: "Photo consent is required to add an item." }, { status: 400 });
+    }
+
     // ── Closet capacity enforcement (immediate — no flag required) ────────────
     // Storage entitlement: customer can free capacity by deleting items.
     const capacityCheck = await checkEntitlement(customer.id, customer.membershipStatus, "closet");
@@ -475,6 +488,7 @@ export async function action({ request }: ActionFunctionArgs) {
         tryOnInternalNote: stageA.internalNote,
         garmentRelationships,
         customerNote,
+        ...buildConsentStamp(consentGiven),
         // Garment intelligence — pending immediately; analysis fires below
         analysisStatus: "pending",
       },
@@ -1016,6 +1030,7 @@ export default function Closet() {
   const [newCategory, setNewCategory] = useState("TOPS");
   const [newImageUrl, setNewImageUrl] = useState("");  // local blob URL for preview only — never sent to server
   const [newPublicId, setNewPublicId] = useState("");  // Cloudinary public ID — sent to action
+  const [photoConsentGiven, setPhotoConsentGiven] = useState(false);  // required before upload or analysis
   const blobUrlRef = useRef<string | null>(null);
   const addFileInputRef = useRef<HTMLInputElement>(null);
   const [newColors, setNewColors] = useState<string[]>([]);
@@ -1168,7 +1183,7 @@ export default function Closet() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
-        body: JSON.stringify({ publicId }),
+        body: JSON.stringify({ publicId, photoConsentGiven }),
       });
       if (!res.ok) {
         // Try to read a structured error — safety failures set requiresReupload:true
@@ -1206,6 +1221,10 @@ export default function Closet() {
   }
 
   async function uploadToCloudinary(file: File) {
+    if (!photoConsentGiven) {
+      setUploadError("Please confirm photo consent before uploading.");
+      return;
+    }
     setAddStep("uploading");
     setUploadError(null);
 
@@ -1298,6 +1317,7 @@ export default function Closet() {
         seasons: JSON.stringify(newSeasons),
         garmentRelationships: JSON.stringify(newRelationships),
         customerNote: newNote,
+        photoConsentGiven: String(photoConsentGiven),
       },
       { method: "post" }
     );
@@ -1322,6 +1342,7 @@ export default function Closet() {
     setShowEditDetails(false);
     setUploadError(null);
     setShowAddForm(false);
+    setPhotoConsentGiven(false);
   }
 
   // ── Edit helpers ──────────────────────────────────────────────────────────
@@ -1555,7 +1576,23 @@ export default function Closet() {
                 <p className="cl-upload-notice" style={{ marginBottom: "8px" }}>
                   JPG, PNG, WEBP or HEIC · min 300 × 300 px · max 5 MB
                 </p>
-                <label className="cl-upload-box" style={{ cursor: addStep === "uploading" ? "default" : "pointer" }}>
+                <div style={{ marginBottom: "12px", padding: "12px 16px", background: "rgba(34,21,22,0.03)", border: "1px solid var(--naia-border)" }}>
+                  <label className="psa-consent-row">
+                    <input
+                      type="checkbox"
+                      id="closet-photo-consent"
+                      className="psa-consent-check"
+                      checked={photoConsentGiven}
+                      onChange={e => setPhotoConsentGiven(e.target.checked)}
+                      disabled={addStep === "uploading"}
+                    />
+                    <span>I consent to nAia analysing this photo to identify and describe this item.</span>
+                  </label>
+                </div>
+                <label
+                  className="cl-upload-box"
+                  style={{ cursor: addStep === "uploading" || !photoConsentGiven ? "default" : "pointer", opacity: photoConsentGiven ? 1 : 0.5 }}
+                >
                   {addStep === "uploading"
                     ? <span className="cl-upload-hint">Uploading…</span>
                     : <span className="cl-upload-hint">Click to upload photo</span>
@@ -1566,7 +1603,7 @@ export default function Closet() {
                     accept="image/*"
                     onChange={e => e.target.files?.[0] && uploadToCloudinary(e.target.files[0])}
                     style={{ display: "none" }}
-                    disabled={addStep === "uploading"}
+                    disabled={addStep === "uploading" || !photoConsentGiven}
                   />
                 </label>
                 {uploadError && <p className="cl-upload-error" style={{ marginTop: "8px" }}>{uploadError}</p>}

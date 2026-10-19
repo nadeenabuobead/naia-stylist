@@ -29,6 +29,7 @@ import {
 import { moderateImageContent } from "~/lib/image-moderation.server";
 import { screenGarmentSuitability } from "~/lib/image-suitability.server";
 import { previewAnalyzeGarment } from "~/lib/ai/closet-preview-analysis.server";
+import { extractConsentGiven } from "~/lib/photo-consent.server";
 
 export async function loader() {
   return data({ error: "Method not allowed" }, { status: 405 });
@@ -66,13 +67,22 @@ export async function action({ request }: ActionFunctionArgs) {
     return data({ error: "publicId required" }, { status: 400 });
   }
 
-  // 3. Ownership check — publicId must belong to the authenticated customer's folder.
+  // 3. Photo consent (2026-10-19) — required before any AI analysis of the
+  //    photo runs. The asset already exists in Cloudinary at this point
+  //    (direct upload happens before this call); without consent it is
+  //    deleted immediately rather than left orphaned.
+  if (!extractConsentGiven(body)) {
+    await deleteCloudinaryAsset(publicId, "private");
+    return data({ error: "Photo consent is required before analysis." }, { status: 400 });
+  }
+
+  // 4. Ownership check — publicId must belong to the authenticated customer's folder.
   const ownership = validatePublicIdOwnership(publicId, naiaCustomer.id);
   if (!ownership.ok) {
     return data({ error: ownership.error }, { status: 400 });
   }
 
-  // 4. Asset verification — must exist and be private delivery type.
+  // 5. Asset verification — must exist and be private delivery type.
   const verify = await verifyCloudinaryAsset(publicId, "private");
   if (!verify.ok) {
     return data({ error: "Asset not found or could not be verified" }, { status: 400 });
@@ -81,14 +91,14 @@ export async function action({ request }: ActionFunctionArgs) {
     return data({ error: "Asset must be a private upload" }, { status: 400 });
   }
 
-  // 5. Build server-side download URL — required for safety checks (never trust client URLs).
+  // 6. Build server-side download URL — required for safety checks (never trust client URLs).
   const cfg = getCloudinaryConfig();
   if (!cfg) {
     return data({ error: "Service unavailable" }, { status: 503 });
   }
   const downloadUrl = buildPrivateDownloadUrl(cfg, publicId, verify.asset.format, "private");
 
-  // 6. Layer 2: content moderation — must run before any AI garment analysis.
+  // 7. Layer 2: content moderation — must run before any AI garment analysis.
   //    Matches the order enforced at final submission in the /closet action.
   const moderation = await moderateImageContent(downloadUrl);
   if (moderation.status === "MODERATION_UNAVAILABLE") {
@@ -106,7 +116,7 @@ export async function action({ request }: ActionFunctionArgs) {
     );
   }
 
-  // 7. Layer 3: garment suitability — no declaredCategory at preview stage
+  // 8. Layer 3: garment suitability — no declaredCategory at preview stage
   //    (customer hasn't confirmed category yet; category_mismatch cannot fire).
   const suitability = await screenGarmentSuitability(downloadUrl);
   if (suitability.status === "RETRY_IMAGE") {
@@ -133,7 +143,7 @@ export async function action({ request }: ActionFunctionArgs) {
     );
   }
 
-  // 8. Preview analysis — non-blocking timeout internal to previewAnalyzeGarment.
+  // 9. Preview analysis — non-blocking timeout internal to previewAnalyzeGarment.
   //    Pass the already-verified downloadUrl so Claude can fetch the private asset
   //    via the authenticated download API (CDN delivery does not serve private assets).
   const preview = await previewAnalyzeGarment(downloadUrl);
