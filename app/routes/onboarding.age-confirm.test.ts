@@ -55,15 +55,24 @@ describe("loader", () => {
     expect(result).toEqual({ next: "/onboarding/step/5" });
   });
 
-  it("not confirmed — an invalid/foreign next value falls back to step 1, never an open redirect", async () => {
+  it("not confirmed — an invalid/foreign next value falls back to /my-naia, never an open redirect", async () => {
     mockRequireCustomer().mockResolvedValueOnce(CUSTOMER_A);
     mockHasConfirmed().mockReturnValueOnce(false);
     const { loader } = await import("./onboarding.age-confirm.tsx");
 
     for (const malicious of ["https://evil.example.com", "/auth/logout", "javascript:alert(1)", "//evil.example.com"]) {
       const result = await loader({ request: new Request(`http://localhost/onboarding/age-confirm?next=${encodeURIComponent(malicious)}`) } as any);
-      expect(result).toEqual({ next: "/onboarding/step/1" });
+      expect(result).toEqual({ next: "/my-naia" });
     }
+  });
+
+  it("not confirmed — the existing-customer backfill's next=/my-naia is accepted as-is", async () => {
+    mockRequireCustomer().mockResolvedValueOnce(CUSTOMER_A);
+    mockHasConfirmed().mockReturnValueOnce(false);
+    const { loader } = await import("./onboarding.age-confirm.tsx");
+
+    const result = await loader({ request: new Request("http://localhost/onboarding/age-confirm?next=/my-naia") } as any);
+    expect(result).toEqual({ next: "/my-naia" });
   });
 });
 
@@ -104,6 +113,14 @@ describe("action", () => {
     const { action } = await import("./onboarding.age-confirm.tsx");
 
     const result = await action({ request: submit("true", "https://evil.example.com") } as any);
-    expect((result as Response).headers.get("Location")).toBe("/onboarding/step/1");
+    expect((result as Response).headers.get("Location")).toBe("/my-naia");
+  });
+
+  it("the existing-customer backfill's next=/my-naia redirects back to /my-naia on confirmation", async () => {
+    mockRequireCustomer().mockResolvedValueOnce(CUSTOMER_A);
+    const { action } = await import("./onboarding.age-confirm.tsx");
+
+    const result = await action({ request: submit("true", "/my-naia") } as any);
+    expect((result as Response).headers.get("Location")).toBe("/my-naia");
   });
 });

@@ -4,10 +4,14 @@
 //
 // Standalone interstitial, not a numbered Passport question — kept
 // separate from onboarding/step.$step.tsx's question bank entirely so
-// adding it never shifts a later step number. Reached only via the
-// redirect in step.$step.tsx's loader when hasConfirmedCurrentAge(customer)
-// is false; once confirmed, redirects back to `next` (validated to stay
-// inside /onboarding/step/:n — never an open redirect).
+// adding it never shifts a later step number. Reached via the redirect in
+// either onboarding/step.$step.tsx's loader (new/returning-to-onboarding
+// customers) or my-naia._index.tsx's loader (the existing-customer
+// backfill, 2026-10-19) when hasConfirmedCurrentAge(customer) is false;
+// once confirmed, redirects back to `next` — validated against an exact
+// allowlist (an onboarding step, or the /my-naia hub) so it can never
+// become an open redirect. Falls back to /my-naia, not step 1, for
+// anything else — that default must stay safe for both entry paths.
 //
 // There is no "I am not 18+" path: the single control is an affirmative,
 // required checkbox, same shape as every other consent control in this
@@ -27,8 +31,9 @@ export function meta() {
 }
 
 function safeNextPath(raw: string | null): string {
+  if (raw === "/my-naia") return raw;
   if (raw && /^\/onboarding\/step\/\d+$/.test(raw)) return raw;
-  return "/onboarding/step/1";
+  return "/my-naia";
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {

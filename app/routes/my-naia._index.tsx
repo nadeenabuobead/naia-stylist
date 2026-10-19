@@ -1,6 +1,7 @@
-import { useLoaderData, Link, Form } from "react-router";
+import { useLoaderData, Link, Form, redirect } from "react-router";
 import type { LinksFunction, LoaderFunctionArgs } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
+import { hasConfirmedCurrentAge } from "~/lib/age-confirmation.server";
 import prisma from "~/db.server";
 import { getPublishedEditorialReports } from "~/lib/editorial-reports.server";
 import { loadStrongestConfirmedTendency } from "~/lib/ai/taste-reconcile.server";
@@ -309,6 +310,22 @@ function PassportSnapshot({ profile }: { profile: Record<string, unknown> }) {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const customer = await requireCurrentNaiaCustomer(request);
+
+  // Priority 5 (2026-10-19) — age-declaration backfill for existing
+  // customers. The onboarding/step.$step.tsx gate (c2c33db) only reaches a
+  // customer who revisits onboarding; someone who finished it long ago and
+  // only uses Closet/StyleMe/Buy-or-Skip would never be asked otherwise.
+  // /my-naia is the natural hub most customers pass through, so it's the
+  // chosen backfill point rather than a global gate on every route —
+  // deliberately NOT hooked into requireCurrentNaiaCustomer itself, which
+  // would intercept every customer-facing request including whatever a
+  // persona QA session is deep-linked into right now.
+  // accountType !== "CUSTOMER" is skipped — test/QA/demo rows are exempt
+  // by design (see the Customer model's accountType comment).
+  if (customer.accountType === "CUSTOMER" && !hasConfirmedCurrentAge(customer)) {
+    return redirect(`/onboarding/age-confirm?next=${encodeURIComponent("/my-naia")}`);
+  }
+
   const customerId = customer.id;
 
   // Sequential, not Promise.all: the pooled DATABASE_URL runs this app with
