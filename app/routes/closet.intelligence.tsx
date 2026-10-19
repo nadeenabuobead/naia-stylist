@@ -1572,6 +1572,14 @@ const css = `
   .wip-hero-stat{display:flex;flex-direction:column;align-items:flex-end;text-align:right}
   .wip-hero-stat strong{font-family:var(--naia-ff-display);font-weight:300;font-size:2rem;color:var(--naia-ink);line-height:1}
   .wip-hero-stat span{font-family:var(--naia-ff-ui);font-size:9.5px;letter-spacing:1.4px;text-transform:uppercase;color:rgba(40,21,12,0.5);margin-top:4px}
+  /* flex-shrink:0 on 3 right-aligned stats is fine once .wip-summary-row
+     has already wrapped them below the summary text (520px+), but below
+     that the stats row itself still refuses to shrink or wrap, running
+     ~100px past the viewport edge. Let it wrap and left-align there. */
+  @media(max-width:520px){
+    .wip-hero-stats{flex-wrap:wrap;row-gap:16px}
+    .wip-hero-stat{align-items:flex-start;text-align:left}
+  }
 
   .wip-cards{display:flex;flex-wrap:wrap;margin-top:28px;padding-top:20px;border-top:1px solid var(--naia-border)}
   .wip-card{padding:0 30px;min-width:150px}
