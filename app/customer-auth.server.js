@@ -1,7 +1,17 @@
 import jwt from "jsonwebtoken";
 import prisma from "./db.server";
 
-const SECRET = process.env.NAIA_CUSTOMER_SECRET || process.env.SHOPIFY_API_SECRET || "naia-fallback-secret";
+// 2026-10-19 security review: this previously fell back to a hardcoded,
+// publicly-readable string ("naia-fallback-secret") if both real secrets were
+// unset, which would let anyone who has read this source forge a valid
+// 30-day customer token in that configuration. Fails closed instead — no
+// environment should ever be silently signing/verifying tokens with a secret
+// that isn't actually secret.
+function getSecret() {
+  const secret = process.env.NAIA_CUSTOMER_SECRET || process.env.SHOPIFY_API_SECRET;
+  if (!secret) throw new Error("customer-auth: no NAIA_CUSTOMER_SECRET or SHOPIFY_API_SECRET configured");
+  return secret;
+}
 
 /**
  * Create a signed token for a storefront customer.
@@ -10,7 +20,7 @@ const SECRET = process.env.NAIA_CUSTOMER_SECRET || process.env.SHOPIFY_API_SECRE
 export function createCustomerToken({ shopifyId, email, firstName, lastName }) {
   return jwt.sign(
     { shopifyId: String(shopifyId), email, firstName, lastName },
-    SECRET,
+    getSecret(),
     { expiresIn: "30d" }
   );
 }
@@ -21,7 +31,7 @@ export function createCustomerToken({ shopifyId, email, firstName, lastName }) {
  */
 export function verifyCustomerToken(token) {
   try {
-    return jwt.verify(token, SECRET);
+    return jwt.verify(token, getSecret());
   } catch {
     return null;
   }
