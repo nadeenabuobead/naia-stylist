@@ -135,6 +135,7 @@ export default [
   // Protected shell — all children inherit the requireAdminSession check.
   route("admin", "routes/admin.tsx", [
     index("routes/admin._index.tsx"),
+    route("maintenance", "routes/admin.maintenance.tsx"),
     route("naia", "routes/admin.naia.tsx", [
       index("routes/admin.naia._index.tsx"),
       route("closet", "routes/admin.naia.closet._index.tsx"),

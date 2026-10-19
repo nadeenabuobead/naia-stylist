@@ -27,6 +27,14 @@ export default function AdminIndex() {
           </div>
           <div className="adm-workspace-tile__arrow">→</div>
         </Link>
+
+        <Link to="/admin/maintenance" className="adm-workspace-tile">
+          <div className="adm-workspace-tile__name">Data Retention</div>
+          <div className="adm-workspace-tile__desc">
+            Manual purge of expired JourneyEvent rows and sessions. No cron configured yet.
+          </div>
+          <div className="adm-workspace-tile__arrow">→</div>
+        </Link>
       </div>
     </div>
   );
