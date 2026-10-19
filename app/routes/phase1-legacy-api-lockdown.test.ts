@@ -197,6 +197,99 @@ describe("§B — cross-customer write vector closed", () => {
   });
 });
 
+describe("§B — scan sessionId is cryptographically bound to the customer it was issued for", () => {
+  // Real behavioral tests (not string assertions) against the exported
+  // signSessionOwnership/sessionOwnershipValid helpers — these are what
+  // close the gap between "the DB write uses customer.id" (closes a write
+  // vector) and "this sessionId actually belongs to this customer" (closes
+  // a session-binding vector: customer A supplying customer B's sessionId).
+  process.env.SESSION_SECRET ||= "phase1-test-only-secret-do-not-use-in-prod";
+
+  it("B16 — action() response includes a sig alongside sessionId", () => {
+    const actionBody = bodyscan.slice(
+      bodyscan.indexOf("export async function action"),
+      bodyscan.indexOf("export async function loader"),
+    );
+    assert.ok(actionBody.includes("sessionId: data.token, sig"), "action must return sig with sessionId");
+    assert.ok(actionBody.includes("signSessionOwnership(data.token, customer.id)"));
+  });
+
+  it("B17 — loader() rejects a missing sig with 403 before calling Bodygram", async () => {
+    const { sessionOwnershipValid } = await import("./api.bodyscan.jsx");
+    assert.equal(sessionOwnershipValid("sess-1", "cust-A", undefined), false);
+    assert.equal(sessionOwnershipValid("sess-1", "cust-A", null), false);
+    assert.equal(sessionOwnershipValid("sess-1", "cust-A", ""), false);
+  });
+
+  it("B18 — a valid signature for (sessionId, customer) verifies", async () => {
+    const { signSessionOwnership, sessionOwnershipValid } = await import("./api.bodyscan.jsx");
+    const sig = signSessionOwnership("sess-1", "cust-A");
+    assert.equal(sessionOwnershipValid("sess-1", "cust-A", sig), true);
+  });
+
+  it("B19 — customer B cannot use a sig issued for customer A's session (the actual exploit this closes)", async () => {
+    const { signSessionOwnership, sessionOwnershipValid } = await import("./api.bodyscan.jsx");
+    // Customer A legitimately creates a scan and receives sig_A for sess-1.
+    const sigForA = signSessionOwnership("sess-1", "cust-A");
+    // Customer B authenticates as themselves and tries to poll A's sessionId,
+    // presenting the sig A received (e.g. obtained from A's network tab).
+    assert.equal(
+      sessionOwnershipValid("sess-1", "cust-B", sigForA),
+      false,
+      "a sig computed for customer A must not validate when checked against customer B",
+    );
+  });
+
+  it("B20 — a sig for one sessionId does not transfer to a different sessionId for the same customer", async () => {
+    const { signSessionOwnership, sessionOwnershipValid } = await import("./api.bodyscan.jsx");
+    const sigForSessX = signSessionOwnership("sess-X", "cust-A");
+    assert.equal(sessionOwnershipValid("sess-Y", "cust-A", sigForSessX), false);
+  });
+
+  it("B21 — a tampered signature (same length, different bytes) is rejected", async () => {
+    const { signSessionOwnership, sessionOwnershipValid } = await import("./api.bodyscan.jsx");
+    const sig = signSessionOwnership("sess-1", "cust-A");
+    const tampered = sig.slice(0, -1) + (sig.at(-1) === "A" ? "B" : "A");
+    assert.equal(sessionOwnershipValid("sess-1", "cust-A", tampered), false);
+  });
+
+  it("B22 — loader checks ownership before the Bodygram scan-result fetch", () => {
+    const loaderBody = bodyscan.slice(bodyscan.indexOf("export async function loader"));
+    const sigCheckPos = loaderBody.indexOf("sessionOwnershipValid");
+    const fetchPos = loaderBody.indexOf("fetch(");
+    assert.ok(sigCheckPos > -1 && fetchPos > -1);
+    assert.ok(sigCheckPos < fetchPos, "ownership check must precede the Bodygram scan-result fetch");
+  });
+
+  it("B23 — ownership check precedes the OnboardingProfile write", () => {
+    const loaderBody = bodyscan.slice(bodyscan.indexOf("export async function loader"));
+    const sigCheckPos = loaderBody.indexOf("sessionOwnershipValid");
+    const upsertPos = loaderBody.indexOf("prisma.onboardingProfile.upsert");
+    assert.ok(sigCheckPos < upsertPos, "ownership check must precede the DB write");
+  });
+
+  it("B24 — comparison uses timingSafeEqual, not a plain string/== compare (no timing oracle)", () => {
+    assert.ok(bodyscan.includes("timingSafeEqual"));
+    assert.ok(!bodyscan.includes("providedSig === expected"), "must not use a non-constant-time comparison");
+  });
+
+  it("B25 — fails closed when SESSION_SECRET is not configured", async () => {
+    const { sessionOwnershipValid, signSessionOwnership } = await import("./api.bodyscan.jsx");
+    const saved = process.env.SESSION_SECRET;
+    try {
+      const sig = signSessionOwnership("sess-1", "cust-A"); // signed while secret present
+      delete process.env.SESSION_SECRET;
+      assert.equal(
+        sessionOwnershipValid("sess-1", "cust-A", sig),
+        false,
+        "verification must fail closed (not throw, not pass) when the secret is missing",
+      );
+    } finally {
+      if (saved !== undefined) process.env.SESSION_SECRET = saved;
+    }
+  });
+});
+
 describe("§B — Bodygram integration logic preserved (not rebuilt, not removed)", () => {
   it("B10 — scan-token creation call is unchanged", () => {
     assert.ok(bodyscan.includes("/scan-tokens"));

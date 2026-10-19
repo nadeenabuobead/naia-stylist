@@ -11,7 +11,20 @@ if (
   delete process.env.HOST;
 }
 
-const host = new URL(process.env.SHOPIFY_APP_URL || "http://localhost").hostname;
+// SHOPIFY_APP_URL is expected to be a full URL, but a malformed or placeholder
+// value in a local .env.local (not committed; set per-developer) must not take
+// down every local build/typecheck/test invocation that loads this config —
+// fall back to localhost rather than crashing on an un-parseable value.
+let host;
+try {
+  host = new URL(process.env.SHOPIFY_APP_URL || "http://localhost").hostname;
+} catch {
+  console.warn(
+    `[vite.config.js] SHOPIFY_APP_URL is not a valid URL — falling back to localhost. ` +
+    `Check .env.local if this is unexpected.`,
+  );
+  host = "localhost";
+}
 let hmrConfig;
 
 if (host === "localhost") {
