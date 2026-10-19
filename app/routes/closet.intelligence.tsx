@@ -1585,7 +1585,13 @@ const css = `
     .wip-hero-stat{align-items:flex-start;text-align:left}
   }
 
-  .wip-cards{display:flex;flex-wrap:wrap;margin-top:28px;padding-top:20px;border-top:1px solid var(--naia-border)}
+  /* No explicit width on .wip-app below ~1180px means these 3 cards wrap
+     (flex-wrap) well before the ≤520px column-stack override below adds
+     its own gap — confirmed live at 768px/tablet: the 3rd card wraps to
+     a new row flush against row 1, with zero space, reading as the two
+     rows' text colliding. row-gap here covers every width where wrapping
+     can happen, not just the explicit mobile breakpoint. */
+  .wip-cards{display:flex;flex-wrap:wrap;row-gap:18px;margin-top:28px;padding-top:20px;border-top:1px solid var(--naia-border)}
   .wip-card{padding:0 30px;min-width:150px}
   .wip-card:first-child{padding-left:0}
   .wip-card + .wip-card{border-left:1px solid var(--naia-border)}
