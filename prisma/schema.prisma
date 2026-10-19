@@ -352,6 +352,16 @@ model ClosetItem {
   // Anything the customer wants nAia to know: fit quirks, wear context, styling notes.
   customerNote          String?
 
+  // ── Photo consent (2026-10-19) ─────────────────────────────────────────────
+  //
+  // Priority 5: Closet upload/analysis previously had NO consent gate at all.
+  // Fields only for now — NOT yet enforced in api.closet-preview-analyze.ts
+  // or api.closet.jsx. See photo-consent.server.ts for why (enforcing here
+  // without a matching UI change in closet._index.tsx — a very large,
+  // actively-used component — would just reject every real upload).
+  photoConsentAt      DateTime?
+  photoConsentVersion String?
+
   // Relationships
   outfitItems   OutfitItem[]
   savedLookItems         SavedLookItem[]
@@ -598,6 +608,11 @@ model BuyOrSkipAnalysis {
   // S0 — private Cloudinary asset reference (replaces public imageUrl for new analyses)
   imagePublicId String?  // Cloudinary public ID (naia-wardrobe/{customerId}/...)
   imageFormat   String?  // Format stored for signed URL generation (jpg, png, webp, heic)
+
+  // Photo consent (2026-10-19) — same status as ClosetItem's pair above:
+  // fields only, not yet enforced. See photo-consent.server.ts.
+  photoConsentAt      DateTime?
+  photoConsentVersion String?
 
   outcome       BuySkipOutcome?
 }
@@ -1148,6 +1163,14 @@ model SelfieAnalysis {
   customerId        String    @unique
   customer          Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
   consentAt         DateTime
+  /// Which consent wording was agreed to, so a future wording change can
+  /// re-ask — same pattern as designResearchConsentVersion/
+  /// ageConfirmationVersion. Nullable: not yet stamped by
+  /// beginSelfieAnalysis (app/lib/ai/selfie-persistence.server.ts), whose
+  /// signature has several existing callers/tests — threading a new
+  /// parameter through is a deliberately separate follow-up, not bundled
+  /// into this additive schema change.
+  consentVersion    String?
   photoPublicId     String?
   photoFormat       String?
   photoDeletedAt    DateTime?
