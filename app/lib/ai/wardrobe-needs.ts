@@ -965,7 +965,16 @@ function buildFindings(
   const byId = new Map(registers.map((r) => [r.register, r]));
 
   // Registers her own words ask for that she cannot actually dress for.
-  const thinNeeded = registers.filter((r) => r.needed && r.distinctLooks <= THIN_LOOKS);
+  //
+  // Sorted most-severe-first (fewest usable pieces, then fewest distinct
+  // looks) so couldUseMore[0] — and therefore the single headline
+  // recommendation — is the register actually most in need, not whichever
+  // happens to come first in the fixed everyday/work/occasion register
+  // order. Found during QA: a 0-usable-piece register was losing the
+  // headline slot to a 6-usable-piece register purely on list order.
+  const thinNeeded = registers
+    .filter((r) => r.needed && r.distinctLooks <= THIN_LOOKS)
+    .sort((a, b) => a.usableCount - b.usableCount || a.distinctLooks - b.distinctLooks);
 
   // ── YOU COULD USE MORE OF ────────────────────────────────────────────────
   for (const r of thinNeeded) {

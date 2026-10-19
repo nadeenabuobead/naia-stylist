@@ -1509,8 +1509,23 @@ function buildDna(items: WardrobeGarment[], coverage: WardrobeCoverage): Wardrob
     candidates.sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
     shapes.push(...candidates.slice(0, MAX_SHAPES));
     // Counts stay in the data as evidence; the customer reads the shape, not the tally.
+    //
+    // A tie for first is real: the earlier alphabetical tiebreak above (for
+    // sorting only) must never read back as "X recurs most, Y close behind"
+    // when X and Y have the identical count — that states a hierarchy the
+    // data doesn't have. Found during QA (straight/tailored tied at 4).
     if (shapes.length > 1) {
-      shapesReading = `${capitalise(shapes[0].label.toLowerCase())} shapes recur most, with ${joinList(shapes.slice(1, 3).map((sh) => sh.label.toLowerCase()))} close behind.`;
+      const topCount = shapes[0].count;
+      const tiedForFirst = shapes.filter((s) => s.count === topCount);
+      if (tiedForFirst.length > 1) {
+        const tiedLabels = joinList(tiedForFirst.map((s) => s.label.toLowerCase()));
+        const rest = shapes.slice(tiedForFirst.length, 3);
+        shapesReading = rest.length > 0
+          ? `${capitalise(tiedLabels)} shapes recur equally, with ${joinList(rest.map((sh) => sh.label.toLowerCase()))} close behind.`
+          : `${capitalise(tiedLabels)} shapes recur equally across your wardrobe, more than any other.`;
+      } else {
+        shapesReading = `${capitalise(shapes[0].label.toLowerCase())} shapes recur most, with ${joinList(shapes.slice(1, 3).map((sh) => sh.label.toLowerCase()))} close behind.`;
+      }
     } else if (shapes.length === 1) {
       shapesReading = `${capitalise(shapes[0].label.toLowerCase())} shapes recur across your wardrobe more than any other.`;
     }

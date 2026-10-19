@@ -513,6 +513,24 @@ function coverageContext(reason: string, hasRescue: boolean, category: string | 
 }
 
 /**
+ * Worth-reconsidering reasons come from wardrobe-needs.ts's
+ * buildReconsiderAdvisory() as a flat "Sits outside a preference you stated
+ * — X." sentence — correct, but blunter than the SAME signal already reads
+ * in the Style Passport coverage dialog (coverageReasonSentence below),
+ * which knows a midi length is an open styling question, not a flat
+ * contradiction. Reuses that exact function rather than a second copy of
+ * the nuance, so the two surfaces can't drift apart again. Only touches
+ * reasons that actually came from a dressing-preference check — the
+ * near-duplicate / repetition reasons elsewhere in Reconsider are a
+ * different template and pass through unchanged.
+ */
+function softenReconsiderReason(reason: string, card: GarmentCard | undefined): string {
+  const match = reason.match(/^Sits outside a preference you stated — (.+)\.$/);
+  if (!match) return reason;
+  return coverageReasonSentence(match[1], card?.hemLength ?? null);
+}
+
+/**
  * The per-piece Coverage reason, in her language.
  *
  * midi gets its own, softer framing (styling may still change whether it
@@ -841,6 +859,11 @@ export default function WardrobeIntelligencePage() {
             })}
           </div>
           <p className="wip-combo-text">{look.reason}</p>
+          {/* Same disclosure the "pair" and "workCombo" dialogs already carry — a
+              moodboard look is always a top+bottom (or one-piece) core pairing,
+              never shoes or finishing pieces, so it was the one combination dialog
+              NOT saying so. Found during QA. */}
+          <p className="wip-dialog-note">Add shoes and finishing pieces to complete the look.</p>
           {/* Same real handoff as the single-piece CTA below — a combination has no
               separate multi-item preload in StyleMe today, so the look's first (anchor)
               piece is pre-selected and StyleMe builds the rest of the look around it. */}
@@ -1358,7 +1381,7 @@ export default function WardrobeIntelligencePage() {
                     <div key={entry.garmentId} className="wip-piece-card">
                       <div className="wip-piece-thumb"><Thumb card={card} height={170} /></div>
                       <h3>{cardLabel(card)}</h3>
-                      {entry.reasons.map((reason) => <p key={reason}>{reason}</p>)}
+                      {entry.reasons.map((reason) => <p key={reason}>{softenReconsiderReason(reason, card)}</p>)}
                     </div>
                   );
                 })}
@@ -1404,6 +1427,19 @@ export default function WardrobeIntelligencePage() {
                         so it only shows when it genuinely backs this recommendation. */}
                     {workFinding && recommendationDetail && workFinding.claim === `depth-gap:${recommendationDetail.register}` && (
                       <p className="wip-shop-quantity">{workFinding.body}</p>
+                    )}
+                    {/* A gap conclusion is only as good as how much of the Closet it was
+                        read from — the same hedging wardrobe-page.ts's hedge() already
+                        applies elsewhere, kept here for the two sentences above that
+                        don't go through it (whyNaiaLines / workFinding.body are built
+                        client-side). Nothing shown while she hasn't answered the
+                        completeness question yet, or has said she's still adding. */}
+                    {model.confidence !== "mostly" && (
+                      <p className="wip-shop-hedge">
+                        {model.confidence === "still-adding"
+                          ? "You've told nAia you're still adding pieces, so treat this as a first read rather than a final answer."
+                          : "This is based on what's in your Closet so far — if you own more than you've added, it could change."}
+                      </p>
                     )}
                   </div>
                 )}
@@ -1765,6 +1801,8 @@ const css = `
   .wip-shop-evidence-label{font-family:var(--naia-ff-ui);font-size:9.5px;letter-spacing:0.6px;text-transform:uppercase;color:rgba(40,21,12,0.4);margin:0 0 8px}
   .wip-shop-col .wip-evidence-row{margin-bottom:12px}
   .wip-shop-why{margin-top:auto;padding-top:10px}
+  .wip-shop-quantity{font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.6;color:rgba(40,21,12,0.7);margin:10px 0 0}
+  .wip-shop-hedge{font-family:var(--naia-ff-ui);font-size:10.5px;line-height:1.6;color:rgba(40,21,12,0.45);margin:10px 0 0}
   .wip-shop-why-label{display:block;font-family:var(--naia-ff-ui);font-size:9.5px;letter-spacing:0.6px;text-transform:uppercase;color:rgba(40,21,12,0.4);margin:0 0 4px}
   .wip-shop-why p{font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.6;color:rgba(40,21,12,0.65);margin:0}
 

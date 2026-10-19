@@ -340,3 +340,75 @@ describe("CIP-J — Shop Smarter's fixed height doesn't force a lone card to be 
     assert.ok(soloOverrideIdx > fixedHeightIdx, "the solo override must be declared after the fixed height to win the cascade");
   });
 });
+
+// ── CIP-K: Worth Reconsidering uses the same nuance as the Coverage dialog ───
+//
+// Found during Persona A QA: the Burgundy Midi Dress read "Sits outside a
+// preference you stated — keeping your legs covered" in Worth Reconsidering,
+// while the Style Passport coverage dialog — same piece, same signal —
+// already said "This midi length sits outside that preference, but how you
+// style it may change whether it works for you." One surface was blunter
+// than the other for the identical underlying fact.
+
+describe("CIP-K — Worth Reconsidering reuses coverageReasonSentence instead of a second, blunter copy of the nuance", () => {
+  test("CIP-K.1 reconsider reasons are routed through softenReconsiderReason before rendering", () => {
+    const src = read(LIVE);
+    assert.match(src, /entry\.reasons\.map\(\(reason\) => <p key=\{reason\}>\{softenReconsiderReason\(reason, card\)\}<\/p>\)/);
+  });
+
+  test("CIP-K.2 softenReconsiderReason calls the same coverageReasonSentence the Coverage dialog uses", () => {
+    const src = read(LIVE);
+    const fnIdx = src.indexOf("function softenReconsiderReason(");
+    assert.notEqual(fnIdx, -1);
+    const fnBody = src.slice(fnIdx, fnIdx + 500);
+    assert.match(fnBody, /coverageReasonSentence\(match\[1\], card\?\.hemLength/);
+  });
+
+  test("CIP-K.3 only the dressing-preference reason template is touched — near-duplicate/repetition reasons pass through", () => {
+    const src = read(LIVE);
+    const fnIdx = src.indexOf("function softenReconsiderReason(");
+    const fnBody = src.slice(fnIdx, fnIdx + 500);
+    assert.match(fnBody, /if \(!match\) return reason;/, "an unmatched (non-preference) reason must be returned unchanged");
+  });
+});
+
+// ── CIP-L: every combination dialog discloses it's a starting point ──────────
+//
+// Found during Persona A QA: the "pair" and "workCombo" dialogs already said
+// "Add shoes and finishing pieces to complete the look" — moodboardLook (the
+// "Your Closet, styled" dialog) was the one combination surface that didn't,
+// even though it's built the same way (a core top/bottom pairing, never
+// shoes).
+
+describe("CIP-L — the moodboard look dialog discloses it's a starting point too", () => {
+  test("CIP-L.1 the moodboardLook dialog includes the same finishing-pieces note as the other combination dialogs", () => {
+    const src = read(LIVE);
+    const kindIdx = src.indexOf('dialog.kind === "moodboardLook"');
+    assert.notEqual(kindIdx, -1);
+    const closeIdx = src.indexOf("</DialogShell>", kindIdx);
+    const scope = src.slice(kindIdx, closeIdx);
+    assert.match(scope, /Add shoes and finishing pieces to complete the look\./);
+  });
+});
+
+// ── CIP-M: shopping-gap conclusions are qualified until completeness is confirmed ──
+//
+// Found during Persona A QA: "Shop smarter" stated an unqualified gap
+// ("there's very little in your Closet that combines into something you
+// could wear for it") even for a customer who had never answered "is this
+// most of the wardrobe you currently wear?" — the SAME hedge wardrobe-page.ts
+// already applies to other shop-smarter text was missing from this one.
+
+describe("CIP-M — Shop Smarter's 'why' text is hedged by closet completeness, same as the rest of the page", () => {
+  test("CIP-M.1 a hedge note renders whenever confidence isn't 'mostly'", () => {
+    const src = read(LIVE);
+    assert.match(src, /model\.confidence !== "mostly" && \(/);
+    assert.match(src, /wip-shop-hedge/);
+  });
+
+  test("CIP-M.2 the still-adding and unknown-completeness cases get distinct, real wording — not a placeholder", () => {
+    const src = read(LIVE);
+    assert.match(src, /You've told nAia you're still adding pieces, so treat this as a first read rather than a final answer\./);
+    assert.match(src, /This is based on what's in your Closet so far — if you own more than you've added, it could change\./);
+  });
+});

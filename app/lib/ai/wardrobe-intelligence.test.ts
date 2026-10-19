@@ -2188,3 +2188,51 @@ describe("§CIA-WI Phase 2 shared-intelligence adapters have zero effect on WI's
     assert.deepEqual(withAdapterCall, withoutAdapterCall, "WI's output must be byte-identical whether or not the Phase 2 adapter was also called on the same evidence");
   });
 });
+
+// ── §WI-22 shapesReading never fabricates a hierarchy out of a tie ───────────
+//
+// Found during Persona A QA: straight and tailored tied at 4 pieces each, but
+// the copy read "Straight shapes recur most, with tailored... close behind" —
+// stating a ranking the counts don't actually show. The sort's alphabetical
+// tiebreak exists only to make the list order deterministic; it must never
+// leak into the customer-facing claim as if it were a real lead.
+
+describe("§WI-22 shapesReading never fabricates a hierarchy out of a tie", () => {
+  it("22a — a genuine two-way tie for first reads as equal, not as one leading the other", () => {
+    const straightGroup = Array.from({ length: 4 }, () =>
+      makeGarment({ silhouette: "straight", fitProfile: null }));
+    const tailoredGroup = Array.from({ length: 4 }, () =>
+      makeGarment({ silhouette: null, fitProfile: "tailored" }));
+    const result = run([...straightGroup, ...tailoredGroup], { passport: PASSPORT });
+
+    assert.doesNotMatch(result.dna.shapesReading, /recur most/i, "must not claim one tied shape 'recurs most' over the other");
+    assert.match(result.dna.shapesReading, /recur equally/i);
+    assert.match(result.dna.shapesReading, /straight/i);
+    assert.match(result.dna.shapesReading, /tailored/i);
+  });
+
+  it("22b — a tie for first with a genuine third shape behind it still names that third shape", () => {
+    const straightGroup = Array.from({ length: 4 }, () =>
+      makeGarment({ silhouette: "straight", fitProfile: null }));
+    const tailoredGroup = Array.from({ length: 4 }, () =>
+      makeGarment({ silhouette: null, fitProfile: "tailored" }));
+    const relaxedGroup = Array.from({ length: 3 }, () =>
+      makeGarment({ silhouette: null, fitProfile: "relaxed" }));
+    const result = run([...straightGroup, ...tailoredGroup, ...relaxedGroup], { passport: PASSPORT });
+
+    assert.match(result.dna.shapesReading, /recur equally/i);
+    assert.match(result.dna.shapesReading, /close behind/i);
+    assert.match(result.dna.shapesReading, /relaxed/i);
+  });
+
+  it("22c — a real, non-tied leader still reads as leading (no false tie)", () => {
+    const leaderGroup = Array.from({ length: 6 }, () =>
+      makeGarment({ silhouette: "straight", fitProfile: null }));
+    const secondGroup = Array.from({ length: 3 }, () =>
+      makeGarment({ silhouette: null, fitProfile: "relaxed" }));
+    const result = run([...leaderGroup, ...secondGroup], { passport: PASSPORT });
+
+    assert.match(result.dna.shapesReading, /recur most/i);
+    assert.doesNotMatch(result.dna.shapesReading, /recur equally/i);
+  });
+});

@@ -444,6 +444,40 @@ describe("§WN-5 a small wardrobe that works is not a gap", () => {
   });
 });
 
+// ── §WN-5b Recommendations prioritise the worst gap, not list order ──────────
+//
+// Found during Persona A QA: couldUseMore (and therefore the single headline
+// "Best next move") came out in the fixed everyday/work/occasion register
+// order, so a register with 6 usable-but-repetitive pieces outranked a
+// register with ZERO usable pieces purely because it happened to be checked
+// first. The worse gap must lead regardless of register order.
+
+describe("§WN-5b couldUseMore is sorted by real severity, not register order", () => {
+  it("5b — a register with zero usable pieces outranks a thin-but-stocked one, even though it's checked later", () => {
+    const items = [
+      // Work: 6 usable pieces, but all interchangeable — thin variety, not thin stock.
+      ...makeLook("business-casual", 3),
+      // Occasion: one dress, blocked by a stated dressing preference — zero usable.
+      makeGarment({ slot: "dress", category: "DRESSES", formality: "evening", hemLength: "mini" }),
+    ];
+    const needs = run(items, {
+      passport: makePassport({
+        lifestyle: ["office", "dinners-going-out"],
+        dressingPreferences: ["legs-covered"],
+      }),
+    });
+
+    const work = registerOf(needs, "work");
+    const occasion = registerOf(needs, "occasion");
+    assert.equal(work.usableCount, 6, "sanity: work genuinely has 6 usable pieces");
+    assert.equal(occasion.usableCount, 0, "sanity: occasion genuinely has zero usable pieces");
+
+    const order = moreIds(needs);
+    assert.ok(order.includes("work") && order.includes("occasion"), `both registers must be flagged thin: ${order.join(", ")}`);
+    assert.equal(order[0], "occasion", `the zero-usable register must lead couldUseMore, got order: ${order.join(", ")}`);
+  });
+});
+
 // ── §WN-6 / §WN-7 Passport synthesis ──────────────────────────────────────────
 
 describe("§WN-6 Passport and Closet alignment", () => {
