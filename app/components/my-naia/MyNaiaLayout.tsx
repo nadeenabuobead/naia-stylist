@@ -72,8 +72,14 @@ const FOOTER_COLS = [
   {
     title: "legal",
     links: [
-      { label: "Privacy Policy", href: "#" },
-      { label: "Terms of Service", href: "#" },
+      // Priority 5 (2026-10-19): these two carry real legal/compliance
+      // weight — a customer clicking "Privacy Policy" or "Terms of
+      // Service" and landing nowhere reads as those documents existing
+      // when they don't. Marked pending so they render as plain, honest
+      // text rather than a dead link that looks complete. Accessibility
+      // and Cookie Preferences are left as-is — out of scope for this pass.
+      { label: "Privacy Policy", href: "#", pending: true },
+      { label: "Terms of Service", href: "#", pending: true },
       { label: "Accessibility", href: "#" },
       { label: "Cookie Preferences", href: "#" },
     ],
@@ -273,7 +279,13 @@ export default function MyNaiaLayout({ children, compact = false }: Props) {
               <ul className="mn-footer-list">
                 {col.links.map((l) => (
                   <li key={l.label}>
-                    <a href={l.href} className="mn-footer-link">{l.label}</a>
+                    {"pending" in l && l.pending ? (
+                      <span className="mn-footer-link" style={{ opacity: 0.55, cursor: "default" }}>
+                        {l.label} <em style={{ fontStyle: "normal", fontSize: "0.85em" }}>— coming soon</em>
+                      </span>
+                    ) : (
+                      <a href={l.href} className="mn-footer-link">{l.label}</a>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -302,7 +314,13 @@ export default function MyNaiaLayout({ children, compact = false }: Props) {
                 <ul className="mn-footer-accordion-list">
                   {col.links.map((l) => (
                     <li key={l.label}>
-                      <a href={l.href} className="mn-footer-link">{l.label}</a>
+                      {"pending" in l && l.pending ? (
+                        <span className="mn-footer-link" style={{ opacity: 0.55, cursor: "default" }}>
+                          {l.label} <em style={{ fontStyle: "normal", fontSize: "0.85em" }}>— coming soon</em>
+                        </span>
+                      ) : (
+                        <a href={l.href} className="mn-footer-link">{l.label}</a>
+                      )}
                     </li>
                   ))}
                 </ul>
