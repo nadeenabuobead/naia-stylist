@@ -14,7 +14,7 @@ vi.mock("../db.server", () => ({
   default: {
     customer: { findUnique: vi.fn(), create: vi.fn() },
     onboardingProfile: { upsert: vi.fn() },
-    closetItem: { create: vi.fn() },
+    closetItem: { create: vi.fn(), deleteMany: vi.fn() },
     naiaSession: { create: vi.fn() },
   },
 }));
@@ -126,6 +126,33 @@ describe("§S4 seed-staging fixture actions — scoped to test-batch1- customers
       makeActionRequest({ _action: "setOnboardingProfile", customerId: "tricky-id", profile: {} }),
     );
     expect((res as Response).status).toBe(403);
+  });
+
+  it("S407 — deleteClosetItemsByName refuses a customerId that is not a test-batch1- fixture", async () => {
+    (prisma.customer.findUnique as any).mockResolvedValueOnce({
+      id: "real-customer-id",
+      shopifyCustomerId: "123456789",
+    });
+    const res = await action(
+      makeActionRequest({ _action: "deleteClosetItemsByName", customerId: "real-customer-id", name: "Anything" }),
+    );
+    expect((res as Response).status).toBe(403);
+    expect(prisma.closetItem.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("S408 — deleteClosetItemsByName proceeds for a genuine test-batch1- fixture customer, scoped by customerId and name", async () => {
+    (prisma.customer.findUnique as any).mockResolvedValueOnce({
+      id: "fixture-id",
+      shopifyCustomerId: "test-batch1-wi-a-populated",
+    });
+    (prisma.closetItem.deleteMany as any).mockResolvedValueOnce({ count: 1 });
+    const res = await action(
+      makeActionRequest({ _action: "deleteClosetItemsByName", customerId: "fixture-id", name: "Burgundy Midi Dress" }),
+    );
+    expect((res as Response).status).toBe(200);
+    expect(prisma.closetItem.deleteMany).toHaveBeenCalledWith({
+      where: { customerId: "fixture-id", name: "Burgundy Midi Dress" },
+    });
   });
 });
 

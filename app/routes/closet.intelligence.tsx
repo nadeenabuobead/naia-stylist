@@ -1266,70 +1266,127 @@ export default function WardrobeIntelligencePage() {
           </section>
           )}
 
-          {/* ── Section 6: two-column analysis ─────────────────────────────── */}
-          <section className="wip-section wip-analysis">
-            <div className="wip-paired-grid">
-            {allRegisterReadings.length > 0 && (
-            <div className="wip-analysis-col">
-              <h2 className="wip-section-title">How your wardrobe supports your life.</h2>
-              <div className="wip-card-shell wip-paired-card wip-analysis-card">
-              {(["everyday", "work", "occasion"] as const).map((register) => {
-                const reading = allRegisterReadings.find((r) => r.register === register);
-                if (!reading) return null;
-                const combos = bestByRegisterPreview[register] ?? [];
-                const interpretation = (register === "work" && reading.plain === "You own a lot that reads this way, but their combinations tend to repeat the same formula."
-                  ? "You have enough work pieces, but many of your combinations repeat the same formula."
-                  : reading.plain)
-                  || (reading.state === "strong" && reading.usableCount > 0
-                    ? `You have ${reading.usableCount} ${REGISTER_LABEL[register].toLowerCase()} pieces with plenty of ways to combine them.`
-                    : "");
-                const primary = combos[0];
-                const secondary = combos[1];
-                const sharedIds = secondary ? primary.garmentIds.filter((id) => secondary.garmentIds.includes(id)) : [];
-                const changedIds = secondary ? secondary.garmentIds.filter((id) => !sharedIds.includes(id)) : [];
-                const isSwap = secondary !== undefined && sharedIds.length > 0 && changedIds.length > 0;
-                const isDistinctLook = secondary !== undefined && sharedIds.length === 0 && changedIds.length > 0;
-                return (
-                  <div key={register} className="wip-life-row">
-                    <div className="wip-life-main">
-                      <div className="wip-life-heading">
-                        <h3>{REGISTER_LABEL[register]}</h3>
-                        <span className="wip-life-state">{reading.stateText}</span>
-                        <span className="wip-life-count">
-                          {reading.usableCount} usable pieces
-                          {reading.conditionallyUsableCount > 0 &&
-                            ` (+${reading.conditionallyUsableCount} may work depending on styling)`}
-                        </span>
-                      </div>
-                      <div className="wip-life-bar"><div className="wip-life-bar-fill" style={{ width: `${DEPTH_FILL[reading.state]}%` }} /></div>
-                      <p className="wip-life-text">{interpretation}</p>
-                      {register === attentionRegister && attentionCombo && (
-                        <button type="button" className="wip-link" onClick={() => setDialog({ kind: "workCombo" })}>View this combination →</button>
-                      )}
-                    </div>
-                    {primary && (() => {
-                      // Evidence tier: max 3 thumbnails per row. The swap/
-                      // distinct-look piece (if any) always gets a slot;
-                      // the rest come from the primary combo.
-                      const extra = isSwap ? changedIds.slice(0, 1) : isDistinctLook ? secondary!.garmentIds.slice(0, 1) : [];
-                      const lifeLookIds = [...primary.garmentIds.slice(0, 3 - extra.length), ...extra];
-                      return (
-                        <div className="wip-evidence-row">
-                          {lifeLookIds.map((id) => <EvidenceThumb key={id} card={byId.get(id)} />)}
+          {/* ── Section 6: how your wardrobe fits your life | shop smarter ───
+              One coordinated editorial grid (58/42), replacing two separately
+              stacked, individually-bordered sections QA flagged as bulky with
+              unused space. Same real data as before in each half — only the
+              layout changed: a single shared border + one subtle divider
+              instead of nested wip-card-shell boxes per side, no fixed
+              height, content-driven sizing. ─────────────────────────────── */}
+          {(allRegisterReadings.length > 0 || worthConsidering) && (
+          <section className="wip-section">
+            <div className="wip-life-shop-grid">
+              {allRegisterReadings.length > 0 && (
+              <div className="wip-life-shop-col">
+                <h2 className="wip-section-title">How your wardrobe fits your life.</h2>
+                {(["everyday", "work", "occasion"] as const).map((register) => {
+                  const reading = allRegisterReadings.find((r) => r.register === register);
+                  if (!reading) return null;
+                  const combos = bestByRegisterPreview[register] ?? [];
+                  const interpretation = (register === "work" && reading.plain === "You own a lot that reads this way, but their combinations tend to repeat the same formula."
+                    ? "You have enough work pieces, but many of your combinations repeat the same formula."
+                    : reading.plain)
+                    || (reading.state === "strong" && reading.usableCount > 0
+                      ? `You have ${reading.usableCount} ${REGISTER_LABEL[register].toLowerCase()} pieces with plenty of ways to combine them.`
+                      : "");
+                  const primary = combos[0];
+                  const secondary = combos[1];
+                  const sharedIds = secondary ? primary.garmentIds.filter((id) => secondary.garmentIds.includes(id)) : [];
+                  const changedIds = secondary ? secondary.garmentIds.filter((id) => !sharedIds.includes(id)) : [];
+                  const isSwap = secondary !== undefined && sharedIds.length > 0 && changedIds.length > 0;
+                  const isDistinctLook = secondary !== undefined && sharedIds.length === 0 && changedIds.length > 0;
+                  return (
+                    <div key={register} className="wip-life-row">
+                      <div className="wip-life-main">
+                        <div className="wip-life-heading">
+                          <h3>{REGISTER_LABEL[register]}</h3>
+                          <span className="wip-life-state">{reading.stateText}</span>
+                          <span className="wip-life-count">
+                            {reading.usableCount} usable pieces
+                            {reading.conditionallyUsableCount > 0 &&
+                              ` (+${reading.conditionallyUsableCount} may work depending on styling)`}
+                          </span>
                         </div>
-                      );
-                    })()}
-                  </div>
-                );
-              })}
+                        <div className="wip-life-bar"><div className="wip-life-bar-fill" style={{ width: `${DEPTH_FILL[reading.state]}%` }} /></div>
+                        <p className="wip-life-text">{interpretation}</p>
+                        {register === attentionRegister && attentionCombo && (
+                          <button type="button" className="wip-link" onClick={() => setDialog({ kind: "workCombo" })}>View this combination →</button>
+                        )}
+                      </div>
+                      {primary && (() => {
+                        // Evidence tier: max 3 thumbnails per row. The swap/
+                        // distinct-look piece (if any) always gets a slot;
+                        // the rest come from the primary combo.
+                        const extra = isSwap ? changedIds.slice(0, 1) : isDistinctLook ? secondary!.garmentIds.slice(0, 1) : [];
+                        const lifeLookIds = [...primary.garmentIds.slice(0, 3 - extra.length), ...extra];
+                        return (
+                          <div className="wip-evidence-row">
+                            {lifeLookIds.map((id) => <EvidenceThumb key={id} card={byId.get(id)} />)}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  );
+                })}
               </div>
-            </div>
-            )}
+              )}
 
-            {enoughClusters.length > 0 && (
-            <div className="wip-analysis-col">
-              <h2 className="wip-section-title">Where your wardrobe repeats.</h2>
-              <div className="wip-card-shell wip-paired-card wip-analysis-card">
+              {worthConsidering && (
+              <div className="wip-life-shop-col wip-shop-col">
+                <h2 className="wip-section-title">Shop smarter.</h2>
+                <span className="wip-shop-col-label wip-shop-col-label--buy">Worth adding</span>
+                <h3>{recTitle}</h3>
+                {(recBullets.length > 0 || recColourLead) && (
+                  <ul>
+                    {recBullets.map((b) => <li key={b}>{b}</li>)}
+                    {recColourLead && <li>Best colour: {recColourLead[0].toUpperCase()}{recColourLead.slice(1)}</li>}
+                    {recColourAlternatives.length > 0 && (
+                      <li>Also within your palette: {recColourAlternatives.map((c) => c[0].toUpperCase() + c.slice(1)).join(", ")}</li>
+                    )}
+                  </ul>
+                )}
+                {worthConsidering.garmentIds.length > 0 && (
+                  <>
+                    <p className="wip-shop-evidence-label">Works with pieces you own</p>
+                    <div className="wip-evidence-row">
+                      {worthConsidering.garmentIds.slice(0, 4).map((id) => <EvidenceThumb key={id} card={byId.get(id)} />)}
+                    </div>
+                  </>
+                )}
+                {whyNaiaLines.length > 0 && (
+                  <div className="wip-shop-why">
+                    <span className="wip-shop-why-label">Why nAia recommends this</span>
+                    <p>{whyNaiaLines.join(" ")}</p>
+                  </div>
+                )}
+                {/* The real evidenced count behind THIS recommendation — same
+                    register, same finding — not a separate estimate. workFinding
+                    is needs.couldUseMore[0]; matched by register, not by index,
+                    so it only shows when it genuinely backs this recommendation. */}
+                {workFinding && recommendationDetail && workFinding.claim === `depth-gap:${recommendationDetail.register}` && (
+                  <p className="wip-shop-quantity">{workFinding.body}</p>
+                )}
+                {/* A gap conclusion is only as good as how much of the Closet it was
+                    read from — the same hedging wardrobe-page.ts's hedge() already
+                    applies elsewhere. Nothing shown while she hasn't answered the
+                    completeness question yet, or has said she's still adding. */}
+                {model.confidence !== "mostly" && (
+                  <p className="wip-shop-hedge">{hedge(undefined, model.confidence)}</p>
+                )}
+              </div>
+              )}
+            </div>
+          </section>
+          )}
+
+          {/* ── Section 6b: where your wardrobe repeats ──────────────────────
+              No longer paired with "how your life" (moved above) — a real
+              finding stands on its own rather than being padded out with an
+              unrelated neighbour just to fill a two-column grid. ─────────── */}
+          {enoughClusters.length > 0 && (
+          <section className="wip-section">
+            <h2 className="wip-section-title">Where your wardrobe repeats.</h2>
+            <div className="wip-card-shell">
               {/* Summary card, not an unlimited report: the strongest finding
                   gets the full treatment (body + evidence); up to 2 further
                   qualifying clusters (same engine output, same slice(0,3) —
@@ -1363,11 +1420,9 @@ export default function WardrobeIntelligencePage() {
                   </>
                 );
               })()}
-              </div>
-            </div>
-            )}
             </div>
           </section>
+          )}
 
           {/* ── Section 6b: worth reconsidering — advisory only ──────────────
               nAia never removes, hides or down-ranks a piece on the strength
@@ -1393,70 +1448,24 @@ export default function WardrobeIntelligencePage() {
             </section>
           )}
 
-          {/* ── Section 7: shop smarter ─────────────────────────────────────── */}
-          {(worthConsidering || lowPriority) && (
+          {/* ── Section 7: buy less ──────────────────────────────────────────
+              Was the "Skip for now" half of "Shop smarter." — the "worth
+              adding" half moved into the new life/shop grid above, so this
+              stands alone rather than filling a now-empty second column. ─── */}
+          {lowPriority && (
             <section className="wip-section">
-              <h2 className="wip-section-title">Shop smarter.</h2>
-              <div className="wip-paired-grid">
-                {worthConsidering && (
-                  <div className={`wip-card-shell wip-paired-card wip-shop-col${!lowPriority ? " wip-shop-col--solo" : ""}`}>
-                    <span className="wip-shop-col-label wip-shop-col-label--buy">Worth adding</span>
-                    <h3>{recTitle}</h3>
-                    {(recBullets.length > 0 || recColourLead) && (
-                      <ul>
-                        {recBullets.map((b) => <li key={b}>{b}</li>)}
-                        {recColourLead && <li>Best colour: {recColourLead[0].toUpperCase()}{recColourLead.slice(1)}</li>}
-                        {recColourAlternatives.length > 0 && (
-                          <li>Also within your palette: {recColourAlternatives.map((c) => c[0].toUpperCase() + c.slice(1)).join(", ")}</li>
-                        )}
-                      </ul>
-                    )}
-                    {worthConsidering.garmentIds.length > 0 && (
-                      <>
-                        <p className="wip-shop-evidence-label">Works with pieces you own</p>
-                        <div className="wip-evidence-row">
-                          {worthConsidering.garmentIds.slice(0, 4).map((id) => <EvidenceThumb key={id} card={byId.get(id)} />)}
-                        </div>
-                      </>
-                    )}
-                    {whyNaiaLines.length > 0 && (
-                      <div className="wip-shop-why">
-                        <span className="wip-shop-why-label">Why nAia recommends this</span>
-                        <p>{whyNaiaLines.join(" ")}</p>
-                      </div>
-                    )}
-                    {/* The real evidenced count behind THIS recommendation — same
-                        register, same finding — not a separate estimate. workFinding
-                        is needs.couldUseMore[0]; matched by register, not by index,
-                        so it only shows when it genuinely backs this recommendation. */}
-                    {workFinding && recommendationDetail && workFinding.claim === `depth-gap:${recommendationDetail.register}` && (
-                      <p className="wip-shop-quantity">{workFinding.body}</p>
-                    )}
-                    {/* A gap conclusion is only as good as how much of the Closet it was
-                        read from — the same hedging wardrobe-page.ts's hedge() already
-                        applies elsewhere, kept here for the two sentences above that
-                        don't go through it (whyNaiaLines / workFinding.body are built
-                        client-side). Nothing shown while she hasn't answered the
-                        completeness question yet, or has said she's still adding. */}
-                    {model.confidence !== "mostly" && (
-                      <p className="wip-shop-hedge">{hedge(undefined, model.confidence)}</p>
-                    )}
-                  </div>
-                )}
-                {lowPriority && (
-                  <div className={`wip-card-shell wip-paired-card wip-shop-col${!worthConsidering ? " wip-shop-col--solo" : ""}`}>
-                    <span className="wip-shop-col-label">Skip for now</span>
-                    <h3>{(lowPriority.title ?? "").replace(/^Another (similar |of your )?/i, "Another ")}</h3>
-                    <p>{enoughCluster?.body ?? lowPriority.body}</p>
-                    {enoughCluster && enoughCluster.garmentIds.length > 0 && (
-                      <>
-                        <p className="wip-shop-evidence-label">Similar pieces you own</p>
-                        <div className="wip-evidence-row">
-                          {enoughCluster.garmentIds.slice(0, 4).map((id) => <EvidenceThumb key={id} card={byId.get(id)} />)}
-                        </div>
-                      </>
-                    )}
-                  </div>
+              <h2 className="wip-section-title">Buy less.</h2>
+              <div className="wip-card-shell wip-shop-col">
+                <span className="wip-shop-col-label">Skip for now</span>
+                <h3>{(lowPriority.title ?? "").replace(/^Another (similar |of your )?/i, "Another ")}</h3>
+                <p>{enoughCluster?.body ?? lowPriority.body}</p>
+                {enoughCluster && enoughCluster.garmentIds.length > 0 && (
+                  <>
+                    <p className="wip-shop-evidence-label">Similar pieces you own</p>
+                    <div className="wip-evidence-row">
+                      {enoughCluster.garmentIds.slice(0, 4).map((id) => <EvidenceThumb key={id} card={byId.get(id)} />)}
+                    </div>
+                  </>
                 )}
               </div>
             </section>
@@ -1684,59 +1693,31 @@ const css = `
   .wip-piece-card > p{font-family:var(--naia-ff-ui);font-size:12px;line-height:1.5;color:rgba(40,21,12,0.6);margin:0 0 8px}
   .wip-piece-actions{display:flex;flex-direction:column;gap:7px;align-items:flex-start}
 
-  /* Two-column analysis: How your wardrobe supports your life | Where it repeats.
-     Each column is its own bordered cream card, matching the moodboard/shop
-     card treatment, rather than two borderless text blocks. */
-  /* align-items:start so each column sizes to its own content — CSS grid's
-     default stretch was forcing both columns to match the taller sibling's
-     height, leaving a large empty gap under the shorter one. */
-  /* ONE shared paired-card grid — both two-column rows (lifestyle/
-     repetition and Worth adding/Skip for now) use this exact rule, so
-     they share total row width, column width, gutter and stacking
-     breakpoint. Shop Smarter previously had its own max-width:920px and a
-     different gap, which is what made it visibly narrower than this row
-     and left its card edges not lining up underneath. */
-  .wip-paired-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}
-  @media(max-width:900px){.wip-paired-grid{grid-template-columns:1fr;gap:20px}}
-  /* align-items:stretch (the default — no longer overridden) is what makes
-     each pair equally sized within its own row: both columns take the
-     row's full height, and .wip-paired-card's flex:1/min-height below
-     make the visible card box itself fill that height, so a shorter
-     card's bottom border still lines up with its taller sibling's
-     instead of ending early. */
-  .wip-analysis-col{display:flex;flex-direction:column}
-  /* Shared height across BOTH rows, not just within each row: without
-     this, the lifestyle/repetition pair and the shop-smarter pair could
-     each be internally equal-height but still end up two different
-     heights from each other, breaking the "cards line up underneath"
-     requirement. 420px is sized to the analysis row's real content (up
-     to 3 register rows with evidence thumbnails) — the shorter
-     Shop-smarter cards reach the same floor and stay top-aligned inside
-     it (plain block flow, nothing centers their content vertically).
-     Desktop only — mobile stacks to one column and sizes naturally. */
-  .wip-paired-card{display:flex;flex-direction:column}
-  /* 436px — measured, not estimated: a real HTML harness using this exact
-     CSS and the real diagnostic customer's real text (3 register rows,
-     merged heading/count line, 100px evidence thumbnails) rendered in an
-     actual browser at desktop width came to 428.4px
-     (document.getElementById(...).getBoundingClientRect().height); 436px
-     keeps a small (~8px) comfortable margin rather than cutting exactly
-     to the measured minimum. The repetition card's compact-summary
-     treatment (primary finding full, any further qualifying clusters as
-     a one-line title+count) was separately verified at a hypothetical
-     3-cluster case: 290px, well inside this shared height regardless of
-     how many real clusters a customer has. height (not min-height) is
-     deliberate here, as requested — all four cards get this exact value.
-     Desktop only — mobile/tablet stacks to natural height:auto. */
-  @media(min-width:901px){.wip-paired-card{height:436px}}
-  .wip-analysis-card{flex:1}
-  /* Found during Persona A QA: when Shop Smarter has only ONE card (no
-     "Skip for now" to match), the fixed height above has nothing to stay
-     symmetrical WITH — a thin "direction"-tier recommendation (no evidence
-     thumbnails yet) left a ~250px dead gap under its own title. The fixed
-     height's whole purpose — keeping two side-by-side cards level — does
-     not apply to a lone card, so it grows to its real content instead. */
-  @media(min-width:901px){.wip-shop-col--solo{height:auto}}
+  /* "How your wardrobe fits your life" | "Shop smarter" — one coordinated
+     58/42 editorial grid, replacing two separately-stacked, individually
+     bordered-box sections (a measured 436px FIXED height was previously
+     shared across both halves purely so mismatched content could "line
+     up" — that is exactly what produced the large empty areas QA flagged;
+     content now sizes to itself, no fixed or shared height at all).
+     ONE shared border around the whole row; a single subtle divider
+     between the two halves instead of two nested wip-card-shell boxes. */
+  .wip-life-shop-grid{
+    display:grid;
+    grid-template-columns:58% 42%;
+    border:1px solid var(--naia-border);
+    border-radius:8px;
+    background:var(--naia-surface);
+  }
+  .wip-life-shop-col{padding:28px 30px;min-width:0}
+  .wip-life-shop-col + .wip-life-shop-col{border-left:1px solid var(--naia-border)}
+  @media(max-width:900px){
+    .wip-life-shop-grid{grid-template-columns:1fr}
+    .wip-life-shop-col + .wip-life-shop-col{border-left:0;border-top:1px solid var(--naia-border)}
+  }
+  @media(max-width:480px){.wip-life-shop-col{padding:22px 18px}}
+  /* The right-hand "Shop smarter" half reuses wip-shop-col-label/h3/ul/p —
+     declared below, originally written for the old bordered shop card —
+     unchanged, just no longer nested inside its own separate box. */
 
   /* How your wardrobe supports your life */
   .wip-life-row{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:9px 0;border-top:1px solid var(--naia-border)}
@@ -1786,13 +1767,11 @@ const css = `
      row without shrinking the image back into icon territory. */
   .wip-evidence-row .wip-thumb{width:86px;border-radius:4px}
 
-  /* Shop smarter — each side its own bordered cream card, matching the
-     analysis/moodboard card treatment. */
-  /* Grid shape (width, gutter, stacking breakpoint) now comes entirely
-     from .wip-paired-grid, shared with the analysis row — this used to
-     declare its own max-width:920px and a different gap, which is what
-     made Shop Smarter visibly narrower and its cards not line up
-     underneath the lifestyle/repetition pair. */
+  /* Shop smarter / Buy less typography — wip-shop-col is applied alongside
+     the layout class at each call site (wip-life-shop-col for the "Worth
+     adding" half of the new grid; wip-card-shell for the standalone "Buy
+     less" card) so both reuse the exact same h3/ul/p/evidence-row rules
+     rather than declaring them twice. */
   .wip-shop-col-label{display:block;font-family:var(--naia-ff-ui);font-size:9.5px;letter-spacing:1.4px;text-transform:uppercase;font-weight:700;color:rgba(40,21,12,0.45);margin-bottom:12px}
   .wip-shop-col-label--buy{color:var(--naia-accent)}
   .wip-shop-col h3{font-family:var(--naia-ff-ui);font-weight:700;font-size:14px;line-height:1.3;margin:0 0 8px;color:var(--naia-ink)}

@@ -727,6 +727,26 @@ export async function action({ request }) {
     return Response.json({ closetItemId: created.id, category: created.category, primaryColor: created.primaryColor });
   }
 
+  // ── deleteClosetItemsByName — QA fixture only ────────────────────────────
+  // Lets a fixture-correction script swap out ONE closet item by name
+  // without resetting the whole customer (createCustomer is idempotent, but
+  // createClosetItemDetailed is not — re-running the full seed script would
+  // duplicate every other item). Scoped to test-batch1- customers only, same
+  // as every other action here.
+  if (act === "deleteClosetItemsByName") {
+    const { customerId, name } = body ?? {};
+    if (!customerId || !name) {
+      return Response.json({ error: "customerId and name required" }, { status: 400 });
+    }
+    if (!(await requireTestCustomer(customerId))) {
+      return Response.json({ error: "customerId must belong to a test-batch1- fixture customer" }, { status: 403 });
+    }
+    const deleted = await prisma.closetItem.deleteMany({
+      where: { customerId: String(customerId), name: String(name) },
+    });
+    return Response.json({ ok: true, deletedCount: deleted.count });
+  }
+
   // ── cleanup ───────────────────────────────────────────────────────────────
   if (act === "cleanup") {
     const { shopifyCustomerId } = body ?? {};

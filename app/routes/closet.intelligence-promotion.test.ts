@@ -312,32 +312,40 @@ describe("CIP-I — the glance headline never calls a thin register 'Strongest'"
   });
 });
 
-// ── CIP-J: Shop Smarter's fixed card height only applies when symmetry is real ──
+// ── CIP-J: no fixed-height card layout, anywhere in the life/shop grid ───────
 //
-// Found during Persona A QA: a lone "Worth adding" card (no "Skip for now"
-// to match) with a thin, honest "direction"-tier recommendation (no
-// evidence thumbnails) left a ~250px blank gap under its own title — the
-// fixed 436px height's purpose (matching a sibling card) doesn't apply
-// when there's no sibling.
+// Superseded finding: the previous round's fix for a lone Shop-Smarter card
+// (a 436px fixed height + a "solo" override to escape it) treated the
+// SYMPTOM. QA's real complaint was the fixed height itself, shared across
+// two sections that were never guaranteed to have comparable content —
+// "How your wardrobe fits your life" and "Shop smarter" are now one
+// coordinated grid with NO fixed or forced-equal height at all; each side
+// sizes to its own real content, so there is no empty-gap case left to
+// patch around.
 
-describe("CIP-J — Shop Smarter's fixed height doesn't force a lone card to be mostly empty", () => {
-  test("CIP-J.1 a lone worth-adding card (no lowPriority) is marked solo", () => {
+describe("CIP-J — the life/shop grid has no fixed-height card to create blank space", () => {
+  test("CIP-J.1 the old fixed-height rule is gone", () => {
     const src = read(LIVE);
-    assert.match(src, /wip-shop-col\$\{!lowPriority \? " wip-shop-col--solo" : ""\}/);
+    assert.doesNotMatch(src, /\.wip-paired-card\{height:436px\}/);
+    assert.doesNotMatch(src, /\.wip-shop-col--solo\{height:auto\}/);
   });
 
-  test("CIP-J.2 a lone skip-for-now card (no worthConsidering) is marked solo", () => {
+  test("CIP-J.2 the new grid declares no height on its columns at all", () => {
     const src = read(LIVE);
-    assert.match(src, /wip-shop-col\$\{!worthConsidering \? " wip-shop-col--solo" : ""\}/);
+    const gridIdx = src.indexOf(".wip-life-shop-grid{");
+    assert.notEqual(gridIdx, -1, "the new combined grid must exist");
+    const block = src.slice(gridIdx, src.indexOf("\n\n", gridIdx));
+    assert.doesNotMatch(block, /height:/, "no fixed or forced height anywhere in the new grid's own rules");
   });
 
-  test("CIP-J.3 the solo override comes after the fixed-height rule, so it wins", () => {
+  test("CIP-J.3 'How your wardrobe fits your life' and 'Shop smarter' share one bordered row, not two separately-stacked sections", () => {
     const src = read(LIVE);
-    const fixedHeightIdx = src.indexOf(".wip-paired-card{height:436px}");
-    const soloOverrideIdx = src.indexOf(".wip-shop-col--solo{height:auto}");
-    assert.notEqual(fixedHeightIdx, -1);
-    assert.notEqual(soloOverrideIdx, -1);
-    assert.ok(soloOverrideIdx > fixedHeightIdx, "the solo override must be declared after the fixed height to win the cascade");
+    const lifeIdx = src.indexOf("How your wardrobe fits your life.");
+    const shopIdx = src.indexOf('<h2 className="wip-section-title">Shop smarter.</h2>');
+    assert.notEqual(lifeIdx, -1);
+    assert.notEqual(shopIdx, -1);
+    const between = src.slice(lifeIdx, shopIdx);
+    assert.doesNotMatch(between, /<\/section>/, "both headings must sit inside the same <section>, not two separate ones");
   });
 });
 
