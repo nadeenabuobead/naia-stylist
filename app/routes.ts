@@ -91,6 +91,11 @@ export default [
   route("auth/*", "routes/auth.$.jsx"),
   route("webhooks/app/scopes_update", "routes/webhooks.app.scopes_update.jsx"),
   route("webhooks/app/uninstalled", "routes/webhooks.app.uninstalled.jsx"),
+  // Phase 2 privacy remediation (2026-10-19) — Shopify's three mandatory
+  // customer-privacy webhooks, previously entirely unimplemented.
+  route("webhooks/customers/data_request", "routes/webhooks.customers.data_request.tsx"),
+  route("webhooks/customers/redact", "routes/webhooks.customers.redact.tsx"),
+  route("webhooks/shop/redact", "routes/webhooks.shop.redact.tsx"),
   route("quick-style", "routes/quick-style/_index.tsx"),
   // api/quick-style retired 2026-10-19 — Phase 1 security lockdown. No live
   // caller (the /quick-style page above posts to its own route action); this
