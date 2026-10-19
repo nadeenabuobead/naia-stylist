@@ -1190,6 +1190,14 @@ function buildReconsiderAdvisory(
 
   for (const register of registers) {
     for (const blocked of register.blockedPieces) {
+      // Conditional (isConditional) pieces are a genuine "unsure, depends on
+      // styling" reading, not evidence of a problem — see BlockedPiece on
+      // RegisterReading. "Worth reconsidering" is nAia noticing something
+      // that might not be serving her; uncertainty isn't that, and listing
+      // it here was the exact contradiction QA found: the Style Passport
+      // dialog already says "may depend on how you wear it" for the same
+      // piece, while Reconsider implied it was settled enough to flag.
+      if (blocked.isConditional) continue;
       note(
         blocked.garmentId,
         `Sits outside a preference you stated — ${blocked.reason}.`,

@@ -1215,6 +1215,26 @@ describe("§WN-14 reconsider / let go — advisory only", () => {
     for (const reason of entry!.reasons) assert.doesNotMatch(reason, BANNED_REMOVAL_LANGUAGE);
   });
 
+  it("14a-2 — a conditionally-blocked piece (midi hem vs legs-covered) never surfaces in Reconsider", () => {
+    // Found during Persona A QA: the Style Passport dialog already says "may
+    // depend on how you wear it" for a midi dress, but it was still listed
+    // under Worth Reconsidering as if nAia had concluded something — the
+    // same evidence-vs-claim contradiction the register count/depthNote fix
+    // closed. A genuine uncertainty is not evidence of a problem.
+    const passport = makePassport({ lifestyle: ["dinners-going-out"], dressingPreferences: ["legs-covered"] });
+    const items = [
+      ...variedLooks("casual", 4),
+      makeGarment({ slot: "dress", category: "DRESSES", formality: "evening", hemLength: "midi" }),
+    ];
+    const needs = run(items, { passport });
+    const occasionRegister = registerOf(needs, "occasion");
+    const midiPiece = occasionRegister.blockedPieces.find((b) => b.isConditional);
+    assert.ok(midiPiece, "sanity: this fixture produces a conditional blocked piece");
+
+    const entry = needs.reconsider.entries.find((e) => e.garmentId === midiPiece!.garmentId);
+    assert.equal(entry, undefined, "a conditional piece must not appear in Reconsider at all");
+  });
+
   it("14b — an 'enough' cluster's own members surface as near-duplicates", () => {
     const needs = run(variedLooks("casual", 5), { passport: makePassport({ lifestyle: ["everyday-casual"] }) });
     assert.ok(needs.enough.length > 0, "sanity: this fixture produces a real 'enough' cluster");
