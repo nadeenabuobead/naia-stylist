@@ -278,6 +278,15 @@ export interface WardrobePageInput {
    * are shown, unlabelled by lifestyle specifics.
    */
   lifestyle?: readonly string[];
+  /**
+   * Whether the customer has actually named favourite colours in her Style
+   * Passport (`OnboardingProfile.favoriteColors.length > 0`) — never derived
+   * from the wardrobe's own colour data, which says nothing about a stated
+   * preference. Gates "colours you like" language in the profile summary:
+   * without it, that phrase would claim a preference-match that was never
+   * evidenced. Defaults to false (no stated preference assumed).
+   */
+  hasStatedColourPreference?: boolean;
 }
 
 // ── Builder ───────────────────────────────────────────────────────────────────
@@ -1121,7 +1130,7 @@ function singularizeLast(phrase: string): string {
  * reveal, as the evidence behind that reading, never as a second headline).
  */
 function buildProfileBlock(input: WardrobePageInput): PageBlock | null {
-  const { intelligence, needs } = input;
+  const { intelligence, needs, hasStatedColourPreference } = input;
   const { passportView, dna } = intelligence;
 
   const summaryLines: string[] = [];
@@ -1130,10 +1139,16 @@ function buildProfileBlock(input: WardrobePageInput): PageBlock | null {
     const thin = needs.synthesis.state === "available"
       ? needs.synthesis.lines.find((l) => l.id === "synth-colour" && l.kind === "uneven")
       : undefined;
+    // "Mostly colours you like" is a preference-MATCH claim — it must never
+    // appear unless the customer actually named colours to match against.
+    // dna.palette only means the wardrobe itself has readable colour data,
+    // which says nothing about whether a preference exists to compare it to.
     summaryLines.push(
-      thin?.thinLabel
-        ? `Mostly colours you like; ${thin.thinLabel.toLowerCase()} appears less often.`
-        : "Mostly colours you like.",
+      !hasStatedColourPreference
+        ? "Here's the colour makeup of your Closet."
+        : thin?.thinLabel
+          ? `Mostly colours you like; ${thin.thinLabel.toLowerCase()} appears less often.`
+          : "Mostly colours you like.",
     );
   }
   if (dna.shapes.length > 0) {

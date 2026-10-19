@@ -155,6 +155,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     garmentName: (id) => garments.find((g) => g.id === id)?.name ?? null,
     change,
     lifestyle: profile?.lifestyle ?? [],
+    hasStatedColourPreference: (profile?.favoriteColors?.length ?? 0) > 0,
   });
 
   const garmentCards = garments.map((g) => ({

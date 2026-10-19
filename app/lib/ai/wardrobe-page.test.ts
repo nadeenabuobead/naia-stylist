@@ -726,7 +726,7 @@ describe("§WP-11 lifestyle-labelled presentation, same 3-register engine", () =
 
 describe("§WP-13 the wardrobe profile states its conclusions once, mostly collapsed", () => {
   it("§WP-13a colours, silhouettes, StyleMe history and wear behaviour are always visible, in one line each", () => {
-    const input = baseInput();
+    const input = baseInput({ hasStatedColourPreference: true });
     (input.intelligence as unknown as { dna: unknown }).dna = {
       palette: [{ colour: "Black", count: 19 }], shapes: [{ label: "Straight" }],
       traits: [], shapesReading: "Straight shapes recur most, with fitted and relaxed close behind.",
@@ -1156,6 +1156,7 @@ describe("§WP-12 the profile's colour line is generic — abundance-to-low-prio
 
   it("§WP-12b the colour summary names the thin colour when the engine has identified one", () => {
     const input = inputWithPalette([{ colour: "Black", count: 19, share: 0.4, neutral: true }]);
+    input.hasStatedColourPreference = true;
     (input.needs as unknown as { synthesis: unknown }).synthesis = {
       state: "available",
       lines: [{ id: "synth-colour", kind: "uneven", reading: "x", evidence: [], thinLabel: "Grey" }],
@@ -1164,6 +1165,18 @@ describe("§WP-12 the profile's colour line is generic — abundance-to-low-prio
     const block = page.sections.find((s) => s.id === "profile")!.blocks.find((b) => b.id === "profile")!;
     const lines = (block.meta as Record<string, unknown>).summaryLines as string[];
     assert.ok(lines.some((l) => /mostly colours you like; grey appears less often/i.test(l)));
+  });
+
+  it("§WP-12c never claims 'colours you like' when the customer named no favourite colours — found live on Persona C (favoriteColors: []), where the wardrobe has readable colour data but nothing was ever stated to match it against", () => {
+    const input = inputWithPalette([{ colour: "Beige", count: 1, share: 0.2, neutral: true }]);
+    // hasStatedColourPreference left at its default (false/undefined) —
+    // the wardrobe has colour data (dna.palette), but no OnboardingProfile
+    // favoriteColors were ever named.
+    const page = buildWardrobePage(input);
+    const block = page.sections.find((s) => s.id === "profile")!.blocks.find((b) => b.id === "profile")!;
+    const lines = (block.meta as Record<string, unknown>).summaryLines as string[];
+    for (const line of lines) assert.doesNotMatch(line, /colours? you like/i);
+    assert.ok(lines.some((l) => /colour makeup of your closet/i.test(l)));
   });
 });
 
