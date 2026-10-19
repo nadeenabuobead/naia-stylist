@@ -119,6 +119,19 @@ model Customer {
   /// Which wording was agreed to. A new version requires asking again.
   designResearchConsentVersion String?
 
+  // ── Age declaration ────────────────────────────────────────────────────────
+  //
+  // Priority 5 (2026-10-19) — no mechanism anywhere in the app previously
+  // confirmed a customer is above the minimum age. Fields only for now; NOT
+  // yet wired into onboarding or any request path — see
+  // age-confirmation.server.ts for why, and for the standalone, tested
+  // check/record functions a UX decision can wire in once placement is
+  // decided. Presence of ageConfirmedAt is the "yes" signal; absence is
+  // simply "not asked/confirmed yet", same shape as designResearchConsentAt.
+  ageConfirmedAt      DateTime?
+  /// Which wording/minimum-age policy was agreed to. A new version requires asking again.
+  ageConfirmationVersion String?
+
   // ── Account type ──────────────────────────────────────────────────────────
   //
   // Our own test and demo accounts must never reach customer insight. Marked
