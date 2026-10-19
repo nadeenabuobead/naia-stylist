@@ -452,3 +452,53 @@ describe("CIP-N — wip-piece-grid left-aligns instead of centring a short row",
     assert.match(rule, /minmax\(0,180px\)/, "columns stay capped, so a lone card keeps its real card width, not 100%");
   });
 });
+
+// ── CIP-O: "View this combination" never appears for a register with nothing to show ──
+//
+// Found live during Persona A QA: Dinners & Events reported "0 usable
+// pieces" and still showed "View this combination →"; opening it read
+// "An existing WORK combination" (hardcoded title) over a body admitting
+// "nAia hasn't selected an occasion example to show here yet." The engine
+// always returns an entry for a thin needed register — explicitly naming
+// the absence rather than omitting it — so `attentionCombo` being truthy
+// was never proof a real combination existed.
+
+describe("CIP-O — the combination link and its dialog never claim more than the evidence supports", () => {
+  test("CIP-O.1 the button checks attentionCombo.garmentIds.length, not just truthiness", () => {
+    const src = read(LIVE);
+    assert.match(src, /attentionRegister && attentionCombo && attentionCombo\.garmentIds\.length > 0 &&/);
+  });
+
+  test("CIP-O.2 the dialog title reads from the entry itself, never a hardcoded register name", () => {
+    const src = read(LIVE);
+    assert.doesNotMatch(src, /title="An existing work combination\."/);
+    assert.match(src, /title=\{attentionCombo\.title/);
+  });
+});
+
+// ── CIP-P: "Why nAia recommends this" reads correctly for every DepthState ────
+//
+// Found live: "Your dinners & events wardrobe has smaller than it looks."
+// — "has fewer combinations" reads fine, but "has smaller than it looks"
+// does not. The template assumed every DEPTH_STATE_TEXT value works after
+// "has", which is only true for some of them — this is the engine's own
+// closed six-value vocabulary, not a per-register or per-persona fix.
+
+describe("CIP-P — the recommendation-reason sentence reads correctly for every register state", () => {
+  test("CIP-P.1 a predicate is looked up per DepthState, not a blind 'has {stateText}'", () => {
+    const src = read(LIVE);
+    assert.match(src, /REGISTER_STATE_PREDICATE\[registerReading\.state\]/);
+  });
+
+  test("CIP-P.2 the predicate map covers all six DepthState values with grammatically real predicates", () => {
+    const src = read(LIVE);
+    const idx = src.indexOf("const REGISTER_STATE_PREDICATE");
+    assert.notEqual(idx, -1);
+    const block = src.slice(idx, src.indexOf("};", idx));
+    for (const state of ["strong", "limited-variety", "needs-range", "less-than-it-looks", "empty", "learning"]) {
+      assert.match(block, new RegExp(`"?${state}"?:\\s*"(is|has) `), `${state} must map to a real "is"/"has" predicate`);
+    }
+    // The specific bug found live, pinned directly.
+    assert.match(block, /"less-than-it-looks":\s*"is smaller than it looks"/);
+  });
+});

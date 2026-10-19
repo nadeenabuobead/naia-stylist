@@ -1208,11 +1208,19 @@ function buildReconsiderAdvisory(
       // dialog already says "may depend on how you wear it" for the same
       // piece, while Reconsider implied it was settled enough to flag.
       if (blocked.isConditional) continue;
-      note(
-        blocked.garmentId,
-        `Sits outside a preference you stated — ${blocked.reason}.`,
-        ev("passport-signal", "dressingPreferences / avoidColors", blocked.reason, [blocked.garmentId]),
-      );
+      // Every failed preference, not just the first — same reasoning as the
+      // Style Passport coverage dialog (allBlockedReasons()): a piece
+      // failing on both arms AND legs coverage, say, is only fully
+      // explained here if every reason gets its own note, not just
+      // whichever one classifyUsability() happened to find first.
+      const reasons = blocked.allReasons.length > 0 ? blocked.allReasons : [blocked.reason];
+      for (const reason of reasons) {
+        note(
+          blocked.garmentId,
+          `Sits outside a preference you stated — ${reason}.`,
+          ev("passport-signal", "dressingPreferences / avoidColors", reason, [blocked.garmentId]),
+        );
+      }
     }
   }
 

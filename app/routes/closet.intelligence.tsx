@@ -588,8 +588,22 @@ function cap(s: string): string {
  * absent for a different customer/recommendation, and a clause that has
  * nothing to cite is dropped rather than filled in with guessed wording.
  */
+// "Your {X} wardrobe has {stateText}." only reads correctly for SOME of the
+// six DepthState values ("has fewer combinations" ✓, "has smaller than it
+// looks" ✗ — found during QA). A full predicate per state, not a hardcoded
+// per-register exception, since this is the engine's own closed vocabulary
+// (DEPTH_STATE_TEXT in wardrobe-copy.ts) — every customer hits all six.
+const REGISTER_STATE_PREDICATE: Readonly<Record<DepthState, string>> = {
+  strong: "has plenty of options",
+  "limited-variety": "is covered, but with less variety",
+  "needs-range": "has fewer combinations",
+  "less-than-it-looks": "is smaller than it looks",
+  empty: "has nothing here yet",
+  learning: "is still being read",
+};
+
 function buildWhyNaiaRecommends(input: {
-  registerReading: { heading: string; stateText: string } | undefined;
+  registerReading: { heading: string; state: DepthState; stateText: string } | undefined;
   recTitle: string;
   resolvingSilhouettes: string[];
   unlocksCount: number;
@@ -599,7 +613,8 @@ function buildWhyNaiaRecommends(input: {
   const sentences: string[] = [];
 
   if (registerReading) {
-    sentences.push(`Your ${registerReading.heading.toLowerCase()} wardrobe has ${registerReading.stateText.toLowerCase()}.`);
+    const predicate = REGISTER_STATE_PREDICATE[registerReading.state] ?? `has ${registerReading.stateText.toLowerCase()}`;
+    sentences.push(`Your ${registerReading.heading.toLowerCase()} wardrobe ${predicate}.`);
   }
 
   const addsVariety = resolvingSilhouettes.length > 0;
@@ -835,7 +850,12 @@ export default function WardrobeIntelligencePage() {
     }
     if (dialog.kind === "workCombo" && attentionCombo) {
       return (
-        <DialogShell title="An existing work combination." subtitle="Start with the pieces you already own." onClose={closeDialog}>
+        // Title reads from the entry itself (REGISTER_LIFE_HEADING, set
+        // per-register server-side) instead of a hardcoded "work" — found
+        // during QA titled "An existing WORK combination" while showing an
+        // occasion-register placeholder, for a customer whose attention
+        // register was Dinners & Events, not Work at all.
+        <DialogShell title={attentionCombo.title ?? "An existing combination."} subtitle="Start with the pieces you already own." onClose={closeDialog}>
           <div className="wip-match-grid" style={{ gridTemplateColumns: `repeat(${attentionCombo.garmentIds.length}, minmax(0,1fr))` }}>
             {attentionCombo.garmentIds.map((id) => {
               const card = byId.get(id);
@@ -1318,7 +1338,15 @@ export default function WardrobeIntelligencePage() {
                         </div>
                         <div className="wip-life-bar"><div className="wip-life-bar-fill" style={{ width: `${DEPTH_FILL[reading.state]}%` }} /></div>
                         <p className="wip-life-text">{interpretation}</p>
-                        {register === attentionRegister && attentionCombo && (
+                        {/* attentionCombo always EXISTS for a thin needed register — the
+                            engine still returns an entry when it has no real pairing to
+                            show (garmentIds: []), explicitly naming that absence rather
+                            than omitting the entry. Checking garmentIds.length, not just
+                            truthiness, is what tells a genuine combination apart from
+                            that honest placeholder — found during QA: "0 usable pieces"
+                            still offered "View this combination" for a register with
+                            nothing to show. depthNote above already states why. */}
+                        {register === attentionRegister && attentionCombo && attentionCombo.garmentIds.length > 0 && (
                           <button type="button" className="wip-link" onClick={() => setDialog({ kind: "workCombo" })}>View this combination →</button>
                         )}
                       </div>
