@@ -42,6 +42,31 @@ model Session {
   refreshToken        String?
   refreshTokenExpires DateTime?
 }
+
+// ============================================
+// INTERNAL ADMIN PORTAL — LOGIN RATE LIMITING
+// ============================================
+
+/// Priority 5 (2026-10-19) — the internal admin portal (app/lib/internal-auth.server.ts)
+/// is a single shared static password with no durable brute-force protection
+/// (previously just a fixed 350ms delay on failure, which a distributed or
+/// patient attacker simply waits out). This table makes lockout durable
+/// across serverless invocations, which in-memory counting cannot do.
+///
+/// ipHash is a SHA-256 digest of the client IP — never the raw address,
+/// matching the JourneyEvent.customerIdHash pattern already used elsewhere.
+/// Rows age out of relevance after RATE_LIMIT_WINDOW_MS (see
+/// admin-login-rate-limit.server.ts) and are opportunistically pruned on
+/// each write — there is no separate retention job for this table.
+model AdminLoginAttempt {
+  id        String   @id @default(cuid())
+  ipHash    String
+  succeeded Boolean
+  createdAt DateTime @default(now())
+
+  @@index([ipHash, createdAt])
+}
+
 // ============================================
 // USER & AUTHENTICATION
 // ============================================

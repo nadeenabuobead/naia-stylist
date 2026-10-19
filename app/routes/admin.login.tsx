@@ -10,6 +10,11 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { redirect, useActionData } from "react-router";
 import { verifyAdminSecret, createAdminSession, requireAdminSession } from "~/lib/internal-auth.server";
+import {
+  checkAdminLoginLockout,
+  recordAdminLoginAttempt,
+  getClientIp,
+} from "~/lib/admin-login-rate-limit.server";
 
 // If already authenticated, send directly to the portal
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -23,13 +28,23 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 export async function action({ request }: ActionFunctionArgs) {
+  const ip = getClientIp(request);
+
+  const lockout = await checkAdminLoginLockout(ip);
+  if (lockout.locked) {
+    const minutes = Math.ceil(lockout.retryAfterSeconds / 60);
+    return { error: `Too many failed attempts. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.` };
+  }
+
   const form = await request.formData();
   const password = String(form.get("password") ?? "");
 
   const ok = verifyAdminSecret(password);
+  await recordAdminLoginAttempt(ip, ok);
 
   if (!ok) {
-    // Lightweight delay to slow brute-force attempts without external state
+    // Lightweight delay on top of the durable lockout above — slows a
+    // single fast-retrying client even before it hits MAX_FAILED_ATTEMPTS.
     await new Promise<void>((resolve) => setTimeout(resolve, 350));
     return { error: "Incorrect password." };
   }
