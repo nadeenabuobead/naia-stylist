@@ -281,12 +281,27 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!category) return data({ error: "Category required" }, { status: 400 });
     if (!publicId) return data({ error: "Image upload reference required." }, { status: 400 });
 
+    // ── Server-side upload validation ─────────────────────────────────────────
+    // All checks run BEFORE any DB write. Rejected uploads have their Cloudinary
+    // asset deleted so orphaned assets do not accumulate in storage.
+
+    // 1. Ownership check — publicId must belong to the authenticated customer's
+    //    folder. Must run BEFORE the photo-consent check below: a consent
+    //    rejection deletes the asset, and that delete must never be reachable
+    //    for a publicId this customer does not own (a forged/guessed publicId
+    //    plus withheld consent must not become a way to delete another
+    //    customer's photo).
+    const ownership = validatePublicIdOwnership(publicId, customer.id);
+    if (!ownership.ok) {
+      return data({ error: ownership.error }, { status: 400 });
+    }
+
     // ── Photo consent (2026-10-19) ─────────────────────────────────────────────
     // The UI gates the upload itself behind this same checkbox (see
     // handleAdd/uploadToCloudinary below), but a client-side gate alone is
-    // not enforcement — this is the real check. The already-uploaded
-    // Cloudinary asset is deleted on rejection, same as every other
-    // pre-DB-write check in this action.
+    // not enforcement — this is the real check. Ownership is already
+    // confirmed above, so it is safe to delete this customer's own asset
+    // here on rejection, same as every other pre-DB-write check in this action.
     const consentGiven = extractConsentGiven({ photoConsentGiven: formData.get("photoConsentGiven") === "true" });
     if (!consentGiven) {
       await deleteCloudinaryAsset(publicId, "private");
@@ -301,16 +316,6 @@ export async function action({ request }: ActionFunctionArgs) {
         { error: "Your closet is full. Remove some items to add new ones." },
         { status: 403 },
       );
-    }
-
-    // ── Server-side upload validation ─────────────────────────────────────────
-    // All checks run BEFORE any DB write. Rejected uploads have their Cloudinary
-    // asset deleted so orphaned assets do not accumulate in storage.
-
-    // 1. Ownership check — publicId must belong to the authenticated customer's folder.
-    const ownership = validatePublicIdOwnership(publicId, customer.id);
-    if (!ownership.ok) {
-      return data({ error: ownership.error }, { status: 400 });
     }
 
     // 2. Verify via Cloudinary Admin API — authoritative format/bytes/dimensions.
