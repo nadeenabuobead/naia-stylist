@@ -36,39 +36,48 @@ if (host === "localhost") {
 // Environment-aware asset base — each case names the ONE host that should
 // win, rather than letting whichever env var happens to be set override the
 // others:
-//   - production  -> the canonical production app URL (SHOPIFY_APP_URL)
-//   - preview     -> this deployment's OWN unique host (VERCEL_URL), always
-//   - fallback    -> ASSET_BASE_URL / SHOPIFY_APP_URL, only if VERCEL_URL is
-//                    somehow unavailable (shouldn't happen on Vercel)
+//   - production        -> the canonical production app URL (SHOPIFY_APP_URL)
+//   - preview, pinned    -> ASSET_BASE_URL, when explicitly set for this build
+//   - preview, ordinary  -> this deployment's OWN unique host (VERCEL_URL)
+//   - fallback           -> SHOPIFY_APP_URL, only if VERCEL_URL is somehow
+//                           unavailable (shouldn't happen on Vercel)
 //
-// VERCEL_URL must win for every preview deployment, full stop. SHOPIFY_APP_URL
-// and ASSET_BASE_URL both point at the shared staging alias
-// (naia-stylist-staging.vercel.app) — if a feature-branch preview's HTML
-// loaded its JS bundles from that shared host instead of its own, the client
-// router would hydrate against a DIFFERENT deployment's route manifest.
-// A route that exists on this branch but not on whatever is currently live
-// on the shared alias (e.g. /admin/naia/customers/:id/styleme/:sessionId)
-// would then be unrecognised by that mismatched client bundle, which can
-// bounce the browser back to that other build's root — the exact
-// "unique preview redirects to shared staging" bug this ordering prevents.
-// ASSET_BASE_URL exists only for the one deployment the shared alias is
-// actually pinned to, whose own assets might sit behind Vercel SSO — never
-// for a disposable feature-branch preview that already has its own
-// (unprotected) VERCEL_URL to serve from.
-const assetBase = (() => {
-  if (process.env.VERCEL_ENV === "production") {
-    return process.env.SHOPIFY_APP_URL ? `${process.env.SHOPIFY_APP_URL}/` : "/";
+// VERCEL_URL wins for every ORDINARY preview deployment, full stop — a
+// disposable feature-branch preview that loaded its JS bundles from the
+// shared staging alias instead of its own host would hydrate the client
+// router against a DIFFERENT deployment's route manifest. A route that
+// exists on this branch but not on whatever is currently live on the shared
+// alias (e.g. /admin/naia/customers/:id/styleme/:sessionId) would then be
+// unrecognised by that mismatched client bundle, which can bounce the
+// browser back to that other build's root — the exact "unique preview
+// redirects to shared staging" bug this ordering prevents.
+//
+// ASSET_BASE_URL is the one deliberate exception, and must be checked BEFORE
+// VERCEL_URL, not after (2026-10-20) — VERCEL_URL is set on every Vercel
+// deployment without exception, so a check ordered the other way around
+// means ASSET_BASE_URL can never actually take effect. It exists only for
+// the one preview deployment the shared alias is deliberately pinned to
+// (set as a branch-scoped Preview env var for that branch only) — that
+// deployment's own unique host sits behind Vercel Authentication, so its
+// assets must instead be served from the alias visitors are actually on.
+// Every other, disposable feature-branch preview never sets this and keeps
+// the ordinary VERCEL_URL isolation above.
+export function resolveAssetBase(env) {
+  if (env.VERCEL_ENV === "production") {
+    return env.SHOPIFY_APP_URL ? `${env.SHOPIFY_APP_URL}/` : "/";
   }
-  if (process.env.VERCEL_ENV === "preview" && process.env.VERCEL_URL) {
-    return `https://${process.env.VERCEL_URL}/`;
+  if (env.VERCEL_ENV === "preview" && env.ASSET_BASE_URL) {
+    return `${env.ASSET_BASE_URL}/`;
   }
-  if (process.env.ASSET_BASE_URL) {
-    return `${process.env.ASSET_BASE_URL}/`;
+  if (env.VERCEL_ENV === "preview" && env.VERCEL_URL) {
+    return `https://${env.VERCEL_URL}/`;
   }
-  return process.env.SHOPIFY_APP_URL
-    ? `${process.env.SHOPIFY_APP_URL}/`
+  return env.SHOPIFY_APP_URL
+    ? `${env.SHOPIFY_APP_URL}/`
     : "/";
-})();
+}
+
+const assetBase = resolveAssetBase(process.env);
 
 export default defineConfig({
   base: assetBase,
