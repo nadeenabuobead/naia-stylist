@@ -285,7 +285,54 @@ describe("§F — shop-ownership guard: Shop A cannot delete Shop B's data", () 
     expect(mockErase()).not.toHaveBeenCalled();
   });
 
-  it("F5 — the legitimate, matching-shop path is unaffected: customers/redact still erases when ownership passes (same as §C1)", async () => {
+  it("F5a — customers/data_request: an authenticated request for a different shop is refused with 500, no export compiled, nothing exposed", async () => {
+    mockVerify().mockResolvedValueOnce({
+      ok: true,
+      shop: "shop-b.myshopify.com",
+      topic: "customers/data_request",
+      webhookId: "wh-cross-5",
+      payload: { customer: { id: "shopify-customer-789" }, shop_domain: "shop-b.myshopify.com" },
+    });
+    mockOwnership().mockReturnValueOnce({ ok: false, reason: "shop_mismatch" });
+
+    const { action } = await import("./webhooks.customers.data_request.tsx");
+    const res = await action({ request: makeRequest() } as any);
+
+    expect(res.status).toBe(500);
+    expect(mockCustomerFindUnique()).not.toHaveBeenCalled();
+    expect(mockCompile()).not.toHaveBeenCalled();
+  });
+
+  it("F5b — customers/data_request: a missing shop header cannot trigger a compile/export", async () => {
+    mockVerify().mockResolvedValueOnce({
+      ok: true, shop: null, topic: "customers/data_request", webhookId: "wh-cross-6",
+      payload: { customer: { id: "shopify-customer-789" } },
+    });
+    mockOwnership().mockReturnValueOnce({ ok: false, reason: "missing_shop_header" });
+
+    const { action } = await import("./webhooks.customers.data_request.tsx");
+    const res = await action({ request: makeRequest() } as any);
+
+    expect(res.status).toBe(500);
+    expect(mockCompile()).not.toHaveBeenCalled();
+  });
+
+  it("F5c — customers/data_request: an unconfigured expected-shop fails closed rather than exposing data by default", async () => {
+    mockVerify().mockResolvedValueOnce({
+      ok: true, shop: "test-shop.myshopify.com", topic: "customers/data_request", webhookId: "wh-cross-7",
+      payload: { customer: { id: "shopify-customer-789" } },
+    });
+    mockOwnership().mockReturnValueOnce({ ok: false, reason: "missing_expected_shop_config" });
+
+    const { action } = await import("./webhooks.customers.data_request.tsx");
+    const res = await action({ request: makeRequest() } as any);
+
+    expect(res.status).toBe(500);
+    expect(mockCustomerFindUnique()).not.toHaveBeenCalled();
+    expect(mockCompile()).not.toHaveBeenCalled();
+  });
+
+  it("F6 — the legitimate, matching-shop path is unaffected: customers/redact still erases when ownership passes (same as §C1)", async () => {
     mockVerify().mockResolvedValueOnce({
       ok: true, shop: OWNED_SHOP, topic: "customers/redact", webhookId: "wh-legit",
       payload: { customer: { id: "shopify-customer-456" } },

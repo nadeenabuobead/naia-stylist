@@ -10,6 +10,7 @@
 // compiled," not "request fulfilled end-to-end."
 
 import { verifyShopifyWebhookRequest } from "../lib/webhook-hmac.server";
+import { verifyShopOwnership } from "../lib/webhook-shop-guard.server";
 import { compileCustomerExport } from "../lib/customer-privacy.server";
 import prisma from "../db.server";
 
@@ -24,6 +25,22 @@ export const action = async ({ request }: { request: Request }) => {
     return new Response("Unauthorized", { status: 401 });
   }
   const { shop, topic, payload } = verified;
+
+  // Shop-ownership guard (2026-10-20) — see webhook-shop-guard.server.ts.
+  // This isn't a deletion risk like the two redact handlers, but the same
+  // ID-collision reasoning applies to exposure: shopifyCustomerId is
+  // unique per row but not scoped to a shop, so without this check a
+  // second shop installation could compile and log a size/shape summary
+  // for the wrong shop's customer on an ID collision. Verified against the
+  // one shop this app's login flow is already locked to, not assumed.
+  const ownership = verifyShopOwnership(shop, payload);
+  if (!ownership.ok) {
+    console.error(
+      `customers/data_request REFUSED for header shop "${shop}": ${ownership.reason}. ` +
+      `Not compiling any export — this must be investigated before retrying.`,
+    );
+    return new Response("Shop ownership could not be established", { status: 500 });
+  }
 
   const shopifyCustomerId = String((payload as any)?.customer?.id ?? "");
   console.log(`Received ${topic} webhook for ${shop} — customer present: ${Boolean(shopifyCustomerId)}`);
