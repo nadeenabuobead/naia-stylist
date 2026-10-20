@@ -134,8 +134,14 @@ describe("WIF-B — what the click established is preserved", () => {
       "the handoff has no business touching Passport data");
   });
 
-  it("WIF-B.6 ownership is still re-verified server-side", () => {
-    assert.match(route(), /resolveClosetAnchor\(naiaCustomer\.id, closetItemId\)/);
+  it("WIF-B.6 ownership is still re-verified server-side — now for every submitted garment, not just one", () => {
+    // Was resolveClosetAnchor(naiaCustomer.id, closetItemId) against a single id.
+    // The multi-garment handoff (see wi-multi-garment-handoff.test.ts) loops this
+    // same ownership check over every id a combination submits, failing the whole
+    // set closed on the first one that doesn't resolve.
+    const src = route();
+    assert.match(src, /for \(const id of closetItemIds\)/, "must loop over every submitted id");
+    assert.match(src, /resolveClosetAnchor\(naiaCustomer\.id, id\)/, "each one is still ownership-checked server-side");
   });
 });
 

@@ -166,7 +166,11 @@ describe("AR-D — auto-anchor behaviour is unchanged", () => {
   test("AR-D.1 auto still selects, stamps AUTO, and goes to the result", () => {
     const text = src();
     const method = text.slice(text.indexOf('intent === "set-anchor-method"'));
-    const block = method.slice(0, 2600);
+    // Window widened again: an auto-selected anchor is never part of a WI
+    // combination, so this branch now also drops any stale
+    // styleMeClosetCompanionIds before redirecting — one more line between the
+    // AUTO stamp and the redirect this block already asserts.
+    const block = method.slice(0, 2700);
     assert.ok(/autoSelectClosetAnchor\(/.test(block));
     assert.ok(/session\.set\("styleMeAnchorProvenance", "AUTO"\)/.test(block));
     assert.ok(/redirect\("\/style-me\/result"/.test(block));

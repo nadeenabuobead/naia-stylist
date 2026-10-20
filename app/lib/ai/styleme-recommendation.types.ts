@@ -244,6 +244,13 @@ export interface StyleMeEngineInput {
   // categories (Hair, Beauty/Makeup) are appropriate to generate.
   // Has ZERO influence on item scoring, candidate selection, ranking, formality, or occasion.
   gender?: string | null;
+  // Closet item IDs from a Wardrobe Intelligence combination that must survive into the
+  // outfit alongside `anchor` — never swapped, never silently dropped. Each one runs
+  // through the exact same evaluateAnchorEligibility gate the anchor itself does (see
+  // buildNaiaOutfitCandidates); a single ineligible companion invalidates the whole
+  // candidate set rather than being silently excluded. Closet mode only (mode: "naia",
+  // anchor.type === "closet") — the WI handoff never sets a NADINE anchor alongside these.
+  closetCompanionIds?: string[];
 }
 
 // ─── Normalized anchors ───────────────────────────────────────────────────────

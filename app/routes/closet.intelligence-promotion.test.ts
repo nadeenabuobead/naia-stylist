@@ -169,13 +169,19 @@ describe("CIP-G — the moodboard combination handoff is a working form, not a l
     assert.doesNotMatch(read(LIVE), /<a className="wip-link" href="\/style-me">/);
   });
 
-  test("CIP-G.2 it posts to /api/wi-style-this with a real closetItemId from the look", () => {
+  test("CIP-G.2 it posts to /api/wi-style-this with EVERY garment id from the look, not just the first", () => {
+    // Was <input ... value={look.garmentIds[0]} /> — only the first garment of the
+    // combination ever reached StyleMe. Fixed as part of the multi-garment handoff
+    // (see wi-multi-garment-handoff.test.ts for the engine-side preservation proof);
+    // this test now pins that every id is submitted, not just one.
     const src = read(LIVE);
     const idx = src.indexOf("A real combination from what you already own.");
     assert.notEqual(idx, -1, "expected the moodboard dialog to still exist");
     const scope = src.slice(idx, src.indexOf("</DialogShell>", idx));
     assert.match(scope, /<Form method="post" action="\/api\/wi-style-this">/);
-    assert.match(scope, /<input type="hidden" name="closetItemId" value=\{look\.garmentIds\[0\]\}/);
+    assert.doesNotMatch(scope, /value=\{look\.garmentIds\[0\]\}/, "must not regress to submitting only the first garment");
+    assert.match(scope, /\{look\.garmentIds\.map\(/, "every garment id must be submitted");
+    assert.match(scope, /<input key=\{id\} type="hidden" name="closetItemId" value=\{id\} \/>/);
     assert.match(scope, /type="submit"/, "decorative text would be a regression, not a fix");
   });
 

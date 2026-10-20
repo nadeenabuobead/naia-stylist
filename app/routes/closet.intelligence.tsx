@@ -30,7 +30,7 @@
 // Pinned by app/routes/closet.intelligence-promotion.test.ts.
 
 import { useState, useEffect, useRef } from "react";
-import { Link, useLoaderData, Form, useNavigation } from "react-router";
+import { Link, useLoaderData, Form, useNavigation, useSearchParams } from "react-router";
 import { data, redirect, type LoaderFunctionArgs, type ActionFunctionArgs, type LinksFunction } from "react-router";
 import prisma from "../db.server";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
@@ -721,6 +721,18 @@ export default function WardrobeIntelligencePage() {
   const saving = navigation.state !== "idle";
   const model = page as WardrobePage;
 
+  // Honest response for a "Style this look in StyleMe" handoff that failed
+  // server-side (invalid/unowned garment, or two garments claiming the same
+  // outfit slot) — see api.wi-style-this.tsx. A bare redirect with no visible
+  // explanation would read as a broken button.
+  const [searchParams] = useSearchParams();
+  const wiStyleError = searchParams.get("wiStyleError");
+  const WI_STYLE_ERROR_MESSAGE: Record<string, string> = {
+    "slot-conflict": "Those pieces can't be styled together — two of them fill the same spot in an outfit.",
+    "invalid-garment": "One of those pieces couldn't be found in your Closet. Try again from Wardrobe Intelligence.",
+    "no-selection": "Nothing was selected to style. Try again from Wardrobe Intelligence.",
+  };
+
   // Found live on Persona A: clicking "Change"/"Update" opens the question
   // panel, but nothing ever closed it again after a fresh answer was
   // submitted — the compact status line and the full question both stayed
@@ -909,11 +921,13 @@ export default function WardrobeIntelligencePage() {
               never shoes or finishing pieces, so it was the one combination dialog
               NOT saying so. Found during QA. */}
           <p className="wip-dialog-note">Add shoes and finishing pieces to complete the look.</p>
-          {/* Same real handoff as the single-piece CTA below — a combination has no
-              separate multi-item preload in StyleMe today, so the look's first (anchor)
-              piece is pre-selected and StyleMe builds the rest of the look around it. */}
+          {/* Every garment in the combination is submitted — api.wi-style-this.tsx
+              resolves, ownership-checks and eligibility-gates each one, preserving
+              all of them through the StyleMe session rather than just the first. */}
           <Form method="post" action="/api/wi-style-this">
-            <input type="hidden" name="closetItemId" value={look.garmentIds[0]} />
+            {look.garmentIds.map((id) => (
+              <input key={id} type="hidden" name="closetItemId" value={id} />
+            ))}
             <button type="submit" className="wip-link wi-style-cta">
               Style this look in StyleMe →
             </button>
@@ -999,6 +1013,11 @@ export default function WardrobeIntelligencePage() {
       <div className="wip-app">
         <main className="wip-main">
           <p className="wip-eyebrow">My nAia / Wardrobe Intelligence</p>
+          {wiStyleError && (
+            <p className="wip-style-error" role="alert">
+              {WI_STYLE_ERROR_MESSAGE[wiStyleError] ?? "That combination couldn't be sent to StyleMe. Try again."}
+            </p>
+          )}
           <div className="wip-hero">
             <header className="wip-header">
               <h1 className="sp-shell-title">Your wardrobe, <em className="sp-shell-accent">understood.</em></h1>
@@ -1580,6 +1599,7 @@ const css = `
   .wip-app{max-width:1180px;margin:0 auto}
   .wip-main{padding:8px 0 24px}
   .wip-eyebrow{font-family:var(--naia-ff-ui);font-size:9px;letter-spacing:2.5px;text-transform:uppercase;color:rgba(40,21,12,0.5);margin:0 0 14px}
+  .wip-style-error{font-family:var(--naia-ff-ui);font-size:12.5px;color:var(--naia-accent);background:rgba(107,29,38,0.07);border:1px solid rgba(107,29,38,0.18);border-radius:6px;padding:10px 14px;margin:0 0 18px}
 
   /* Hero: headline, full width, dominant — summary below it, then the 3
      headline cards below that as a clearly subordinate summary layer. Never

@@ -5,7 +5,7 @@ export function meta() {
   return [{ title: "Build the look around | nAia Style Me" }];
 }
 import { useEffect, useRef, useState } from "react";
-import { commitSession, getSession } from "~/lib/session.server";
+import { commitSession, getSession, parseClosetCompanionIds } from "~/lib/session.server";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { readNadineHandoff, CANONICAL_STYLEME_ENTRY,
   isNadineEntryOrigin,
@@ -80,6 +80,9 @@ type LockedAnchorItem = {
   imageUrl: string | null;
 };
 
+const toLockedAnchorItem = (item: { id: string; name: string | null; imageUrl: string | null }): LockedAnchorItem =>
+  ({ id: item.id, name: item.name, imageUrl: item.imageUrl });
+
 // ── Loader ────────────────────────────────────────────────────────────────────
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -124,6 +127,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     session.unset("styleMeClosetAnchorId");
     session.unset("styleMeAnchorProvenance");
     session.unset("styleMeAnchorMode");
+    session.unset("styleMeClosetCompanionIds");
     return redirect("/style-me/result", {
       headers: { "Set-Cookie": await commitSession(session) },
     });
@@ -200,10 +204,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
       const outcome = resolveLockedAnchorOutcome(eligibility, provenance);
 
       if (outcome.kind === "eligible") {
+        // Display every required WI companion alongside the anchor — "Styling
+        // around" must show the complete selected combination, not just one
+        // piece of it. Re-resolved (not trusted from the cookie id list alone)
+        // the same way the anchor itself is, directly above.
+        const companionIds = parseClosetCompanionIds(session.get("styleMeClosetCompanionIds"));
+        const resolvedCompanions = (
+          await Promise.all(companionIds.map((id) => resolveClosetAnchor(naiaCustomer.id, id)))
+        ).filter((c): c is NonNullable<typeof c> => c !== null);
         return data({
           step: "anchor-locked" as const,
           source,
-          item: { id: resolved.id, name: resolved.name, imageUrl: resolved.imageUrl } as LockedAnchorItem,
+          item: toLockedAnchorItem(resolved),
+          companions: resolvedCompanions.map(toLockedAnchorItem),
         });
       }
       if (outcome.kind === "incompatible") {
@@ -221,6 +234,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     session.unset("styleMeAnchorLocked");
     session.unset("styleMeClosetAnchorId");
     session.unset("styleMeAnchorProvenance");
+    session.unset("styleMeClosetCompanionIds");
     return redirect("/style-me/source", {
       headers: { "Set-Cookie": await commitSession(session) },
     });
@@ -259,6 +273,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
         session.set("styleMeAnchorProvenance", "MANUAL");
         session.unset("styleMePendingClosetAnchorId");
         session.unset("styleMeAnchorMode");
+        // A manually re-eligible pick is not a WI combination — never inherit stale
+        // companions from whatever combination (if any) preceded it.
+        session.unset("styleMeClosetCompanionIds");
         return redirect("/style-me/result", {
           headers: { "Set-Cookie": await commitSession(session) },
         });
@@ -341,6 +358,7 @@ export async function action({ request }: ActionFunctionArgs) {
       session.unset("styleMeNadineAnchorHandle");
       session.unset("styleMeClosetAnchorId");
     session.unset("styleMeAnchorProvenance");
+    session.unset("styleMeClosetCompanionIds");
       return redirect("/style-me/source", {
         headers: { "Set-Cookie": await commitSession(session) },
       });
@@ -364,6 +382,7 @@ export async function action({ request }: ActionFunctionArgs) {
     session.unset("styleMeAnchorMode");
     session.unset("styleMeSourcePrev");
     session.unset("styleMeAnchorMethodPrev");
+    session.unset("styleMeClosetCompanionIds");
 
     // NADINE-only: engine auto-selects the best piece from session signals.
     if (source === "naia-piece") {
@@ -429,6 +448,9 @@ export async function action({ request }: ActionFunctionArgs) {
       session.set("styleMeClosetAnchorId", selected.id);
       // nAia chose this garment, so a reroll may move the structural centre.
       session.set("styleMeAnchorProvenance", "AUTO");
+      // An auto-selected anchor is never part of a WI combination — drop any
+      // stale companions from an earlier session rather than inherit them.
+      session.unset("styleMeClosetCompanionIds");
       return redirect("/style-me/result", {
         headers: { "Set-Cookie": await commitSession(session) },
       });
@@ -460,6 +482,11 @@ export async function action({ request }: ActionFunctionArgs) {
     // anchor-incompatible screen for a pending (not yet eligible) piece rather than a
     // locked one — same "choose a different piece" intent either way.
     session.unset("styleMePendingClosetAnchorId");
+    // The customer is explicitly abandoning the WI combination (if there was one) to
+    // choose a different piece — the one case where dropping companions is not just
+    // safe but required: this IS "the customer explicitly chooses to modify the
+    // original selection."
+    session.unset("styleMeClosetCompanionIds");
     session.set("styleMeAnchorMode", "manual");
     return redirect("/style-me/source", {
       headers: { "Set-Cookie": await commitSession(session) },
@@ -528,6 +555,8 @@ export async function action({ request }: ActionFunctionArgs) {
     // A stale rejected pick from earlier in this same flow must not outlive the real,
     // now-validated anchor it was superseded by.
     session.unset("styleMePendingClosetAnchorId");
+    // A manual picker selection is not a WI combination — drop any stale companions.
+    session.unset("styleMeClosetCompanionIds");
     return redirect("/style-me/result", {
       headers: { "Set-Cookie": await commitSession(session) },
     });
@@ -544,6 +573,7 @@ export async function action({ request }: ActionFunctionArgs) {
         session.unset("styleMeAnchorMode");
         session.unset("styleMeClosetAnchorId");
     session.unset("styleMeAnchorProvenance");
+    session.unset("styleMeClosetCompanionIds");
         return redirect("/style-me/occasion", {
           headers: { "Set-Cookie": await commitSession(session) },
         });
@@ -557,6 +587,7 @@ export async function action({ request }: ActionFunctionArgs) {
       session.unset("styleMeAnchorMode");
       session.unset("styleMeClosetAnchorId");
     session.unset("styleMeAnchorProvenance");
+    session.unset("styleMeClosetCompanionIds");
     } else if (from === "closet-anchor") {
       // Save anchor method for hydration before clearing (so AnchorMethodStep restores selection).
       const prevAnchorMode = session.get("styleMeAnchorMode") as string | undefined;
@@ -661,7 +692,10 @@ export default function StyleMeSource() {
       <div className="sm-inner sm-inner--wide">
         {step === "source" && <SourceStep />}
         {step === "anchor-locked" && (
-          <AnchorLockedStep item={(loaderData as { item: LockedAnchorItem }).item} />
+          <AnchorLockedStep
+            item={(loaderData as { item: LockedAnchorItem }).item}
+            companions={(loaderData as { companions?: LockedAnchorItem[] }).companions}
+          />
         )}
         {step === "anchor-incompatible" && (
           <AnchorIncompatibleStep
@@ -740,22 +774,28 @@ function SourceStep() {
 // Shows the pre-selected Closet piece instead of asking the customer to choose
 // it again. "Change piece" drops the lock and opens the normal manual picker.
 
-function AnchorLockedStep({ item }: { item: LockedAnchorItem }) {
+function AnchorLockedStep({ item, companions }: { item: LockedAnchorItem; companions?: LockedAnchorItem[] }) {
+  const allPieces = [item, ...(companions ?? [])];
+  const isCombination = allPieces.length > 1;
   return (
     <>
       <p className="sm-step-label">My Closet</p>
-      <h1 className="sm-heading">Styling around</h1>
-      <div className="sm-anchor-card" style={{ marginBottom: "24px" }}>
-        {item.imageUrl && (
-          <img
-            src={item.imageUrl}
-            alt={item.name ?? "Your closet piece"}
-            style={{ width: "100%", maxWidth: "230px", height: "auto", objectFit: "contain", borderRadius: "4px", marginBottom: "10px", background: "var(--naia-warm)" }}
-          />
-        )}
-        <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "16px", color: "var(--naia-ink)" }}>
-          {item.name ?? "This piece"}
-        </p>
+      <h1 className="sm-heading">{isCombination ? "Styling this combination" : "Styling around"}</h1>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "16px", marginBottom: "24px" }}>
+        {allPieces.map((piece) => (
+          <div key={piece.id} className="sm-anchor-card" style={{ flex: isCombination ? "0 1 140px" : "1 1 auto" }}>
+            {piece.imageUrl && (
+              <img
+                src={piece.imageUrl}
+                alt={piece.name ?? "Your closet piece"}
+                style={{ width: "100%", maxWidth: "230px", height: "auto", objectFit: "contain", borderRadius: "4px", marginBottom: "10px", background: "var(--naia-warm)" }}
+              />
+            )}
+            <p style={{ fontFamily: "var(--naia-ff-body)", fontSize: "16px", color: "var(--naia-ink)" }}>
+              {piece.name ?? "This piece"}
+            </p>
+          </div>
+        ))}
       </div>
       <Form method="post">
         <input type="hidden" name="_action" value="confirm-anchor" />
@@ -765,7 +805,9 @@ function AnchorLockedStep({ item }: { item: LockedAnchorItem }) {
       </Form>
       <Form method="post" style={{ marginTop: "8px" }}>
         <input type="hidden" name="_action" value="change-piece" />
-        <button type="submit" className="sm-btn-back">Change piece</button>
+        <button type="submit" className="sm-btn-back">
+          {isCombination ? "Choose a different piece" : "Change piece"}
+        </button>
       </Form>
     </>
   );

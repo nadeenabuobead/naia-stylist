@@ -15,7 +15,7 @@ import {
 } from "~/lib/cloudinary-admin.server";
 import { loadNaiaModel, computeModelReadinessFromRecord } from "~/lib/ai/my-naia-model.server";
 import { prisma } from "~/lib/prisma.server";
-import { getSession, commitSession, clearStyleMeSession } from "~/lib/session.server";
+import { getSession, commitSession, clearStyleMeSession, parseClosetCompanionIds } from "~/lib/session.server";
 import { CANONICAL_STYLEME_ENTRY } from "~/lib/styleme/handoff";
 import { readPendingSave, writePendingSave, clearPendingSave } from "~/lib/pending-save.server";
 import {
@@ -631,6 +631,11 @@ export async function action({ request }: ActionFunctionArgs) {
       // generation on an expired cookie keeps the context it started in.
       const styleMeMode = resolveStyleMeMode(session.styleMeMode, cookieSession.get("styleMeMode"));
       const occasionDisplayLabel = (cookieSession.get("styleMeOccasionDisplayLabel") as string | undefined) ?? null;
+      // See StyleMeEngineInput.closetCompanionIds. Read directly from the cookie, same as
+      // styleMeMode/occasionDisplayLabel above — companions are fixed at the WI handoff and
+      // never change mid-questionnaire, so no form-field roundtrip is needed. A malformed
+      // value fails closed to an empty list rather than ever throwing mid-generation.
+      const closetCompanionIds = parseClosetCompanionIds(cookieSession.get("styleMeClosetCompanionIds"));
 
       const engineInput = buildEngineInput({
         moods,
@@ -657,6 +662,7 @@ export async function action({ request }: ActionFunctionArgs) {
         anchor,
         // Finishing/presentation context only — zero engine scoring.
         gender: naiaCustomer?.onboardingProfile?.gender ?? null,
+        closetCompanionIds,
       });
 
       const loadClosetItems = naiaCustomer
@@ -745,6 +751,19 @@ export async function action({ request }: ActionFunctionArgs) {
       // cookie is only a fallback for sessions written before the column existed.
       const regenMode = resolveStyleMeMode(session.styleMeMode, regenCookieSession.get("styleMeMode"));
       const regenOccasionDisplayLabel = (regenCookieSession.get("styleMeOccasionDisplayLabel") as string | undefined) ?? null;
+      // See StyleMeEngineInput.closetCompanionIds. Unlike the anchor (session.closetAnchorId,
+      // a real DB column read above at line ~735, so New Look survives an expired cookie or a
+      // different device), there is no persisted StylingSession column for companions — read
+      // from the cookie only. Concretely: New Look keeps companions for the lifetime of the
+      // SAME cookie that did the original WI handoff, but a regenerate on an expired/cleared
+      // cookie, or from a different device/browser, resolves the correct anchor from the DB
+      // yet silently styles around it alone, dropping the companions the customer originally
+      // selected. The already-generated, PERSISTED suggestion is unaffected by this — its
+      // items were written to the OutfitSuggestion.items table at generation time and do not
+      // depend on the cookie to be displayed later. Flagged as a genuine, deferred DB
+      // dependency (no migration run per explicit instruction), not silently treated as
+      // equivalent to the persisted brief's guarantee.
+      const regenClosetCompanionIds = parseClosetCompanionIds(regenCookieSession.get("styleMeClosetCompanionIds"));
 
       // Collect handles from the most-recent suggestion so the engine applies a
       // diversity penalty and avoids returning the exact same outfit.
@@ -884,6 +903,7 @@ export async function action({ request }: ActionFunctionArgs) {
         }),
         // Finishing/presentation context only — zero engine scoring.
         gender: naiaCustomer?.onboardingProfile?.gender ?? null,
+        closetCompanionIds: regenClosetCompanionIds,
       });
 
       const regenLoadClosetItems = naiaCustomer
