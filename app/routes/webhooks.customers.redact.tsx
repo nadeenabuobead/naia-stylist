@@ -5,12 +5,21 @@
 // inactive accounts). Calls the same eraseCustomerData used by the
 // self-service Settings deletion flow — one implementation, two entry points.
 
-import { authenticate } from "../shopify.server";
+import { verifyShopifyWebhookRequest } from "../lib/webhook-hmac.server";
 import { eraseCustomerData } from "../lib/customer-privacy.server";
 import prisma from "../db.server";
 
 export const action = async ({ request }: { request: Request }) => {
-  const { shop, topic, payload } = await authenticate.webhook(request);
+  // Manual HMAC verification (2026-10-20) — see webhook-hmac.server.ts.
+  // Session-independent by design: a shop's offline session is routinely
+  // gone by the time this topic fires (Shopify can withhold delivery up
+  // to six months), so authenticate.webhook()'s session lookup was never
+  // the right mechanism here, not just one blocked by a missing table.
+  const verified = await verifyShopifyWebhookRequest(request);
+  if (!verified.ok) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+  const { shop, topic, payload } = verified;
 
   const shopifyCustomerId = String((payload as any)?.customer?.id ?? "");
   console.log(`Received ${topic} webhook for ${shop} — customer present: ${Boolean(shopifyCustomerId)}`);

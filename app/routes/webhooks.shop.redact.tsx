@@ -15,12 +15,20 @@
 // shop, if ever tracked) must be added before that point. Flagging this
 // loudly here rather than letting it become a silent landmine.
 
-import { authenticate } from "../shopify.server";
+import { verifyShopifyWebhookRequest } from "../lib/webhook-hmac.server";
 import { eraseCustomerData } from "../lib/customer-privacy.server";
 import prisma from "../db.server";
 
 export const action = async ({ request }: { request: Request }) => {
-  const { shop, topic } = await authenticate.webhook(request);
+  // Manual HMAC verification (2026-10-20) — see webhook-hmac.server.ts.
+  // Fires only AFTER a shop uninstalls, so any offline session for it is
+  // already gone by definition — authenticate.webhook()'s session lookup
+  // could never succeed here even with the missing table fixed.
+  const verified = await verifyShopifyWebhookRequest(request);
+  if (!verified.ok) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+  const { shop, topic } = verified;
   console.log(`Received ${topic} webhook for ${shop}`);
 
   const customers = await prisma.customer.findMany({ select: { id: true } });

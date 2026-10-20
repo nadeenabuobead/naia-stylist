@@ -9,14 +9,21 @@
 // architecture report). Treat a successful 200 here as "request logged and
 // compiled," not "request fulfilled end-to-end."
 
-import { authenticate } from "../shopify.server";
+import { verifyShopifyWebhookRequest } from "../lib/webhook-hmac.server";
 import { compileCustomerExport } from "../lib/customer-privacy.server";
 import prisma from "../db.server";
 
 export const action = async ({ request }: { request: Request }) => {
-  // Throws (caught by the Shopify SDK's own handling) on a missing/invalid
-  // HMAC signature — this IS the signature verification step.
-  const { shop, topic, payload } = await authenticate.webhook(request);
+  // Manual HMAC verification (2026-10-20) — see webhook-hmac.server.ts for
+  // why this handler no longer uses the SDK's authenticate.webhook(), which
+  // requires a `session` table this app's custom auth architecture never
+  // creates. The HMAC check itself is unchanged: Shopify's documented
+  // base64(HMAC-SHA256(raw_body, client_secret)) comparison.
+  const verified = await verifyShopifyWebhookRequest(request);
+  if (!verified.ok) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+  const { shop, topic, payload } = verified;
 
   const shopifyCustomerId = String((payload as any)?.customer?.id ?? "");
   console.log(`Received ${topic} webhook for ${shop} — customer present: ${Boolean(shopifyCustomerId)}`);
