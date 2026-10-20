@@ -2,7 +2,7 @@
 
 client_id = "50b4046fe497fe8ff5d5dbda8ae243a0"
 name = "nAia Stylist — Staging"
-application_url = "https://naia-stylist-staging-nadeenabuobeads-projects.vercel.app"
+application_url = "https://naia-stylist-staging.vercel.app/app"
 embedded = true
 
 [webhooks]
@@ -19,15 +19,15 @@ api_version = "2026-04"
   # comment in shopify.app.toml for why.
   #
   # Absolute HTTPS uri, not a path relative to application_url (2026-10-20):
-  # application_url above is naia-stylist-staging-nadeenabuobeads-projects.
-  # vercel.app, Vercel's auto-managed project domain — it sits behind Vercel
-  # Authentication, unlike naia-stylist-staging.vercel.app (a verified,
-  # exempt custom domain). A relative uri would resolve against the former
-  # and Shopify could never deliver to it. Shopify's own webhook uri field
-  # accepts a full HTTPS URL independent of application_url (confirmed
-  # against shopify.dev's webhook security-check docs) — pointing it
-  # directly at the exempt alias here sidesteps the non-exempt domain
-  # without touching application_url, OAuth redirects, or scopes.
+  # kept absolute even after correcting application_url below to the
+  # exempt alias (2026-10-20, same day) — this file's application_url,
+  # [auth].redirect_urls and [app_proxy].url had all silently drifted to
+  # Vercel's auto-managed project domain (protected by Vercel
+  # Authentication) while the live Shopify version had already moved on to
+  # the exempt naia-stylist-staging.vercel.app; comparing this file against
+  # Shopify's own active version caught it. An absolute webhook uri has no
+  # dependency on application_url staying correct, so it stays this way as
+  # a second, independent safeguard against the same drift recurring.
   [[webhooks.subscriptions]]
   compliance_topics = [ "customers/data_request" ]
   uri = "https://naia-stylist-staging.vercel.app/webhooks/customers/data_request"
@@ -47,10 +47,10 @@ optional_scopes = [ ]
 use_legacy_install_flow = false
 
 [auth]
-redirect_urls = [ "https://naia-stylist-staging-nadeenabuobeads-projects.vercel.app/auth/callback" ]
+redirect_urls = [ "https://naia-stylist-staging.vercel.app/auth/callback" ]
 
 [app_proxy]
-url = "https://naia-stylist-staging-nadeenabuobeads-projects.vercel.app"
+url = "https://naia-stylist-staging.vercel.app"
 subpath = "naia-stylist-staging"
 prefix = "apps"
 
