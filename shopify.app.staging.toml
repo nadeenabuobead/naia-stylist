@@ -17,17 +17,28 @@ api_version = "2026-04"
   #
   # These three MUST use `compliance_topics`, not `topics` — see the matching
   # comment in shopify.app.toml for why.
+  #
+  # Absolute HTTPS uri, not a path relative to application_url (2026-10-20):
+  # application_url above is naia-stylist-staging-nadeenabuobeads-projects.
+  # vercel.app, Vercel's auto-managed project domain — it sits behind Vercel
+  # Authentication, unlike naia-stylist-staging.vercel.app (a verified,
+  # exempt custom domain). A relative uri would resolve against the former
+  # and Shopify could never deliver to it. Shopify's own webhook uri field
+  # accepts a full HTTPS URL independent of application_url (confirmed
+  # against shopify.dev's webhook security-check docs) — pointing it
+  # directly at the exempt alias here sidesteps the non-exempt domain
+  # without touching application_url, OAuth redirects, or scopes.
   [[webhooks.subscriptions]]
   compliance_topics = [ "customers/data_request" ]
-  uri = "/webhooks/customers/data_request"
+  uri = "https://naia-stylist-staging.vercel.app/webhooks/customers/data_request"
 
   [[webhooks.subscriptions]]
   compliance_topics = [ "customers/redact" ]
-  uri = "/webhooks/customers/redact"
+  uri = "https://naia-stylist-staging.vercel.app/webhooks/customers/redact"
 
   [[webhooks.subscriptions]]
   compliance_topics = [ "shop/redact" ]
-  uri = "/webhooks/shop/redact"
+  uri = "https://naia-stylist-staging.vercel.app/webhooks/shop/redact"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
