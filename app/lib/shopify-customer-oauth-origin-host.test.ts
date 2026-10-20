@@ -354,6 +354,26 @@ describe("auth.shopify.login.tsx source wiring", () => {
     assert.match(loginSrc, /const finalReturnTarget = originHost \? `https:\/\/\$\{originHost\}\$\{returnTo\}` : returnTo;/);
     assert.match(loginSrc, /return redirect\(finalReturnTarget\);/);
   });
+
+  // ── Browser-binding nonce (2026-10-20) ──────────────────────────────────
+
+  it("mints a fresh browser-binding nonce before storing the PKCE session, never trusting one from the incoming request at this point", () => {
+    assert.match(loginSrc, /buildHandoffNonceCookie\(\)/);
+    assert.match(loginSrc, /session\.set\("origin_nonce_hash",\s*originNonceHash\)/);
+  });
+
+  it("validates origin_nonce_hash is a well-formed SHA-256 hex digest before storing it — anything else this app didn't generate is dropped", () => {
+    assert.match(loginSrc, /function validateNonceHash/);
+    assert.match(loginSrc, /\^\[a-f0-9\]\{64\}\$/i);
+  });
+
+  it("the secondary storefront-bounce branch also mints its own fresh nonce, rather than trusting one on the incoming URL — it is the only place that can set a cookie on this (the originating) host for this path", () => {
+    const branchStart = loginSrc.indexOf("if (shouldBounceToStorefront(");
+    const branchEnd = loginSrc.indexOf("return redirect(sfLogin.toString()");
+    const branchBody = loginSrc.slice(branchStart, branchEnd);
+    assert.match(branchBody, /buildHandoffNonceCookie\(\)/);
+    assert.match(branchBody, /sfLogin\.searchParams\.set\("origin_nonce_hash",\s*nonce\.nonceHash\)/);
+  });
 });
 
 // ── auth.shopify.callback.tsx — read back, re-validate, build absolute redirect ──
@@ -424,6 +444,23 @@ describe("auth.shopify.callback.tsx source wiring", () => {
   it("the no-origin-host path is completely untouched — still redirects straight to finalReturnTarget", () => {
     assert.match(callbackSrc, /return redirect\(finalReturnTarget, \{ headers \}\);/);
   });
+
+  // ── Browser-binding nonce (2026-10-20) ──────────────────────────────────
+
+  it("re-reads the nonce hash captured in auth.shopify.login and clears it from the PKCE session alongside the other one-shot fields", () => {
+    assert.match(callbackSrc, /const originNonceHash = session\.get\("origin_nonce_hash"\)/);
+    assert.match(callbackSrc, /session\.unset\("origin_nonce_hash"\)/);
+  });
+
+  it("refuses to build a handoff at all when the nonce hash never made it this far — never silently proceeds without browser-binding", () => {
+    const branchStart = callbackSrc.indexOf("if (originHost) {");
+    const nextLine = callbackSrc.slice(branchStart, branchStart + 200);
+    assert.match(nextLine, /if \(!originNonceHash\)/);
+  });
+
+  it("includes the nonce hash in the signed handoff payload", () => {
+    assert.match(callbackSrc, /handoff\.set\("handoff_origin_nonce_hash",\s*originNonceHash\)/);
+  });
 });
 
 // ── auth.shopify.handoff.tsx — the receiving end of the handoff ───────────
@@ -436,6 +473,12 @@ describe("auth.shopify.handoff.tsx — behavioral", () => {
     session.set("handoff_raw_token", overrides.rawToken ?? "synthetic-raw-token-abc123");
     session.set("handoff_origin_host", overrides.originHost ?? ORIGIN_HOST);
     session.set("handoff_expires_at", overrides.expiresAt ?? Date.now() + 60_000);
+    // A fixed placeholder hash — none of the remaining tests in this file
+    // test nonce verification itself (that lives in
+    // naia-session-handoff-single-use.test.ts); this only needs to be
+    // present so each test below still fails for the reason its own name
+    // describes, not incidentally because this field is missing.
+    session.set("handoff_origin_nonce_hash", overrides.originNonceHash ?? "a".repeat(64));
     const cookie = await commitSession(session);
     const eq = cookie.indexOf("=");
     const semi = cookie.indexOf(";");

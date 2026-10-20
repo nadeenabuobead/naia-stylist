@@ -9,12 +9,21 @@ import {
   shouldBounceToStorefront,
 } from "~/lib/shopify-customer-oauth.server";
 import { getSession, commitSession } from "~/lib/session.server";
-import { resolveNaiaSession }        from "~/lib/naia-session.server";
+import { resolveNaiaSession, buildHandoffNonceCookie } from "~/lib/naia-session.server";
+
+// A SHA-256 hex digest — the exact, fixed shape buildHandoffNonceCookie's
+// hash always produces. Anything else is not a value this app generated,
+// so there is no reason to carry it any further through the flow.
+function validateNonceHash(raw: string | null): string | null {
+  if (!raw) return null;
+  return /^[a-f0-9]{64}$/i.test(raw) ? raw : null;
+}
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const url        = new URL(request.url);
   const returnTo   = validateReturnTo(url.searchParams.get("return_to"));
   const originHost = validateOriginHost(url.searchParams.get("origin_host"));
+  const originNonceHash = validateNonceHash(url.searchParams.get("origin_nonce_hash"));
   // The absolute target to land on once auth succeeds — the originating
   // preview host + the relative return path, when one was captured and
   // validated; otherwise the existing relative-path behavior (stays on
@@ -43,8 +52,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const sfLogin = new URL(`https://${storefrontHost}/auth/shopify/login`);
     sfLogin.searchParams.set("return_to", returnTo);
     sfLogin.searchParams.set("_sf", "1");
-    if (originHost) sfLogin.searchParams.set("origin_host", originHost);
-    return redirect(sfLogin.toString(), 302);
+    const bounceHeaders = new Headers();
+    if (originHost) {
+      sfLogin.searchParams.set("origin_host", originHost);
+      // This request never carried _sf=1, so requireCurrentNaiaCustomer's
+      // own nonce-setting never ran for it — mint one fresh here, on this
+      // (the originating) host, before bouncing away. Any origin_nonce_hash
+      // already on the incoming URL is ignored and overwritten: the only
+      // legitimate source of that param is the cookie this exact branch is
+      // about to set, so one arriving without it is not trustworthy.
+      const nonce = buildHandoffNonceCookie();
+      bounceHeaders.append("Set-Cookie", nonce.cookieHeader);
+      sfLogin.searchParams.set("origin_nonce_hash", nonce.nonceHash);
+    }
+    return redirect(sfLogin.toString(), { status: 302, headers: bounceHeaders });
   }
 
   // If caller already has a valid nAia session skip OAuth entirely
@@ -70,6 +91,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   session.set("pkce_nonce",    pkce.nonce);
   session.set("return_to",     returnTo);
   if (originHost) session.set("origin_host", originHost);
+  if (originHost && originNonceHash) session.set("origin_nonce_hash", originNonceHash);
 
   // Return a 200 page with a JS redirect instead of a 302.
   // Mobile Safari's bounce-tracking mitigation can drop cookies set in a

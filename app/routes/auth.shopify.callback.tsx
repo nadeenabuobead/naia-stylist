@@ -33,6 +33,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // be this app's own preview host, the storefront host, or the canonical
   // app host, never an arbitrary external one.
   const originHost     = validateOriginHost(session.get("origin_host") as string | null);
+  // The browser-binding nonce hash captured in auth.shopify.login — carried
+  // through so the handoff can demand the matching raw cookie be presented
+  // by whoever redeems it. See naia-session.server.ts's
+  // buildHandoffNonceCookie/verifyHandoffNonce for what this protects
+  // against.
+  const originNonceHash = session.get("origin_nonce_hash") as string | undefined;
   // The final redirect target: back to the preview that actually started
   // this flow when one was captured, otherwise the existing relative-path
   // behavior (stays on whichever host serves this callback — unchanged for
@@ -44,6 +50,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   session.unset("pkce_nonce");
   session.unset("return_to");
   session.unset("origin_host");
+  session.unset("origin_nonce_hash");
 
   const clearedSessionCookie = await commitSession(session);
 
@@ -230,7 +237,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // URL cannot be replayed afterward, from the same browser or a
   // different one, and no long-lived cookie is ever set on the storefront
   // host for this case at all.
+  //
+  // Browser-binding (2026-10-20): single-use stops a SECOND redemption,
+  // but not a race to be FIRST — without originNonceHash, any client that
+  // merely has this URL could redeem it ahead of the real browser. If the
+  // nonce somehow never made it this far (a malformed or forged request
+  // that skipped auth.shopify.login entirely), that is treated the same
+  // as any other broken handoff attempt: refuse to create one at all.
   if (originHost) {
+    if (!originNonceHash) {
+      return fail(400, "Missing browser-binding nonce");
+    }
+
     const HANDOFF_PENDING_MS = 60_000;
     const pendingExpiresAt = new Date(Date.now() + HANDOFF_PENDING_MS);
 
@@ -245,6 +263,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     handoff.set("handoff_raw_token", rawToken);
     handoff.set("handoff_origin_host", originHost);
     handoff.set("handoff_expires_at", pendingExpiresAt.getTime());
+    handoff.set("handoff_origin_nonce_hash", originNonceHash);
     const handoffCookie = await commitSession(handoff);
     const handoffValue = extractSessionCookieValue(handoffCookie);
     const handoffUrl = new URL(`https://${originHost}/auth/shopify/handoff`);

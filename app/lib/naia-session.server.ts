@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "crypto";
+import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import { redirect } from "react-router";
 import prisma from "~/db.server";
 import { validateOriginHost } from "~/lib/shopify-customer-oauth.server";
@@ -40,6 +40,51 @@ export function buildSessionCookieHeader(rawToken: string): string {
 
 export function buildClearSessionCookieHeader(): string {
   return `${COOKIE_NAME}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`;
+}
+
+// ---------------------------------------------------------------------------
+// Cross-domain handoff browser-binding nonce (2026-10-20)
+//
+// Single-use enforcement (promoteHandoffSession) stops a handoff token
+// being redeemed a SECOND time, but says nothing about who redeems it
+// FIRST — a captured handoff URL could be used by a completely unrelated
+// client before the real browser gets there, and single-use would then
+// reject the legitimate browser instead. This nonce closes that gap: set
+// as an HttpOnly/Secure cookie on the ORIGINATING preview host — the one
+// place that can set a cookie the destination host will actually receive
+// back later, because it never leaves this host at all. Only its SHA-256
+// hash travels through the redirect chain (query param → signed PKCE
+// session → signed handoff payload); /auth/shopify/handoff demands the
+// matching raw cookie be present on the SAME request that presents the
+// token, so a client with the URL but not this specific cookie cannot
+// redeem it, no matter how fast it is.
+// ---------------------------------------------------------------------------
+
+const HANDOFF_NONCE_COOKIE = "__naia_handoff_nonce";
+
+export function buildHandoffNonceCookie(): { cookieHeader: string; nonceHash: string } {
+  const rawNonce = generateRawToken();
+  return {
+    cookieHeader: `${HANDOFF_NONCE_COOKIE}=${rawNonce}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=120`,
+    nonceHash: hashToken(rawNonce),
+  };
+}
+
+export function verifyHandoffNonce(request: Request, expectedHash: string): boolean {
+  const cookies = request.headers.get("Cookie") ?? "";
+  const match = cookies.match(new RegExp(`${HANDOFF_NONCE_COOKIE}=([A-Za-z0-9_-]+)`));
+  if (!match) return false;
+  const actualHash = hashToken(match[1]);
+  // Both sides are fixed-length hex SHA-256 digests — timingSafeEqual needs
+  // equal-length buffers, which this already guarantees by construction.
+  return (
+    actualHash.length === expectedHash.length &&
+    timingSafeEqual(Buffer.from(actualHash, "utf8"), Buffer.from(expectedHash, "utf8"))
+  );
+}
+
+export function buildClearHandoffNonceCookieHeader(): string {
+  return `${HANDOFF_NONCE_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`;
 }
 
 // ---------------------------------------------------------------------------
@@ -289,8 +334,21 @@ export async function requireCurrentNaiaCustomer(request: Request) {
       // since it has no reason to differ from sfHost in the first place).
       const originHost =
         process.env.VERCEL_ENV !== "production" ? validateOriginHost(url.hostname) : null;
-      const originParam = originHost && originHost !== sfHost ? `&origin_host=${encodeURIComponent(originHost)}` : "";
-      throw redirect(`https://${sfHost}/auth/shopify/login?_sf=1&return_to=${returnTo}${originParam}`);
+      const crossesDomain = Boolean(originHost && originHost !== sfHost);
+
+      const headers = new Headers();
+      let nonceParam = "";
+      if (crossesDomain) {
+        const nonce = buildHandoffNonceCookie();
+        headers.append("Set-Cookie", nonce.cookieHeader);
+        nonceParam = `&origin_nonce_hash=${nonce.nonceHash}`;
+      }
+
+      const originParam = crossesDomain ? `&origin_host=${encodeURIComponent(originHost!)}` : "";
+      throw redirect(
+        `https://${sfHost}/auth/shopify/login?_sf=1&return_to=${returnTo}${originParam}${nonceParam}`,
+        { headers },
+      );
     }
     throw redirect(`/auth/shopify/login?return_to=${returnTo}`);
   }
