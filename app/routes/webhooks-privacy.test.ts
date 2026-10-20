@@ -24,6 +24,10 @@ vi.mock("../lib/webhook-hmac.server", () => ({
   verifyShopifyWebhookRequest: vi.fn(),
 }));
 
+vi.mock("../lib/webhook-shop-guard.server", () => ({
+  verifyShopOwnership: vi.fn(),
+}));
+
 vi.mock("../lib/customer-privacy.server", () => ({
   compileCustomerExport: vi.fn(),
   eraseCustomerData: vi.fn(),
@@ -36,16 +40,25 @@ vi.mock("~/db.server", () => ({
 }));
 
 import { verifyShopifyWebhookRequest } from "../lib/webhook-hmac.server";
+import { verifyShopOwnership } from "../lib/webhook-shop-guard.server";
 import { compileCustomerExport, eraseCustomerData } from "../lib/customer-privacy.server";
 import prisma from "~/db.server";
 
 const mockVerify = () => verifyShopifyWebhookRequest as ReturnType<typeof vi.fn>;
+const mockOwnership = () => verifyShopOwnership as ReturnType<typeof vi.fn>;
 const mockCompile = () => compileCustomerExport as ReturnType<typeof vi.fn>;
 const mockErase = () => eraseCustomerData as ReturnType<typeof vi.fn>;
 const mockCustomerFindUnique = () => (prisma as any).customer.findUnique as ReturnType<typeof vi.fn>;
 const mockCustomerFindMany = () => (prisma as any).customer.findMany as ReturnType<typeof vi.fn>;
 
-beforeEach(() => vi.clearAllMocks());
+const OWNED_SHOP = "test-shop.myshopify.com";
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  // Default: ownership passes for the shop every other test already uses —
+  // §F below overrides this per-case to exercise rejection paths.
+  mockOwnership().mockReturnValue({ ok: true, shop: OWNED_SHOP });
+});
 
 function makeRequest() {
   return new Request("http://localhost/webhooks/test", { method: "POST" });
@@ -206,6 +219,85 @@ describe("§D — shop/redact: erases every current customer (documented single-
     const res = await action({ request: makeRequest() } as any);
     expect(res.status).toBe(200);
     expect(mockErase()).not.toHaveBeenCalled();
+  });
+});
+
+describe("§F — shop-ownership guard: Shop A cannot delete Shop B's data", () => {
+  it("F1 — customers/redact: an authenticated request for a different shop is refused with 500, erase never called", async () => {
+    mockVerify().mockResolvedValueOnce({
+      ok: true,
+      shop: "shop-b.myshopify.com",
+      topic: "customers/redact",
+      webhookId: "wh-cross-1",
+      payload: { customer: { id: "shopify-customer-456" }, shop_domain: "shop-b.myshopify.com" },
+    });
+    mockOwnership().mockReturnValueOnce({ ok: false, reason: "shop_mismatch" });
+
+    const { action } = await import("./webhooks.customers.redact.tsx");
+    const res = await action({ request: makeRequest() } as any);
+
+    expect(res.status).toBe(500);
+    expect(mockCustomerFindUnique()).not.toHaveBeenCalled();
+    expect(mockErase()).not.toHaveBeenCalled();
+  });
+
+  it("F2 — shop/redact: an authenticated request for a different shop is refused with 500, no customer is even listed, let alone erased", async () => {
+    mockVerify().mockResolvedValueOnce({
+      ok: true,
+      shop: "shop-b.myshopify.com",
+      topic: "shop/redact",
+      webhookId: "wh-cross-2",
+      payload: { shop_domain: "shop-b.myshopify.com" },
+    });
+    mockOwnership().mockReturnValueOnce({ ok: false, reason: "shop_mismatch" });
+
+    const { action } = await import("./webhooks.shop.redact.tsx");
+    const res = await action({ request: makeRequest() } as any);
+
+    expect(res.status).toBe(500);
+    expect(mockCustomerFindMany()).not.toHaveBeenCalled();
+    expect(mockErase()).not.toHaveBeenCalled();
+  });
+
+  it("F3 — customers/redact: a missing shop header cannot trigger deletion", async () => {
+    mockVerify().mockResolvedValueOnce({
+      ok: true, shop: null, topic: "customers/redact", webhookId: "wh-cross-3",
+      payload: { customer: { id: "shopify-customer-456" } },
+    });
+    mockOwnership().mockReturnValueOnce({ ok: false, reason: "missing_shop_header" });
+
+    const { action } = await import("./webhooks.customers.redact.tsx");
+    const res = await action({ request: makeRequest() } as any);
+
+    expect(res.status).toBe(500);
+    expect(mockErase()).not.toHaveBeenCalled();
+  });
+
+  it("F4 — shop/redact: an unconfigured expected-shop (env var unset) fails closed rather than defaulting to 'assume safe'", async () => {
+    mockVerify().mockResolvedValueOnce({ ok: true, shop: "test-shop.myshopify.com", topic: "shop/redact", webhookId: "wh-cross-4", payload: {} });
+    mockOwnership().mockReturnValueOnce({ ok: false, reason: "missing_expected_shop_config" });
+
+    const { action } = await import("./webhooks.shop.redact.tsx");
+    const res = await action({ request: makeRequest() } as any);
+
+    expect(res.status).toBe(500);
+    expect(mockCustomerFindMany()).not.toHaveBeenCalled();
+    expect(mockErase()).not.toHaveBeenCalled();
+  });
+
+  it("F5 — the legitimate, matching-shop path is unaffected: customers/redact still erases when ownership passes (same as §C1)", async () => {
+    mockVerify().mockResolvedValueOnce({
+      ok: true, shop: OWNED_SHOP, topic: "customers/redact", webhookId: "wh-legit",
+      payload: { customer: { id: "shopify-customer-456" } },
+    });
+    mockCustomerFindUnique().mockResolvedValueOnce({ id: "internal-customer-id-2" });
+    mockErase().mockResolvedValueOnce({ ok: true, alreadyErased: false, cloudinaryFailures: [], journeyEventsPurged: 2 });
+
+    const { action } = await import("./webhooks.customers.redact.tsx");
+    const res = await action({ request: makeRequest() } as any);
+
+    expect(mockErase()).toHaveBeenCalledWith("internal-customer-id-2");
+    expect(res.status).toBe(200);
   });
 });
 

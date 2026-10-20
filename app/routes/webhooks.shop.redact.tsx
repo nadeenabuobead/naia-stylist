@@ -16,6 +16,7 @@
 // loudly here rather than letting it become a silent landmine.
 
 import { verifyShopifyWebhookRequest } from "../lib/webhook-hmac.server";
+import { verifyShopOwnership } from "../lib/webhook-shop-guard.server";
 import { eraseCustomerData } from "../lib/customer-privacy.server";
 import prisma from "../db.server";
 
@@ -23,13 +24,26 @@ export const action = async ({ request }: { request: Request }) => {
   // Manual HMAC verification (2026-10-20) — see webhook-hmac.server.ts.
   // Fires only AFTER a shop uninstalls, so any offline session for it is
   // already gone by definition — authenticate.webhook()'s session lookup
-  // could never succeed here even with the missing table fixed.
+  // could never succeed even with the missing table fixed.
   const verified = await verifyShopifyWebhookRequest(request);
   if (!verified.ok) {
     return new Response("Unauthorized", { status: 401 });
   }
-  const { shop, topic } = verified;
+  const { shop, topic, payload } = verified;
   console.log(`Received ${topic} webhook for ${shop}`);
+
+  // Shop-ownership guard (2026-10-20) — see webhook-shop-guard.server.ts.
+  // This handler erases EVERY customer row in the database; that is only
+  // correct when the authenticated request is for the one shop every row
+  // actually belongs to. Verified, not assumed — fails closed otherwise.
+  const ownership = verifyShopOwnership(shop, payload);
+  if (!ownership.ok) {
+    console.error(
+      `shop/redact REFUSED for header shop "${shop}": ${ownership.reason}. ` +
+      `Not erasing any data — this must be investigated before retrying.`,
+    );
+    return new Response("Shop ownership could not be established", { status: 500 });
+  }
 
   const customers = await prisma.customer.findMany({ select: { id: true } });
   console.log(`shop/redact for ${shop}: erasing ${customers.length} customer record(s) (single-shop assumption — see file header)`);
