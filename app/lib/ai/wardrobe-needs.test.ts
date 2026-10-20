@@ -1301,14 +1301,22 @@ describe("§WN-14 reconsider / let go — advisory only", () => {
     assert.equal(entry, undefined, "a conditional piece must not appear in Reconsider at all");
   });
 
-  it("14b — an 'enough' cluster's own members surface as near-duplicates", () => {
+  it("14b — an 'enough' cluster's own members surface in Reconsider, without an overstated visual-similarity claim", () => {
+    // Was "A near-duplicate of pieces you already have enough of." — but variedLooks()
+    // deliberately builds five genuinely different silhouettes/fits/colours (fitted black,
+    // oversized navy, boxy cream, wrap green, column grey) that only cluster together on
+    // register + slot + neutral-band (clustersOf() does not compare silhouette, fit, print
+    // or fabric at all). "Near-duplicate" overstated a claim the evidence never supported;
+    // fixed to describe the real basis — covering the same role — without implying the
+    // pieces look alike. This is the exact fixture that would make the overclaim visible.
     const needs = run(variedLooks("casual", 5), { passport: makePassport({ lifestyle: ["everyday-casual"] }) });
     assert.ok(needs.enough.length > 0, "sanity: this fixture produces a real 'enough' cluster");
 
     const memberId = needs.enough[0].garmentIds[0];
     const entry = needs.reconsider.entries.find((e) => e.garmentId === memberId);
     assert.ok(entry, "a member of an 'enough' cluster must surface as a reconsider entry");
-    assert.match(entry!.reasons.join(" "), /near-duplicate of pieces you already have enough of/);
+    assert.match(entry!.reasons.join(" "), /already cover this role well/);
+    assert.doesNotMatch(entry!.reasons.join(" "), /near-duplicate|duplicate|identical/i, "must not claim visual similarity clustersOf() never actually checked");
     for (const reason of entry!.reasons) assert.doesNotMatch(reason, BANNED_REMOVAL_LANGUAGE);
   });
 

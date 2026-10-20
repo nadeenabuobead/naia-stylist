@@ -1226,9 +1226,15 @@ function buildReconsiderAdvisory(
 
   for (const finding of enough) {
     for (const garmentId of finding.garmentIds) {
+      // NOT "near-duplicate" — clustersOf() groups by register + slot + neutral/colour
+      // band only (wardrobe-needs.ts), with no comparison of actual silhouette, fit, print
+      // or fabric. Two pieces in the same cluster can be genuinely different-looking (e.g.
+      // a fitted black blazer and an oversized black blazer are both "everyday outerwear,
+      // neutral"). "Enough of" is the accurate claim this evidence actually supports — a
+      // visual-similarity claim would overstate it.
       note(
         garmentId,
-        "A near-duplicate of pieces you already have enough of.",
+        "One of several pieces that already cover this role well, so another probably wouldn't add much.",
         ev("garment-fact", "slot + colour + formality", finding.body, finding.garmentIds),
       );
     }

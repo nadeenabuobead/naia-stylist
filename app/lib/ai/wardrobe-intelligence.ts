@@ -3386,6 +3386,14 @@ function buildRediscover(
       // everything, which makes the claim true and useless.
       if (!CORE_SLOTS.has(garment.slot) || !underused || partners.length < 3) return null;
 
+      // She stated a strict dressing requirement (arms-covered, legs-covered, etc.) and this
+      // piece fails it — the same hard gate clustersOf() already applies to Buy-Less
+      // (wardrobe-needs.ts), so Rediscover cannot recommend reaching for a piece that
+      // violates a requirement she set. passportAlignmentFor below is a SEPARATE, purely
+      // additive score bonus for soft style-preference matches; it never excludes a
+      // garment, which is exactly why this exclusion has to live here, not there.
+      if (classifyUsability(garment, passport).usability === "blocked") return null;
+
       score += Math.min(partners.length, 8);
       evidence.push(
         ev("garment-fact", "compatibility graph", `Works with ${partners.length} pieces you already own.`, partners.map((p) => p.id)),
