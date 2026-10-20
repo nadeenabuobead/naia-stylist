@@ -204,6 +204,32 @@ describe("auth.shopify.handoff.tsx — the success path, replay, and browser-bin
     expect(res.headers.get("Cache-Control")).toMatch(/no-store/);
   });
 
+  // Found missing in a later security review pass (2026-10-20): the handoff
+  // URL briefly carries a sensitive value (h) in its query string. Without
+  // Referrer-Policy: no-referrer, if the destination page ever linked out
+  // to a third party before redirecting, that party's own server logs
+  // could capture the full referring URL, token included. Required on
+  // every response this route returns, success or rejection — the token's
+  // presence on the request is what needs covering, not the outcome.
+  it("sets Referrer-Policy: no-referrer on a SUCCESSFUL handoff response", async () => {
+    mockUpdateMany().mockResolvedValue({ count: 1 });
+    const { h, nonceCookieHeader } = await buildHandoffValue({});
+    const res: any = await handoffLoader({ request: requestTo({ h, return_to: "/my-naia" }, nonceCookieHeader), params: {}, context: {} });
+    expect(res.headers.get("Referrer-Policy")).toBe("no-referrer");
+  });
+
+  it("sets Referrer-Policy: no-referrer on a REJECTED handoff response too (missing, tampered, expired, or unbound)", async () => {
+    // Missing token entirely — the cheapest rejection path, and the one
+    // most likely to have been hand-rolled without the shared header set.
+    const res: any = await handoffLoader({
+      request: requestTo({ return_to: "/my-naia" }),
+      params: {},
+      context: {},
+    });
+    expect(res.headers.get("Location")).toBe("/auth/shopify/login");
+    expect(res.headers.get("Referrer-Policy")).toBe("no-referrer");
+  });
+
   it("THE FIX (single-use) — replaying the exact same handoff value a second time, even WITH the correct nonce cookie, fails closed", async () => {
     const { h, nonceCookieHeader } = await buildHandoffValue({ rawToken: "synthetic-raw-token-abc123" });
 

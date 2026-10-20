@@ -42,7 +42,10 @@ import {
 } from "~/lib/naia-session.server";
 import { validateReturnTo, validateOriginHost } from "~/lib/shopify-customer-oauth.server";
 
-const NO_STORE = { "Cache-Control": "no-store, no-cache, must-revalidate" };
+const NO_STORE = {
+  "Cache-Control": "no-store, no-cache, must-revalidate",
+  "Referrer-Policy": "no-referrer",
+};
 
 function toLogin() {
   return redirect("/auth/shopify/login", { headers: NO_STORE });
