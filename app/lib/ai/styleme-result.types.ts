@@ -103,6 +103,14 @@ export interface StyleMeCustomerResult {
   /** Product context this result was generated in. Recorded into the persisted metadata so
    *  a reloaded suggestion knows its own context instead of re-deriving it from a cookie. */
   mode?: "naia" | "nadine";
+  /**
+   * Required WI companions (see StyleMeEngineInput.closetCompanionIds), carried through so
+   * buildMetadataJson can persist them. This is the fix for the cookie-only gap: once a
+   * suggestion is generated, this list becomes the durable, unambiguous record of which
+   * closet ids were REQUIRED at generation time — never re-derived from the persisted
+   * items (which also contain auto-recommended pieces indistinguishable by shape alone).
+   */
+  companionIds?: string[];
 }
 
 // ── Versioned metadata envelope (stored in OutfitSuggestion.moodDescription) ─
@@ -146,6 +154,16 @@ export interface StyleMeMetadata {
     productImageUrl: string | null;
     outfitPieces?: Array<{ slot: string; id: string; label: string | null; imageUrl: string | null }>;
   }>;
+  /**
+   * Required WI companion closet ids at generation time, when this suggestion was styled
+   * around a Wardrobe Intelligence multi-garment combination. Absent (not merely empty) on
+   * every suggestion generated before this field existed — callers MUST distinguish
+   * "undefined" (unknown/legacy, no durable record) from "[]" (durably recorded, zero
+   * companions) rather than treating both the same way. This is the recovery path for New
+   * Look surviving an expired cookie or a different device: regenerate reads THIS first,
+   * falling back to the cookie only when this field is absent.
+   */
+  companionIds?: string[];
 }
 
 /**

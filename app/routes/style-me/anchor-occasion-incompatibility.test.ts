@@ -140,11 +140,19 @@ describe("2 — an eligible locked anchor behaves exactly as before", () => {
     assert.deepEqual(outcome, { kind: "eligible" });
   });
 
-  it("2.4 the original anchor-locked response shape (id, name, imageUrl only) is unchanged", () => {
+  it("2.4 the anchor-locked response still carries exactly {id, name, imageUrl} for the anchor itself", () => {
+    // Was item: { id: resolved.id, name: resolved.name, imageUrl: resolved.imageUrl } inline.
+    // The multi-garment handoff factored this into toLockedAnchorItem(resolved) — same three
+    // fields, same shape, now shared with the new `companions` array added alongside it (see
+    // wi-multi-garment-handoff.test.ts) so "Styling around" can show the complete combination,
+    // not just the anchor. Window widened: that companion-resolution block now sits between
+    // the outcome check and the return.
     const src = sourceSrc();
-    const eligibleBlock = src.slice(src.indexOf('outcome.kind === "eligible"'), src.indexOf('outcome.kind === "eligible"') + 300);
+    const eligibleBlock = src.slice(src.indexOf('outcome.kind === "eligible"'), src.indexOf('outcome.kind === "eligible"') + 900);
     assert.ok(eligibleBlock.includes('step: "anchor-locked" as const'));
-    assert.ok(eligibleBlock.includes("item: { id: resolved.id, name: resolved.name, imageUrl: resolved.imageUrl }"));
+    assert.ok(eligibleBlock.includes("item: toLockedAnchorItem(resolved)"), "the anchor's own item shape is unchanged, just factored out");
+    const toLockedAnchorItemFn = src.slice(src.indexOf("const toLockedAnchorItem ="), src.indexOf("const toLockedAnchorItem =") + 300);
+    assert.ok(toLockedAnchorItemFn.includes("id: item.id") && toLockedAnchorItemFn.includes("name: item.name") && toLockedAnchorItemFn.includes("imageUrl: item.imageUrl"), "toLockedAnchorItem itself must still produce exactly {id, name, imageUrl}");
   });
 });
 
@@ -413,7 +421,10 @@ describe("8 — rejected manual pick survives Change Occasion as a pending (not 
     const src = sourceSrc();
     const idx = src.indexOf('const pendingClosetAnchorId = session.get("styleMePendingClosetAnchorId")');
     assert.ok(idx > -1, "the loader has its own independent re-check, not only occasion.tsx's");
-    const block = src.slice(idx, idx + 1600);
+    // Window widened: unrelated additions earlier in this same loader section (the
+    // multi-garment handoff's companion resolution, see wi-multi-garment-handoff.test.ts)
+    // pushed this block's own content further from pendingClosetAnchorId's declaration.
+    const block = src.slice(idx, idx + 2400);
     assert.ok(block.includes('step: "anchor-incompatible" as const'), "reuses the exact same step the WI-locked case renders");
     assert.ok(block.includes('session.set("styleMeClosetAnchorId", resolvedPending.id)'), "the loader can also promote (e.g. direct navigation back to /style-me/source), mirroring occasion.tsx");
     assert.ok(block.includes('redirect("/style-me/result"'));
@@ -422,7 +433,8 @@ describe("8 — rejected manual pick survives Change Occasion as a pending (not 
   it("8.9 a pending piece that no longer resolves (deleted) is dropped, not silently promoted", () => {
     const src = sourceSrc();
     const idx = src.indexOf('const pendingClosetAnchorId = session.get("styleMePendingClosetAnchorId")');
-    const block = src.slice(idx, idx + 2000);
+    // Window widened for the same reason as 8.8 above.
+    const block = src.slice(idx, idx + 2800);
     const deletedIdx = block.indexOf("Deleted since the rejection");
     assert.ok(deletedIdx > -1);
     assert.ok(block.slice(deletedIdx, deletedIdx + 200).includes('session.unset("styleMePendingClosetAnchorId")'));

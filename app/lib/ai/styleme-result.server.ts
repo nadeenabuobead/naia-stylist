@@ -801,7 +801,39 @@ export function buildSongReason(
 
 // ── Metadata envelope builder ─────────────────────────────────────────────────
 
-function buildMetadataJson(result: StyleMeCustomerResult): string {
+/**
+ * Decides where New Look's required companion ids come from on regeneration, and whether
+ * regeneration must fail closed rather than silently drop one. Pure — ownership
+ * re-verification (resolveClosetAnchor, DB-dependent) happens in the caller (result.tsx);
+ * this only decides what to do with the results, which is what makes it independently
+ * testable without a database. See StyleMeMetadata.companionIds for why this exists: a
+ * regenerate on an expired/cleared cookie, or a different device, used to resolve the
+ * correct anchor (a real DB column) but silently style around it alone.
+ *
+ * @param priorCompanionIds   prevMeta?.companionIds — undefined means this suggestion
+ *                            predates the durable-record fix (legacy, no record at all);
+ *                            an array (possibly empty) means a durable record exists.
+ * @param ownershipStillValid Parallel to priorCompanionIds — true where resolveClosetAnchor
+ *                            still resolved that id for this customer. Ignored when
+ *                            priorCompanionIds is undefined (nothing to re-verify).
+ * @param cookieCompanionIds  The cookie-derived fallback, used only when priorCompanionIds
+ *                            is undefined — unchanged pre-fix behaviour for legacy sessions.
+ */
+export function resolveRegenCompanionIds(
+  priorCompanionIds: string[] | undefined,
+  ownershipStillValid: boolean[],
+  cookieCompanionIds: string[],
+): { blocked: true } | { blocked: false; companionIds: string[] } {
+  if (priorCompanionIds === undefined) {
+    return { blocked: false, companionIds: cookieCompanionIds };
+  }
+  if (ownershipStillValid.some((ok) => !ok)) {
+    return { blocked: true };
+  }
+  return { blocked: false, companionIds: priorCompanionIds };
+}
+
+export function buildMetadataJson(result: StyleMeCustomerResult): string {
   const rawAnchor = result.rawRecommendation.anchor;
   let anchorMeta: StyleMeMetadata["anchor"] = null;
   let anchorSlot: string | null = null;
@@ -850,6 +882,10 @@ function buildMetadataJson(result: StyleMeCustomerResult): string {
         outfitPieces: d.outfitPieces ?? [],
       })),
     }),
+    // See StyleMeMetadata.companionIds. Persisted unconditionally whenever the result carries
+    // the field at all — including an explicit [] — so a later regenerate can tell "durably
+    // confirmed zero companions" apart from "no record exists" (undefined, legacy only).
+    ...(result.companionIds !== undefined && { companionIds: result.companionIds }),
   };
 
   return JSON.stringify(metadata);
@@ -5699,6 +5735,7 @@ export async function computeStyleMeResult(
     rawRecommendation: recommendation,
     resultDirections,
     mode,
+    ...(engineInput.closetCompanionIds !== undefined && { companionIds: engineInput.closetCompanionIds }),
   };
 }
 

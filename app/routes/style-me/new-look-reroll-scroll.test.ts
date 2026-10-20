@@ -105,13 +105,23 @@ describe("5 — a failed or same-combination reroll neither scrolls nor leaves t
     assert.ok(resetIdx > suggestionBlockEnd, "the reset happens after the suggestion-only block closes, so it runs whether or not a suggestion was present");
   });
 
-  it("5.2 an error response carries no suggestion field, so the same guard that gates the scroll also keeps a failed reroll from scrolling", () => {
+  it("5.2 an error (or companion-recovery-blocked) response carries no suggestion field, so the same guard that gates the scroll also keeps a failed reroll from scrolling", () => {
     const src = resultSrc();
-    // generateFetcher's typed shape: suggestion and error are alternatives, never both.
-    assert.ok(src.includes("useFetcher<{ suggestion?: any; error?: string; sameCombination?: boolean }>()"));
+    // generateFetcher's typed shape: suggestion is always an alternative to every other
+    // field a regenerate response can carry (error, sameCombination, and — added by the
+    // companion-recovery fix — companionRecoveryBlocked). Checked as a declaration prefix
+    // plus each field present, not the exact literal string, since the type legitimately
+    // grows as new non-suggestion response shapes are added.
+    const fetcherDeclIdx = src.indexOf("const generateFetcher = useFetcher<{");
+    assert.ok(fetcherDeclIdx > -1, "generateFetcher's typed declaration must still exist");
+    const fetcherDecl = src.slice(fetcherDeclIdx, src.indexOf("}>()", fetcherDeclIdx));
+    for (const field of ["suggestion?: any", "error?: string", "sameCombination?: boolean", "companionRecoveryBlocked?: boolean"]) {
+      assert.ok(fetcherDecl.includes(field), `generateFetcher's type must still declare ${field}`);
+    }
     const effectIdx = src.indexOf("const isRerollingRef = useRef(false)");
     const effectBlock = src.slice(effectIdx, effectIdx + 700);
     assert.ok(!effectBlock.includes("generateFetcher.data?.error"), "the effect does not need to branch on error separately — absence of .suggestion already covers it");
+    assert.ok(!effectBlock.includes("companionRecoveryBlocked"), "nor on the new blocked field — same reasoning, absence of .suggestion already covers it");
   });
 
   it("5.3 a sameCombination response (old outfit kept, nothing changed) also does not scroll, for the same reason", () => {

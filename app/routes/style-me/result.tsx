@@ -24,8 +24,9 @@ import {
   computeStyleMeResult,
   buildDbPayload,
   styleSourceToSessionSource,
+  resolveRegenCompanionIds,
 } from "~/lib/ai/styleme-result.server";
-import { autoSelectClosetAnchor, resolveActionAnchor, loadAllClosetItemsForEngine } from "~/lib/ai/styleme-anchor.server";
+import { autoSelectClosetAnchor, resolveActionAnchor, resolveClosetAnchor, loadAllClosetItemsForEngine } from "~/lib/ai/styleme-anchor.server";
 import { parseSuggestionMetadata } from "~/lib/ai/styleme-result.types";
 import { resolveItemImage } from "~/lib/styleme/look-image-resolution.server";
 import { resolveStyleMeMode } from "~/lib/styleme/mode-resolution";
@@ -751,20 +752,6 @@ export async function action({ request }: ActionFunctionArgs) {
       // cookie is only a fallback for sessions written before the column existed.
       const regenMode = resolveStyleMeMode(session.styleMeMode, regenCookieSession.get("styleMeMode"));
       const regenOccasionDisplayLabel = (regenCookieSession.get("styleMeOccasionDisplayLabel") as string | undefined) ?? null;
-      // See StyleMeEngineInput.closetCompanionIds. Unlike the anchor (session.closetAnchorId,
-      // a real DB column read above at line ~735, so New Look survives an expired cookie or a
-      // different device), there is no persisted StylingSession column for companions — read
-      // from the cookie only. Concretely: New Look keeps companions for the lifetime of the
-      // SAME cookie that did the original WI handoff, but a regenerate on an expired/cleared
-      // cookie, or from a different device/browser, resolves the correct anchor from the DB
-      // yet silently styles around it alone, dropping the companions the customer originally
-      // selected. The already-generated, PERSISTED suggestion is unaffected by this — its
-      // items were written to the OutfitSuggestion.items table at generation time and do not
-      // depend on the cookie to be displayed later. Flagged as a genuine, deferred DB
-      // dependency (no migration run per explicit instruction), not silently treated as
-      // equivalent to the persisted brief's guarantee.
-      const regenClosetCompanionIds = parseClosetCompanionIds(regenCookieSession.get("styleMeClosetCompanionIds"));
-
       // Collect handles from the most-recent suggestion so the engine applies a
       // diversity penalty and avoids returning the exact same outfit.
       const prevSuggestion = await prisma.outfitSuggestion.findFirst({
@@ -776,6 +763,48 @@ export async function action({ request }: ActionFunctionArgs) {
         },
       });
       const prevMeta = prevSuggestion ? parseSuggestionMetadata(prevSuggestion.moodDescription) : null;
+
+      // ── Required WI companions: recover from the DURABLE record, not the cookie ──
+      //
+      // Unlike the anchor (session.closetAnchorId, a real DB column read above, so New Look
+      // already survives an expired cookie or a different device for the anchor), companions
+      // had no persisted column — a regenerate on an expired/cleared cookie, or a different
+      // device, resolved the correct anchor from the DB but silently styled around it alone,
+      // dropping the companions the customer originally selected.
+      //
+      // Fix: StyleMeMetadata.companionIds (see styleme-result.types.ts) is a versioned JSON
+      // field already stored in moodDescription for every OTHER piece of regeneration
+      // context (resultDirections, sameCombination, mode) — no schema change. Every
+      // suggestion generated FROM NOW ON carries an explicit companionIds (even "[]"), so
+      // prevMeta.companionIds is the durable, cross-device-safe source of truth once it
+      // exists. undefined (the key itself absent) means this suggestion predates the fix —
+      // the one case with no durable record — and falls back to the cookie exactly as
+      // before, which is the correct, non-regressive default for the overwhelmingly common
+      // case of a suggestion that genuinely never had companions.
+      //
+      // Deliberately NOT inferred from prevSuggestion.items: that list also contains
+      // auto-recommended pieces chosen by selectAdditionalClosetGarments, indistinguishable
+      // by shape from a required companion — exactly the ambiguity this field exists to avoid.
+      // Ownership re-verification is the only DB-dependent step (resolveClosetAnchor); the
+      // decision itself is pure — see resolveRegenCompanionIds' own unit tests for the direct,
+      // database-free proof of this exact branching, including the multi-id fail-closed case.
+      const ownershipResults = prevMeta?.companionIds !== undefined
+        ? await Promise.all(prevMeta.companionIds.map((id) => resolveClosetAnchor(session.customerId, id)))
+        : [];
+      const companionRecovery = resolveRegenCompanionIds(
+        prevMeta?.companionIds,
+        ownershipResults.map((r) => r !== null),
+        parseClosetCompanionIds(regenCookieSession.get("styleMeClosetCompanionIds")),
+      );
+
+      if (companionRecovery.blocked) {
+        return data({
+          companionRecoveryBlocked: true,
+          companionRecoveryMessage:
+            "One or more pieces from your original combination are no longer in your Closet, so New Look can't recreate it completely. Your current look is unchanged — go to Wardrobe Intelligence to choose a combination again, or pick a piece manually.",
+        });
+      }
+      const regenClosetCompanionIds = companionRecovery.companionIds;
 
       // NADINE mode: penalise previously shown product handles so the engine picks a different primary.
       const recentlyShownHandles: string[] = [];
@@ -1279,7 +1308,7 @@ interface StyleMeGenerationLoaderData {
 
 export default function StyleMeResult() {
   const loaderData = useLoaderData<typeof loader>();
-  const generateFetcher = useFetcher<{ suggestion?: any; error?: string; sameCombination?: boolean }>();
+  const generateFetcher = useFetcher<{ suggestion?: any; error?: string; sameCombination?: boolean; companionRecoveryBlocked?: boolean; companionRecoveryMessage?: string }>();
   const saveFetcher = useFetcher<{ saved?: boolean; error?: string; code?: string; pending?: boolean; next?: string; cleared?: boolean; alreadySaved?: boolean }>();
   const [msgIndex, setMsgIndex] = useState(0);
   // ── Staging QA: full-look VTO trigger ────────────────────────────────────
@@ -2470,6 +2499,17 @@ export default function StyleMeResult() {
           {generateFetcher.data?.sameCombination && (
             <p className="sm-same-combination-msg">
               nAia couldn&rsquo;t find a different combination with your available pieces.
+            </p>
+          )}
+          {/* Fail-closed recovery: New Look refused rather than silently dropping a required
+              companion it could not re-verify. The current look above is untouched — this is
+              a sibling message to sameCombination, not an error-page takeover (the action
+              deliberately returns a distinct field, never `error`, so the error-state branch
+              above is never triggered and the existing suggestion stays on screen). */}
+          {generateFetcher.data?.companionRecoveryBlocked && (
+            <p className="sm-same-combination-msg" role="alert">
+              {generateFetcher.data.companionRecoveryMessage}{" "}
+              <Link to="/closet/intelligence">Go to Wardrobe Intelligence →</Link>
             </p>
           )}
           {suggestionMeta?.outcome !== "closet-led" && (
