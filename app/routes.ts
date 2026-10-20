@@ -87,6 +87,9 @@ export default [
   route("auth/login", "routes/auth.login/route.jsx"),
   route("auth/shopify/login", "routes/auth.shopify.login.tsx"),
   route("auth/shopify/callback", "routes/auth.shopify.callback.tsx"),
+  // Cross-domain handoff for a preview-deployment-initiated login — see
+  // auth.shopify.callback.tsx's comment on originHost for why this exists.
+  route("auth/shopify/handoff", "routes/auth.shopify.handoff.tsx"),
   route("auth/logout", "routes/auth.logout.tsx"),
   route("auth/signed-out", "routes/auth.signed-out.tsx"),
   route("auth/*", "routes/auth.$.jsx"),

@@ -27,10 +27,14 @@ import { resolve } from "node:path";
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { validateOriginHost, shouldBounceToStorefront, buildProviderLogoutUrl } from "./shopify-customer-oauth.server.ts";
 import { requireCurrentNaiaCustomer } from "./naia-session.server.ts";
+import { getSession, commitSession } from "./session.server.ts";
+import { loader as handoffLoader } from "../routes/auth.shopify.handoff.tsx";
 
 const LOGIN_PATH    = resolve(import.meta.dirname, "../routes/auth.shopify.login.tsx");
 const CALLBACK_PATH = resolve(import.meta.dirname, "../routes/auth.shopify.callback.tsx");
 const SESSION_PATH  = resolve(import.meta.dirname, "naia-session.server.ts");
+const HANDOFF_PATH  = resolve(import.meta.dirname, "../routes/auth.shopify.handoff.tsx");
+const handoffSrc = readFileSync(HANDOFF_PATH, "utf-8");
 const loginSrc    = readFileSync(LOGIN_PATH, "utf-8");
 const callbackSrc = readFileSync(CALLBACK_PATH, "utf-8");
 const sessionSrc  = readFileSync(SESSION_PATH, "utf-8");
@@ -371,5 +375,124 @@ describe("auth.shopify.callback.tsx source wiring", () => {
 
   it("finalReturnTarget falls back to the existing relative returnTo when no origin host was captured — shared-staging-initiated and production flows are unchanged", () => {
     assert.match(callbackSrc, /const finalReturnTarget = originHost \? `https:\/\/\$\{originHost\}\$\{returnTo\}` : returnTo;/);
+  });
+
+  // ── Cross-domain handoff fix (2026-10-20) ────────────────────────────────
+  // finalReturnTarget alone was never reachable: the cookie this response
+  // sets is scoped to THIS domain (the storefront host), never sent to a
+  // different originHost. Redirecting straight there landed the browser
+  // with no session at all — the app saw "not authenticated," bounced back
+  // to login, Shopify silently re-approved the already-authenticated
+  // identity, and the cycle repeated: ERR_TOO_MANY_REDIRECTS. Confirmed
+  // live against the real preview deployment, confirmed via git diff that
+  // Phase 1/2 never touched this file, so this was always latent — it only
+  // needed a real browser login attempt against a Vercel-Authentication-
+  // protected preview to surface.
+
+  it("routes through /auth/shopify/handoff on originHost instead of redirecting straight to finalReturnTarget, when an origin host was captured", () => {
+    assert.match(callbackSrc, /if \(originHost\) \{/);
+    assert.match(callbackSrc, /`https:\/\/\$\{originHost\}\/auth\/shopify\/handoff`/);
+  });
+
+  it("carries the handoff value and return_to as query params, not the raw session token directly", () => {
+    assert.match(callbackSrc, /handoffUrl\.searchParams\.set\("h", handoffValue\)/);
+    assert.match(callbackSrc, /handoffUrl\.searchParams\.set\("return_to", returnTo\)/);
+    assert.ok(!/searchParams\.set\("h",\s*rawToken\)/.test(callbackSrc),
+      "the raw bearer token must never be placed directly in a URL — only the signed, short-lived handoff value");
+  });
+
+  it("the handoff value is built with the same signed-cookie machinery as the PKCE handshake — no new secret, no new signing scheme", () => {
+    assert.match(callbackSrc, /handoff\.set\("handoff_raw_token", rawToken\)/);
+    assert.match(callbackSrc, /handoff\.set\("handoff_origin_host", originHost\)/);
+    assert.match(callbackSrc, /handoff\.set\("handoff_expires_at", Date\.now\(\) \+ 60_000\)/);
+    assert.match(callbackSrc, /await commitSession\(handoff\)/);
+  });
+
+  it("the no-origin-host path is completely untouched — still redirects straight to finalReturnTarget", () => {
+    assert.match(callbackSrc, /return redirect\(finalReturnTarget, \{ headers \}\);/);
+  });
+});
+
+// ── auth.shopify.handoff.tsx — the receiving end of the handoff ───────────
+
+describe("auth.shopify.handoff.tsx — behavioral", () => {
+  const ORIGIN_HOST = "naia-stylist-staging-i4b0504kk-nadeenabuobeads-projects.vercel.app";
+
+  async function buildHandoffValue(overrides = {}) {
+    const session = await getSession();
+    session.set("handoff_raw_token", overrides.rawToken ?? "synthetic-raw-token-abc123");
+    session.set("handoff_origin_host", overrides.originHost ?? ORIGIN_HOST);
+    session.set("handoff_expires_at", overrides.expiresAt ?? Date.now() + 60_000);
+    const cookie = await commitSession(session);
+    const eq = cookie.indexOf("=");
+    const semi = cookie.indexOf(";");
+    return cookie.slice(eq + 1, semi === -1 ? undefined : semi);
+  }
+
+  function requestTo(hostname, searchParams) {
+    const url = new URL(`https://${hostname}/auth/shopify/handoff`);
+    for (const [k, v] of Object.entries(searchParams)) url.searchParams.set(k, v);
+    return new Request(url.toString());
+  }
+
+  it("a valid, unexpired, correctly-bound handoff value sets the real session cookie and redirects to return_to", async () => {
+    const h = await buildHandoffValue({ rawToken: "synthetic-raw-token-abc123" });
+    const res = await handoffLoader({
+      request: requestTo(ORIGIN_HOST, { h, return_to: "/my-naia" }),
+      params: {},
+      context: {},
+    });
+    assert.equal(res.headers.get("Location"), "/my-naia");
+    const setCookie = res.headers.get("Set-Cookie");
+    assert.ok(setCookie.includes("__naia_tok=synthetic-raw-token-abc123"));
+    assert.ok(setCookie.includes("HttpOnly"));
+    assert.ok(setCookie.includes("Secure"));
+  });
+
+  it("an expired handoff value fails closed — redirects to login, sets no session cookie", async () => {
+    const h = await buildHandoffValue({ expiresAt: Date.now() - 1000 });
+    const res = await handoffLoader({ request: requestTo(ORIGIN_HOST, { h, return_to: "/my-naia" }), params: {}, context: {} });
+    assert.equal(res.headers.get("Location"), "/auth/shopify/login");
+    assert.equal(res.headers.get("Set-Cookie"), null);
+  });
+
+  it("a tampered handoff value fails closed — signature verification rejects it, not a thrown error", async () => {
+    const h = await buildHandoffValue({});
+    const tampered = h.slice(0, -4) + "9999";
+    const res = await handoffLoader({ request: requestTo(ORIGIN_HOST, { h: tampered, return_to: "/my-naia" }), params: {}, context: {} });
+    assert.equal(res.headers.get("Location"), "/auth/shopify/login");
+    assert.equal(res.headers.get("Set-Cookie"), null);
+  });
+
+  it("a missing handoff value fails closed immediately", async () => {
+    const res = await handoffLoader({ request: requestTo(ORIGIN_HOST, { return_to: "/my-naia" }), params: {}, context: {} });
+    assert.equal(res.headers.get("Location"), "/auth/shopify/login");
+  });
+
+  it("REPLAY PROTECTION — a handoff value bound to a different origin host is rejected, even if otherwise valid and unexpired", async () => {
+    const h = await buildHandoffValue({ originHost: "some-other-preview-host.vercel.app" });
+    const res = await handoffLoader({ request: requestTo(ORIGIN_HOST, { h, return_to: "/my-naia" }), params: {}, context: {} });
+    assert.equal(res.headers.get("Location"), "/auth/shopify/login");
+    assert.equal(res.headers.get("Set-Cookie"), null);
+  });
+
+  it("an invalid return_to falls back to the safe default rather than an open redirect", async () => {
+    const h = await buildHandoffValue({});
+    const res = await handoffLoader({ request: requestTo(ORIGIN_HOST, { h, return_to: "https://evil.example.com" }), params: {}, context: {} });
+    assert.equal(res.headers.get("Location"), "/my-naia");
+  });
+});
+
+describe("auth.shopify.handoff.tsx — source wiring", () => {
+  it("verifies the handoff value through the same signed-cookie mechanism as the PKCE handshake — getSession, not a bespoke check", () => {
+    assert.match(handoffSrc, /getSession\(`__naia_session=\$\{h\}`\)/);
+  });
+
+  it("checks expiry before trusting anything else in the payload", () => {
+    assert.match(handoffSrc, /Date\.now\(\) > expiresAt/);
+  });
+
+  it("re-validates the bound origin host against validateOriginHost, not just an equality check on an untrusted value", () => {
+    assert.match(handoffSrc, /validateOriginHost\(originHost\)/);
   });
 });

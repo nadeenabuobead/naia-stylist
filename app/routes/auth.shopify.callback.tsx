@@ -219,5 +219,48 @@ export async function loader({ request }: LoaderFunctionArgs) {
   headers.append("Set-Cookie", clearedSessionCookie);
   headers.append("Set-Cookie", buildSessionCookieHeader(rawToken));
 
+  // Cross-domain handoff (2026-10-20): the cookie just set above is scoped
+  // to THIS response's domain (the storefront host) — it is never sent to
+  // originHost, a different domain by definition. Previously this redirect
+  // went straight to finalReturnTarget, landing the browser on originHost
+  // with no session at all: the app saw "not authenticated," bounced back
+  // to login, Shopify silently re-approved the already-authenticated
+  // identity, and the cycle repeated — ERR_TOO_MANY_REDIRECTS. Never
+  // reachable in production (originHost is only ever set for a preview
+  // host, see validateOriginHost), so this never touches today's normal,
+  // working flow.
+  //
+  // Fix: route through /auth/shopify/handoff with a short-lived (60s),
+  // tamper-proof token instead of handing the browser a long-lived
+  // credential in a URL. Built with the exact same signed-cookie machinery
+  // already used for the PKCE handshake (session.server.ts, SESSION_SECRET)
+  // — no new secret, no new database table. It carries the already-created
+  // rawToken only as long as it takes the browser to follow one redirect;
+  // once exchanged, the destination host has its own normal cookie and this
+  // token is never consulted again. Bound to the specific originHost it was
+  // issued for, so it cannot be replayed against a different destination.
+  if (originHost) {
+    const handoff = await getSession();
+    handoff.set("handoff_raw_token", rawToken);
+    handoff.set("handoff_origin_host", originHost);
+    handoff.set("handoff_expires_at", Date.now() + 60_000);
+    const handoffCookie = await commitSession(handoff);
+    const handoffValue = extractSessionCookieValue(handoffCookie);
+    const handoffUrl = new URL(`https://${originHost}/auth/shopify/handoff`);
+    handoffUrl.searchParams.set("h", handoffValue);
+    handoffUrl.searchParams.set("return_to", returnTo);
+    return redirect(handoffUrl.toString(), { headers });
+  }
+
   return redirect(finalReturnTarget, { headers });
+}
+
+// Pulls just the cookie's own value out of a Set-Cookie header string, so it
+// can be carried in a URL query param instead of a cookie for one hop. The
+// value itself is still the same signed/encrypted blob commitSession always
+// produces — this does not change what's inside it or how it's verified.
+function extractSessionCookieValue(setCookieHeader: string): string {
+  const eq = setCookieHeader.indexOf("=");
+  const semi = setCookieHeader.indexOf(";");
+  return setCookieHeader.slice(eq + 1, semi === -1 ? undefined : semi);
 }
