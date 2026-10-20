@@ -8,6 +8,27 @@ embedded = true
 [webhooks]
 api_version = "2026-04"
 
+  # Phase 2 privacy remediation (2026-10-20) — same correction already made
+  # on shopify.app.toml (production): the three mandatory customer-privacy
+  # webhooks were entirely unregistered here too. Local config only; not yet
+  # pushed live via `shopify app deploy --config staging` — that is a
+  # separate, not-yet-authorised step. See webhooks.customers.data_request.tsx,
+  # webhooks.customers.redact.tsx, webhooks.shop.redact.tsx.
+  #
+  # These three MUST use `compliance_topics`, not `topics` — see the matching
+  # comment in shopify.app.toml for why.
+  [[webhooks.subscriptions]]
+  compliance_topics = [ "customers/data_request" ]
+  uri = "/webhooks/customers/data_request"
+
+  [[webhooks.subscriptions]]
+  compliance_topics = [ "customers/redact" ]
+  uri = "/webhooks/customers/redact"
+
+  [[webhooks.subscriptions]]
+  compliance_topics = [ "shop/redact" ]
+  uri = "/webhooks/shop/redact"
+
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
 scopes = "customer_read_customers,read_customers,write_metaobject_definitions,write_metaobjects,write_products"
