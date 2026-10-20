@@ -56,10 +56,19 @@ export async function createNaiaSession(
   // today, but the type stays honest) simply store no hint, same as an
   // older session created before this field existed.
   shopifyIdTokenHint?: string | null,
+  // Cross-domain handoff only (2026-10-20): a session created pending
+  // promotion by promoteHandoffSession expires at this exact Date instead
+  // of the normal 30 days out, until that one-time exchange succeeds.
+  // Every other caller omits this and gets the unchanged, full-length
+  // session. Takes an explicit Date, not a duration, so the caller can
+  // reuse the exact same value for promoteHandoffSession's exact-match
+  // check later — two independent Date.now() calls computed moments apart
+  // would never agree down to the millisecond.
+  overrideExpiresAt?: Date,
 ): Promise<string> {
   const rawToken = generateRawToken();
   const tokenHash = hashToken(rawToken);
-  const expiresAt = new Date(Date.now() + MAX_AGE_MS);
+  const expiresAt = overrideExpiresAt ?? new Date(Date.now() + MAX_AGE_MS);
 
   await prisma.naiaSession.create({
     data: {
@@ -72,6 +81,36 @@ export async function createNaiaSession(
   });
 
   return rawToken;
+}
+
+// ---------------------------------------------------------------------------
+// Cross-domain handoff only (2026-10-20) — promote a short-lived, pending
+// session to a normal full-length one, exactly once.
+//
+// createNaiaSession above is reused as-is for the handoff case, just with a
+// short expiresInMs instead of the normal 30 days — the row this creates is
+// real and already usable, but only for a brief window, until this
+// function is called. The WHERE clause's exact match on the original
+// expiresAt is the single-use guard: the very first successful call moves
+// expiresAt to the full 30-day value, so a second call with the same token
+// finds expiresAt no longer matches (it's already been promoted) and the
+// Prisma update affects zero rows — a replay, from the same browser or a
+// different one, after the legitimate exchange has already happened. This
+// is a single atomic database statement, so two concurrent replay attempts
+// can never both succeed (one UPDATE always loses the race and matches
+// zero rows) — it is not a read-then-write check with a window to race.
+// ---------------------------------------------------------------------------
+
+export async function promoteHandoffSession(
+  rawToken: string,
+  expectedPendingExpiresAt: number,
+): Promise<boolean> {
+  const tokenHash = hashToken(rawToken);
+  const result = await prisma.naiaSession.updateMany({
+    where: { tokenHash, expiresAt: new Date(expectedPendingExpiresAt) },
+    data: { expiresAt: new Date(Date.now() + MAX_AGE_MS) },
+  });
+  return result.count === 1;
 }
 
 // ---------------------------------------------------------------------------

@@ -203,7 +203,57 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
   }
 
-  // ── Create the nAia session ──
+  const headers = new Headers();
+  headers.append("Set-Cookie", clearedSessionCookie);
+
+  // Cross-domain handoff (2026-10-20): a cookie set in this response is
+  // scoped to THIS domain (the storefront host) — it is never sent to
+  // originHost, a different domain by definition. Previously this redirect
+  // went straight to finalReturnTarget with the normal cookie set here,
+  // landing the browser on originHost with no session at all: the app saw
+  // "not authenticated," bounced back to login, Shopify silently
+  // re-approved the already-authenticated identity, and the cycle
+  // repeated — ERR_TOO_MANY_REDIRECTS. Never reachable in production
+  // (originHost is only ever set for a preview host, see
+  // validateOriginHost), so this never touches today's normal, working
+  // flow — confirmed by the else branch below being byte-identical to
+  // before this fix.
+  //
+  // Fix: the session created for this case starts with a short (60s)
+  // expiry rather than the normal 30 days, and only a tamper-proof,
+  // short-lived handoff value (not the raw session token itself) travels
+  // in the URL — built with the exact same signed-cookie machinery already
+  // used for the PKCE handshake (session.server.ts, SESSION_SECRET), no
+  // new secret. /auth/shopify/handoff calls promoteHandoffSession to
+  // extend the session to its normal full length, but only once, ever,
+  // enforced by a single atomic database statement — a captured handoff
+  // URL cannot be replayed afterward, from the same browser or a
+  // different one, and no long-lived cookie is ever set on the storefront
+  // host for this case at all.
+  if (originHost) {
+    const HANDOFF_PENDING_MS = 60_000;
+    const pendingExpiresAt = new Date(Date.now() + HANDOFF_PENDING_MS);
+
+    let rawToken: string;
+    try {
+      rawToken = await createNaiaSession(customer.id, request, tokens.id_token, pendingExpiresAt);
+    } catch {
+      return fail(502, "Session creation failed");
+    }
+
+    const handoff = await getSession();
+    handoff.set("handoff_raw_token", rawToken);
+    handoff.set("handoff_origin_host", originHost);
+    handoff.set("handoff_expires_at", pendingExpiresAt.getTime());
+    const handoffCookie = await commitSession(handoff);
+    const handoffValue = extractSessionCookieValue(handoffCookie);
+    const handoffUrl = new URL(`https://${originHost}/auth/shopify/handoff`);
+    handoffUrl.searchParams.set("h", handoffValue);
+    handoffUrl.searchParams.set("return_to", returnTo);
+    return redirect(handoffUrl.toString(), { headers });
+  }
+
+  // ── Create the nAia session (unchanged from before this fix) ──
   // tokens.id_token is already validated above (validateIdToken) — stored
   // only as logout's future id_token_hint for Shopify's end_session_endpoint,
   // never logged, never returned in any loader data, never sent to the
@@ -214,43 +264,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   } catch {
     return fail(502, "Session creation failed");
   }
-
-  const headers = new Headers();
-  headers.append("Set-Cookie", clearedSessionCookie);
   headers.append("Set-Cookie", buildSessionCookieHeader(rawToken));
-
-  // Cross-domain handoff (2026-10-20): the cookie just set above is scoped
-  // to THIS response's domain (the storefront host) — it is never sent to
-  // originHost, a different domain by definition. Previously this redirect
-  // went straight to finalReturnTarget, landing the browser on originHost
-  // with no session at all: the app saw "not authenticated," bounced back
-  // to login, Shopify silently re-approved the already-authenticated
-  // identity, and the cycle repeated — ERR_TOO_MANY_REDIRECTS. Never
-  // reachable in production (originHost is only ever set for a preview
-  // host, see validateOriginHost), so this never touches today's normal,
-  // working flow.
-  //
-  // Fix: route through /auth/shopify/handoff with a short-lived (60s),
-  // tamper-proof token instead of handing the browser a long-lived
-  // credential in a URL. Built with the exact same signed-cookie machinery
-  // already used for the PKCE handshake (session.server.ts, SESSION_SECRET)
-  // — no new secret, no new database table. It carries the already-created
-  // rawToken only as long as it takes the browser to follow one redirect;
-  // once exchanged, the destination host has its own normal cookie and this
-  // token is never consulted again. Bound to the specific originHost it was
-  // issued for, so it cannot be replayed against a different destination.
-  if (originHost) {
-    const handoff = await getSession();
-    handoff.set("handoff_raw_token", rawToken);
-    handoff.set("handoff_origin_host", originHost);
-    handoff.set("handoff_expires_at", Date.now() + 60_000);
-    const handoffCookie = await commitSession(handoff);
-    const handoffValue = extractSessionCookieValue(handoffCookie);
-    const handoffUrl = new URL(`https://${originHost}/auth/shopify/handoff`);
-    handoffUrl.searchParams.set("h", handoffValue);
-    handoffUrl.searchParams.set("return_to", returnTo);
-    return redirect(handoffUrl.toString(), { headers });
-  }
 
   return redirect(finalReturnTarget, { headers });
 }

@@ -13,12 +13,19 @@
 // reached the destination host yet. It is verified with the exact same
 // signing key and mechanism (session.server.ts, SESSION_SECRET) already
 // used for the PKCE handshake, so a tampered or expired value is rejected
-// before anything is trusted. On success, this sets the real, normal
-// __naia_tok cookie on THIS host and redirects to the clean return path —
-// the handoff value is never consulted again after this one exchange.
+// before anything is trusted.
+//
+// Single-use, not just time-boxed (2026-10-20): the session this points at
+// was created with only a 60-second life. promoteHandoffSession extends it
+// to the normal 30 days, but the WHERE clause backing that update only
+// matches while expiresAt is still that exact original short value — the
+// first successful call moves it, so a second call (replay, from the same
+// browser or a different one, including a race between two concurrent
+// attempts) always matches zero rows and fails. This is a single atomic
+// database statement, not a read-then-write check, so it cannot be raced.
 import { redirect, type LoaderFunctionArgs } from "react-router";
 import { getSession } from "~/lib/session.server";
-import { buildSessionCookieHeader } from "~/lib/naia-session.server";
+import { buildSessionCookieHeader, promoteHandoffSession } from "~/lib/naia-session.server";
 import { validateReturnTo, validateOriginHost } from "~/lib/shopify-customer-oauth.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -53,6 +60,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Bound to the exact host it was issued for — cannot be replayed to a
   // different destination even if somehow captured in transit.
   if (validateOriginHost(originHost) !== originHost || url.hostname !== originHost) {
+    return redirect("/auth/shopify/login");
+  }
+
+  // The single-use check — see promoteHandoffSession's own comment. A
+  // false here means: already consumed (replay), the row was never
+  // created, or it genuinely expired — every case fails the same way.
+  const promoted = await promoteHandoffSession(rawToken, expiresAt);
+  if (!promoted) {
     return redirect("/auth/shopify/login");
   }
 
