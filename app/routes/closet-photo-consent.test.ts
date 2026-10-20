@@ -26,13 +26,20 @@ describe("closet._index.tsx action — server-side consent enforcement on final 
     assert.ok(closetIndex.includes("buildConsentStamp"));
   });
 
-  it("the consent check runs AFTER the publicId-required check and BEFORE capacity/ownership checks", () => {
+  it("the consent check runs AFTER the publicId-required AND ownership checks, and BEFORE capacity", () => {
+    // Reordered 2026-10-20: consent rejection deletes the asset, so ownership
+    // must be confirmed first — otherwise a forged/guessed publicId plus
+    // withheld consent would delete another customer's photo without any
+    // ownership check ever running. See closet-add-intent.behavioral.test.ts
+    // for the behavioral regression test proving this.
     const publicIdIdx = closetIndex.indexOf('if (!publicId) return data({ error: "Image upload reference required."');
+    const ownershipIdx = closetIndex.indexOf("validatePublicIdOwnership(publicId");
     const consentIdx = closetIndex.indexOf("extractConsentGiven({ photoConsentGiven:");
     const capacityIdx = closetIndex.indexOf("checkEntitlement(customer.id");
-    assert.ok(publicIdIdx > -1 && consentIdx > -1 && capacityIdx > -1);
-    assert.ok(publicIdIdx < consentIdx, "consent check comes after the publicId check");
-    assert.ok(consentIdx < capacityIdx, "consent check comes before capacity/ownership checks");
+    assert.ok(publicIdIdx > -1 && ownershipIdx > -1 && consentIdx > -1 && capacityIdx > -1);
+    assert.ok(publicIdIdx < ownershipIdx, "ownership check comes after the publicId check");
+    assert.ok(ownershipIdx < consentIdx, "ownership check now comes before the consent check");
+    assert.ok(consentIdx < capacityIdx, "consent check comes before the capacity check");
   });
 
   it("on rejection, deletes the already-uploaded Cloudinary asset and returns 400 — same pattern as every other pre-DB-write check", () => {
@@ -95,13 +102,19 @@ describe("api.closet-preview-analyze.ts — consent required before any AI analy
     assert.ok(previewAnalyze.includes("extractConsentGiven"));
   });
 
-  it("the consent check runs BEFORE ownership/asset verification and BEFORE moderateImageContent/previewAnalyzeGarment", () => {
-    const consentIdx = previewAnalyze.indexOf("extractConsentGiven(body)");
+  it("ownership is verified BEFORE the consent check, which runs BEFORE moderateImageContent/previewAnalyzeGarment", () => {
+    // Reordered 2026-10-20: consent rejection deletes the asset, so ownership
+    // must be confirmed first — otherwise a forged/guessed publicId plus
+    // withheld consent would delete another customer's photo without any
+    // ownership check ever running. See
+    // api.closet-preview-analyze.behavioral.test.ts for the behavioral
+    // regression test proving this.
     const ownershipIdx = previewAnalyze.indexOf("validatePublicIdOwnership(publicId");
+    const consentIdx = previewAnalyze.indexOf("extractConsentGiven(body)");
     const moderationIdx = previewAnalyze.indexOf("moderateImageContent(downloadUrl)");
     const analysisIdx = previewAnalyze.indexOf("previewAnalyzeGarment(downloadUrl)");
     assert.ok(consentIdx > -1 && ownershipIdx > -1 && moderationIdx > -1 && analysisIdx > -1);
-    assert.ok(consentIdx < ownershipIdx);
+    assert.ok(ownershipIdx < consentIdx, "ownership check now comes before the consent check");
     assert.ok(consentIdx < moderationIdx);
     assert.ok(consentIdx < analysisIdx);
   });
