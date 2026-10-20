@@ -67,19 +67,23 @@ export async function action({ request }: ActionFunctionArgs) {
     return data({ error: "publicId required" }, { status: 400 });
   }
 
-  // 3. Photo consent (2026-10-19) — required before any AI analysis of the
-  //    photo runs. The asset already exists in Cloudinary at this point
-  //    (direct upload happens before this call); without consent it is
-  //    deleted immediately rather than left orphaned.
-  if (!extractConsentGiven(body)) {
-    await deleteCloudinaryAsset(publicId, "private");
-    return data({ error: "Photo consent is required before analysis." }, { status: 400 });
-  }
-
-  // 4. Ownership check — publicId must belong to the authenticated customer's folder.
+  // 3. Ownership check — publicId must belong to the authenticated customer's
+  //    folder. Must run BEFORE the consent check below: a consent rejection
+  //    deletes the asset, and that delete must never be reachable for a
+  //    publicId this customer does not own (a forged/guessed publicId plus
+  //    withheld consent must not become a way to delete another customer's
+  //    photo).
   const ownership = validatePublicIdOwnership(publicId, naiaCustomer.id);
   if (!ownership.ok) {
     return data({ error: ownership.error }, { status: 400 });
+  }
+
+  // 4. Photo consent (2026-10-19) — required before any AI analysis of the
+  //    photo runs. Ownership is already confirmed above, so it is safe to
+  //    delete this customer's own asset here rather than leave it orphaned.
+  if (!extractConsentGiven(body)) {
+    await deleteCloudinaryAsset(publicId, "private");
+    return data({ error: "Photo consent is required before analysis." }, { status: 400 });
   }
 
   // 5. Asset verification — must exist and be private delivery type.
