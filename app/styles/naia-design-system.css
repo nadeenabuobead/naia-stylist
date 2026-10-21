@@ -1079,20 +1079,29 @@ a.mn-action:focus-visible,
 }
 .sm-result-context-label { font-family: var(--naia-ff-mono); font-size: 7px; letter-spacing: 2px; text-transform: uppercase; color: var(--naia-muted); margin-bottom: 4px; }
 .sm-result-context-value { font-family: var(--naia-ff-display); font-size: 20px; font-style: italic; color: var(--naia-ink); }
-.sm-result-section { margin-bottom: 36px; }
+.sm-result-section { margin-bottom: 32px; }
 .sm-result-section-head {
   font-family: var(--naia-ff-mono); font-size: 9px; letter-spacing: 3px; text-transform: uppercase;
   color: var(--naia-accent); margin-bottom: 16px; padding-bottom: 8px;
   border-bottom: 1px solid rgba(107, 29, 38, 0.1);
 }
-.sm-item-card { padding: 14px 0 14px 20px; border-left: 3px solid var(--naia-accent); margin-bottom: 12px; }
-.sm-item-card--secondary { border-left-color: rgba(107, 29, 38, 0.2); padding: 10px 0 10px 16px; margin-bottom: 8px; }
+/* Garment grids — a look is presented as one cohesive set of pieces, not a single
+   stacked column of full-width rows. Desktop default below; tablet/mobile column
+   counts are set in the responsive block. minmax(…, Npx) caps each tile's width so
+   a short list (e.g. one anchor + one companion) reads as a tidy cluster instead of
+   stretching to fill the row. */
+.sm-outfit-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 210px)); gap: 24px 20px; align-items: start; }
+.sm-finishing-grid, .sm-complete-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 170px)); gap: 20px 16px; align-items: start; margin-top: 4px; }
+.sm-item-card { display: flex; flex-direction: column; padding: 0; border: none; margin: 0; }
+.sm-item-card--secondary { padding: 12px; border-radius: 4px; background: rgba(107, 29, 38, 0.03); border: 1px solid rgba(107, 29, 38, 0.1); margin: 0; }
+/* The hero piece of the look — a visible accent, not just a class with no rule. */
+.sm-item-card--primary .sm-item-img { border: 2px solid var(--naia-accent); }
 .sm-item-product-label { font-family: var(--naia-ff-mono); font-size: 9px; letter-spacing: 2px; text-transform: uppercase; color: var(--naia-accent); margin-bottom: 6px; }
 .sm-item-type-label { font-family: var(--naia-ff-mono); font-size: 7px; letter-spacing: 2px; text-transform: uppercase; color: var(--naia-muted); margin-bottom: 4px; }
-.sm-item-notes { font-family: var(--naia-ff-body); font-size: 17px; line-height: 1.6; color: var(--naia-ink); }
-.sm-item-notes--secondary { font-family: var(--naia-ff-body); font-size: 15px; line-height: 1.6; color: var(--naia-muted); }
+.sm-item-notes { font-family: var(--naia-ff-body); font-size: 14px; line-height: 1.5; color: var(--naia-ink); margin-top: 2px; }
+.sm-item-notes--secondary { font-family: var(--naia-ff-body); font-size: 13px; line-height: 1.5; color: var(--naia-muted); margin-top: 2px; }
 .sm-alt-card { display: flex; gap: 16px; align-items: flex-start; padding: 12px 0 12px 16px; border-left: 3px solid rgba(107, 29, 38, 0.2); margin-bottom: 16px; }
-.sm-item-img { width: 100%; max-width: 200px; aspect-ratio: 3/4; object-fit: contain; display: block; border-radius: 4px; margin-bottom: 12px; background: var(--naia-warm, #f5f0eb); }
+.sm-item-img { width: 100%; max-width: 100%; aspect-ratio: 3/4; object-fit: contain; display: block; border-radius: 4px; margin-bottom: 10px; background: var(--naia-warm, #f5f0eb); }
 .sm-alt-card { display: block; padding: 12px 0 12px 16px; border-left: 3px solid rgba(107, 29, 38, 0.2); margin-bottom: 16px; }
 .sm-alt-body { }
 .sm-alt-shop-cta { display: inline-block; margin-top: 8px; font-family: var(--naia-ff-body); font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: var(--naia-accent); text-decoration: none; border-bottom: 1px solid currentColor; padding-bottom: 1px; }
@@ -1309,6 +1318,12 @@ a.mn-action:focus-visible,
 }
 
 /* ── Responsive ───────────────────────────────────────────────────── */
+/* Tablet: narrower than desktop's auto-fit-at-210px (which already settles to
+   2-3 columns on its own) only needs the finishing/complete tiles tightened a
+   touch so they don't crowd the narrower content width. */
+@media (max-width: 1023px) {
+  .sm-finishing-grid, .sm-complete-grid { grid-template-columns: repeat(auto-fit, minmax(110px, 160px)); }
+}
 @media (max-width: 767px) {
   .sm-page { padding: 24px 16px; }
   .sm-topbar { padding: 16px 20px; }
@@ -1327,6 +1342,10 @@ a.mn-action:focus-visible,
   .sm-result-actions { justify-content: flex-start; }
   .sm-vto-cta { align-self: stretch; text-align: center; }
   .sm-vto-image { max-width: 100%; }
+  /* Two tiles per row rather than letting a single auto-fit column stretch
+     a lone piece edge-to-edge on a narrow phone viewport. */
+  .sm-outfit-grid { grid-template-columns: repeat(2, 1fr); gap: 20px 14px; }
+  .sm-finishing-grid, .sm-complete-grid { grid-template-columns: repeat(2, 1fr); gap: 16px 12px; }
 }
 
 /* ── Reduced motion ───────────────────────────────────────────────── */
