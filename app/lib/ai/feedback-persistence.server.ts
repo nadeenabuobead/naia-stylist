@@ -118,6 +118,15 @@ async function _upsertPostWearReview(
   customerId: string,
   data: PostWearAnswers,
 ): Promise<{ ok: boolean; errorCode?: string }> {
+  // Ownership (2026-10-21) — the upsert below is keyed only on the unique
+  // sessionId, so without this check a different authenticated customer
+  // could silently overwrite an existing review's content (customerId on
+  // the row is never touched by the update branch). Matches the ownership
+  // check _loadPostWearReview/_deletePostWearReview already do via findFirst.
+  const existing = await db.postOutfitReview.findUnique({ where: { sessionId }, select: { customerId: true } });
+  if (existing && existing.customerId !== customerId) {
+    return { ok: false, errorCode: "FORBIDDEN" };
+  }
   await db.postOutfitReview.upsert({
     where: { sessionId },
     create: {
