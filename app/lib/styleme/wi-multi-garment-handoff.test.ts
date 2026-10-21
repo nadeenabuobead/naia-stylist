@@ -216,6 +216,30 @@ describe("WMG-D — an ineligible companion invalidates the whole candidate set,
     const cands = build(anchor, sess, items, ["this-id-does-not-exist"]);
     assert.deepEqual(cands, [], "an unresolvable companion id must fail closed, never silently ignored");
   });
+
+  // Gap found during final acceptance (Step 3 — styling priorities / Style Passport):
+  // WMG-D.1 only proved the OCCASION branch of evaluateAnchorEligibility rejects a bad
+  // companion. The other branch — classifyAnchorCoverageConflict, the actual Style Passport
+  // strict-requirement check (legs-covered / no-cropped-tops) — had never been exercised for
+  // a companion specifically, only for a manually-picked single anchor elsewhere in the
+  // suite. Both branches feed the same evaluateAnchorEligibility call this file already
+  // relies on (see the file header), so this closes the one untested branch rather than
+  // re-proving the whole gate.
+  test("WMG-D.4 a companion that violates a stated strict dressing requirement (legs-covered) also invalidates the set", () => {
+    const items = [
+      g({ id: "wi-top", category: "TOPS", occasions: ["dinner"], formality: "smart-casual",
+          approvedProfile: prof("smart-casual", { dinner: "Strong" }) }),
+      g({ id: "wi-mini-skirt", category: "BOTTOMS", occasions: ["dinner"], formality: "smart-casual",
+          hemLength: "mini", approvedProfile: prof("smart-casual", { dinner: "Strong" }) }),
+    ];
+    const profile = { dressingPreferences: ["legs-covered"] } as unknown as Parameters<typeof buildNaiaOutfitCandidates>[3];
+    const cands = buildNaiaOutfitCandidates(anchor, sess, items, profile, undefined, undefined, ["wi-mini-skirt"])
+      .filter((c): c is OutfitCandidate => c !== null);
+    assert.deepEqual(
+      cands, [],
+      "a companion that sits outside a stated strict dressing requirement must invalidate the whole set, exactly like the occasion branch already does",
+    );
+  });
 });
 
 // ── WMG-E: piece-count budget accounts for companions ─────────────────────────
