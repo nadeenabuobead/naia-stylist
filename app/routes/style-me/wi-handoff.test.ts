@@ -102,7 +102,12 @@ describe("Wardrobe Intelligence -> StyleMe handoff", () => {
   it("3b: AnchorLockedStep shows 'Styling around' and a Change piece control, not a picker", () => {
     const text = src("source.tsx");
     const compStart = text.indexOf("function AnchorLockedStep");
-    const compBody = text.slice(compStart, compStart + 1200);
+    // Window widened: the multi-garment handoff extended this component to render every
+    // companion alongside the anchor (see wi-multi-garment-handoff.test.ts), which pushed
+    // "Change piece" past the original 1200-char window. Both strings are conditional on
+    // the single-anchor case now ({isCombination ? "..." : "Styling around"/"Change piece"}),
+    // which is exactly the case this test exercises — a WI click with no companions.
+    const compBody = text.slice(compStart, compStart + 1800);
     assert.ok(compBody.includes("Styling around"), "heading matches the desired UX");
     assert.ok(compBody.includes("Change piece"), "Change piece control is present");
     assert.ok(!compBody.includes("sm-item-picker"), "does not render the closet item grid");
@@ -110,12 +115,16 @@ describe("Wardrobe Intelligence -> StyleMe handoff", () => {
 
   // ── 4. Another customer's closet item cannot be injected ──────────────────
 
-  it("4: the handoff resolves ownership via resolveClosetAnchor(customerId, closetItemId) — never trusts the posted id alone", () => {
+  it("4: the handoff resolves ownership via resolveClosetAnchor(customerId, id) for every submitted id — never trusts the posted id(s) alone", () => {
+    // Was resolveClosetAnchor(naiaCustomer.id, closetItemId) against a single id. The
+    // multi-garment handoff (wi-multi-garment-handoff.test.ts, WIF-B.6) loops this same
+    // ownership check over every id a combination submits — same scoping, now per-id.
     const handoff = apiSrc("api.wi-style-this.tsx");
     assert.ok(handoff.includes("resolveClosetAnchor"), "imports the ownership-checked resolver");
+    assert.ok(handoff.includes("for (const id of closetItemIds)"), "loops over every submitted id");
     assert.ok(
-      handoff.includes("resolveClosetAnchor(naiaCustomer.id, closetItemId)"),
-      "resolution is scoped to the authenticated customer's id, not an id read from the form alone",
+      handoff.includes("resolveClosetAnchor(naiaCustomer.id, id)"),
+      "each one is scoped to the authenticated customer's id, not an id read from the form alone",
     );
     assert.ok(
       handoff.includes("if (!naiaCustomer)"),
@@ -134,22 +143,33 @@ describe("Wardrobe Intelligence -> StyleMe handoff", () => {
   // ── 5. Invalid/deleted item fails safely ──────────────────────────────────
 
   it("5: the handoff redirects back to Wardrobe Intelligence (no anchor set) when resolution fails", () => {
+    // `fail(reason)` now wraps the redirect (so every early exit carries a distinguishable
+    // reason code — see api.wi-style-this.tsx's own header comment and
+    // wi-multi-garment-handoff.test.ts's WMG-L), rather than an inline redirect call; the
+    // destination is unchanged.
     const handoff = apiSrc("api.wi-style-this.tsx");
+    const failDeclIdx = handoff.indexOf("const fail = (reason: string)");
+    assert.ok(failDeclIdx > -1, "the fail-closed helper must still exist");
+    assert.ok(
+      handoff.slice(failDeclIdx, failDeclIdx + 120).includes('redirect(`/closet/intelligence?wiStyleError=${reason}`)'),
+      "fails back to the WI page, not into a broken StyleMe session",
+    );
     const idx = handoff.indexOf("if (!resolved)");
     const block = handoff.slice(idx, idx + 120);
-    assert.ok(block.includes('redirect("/closet/intelligence")'), "fails back to the WI page, not into a broken StyleMe session");
-    // The failure branch must come before any session.set call.
-    const firstSet = handoff.indexOf("session.set(");
-    assert.ok(idx < firstSet, "failure check runs before any session anchor is written");
+    assert.ok(block.includes('return fail("invalid-garment")'), "the resolution-failure branch uses the fail-closed helper");
+    // The failure check must come before the anchor's own session.set call.
+    const anchorSet = handoff.indexOf('session.set("styleMeClosetAnchorId"');
+    assert.ok(idx < anchorSet, "failure check runs before the session anchor is written");
   });
 
   it("5b: source.tsx loader re-validates the locked anchor on every visit and drops the lock if it no longer resolves", () => {
     const text = src("source.tsx");
     const lockedIdx = text.indexOf('session.get("styleMeAnchorLocked")');
-    // Window widened: the occasion-eligibility re-check (added so a locked anchor is
-    // validated against the occasion once it's known, not just re-resolved for
-    // ownership) now sits between resolution and this fail-safe drop-the-lock path.
-    const block = text.slice(lockedIdx, lockedIdx + 2600);
+    // Window widened again: the multi-garment handoff's companion resolution (the loader's
+    // "eligible" branch now also resolves and returns every companion, see
+    // wi-multi-garment-handoff.test.ts) sits between the occasion-eligibility re-check and
+    // this fail-safe drop-the-lock path, pushing it further from styleMeAnchorLocked.
+    const block = text.slice(lockedIdx, lockedIdx + 3300);
     assert.ok(block.includes("resolveClosetAnchor(naiaCustomer.id, closetAnchorId)"), "re-resolves ownership, does not trust the stale cookie value");
     assert.ok(block.includes('session.unset("styleMeAnchorLocked")'), "drops the lock on failed re-resolution");
     assert.ok(block.includes('session.unset("styleMeClosetAnchorId")'), "drops the stale anchor id too — never styles around a deleted item");
@@ -166,8 +186,10 @@ describe("Wardrobe Intelligence -> StyleMe handoff", () => {
     const idx = text.indexOf('intent === "change-piece"');
     assert.ok(idx !== -1, "change-piece intent is handled");
     // Window widened: also unsets styleMePendingClosetAnchorId (a rejected-but-remembered
-    // manual pick — distinct from the locked-anchor fields this test already covers).
-    const block = text.slice(idx, idx + 600);
+    // manual pick — distinct from the locked-anchor fields this test already covers) and,
+    // from the multi-garment handoff, styleMeClosetCompanionIds (a stale WI combination must
+    // not silently reattach once she chooses to pick a different piece manually).
+    const block = text.slice(idx, idx + 900);
     assert.ok(block.includes('session.unset("styleMeAnchorLocked")'));
     assert.ok(block.includes('session.unset("styleMeClosetAnchorId")'), "clears the preselected item — it is not forced back on the customer");
     assert.ok(

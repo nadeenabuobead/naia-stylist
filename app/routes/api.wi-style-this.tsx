@@ -1,17 +1,52 @@
 // app/routes/api.wi-style-this.tsx
 // Wardrobe Intelligence → StyleMe handoff.
 // Called when a customer clicks "Style this in StyleMe" on a rediscovered
-// Closet piece on /closet/intelligence.
+// Closet piece, or "Style this look in StyleMe" on a multi-garment WI
+// combination, on /closet/intelligence.
 // POST-only: state-changing session writes must not be triggered by GET requests.
 // Same-origin (the WI page lives inside this app) — no Origin check needed, unlike
 // the cross-origin NADINE handoff in api.styleme-handoff.tsx.
-// Ownership is re-verified server-side via resolveClosetAnchor; the browser-supplied
-// closetItemId is never trusted on its own.
+// Ownership is re-verified server-side via resolveClosetAnchor for EVERY submitted
+// id — the browser-supplied closetItemId values are never trusted on their own.
 
 import { redirect, type ActionFunctionArgs } from "react-router";
 import { getSession, commitSession, STYLEME_SESSION_KEYS } from "~/lib/session.server";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { resolveClosetAnchor } from "~/lib/ai/styleme-anchor.server";
+import { closetItemToSlot } from "~/lib/ai/closet-slot";
+import type { ClosetAnchorInput } from "~/lib/ai/styleme-recommendation.types";
+
+// Pure helpers, extracted so the submission-shape logic (dedup, same-slot conflict) is
+// independently unit-testable without a database — resolveClosetAnchor's ownership check is
+// the only DB-dependent step in this action and stays integration-only, per this codebase's
+// existing convention (see wi-handoff-fresh-session.test.ts).
+
+/** Dedupe while preserving first-seen order; drops non-string/empty values. */
+export function dedupeGarmentIds(raw: FormDataEntryValue[]): string[] {
+  const strings = raw.filter((v): v is string => typeof v === "string" && v.length > 0);
+  return [...new Set(strings)];
+}
+
+/**
+ * The first clothing slot claimed by more than one of the given items, or null when every
+ * item occupies a distinct slot. Category-level only — sufficient to catch a malformed or
+ * adversarial submission (e.g. a forged duplicate id resolving to two different rows that
+ * both land in "top"); not the fuller admin-override-aware slot resolution the engine itself
+ * uses once an occasion is known.
+ */
+export function findConflictingSlot(
+  items: Array<{ category: string; subcategory?: string | null }>,
+): string | null {
+  const counts = new Map<string, number>();
+  for (const item of items) {
+    const slot = closetItemToSlot(item.category, item.subcategory);
+    counts.set(slot, (counts.get(slot) ?? 0) + 1);
+  }
+  for (const [slot, count] of counts) {
+    if (count > 1) return slot;
+  }
+  return null;
+}
 
 export async function action({ request }: ActionFunctionArgs) {
   const naiaCustomer = await getCurrentNaiaCustomer(request);
@@ -20,14 +55,49 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   const formData = await request.formData();
-  const closetItemId = formData.get("closetItemId") as string | null;
+  // getAll, not get: a multi-garment WI combination submits one hidden input per
+  // garment, all named closetItemId. A single-piece "Style this in StyleMe" CTA
+  // still submits exactly one — that path is byte-identical to before.
+  // Dedupe while preserving first-seen order — a combination should never be
+  // able to submit the same garment twice and have it silently become its own
+  // "companion". See dedupeGarmentIds' own unit tests for the direct proof.
+  const closetItemIds = dedupeGarmentIds(formData.getAll("closetItemId"));
 
-  // Fail closed: no id, or the item doesn't exist / isn't owned by this customer
-  // (resolveClosetAnchor collapses both cases into the same null — no ownership leak).
-  const resolved = closetItemId ? await resolveClosetAnchor(naiaCustomer.id, closetItemId) : null;
-  if (!resolved) {
-    return redirect("/closet/intelligence");
+  // Every early exit redirects back to the WI page with a reason code rather than
+  // a bare, unexplained bounce — "fail closed" must not mean "fail silent". The WI
+  // page is free to surface wiStyleError as a message (or ignore it, today); either
+  // way the response is honest and independently testable, never a disguised no-op.
+  const fail = (reason: string) => redirect(`/closet/intelligence?wiStyleError=${reason}`);
+
+  if (closetItemIds.length === 0) {
+    return fail("no-selection");
   }
+
+  // Resolve + verify ownership for EVERY id, same check the single-piece path has
+  // always used. Fail closed on the WHOLE set if even one id doesn't resolve —
+  // resolveClosetAnchor collapses "doesn't exist" and "not owned by this customer"
+  // into the same null (no ownership-leak signal), and a partial multi-garment
+  // handoff (silently dropping just the bad id) would be exactly the kind of
+  // silent garment loss this feature exists to eliminate.
+  const resolvedItems: ClosetAnchorInput[] = [];
+  for (const id of closetItemIds) {
+    const resolved = await resolveClosetAnchor(naiaCustomer.id, id);
+    if (!resolved) {
+      return fail("invalid-garment");
+    }
+    resolvedItems.push(resolved);
+  }
+
+  // Reject two garments that would claim the same core clothing slot (e.g. two
+  // tops) — an "incompatible category" combination that must never silently let
+  // one piece overwrite the other's slot downstream. Honest response, not a
+  // silent pick of one garment over the other: the whole handoff fails with a
+  // distinguishable reason. See findConflictingSlot's own unit tests.
+  if (findConflictingSlot(resolvedItems) !== null) {
+    return fail("slot-conflict");
+  }
+
+  const [resolved, ...companions] = resolvedItems;
 
   // Pre-select the anchor exactly as a manual pick would, on the existing
   // session cookie — the engine never knows this came from Wardrobe
@@ -63,6 +133,12 @@ export async function action({ request }: ActionFunctionArgs) {
   // survive and let the reroll replace a piece she explicitly chose.
   session.set("styleMeAnchorProvenance", "MANUAL");
   session.set("styleMeAnchorLocked", "1");
+  // Only set for a genuine multi-garment combination — a single-piece handoff never
+  // writes this key at all, so it stays absent/undefined for that path exactly as
+  // before this feature existed.
+  if (companions.length > 0) {
+    session.set("styleMeClosetCompanionIds", JSON.stringify(companions.map((c) => c.id)));
+  }
 
   return redirect("/style-me/state", {
     headers: { "Set-Cookie": await commitSession(session) },

@@ -52,6 +52,7 @@ import {
   INTENTION_LABELS,
   classifyUsability,
   layersThatResolve,
+  allBlockedReasons,
   type WardrobeGarment,
   type WardrobePassport,
   type Evidence,
@@ -233,6 +234,27 @@ export interface BlockedPiece {
   garmentId: string;
   reason: string;
   rescuedBy: string[];
+  /**
+   * The evidence doesn't actually resolve to confirmed incompatibility —
+   * either the category is one nAia already treats loosely (activewear), a
+   * garment she owns genuinely resolves it as a layer, or (legs-covered
+   * specifically) the hem is "midi": closer to full coverage than to a
+   * mini/knee length, and whether it reads as "covered" depends on how she
+   * styles it (tights, boots), which nAia was never told and never assumes.
+   * Same three criteria the Style Passport coverage dialog already uses
+   * (coverageContext() in closet.intelligence.tsx) — kept in sync here so
+   * the dialog's "may depend on how you wear it" framing and this register's
+   * own counts can't say two different things about the same piece.
+   */
+  isConditional: boolean;
+  /**
+   * Every stated preference this piece fails, not just `reason` (the first
+   * one classifyUsability() found — enough for counting, not enough for
+   * explaining). A piece that fails on both arms AND legs coverage, say,
+   * is only explained fully if the dialog reads this instead of `reason`
+   * alone. See allBlockedReasons() in wardrobe-intelligence.ts.
+   */
+  allReasons: string[];
 }
 
 export interface RegisterReading {
@@ -254,6 +276,16 @@ export interface RegisterReading {
   usableCount: number;
   /** Read, and contradicts something she has told nAia. */
   blockedCount: number;
+  /**
+   * Of blockedCount, the pieces whose evidence doesn't actually confirm
+   * incompatibility (see BlockedPiece.isConditional). Not folded into
+   * usableCount — nAia isn't confident enough to count on them for depth —
+   * but kept distinct from confirmedBlockedCount so "X usable pieces" never
+   * states more certainty than the evidence supports in either direction.
+   */
+  conditionallyUsableCount: number;
+  /** blockedCount - conditionallyUsableCount. The genuinely confirmed ones. */
+  confirmedBlockedCount: number;
   /**
    * The pieces that contradict a stated dressing preference, each with the
    * reason and whether something she owns can genuinely resolve it. Carried so
@@ -285,6 +317,25 @@ export interface DepthFinding {
   garmentIds: string[];
   evidence: Evidence[];
   strength: EvidenceStrength;
+}
+
+/**
+ * ADVISORY ONLY. nAia never removes, hides or down-ranks a garment on the
+ * strength of this — it only tells the customer what it noticed, so she can
+ * decide. Composed entirely from evidence this file already computes
+ * (blocked pieces, redundant clusters, low-range repetition); no new scoring.
+ */
+export interface ReconsiderEntry {
+  garmentId: string;
+  /** One sentence per reason this piece surfaced, never a verdict. */
+  reasons: string[];
+  evidence: Evidence[];
+}
+
+export interface ReconsiderAdvisory {
+  state: BlockState;
+  learningNote?: string;
+  entries: ReconsiderEntry[];
 }
 
 /**
@@ -479,6 +530,8 @@ export interface WardrobeNeeds {
    * `styleMe`/`intentions` above; does not replace or feed either one. */
   demand: StyleMeDemandReading;
   headlines: Headline[];
+  /** Advisory-only "worth reconsidering" list. Never auto-removes anything. */
+  reconsider: ReconsiderAdvisory;
 }
 
 // ── Passport reading ──────────────────────────────────────────────────────────
@@ -814,6 +867,28 @@ function countCombinations(pool: WardrobeGarment[]): number {
   return pairs + onePieces.length;
 }
 
+/**
+ * Mirrors coverageContext() in closet.intelligence.tsx exactly — same three
+ * criteria, one on each side so the register's own counts and the Style
+ * Passport coverage dialog's "may depend on how you wear it" framing can
+ * never contradict each other about the same piece. Not a new judgement:
+ * activewear is already read loosely elsewhere, a genuine rescuing layer is
+ * already surfaced as `rescuedBy`, and a midi hem is already worded as an
+ * open styling question, not an asserted failure — this only makes the
+ * COUNT agree with language that already existed.
+ */
+function isConditionalBlock(
+  garment: WardrobeGarment,
+  reason: string | null,
+  items: WardrobeGarment[],
+  passport: WardrobePassport | null,
+): boolean {
+  if (garment.category === "ACTIVEWEAR") return true;
+  if (reason === "keeping your legs covered" && garment.hemLength === "midi") return true;
+  if (layersThatResolve(garment, items, passport).length > 0) return true;
+  return false;
+}
+
 function readRegisters(
   items: WardrobeGarment[],
   passport: WardrobePassport | null,
@@ -827,6 +902,10 @@ function readRegisters(
     const blocked = classified.filter((c) => c.usability === "blocked").map((c) => c.g);
     const unknown = classified.filter((c) => c.usability === "unknown").map((c) => c.g);
     const need = needs.get(register);
+
+    const blockedWithReason = classified.filter((c) => c.usability === "blocked");
+    const conditional = blockedWithReason.filter((c) => isConditionalBlock(c.g, c.reason, items, passport));
+    const confirmedBlocked = blockedWithReason.filter((c) => !isConditionalBlock(c.g, c.reason, items, passport));
 
     const distinctLooks = countDistinctLooks(usable);
     const shortNoun = register === "everyday" ? "everyday" : register === "work" ? "work" : "occasion";
@@ -849,11 +928,25 @@ function readRegisters(
       depthNote = need
         ? `You've told nAia that ${need.phrase} is part of your life, and there's nothing in your Closet that reads this way.`
         : `Nothing in your Closet reads this way — and nothing you've told nAia suggests it needs to.`;
+    } else if (blocked.length > 0 && blocked.length >= usable.length && confirmedBlocked.length === 0) {
+      // Every blocked piece here is conditional — nAia isn't confident
+      // enough to count on it, but it was never confirmed incompatible
+      // either. Say that, not "don't currently meet".
+      depthLabel = `Your ${shortNoun} wardrobe looks bigger than it really is`;
+      depthNote = `You own ${pool.length} ${shortNoun} ${pool.length === 1 ? "piece" : "pieces"}. ${
+        conditional.length === 1 ? "It" : `${conditional.length} of them`
+      } may work depending on how you style ${conditional.length === 1 ? "it" : "them"} — nAia can't confirm ${
+        conditional.length === 1 ? "it meets" : "they meet"
+      } the way you've told it you prefer to dress yet.`;
     } else if (blocked.length > 0 && blocked.length >= usable.length) {
       depthLabel = `Your ${shortNoun} wardrobe looks bigger than it really is`;
       depthNote = `You own ${pool.length} ${shortNoun} ${
         pool.length === 1 ? "piece" : "pieces"
-      }, but ${blocked.length} of them don't currently meet the way you've told nAia you prefer to dress.`;
+      }, but ${confirmedBlocked.length} of them ${confirmedBlocked.length === 1 ? "doesn't" : "don't"} currently meet the way you've told nAia you prefer to dress${
+        conditional.length > 0
+          ? ` (${conditional.length} more may work depending on how you style ${conditional.length === 1 ? "it" : "them"})`
+          : ""
+      }.`;
     } else if (distinctLooks >= DEEP_LOOKS) {
       depthLabel = `Strong ${shortNoun} depth`;
       depthNote = `You already have plenty of usable combinations here, so more similar pieces are unlikely to add much to your wardrobe.`;
@@ -876,11 +969,18 @@ function readRegisters(
       rawCount: pool.length,
       usableCount: usable.length,
       blockedCount: blocked.length,
-      blockedPieces: blocked.map((g) => ({
-        garmentId: g.id,
-        reason: classifyUsability(g, passport).reason ?? "does not meet a stated preference",
-        rescuedBy: layersThatResolve(g, items, passport).map((l) => l.id),
-      })),
+      conditionallyUsableCount: conditional.length,
+      confirmedBlockedCount: confirmedBlocked.length,
+      blockedPieces: blocked.map((g) => {
+        const reason = classifyUsability(g, passport).reason ?? "does not meet a stated preference";
+        return {
+          garmentId: g.id,
+          reason,
+          rescuedBy: layersThatResolve(g, items, passport).map((l) => l.id),
+          isConditional: isConditionalBlock(g, reason, items, passport),
+          allReasons: allBlockedReasons(g, passport),
+        };
+      }),
       unknownCount: unknown.length,
       distinctLooks,
       combinations: countCombinations(usable),
@@ -944,7 +1044,16 @@ function buildFindings(
   const byId = new Map(registers.map((r) => [r.register, r]));
 
   // Registers her own words ask for that she cannot actually dress for.
-  const thinNeeded = registers.filter((r) => r.needed && r.distinctLooks <= THIN_LOOKS);
+  //
+  // Sorted most-severe-first (fewest usable pieces, then fewest distinct
+  // looks) so couldUseMore[0] — and therefore the single headline
+  // recommendation — is the register actually most in need, not whichever
+  // happens to come first in the fixed everyday/work/occasion register
+  // order. Found during QA: a 0-usable-piece register was losing the
+  // headline slot to a 6-usable-piece register purely on list order.
+  const thinNeeded = registers
+    .filter((r) => r.needed && r.distinctLooks <= THIN_LOOKS)
+    .sort((a, b) => a.usableCount - b.usableCount || a.distinctLooks - b.distinctLooks);
 
   // ── YOU COULD USE MORE OF ────────────────────────────────────────────────
   for (const r of thinNeeded) {
@@ -1064,6 +1173,99 @@ function buildFindings(
 
   enough.sort((a, b) => b.garmentIds.length - a.garmentIds.length);
   return { enough: enough.slice(0, 3), couldUseMore: couldUseMore.slice(0, 3) };
+}
+
+// ── Reconsider / let go — advisory only ───────────────────────────────────────
+//
+// Composed entirely from evidence already computed above:
+//   - blockedPieces   → sits outside a preference she stated
+//   - "enough" clusters → a near-duplicate of pieces she already has plenty of
+//   - "repetition" findings → one of many near-identical pieces that collapse
+//     into the same one or two looks, so it adds little on its own
+// nAia never says "remove" or "donate" here — only what it noticed, with the
+// evidence behind it, so she can decide for herself.
+function buildReconsiderAdvisory(
+  registers: RegisterReading[],
+  enough: DepthFinding[],
+  couldUseMore: DepthFinding[],
+): ReconsiderAdvisory {
+  const byGarment = new Map<string, { reasons: string[]; evidence: Evidence[] }>();
+
+  const note = (garmentId: string, reason: string, evidence: Evidence) => {
+    const entry = byGarment.get(garmentId) ?? { reasons: [], evidence: [] };
+    if (!entry.reasons.includes(reason)) entry.reasons.push(reason);
+    entry.evidence.push(evidence);
+    byGarment.set(garmentId, entry);
+  };
+
+  for (const register of registers) {
+    for (const blocked of register.blockedPieces) {
+      // Conditional (isConditional) pieces are a genuine "unsure, depends on
+      // styling" reading, not evidence of a problem — see BlockedPiece on
+      // RegisterReading. "Worth reconsidering" is nAia noticing something
+      // that might not be serving her; uncertainty isn't that, and listing
+      // it here was the exact contradiction QA found: the Style Passport
+      // dialog already says "may depend on how you wear it" for the same
+      // piece, while Reconsider implied it was settled enough to flag.
+      if (blocked.isConditional) continue;
+      // Every failed preference, not just the first — same reasoning as the
+      // Style Passport coverage dialog (allBlockedReasons()): a piece
+      // failing on both arms AND legs coverage, say, is only fully
+      // explained here if every reason gets its own note, not just
+      // whichever one classifyUsability() happened to find first.
+      const reasons = blocked.allReasons.length > 0 ? blocked.allReasons : [blocked.reason];
+      for (const reason of reasons) {
+        note(
+          blocked.garmentId,
+          `Sits outside a preference you stated — ${reason}.`,
+          ev("passport-signal", "dressingPreferences / avoidColors", reason, [blocked.garmentId]),
+        );
+      }
+    }
+  }
+
+  for (const finding of enough) {
+    for (const garmentId of finding.garmentIds) {
+      // NOT "near-duplicate" — clustersOf() groups by register + slot + neutral/colour
+      // band only (wardrobe-needs.ts), with no comparison of actual silhouette, fit, print
+      // or fabric. Two pieces in the same cluster can be genuinely different-looking (e.g.
+      // a fitted black blazer and an oversized black blazer are both "everyday outerwear,
+      // neutral"). "Enough of" is the accurate claim this evidence actually supports — a
+      // visual-similarity claim would overstate it.
+      note(
+        garmentId,
+        "One of several pieces that already cover this role well, so another probably wouldn't add much.",
+        ev("garment-fact", "slot + colour + formality", finding.body, finding.garmentIds),
+      );
+    }
+  }
+
+  for (const finding of couldUseMore) {
+    if (finding.kind !== "repetition") continue;
+    for (const garmentId of finding.garmentIds) {
+      note(
+        garmentId,
+        "One of several near-identical pieces, so it doesn't add much on its own.",
+        ev("garment-fact", "shape + colour + fit", finding.body, finding.garmentIds),
+      );
+    }
+  }
+
+  if (byGarment.size === 0) {
+    return {
+      state: "learning",
+      learningNote:
+        "nAia hasn't found anything worth flagging yet. Add more Closet pieces, or complete more of your Style Passport, and nAia can look more closely.",
+      entries: [],
+    };
+  }
+
+  const entries: ReconsiderEntry[] = Array.from(byGarment.entries())
+    .map(([garmentId, { reasons, evidence }]) => ({ garmentId, reasons, evidence }))
+    .sort((a, b) => b.reasons.length - a.reasons.length || a.garmentId.localeCompare(b.garmentId))
+    .slice(0, 12);
+
+  return { state: "available", entries };
 }
 
 // ── Passport ↔ Closet synthesis ───────────────────────────────────────────────
@@ -1483,11 +1685,17 @@ export function computeWardrobeNeeds(input: WardrobeNeedsInput): WardrobeNeeds {
     intentions: buildIntentionReading(items, styleMeSessions),
     demand: buildStyleMeDemandReading(styleMeDemandFacts, []),
     headlines: [],
+    reconsider: {
+      state: "learning",
+      learningNote: `nAia reads your wardrobe as a whole once there are at least ${MIN_WARDROBE_SIZE} pieces in it.`,
+      entries: [],
+    },
   };
   if (items.length < MIN_WARDROBE_SIZE) return empty;
 
   const registers = readRegisters(items, passport);
   const { enough, couldUseMore } = buildFindings(items, passport, registers);
+  const reconsider = buildReconsiderAdvisory(registers, enough, couldUseMore);
   const synthesis = buildSynthesis(items, passport);
   const styleMe = buildStyleMeReading(items, styleMeSessions, registers);
   const outcomeReading = buildOutcomeReading(outcomes);
@@ -1508,6 +1716,7 @@ export function computeWardrobeNeeds(input: WardrobeNeedsInput): WardrobeNeeds {
     synthesis, styleMe, outcomes: outcomeReading,
     intentions: buildIntentionReading(items, styleMeSessions),
     demand: buildStyleMeDemandReading(styleMeDemandFacts, registers),
+    reconsider,
   };
 
   return { ...withoutHeadlines, headlines: buildHeadlines(withoutHeadlines) };

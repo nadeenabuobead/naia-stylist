@@ -29,8 +29,8 @@
 //
 // Pinned by app/routes/closet.intelligence-promotion.test.ts.
 
-import { useState } from "react";
-import { Link, useLoaderData, Form, useNavigation } from "react-router";
+import { useState, useEffect, useRef } from "react";
+import { Link, useLoaderData, Form, useNavigation, useSearchParams } from "react-router";
 import { data, redirect, type LoaderFunctionArgs, type ActionFunctionArgs, type LinksFunction } from "react-router";
 import prisma from "../db.server";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
@@ -40,7 +40,7 @@ import { getCloudinaryConfig, buildPrivateDownloadUrl } from "~/lib/cloudinary-a
 import { loadWardrobeIntelligence } from "~/lib/ai/wardrobe-intelligence.server";
 import { readAndRecordChange } from "~/lib/ai/wardrobe-snapshot.server";
 import { readClosetConfidence, recordClosetConfidence } from "~/lib/ai/wardrobe-confidence.server";
-import { buildWardrobePage, type WardrobePage, type PageEntry } from "~/lib/ai/wardrobe-page";
+import { buildWardrobePage, hedge, type WardrobePage, type PageEntry } from "~/lib/ai/wardrobe-page";
 import { registerDisplay, type DepthState } from "~/lib/ai/wardrobe-copy";
 import { type RegisterId } from "~/lib/ai/wardrobe-needs";
 import { SILHOUETTE_LABELS } from "~/lib/ai/wardrobe-intelligence";
@@ -155,6 +155,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     garmentName: (id) => garments.find((g) => g.id === id)?.name ?? null,
     change,
     lifestyle: profile?.lifestyle ?? [],
+    hasStatedColourPreference: (profile?.favoriteColors?.length ?? 0) > 0,
+    // Found live on Persona E: favoriteColors and avoidColors both named
+    // "black" — the exact same colour stated as both loved and avoided.
+    // Raw-token overlap (not family-normalised) because this is reporting
+    // what she literally typed, not resolving it against the wardrobe.
+    contradictedColours: (profile?.favoriteColors ?? []).filter((c: string) =>
+      (profile?.avoidColors ?? []).some((a: string) => a.toLowerCase() === c.toLowerCase()),
+    ),
   });
 
   const garmentCards = garments.map((g) => ({
@@ -184,12 +192,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
     .filter((r) => r.needed)
     .map(registerDisplay)
     .filter((d) => d.state !== "learning");
-  const glanceRegisters: Array<{ heading: string; stateText: string }> = [];
+  const glanceRegisters: Array<{ heading: string; stateText: string; isGenuinelyStrong: boolean }> = [];
   if (glanceCandidates.length > 0) {
     const best = [...glanceCandidates].sort((a, b) => DEPTH_RANK[a.state] - DEPTH_RANK[b.state])[0];
     const worst = [...glanceCandidates].sort((a, b) => DEPTH_RANK[b.state] - DEPTH_RANK[a.state])[0];
-    glanceRegisters.push({ heading: best.heading, stateText: best.stateText });
-    if (worst.heading !== best.heading) glanceRegisters.push({ heading: worst.heading, stateText: worst.stateText });
+    // The best of her needed registers can still itself read as thin (e.g.
+    // "needs-range") when EVERY needed register is under-supported — found
+    // during QA: a "Strongest: Work — Fewer combinations" card read as
+    // self-contradictory. "Strongest" only when that's true in absolute
+    // terms too (DEPTH_RANK 0-1); otherwise it's honestly just the
+    // relatively-better of two still-thin areas.
+    const isGenuinelyStrong = DEPTH_RANK[best.state] <= 1;
+    glanceRegisters.push({ heading: best.heading, stateText: best.stateText, isGenuinelyStrong });
+    if (worst.heading !== best.heading) glanceRegisters.push({ heading: worst.heading, stateText: worst.stateText, isGenuinelyStrong: false });
   }
 
   // ── Every register's real reading, for "How your wardrobe supports your life" ──
@@ -202,7 +217,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // duplicated here.
   const allRegisterReadings = needs.registers
     .filter((r) => r.needed)
-    .map((r) => ({ register: r.register, usableCount: r.usableCount, ...registerDisplay(r) }))
+    .map((r) => ({ register: r.register, usableCount: r.usableCount, conditionallyUsableCount: r.conditionallyUsableCount, ...registerDisplay(r) }))
     .filter((d) => d.state !== "learning");
 
   // ── Real neutral share, for "What your wardrobe looks like" ─────────────
@@ -211,6 +226,27 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const neutralSharePct = intelligence.dna.palette.length > 0
     ? Math.round(intelligence.dna.palette.filter((p) => p.neutral).reduce((sum, p) => sum + p.share, 0) * 100)
     : null;
+
+  // Which TEMPERATURE of neutral actually dominates — previously this line
+  // always said "warm neutrals" regardless of the real palette, which was
+  // wrong for a black/navy/grey wardrobe (cool neutrals). Classified from
+  // the same real per-colour share already computed above; "neutrals" with
+  // no temperature word when there's no clear majority, rather than guessing.
+  const neutralColourShares = intelligence.dna.palette.filter((p) => p.neutral);
+  const warmShare = neutralColourShares
+    .filter((p) => WARM_NEUTRAL_COLOURS.has(p.colour.toLowerCase()))
+    .reduce((sum, p) => sum + p.share, 0);
+  const coolShare = neutralColourShares
+    .filter((p) => COOL_NEUTRAL_COLOURS.has(p.colour.toLowerCase()))
+    .reduce((sum, p) => sum + p.share, 0);
+  const neutralTemperature: "warm" | "cool" | null =
+    warmShare === 0 && coolShare === 0
+      ? null
+      : warmShare > coolShare * 1.2
+        ? "warm"
+        : coolShare > warmShare * 1.2
+          ? "cool"
+          : null;
 
   // ── The real "enough" clusters behind the low-priority finding ───────────
   // notAPriority.body only explains why ONE cluster is LOW priority (thinner
@@ -297,9 +333,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
       }
     : null;
 
+  // ── Real combinations available, for "Your wardrobe at a glance" ────────
+  // intelligence.pairings.totalFound is the engine's own count of supported
+  // combinations across every register — not recomputed or estimated here.
+  const combosCount = intelligence.pairings.state === "available" ? intelligence.pairings.totalFound : null;
+
+  // ── Advisory-only "worth reconsidering" list, never an auto-removal ─────
+  // needs.reconsider.entries already carries the real evidence (outside a
+  // stated preference, a near-duplicate, or one of several near-identical
+  // pieces) — see buildReconsiderAdvisory() in wardrobe-needs.ts.
+  const reconsiderEntries = needs.reconsider.entries.map((e) => ({
+    garmentId: e.garmentId,
+    reasons: e.reasons,
+  }));
+
   return data({
-    page, garmentCards, glanceRegisters, allRegisterReadings, neutralSharePct,
+    page, garmentCards, glanceRegisters, allRegisterReadings, neutralSharePct, neutralTemperature,
     enoughCluster, enoughClusters, rediscoverPieces, bestByRegisterPreview, moodboardLooks, recommendationDetail,
+    combosCount, reconsiderEntries,
   });
 }
 
@@ -379,6 +430,19 @@ type GarmentCard = {
   primaryColor: string | null; imageUrl: string | null; hemLength: string | null;
 };
 
+// Which of the engine's wardrobe-neutral colours (see NEUTRAL_COLORS in
+// garment-intelligence-v1.server.ts) read as warm vs cool — used only to
+// pick the right word in "N% of your pieces are {warm|cool} neutrals",
+// never to change which colours count as neutral in the first place.
+const WARM_NEUTRAL_COLOURS: ReadonlySet<string> = new Set([
+  "beige", "cream", "ivory", "off-white", "stone", "taupe", "tan", "camel",
+  "nude", "khaki", "brown", "dark brown",
+]);
+const COOL_NEUTRAL_COLOURS: ReadonlySet<string> = new Set([
+  "black", "white", "grey", "gray", "navy", "charcoal", "dark grey",
+  "dark gray", "off-black", "charcoal grey", "charcoal gray", "silver",
+]);
+
 const SWATCH: Readonly<Record<string, string>> = {
   black: "#1A1512", white: "#E3DDD2", cream: "#EFE6D8", ivory: "#F2EAD9",
   beige: "#DCCCB6", "off-white": "#F4EFE7", nude: "#E3C9B4", tan: "#C79E74",
@@ -457,6 +521,24 @@ function coverageContext(reason: string, hasRescue: boolean, category: string | 
 }
 
 /**
+ * Worth-reconsidering reasons come from wardrobe-needs.ts's
+ * buildReconsiderAdvisory() as a flat "Sits outside a preference you stated
+ * — X." sentence — correct, but blunter than the SAME signal already reads
+ * in the Style Passport coverage dialog (coverageReasonSentence below),
+ * which knows a midi length is an open styling question, not a flat
+ * contradiction. Reuses that exact function rather than a second copy of
+ * the nuance, so the two surfaces can't drift apart again. Only touches
+ * reasons that actually came from a dressing-preference check — the
+ * near-duplicate / repetition reasons elsewhere in Reconsider are a
+ * different template and pass through unchanged.
+ */
+function softenReconsiderReason(reason: string, card: GarmentCard | undefined): string {
+  const match = reason.match(/^Sits outside a preference you stated — (.+)\.$/);
+  if (!match) return reason;
+  return coverageReasonSentence(match[1], card?.hemLength ?? null);
+}
+
+/**
  * The per-piece Coverage reason, in her language.
  *
  * midi gets its own, softer framing (styling may still change whether it
@@ -480,9 +562,16 @@ function Thumb({ card, height = 220 }: { card: GarmentCard | undefined; height?:
   if (!card) return null;
   return (
     <div className="wip-thumb" style={{ height }}>
-      {card.imageUrl
-        ? <img src={card.imageUrl} alt={cardLabel(card)} loading="lazy" />
-        : <span className="wip-thumb-fallback">{card.category.slice(0, 2)}</span>}
+      {card.imageUrl ? (
+        <img src={card.imageUrl} alt={cardLabel(card)} loading="lazy" />
+      ) : (
+        <div className="wip-thumb-fallback-stack">
+          <span className="wip-thumb-fallback">{card.category.slice(0, 2)}</span>
+          {/* Only on thumbs tall enough for it to read as a caption, not a
+              cramped afterthought, in the smallest evidence-row frames. */}
+          {height >= 150 && <span className="wip-thumb-fallback-caption">No photo yet</span>}
+        </div>
+      )}
     </div>
   );
 }
@@ -507,8 +596,22 @@ function cap(s: string): string {
  * absent for a different customer/recommendation, and a clause that has
  * nothing to cite is dropped rather than filled in with guessed wording.
  */
+// "Your {X} wardrobe has {stateText}." only reads correctly for SOME of the
+// six DepthState values ("has fewer combinations" ✓, "has smaller than it
+// looks" ✗ — found during QA). A full predicate per state, not a hardcoded
+// per-register exception, since this is the engine's own closed vocabulary
+// (DEPTH_STATE_TEXT in wardrobe-copy.ts) — every customer hits all six.
+const REGISTER_STATE_PREDICATE: Readonly<Record<DepthState, string>> = {
+  strong: "has plenty of options",
+  "limited-variety": "is covered, but with less variety",
+  "needs-range": "has fewer combinations",
+  "less-than-it-looks": "is smaller than it looks",
+  empty: "has nothing here yet",
+  learning: "is still being read",
+};
+
 function buildWhyNaiaRecommends(input: {
-  registerReading: { heading: string; stateText: string } | undefined;
+  registerReading: { heading: string; state: DepthState; stateText: string } | undefined;
   recTitle: string;
   resolvingSilhouettes: string[];
   unlocksCount: number;
@@ -518,7 +621,8 @@ function buildWhyNaiaRecommends(input: {
   const sentences: string[] = [];
 
   if (registerReading) {
-    sentences.push(`Your ${registerReading.heading.toLowerCase()} wardrobe has ${registerReading.stateText.toLowerCase()}.`);
+    const predicate = REGISTER_STATE_PREDICATE[registerReading.state] ?? `has ${registerReading.stateText.toLowerCase()}`;
+    sentences.push(`Your ${registerReading.heading.toLowerCase()} wardrobe ${predicate}.`);
   }
 
   const addsVariety = resolvingSilhouettes.length > 0;
@@ -584,13 +688,15 @@ function DialogShell({
 
 export default function WardrobeIntelligencePage() {
   const {
-    page, garmentCards, glanceRegisters, allRegisterReadings, neutralSharePct,
+    page, garmentCards, glanceRegisters, allRegisterReadings, neutralSharePct, neutralTemperature,
     enoughCluster, enoughClusters, rediscoverPieces, bestByRegisterPreview, moodboardLooks, recommendationDetail,
+    combosCount, reconsiderEntries,
   } = useLoaderData<typeof loader>() as {
     page: WardrobePage; garmentCards: GarmentCard[];
-    glanceRegisters: Array<{ heading: string; stateText: string }>;
-    allRegisterReadings: Array<{ register: RegisterId; usableCount: number; heading: string; state: DepthState; stateText: string; plain: string }>;
+    glanceRegisters: Array<{ heading: string; stateText: string; isGenuinelyStrong: boolean }>;
+    allRegisterReadings: Array<{ register: RegisterId; usableCount: number; conditionallyUsableCount: number; heading: string; state: DepthState; stateText: string; plain: string }>;
     neutralSharePct: number | null;
+    neutralTemperature: "warm" | "cool" | null;
     enoughCluster: { title: string; body: string; garmentIds: string[]; count: number } | null;
     enoughClusters: Array<{ title: string; body: string; garmentIds: string[]; count: number }>;
     rediscoverPieces: Array<{ garmentId: string; matchIds: string[]; insight: string }>;
@@ -604,6 +710,8 @@ export default function WardrobeIntelligencePage() {
       resolvingSilhouettes: string[];
       unlocksIds: string[];
     } | null;
+    combosCount: number | null;
+    reconsiderEntries: Array<{ garmentId: string; reasons: string[] }>;
   };
   const byId = new Map(garmentCards.map((c) => [c.id, c]));
   // The completeness question is a first-visit card; once answered it collapses to a
@@ -612,6 +720,35 @@ export default function WardrobeIntelligencePage() {
   const navigation = useNavigation();
   const saving = navigation.state !== "idle";
   const model = page as WardrobePage;
+
+  // Honest response for a "Style this look in StyleMe" handoff that failed
+  // server-side (invalid/unowned garment, or two garments claiming the same
+  // outfit slot) — see api.wi-style-this.tsx. A bare redirect with no visible
+  // explanation would read as a broken button.
+  const [searchParams] = useSearchParams();
+  const wiStyleError = searchParams.get("wiStyleError");
+  const WI_STYLE_ERROR_MESSAGE: Record<string, string> = {
+    "slot-conflict": "Those pieces can't be styled together — two of them fill the same spot in an outfit.",
+    "invalid-garment": "One of those pieces couldn't be found in your Closet. Try again from Wardrobe Intelligence.",
+    "no-selection": "Nothing was selected to style. Try again from Wardrobe Intelligence.",
+  };
+
+  // Found live on Persona A: clicking "Change"/"Update" opens the question
+  // panel, but nothing ever closed it again after a fresh answer was
+  // submitted — the compact status line and the full question both stayed
+  // visible together for the rest of the session. navigation.formData is
+  // only populated while a submission is in flight, so the in-flight check
+  // (not "closetCompleteness" itself) has to be captured in a ref to survive
+  // into the idle transition, when the reset actually needs to happen.
+  const submittingCompleteness = navigation.formData?.has("closetCompleteness") ?? false;
+  const wasSubmittingCompleteness = useRef(false);
+  if (submittingCompleteness) wasSubmittingCompleteness.current = true;
+  useEffect(() => {
+    if (navigation.state === "idle" && wasSubmittingCompleteness.current) {
+      setEditingCompleteness(false);
+      wasSubmittingCompleteness.current = false;
+    }
+  }, [navigation.state]);
 
   // Same locked labels wardrobe-copy.ts already uses for these three real
   // registers — not new vocabulary, just named here too since that constant
@@ -663,7 +800,7 @@ export default function WardrobeIntelligencePage() {
   const profileEntries = (profileBlock?.entries ?? []).filter((e) => e.id !== "closet-capability" && !e.id.startsWith("hero-"));
 
   const blockedDetail = (coverage?.meta?.blockedDetail ?? []) as Array<{
-    garmentId: string; name: string; reason: string; layers: string[];
+    garmentId: string; name: string; reason: string; allReasons: string[]; layers: string[];
   }>;
 
   const recColourAttr = recommendationDetail?.attributes.find((a) => a.kind === "colour");
@@ -750,7 +887,12 @@ export default function WardrobeIntelligencePage() {
     }
     if (dialog.kind === "workCombo" && attentionCombo) {
       return (
-        <DialogShell title="An existing work combination." subtitle="Start with the pieces you already own." onClose={closeDialog}>
+        // Title reads from the entry itself (REGISTER_LIFE_HEADING, set
+        // per-register server-side) instead of a hardcoded "work" — found
+        // during QA titled "An existing WORK combination" while showing an
+        // occasion-register placeholder, for a customer whose attention
+        // register was Dinners & Events, not Work at all.
+        <DialogShell title={attentionCombo.title ?? "An existing combination."} subtitle="Start with the pieces you already own." onClose={closeDialog}>
           <div className="wip-match-grid" style={{ gridTemplateColumns: `repeat(${attentionCombo.garmentIds.length}, minmax(0,1fr))` }}>
             {attentionCombo.garmentIds.map((id) => {
               const card = byId.get(id);
@@ -774,7 +916,22 @@ export default function WardrobeIntelligencePage() {
             })}
           </div>
           <p className="wip-combo-text">{look.reason}</p>
-          <a className="wip-link" href="/style-me">Style this look in StyleMe →</a>
+          {/* Same disclosure the "pair" and "workCombo" dialogs already carry — a
+              moodboard look is always a top+bottom (or one-piece) core pairing,
+              never shoes or finishing pieces, so it was the one combination dialog
+              NOT saying so. Found during QA. */}
+          <p className="wip-dialog-note">Add shoes and finishing pieces to complete the look.</p>
+          {/* Every garment in the combination is submitted — api.wi-style-this.tsx
+              resolves, ownership-checks and eligibility-gates each one, preserving
+              all of them through the StyleMe session rather than just the first. */}
+          <Form method="post" action="/api/wi-style-this">
+            {look.garmentIds.map((id) => (
+              <input key={id} type="hidden" name="closetItemId" value={id} />
+            ))}
+            <button type="submit" className="wip-link wi-style-cta">
+              Style this look in StyleMe →
+            </button>
+          </Form>
         </DialogShell>
       );
     }
@@ -792,7 +949,16 @@ export default function WardrobeIntelligencePage() {
           <div className="wip-coverage-list">
             {blockedDetail.map((b) => {
               const card = byId.get(b.garmentId);
-              const state = coverageContext(b.reason, b.layers.length > 0, card?.category, card?.hemLength ?? null);
+              // Every stated preference this piece fails, not just one — a
+              // piece that fails on both arms AND legs coverage is now
+              // explained fully instead of only by whichever reason
+              // happened to be found first. The badge reflects the worst
+              // (most confirmed) of the set: "may depend" only when EVERY
+              // reason is genuinely conditional, never when even one is a
+              // confirmed mismatch.
+              const reasons = b.allReasons.length > 0 ? b.allReasons : [b.reason];
+              const states = reasons.map((r) => coverageContext(r, b.layers.length > 0, card?.category, card?.hemLength ?? null));
+              const state = states.includes("doesnt-match") ? "doesnt-match" : "may-depend";
               return (
                 <div key={b.garmentId} className="wip-coverage-item">
                   <Thumb card={card} height={120} />
@@ -801,11 +967,11 @@ export default function WardrobeIntelligencePage() {
                       {state === "may-depend" ? "May depend on how you wear it" : "Outside your usual preference"}
                     </span>
                     <h3>{b.name}</h3>
-                    <p>
-                      {card?.category === "ACTIVEWEAR"
-                        ? "You've tagged this as activewear, so your everyday coverage preference may not apply in the same way."
-                        : coverageReasonSentence(b.reason, card?.hemLength ?? null)}
-                    </p>
+                    {card?.category === "ACTIVEWEAR" ? (
+                      <p>You&rsquo;ve tagged this as activewear, so your everyday coverage preference may not apply in the same way.</p>
+                    ) : (
+                      reasons.map((r) => <p key={r}>{coverageReasonSentence(r, card?.hemLength ?? null)}</p>)
+                    )}
                     {b.layers.length > 0 && <p className="wip-coverage-rescue">Worn with your {b.layers[0]}, it could still work.</p>}
                   </div>
                 </div>
@@ -818,18 +984,23 @@ export default function WardrobeIntelligencePage() {
     return null;
   }
 
-  if (rediscoverPieces.length === 0) {
-    // No dynamic rediscovery candidate for this Closet — the preview has
-    // nothing honest to lead with. Real state, not an error.
+  if (!model.ready) {
+    // Genuinely not enough Closet yet for ANY of the nine modules to say
+    // something real — the only condition that should hide the whole page.
+    // Previously this checked rediscoverPieces.length === 0, which hid every
+    // module (coverage, colour, pairings, reconsider, shop smarter...) for
+    // any Closet that simply had no self-reported "rarely-wear"/"struggle"
+    // tag or StyleMe history yet — a much narrower condition than "nothing
+    // to say", and wrong for a full, well-analysed Closet with none of that.
     return (
       <MyNaiaLayout compact>
         <style>{css}</style>
         <div className="wip-app">
           <main className="wip-main">
             <p className="wip-empty">
-              Nothing to preview yet — this Closet doesn&rsquo;t currently have a &ldquo;piece worth
-              rediscovering&rdquo; finding to lead with.
+              {model.readyNote ?? "Add a few more pieces and nAia can start reading your wardrobe as a whole."}
             </p>
+            <Link to="/closet" className="wip-link">Add a piece to your Closet →</Link>
           </main>
         </div>
       </MyNaiaLayout>
@@ -842,6 +1013,11 @@ export default function WardrobeIntelligencePage() {
       <div className="wip-app">
         <main className="wip-main">
           <p className="wip-eyebrow">My nAia / Wardrobe Intelligence</p>
+          {wiStyleError && (
+            <p className="wip-style-error" role="alert">
+              {WI_STYLE_ERROR_MESSAGE[wiStyleError] ?? "That combination couldn't be sent to StyleMe. Try again."}
+            </p>
+          )}
           <div className="wip-hero">
             <header className="wip-header">
               <h1 className="sp-shell-title">Your wardrobe, <em className="sp-shell-accent">understood.</em></h1>
@@ -883,14 +1059,29 @@ export default function WardrobeIntelligencePage() {
                 nAia&rsquo;s perspective on what you own, how you wear it, and where to focus next.{" "}
                 {page.reading ?? "Find more in what you own. See what deserves your attention."}
               </p>
-              {/* Only a real stat is shown — the engine has no "possible
-                  outfits" or "Passport match %" metric, so those are omitted
-                  rather than approximated. */}
+              {/* Only real stats are shown — the engine has no "Passport
+                  match %" metric, so that is omitted rather than
+                  approximated. Combinations and reconsider counts are the
+                  engine's own totalFound / reconsider.entries — never
+                  estimated — and each is hidden rather than shown as zero
+                  when nAia doesn't yet have enough to say so honestly. */}
               <div className="wip-hero-stats">
                 <div className="wip-hero-stat">
                   <strong>{garmentCards.length}</strong>
                   <span>Pieces in closet</span>
                 </div>
+                {combosCount !== null && combosCount > 0 && (
+                  <div className="wip-hero-stat">
+                    <strong>{combosCount}</strong>
+                    <span>Outfit combinations</span>
+                  </div>
+                )}
+                {reconsiderEntries.length > 0 && (
+                  <div className="wip-hero-stat">
+                    <strong>{reconsiderEntries.length}</strong>
+                    <span>Worth reconsidering</span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -899,7 +1090,9 @@ export default function WardrobeIntelligencePage() {
             <div className="wip-cards">
               {glanceRegisters[0] && (
                 <div className="wip-card">
-                  <span className="wip-card-kicker wip-card-kicker--positive">Strongest</span>
+                  <span className={`wip-card-kicker${glanceRegisters[0].isGenuinelyStrong ? " wip-card-kicker--positive" : ""}`}>
+                    {glanceRegisters[0].isGenuinelyStrong ? "Strongest" : "Most supported"}
+                  </span>
                   <h3>{glanceRegisters[0].heading} wardrobe</h3>
                   <p>{glanceRegisters[0].stateText}</p>
                 </div>
@@ -959,7 +1152,9 @@ export default function WardrobeIntelligencePage() {
               <h2 className="wip-section-title">What your wardrobe looks like.</h2>
               <div className="wip-card-shell wip-looks-card">
                 {neutralSharePct !== null && neutralSharePct >= 40 && (
-                  <p className="wip-looks-headline">{neutralSharePct}% of your pieces are warm neutrals — easy to combine, though outfits can start to feel similar.</p>
+                  <p className="wip-looks-headline">
+                    {neutralSharePct}% of your wardrobe is neutral{neutralTemperature ? `, predominantly ${neutralTemperature}-toned` : ""} — easy to combine, though outfits can start to feel similar.
+                  </p>
                 )}
                 {paletteRows.length > 0 && (
                   <div className="wip-colour-bar">
@@ -979,15 +1174,31 @@ export default function WardrobeIntelligencePage() {
                       ))}
                     </div>
                   )}
-                  {shapeChips.length > 0 && (
-                    <div className="wip-silhouette-group">
-                      <span className="wip-eyebrow-accent">Silhouettes</span>
-                      <div className="wip-chips">
-                        {shapeChips.map((s) => <span key={s.label} className="wip-chip">{s.label} · {s.count}</span>)}
-                      </div>
-                    </div>
-                  )}
                 </div>
+                {shapeChips.length > 0 && (
+                  <div className="wip-silhouette-group">
+                    <span className="wip-eyebrow-accent">Silhouettes</span>
+                    <div className="wip-shape-rows">
+                      {shapeChips.map((s) => {
+                        const pct = garmentCards.length > 0 ? Math.min((s.count / garmentCards.length) * 100, 100) : 0;
+                        return (
+                          <div key={s.label} className="wip-shape-row">
+                            <div className="wip-shape-row-label">
+                              <span>{s.label}</span>
+                              <span>{s.count} {s.count === 1 ? "piece" : "pieces"}</span>
+                            </div>
+                            <div className="wip-shape-bar"><div className="wip-shape-bar-fill" style={{ width: `${pct}%` }} /></div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {/* Real design fact, not a caveat to hide: silhouette and fit are two
+                        separate readings (§WI-19), so a piece can count in both — bars are
+                        each piece's true share of the whole Closet, never forced to sum to
+                        100%, so this is never a misleading stacked distribution. */}
+                    <p className="wip-shape-note">Each bar is its own share of your {garmentCards.length} pieces — a piece can have both a silhouette and a fit reading, so these can add up to more than your total.</p>
+                  </div>
+                )}
               </div>
             </section>
           )}
@@ -1005,7 +1216,7 @@ export default function WardrobeIntelligencePage() {
             ].filter((l): l is string => Boolean(l));
             const feedbackBody = profileEntries.find((e) => e.id === "outcome-feedback")?.body;
             const supportSentence = glanceRegisters[0]
-              ? `Your current Closet gives you the strongest support for ${glanceRegisters[0].heading.toLowerCase()} dressing` +
+              ? `Your current Closet gives you ${glanceRegisters[0].isGenuinelyStrong ? "its strongest support" : "relatively more support"} for ${glanceRegisters[0].heading.toLowerCase()} dressing` +
                 (glanceRegisters[1] ? `, with fewer combinations for ${glanceRegisters[1].heading.toLowerCase()}.` : ".")
               : null;
             if (patternLines.length === 0 && styleLines.length === 0 && !feedbackBody && !supportSentence) return null;
@@ -1095,6 +1306,7 @@ export default function WardrobeIntelligencePage() {
           })()}
 
           {/* ── Section 5: pieces worth rediscovering ──────────────────────── */}
+          {rediscoverPieces.length > 0 && (
           <section className="wip-section">
             <h2 className="wip-section-title">Pieces worth rediscovering.</h2>
             <p className="wip-section-sub">You have more ways to wear these than you think.</p>
@@ -1126,67 +1338,137 @@ export default function WardrobeIntelligencePage() {
               })}
             </div>
           </section>
+          )}
 
-          {/* ── Section 6: two-column analysis ─────────────────────────────── */}
-          <section className="wip-section wip-analysis">
-            <div className="wip-paired-grid">
-            {allRegisterReadings.length > 0 && (
-            <div className="wip-analysis-col">
-              <h2 className="wip-section-title">How your wardrobe supports your life.</h2>
-              <div className="wip-card-shell wip-paired-card wip-analysis-card">
-              {(["everyday", "work", "occasion"] as const).map((register) => {
-                const reading = allRegisterReadings.find((r) => r.register === register);
-                if (!reading) return null;
-                const combos = bestByRegisterPreview[register] ?? [];
-                const interpretation = (register === "work" && reading.plain === "You own a lot that reads this way, but their combinations tend to repeat the same formula."
-                  ? "You have enough work pieces, but many of your combinations repeat the same formula."
-                  : reading.plain)
-                  || (reading.state === "strong" && reading.usableCount > 0
-                    ? `You have ${reading.usableCount} ${REGISTER_LABEL[register].toLowerCase()} pieces with plenty of ways to combine them.`
-                    : "");
-                const primary = combos[0];
-                const secondary = combos[1];
-                const sharedIds = secondary ? primary.garmentIds.filter((id) => secondary.garmentIds.includes(id)) : [];
-                const changedIds = secondary ? secondary.garmentIds.filter((id) => !sharedIds.includes(id)) : [];
-                const isSwap = secondary !== undefined && sharedIds.length > 0 && changedIds.length > 0;
-                const isDistinctLook = secondary !== undefined && sharedIds.length === 0 && changedIds.length > 0;
-                return (
-                  <div key={register} className="wip-life-row">
-                    <div className="wip-life-main">
-                      <div className="wip-life-heading">
-                        <h3>{REGISTER_LABEL[register]}</h3>
-                        <span className="wip-life-state">{reading.stateText}</span>
-                        <span className="wip-life-count">{reading.usableCount} usable pieces</span>
-                      </div>
-                      <div className="wip-life-bar"><div className="wip-life-bar-fill" style={{ width: `${DEPTH_FILL[reading.state]}%` }} /></div>
-                      <p className="wip-life-text">{interpretation}</p>
-                      {register === attentionRegister && attentionCombo && (
-                        <button type="button" className="wip-link" onClick={() => setDialog({ kind: "workCombo" })}>View this combination →</button>
-                      )}
-                    </div>
-                    {primary && (() => {
-                      // Evidence tier: max 3 thumbnails per row. The swap/
-                      // distinct-look piece (if any) always gets a slot;
-                      // the rest come from the primary combo.
-                      const extra = isSwap ? changedIds.slice(0, 1) : isDistinctLook ? secondary!.garmentIds.slice(0, 1) : [];
-                      const lifeLookIds = [...primary.garmentIds.slice(0, 3 - extra.length), ...extra];
-                      return (
-                        <div className="wip-evidence-row">
-                          {lifeLookIds.map((id) => <EvidenceThumb key={id} card={byId.get(id)} />)}
+          {/* ── Section 6: how your wardrobe fits your life | shop smarter ───
+              One coordinated editorial grid (58/42), replacing two separately
+              stacked, individually-bordered sections QA flagged as bulky with
+              unused space. Same real data as before in each half — only the
+              layout changed: a single shared border + one subtle divider
+              instead of nested wip-card-shell boxes per side, no fixed
+              height, content-driven sizing. ─────────────────────────────── */}
+          {(allRegisterReadings.length > 0 || worthConsidering) && (
+          <section className="wip-section">
+            <div className="wip-life-shop-grid">
+              {allRegisterReadings.length > 0 && (
+              <div className="wip-life-shop-col">
+                <h2 className="wip-section-title">How your wardrobe fits your life.</h2>
+                {(["everyday", "work", "occasion"] as const).map((register) => {
+                  const reading = allRegisterReadings.find((r) => r.register === register);
+                  if (!reading) return null;
+                  const combos = bestByRegisterPreview[register] ?? [];
+                  const interpretation = (register === "work" && reading.plain === "You own a lot that reads this way, but their combinations tend to repeat the same formula."
+                    ? "You have enough work pieces, but many of your combinations repeat the same formula."
+                    : reading.plain)
+                    || (reading.state === "strong" && reading.usableCount > 0
+                      ? `You have ${reading.usableCount} ${REGISTER_LABEL[register].toLowerCase()} pieces with plenty of ways to combine them.`
+                      : "");
+                  const primary = combos[0];
+                  const secondary = combos[1];
+                  const sharedIds = secondary ? primary.garmentIds.filter((id) => secondary.garmentIds.includes(id)) : [];
+                  const changedIds = secondary ? secondary.garmentIds.filter((id) => !sharedIds.includes(id)) : [];
+                  const isSwap = secondary !== undefined && sharedIds.length > 0 && changedIds.length > 0;
+                  const isDistinctLook = secondary !== undefined && sharedIds.length === 0 && changedIds.length > 0;
+                  return (
+                    <div key={register} className="wip-life-row">
+                      <div className="wip-life-main">
+                        <div className="wip-life-heading">
+                          <h3>{REGISTER_LABEL[register]}</h3>
+                          <span className="wip-life-state">{reading.stateText}</span>
+                          <span className="wip-life-count">
+                            {reading.usableCount} usable pieces
+                            {reading.conditionallyUsableCount > 0 &&
+                              ` (+${reading.conditionallyUsableCount} may work depending on styling)`}
+                          </span>
                         </div>
-                      );
-                    })()}
-                  </div>
-                );
-              })}
+                        <div className="wip-life-bar"><div className="wip-life-bar-fill" style={{ width: `${DEPTH_FILL[reading.state]}%` }} /></div>
+                        <p className="wip-life-text">{interpretation}</p>
+                        {/* attentionCombo always EXISTS for a thin needed register — the
+                            engine still returns an entry when it has no real pairing to
+                            show (garmentIds: []), explicitly naming that absence rather
+                            than omitting the entry. Checking garmentIds.length, not just
+                            truthiness, is what tells a genuine combination apart from
+                            that honest placeholder — found during QA: "0 usable pieces"
+                            still offered "View this combination" for a register with
+                            nothing to show. depthNote above already states why. */}
+                        {register === attentionRegister && attentionCombo && attentionCombo.garmentIds.length > 0 && (
+                          <button type="button" className="wip-link" onClick={() => setDialog({ kind: "workCombo" })}>View this combination →</button>
+                        )}
+                      </div>
+                      {primary && (() => {
+                        // Evidence tier: max 3 thumbnails per row. The swap/
+                        // distinct-look piece (if any) always gets a slot;
+                        // the rest come from the primary combo.
+                        const extra = isSwap ? changedIds.slice(0, 1) : isDistinctLook ? secondary!.garmentIds.slice(0, 1) : [];
+                        const lifeLookIds = [...primary.garmentIds.slice(0, 3 - extra.length), ...extra];
+                        return (
+                          <div className="wip-evidence-row">
+                            {lifeLookIds.map((id) => <EvidenceThumb key={id} card={byId.get(id)} />)}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  );
+                })}
               </div>
-            </div>
-            )}
+              )}
 
-            {enoughClusters.length > 0 && (
-            <div className="wip-analysis-col">
-              <h2 className="wip-section-title">Where your wardrobe repeats.</h2>
-              <div className="wip-card-shell wip-paired-card wip-analysis-card">
+              {worthConsidering && (
+              <div className="wip-life-shop-col wip-shop-col">
+                <h2 className="wip-section-title">Shop smarter.</h2>
+                <span className="wip-shop-col-label wip-shop-col-label--buy">Worth adding</span>
+                <h3>{recTitle}</h3>
+                {(recBullets.length > 0 || recColourLead) && (
+                  <ul>
+                    {recBullets.map((b) => <li key={b}>{b}</li>)}
+                    {recColourLead && <li>Best colour: {recColourLead[0].toUpperCase()}{recColourLead.slice(1)}</li>}
+                    {recColourAlternatives.length > 0 && (
+                      <li>Also within your palette: {recColourAlternatives.map((c) => c[0].toUpperCase() + c.slice(1)).join(", ")}</li>
+                    )}
+                  </ul>
+                )}
+                {worthConsidering.garmentIds.length > 0 && (
+                  <>
+                    <p className="wip-shop-evidence-label">Works with pieces you own</p>
+                    <div className="wip-evidence-row">
+                      {worthConsidering.garmentIds.slice(0, 4).map((id) => <EvidenceThumb key={id} card={byId.get(id)} />)}
+                    </div>
+                  </>
+                )}
+                {whyNaiaLines.length > 0 && (
+                  <div className="wip-shop-why">
+                    <span className="wip-shop-why-label">Why nAia recommends this</span>
+                    <p>{whyNaiaLines.join(" ")}</p>
+                  </div>
+                )}
+                {/* The real evidenced count behind THIS recommendation — same
+                    register, same finding — not a separate estimate. workFinding
+                    is needs.couldUseMore[0]; matched by register, not by index,
+                    so it only shows when it genuinely backs this recommendation. */}
+                {workFinding && recommendationDetail && workFinding.claim === `depth-gap:${recommendationDetail.register}` && (
+                  <p className="wip-shop-quantity">{workFinding.body}</p>
+                )}
+                {/* A gap conclusion is only as good as how much of the Closet it was
+                    read from — the same hedging wardrobe-page.ts's hedge() already
+                    applies elsewhere. Nothing shown while she hasn't answered the
+                    completeness question yet, or has said she's still adding. */}
+                {model.confidence !== "mostly" && (
+                  <p className="wip-shop-hedge">{hedge(undefined, model.confidence)}</p>
+                )}
+              </div>
+              )}
+            </div>
+          </section>
+          )}
+
+          {/* ── Section 6b: where your wardrobe repeats ──────────────────────
+              No longer paired with "how your life" (moved above) — a real
+              finding stands on its own rather than being padded out with an
+              unrelated neighbour just to fill a two-column grid. ─────────── */}
+          {enoughClusters.length > 0 && (
+          <section className="wip-section">
+            <h2 className="wip-section-title">Where your wardrobe repeats.</h2>
+            <div className="wip-card-shell">
               {/* Summary card, not an unlimited report: the strongest finding
                   gets the full treatment (body + evidence); up to 2 further
                   qualifying clusters (same engine output, same slice(0,3) —
@@ -1220,60 +1502,52 @@ export default function WardrobeIntelligencePage() {
                   </>
                 );
               })()}
-              </div>
-            </div>
-            )}
             </div>
           </section>
+          )}
 
-          {/* ── Section 7: shop smarter ─────────────────────────────────────── */}
-          {(worthConsidering || lowPriority) && (
+          {/* ── Section 6b: worth reconsidering — advisory only ──────────────
+              nAia never removes, hides or down-ranks a piece on the strength
+              of this. It says what it noticed and the real evidence behind
+              it; the customer decides. See buildReconsiderAdvisory() in
+              wardrobe-needs.ts. ──────────────────────────────────────────── */}
+          {reconsiderEntries.length > 0 && (
             <section className="wip-section">
-              <h2 className="wip-section-title">Shop smarter.</h2>
-              <div className="wip-paired-grid">
-                {worthConsidering && (
-                  <div className="wip-card-shell wip-paired-card wip-shop-col">
-                    <span className="wip-shop-col-label wip-shop-col-label--buy">Worth adding</span>
-                    <h3>{recTitle}</h3>
-                    {(recBullets.length > 0 || recColourLead) && (
-                      <ul>
-                        {recBullets.map((b) => <li key={b}>{b}</li>)}
-                        {recColourLead && <li>Best colour: {recColourLead[0].toUpperCase()}{recColourLead.slice(1)}</li>}
-                        {recColourAlternatives.length > 0 && (
-                          <li>Also within your palette: {recColourAlternatives.map((c) => c[0].toUpperCase() + c.slice(1)).join(", ")}</li>
-                        )}
-                      </ul>
-                    )}
-                    {worthConsidering.garmentIds.length > 0 && (
-                      <>
-                        <p className="wip-shop-evidence-label">Works with pieces you own</p>
-                        <div className="wip-evidence-row">
-                          {worthConsidering.garmentIds.slice(0, 4).map((id) => <EvidenceThumb key={id} card={byId.get(id)} />)}
-                        </div>
-                      </>
-                    )}
-                    {whyNaiaLines.length > 0 && (
-                      <div className="wip-shop-why">
-                        <span className="wip-shop-why-label">Why nAia recommends this</span>
-                        <p>{whyNaiaLines.join(" ")}</p>
-                      </div>
-                    )}
-                  </div>
-                )}
-                {lowPriority && (
-                  <div className="wip-card-shell wip-paired-card wip-shop-col">
-                    <span className="wip-shop-col-label">Skip for now</span>
-                    <h3>{(lowPriority.title ?? "").replace(/^Another (similar |of your )?/i, "Another ")}</h3>
-                    <p>{enoughCluster?.body ?? lowPriority.body}</p>
-                    {enoughCluster && enoughCluster.garmentIds.length > 0 && (
-                      <>
-                        <p className="wip-shop-evidence-label">Similar pieces you own</p>
-                        <div className="wip-evidence-row">
-                          {enoughCluster.garmentIds.slice(0, 4).map((id) => <EvidenceThumb key={id} card={byId.get(id)} />)}
-                        </div>
-                      </>
-                    )}
-                  </div>
+              <h2 className="wip-section-title">Worth reconsidering.</h2>
+              <p className="wip-section-sub">nAia&rsquo;s own noticing — not a decision. Nothing is removed or hidden.</p>
+              <div className="wip-piece-grid">
+                {reconsiderEntries.slice(0, 6).map((entry) => {
+                  const card = byId.get(entry.garmentId);
+                  return (
+                    <div key={entry.garmentId} className="wip-piece-card">
+                      <div className="wip-piece-thumb"><Thumb card={card} height={170} /></div>
+                      <h3>{cardLabel(card)}</h3>
+                      {entry.reasons.map((reason) => <p key={reason}>{softenReconsiderReason(reason, card)}</p>)}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
+          {/* ── Section 7: buy less ──────────────────────────────────────────
+              Was the "Skip for now" half of "Shop smarter." — the "worth
+              adding" half moved into the new life/shop grid above, so this
+              stands alone rather than filling a now-empty second column. ─── */}
+          {lowPriority && (
+            <section className="wip-section">
+              <h2 className="wip-section-title">Buy less.</h2>
+              <div className="wip-card-shell wip-shop-col">
+                <span className="wip-shop-col-label">Skip for now</span>
+                <h3>{(lowPriority.title ?? "").replace(/^Another (similar |of your )?/i, "Another ")}</h3>
+                <p>{enoughCluster?.body ?? lowPriority.body}</p>
+                {enoughCluster && enoughCluster.garmentIds.length > 0 && (
+                  <>
+                    <p className="wip-shop-evidence-label">Similar pieces you own</p>
+                    <div className="wip-evidence-row">
+                      {enoughCluster.garmentIds.slice(0, 4).map((id) => <EvidenceThumb key={id} card={byId.get(id)} />)}
+                    </div>
+                  </>
                 )}
               </div>
             </section>
@@ -1325,6 +1599,7 @@ const css = `
   .wip-app{max-width:1180px;margin:0 auto}
   .wip-main{padding:8px 0 24px}
   .wip-eyebrow{font-family:var(--naia-ff-ui);font-size:9px;letter-spacing:2.5px;text-transform:uppercase;color:rgba(40,21,12,0.5);margin:0 0 14px}
+  .wip-style-error{font-family:var(--naia-ff-ui);font-size:12.5px;color:var(--naia-accent);background:rgba(107,29,38,0.07);border:1px solid rgba(107,29,38,0.18);border-radius:6px;padding:10px 14px;margin:0 0 18px}
 
   /* Hero: headline, full width, dominant — summary below it, then the 3
      headline cards below that as a clearly subordinate summary layer. Never
@@ -1343,8 +1618,26 @@ const css = `
   .wip-hero-stat{display:flex;flex-direction:column;align-items:flex-end;text-align:right}
   .wip-hero-stat strong{font-family:var(--naia-ff-display);font-weight:300;font-size:2rem;color:var(--naia-ink);line-height:1}
   .wip-hero-stat span{font-family:var(--naia-ff-ui);font-size:9.5px;letter-spacing:1.4px;text-transform:uppercase;color:rgba(40,21,12,0.5);margin-top:4px}
+  /* flex-shrink:0 on 3 right-aligned stats is fine once .wip-summary-row
+     has already wrapped them below the summary text (520px+) — but
+     flex-shrink:0 also means .wip-hero-stats keeps its full content
+     width (~444px) once alone on its own line, so flex-wrap:wrap on it
+     had nothing to react to: none of its children ever got squeezed
+     below the space available, so none of them wrapped either, and the
+     ~444px box just overflowed the viewport. Capping its own width is
+     what actually forces the 3 stats to wrap below that breakpoint. */
+  @media(max-width:520px){
+    .wip-hero-stats{flex-shrink:1;flex-wrap:wrap;row-gap:16px;width:100%;max-width:100%}
+    .wip-hero-stat{align-items:flex-start;text-align:left}
+  }
 
-  .wip-cards{display:flex;flex-wrap:wrap;margin-top:28px;padding-top:20px;border-top:1px solid var(--naia-border)}
+  /* No explicit width on .wip-app below ~1180px means these 3 cards wrap
+     (flex-wrap) well before the ≤520px column-stack override below adds
+     its own gap — confirmed live at 768px/tablet: the 3rd card wraps to
+     a new row flush against row 1, with zero space, reading as the two
+     rows' text colliding. row-gap here covers every width where wrapping
+     can happen, not just the explicit mobile breakpoint. */
+  .wip-cards{display:flex;flex-wrap:wrap;row-gap:18px;margin-top:28px;padding-top:20px;border-top:1px solid var(--naia-border)}
   .wip-card{padding:0 30px;min-width:150px}
   .wip-card:first-child{padding-left:0}
   .wip-card + .wip-card{border-left:1px solid var(--naia-border)}
@@ -1398,7 +1691,8 @@ const css = `
 
   /* What your wardrobe looks like — a segmented proportional colour bar
      (each piece's real share as its width) instead of a row of equal
-     circular swatches, plus the existing silhouette chips alongside it. */
+     circular swatches, with the silhouette bars (below) in the same
+     visual language — same card, same thin-bar-on-muted-track idiom. */
   .wip-looks-headline{font-family:var(--naia-ff-ui);font-weight:600;font-size:13.5px;line-height:1.5;color:var(--naia-ink);margin:0 0 14px}
   .wip-colour-bar{display:flex;width:100%;height:14px;border-radius:7px;overflow:hidden;background:var(--naia-muted-bg)}
   .wip-colour-bar span{display:block;height:100%}
@@ -1407,7 +1701,21 @@ const css = `
   .wip-legend-item{display:flex;align-items:center;gap:6px;font-family:var(--naia-ff-ui);font-size:11px;color:rgba(40,21,12,0.6)}
   .wip-legend-item em{font-style:normal;color:rgba(40,21,12,0.4)}
   .wip-legend-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
-  .wip-silhouette-group{flex-shrink:0}
+
+  /* Silhouettes — individual proportional bars, each a real share of the
+     whole Closet (never normalised to sum to 100%, since silhouette and
+     fit are two separate readings and a piece can count in both — see
+     §WI-19 — so a stacked 100% bar would misrepresent real overlap as a
+     clean partition). Same accent/track colours as "Ways to get dressed"
+     elsewhere on this page, just full-width here instead of capped at
+     180px, since this section is this chart's whole purpose. */
+  .wip-silhouette-group{margin-top:28px;padding-top:24px;border-top:1px solid var(--naia-border)}
+  .wip-shape-rows{display:flex;flex-direction:column;gap:14px;margin-top:14px}
+  .wip-shape-row-label{display:flex;justify-content:space-between;align-items:baseline;font-family:var(--naia-ff-ui);font-size:12.5px;color:var(--naia-ink);margin-bottom:5px}
+  .wip-shape-row-label span:last-child{font-size:11px;color:rgba(40,21,12,0.5)}
+  .wip-shape-bar{height:6px;background:var(--naia-muted-bg);border-radius:3px;overflow:hidden}
+  .wip-shape-bar-fill{height:100%;background:var(--naia-accent);border-radius:3px}
+  .wip-shape-note{font-family:var(--naia-ff-ui);font-size:10.5px;line-height:1.5;color:rgba(40,21,12,0.45);margin:14px 0 0}
 
   /* Your Closet, styled (Moodboard V1) — one contained editorial composition
      per look, not a grid of separate photos: a single shared cream surface
@@ -1477,7 +1785,12 @@ const css = `
      curated edit rather than three cards; the margin-bottom is the gap
      before the analysis cards below, which previously relied only on
      the next section's own top padding and read as too sudden. */
-  .wip-piece-grid{display:grid;grid-template-columns:repeat(3,minmax(0,180px));gap:22px;justify-content:center;margin-bottom:16px}
+  /* justify-content:start (not center) — with fewer cards than columns
+     (e.g. Worth Reconsidering's one piece), centering left large empty
+     margins on both sides instead of sitting under the section's own
+     left-aligned heading/description. Shared by Worth Reconsidering and
+     Pieces Worth Rediscovering — same grid, same fix for both. */
+  .wip-piece-grid{display:grid;grid-template-columns:repeat(3,minmax(0,180px));gap:22px;justify-content:start;margin-bottom:16px}
   @media(max-width:900px){.wip-piece-grid{grid-template-columns:repeat(2,minmax(0,180px))}}
   @media(max-width:600px){.wip-piece-grid{grid-template-columns:minmax(0,220px)}}
   .wip-piece-card{display:flex;flex-direction:column}
@@ -1486,52 +1799,31 @@ const css = `
   .wip-piece-card > p{font-family:var(--naia-ff-ui);font-size:12px;line-height:1.5;color:rgba(40,21,12,0.6);margin:0 0 8px}
   .wip-piece-actions{display:flex;flex-direction:column;gap:7px;align-items:flex-start}
 
-  /* Two-column analysis: How your wardrobe supports your life | Where it repeats.
-     Each column is its own bordered cream card, matching the moodboard/shop
-     card treatment, rather than two borderless text blocks. */
-  /* align-items:start so each column sizes to its own content — CSS grid's
-     default stretch was forcing both columns to match the taller sibling's
-     height, leaving a large empty gap under the shorter one. */
-  /* ONE shared paired-card grid — both two-column rows (lifestyle/
-     repetition and Worth adding/Skip for now) use this exact rule, so
-     they share total row width, column width, gutter and stacking
-     breakpoint. Shop Smarter previously had its own max-width:920px and a
-     different gap, which is what made it visibly narrower than this row
-     and left its card edges not lining up underneath. */
-  .wip-paired-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}
-  @media(max-width:900px){.wip-paired-grid{grid-template-columns:1fr;gap:20px}}
-  /* align-items:stretch (the default — no longer overridden) is what makes
-     each pair equally sized within its own row: both columns take the
-     row's full height, and .wip-paired-card's flex:1/min-height below
-     make the visible card box itself fill that height, so a shorter
-     card's bottom border still lines up with its taller sibling's
-     instead of ending early. */
-  .wip-analysis-col{display:flex;flex-direction:column}
-  /* Shared height across BOTH rows, not just within each row: without
-     this, the lifestyle/repetition pair and the shop-smarter pair could
-     each be internally equal-height but still end up two different
-     heights from each other, breaking the "cards line up underneath"
-     requirement. 420px is sized to the analysis row's real content (up
-     to 3 register rows with evidence thumbnails) — the shorter
-     Shop-smarter cards reach the same floor and stay top-aligned inside
-     it (plain block flow, nothing centers their content vertically).
-     Desktop only — mobile stacks to one column and sizes naturally. */
-  .wip-paired-card{display:flex;flex-direction:column}
-  /* 436px — measured, not estimated: a real HTML harness using this exact
-     CSS and the real diagnostic customer's real text (3 register rows,
-     merged heading/count line, 100px evidence thumbnails) rendered in an
-     actual browser at desktop width came to 428.4px
-     (document.getElementById(...).getBoundingClientRect().height); 436px
-     keeps a small (~8px) comfortable margin rather than cutting exactly
-     to the measured minimum. The repetition card's compact-summary
-     treatment (primary finding full, any further qualifying clusters as
-     a one-line title+count) was separately verified at a hypothetical
-     3-cluster case: 290px, well inside this shared height regardless of
-     how many real clusters a customer has. height (not min-height) is
-     deliberate here, as requested — all four cards get this exact value.
-     Desktop only — mobile/tablet stacks to natural height:auto. */
-  @media(min-width:901px){.wip-paired-card{height:436px}}
-  .wip-analysis-card{flex:1}
+  /* "How your wardrobe fits your life" | "Shop smarter" — one coordinated
+     58/42 editorial grid, replacing two separately-stacked, individually
+     bordered-box sections (a measured 436px FIXED height was previously
+     shared across both halves purely so mismatched content could "line
+     up" — that is exactly what produced the large empty areas QA flagged;
+     content now sizes to itself, no fixed or shared height at all).
+     ONE shared border around the whole row; a single subtle divider
+     between the two halves instead of two nested wip-card-shell boxes. */
+  .wip-life-shop-grid{
+    display:grid;
+    grid-template-columns:58% 42%;
+    border:1px solid var(--naia-border);
+    border-radius:8px;
+    background:var(--naia-surface);
+  }
+  .wip-life-shop-col{padding:28px 30px;min-width:0}
+  .wip-life-shop-col + .wip-life-shop-col{border-left:1px solid var(--naia-border)}
+  @media(max-width:900px){
+    .wip-life-shop-grid{grid-template-columns:1fr}
+    .wip-life-shop-col + .wip-life-shop-col{border-left:0;border-top:1px solid var(--naia-border)}
+  }
+  @media(max-width:480px){.wip-life-shop-col{padding:22px 18px}}
+  /* The right-hand "Shop smarter" half reuses wip-shop-col-label/h3/ul/p —
+     declared below, originally written for the old bordered shop card —
+     unchanged, just no longer nested inside its own separate box. */
 
   /* How your wardrobe supports your life */
   .wip-life-row{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:9px 0;border-top:1px solid var(--naia-border)}
@@ -1581,13 +1873,11 @@ const css = `
      row without shrinking the image back into icon territory. */
   .wip-evidence-row .wip-thumb{width:86px;border-radius:4px}
 
-  /* Shop smarter — each side its own bordered cream card, matching the
-     analysis/moodboard card treatment. */
-  /* Grid shape (width, gutter, stacking breakpoint) now comes entirely
-     from .wip-paired-grid, shared with the analysis row — this used to
-     declare its own max-width:920px and a different gap, which is what
-     made Shop Smarter visibly narrower and its cards not line up
-     underneath the lifestyle/repetition pair. */
+  /* Shop smarter / Buy less typography — wip-shop-col is applied alongside
+     the layout class at each call site (wip-life-shop-col for the "Worth
+     adding" half of the new grid; wip-card-shell for the standalone "Buy
+     less" card) so both reuse the exact same h3/ul/p/evidence-row rules
+     rather than declaring them twice. */
   .wip-shop-col-label{display:block;font-family:var(--naia-ff-ui);font-size:9.5px;letter-spacing:1.4px;text-transform:uppercase;font-weight:700;color:rgba(40,21,12,0.45);margin-bottom:12px}
   .wip-shop-col-label--buy{color:var(--naia-accent)}
   .wip-shop-col h3{font-family:var(--naia-ff-ui);font-weight:700;font-size:14px;line-height:1.3;margin:0 0 8px;color:var(--naia-ink)}
@@ -1596,6 +1886,8 @@ const css = `
   .wip-shop-evidence-label{font-family:var(--naia-ff-ui);font-size:9.5px;letter-spacing:0.6px;text-transform:uppercase;color:rgba(40,21,12,0.4);margin:0 0 8px}
   .wip-shop-col .wip-evidence-row{margin-bottom:12px}
   .wip-shop-why{margin-top:auto;padding-top:10px}
+  .wip-shop-quantity{font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.6;color:rgba(40,21,12,0.7);margin:10px 0 0}
+  .wip-shop-hedge{font-family:var(--naia-ff-ui);font-size:10.5px;line-height:1.6;color:rgba(40,21,12,0.45);margin:10px 0 0}
   .wip-shop-why-label{display:block;font-family:var(--naia-ff-ui);font-size:9.5px;letter-spacing:0.6px;text-transform:uppercase;color:rgba(40,21,12,0.4);margin:0 0 4px}
   .wip-shop-why p{font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.6;color:rgba(40,21,12,0.65);margin:0}
 
@@ -1612,11 +1904,17 @@ const css = `
      (smaller, muted) rather than reading as another full finding. */
   .wip-method-body{font-family:var(--naia-ff-ui);font-size:12.5px;line-height:1.65;color:rgba(40,21,12,0.6);margin:0 0 10px;max-width:640px}
   .wip-legal{font-family:var(--naia-ff-ui);font-size:9.5px;color:rgba(40,21,12,0.45);margin-top:10px}
-  .wip-empty{font-family:var(--naia-ff-ui);font-size:13px;color:rgba(40,21,12,0.6);padding:40px 0}
+  .wip-empty{font-family:var(--naia-ff-ui);font-size:13px;color:rgba(40,21,12,0.6);padding:40px 0 0}
+  .wip-empty + .wip-link{display:inline-block;margin:10px 0 40px}
 
-  .wip-thumb{width:100%;display:flex;align-items:center;justify-content:center;background:var(--naia-muted-bg);border-radius:4px;overflow:hidden;flex-shrink:0}
+  .wip-thumb{width:100%;display:flex;align-items:center;justify-content:center;background:var(--naia-muted-bg);border:1px solid var(--naia-border);border-radius:4px;overflow:hidden;flex-shrink:0}
   .wip-thumb img{width:100%;height:100%;object-fit:contain}
-  .wip-thumb-fallback{font-family:var(--naia-ff-ui);font-size:11px;color:rgba(40,21,12,0.4)}
+  /* No photo yet — a deliberate monogram, not an empty box. Same display
+     face as the page's own headings, sized to read clearly at any of this
+     page's thumbnail sizes without dominating the smallest ones. */
+  .wip-thumb-fallback-stack{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px}
+  .wip-thumb-fallback{font-family:var(--naia-ff-display);font-weight:300;font-size:22px;letter-spacing:0.04em;color:rgba(40,21,12,0.35)}
+  .wip-thumb-fallback-caption{font-family:var(--naia-ff-ui);font-size:9.5px;letter-spacing:0.06em;text-transform:uppercase;color:rgba(40,21,12,0.3)}
 
   @media(max-width:700px){
     .wip-header{display:block}

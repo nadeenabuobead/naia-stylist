@@ -397,6 +397,147 @@ describe("§WN-4 effective depth", () => {
       "unknown",
     );
   });
+
+  it("4d — arms-covered never judges a garment that structurally has no sleeves", () => {
+    // Same false-positive class as the legs-covered/trench-coat fix above:
+    // trousers, shoes and bags have no sleeveLength to read, and never will.
+    // Found via real QA data — these were reporting "unknown — coverage not
+    // read yet" against a preference that was never about them, inflating
+    // the customer-facing "still being read" count.
+    const passport = makePassport({ dressingPreferences: ["arms-covered"] });
+    for (const slot of ["bottom", "shoes", "bag", "accessory", "jewelry"]) {
+      assert.equal(
+        classifyUsability(makeGarment({ slot, sleeveLength: undefined }), passport).usability,
+        "usable",
+        `${slot} with no sleeveLength must be exempt, not unknown`,
+      );
+    }
+    // A top, outerwear piece, dress or set genuinely can have sleeves, so the
+    // check must stay active for them.
+    for (const slot of ["top", "outerwear", "dress", "set"]) {
+      assert.equal(
+        classifyUsability(makeGarment({ slot, sleeveLength: undefined }), passport).usability,
+        "unknown",
+        `${slot} with no sleeveLength must still read as unknown — it genuinely isn't read yet`,
+      );
+    }
+  });
+});
+
+// ── §WN-4e Conditional vs confirmed incompatibility ───────────────────────────
+
+describe("§WN-4e a midi hem against legs-covered is conditional, not confirmed incompatible", () => {
+  it("4e — the register's own count and note agree with the Style Passport dialog's 'may depend' framing", () => {
+    // Found during Persona A QA: the coverage dialog already said "may depend
+    // on how you wear it" for a midi dress, while this register's own count
+    // and depthNote said "0 usable pieces... don't currently meet" — flatly
+    // contradicting the dialog about the exact same piece.
+    const passport = makePassport({ lifestyle: ["dinners-going-out"], dressingPreferences: ["legs-covered"] });
+    const items = [
+      ...variedLooks("casual", 4), // pad past MIN_WARDROBE_SIZE, irrelevant register
+      makeGarment({ slot: "dress", category: "DRESSES", formality: "evening", hemLength: "midi" }),
+    ];
+    const needs = run(items, { passport });
+    const occasion = registerOf(needs, "occasion");
+
+    assert.equal(occasion.confirmedBlockedCount, 0, "a midi hem is never a confirmed violation on its own");
+    assert.equal(occasion.conditionallyUsableCount, 1);
+    assert.equal(occasion.usableCount, 0, "not folded into confirmed usable — nAia still isn't certain either way");
+    assert.doesNotMatch(occasion.depthNote, /don't currently meet/, "must not flatly contradict the dialog's hedged framing");
+    assert.match(occasion.depthNote, /may work depending on how you style/);
+    assert.equal(occasion.blockedPieces.length, 1);
+    assert.equal(occasion.blockedPieces[0].isConditional, true);
+  });
+
+  it("4f — an objectively sleeveless piece against arms-covered is still confirmed, never softened", () => {
+    const passport = makePassport({ lifestyle: ["office"], dressingPreferences: ["arms-covered"] });
+    const items = [
+      ...variedLooks("casual", 4),
+      makeGarment({ slot: "top", category: "TOPS", formality: "business-casual", sleeveLength: "sleeveless" }),
+    ];
+    const needs = run(items, { passport });
+    const work = registerOf(needs, "work");
+    const sleeveless = work.blockedPieces.find((b) => b.reason === "keeping your arms covered");
+    assert.ok(sleeveless, "the sleeveless piece must still be flagged");
+    assert.equal(sleeveless!.isConditional, false, "a genuinely sleeveless top is confirmed incompatible, not a styling question");
+  });
+
+  it("4g — singular vs plural grammar in the depthNote matches the real confirmed-blocked count", () => {
+    const passport = makePassport({ lifestyle: ["office"], dressingPreferences: ["arms-covered"] });
+    const items = [
+      ...variedLooks("casual", 4),
+      makeGarment({ slot: "top", category: "TOPS", formality: "business-casual", sleeveLength: "sleeveless" }),
+    ];
+    const needs = run(items, { passport });
+    const work = registerOf(needs, "work");
+    assert.match(work.depthNote, /1 of them doesn't currently meet/, "exactly one confirmed-blocked piece must read as singular");
+  });
+
+  it("4h — a piece failing BOTH arms and legs coverage lists both reasons, not just the first one found", () => {
+    // Found during Persona A QA: the coverage dialog mentioned uncovered
+    // arms but not the short hemline for a piece that genuinely fails both
+    // stated preferences — classifyUsability()'s reason only ever carries
+    // the FIRST check that fails, which is correct for counting but not
+    // for fully explaining why a piece is blocked.
+    const passport = makePassport({ lifestyle: ["dinners-going-out"], dressingPreferences: ["arms-covered", "legs-covered"] });
+    const items = [
+      ...variedLooks("casual", 4),
+      makeGarment({ slot: "dress", category: "DRESSES", formality: "evening", sleeveLength: "sleeveless", hemLength: "mini" }),
+    ];
+    const needs = run(items, { passport });
+    const occasion = registerOf(needs, "occasion");
+    const piece = occasion.blockedPieces[0];
+    assert.ok(piece, "sanity: this fixture produces a real blocked piece");
+    assert.equal(piece.reason, "keeping your arms covered", "sanity: the single `reason` is still just the first check, unchanged");
+    assert.deepEqual(
+      piece.allReasons,
+      ["keeping your arms covered", "keeping your legs covered"],
+      "allReasons must list every failed check, in the order they're evaluated",
+    );
+  });
+
+  it("4i — a colour named in BOTH favoriteColors and avoidColors is never a confident avoid-colour block", () => {
+    // Found live on Persona E (favoriteColors: ["black"], avoidColors: ["black"])
+    // — the exact same colour stated as both loved and avoided. A black
+    // piece with no other violation was being flagged "blocked" purely for
+    // matching avoidColors, silently ignoring that the identical colour was
+    // also her stated favourite. Self-contradictory data must not produce a
+    // confident negative claim in either direction.
+    const passport = makePassport({
+      lifestyle: ["office"],
+      favoriteColors: ["black"],
+      avoidColors: ["black"],
+      dressingPreferences: [],
+    });
+    const items = [
+      ...variedLooks("casual", 4),
+      makeGarment({ slot: "bottom", category: "BOTTOMS", formality: "business-casual", primaryColor: "black", hemLength: "full" }),
+    ];
+    const needs = run(items, { passport });
+    const work = registerOf(needs, "work");
+    const trousers = work.blockedPieces.find((b) => b.allReasons.some((r) => /avoid.*colour/i.test(r)));
+    assert.equal(trousers, undefined, "a genuinely conflicted colour must never block an otherwise-compliant piece");
+  });
+
+  it("4j — avoidColors still blocks a colour that is NOT also a stated favourite", () => {
+    // Same fixture shape as 4i, but the avoided colour is unambiguous
+    // (never stated as a favourite) — confirms 4i's fix didn't just disable
+    // the avoidColors check entirely.
+    const passport = makePassport({
+      lifestyle: ["office"],
+      favoriteColors: ["navy"],
+      avoidColors: ["black"],
+      dressingPreferences: [],
+    });
+    const items = [
+      ...variedLooks("casual", 4),
+      makeGarment({ slot: "bottom", category: "BOTTOMS", formality: "business-casual", primaryColor: "black", hemLength: "full" }),
+    ];
+    const needs = run(items, { passport });
+    const work = registerOf(needs, "work");
+    const trousers = work.blockedPieces.find((b) => b.allReasons.some((r) => /avoid.*colour/i.test(r)));
+    assert.ok(trousers, "an unambiguously avoided colour must still block");
+  });
 });
 
 // ── §WN-5 Small but sufficient ────────────────────────────────────────────────
@@ -416,6 +557,40 @@ describe("§WN-5 a small wardrobe that works is not a gap", () => {
     assert.ok(r.usableCount <= 6, "this really is a small register");
     assert.ok(r.distinctLooks > 2, `a small but varied register should clear the thin threshold, got ${r.distinctLooks}`);
     assert.ok(!moreIds(needs).includes("occasion"), "a small register that covers her needs is not a gap");
+  });
+});
+
+// ── §WN-5b Recommendations prioritise the worst gap, not list order ──────────
+//
+// Found during Persona A QA: couldUseMore (and therefore the single headline
+// "Best next move") came out in the fixed everyday/work/occasion register
+// order, so a register with 6 usable-but-repetitive pieces outranked a
+// register with ZERO usable pieces purely because it happened to be checked
+// first. The worse gap must lead regardless of register order.
+
+describe("§WN-5b couldUseMore is sorted by real severity, not register order", () => {
+  it("5b — a register with zero usable pieces outranks a thin-but-stocked one, even though it's checked later", () => {
+    const items = [
+      // Work: 6 usable pieces, but all interchangeable — thin variety, not thin stock.
+      ...makeLook("business-casual", 3),
+      // Occasion: one dress, blocked by a stated dressing preference — zero usable.
+      makeGarment({ slot: "dress", category: "DRESSES", formality: "evening", hemLength: "mini" }),
+    ];
+    const needs = run(items, {
+      passport: makePassport({
+        lifestyle: ["office", "dinners-going-out"],
+        dressingPreferences: ["legs-covered"],
+      }),
+    });
+
+    const work = registerOf(needs, "work");
+    const occasion = registerOf(needs, "occasion");
+    assert.equal(work.usableCount, 6, "sanity: work genuinely has 6 usable pieces");
+    assert.equal(occasion.usableCount, 0, "sanity: occasion genuinely has zero usable pieces");
+
+    const order = moreIds(needs);
+    assert.ok(order.includes("work") && order.includes("occasion"), `both registers must be flagged thin: ${order.join(", ")}`);
+    assert.equal(order[0], "occasion", `the zero-usable register must lead couldUseMore, got order: ${order.join(", ")}`);
   });
 });
 
@@ -1068,5 +1243,133 @@ describe("§CIA-WI-7 Phase 3 wardrobe adapter has zero effect on WI's own output
 
     const after = run(items, { passport });
     assert.deepEqual(after, before, "WI's output must be byte-identical whether or not the Phase 3 adapter was also called on its output");
+  });
+});
+
+// ── §WN-14 Reconsider / let go — advisory only ────────────────────────────────
+//
+// Composed entirely from signals this file already computes and already
+// tests elsewhere (blockedPieces, "enough" clusters, "repetition" findings).
+// The one new rule asserted here: nAia states what it noticed, never a
+// removal verdict — no "remove", "donate", "get rid of" or "delete" may ever
+// appear in a reconsider reason.
+const BANNED_REMOVAL_LANGUAGE = /\bremove\b|\bdonate\b|\bget rid of\b|\bdelete\b|\bdiscard\b|\btoss\b/i;
+
+describe("§WN-14 reconsider / let go — advisory only", () => {
+  it("14a — a piece blocked by a stated dressing preference surfaces with the real reason, never a verdict", () => {
+    const occasion = [
+      ...makeLook("evening", 1, { hemLength: "maxi" }),
+      ...Array.from({ length: 6 }, () =>
+        makeGarment({ slot: "dress", category: "DRESSES", formality: "evening", sleeveLength: "sleeveless", hemLength: "maxi" }),
+      ),
+    ];
+    const needs = run([...makeLook("casual", 6), ...occasion], {
+      passport: makePassport({
+        lifestyle: ["dinners-going-out", "everyday-casual"],
+        dressingPreferences: ["arms-covered"],
+      }),
+    });
+
+    const occasionRegister = registerOf(needs, "occasion");
+    assert.ok(occasionRegister.blockedPieces.length > 0, "sanity: this fixture produces real blocked pieces");
+
+    const blockedId = occasionRegister.blockedPieces[0].garmentId;
+    const entry = needs.reconsider.entries.find((e) => e.garmentId === blockedId);
+    assert.ok(entry, "a blocked piece must surface as a reconsider entry");
+    assert.match(entry!.reasons.join(" "), /outside a preference you stated/);
+    assert.match(entry!.reasons.join(" "), /arms covered/);
+    for (const reason of entry!.reasons) assert.doesNotMatch(reason, BANNED_REMOVAL_LANGUAGE);
+  });
+
+  it("14a-2 — a conditionally-blocked piece (midi hem vs legs-covered) never surfaces in Reconsider", () => {
+    // Found during Persona A QA: the Style Passport dialog already says "may
+    // depend on how you wear it" for a midi dress, but it was still listed
+    // under Worth Reconsidering as if nAia had concluded something — the
+    // same evidence-vs-claim contradiction the register count/depthNote fix
+    // closed. A genuine uncertainty is not evidence of a problem.
+    const passport = makePassport({ lifestyle: ["dinners-going-out"], dressingPreferences: ["legs-covered"] });
+    const items = [
+      ...variedLooks("casual", 4),
+      makeGarment({ slot: "dress", category: "DRESSES", formality: "evening", hemLength: "midi" }),
+    ];
+    const needs = run(items, { passport });
+    const occasionRegister = registerOf(needs, "occasion");
+    const midiPiece = occasionRegister.blockedPieces.find((b) => b.isConditional);
+    assert.ok(midiPiece, "sanity: this fixture produces a conditional blocked piece");
+
+    const entry = needs.reconsider.entries.find((e) => e.garmentId === midiPiece!.garmentId);
+    assert.equal(entry, undefined, "a conditional piece must not appear in Reconsider at all");
+  });
+
+  it("14b — an 'enough' cluster's own members surface in Reconsider, without an overstated visual-similarity claim", () => {
+    // Was "A near-duplicate of pieces you already have enough of." — but variedLooks()
+    // deliberately builds five genuinely different silhouettes/fits/colours (fitted black,
+    // oversized navy, boxy cream, wrap green, column grey) that only cluster together on
+    // register + slot + neutral-band (clustersOf() does not compare silhouette, fit, print
+    // or fabric at all). "Near-duplicate" overstated a claim the evidence never supported;
+    // fixed to describe the real basis — covering the same role — without implying the
+    // pieces look alike. This is the exact fixture that would make the overclaim visible.
+    const needs = run(variedLooks("casual", 5), { passport: makePassport({ lifestyle: ["everyday-casual"] }) });
+    assert.ok(needs.enough.length > 0, "sanity: this fixture produces a real 'enough' cluster");
+
+    const memberId = needs.enough[0].garmentIds[0];
+    const entry = needs.reconsider.entries.find((e) => e.garmentId === memberId);
+    assert.ok(entry, "a member of an 'enough' cluster must surface as a reconsider entry");
+    assert.match(entry!.reasons.join(" "), /already cover this role well/);
+    assert.doesNotMatch(entry!.reasons.join(" "), /near-duplicate|duplicate|identical/i, "must not claim visual similarity clustersOf() never actually checked");
+    for (const reason of entry!.reasons) assert.doesNotMatch(reason, BANNED_REMOVAL_LANGUAGE);
+  });
+
+  it("14c — a repetition finding's pieces surface as reconsider entries, never as a 'buy more' signal", () => {
+    const needs = run(makeLook("casual", 13), { passport: makePassport({ lifestyle: ["everyday-casual"] }) });
+    const finding = needs.couldUseMore.find((f) => f.kind === "repetition");
+    assert.ok(finding, "sanity: this fixture produces a real repetition finding");
+
+    const memberId = finding!.garmentIds[0];
+    const entry = needs.reconsider.entries.find((e) => e.garmentId === memberId);
+    assert.ok(entry, "a repetition finding's piece must surface as a reconsider entry");
+    assert.match(entry!.reasons.join(" "), /near-identical pieces/);
+    for (const reason of entry!.reasons) assert.doesNotMatch(reason, BANNED_REMOVAL_LANGUAGE);
+  });
+
+  it("14d — with nothing evidenced, reconsider reports a learning state with a real next action, never a fabricated list", () => {
+    // 16 interchangeable pieces, no Passport at all: no blocked pieces, and
+    // distinctLooks (1) never clears DEEP_LOOKS, so no 'enough' cluster either.
+    const needs = run(makeLook("casual", 8), { passport: null });
+    assert.equal(needs.reconsider.state, "learning");
+    assert.equal(needs.reconsider.entries.length, 0);
+    assert.ok(needs.reconsider.learningNote && needs.reconsider.learningNote.length > 0);
+  });
+
+  it("14e — below the minimum wardrobe size, reconsider is learning, not empty-by-coincidence", () => {
+    const needs = run([makeGarment(), makeGarment()], { passport: makePassport({ lifestyle: ["everyday-casual"] }) });
+    assert.equal(needs.reconsider.state, "learning");
+    assert.equal(needs.reconsider.entries.length, 0);
+  });
+
+  it("14f — every reason across every fixture avoids removal language", () => {
+    const fixtures: Array<[WardrobeGarment[], WardrobePassport | null]> = [
+      [makeLook("casual", 13), makePassport({ lifestyle: ["everyday-casual"] })],
+      [variedLooks("casual", 5), makePassport({ lifestyle: ["everyday-casual"] })],
+    ];
+    for (const [items, passport] of fixtures) {
+      const needs = run(items, { passport });
+      for (const entry of needs.reconsider.entries) {
+        for (const reason of entry.reasons) {
+          assert.doesNotMatch(reason, BANNED_REMOVAL_LANGUAGE, `banned removal language in: "${reason}"`);
+        }
+      }
+    }
+  });
+
+  it("14g — a reconsider entry always carries real, signal-tagged evidence", () => {
+    const needs = run(makeLook("casual", 13), { passport: makePassport({ lifestyle: ["everyday-casual"] }) });
+    assert.ok(needs.reconsider.entries.length > 0, "sanity");
+    for (const entry of needs.reconsider.entries) {
+      assert.ok(entry.evidence.length > 0, `entry for ${entry.garmentId} has no evidence`);
+      for (const ev of entry.evidence) {
+        assert.ok(ev.garmentIds.length > 0, "evidence must name the garments it's about");
+      }
+    }
   });
 });

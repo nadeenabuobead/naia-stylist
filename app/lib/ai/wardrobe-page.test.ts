@@ -115,6 +115,7 @@ function baseInput(over: Partial<WardrobePageInput> = {}): WardrobePageInput {
       { id: "need-work-repetition", text: "You have work pieces, but fewer ways to combine them", source: "depth", evidence: [] },
       { id: "f1", text: "You already have enough everyday neutral tops", source: "depth", evidence: [] },
     ],
+    reconsider: { state: "available", entries: [] },
   } as never;
 
   const recommendations = {
@@ -725,7 +726,7 @@ describe("§WP-11 lifestyle-labelled presentation, same 3-register engine", () =
 
 describe("§WP-13 the wardrobe profile states its conclusions once, mostly collapsed", () => {
   it("§WP-13a colours, silhouettes, StyleMe history and wear behaviour are always visible, in one line each", () => {
-    const input = baseInput();
+    const input = baseInput({ hasStatedColourPreference: true });
     (input.intelligence as unknown as { dna: unknown }).dna = {
       palette: [{ colour: "Black", count: 19 }], shapes: [{ label: "Straight" }],
       traits: [], shapesReading: "Straight shapes recur most, with fitted and relaxed close behind.",
@@ -1155,6 +1156,7 @@ describe("§WP-12 the profile's colour line is generic — abundance-to-low-prio
 
   it("§WP-12b the colour summary names the thin colour when the engine has identified one", () => {
     const input = inputWithPalette([{ colour: "Black", count: 19, share: 0.4, neutral: true }]);
+    input.hasStatedColourPreference = true;
     (input.needs as unknown as { synthesis: unknown }).synthesis = {
       state: "available",
       lines: [{ id: "synth-colour", kind: "uneven", reading: "x", evidence: [], thinLabel: "Grey" }],
@@ -1163,6 +1165,30 @@ describe("§WP-12 the profile's colour line is generic — abundance-to-low-prio
     const block = page.sections.find((s) => s.id === "profile")!.blocks.find((b) => b.id === "profile")!;
     const lines = (block.meta as Record<string, unknown>).summaryLines as string[];
     assert.ok(lines.some((l) => /mostly colours you like; grey appears less often/i.test(l)));
+  });
+
+  it("§WP-12c never claims 'colours you like' when the customer named no favourite colours — found live on Persona C (favoriteColors: []), where the wardrobe has readable colour data but nothing was ever stated to match it against", () => {
+    const input = inputWithPalette([{ colour: "Beige", count: 1, share: 0.2, neutral: true }]);
+    // hasStatedColourPreference left at its default (false/undefined) —
+    // the wardrobe has colour data (dna.palette), but no OnboardingProfile
+    // favoriteColors were ever named.
+    const page = buildWardrobePage(input);
+    const block = page.sections.find((s) => s.id === "profile")!.blocks.find((b) => b.id === "profile")!;
+    const lines = (block.meta as Record<string, unknown>).summaryLines as string[];
+    for (const line of lines) assert.doesNotMatch(line, /colours? you like/i);
+    assert.ok(lines.some((l) => /colour makeup of your closet/i.test(l)));
+  });
+
+  it("§WP-12d names a self-contradictory colour instead of asserting 'colours you like' — found live on Persona E (favoriteColors and avoidColors both naming 'black')", () => {
+    const input = inputWithPalette([{ colour: "Black", count: 4, share: 0.8, neutral: true }]);
+    input.hasStatedColourPreference = true;
+    input.contradictedColours = ["black"];
+    const page = buildWardrobePage(input);
+    const block = page.sections.find((s) => s.id === "profile")!.blocks.find((b) => b.id === "profile")!;
+    const lines = (block.meta as Record<string, unknown>).summaryLines as string[];
+    for (const line of lines) assert.doesNotMatch(line, /^mostly colours you like/i);
+    assert.ok(lines.some((l) => /both like and want to avoid black/i.test(l)));
+    assert.ok(lines.some((l) => /won't assume/i.test(l)));
   });
 });
 
@@ -1244,5 +1270,70 @@ describe("§WP-20 register-demand migration — clean 90-day layer, decoupled fr
     const entry = block.entries.find((e) => e.id === "dress-level")!;
     assert.equal(entry.body, "Over the last 90 days, 73 of the 109 StyleMe requests nAia could classify were on the more everyday, relaxed side.");
     assert.doesNotMatch(entry.body, /999|work-ready/, "no raw request count or raw top-register wording leaks into the migrated copy");
+  });
+});
+
+// ── §WP-21 — Worth reconsidering is advisory, lives in "attention" ───────────
+
+describe("§WP-21 worth reconsidering", () => {
+  it("renders nothing when there's nothing to reconsider", () => {
+    const page = buildWardrobePage(baseInput());
+    const attention = page.sections.find((s) => s.id === "attention")!;
+    assert.equal(attention.blocks.some((b) => b.id === "reconsider"), false);
+  });
+
+  it("renders one entry per reconsider finding, owned by the attention section", () => {
+    const input = baseInput();
+    (input.needs as unknown as { reconsider: unknown }).reconsider = {
+      state: "available",
+      entries: [
+        {
+          garmentId: "g9",
+          reasons: ["A near-duplicate of pieces you already have enough of."],
+          evidence: [{ signal: "garment-fact", field: "slot + colour + formality", detail: "x", garmentIds: ["g9"] }],
+        },
+      ],
+    };
+    const page = buildWardrobePage(input);
+    assert.equal(ownerOf("reconsider:g9"), "attention");
+
+    const attention = page.sections.find((s) => s.id === "attention")!;
+    const block = attention.blocks.find((b) => b.id === "reconsider")!;
+    assert.ok(block, "expected a reconsider block in the attention section");
+    const entry = block.entries.find((e) => e.id === "reconsider-g9")!;
+    assert.equal(entry.claim, "reconsider:g9");
+    assert.equal(entry.body, "A near-duplicate of pieces you already have enough of.");
+    assert.deepEqual(entry.garmentIds, ["g9"]);
+    // Advisory only — nothing here may read as a removal instruction.
+    assert.doesNotMatch(entry.body, /\bremove\b|\bdonate\b|\bget rid of\b|\bdelete\b/i);
+  });
+});
+
+// ── §WP-22 — Coverage discloses what it cannot yet check ─────────────────────
+
+describe("§WP-22 coverage block discloses unmeasurable preferences", () => {
+  it("still renders when nothing is blocked, as long as something is undisclosed", () => {
+    const input = baseInput();
+    (input.intelligence as unknown as { passportView: unknown }).passportView = {
+      state: "available", comparisons: [], notYetMeasurable: ["avoid shorts"],
+    };
+    const page = buildWardrobePage(input);
+    const attention = page.sections.find((s) => s.id === "attention")!;
+    const block = attention.blocks.find((b) => b.id === "coverage")!;
+    assert.ok(block, "expected a coverage block even with zero blocked pieces");
+    const entry = block.entries[0];
+    assert.match(entry.body, /avoid shorts/);
+    assert.match(entry.body, /can't yet check/);
+  });
+
+  it("renders nothing at all when there is nothing blocked and nothing undisclosed", () => {
+    const input = baseInput();
+    (input.needs as unknown as { registers: unknown }).registers = [];
+    (input.intelligence as unknown as { passportView: unknown }).passportView = {
+      state: "available", comparisons: [], notYetMeasurable: [],
+    };
+    const page = buildWardrobePage(input);
+    const attention = page.sections.find((s) => s.id === "attention")!;
+    assert.equal(attention.blocks.some((b) => b.id === "coverage"), false);
   });
 });

@@ -998,6 +998,83 @@ describe("§WI-10 passport and closet", () => {
   });
 });
 
+// ── §WI-10b — Colours she asked nAia to avoid ─────────────────────────────────
+//
+// A separate, explicit Passport signal (avoidColors) — never inferred from
+// what she simply owns less of. "Do not treat inferred colour preference as
+// Passport truth" is the rule this comparison exists to honour.
+
+describe("§WI-10b avoided colours", () => {
+  it("names the real count when an avoided colour is actually present", () => {
+    // neutralWardrobe: 4 of 6 items are black.
+    const result = run(neutralWardrobe(), { passport: { ...PASSPORT, avoidColors: ["black"] } });
+    const avoid = result.passportView.comparisons.find((c) => c.id === "colour-avoid")!;
+    assert.ok(avoid, "expected a colour-avoid comparison");
+    assert.match(avoid.observed, /4 of the 6 colour-tagged pieces/);
+    assert.match(avoid.reading, /Worth knowing/i);
+    assert.doesNotMatch(avoid.reading, /you should|wrong|mistake/i);
+  });
+
+  it("confirms the match honestly when the avoided colour is genuinely absent", () => {
+    const result = run(neutralWardrobe(), { passport: { ...PASSPORT, avoidColors: ["green"] } });
+    const avoid = result.passportView.comparisons.find((c) => c.id === "colour-avoid")!;
+    assert.ok(avoid, "expected a colour-avoid comparison");
+    assert.match(avoid.observed, /None of the 6/);
+    assert.match(avoid.reading, /nothing to flag/i);
+  });
+
+  it("says nothing about avoided colours when none are stated", () => {
+    const result = run(neutralWardrobe(), { passport: PASSPORT }); // avoidColors: []
+    assert.equal(result.passportView.comparisons.some((c) => c.id === "colour-avoid"), false);
+  });
+
+  it("cites both a passport signal and a garment fact, like every other comparison", () => {
+    const result = run(neutralWardrobe(), { passport: { ...PASSPORT, avoidColors: ["black"] } });
+    const avoid = result.passportView.comparisons.find((c) => c.id === "colour-avoid")!;
+    assert.ok(avoid.evidence.some((e) => e.signal === "passport-signal"));
+    assert.ok(avoid.evidence.some((e) => e.signal === "garment-fact"));
+  });
+});
+
+// ── §WI-10c — Dressing preferences nAia cannot yet check ──────────────────────
+//
+// Disclosed honestly rather than silently skipped or guessed. Only tokens
+// with NO garment-side field reach this list — classifyUsability()'s own
+// checked tokens (arms-covered, etc.) never appear here.
+
+describe("§WI-10c dressing preferences not yet measurable", () => {
+  it("names a stated preference nAia has no garment field for", () => {
+    const result = run(neutralWardrobe(), {
+      passport: { ...PASSPORT, dressingPreferences: ["avoid-shorts", "wears-hijab"] },
+    });
+    assert.ok(result.passportView.notYetMeasurable.includes("avoid shorts"));
+    assert.ok(result.passportView.notYetMeasurable.includes("wear hijab"));
+  });
+
+  it("never lists a token classifyUsability() actually checks", () => {
+    const result = run(neutralWardrobe(), {
+      passport: { ...PASSPORT, dressingPreferences: ["arms-covered", "avoid-shorts"] },
+    });
+    assert.ok(!result.passportView.notYetMeasurable.some((s) => /arms/i.test(s)));
+    assert.ok(result.passportView.notYetMeasurable.includes("avoid shorts"));
+  });
+
+  it("is empty when nothing is stated, or only the sentinel is", () => {
+    const none = run(neutralWardrobe(), { passport: { ...PASSPORT, dressingPreferences: [] } });
+    assert.deepEqual(none.passportView.notYetMeasurable, []);
+    const sentinel = run(neutralWardrobe(), { passport: { ...PASSPORT, dressingPreferences: ["no-dressing-requirements"] } });
+    assert.deepEqual(sentinel.passportView.notYetMeasurable, []);
+  });
+
+  it("is present even without a Passport comparison existing (learning state)", () => {
+    // No Passport at all: passportView.state is "learning" and comparisons is
+    // empty, but notYetMeasurable must still be a real (empty) array, not
+    // undefined — every WardrobePassportView shape carries the field.
+    const result = run(neutralWardrobe());
+    assert.deepEqual(result.passportView.notYetMeasurable, []);
+  });
+});
+
 // ── §WI-11 — Wear intelligence is prepared, never faked ───────────────────────
 
 describe("§WI-11 wear intelligence", () => {
@@ -2109,5 +2186,53 @@ describe("§CIA-WI Phase 2 shared-intelligence adapters have zero effect on WI's
 
     const withAdapterCall = run(items, { passport: PASSPORT, formulaEvidence, positiveGarmentEvidence });
     assert.deepEqual(withAdapterCall, withoutAdapterCall, "WI's output must be byte-identical whether or not the Phase 2 adapter was also called on the same evidence");
+  });
+});
+
+// ── §WI-22 shapesReading never fabricates a hierarchy out of a tie ───────────
+//
+// Found during Persona A QA: straight and tailored tied at 4 pieces each, but
+// the copy read "Straight shapes recur most, with tailored... close behind" —
+// stating a ranking the counts don't actually show. The sort's alphabetical
+// tiebreak exists only to make the list order deterministic; it must never
+// leak into the customer-facing claim as if it were a real lead.
+
+describe("§WI-22 shapesReading never fabricates a hierarchy out of a tie", () => {
+  it("22a — a genuine two-way tie for first reads as equal, not as one leading the other", () => {
+    const straightGroup = Array.from({ length: 4 }, () =>
+      makeGarment({ silhouette: "straight", fitProfile: null }));
+    const tailoredGroup = Array.from({ length: 4 }, () =>
+      makeGarment({ silhouette: null, fitProfile: "tailored" }));
+    const result = run([...straightGroup, ...tailoredGroup], { passport: PASSPORT });
+
+    assert.doesNotMatch(result.dna.shapesReading, /recur most/i, "must not claim one tied shape 'recurs most' over the other");
+    assert.match(result.dna.shapesReading, /recur equally/i);
+    assert.match(result.dna.shapesReading, /straight/i);
+    assert.match(result.dna.shapesReading, /tailored/i);
+  });
+
+  it("22b — a tie for first with a genuine third shape behind it still names that third shape", () => {
+    const straightGroup = Array.from({ length: 4 }, () =>
+      makeGarment({ silhouette: "straight", fitProfile: null }));
+    const tailoredGroup = Array.from({ length: 4 }, () =>
+      makeGarment({ silhouette: null, fitProfile: "tailored" }));
+    const relaxedGroup = Array.from({ length: 3 }, () =>
+      makeGarment({ silhouette: null, fitProfile: "relaxed" }));
+    const result = run([...straightGroup, ...tailoredGroup, ...relaxedGroup], { passport: PASSPORT });
+
+    assert.match(result.dna.shapesReading, /recur equally/i);
+    assert.match(result.dna.shapesReading, /close behind/i);
+    assert.match(result.dna.shapesReading, /relaxed/i);
+  });
+
+  it("22c — a real, non-tied leader still reads as leading (no false tie)", () => {
+    const leaderGroup = Array.from({ length: 6 }, () =>
+      makeGarment({ silhouette: "straight", fitProfile: null }));
+    const secondGroup = Array.from({ length: 3 }, () =>
+      makeGarment({ silhouette: null, fitProfile: "relaxed" }));
+    const result = run([...leaderGroup, ...secondGroup], { passport: PASSPORT });
+
+    assert.match(result.dna.shapesReading, /recur most/i);
+    assert.doesNotMatch(result.dna.shapesReading, /recur equally/i);
   });
 });

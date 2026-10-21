@@ -171,6 +171,9 @@ const CLAIM_OWNER: Readonly<Record<string, SectionId>> = {
   // preferences"), not background provenance — it sits with the work-variety
   // finding, not in the profile.
   coverage: "attention",
+  // Advisory-only — nAia never removes anything on the strength of this, it
+  // only says what it noticed. Sits with the other actionable findings.
+  reconsider: "attention",
   recommendation: "shop",
   "not-a-priority": "shop",
   "low-priority": "shop",
@@ -275,6 +278,24 @@ export interface WardrobePageInput {
    * are shown, unlabelled by lifestyle specifics.
    */
   lifestyle?: readonly string[];
+  /**
+   * Whether the customer has actually named favourite colours in her Style
+   * Passport (`OnboardingProfile.favoriteColors.length > 0`) — never derived
+   * from the wardrobe's own colour data, which says nothing about a stated
+   * preference. Gates "colours you like" language in the profile summary:
+   * without it, that phrase would claim a preference-match that was never
+   * evidenced. Defaults to false (no stated preference assumed).
+   */
+  hasStatedColourPreference?: boolean;
+  /**
+   * Colour tokens named in BOTH favoriteColors and avoidColors — found live
+   * on Persona E (both naming "black"). A genuine self-contradiction in
+   * what the customer told nAia, not a wardrobe fact; takes priority over
+   * hasStatedColourPreference in the profile summary, because asserting
+   * "colours you like" would silently pick one side of a conflict she
+   * never resolved. Defaults to empty (no contradiction assumed).
+   */
+  contradictedColours?: readonly string[];
 }
 
 // ── Builder ───────────────────────────────────────────────────────────────────
@@ -354,6 +375,10 @@ export function buildWardrobePage(input: WardrobePageInput): WardrobePage {
     // Coverage: an actionable limitation, so it sits beside the other thing
     // that deserves attention, not in the profile as background provenance.
     add("attention", buildCoverageBlock(input));
+    // Worth reconsidering: advisory only. nAia never removes or hides a
+    // garment on the strength of this — see buildReconsiderAdvisory() in
+    // wardrobe-needs.ts for exactly which evidence can surface a piece here.
+    add("attention", buildReconsiderBlock(input));
   }
 
   // ── Wear what you already own (combinations) ───────────────────────────────
@@ -1080,7 +1105,7 @@ function buildVerdictBlock(
  * nAia is reading what has been uploaded, which is not necessarily everything
  * owned. Until she has been told otherwise she says so.
  */
-function hedge(base: string | undefined, confidence: ClosetConfidence): string {
+export function hedge(base: string | undefined, confidence: ClosetConfidence): string {
   const suffix =
     confidence === "mostly"
       ? ""
@@ -1104,6 +1129,14 @@ function singularizeLast(phrase: string): string {
   return [...words, singular].join(" ");
 }
 
+/** Local copy of wardrobe-intelligence.ts's joinList — not exported there. */
+function joinListLocal(parts: string[]): string {
+  if (parts.length === 0) return "";
+  if (parts.length === 1) return parts[0];
+  if (parts.length === 2) return `${parts[0]} and ${parts[1]}`;
+  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+}
+
 /**
  * The wardrobe profile: colours, silhouettes, StyleMe history and wear
  * behaviour, always visible at one line each; the Passport comparison,
@@ -1114,7 +1147,7 @@ function singularizeLast(phrase: string): string {
  * reveal, as the evidence behind that reading, never as a second headline).
  */
 function buildProfileBlock(input: WardrobePageInput): PageBlock | null {
-  const { intelligence, needs } = input;
+  const { intelligence, needs, hasStatedColourPreference, contradictedColours } = input;
   const { passportView, dna } = intelligence;
 
   const summaryLines: string[] = [];
@@ -1123,10 +1156,23 @@ function buildProfileBlock(input: WardrobePageInput): PageBlock | null {
     const thin = needs.synthesis.state === "available"
       ? needs.synthesis.lines.find((l) => l.id === "synth-colour" && l.kind === "uneven")
       : undefined;
+    // "Mostly colours you like" is a preference-MATCH claim — it must never
+    // appear unless the customer actually named colours to match against.
+    // dna.palette only means the wardrobe itself has readable colour data,
+    // which says nothing about whether a preference exists to compare it to.
+    //
+    // A colour named in BOTH favoriteColors and avoidColors takes priority
+    // over that check entirely: asserting "colours you like" (or staying
+    // silent about it) would silently resolve a contradiction she stated
+    // herself, in either direction, without ever telling her it exists.
     summaryLines.push(
-      thin?.thinLabel
-        ? `Mostly colours you like; ${thin.thinLabel.toLowerCase()} appears less often.`
-        : "Mostly colours you like.",
+      (contradictedColours?.length ?? 0) > 0
+        ? `You've told nAia you both like and want to avoid ${joinListLocal([...contradictedColours!])} — nAia won't assume which one wins.`
+        : !hasStatedColourPreference
+          ? "Here's the colour makeup of your Closet."
+          : thin?.thinLabel
+            ? `Mostly colours you like; ${thin.thinLabel.toLowerCase()} appears less often.`
+            : "Mostly colours you like.",
     );
   }
   if (dna.shapes.length > 0) {
@@ -1337,7 +1383,7 @@ function naturalShapeTitle(rec: { title: string; register: string }): string {
  * the per-piece detail is the customer's choice to open.
  */
 function buildCoverageBlock(input: WardrobePageInput): PageBlock | null {
-  const { needs } = input;
+  const { needs, intelligence } = input;
   const registers = needs.registers.filter((r) => r.rawCount > 0 || r.needed);
 
   const blocked = registers.flatMap((r) => r.blockedPieces ?? []);
@@ -1348,11 +1394,42 @@ function buildCoverageBlock(input: WardrobePageInput): PageBlock | null {
       garmentId: b.garmentId,
       name: input.garmentName?.(b.garmentId) ?? "This piece",
       reason: b.reason,
+      // Every stated preference this piece fails, not just the first one —
+      // a piece that fails on both arms AND legs coverage, say, is only
+      // fully explained if the dialog reads all of them. Falls back to the
+      // single `reason` if somehow empty, so there's always at least one.
+      allReasons: b.allReasons.length > 0 ? b.allReasons : [b.reason],
       layers: b.rescuedBy.map((id) => input.garmentName?.(id) ?? "a layer you own"),
       layerIds: b.rescuedBy,
     }));
-  if (blockedDetail.length === 0) return null;
+  // Stated dressing preferences nAia cannot check against any garment field —
+  // disclosed honestly rather than silently skipped. See notYetMeasurable in
+  // buildPassportView() (wardrobe-intelligence.ts).
+  const notYetMeasurable = intelligence.passportView.notYetMeasurable ?? [];
+  if (blockedDetail.length === 0 && notYetMeasurable.length === 0) return null;
   const rescued = blockedDetail.filter((b) => b.layers.length > 0);
+
+  const notYetMeasurableNote =
+    notYetMeasurable.length > 0
+      ? ` nAia can't yet check ${joinWithAnd(notYetMeasurable)} against your photos — that will improve as garment analysis grows.`
+      : "";
+
+  if (blockedDetail.length === 0) {
+    return {
+      id: "coverage",
+      label: "Coverage",
+      kind: "coverage",
+      entries: [
+        {
+          id: "coverage-detail",
+          claim: "coverage",
+          role: "full",
+          body: `Every piece nAia has read meets the dressing preferences it can check.${notYetMeasurableNote}`,
+          garmentIds: [],
+        },
+      ],
+    };
+  }
 
   return {
     id: "coverage",
@@ -1367,7 +1444,7 @@ function buildCoverageBlock(input: WardrobePageInput): PageBlock | null {
           rescued.length > 0
             ? ` nAia found a potential layering option in your Closet for ${rescued.length === 1 ? "one of them" : `${numberWord(rescued.length)} of them`}.`
             : ""
-        }`,
+        }${notYetMeasurableNote}`,
         garmentIds: blockedDetail.map((b) => b.garmentId),
         action: {
           kind: "reveal",
@@ -1378,6 +1455,34 @@ function buildCoverageBlock(input: WardrobePageInput): PageBlock | null {
         meta: { blockedDetail },
       },
     ],
+  };
+}
+
+/**
+ * Worth reconsidering — advisory only.
+ *
+ * nAia never removes, hides or down-ranks a garment on the strength of this.
+ * It states what it noticed, and the real evidence behind it, so the
+ * customer can decide for herself. See buildReconsiderAdvisory() in
+ * wardrobe-needs.ts for exactly which signals can surface a piece here.
+ */
+function buildReconsiderBlock(input: WardrobePageInput): PageBlock | null {
+  const { needs } = input;
+  const entries = needs.reconsider.entries;
+  if (entries.length === 0) return null;
+
+  return {
+    id: "reconsider",
+    label: "Worth reconsidering",
+    kind: "reconsider",
+    entries: entries.map((entry) => ({
+      id: `reconsider-${entry.garmentId}`,
+      claim: `reconsider:${entry.garmentId}` as ClaimKey,
+      role: "full" as EntryRole,
+      title: input.garmentName?.(entry.garmentId) ?? "This piece",
+      body: entry.reasons.join(" "),
+      garmentIds: [entry.garmentId],
+    })),
   };
 }
 

@@ -32,6 +32,11 @@ export const STYLEME_SESSION_KEYS = [
   "styleMeAnchorMethodPrev",
   "styleMeNadineAnchorHandle",
   "styleMeClosetAnchorId",
+  // Additional garments from a Wardrobe Intelligence combination that must survive
+  // into the outfit alongside styleMeClosetAnchorId — JSON-encoded string[]. Additive:
+  // every existing single-anchor path never sets this, so it stays absent/undefined for
+  // them. See api.wi-style-this.tsx and buildNaiaOutfitCandidates (styleme-result.server.ts).
+  "styleMeClosetCompanionIds",
   // AUTO or MANUAL. Governs whether New Look may move the anchor, so it must not outlive
   // the anchor it describes: a stale MANUAL pins the next session's reroll to a piece the
   // customer never chose, and a stale AUTO lets a reroll move one she did. It was missing
@@ -55,6 +60,24 @@ export const STYLEME_SESSION_KEYS = [
   // handoff from an ordinary closet Rev 3 session; see app/lib/styleme/handoff.ts.
   "styleMeHandoffOrigin",
 ] as const;
+
+/**
+ * Parses the styleMeClosetCompanionIds cookie value (JSON-encoded string[])
+ * into a plain array. Fails closed to [] on anything malformed — a corrupted
+ * or tampered cookie value must never throw mid-generation; it just means no
+ * companions survive, which is the same observable behaviour as an ordinary
+ * single-anchor session.
+ */
+export function parseClosetCompanionIds(raw: unknown): string[] {
+  if (typeof raw !== "string" || raw.length === 0) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((id): id is string => typeof id === "string" && id.length > 0);
+  } catch {
+    return [];
+  }
+}
 
 export async function clearStyleMeSession(request: Request): Promise<string> {
   const session = await getSession(request.headers.get("Cookie"));

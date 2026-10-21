@@ -1,16 +1,21 @@
-import { createHash, randomBytes } from "crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "crypto";
 import prisma from "../db.server";
 import { emitClosetItemAdded, recordJourneyEvent } from "../lib/ai/journey-events.server";
 import { extractStyleMeEvidence, extractPostWearEvidence, extractClosetEvidence, extractBuySkipEvidence } from "../lib/ai/taste-extraction.server";
 import { writeSourceEvidence, reconcileObservations } from "../lib/ai/taste-reconcile.server";
 
 // Staging-only fixture and diagnostic endpoint.
-// Requires STAGING_SEED_SECRET env var + matching x-seed-secret header.
+// Requires STAGING_SEED_SECRET (legacy) OR WI_QA_LOGIN_SECRET (dedicated to
+// the Wardrobe Intelligence QA workflow, kept intentionally separate — see
+// isValidSeedSecret) env var + matching x-seed-secret header.
 //
 // Supported _action values:
 //   "createCustomer"     — create Customer record (idempotent on shopifyCustomerId)
 //   "createSession"      — create Customer + NaiaSession, returns rawToken
 //   "loginRedirect"      — create Customer + NaiaSession, set HttpOnly cookie, redirect to `to`
+//   "createLoginLink"    — header-authenticated; returns a short-lived, single-use
+//                          ticket URL (GET /api/seed-staging?ticket=...) that logs
+//                          the browser in WITHOUT the secret ever appearing in that URL
 //   "createStylingSession" — create StylingSession for an existing customer
 //   "countRecords"       — return event/analysis counts scoped to a customerId
 //   "cleanup"            — delete all test records for a shopifyCustomerId
@@ -25,6 +30,132 @@ function generateRawToken() {
   return randomBytes(32).toString("base64url");
 }
 
+/**
+ * WI_QA_LOGIN_SECRET is a dedicated secret for the Wardrobe Intelligence QA
+ * workflow, intentionally separate from the long-standing STAGING_SEED_SECRET
+ * — set it (Preview-only) to stop depending on that older shared secret
+ * entirely. Every header-authenticated action below accepts either one, so
+ * nothing here breaks if only one of the two is configured. Constant-time
+ * comparison: these gate real writes, so a timing side-channel is worth
+ * closing even though the Forbidden path already does almost no work.
+ */
+function timingSafeStringEqual(a, b) {
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  const aBuf = Buffer.from(a);
+  const bBuf = Buffer.from(b);
+  if (aBuf.length !== bBuf.length) return false;
+  return timingSafeEqual(aBuf, bBuf);
+}
+
+function isValidSeedSecret(provided) {
+  if (!provided) return false;
+  const candidates = [process.env.STAGING_SEED_SECRET, process.env.WI_QA_LOGIN_SECRET].filter(Boolean);
+  return candidates.some((candidate) => timingSafeStringEqual(provided, candidate));
+}
+
+/** The one secret used to sign/verify login tickets — prefers the dedicated
+ * WI_QA_LOGIN_SECRET so tickets stop depending on STAGING_SEED_SECRET as
+ * soon as the dedicated one is configured; falls back so nothing breaks
+ * before that. */
+function ticketSigningSecret() {
+  return process.env.WI_QA_LOGIN_SECRET || process.env.STAGING_SEED_SECRET;
+}
+
+/** Standard prefix every fixture record in this file must carry. */
+const TEST_CUSTOMER_PREFIX = "test-batch1-";
+
+/**
+ * Resolves customerId to its shopifyCustomerId and confirms it's a fixture
+ * customer. Used by every action below that mutates data scoped to an
+ * EXISTING customerId (as opposed to createCustomer/createSession/
+ * loginRedirect, which only ever create a brand-new test-prefixed customer
+ * or look one up by its own test-prefixed shopifyCustomerId) — so a wrong or
+ * mistyped id can never write into a real customer's data.
+ */
+async function requireTestCustomer(customerId) {
+  const customer = await prisma.customer.findUnique({
+    where: { id: String(customerId) },
+    select: { id: true, shopifyCustomerId: true },
+  });
+  if (!customer || !customer.shopifyCustomerId?.startsWith(TEST_CUSTOMER_PREFIX)) {
+    return null;
+  }
+  return customer;
+}
+
+// ── Single-use login tickets ──────────────────────────────────────────────
+//
+// The GET ?secret=... login path above puts STAGING_SEED_SECRET in the URL,
+// where it lands in Chrome history and server access logs. createLoginLink
+// (a header-authenticated POST, like every other mutating action here)
+// issues a short-lived, signed, single-use TICKET instead — a browser then
+// opens /api/seed-staging?ticket=... to redeem it, and that URL never
+// contains the secret at all.
+//
+// The ticket is a self-contained HMAC-signed token (no new DB table): a
+// base64url JSON payload, a ".", then HMAC-SHA256(payload) keyed on
+// STAGING_SEED_SECRET. Verifying it needs only the secret the server
+// already has — nothing is ever stored for lookup. "Single-use" is
+// enforced by an in-memory consumed-nonce set, best-effort across a single
+// serverless instance's lifetime; the hard, deterministic guarantee is the
+// short expiry (default 2 minutes), which bounds exposure either way.
+const LOGIN_TICKET_DEFAULT_TTL_SECONDS = 120;
+const LOGIN_TICKET_MAX_TTL_SECONDS = 600;
+const consumedTicketNonces = new Map(); // nonce -> expiresAtMs, swept lazily
+
+function sweepConsumedNonces() {
+  const now = Date.now();
+  for (const [nonce, expiresAtMs] of consumedTicketNonces) {
+    if (expiresAtMs < now) consumedTicketNonces.delete(nonce);
+  }
+}
+
+function signTicketPayload(payloadB64) {
+  return createHmac("sha256", ticketSigningSecret()).update(payloadB64).digest("base64url");
+}
+
+function createLoginTicket({ customerId, to, ttlSeconds }) {
+  const clampedTtl = Math.min(Math.max(Number(ttlSeconds) || LOGIN_TICKET_DEFAULT_TTL_SECONDS, 30), LOGIN_TICKET_MAX_TTL_SECONDS);
+  const payload = {
+    sub: customerId,
+    to,
+    exp: Date.now() + clampedTtl * 1000,
+    nonce: randomBytes(12).toString("base64url"),
+  };
+  const payloadB64 = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const sig = signTicketPayload(payloadB64);
+  return `${payloadB64}.${sig}`;
+}
+
+/** Returns { customerId, to } on a valid, unexpired, unconsumed ticket — or null. */
+function redeemLoginTicket(ticket) {
+  const parts = String(ticket ?? "").split(".");
+  if (parts.length !== 2) return null;
+  const [payloadB64, sig] = parts;
+
+  const expectedSig = signTicketPayload(payloadB64);
+  const sigBuf = Buffer.from(sig);
+  const expectedBuf = Buffer.from(expectedSig);
+  if (sigBuf.length !== expectedBuf.length || !timingSafeEqual(sigBuf, expectedBuf)) {
+    return null; // bad signature — tampered or signed with a different secret
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf8"));
+  } catch {
+    return null;
+  }
+  if (!payload?.sub || !payload?.nonce || typeof payload.exp !== "number") return null;
+  if (payload.exp < Date.now()) return null; // expired
+
+  sweepConsumedNonces();
+  if (consumedTicketNonces.has(payload.nonce)) return null; // already redeemed
+  consumedTicketNonces.set(payload.nonce, payload.exp);
+
+  return { customerId: payload.sub, to: typeof payload.to === "string" ? payload.to : "/my-naia" };
+}
+
 // Staging GET login helper: /api/seed-staging?secret=…&id=…&email=…&to=…
 // Sets the __naia_tok cookie and redirects — allows browser-based test login.
 export async function loader({ request }) {
@@ -34,6 +165,36 @@ export async function loader({ request }) {
   }
 
   const url = new URL(request.url);
+
+  // ── Login-ticket redemption — no secret in this URL at all ──────────────
+  // The ticket itself (signed, short-lived, single-use) is the only thing
+  // that authorizes this request; it is issued separately by the header-
+  // authenticated createLoginLink action.
+  const ticket = url.searchParams.get("ticket");
+  if (ticket) {
+    const redeemed = redeemLoginTicket(ticket);
+    if (!redeemed) {
+      return new Response("Login link is invalid, expired, or already used.", { status: 410 });
+    }
+    const customer = await prisma.customer.findUnique({
+      where: { id: redeemed.customerId },
+      select: { id: true },
+    });
+    if (!customer) return new Response("Not Found", { status: 404 });
+
+    const rawToken = generateRawToken();
+    const tokenHash = hashToken(rawToken);
+    const sessionTtlSeconds = 2 * 60 * 60; // 2h — this is a QA session, not the ticket itself
+    const expiresAt = new Date(Date.now() + sessionTtlSeconds * 1000);
+    await prisma.naiaSession.create({ data: { tokenHash, customerId: customer.id, expiresAt } });
+
+    const cookieHeader = `__naia_tok=${rawToken}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${sessionTtlSeconds}`;
+    return new Response(null, {
+      status: 302,
+      headers: { "Set-Cookie": cookieHeader, Location: redeemed.to },
+    });
+  }
+
   const secret = url.searchParams.get("secret");
   if (!process.env.STAGING_SEED_SECRET || secret !== process.env.STAGING_SEED_SECRET) {
     return new Response("Forbidden", { status: 403 });
@@ -89,14 +250,23 @@ export async function loader({ request }) {
     });
   }
 
+  // Optional ?ttl=<seconds> — a QA caller can request a much shorter-lived
+  // session than the 30-day default (clamped 60s..30d either way). Every
+  // existing caller that omits it keeps today's exact 30-day behaviour.
+  const DEFAULT_TTL_SECONDS = 30 * 24 * 60 * 60;
+  const ttlParam = Number.parseInt(url.searchParams.get("ttl") ?? "", 10);
+  const ttlSeconds = Number.isFinite(ttlParam)
+    ? Math.min(Math.max(ttlParam, 60), DEFAULT_TTL_SECONDS)
+    : DEFAULT_TTL_SECONDS;
+
   const rawToken = generateRawToken();
   const tokenHash = hashToken(rawToken);
-  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+  const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
   await prisma.naiaSession.create({
     data: { tokenHash, customerId: customer.id, expiresAt },
   });
 
-  const cookieHeader = `__naia_tok=${rawToken}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${30 * 24 * 60 * 60}`;
+  const cookieHeader = `__naia_tok=${rawToken}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${ttlSeconds}`;
   return new Response(null, {
     status: 302,
     headers: { "Set-Cookie": cookieHeader, Location: to },
@@ -252,9 +422,12 @@ export async function action({ request }) {
     return Response.json({ ok: true, updated: updated.count });
   }
 
-  // All other actions require x-seed-secret
+  // All other actions require x-seed-secret, matching EITHER the long-
+  // standing STAGING_SEED_SECRET or the dedicated WI_QA_LOGIN_SECRET (see
+  // isValidSeedSecret below). Both are header-only — never accepted from a
+  // query string on this path.
   const secret = request.headers.get("x-seed-secret");
-  if (!process.env.STAGING_SEED_SECRET || secret !== process.env.STAGING_SEED_SECRET) {
+  if (!isValidSeedSecret(secret)) {
     return new Response("Forbidden", { status: 403 });
   }
 
@@ -340,6 +513,36 @@ export async function action({ request }) {
       status: 302,
       headers: { "Set-Cookie": cookieHeader, Location: destination },
     });
+  }
+
+  // ── createLoginLink — QA fixture only ────────────────────────────────────
+  // Header-authenticated (x-seed-secret, like every action below this
+  // point) — never the URL. Returns a short-lived, single-use ticket URL
+  // that contains NO secret: GET-ing it (see loader's ?ticket= branch) is
+  // what actually sets the session cookie. shopifyCustomerId must already
+  // be test-batch1--prefixed; this never creates a non-fixture customer.
+  if (act === "createLoginLink") {
+    const { shopifyCustomerId, email, to, ttlSeconds } = body ?? {};
+    if (!shopifyCustomerId || !String(shopifyCustomerId).startsWith(TEST_CUSTOMER_PREFIX)) {
+      return Response.json({ error: `shopifyCustomerId must start with ${TEST_CUSTOMER_PREFIX}` }, { status: 400 });
+    }
+    if (!email) return Response.json({ error: "email required" }, { status: 400 });
+    const destination = typeof to === "string" && to.startsWith("/") ? to : "/my-naia";
+
+    let customer = await prisma.customer.findUnique({
+      where: { shopifyCustomerId: String(shopifyCustomerId) },
+      select: { id: true },
+    });
+    if (!customer) {
+      customer = await prisma.customer.create({
+        data: { shopifyCustomerId: String(shopifyCustomerId), email: String(email) },
+        select: { id: true },
+      });
+    }
+
+    const ticket = createLoginTicket({ customerId: customer.id, to: destination, ttlSeconds });
+    const ticketUrl = `${new URL(request.url).origin}/api/seed-staging?ticket=${ticket}`;
+    return Response.json({ ok: true, url: ticketUrl, expiresInSeconds: LOGIN_TICKET_DEFAULT_TTL_SECONDS });
   }
 
   // ── createStylingSession ──────────────────────────────────────────────────
@@ -447,6 +650,42 @@ export async function action({ request }) {
     });
   }
 
+  // ── getFixtureSnapshot — QA fixture only, read-only ──────────────────────
+  // Full closet + Style Passport dump for a test-batch1- customer, so QA
+  // audits can be written against the real seeded data instead of assumed
+  // or re-derived values. Read-only — touches nothing. Same requireTestCustomer
+  // gate as every mutating action in this file.
+  if (act === "getFixtureSnapshot") {
+    const { customerId } = body ?? {};
+    if (!customerId) return Response.json({ error: "customerId required" }, { status: 400 });
+    const customer = await requireTestCustomer(customerId);
+    if (!customer) {
+      return Response.json({ error: "customerId must belong to a test-batch1- fixture customer" }, { status: 403 });
+    }
+    const [profile, closetItems] = await Promise.all([
+      prisma.onboardingProfile.findUnique({ where: { customerId: String(customerId) } }),
+      prisma.closetItem.findMany({
+        where: { customerId: String(customerId) },
+        orderBy: { createdAt: "asc" },
+        select: {
+          id: true, name: true, category: true, subcategory: true,
+          colors: true, primaryColor: true, pattern: true, material: true,
+          styleTags: true, seasons: true, occasions: true,
+          silhouette: true, fitProfile: true, hemLength: true, topLength: true,
+          sleeveLength: true, necklineCoverage: true, shoulderCoverage: true,
+          midriffExposed: true, waistShape: true, formality: true, stylePersonality: true,
+          garmentRelationships: true, analysisStatus: true, timesWorn: true, favorite: true,
+        },
+      }),
+    ]);
+    return Response.json({
+      customer: { id: customer.id, shopifyCustomerId: customer.shopifyCustomerId },
+      profile,
+      closetItemCount: closetItems.length,
+      closetItems,
+    });
+  }
+
   // ── createSuggestion ──────────────────────────────────────────────────────
   // Creates a minimal OutfitSuggestion for a StylingSession so that look_saved
   // and in_session_review_submitted tests can run.
@@ -475,6 +714,73 @@ export async function action({ request }) {
       expired: session ? session.expiresAt < new Date() : null,
       tokenHashPrefix: tokenHash.slice(0, 8),
     });
+  }
+
+  // ── setOnboardingProfile — QA fixture only ───────────────────────────────
+  // Upserts arbitrary OnboardingProfile fields for a test customer so WI /
+  // Passport-dependent QA can be set up deterministically, without walking
+  // the full onboarding questionnaire by hand. Same staging-only + secret
+  // gate as every other action in this file.
+  if (act === "setOnboardingProfile") {
+    const { customerId, profile } = body ?? {};
+    if (!customerId || !profile || typeof profile !== "object") {
+      return Response.json({ error: "customerId and profile object required" }, { status: 400 });
+    }
+    if (!(await requireTestCustomer(customerId))) {
+      return Response.json({ error: "customerId must belong to a test-batch1- fixture customer" }, { status: 403 });
+    }
+    const data = { completed: true, ...profile };
+    const saved = await prisma.onboardingProfile.upsert({
+      where: { customerId: String(customerId) },
+      create: { customerId: String(customerId), ...data },
+      update: data,
+      select: { id: true, completed: true },
+    });
+    return Response.json({ ok: true, profileId: saved.id, completed: saved.completed });
+  }
+
+  // ── createClosetItemDetailed — QA fixture only ───────────────────────────
+  // Creates a ClosetItem with caller-supplied garment-intelligence fields
+  // (colour, silhouette, coverage vocab, etc.) and analysisStatus "ready" by
+  // default, so WI QA can exercise specific real wardrobe shapes without a
+  // vision-model photo round trip.
+  if (act === "createClosetItemDetailed") {
+    const { customerId, item } = body ?? {};
+    if (!customerId || !item || typeof item !== "object") {
+      return Response.json({ error: "customerId and item object required" }, { status: 400 });
+    }
+    if (!(await requireTestCustomer(customerId))) {
+      return Response.json({ error: "customerId must belong to a test-batch1- fixture customer" }, { status: 403 });
+    }
+    const created = await prisma.closetItem.create({
+      data: {
+        customerId: String(customerId),
+        analysisStatus: "ready",
+        ...item,
+      },
+      select: { id: true, category: true, primaryColor: true },
+    });
+    return Response.json({ closetItemId: created.id, category: created.category, primaryColor: created.primaryColor });
+  }
+
+  // ── deleteClosetItemsByName — QA fixture only ────────────────────────────
+  // Lets a fixture-correction script swap out ONE closet item by name
+  // without resetting the whole customer (createCustomer is idempotent, but
+  // createClosetItemDetailed is not — re-running the full seed script would
+  // duplicate every other item). Scoped to test-batch1- customers only, same
+  // as every other action here.
+  if (act === "deleteClosetItemsByName") {
+    const { customerId, name } = body ?? {};
+    if (!customerId || !name) {
+      return Response.json({ error: "customerId and name required" }, { status: 400 });
+    }
+    if (!(await requireTestCustomer(customerId))) {
+      return Response.json({ error: "customerId must belong to a test-batch1- fixture customer" }, { status: 403 });
+    }
+    const deleted = await prisma.closetItem.deleteMany({
+      where: { customerId: String(customerId), name: String(name) },
+    });
+    return Response.json({ ok: true, deletedCount: deleted.count });
   }
 
   // ── cleanup ───────────────────────────────────────────────────────────────

@@ -169,6 +169,10 @@ export async function action({ request }: ActionFunctionArgs) {
       session.set("styleMeClosetAnchorId", pendingClosetAnchorId);
       session.set("styleMeAnchorProvenance", "MANUAL");
       session.unset("styleMePendingClosetAnchorId");
+      // Defensive: this branch only runs when !closetAnchorId (no real anchor yet),
+      // so companions should already be absent — cleared anyway so a newly-eligible
+      // manual pick can never inherit stale companions from an unrelated WI combination.
+      session.unset("styleMeClosetCompanionIds");
     }
   }
 

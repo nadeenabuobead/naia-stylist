@@ -218,6 +218,8 @@ export function buildEngineInput(params: {
   intentions?: string[];
   // Finishing/presentation context only — zero engine scoring.
   gender?: string | null;
+  // See StyleMeEngineInput.closetCompanionIds.
+  closetCompanionIds?: string[];
 }): StyleMeEngineInput {
   return {
     session: {
@@ -242,6 +244,7 @@ export function buildEngineInput(params: {
     prevOutfitClosetIds: params.prevOutfitClosetIds,
     mode: params.mode,
     gender: params.gender ?? null,
+    closetCompanionIds: params.closetCompanionIds,
   };
 }
 
@@ -798,7 +801,39 @@ export function buildSongReason(
 
 // ── Metadata envelope builder ─────────────────────────────────────────────────
 
-function buildMetadataJson(result: StyleMeCustomerResult): string {
+/**
+ * Decides where New Look's required companion ids come from on regeneration, and whether
+ * regeneration must fail closed rather than silently drop one. Pure — ownership
+ * re-verification (resolveClosetAnchor, DB-dependent) happens in the caller (result.tsx);
+ * this only decides what to do with the results, which is what makes it independently
+ * testable without a database. See StyleMeMetadata.companionIds for why this exists: a
+ * regenerate on an expired/cleared cookie, or a different device, used to resolve the
+ * correct anchor (a real DB column) but silently style around it alone.
+ *
+ * @param priorCompanionIds   prevMeta?.companionIds — undefined means this suggestion
+ *                            predates the durable-record fix (legacy, no record at all);
+ *                            an array (possibly empty) means a durable record exists.
+ * @param ownershipStillValid Parallel to priorCompanionIds — true where resolveClosetAnchor
+ *                            still resolved that id for this customer. Ignored when
+ *                            priorCompanionIds is undefined (nothing to re-verify).
+ * @param cookieCompanionIds  The cookie-derived fallback, used only when priorCompanionIds
+ *                            is undefined — unchanged pre-fix behaviour for legacy sessions.
+ */
+export function resolveRegenCompanionIds(
+  priorCompanionIds: string[] | undefined,
+  ownershipStillValid: boolean[],
+  cookieCompanionIds: string[],
+): { blocked: true } | { blocked: false; companionIds: string[] } {
+  if (priorCompanionIds === undefined) {
+    return { blocked: false, companionIds: cookieCompanionIds };
+  }
+  if (ownershipStillValid.some((ok) => !ok)) {
+    return { blocked: true };
+  }
+  return { blocked: false, companionIds: priorCompanionIds };
+}
+
+export function buildMetadataJson(result: StyleMeCustomerResult): string {
   const rawAnchor = result.rawRecommendation.anchor;
   let anchorMeta: StyleMeMetadata["anchor"] = null;
   let anchorSlot: string | null = null;
@@ -847,6 +882,10 @@ function buildMetadataJson(result: StyleMeCustomerResult): string {
         outfitPieces: d.outfitPieces ?? [],
       })),
     }),
+    // See StyleMeMetadata.companionIds. Persisted unconditionally whenever the result carries
+    // the field at all — including an explicit [] — so a later regenerate can tell "durably
+    // confirmed zero companions" apart from "no record exists" (undefined, legacy only).
+    ...(result.companionIds !== undefined && { companionIds: result.companionIds }),
   };
 
   return JSON.stringify(metadata);
@@ -1619,9 +1658,32 @@ export function buildNaiaOutfitCandidates(
   /** Forwarded to the Candidate A selection so the caller learns which finishing slots
    *  the suitability rule suppressed. Additive and optional. */
   suppressedFinishingOut?: Set<string>,
+  /**
+   * Closet item IDs from a Wardrobe Intelligence combination that must survive into
+   * the outfit alongside the anchor — see StyleMeEngineInput.closetCompanionIds.
+   * Resolved against allItems (the already-ownership-checked closet pool); an id that
+   * fails to resolve there is treated as a validation failure for the whole set, the
+   * same as an ineligible companion — never silently dropped.
+   */
+  companionIds?: string[],
 ): [OutfitCandidate, OutfitCandidate | null, OutfitCandidate | null, OutfitCandidate | null, OutfitCandidate | null] {
   const profile_ = profile as ClosetScoringProfile | undefined;
   const signals = { occasion: session.occasion, moods: session.moods, desiredFeelings: session.desiredFeelings };
+  const ALL_NULL_CANDIDATES = [null, null, null, null, null] as unknown as [OutfitCandidate, OutfitCandidate | null, OutfitCandidate | null, OutfitCandidate | null, OutfitCandidate | null];
+
+  // ── Companion resolution + eligibility (same gate as the anchor, below) ───
+  // Resolved against allItems rather than re-trusted from the caller: allItems is
+  // already the ownership-checked closet pool, so a companion id that doesn't
+  // resolve there means it was never genuinely owned (or was removed from the
+  // Closet between the WI handoff and generating the look) — treated as a hard
+  // failure of the whole set, same as an ineligible anchor, never a silent drop.
+  const requestedCompanionIds = companionIds ?? [];
+  const companions: ClosetAnchorInput[] = [];
+  for (const id of requestedCompanionIds) {
+    const found = allItems.find((i) => i.id === id);
+    if (!found) return ALL_NULL_CANDIDATES;
+    companions.push(found);
+  }
 
   // ── Anchor eligibility (defence in depth) ─────────────────────────────────
   // The anchor is normally rejected at selection time, where the customer can be
@@ -1643,7 +1705,18 @@ export function buildNaiaOutfitCandidates(
       profile_?.dressingPreferences,
     ).eligible
   ) {
-    return [null, null, null, null, null] as unknown as [OutfitCandidate, OutfitCandidate | null, OutfitCandidate | null, OutfitCandidate | null, OutfitCandidate | null];
+    return ALL_NULL_CANDIDATES;
+  }
+
+  // Every companion runs through the exact same gate as the anchor — a WI
+  // combination supplying a second (or third) garment must never let that
+  // garment bypass coverage/occasion checking just because it arrived as a
+  // "companion" rather than the primary anchor. One ineligible companion
+  // invalidates the whole candidate set, same as an ineligible anchor.
+  for (const companion of companions) {
+    if (!evaluateAnchorEligibility(companion, session.occasion, profile_?.dressingPreferences).eligible) {
+      return ALL_NULL_CANDIDATES;
+    }
   }
 
   // ── The swap pool for every alternative candidate ─────────────────────────
@@ -1670,9 +1743,11 @@ export function buildNaiaOutfitCandidates(
   // A sparse or lightly-reviewed wardrobe can legitimately yield fewer alternatives — B and E
   // become null rather than contaminated — and A is unconditional, so the candidate set can
   // never empty because of this filter.
+  const companionIdSet = new Set(companions.map((c) => c.id));
   const anchorItemForSwapGates = allItems.find((i) => i.id === anchor.id) ?? null;
   const swapEligibleItems = allItems.filter((item) =>
     item.id === anchor.id ||
+    companionIdSet.has(item.id) ||
     (passesDressingRequirements(item, profile_?.dressingPreferences) &&
       passesProfileOccasionGate(item, session.occasion) &&
       passesProfileRegisterGate(item, session.occasion) &&
@@ -1687,6 +1762,7 @@ export function buildNaiaOutfitCandidates(
     profile_,
     recentlyShownIds,
     suppressedFinishingOut,
+    companions,
   );
 
   const anchorPiece: OutfitCandidate["pieces"][0] = {
@@ -1696,13 +1772,26 @@ export function buildNaiaOutfitCandidates(
     colors: anchor.colors,
   };
 
+  const closetItemSlot = (item: ClosetAnchorInput): string => {
+    const categorySlot = closetItemToSlot(item.category, item.subcategory);
+    return resolveProfileSlot(item, categorySlot);
+  };
+  const companionPieces: OutfitCandidate["pieces"] = companions.map((c) => ({
+    closetId: c.id,
+    slot: closetItemSlot(c),
+    label: c.name ?? null,
+    colors: c.colors,
+  }));
+
   const toPiece = (g: { slot: OutfitSlot; id: string; label: string | null; colors: string[] }): OutfitCandidate["pieces"][0] =>
     ({ closetId: g.id, slot: g.slot as string, label: g.label, colors: g.colors });
 
   // Candidate A is always the primary full selection (may include outerwear when eligible).
+  // Companions are spliced in unconditionally, alongside the anchor — they were already
+  // validated above via evaluateAnchorEligibility and must never be dropped silently.
   const candidateA: OutfitCandidate = {
     id: "A",
-    pieces: [anchorPiece, ...fullSelection.map(toPiece)],
+    pieces: [anchorPiece, ...companionPieces, ...fullSelection.map(toPiece)],
   };
 
   // ── Anchor base-under-layer candidate-level enforcement ──────────────────────
@@ -1783,11 +1872,14 @@ export function buildNaiaOutfitCandidates(
   const bPiecesMap = new Map<string, OutfitCandidate["pieces"][0]>();
   let bDiffersFromA = false;
 
+  const companionSlots = new Set(companionPieces.map((p) => p.slot));
   for (const slot of B_SLOTS) {
-    // Anchor occupies its own slot — keep it unchanged in B.
-    if (slot === (anchor.slot as string)) {
-      const anchorPieceInA = candidateA.pieces.find((p) => p.slot === slot);
-      if (anchorPieceInA) bPiecesMap.set(slot, anchorPieceInA);
+    // Anchor and companion slots are kept unchanged in B — a companion arrived
+    // as a required piece of a Wardrobe Intelligence combination, not a scored
+    // candidate, so it must never be swapped out for a "better" alternative here.
+    if (slot === (anchor.slot as string) || companionSlots.has(slot)) {
+      const lockedPieceInA = candidateA.pieces.find((p) => p.slot === slot);
+      if (lockedPieceInA) bPiecesMap.set(slot, lockedPieceInA);
       continue;
     }
     // Not every outfit needs every slot; skip slots not in A.
@@ -1867,14 +1959,17 @@ export function buildNaiaOutfitCandidates(
   }
 
   // ── Candidate C: no-outerwear variant of A ────────────────────────────────
-  // Not generated when the anchor IS outerwear (cannot remove the anchor) or when the
+  // Not generated when the anchor IS outerwear (cannot remove the anchor), when the
   // session has a hard coverage requirement — the outerwear in A may be the only layer
-  // satisfying that requirement and must not be removed.
+  // satisfying that requirement and must not be removed — or when the outerwear piece
+  // is a required WI companion: every garment transferred through "Style This Look"
+  // must be preserved in every candidate it's offered in, so a variant that can only
+  // exist by dropping one is excluded entirely rather than silently stripping it.
   let candidateC: OutfitCandidate | null = null;
   const coverageRequiresLayer = session.coverageConditional === "coverage-non-negotiable";
   if (anchor.slot !== "outerwear" && !coverageRequiresLayer) {
     const outerwearInSelection = fullSelection.find((g) => g.slot === "outerwear");
-    if (outerwearInSelection) {
+    if (outerwearInSelection && !companionIdSet.has(outerwearInSelection.id)) {
       candidateC = { id: "C", pieces: candidateA.pieces.filter((p) => p.closetId !== outerwearInSelection.id) };
     }
   }
@@ -1885,10 +1980,14 @@ export function buildNaiaOutfitCandidates(
   // base outfit WITHOUT the optional layer — e.g. jeans+sneakers when B = jeans+sneakers+blazer
   // and C only covers trousers+loafers (A's core). D = B-without-outerwear is only meaningful
   // when it's distinct from C (otherwise the same outfit is already in the pool).
+  // Same companion-preservation rule as C: if the removable outerwear piece in B is a
+  // required companion, D is excluded rather than built without it. B itself already
+  // keeps every companion slot locked (see companionSlots above), so this only guards
+  // the one piece D would otherwise strip.
   let candidateD: OutfitCandidate | null = null;
   if (candidateB !== null && anchor.slot !== "outerwear" && !coverageRequiresLayer) {
     const outerwearInB = candidateB.pieces.find((p) => p.slot === "outerwear" && p.closetId !== anchor.id);
-    if (outerwearInB) {
+    if (outerwearInB && !companionIdSet.has(outerwearInB.closetId)) {
       const dPieces = candidateB.pieces.filter((p) => p.closetId !== outerwearInB.closetId);
       const dSig = computeOutfitSignature(dPieces.map((p) => p.closetId));
       const cSig = candidateC ? computeOutfitSignature(candidateC.pieces.map((p) => p.closetId)) : null;
@@ -1952,7 +2051,12 @@ export function buildNaiaOutfitCandidates(
       let bestTuple = seedTuple;
 
       for (const slot of structuralSlots) {
+        // Same preservation rule as Candidate B: a slot held by the anchor OR a
+        // required WI companion is never explored for a swap — Candidate E must
+        // never trade away a garment transferred through "Style This Look" for a
+        // higher-scoring alternative.
         if (seed.pieces.some((p) => p.closetId === anchor.id && p.slot === slot)) continue;
+        if (companionSlots.has(slot)) continue;
         const eligible = swapEligibleItems.filter(
           (item) => !seedItemIds.has(item.id) && resolveProfileSlot(item, closetItemToSlot(item.category, item.subcategory)) === slot
             && altSlotSuitable(item, slot),
@@ -1975,6 +2079,7 @@ export function buildNaiaOutfitCandidates(
           for (const slot2 of structuralSlots) {
             if (slot2 === slot) continue;
             if (seed.pieces.some((p) => p.closetId === anchor.id && p.slot === slot2)) continue;
+            if (companionSlots.has(slot2)) continue;
               const eligible2 = swapEligibleItems.filter(
               (item) => !trial1Ids.has(item.id) && resolveProfileSlot(item, closetItemToSlot(item.category, item.subcategory)) === slot2
                 && altSlotSuitable(item, slot2),
@@ -4206,14 +4311,31 @@ export function selectAdditionalClosetGarments(
    * a slot that is empty for any other reason is NOT reported here.
    */
   suppressedFinishingOut?: Set<string>,
+  /**
+   * Garments from a Wardrobe Intelligence combination that must survive into the
+   * outfit alongside the anchor — never swapped, never silently dropped. Each one
+   * is treated exactly like the anchor for slot-coverage and exclusion purposes.
+   * Eligibility (coverage/occasion) is the caller's responsibility, same as the
+   * anchor's own eligibility backstop in buildNaiaOutfitCandidates — this function
+   * only ever receives companions that already passed that gate.
+   */
+  companions?: ClosetAnchorInput[],
 ): Array<{ slot: OutfitSlot; id: string; label: string | null; imageUrl: string | null; colors: string[] }> {
   const anchorId = anchor?.type === "closet" ? (anchor as NormalizedClosetAnchor).id : null;
+  const companionList = companions ?? [];
+  const companionIds = new Set(companionList.map((c) => c.id));
 
   // Slots already covered by the anchor (all slot types) and by the primary (clothing only).
   const filledClothingSlots = getFilledClothingSlots(anchor, primaryProduct, []);
   const coveredSlots = new Set<string>(filledClothingSlots);
   if (anchor?.type === "closet") coveredSlots.add((anchor as NormalizedClosetAnchor).slot);
   if (anchor?.type === "nadine") coveredSlots.add((anchor as NormalizedNadineAnchor).slot);
+  // Each companion covers its own slot too — otherwise a newly-selected garment
+  // could be placed directly into a slot a companion already fills.
+  for (const companion of companionList) {
+    const companionSlot = resolveProfileSlot(companion, closetItemToSlot(companion.category, companion.subcategory));
+    if (companionSlot !== "unknown") coveredSlots.add(companionSlot);
+  }
   // A dress or set in coveredSlots (from anchor or primary) covers both top and bottom —
   // block all conflicting garments so no invalid base combination can be produced.
   // Note: for Closet SET anchors, resolveSetSlots returns empty (no component metadata),
@@ -4245,7 +4367,7 @@ export function selectAdditionalClosetGarments(
   const anchorClosetItem = anchorId ? closetItems.find((i) => i.id === anchorId) ?? null : null;
 
   for (const item of closetItems) {
-    if (item.id === anchorId) continue;
+    if (item.id === anchorId || companionIds.has(item.id)) continue;
 
     if (!passesDressingRequirements(item, profile?.dressingPreferences)) continue;
 
@@ -4255,9 +4377,11 @@ export function selectAdditionalClosetGarments(
     // Gate 2: register incompatibility blocks cross-register outfit construction.
     //         Approved occasionFit Strong/Acceptable overrides blanket register rules.
     if (!passesProfileRegisterGate(item, session.occasion)) continue;
-    // Gate 3: outfit-level register coherence — candidate must be compatible with anchor.
-    //         Shared-occasion approval (both approved for this occasion) overrides the gap check.
+    // Gate 3: outfit-level register coherence — candidate must be compatible with the
+    //         anchor AND every companion. Shared-occasion approval (both approved for
+    //         this occasion) overrides the gap check, same as the anchor-only version.
     if (!passesRegisterCoherenceWithAnchor(item, anchorClosetItem, session.occasion)) continue;
+    if (companionList.some((c) => !passesRegisterCoherenceWithAnchor(item, c, session.occasion))) continue;
 
     // Use profile exactSlot when available (authoritative slot override).
     const categorySlot = closetItemToSlot(item.category, item.subcategory);
@@ -4395,7 +4519,7 @@ export function selectAdditionalClosetGarments(
   // included first; optional finishing pieces are ranked by score and selected greedily.
   // At most one combined finishing piece from accessory + jewelry.
   const BASE_SLOTS_SET = new Set<string>(["top", "bottom", "dress", "set"]);
-  const committedCount = (anchor ? 1 : 0) + (primaryProduct ? 1 : 0);
+  const committedCount = (anchor ? 1 : 0) + (primaryProduct ? 1 : 0) + companionList.length;
   const maxAdditional = Math.max(0, MAX_OUTFIT_PIECES - committedCount);
 
   const result: Array<{ slot: OutfitSlot; id: string; label: string | null; imageUrl: string | null; colors: string[] }> = [];
@@ -4711,7 +4835,22 @@ export function computeNaiaResultDirections(
   session: Pick<StyleMeSessionInput, "occasion" | "moods" | "desiredFeelings">,
   profile?: ClosetScoringProfile | null,
   recentlyShownIds?: Set<string>,
+  /**
+   * Required WI companions — see StyleMeEngineInput.closetCompanionIds. Excluded
+   * from the swap pool exactly like the anchor (never offered as a "different"
+   * alternative a direction card could suggest in place of a garment the customer
+   * explicitly selected). UNLIKE the anchor, every companion IS appended to each
+   * direction's own outfitPieces below (companionOutfitPieces) — the anchor stays
+   * the caller's responsibility to display "separately", but a companion has no
+   * separate display surface of its own, so a direction that stayed silent about
+   * it would be a direction that dropped a required garment. Always safe to append
+   * unconditionally: a companion's slot is excluded from `bySlot` above, so it can
+   * never collide with a scored alternative, and MAX_DIR_PIECES already reserves
+   * room for exactly this many pieces.
+   */
+  companionIds?: string[],
 ): ResultDirection[] {
+  const companionIdSet = new Set(companionIds ?? []);
   const signals = {
     occasion: session.occasion,
     moods: session.moods,
@@ -4745,7 +4884,7 @@ export function computeNaiaResultDirections(
   // Score all non-anchor items and group by slot (best first within each slot).
   const bySlot = new Map<OutfitSlot, ScoredItem[]>();
   for (const item of closetItems) {
-    if (item.id === anchorId) continue;
+    if (item.id === anchorId || companionIdSet.has(item.id)) continue;
     const slot = closetItemToSlot(item.category, item.subcategory);
     if (slot === "unknown") continue;
     if (!passesDressingRequirements(item, profile?.dressingPreferences)) continue;
@@ -4801,9 +4940,11 @@ export function computeNaiaResultDirections(
   }
 
   // ── Piece cap and slot priority ────────────────────────────────────────────
-  // Direction outfitPieces = additional pieces only (anchor shown separately).
-  // Cap = MAX_OUTFIT_PIECES - 1 (the anchor occupies the +1 slot).
-  const MAX_DIR_PIECES = MAX_OUTFIT_PIECES - 1;
+  // Direction outfitPieces = additional pieces only (anchor + companions shown
+  // separately). Cap = MAX_OUTFIT_PIECES - 1 - companions.length — the anchor and
+  // every required companion each occupy one of the fixed slots, same accounting
+  // as buildNaiaOutfitCandidates' committedCount.
+  const MAX_DIR_PIECES = Math.max(0, MAX_OUTFIT_PIECES - 1 - companionIdSet.size);
   const DIR_BASE_SLOTS = new Set<string>(["top", "bottom", "dress", "set"]);
 
   // Build an outfit for a direction by picking one item per slot, then capping.
@@ -4874,6 +5015,23 @@ export function computeNaiaResultDirections(
     imageUrl: item.imageUrl,
   }));
 
+  // Required WI companions, in the same { slot, id, label, imageUrl } shape, appended to
+  // EVERY direction's displayed pieces. Closes the gap flagged on companionIds above: a
+  // companion can never lose its slot here (companion slots are excluded from `bySlot`
+  // entirely, so there is no scored alternative that could replace or collide with them),
+  // so unconditional inclusion is always correct — no direction ever has to be dropped to
+  // make room, which MAX_DIR_PIECES already reserves space for.
+  const companionOutfitPieces = companionIdSet.size > 0
+    ? closetItems
+        .filter((i) => companionIdSet.has(i.id))
+        .map((item) => ({
+          slot: closetItemToSlot(item.category, item.subcategory),
+          id: item.id,
+          label: item.name,
+          imageUrl: item.imageUrl,
+        }))
+    : [];
+
   // Lead piece for a direction: highest-priority slot in the outfit.
   const leadItem = (
     outfit: Array<{ slot: OutfitSlot; item: ClosetAnchorInput }>,
@@ -4909,7 +5067,7 @@ export function computeNaiaResultDirections(
     displayLabel: "MOST LIKE ME",
     product: makeProduct(mostYouItems),
     directionalNote: "The combination from your Closet that aligns most closely with today's signals.",
-    outfitPieces: toOutfitPieces(mostYouItems),
+    outfitPieces: [...toOutfitPieces(mostYouItems), ...companionOutfitPieces],
   });
 
   // Only add FRESH if it produces a meaningfully different outfit from MOST YOU.
@@ -4926,7 +5084,7 @@ export function computeNaiaResultDirections(
       displayLabel: "FRESH TWIST",
       product: makeProduct(freshItems),
       directionalNote: freshNote,
-      outfitPieces: toOutfitPieces(freshItems),
+      outfitPieces: [...toOutfitPieces(freshItems), ...companionOutfitPieces],
     });
   }
 
@@ -4940,7 +5098,7 @@ export function computeNaiaResultDirections(
       displayLabel: "TRY SOMETHING NEW",
       product: makeProduct(pushMeItems),
       directionalNote: "The further reach — pieces from your Closet at the outer edge of today's signals.",
-      outfitPieces: toOutfitPieces(pushMeItems),
+      outfitPieces: [...toOutfitPieces(pushMeItems), ...companionOutfitPieces],
     });
   }
 
@@ -5192,7 +5350,7 @@ export async function computeStyleMeResult(
       const recentClosetSet = engineInput.recentlyShownClosetIds?.length
         ? new Set(engineInput.recentlyShownClosetIds)
         : undefined;
-      resultDirections = computeNaiaResultDirections(allItems, anchorId, session, engineInput.profile, recentClosetSet);
+      resultDirections = computeNaiaResultDirections(allItems, anchorId, session, engineInput.profile, recentClosetSet, engineInput.closetCompanionIds);
     } else {
       resultDirections = computeResultDirections(
         recommendation.evaluatedProducts,
@@ -5281,6 +5439,7 @@ export async function computeStyleMeResult(
       engineInput.profile,
       recentClosetSet,
       suppressedFinishingSlots,
+      engineInput.closetCompanionIds,
     );
 
     const anchorId = (anchor as NormalizedClosetAnchor).id;
@@ -5576,6 +5735,7 @@ export async function computeStyleMeResult(
     rawRecommendation: recommendation,
     resultDirections,
     mode,
+    ...(engineInput.closetCompanionIds !== undefined && { companionIds: engineInput.closetCompanionIds }),
   };
 }
 
