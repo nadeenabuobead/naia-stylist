@@ -721,10 +721,10 @@ export default function WardrobeIntelligencePage() {
   const saving = navigation.state !== "idle";
   const model = page as WardrobePage;
 
-  // Honest response for a "Style this look in StyleMe" handoff that failed
-  // server-side (invalid/unowned garment, or two garments claiming the same
-  // outfit slot) — see api.wi-style-this.tsx. A bare redirect with no visible
-  // explanation would read as a broken button.
+  // Honest response for a "Complete This Look" (or single-piece "Style this in
+  // StyleMe") handoff that failed server-side (invalid/unowned garment, or two
+  // garments claiming the same outfit slot) — see api.wi-style-this.tsx. A bare
+  // redirect with no visible explanation would read as a broken button.
   const [searchParams] = useSearchParams();
   const wiStyleError = searchParams.get("wiStyleError");
   const WI_STYLE_ERROR_MESSAGE: Record<string, string> = {
@@ -929,7 +929,7 @@ export default function WardrobeIntelligencePage() {
               <input key={id} type="hidden" name="closetItemId" value={id} />
             ))}
             <button type="submit" className="wip-link wi-style-cta">
-              Style this look in StyleMe →
+              Complete This Look →
             </button>
           </Form>
         </DialogShell>

@@ -185,8 +185,19 @@ describe("CIP-G — the moodboard combination handoff is a working form, not a l
     assert.match(scope, /type="submit"/, "decorative text would be a regression, not a fix");
   });
 
-  test("CIP-G.3 the label says 'look', not the single-piece label verbatim", () => {
-    assert.match(read(LIVE), /Style this look in StyleMe →/);
+  // UPDATED 2026-10-21 — relabelled from "Style this look in StyleMe" to "Complete This
+  // Look" per customer-facing UX correction (the live staging test confirmed StyleMe still
+  // preserves every garment and adds shoes/a bag, so only the wording changed). The real
+  // intent this test protects — the multi-garment CTA must never collapse onto the
+  // single-piece CTA's own wording — is unchanged, so it's re-pinned against the new text.
+  test("CIP-G.3 the multi-garment combination CTA has its own label, not the single-piece label verbatim", () => {
+    const src = read(LIVE);
+    assert.match(src, /Complete This Look →/, "the combination CTA must use its own updated label");
+    assert.doesNotMatch(
+      src.slice(src.indexOf("Complete This Look"), src.indexOf("Complete This Look") + 50),
+      /Style this in StyleMe/,
+      "must not regress to the single-piece label",
+    );
   });
 });
 

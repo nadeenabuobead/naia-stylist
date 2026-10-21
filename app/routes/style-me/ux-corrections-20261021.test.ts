@@ -1,0 +1,143 @@
+// app/routes/style-me/ux-corrections-20261021.test.ts
+//
+// Three customer-facing UX corrections identified during the first real-browser staging
+// pass on the integrated build (commit 1ac71ff and its history). Source-regex tests, same
+// convention as every other result.tsx/closet.intelligence.tsx test in this codebase
+// (both files import *.css?url and cannot be loaded directly under plain node --test).
+//
+//   1. Save Look confirmation wording + destination (View Saved Looks -> /style-me).
+//   2. The multi-garment "Pieces That Work Together" CTA relabelled to "Complete This
+//      Look" — the single-piece Rediscover CTA ("Style this in StyleMe") is a distinct
+//      string and must be unaffected.
+//   3. The "SAVE QA PAGE" debug control gated by a dedicated, explicit, server-computed
+//      env flag instead of isStagingProject — staging now also hosts live customer
+//      acceptance checks, so "is staging" no longer implies "is an internal QA session."
+
+import { test, describe } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+const resultSrc = (): string =>
+  readFileSync(join(process.cwd(), "app/routes/style-me/result.tsx"), "utf8");
+const closetIntelSrc = (): string =>
+  readFileSync(join(process.cwd(), "app/routes/closet.intelligence.tsx"), "utf8");
+
+// ── 1. Save Look confirmation ───────────────────────────────────────────────
+
+describe("UX-1 — Save Look confirmation points at the real Saved Looks destination", () => {
+  test("UX-1.1 the confirmation banner uses the new wording, not the old Passport copy", () => {
+    const src = resultSrc();
+    assert.match(src, /Look saved to My Looks!/);
+    assert.doesNotMatch(src, /Saved to your nAia Passport\./, "old wording must not survive alongside the new copy");
+  });
+
+  test("UX-1.2 'View Saved Looks' links to /style-me — the real, already-existing page that shows saved looks (badged SAVED), not a fabricated destination", () => {
+    const src = resultSrc();
+    const bannerAt = src.indexOf("sm-banner-saved");
+    const scope = src.slice(bannerAt, bannerAt + 400);
+    assert.match(scope, /<Link to="\/style-me" className="sm-banner-cta">View Saved Looks/);
+  });
+
+  test("UX-1.3 /style-me (StyleMeIndex) genuinely queries SavedLook and badges saved entries — the destination is real, not invented", () => {
+    const indexSrc = readFileSync(join(process.cwd(), "app/routes/style-me/_index.tsx"), "utf8");
+    assert.match(indexSrc, /prisma\.savedLook\.findMany/, "the page must actually read SavedLook records");
+    assert.match(indexSrc, /session\.saved && <span className="sml-card-saved-badge">SAVED<\/span>/, "a saved look must be visibly marked as such on this page");
+  });
+
+  test("UX-1.4 the banner still only renders after a real save (isSaved), not unconditionally", () => {
+    const src = resultSrc();
+    const bannerAt = src.indexOf("sm-banner-saved");
+    const beforeBanner = src.slice(Math.max(0, bannerAt - 80), bannerAt);
+    assert.match(beforeBanner, /\{isSaved && \(/);
+  });
+
+  test("UX-1.5 the Save Look action and saved-outfit recovery are untouched — same intent, same SavedLook.create call, same ownership check", () => {
+    const src = resultSrc();
+    assert.match(src, /intent === "save"/, "the save action intent is unchanged");
+    assert.match(src, /prisma\.savedLook\.create/, "saving still creates a real SavedLook row");
+    assert.match(src, /if \(!suggestion \|\| suggestion\.session\.customerId !== naiaCustomer\.id\)/, "the save path's ownership check (CR-F.3) is untouched by this UX change");
+  });
+});
+
+// ── 2. Wardrobe Intelligence "Complete This Look" CTA ──────────────────────
+
+describe("UX-2 — the multi-garment combination CTA is relabelled without affecting the single-piece CTA", () => {
+  test("UX-2.1 the moodboard combination dialog's CTA now reads 'Complete This Look'", () => {
+    const src = closetIntelSrc();
+    const moodboardAt = src.indexOf('dialog.kind === "moodboardLook"');
+    assert.ok(moodboardAt > -1, "the moodboard combination dialog must still exist");
+    const scope = src.slice(moodboardAt, src.indexOf("</DialogShell>", moodboardAt));
+    assert.match(scope, /Complete This Look →/);
+    assert.doesNotMatch(scope, /Style this look in StyleMe/, "the old label must not survive alongside the new one");
+  });
+
+  test("UX-2.2 the multi-garment handoff mechanism itself is unchanged: every garment id is still submitted to /api/wi-style-this", () => {
+    const src = closetIntelSrc();
+    const moodboardAt = src.indexOf('dialog.kind === "moodboardLook"');
+    const scope = src.slice(moodboardAt, src.indexOf("</DialogShell>", moodboardAt));
+    assert.match(scope, /<Form method="post" action="\/api\/wi-style-this">/);
+    assert.match(scope, /\{look\.garmentIds\.map\(/, "every garment id must still be submitted — only the label changed");
+    assert.doesNotMatch(scope, /value=\{look\.garmentIds\[0\]\}/, "must not regress to submitting only the first garment");
+  });
+
+  test("UX-2.3 the SEPARATE single-piece Rediscover CTA ('Style this in StyleMe') is a distinct string and was not touched", () => {
+    const src = closetIntelSrc();
+    assert.match(src, /Style this in StyleMe →/, "the single-piece CTA (Pieces worth rediscovering) must still exist, unchanged");
+    // Sanity: confirm this is genuinely a different occurrence from the one just relabelled —
+    // the old multi-garment string must not have simply moved here instead of being replaced.
+    const occurrences = (src.match(/Style this in StyleMe →/g) ?? []).length;
+    assert.equal(occurrences, 1, "exactly one single-piece CTA occurrence, not a leftover duplicate");
+  });
+
+  test("UX-2.4 no other styling CTA in this file was relabelled — 'Complete This Look' appears exactly once", () => {
+    const src = closetIntelSrc();
+    const occurrences = (src.match(/Complete This Look →/g) ?? []).length;
+    assert.equal(occurrences, 1, "only the moodboard combination CTA should carry the new label");
+  });
+});
+
+// ── 3. "SAVE QA PAGE" gated by a dedicated server-side flag, not isStagingProject ──
+
+describe("UX-3 — the Save QA Page debug control is gated by an explicit, server-computed flag", () => {
+  test("UX-3.1 the QA export flag is computed server-side from process.env, not a client-side toggle", () => {
+    const src = resultSrc();
+    assert.match(
+      src, /const qaExportEnabled = process\.env\.STYLEME_QA_EXPORT_ENABLED === "true";/,
+      "must be a real server-side env check in the loader, same pattern as devTryOnEnabled/vtoEnabled — never useState/localStorage",
+    );
+    assert.doesNotMatch(src, /qaExportEnabled.*useState|localStorage.*[Qq]a[Ee]xport/, "must never be settable from the client");
+  });
+
+  test("UX-3.2 the SAVE QA PAGE button is gated by qaExportEnabled, no longer by isStagingProject", () => {
+    const src = resultSrc();
+    const btnAt = src.indexOf("SAVE QA PAGE");
+    assert.ok(btnAt > -1, "the control must still exist for internal QA use");
+    const before = src.slice(Math.max(0, btnAt - 1400), btnAt);
+    assert.match(before, /\{loaderData\.qaExportEnabled && \(/, "must be gated by the new dedicated flag");
+    assert.doesNotMatch(before, /\{loaderData\.isStagingProject && \(/, "must no longer be gated by the broad staging flag — staging now also hosts real customer acceptance checks");
+  });
+
+  test("UX-3.3 the UNRELATED staging-gated block (full-look VTO trigger) is untouched — this fix is scoped to the QA export button only", () => {
+    const src = resultSrc();
+    const vtoAt = src.indexOf("Staging QA: full-look VTO trigger");
+    assert.ok(vtoAt > -1, "the unrelated VTO trigger feature must still exist");
+    const jsxAt = src.indexOf("loaderData.isStagingProject && suggestion?.id", vtoAt);
+    assert.ok(jsxAt > -1, "it must remain gated by isStagingProject — only the Save QA Page control's gate changed");
+  });
+
+  test("UX-3.4 qaExportEnabled is threaded through every loader return path, same as isStagingProject already was", () => {
+    const src = resultSrc();
+    const isStagingCount = (src.match(/\bisStagingProject,?\s*$/gm) ?? []).length
+      + (src.match(/\bisStagingProject,\s/g) ?? []).length;
+    const qaExportCount = (src.match(/\bqaExportEnabled,?\s*$/gm) ?? []).length
+      + (src.match(/\bqaExportEnabled,\s/g) ?? []).length;
+    assert.ok(qaExportCount > 0, "qaExportEnabled must be returned from the loader on at least one path");
+    assert.ok(isStagingCount > 0, "sanity: isStagingProject's own return sites must still be findable for comparison");
+  });
+
+  test("UX-3.5 off by default: the flag requires an exact 'true' string match, never truthy-by-presence", () => {
+    const src = resultSrc();
+    assert.match(src, /process\.env\.STYLEME_QA_EXPORT_ENABLED === "true"/, "must require the literal string \"true\", not just any set value — so an accidentally-set empty/placeholder env var does not enable it");
+  });
+});

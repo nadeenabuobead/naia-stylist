@@ -64,6 +64,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const devTryOnEnabled = process.env.DEV_TRYON_UI_ENABLED === 'true';
   const vtoEnabled = process.env.VTO_UI_ENABLED === "true";
   const isStagingProject = process.env.NAIA_PROJECT_VARIANT === "staging";
+  // Deliberately NOT the same flag as isStagingProject: staging now also hosts live
+  // customer-facing acceptance checks (2026-10-21), so "is this staging" no longer implies
+  // "is this an internal QA session" the way it used to. A dedicated, explicit, server-
+  // gated flag (same pattern as devTryOnEnabled/vtoEnabled above) — never a client-side
+  // toggle, and off by default everywhere, including on the staging deployment, unless
+  // someone with the ability to set environment variables there turns it on deliberately.
+  const qaExportEnabled = process.env.STYLEME_QA_EXPORT_ENABLED === "true";
   try {
     const url = new URL(request.url);
     const sessionId = url.searchParams.get("sessionId");
@@ -102,6 +109,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             devTryOnEnabled,
             vtoEnabled,
             isStagingProject,
+            qaExportEnabled,
             tryOnFixtureTokens,
             sessionId: null,
             mood: null,
@@ -150,6 +158,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             devTryOnEnabled,
             vtoEnabled,
             isStagingProject,
+            qaExportEnabled,
             tryOnFixtureTokens,
             sessionId: null,
             mood: null,
@@ -246,6 +255,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         devTryOnEnabled,
         vtoEnabled,
         isStagingProject,
+        qaExportEnabled,
         tryOnFixtureTokens,
         sessionId: session.id,
         mood: session.currentMood,
@@ -304,6 +314,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         devTryOnEnabled,
         vtoEnabled,
         isStagingProject,
+        qaExportEnabled,
         tryOnFixtureTokens,
         sessionId: pendingSuggestion.sessionId,
         mood: pendingSuggestion.session.currentMood,
@@ -391,6 +402,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         return data(
           { isLoading: false, isAuthenticated: true, naiaModelIsReady, devTryOnEnabled, vtoEnabled,
             isStagingProject,
+            qaExportEnabled,
             tryOnFixtureTokens: {} as Record<string, string>, sessionId: null, mood: null,
             currentMood: null, desiredFeeling: null, occasion: null, suggestion: null,
             pendingState: null as "needs_passport" | "ready_to_save" | null,
@@ -447,6 +459,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         isAuthenticated: !!naiaCustomer,
         naiaModelIsReady,
         isStagingProject,
+        qaExportEnabled,
         sessionId: stylingSession.id,
         mood: moodFirst,
         currentMood: moodFirst,
@@ -481,7 +494,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     );
   } catch (err: any) {
     console.error("Result loader error:", err);
-    return data({ isLoading: false, isAuthenticated: false, naiaModelIsReady: false, devTryOnEnabled, vtoEnabled, isStagingProject, tryOnFixtureTokens: {} as Record<string, string>, sessionId: null, mood: null, currentMood: null, desiredFeeling: null, occasion: null, suggestion: null, pendingState: null as "needs_passport" | "ready_to_save" | null, existingOutfitFeedback: null, existingOutcome: null, error: err?.message || "Something went wrong" });
+    return data({ isLoading: false, isAuthenticated: false, naiaModelIsReady: false, devTryOnEnabled, vtoEnabled, isStagingProject, qaExportEnabled, tryOnFixtureTokens: {} as Record<string, string>, sessionId: null, mood: null, currentMood: null, desiredFeeling: null, occasion: null, suggestion: null, pendingState: null as "needs_passport" | "ready_to_save" | null, existingOutfitFeedback: null, existingOutcome: null, error: err?.message || "Something went wrong" });
   }
 }
 
@@ -1579,11 +1592,17 @@ export default function StyleMeResult() {
       </div>
 
       {/* ── Saved confirmation banner ── */}
+      {/* "View Saved Looks" goes to /style-me (StyleMeIndex, "Your StyleMe Looks" section)
+          — the real, existing place a saved look appears, badged SAVED, inside the StyleMe
+          area itself. Not /my-naia/saved: that route exists and genuinely queries
+          SavedLook, but nothing in the app links to it (confirmed: no Link anywhere
+          targets "/my-naia/saved"), so it is not "the existing Saved Looks section within
+          StyleMe" a customer could already be expected to reach. */}
       {isSaved && (
         <div className="sm-banner sm-banner-saved">
-          <p className="sm-banner-text">Saved to your nAia Passport.</p>
+          <p className="sm-banner-text">Look saved to My Looks!</p>
           <div className="sm-banner-actions">
-            <Link to="/my-naia" className="sm-banner-cta">← Overview</Link>
+            <Link to="/style-me" className="sm-banner-cta">View Saved Looks →</Link>
           </div>
         </div>
       )}
@@ -2143,7 +2162,7 @@ export default function StyleMeResult() {
           )}
         </div>
 
-        {loaderData.isStagingProject && (
+        {loaderData.qaExportEnabled && (
           <div style={{ marginTop: "1.5rem", textAlign: "center" }}>
             <button
               type="button"
