@@ -429,59 +429,43 @@ describe("§O.6 — Migration contract", () => {
 describe("§O.7 — Result page integration", () => {
   const resultSrc = src("routes/style-me/result.tsx");
 
-  it("result.tsx imports loadOutcomeForSuggestion", () => {
+  // UPDATED 2026-10-21 — the immediate "After You Wear This" outcome widget was removed
+  // from result.tsx by request (fix(styleme): remove premature post-wear feedback prompt
+  // from result page, e41e064 on fix/phase1-legacy-api-lockdown, integrated here). The
+  // commit's own stated intent: "Removes only the UI ... The backend stays intact" — so
+  // §O.1-§O.6 above (validateOutcomeInput, the /api/styleme-outcome route contract,
+  // persistence) are untouched and still fully apply; only this block, which tested the
+  // now-removed UI's presence in result.tsx specifically, needed updating. The eight tests
+  // below that asserted the widget's exact copy/behaviour are replaced by the dedicated
+  // removal-regression file (result.post-wear-feedback-removed.test.tsx), which is more
+  // precise (render-based, not source-text) and is the test to extend if this surface
+  // changes again — duplicating its coverage here would just be two places to update.
+
+  it("result.tsx imports loadOutcomeForSuggestion (backend read — untouched by the UI removal)", () => {
     assert.ok(resultSrc.includes("loadOutcomeForSuggestion"));
   });
 
-  it("result.tsx loads existingOutcome in loader (direct-session path)", () => {
+  it("result.tsx loads existingOutcome in loader (direct-session path — untouched)", () => {
     assert.ok(
       resultSrc.includes("existingOutcome") && resultSrc.includes("loadOutcomeForSuggestion"),
     );
   });
 
-  it("result.tsx initialises outcomeStatus state from existingOutcome", () => {
-    assert.ok(resultSrc.includes("existingOutcome?.outcomeStatus"));
-  });
-
-  it("result.tsx initialises outcomeSaved from existingOutcome (pre-fills saved state)", () => {
-    assert.ok(resultSrc.includes("existingOutcome != null"));
-  });
-
-  it("outcome widget renders 'After you wear this' label", () => {
-    assert.ok(resultSrc.includes("After you wear this"));
-  });
-
-  it("outcome widget renders 'What happened with this look?' prompt", () => {
-    assert.ok(resultSrc.includes("What happened with this look?"));
-  });
-
-  it("outcome widget renders goal outcome question with locked copy", () => {
+  it("the component itself no longer reads existingOutcome into state — the widget's hooks are gone, not just hidden", () => {
     assert.ok(
-      resultSrc.includes("Did the look give you what you wanted today?"),
-      "must use locked copy for goal question",
+      !resultSrc.includes("existingOutcome?.outcomeStatus") && !resultSrc.includes("existingOutcome != null"),
+      "outcomeStatus/outcomeSaved component state must be gone entirely, not merely unrendered",
     );
   });
 
-  it("outcome widget shows 'Noted.' on saved state (with period)", () => {
-    assert.ok(resultSrc.includes("Noted."), "saved state must display 'Noted.' with period");
-  });
-
-  it("outcome widget has Edit button to re-enter form", () => {
-    assert.ok(resultSrc.includes("isOutcomeEditing"));
-  });
-
-  it("outcome widget POSTs to /api/styleme-outcome", () => {
-    assert.ok(resultSrc.includes("/api/styleme-outcome"));
-  });
-
-  it("outcome widget sends JSON body (application/json encType)", () => {
-    assert.ok(resultSrc.includes('application/json'));
-  });
-
-  it("route does NOT show outcome widget for unauthenticated visitors", () => {
-    const outcomeBlock = resultSrc.indexOf("After you wear this");
-    const authCheck = resultSrc.lastIndexOf("isAuthenticated", outcomeBlock);
-    assert.ok(authCheck > -1, "outcome widget must be gated by isAuthenticated");
+  it("the removed widget's copy and submission target are gone from result.tsx", () => {
+    assert.ok(!resultSrc.includes("After you wear this"), "the component-level widget heading must not survive");
+    assert.ok(!resultSrc.includes("What happened with this look?"));
+    assert.ok(!resultSrc.includes("isOutcomeEditing"), "the Edit-button state must be gone, not just unreachable");
+    // The backend route itself (api.styleme-outcome.tsx) is untouched and still exists —
+    // see §O.3 above — this only asserts result.tsx no longer POSTs to it (the removed
+    // call was a JS object property, action: "/api/styleme-outcome", not a JSX attribute).
+    assert.ok(!resultSrc.includes('action: "/api/styleme-outcome"'));
   });
 
   it("result.tsx does NOT mutate OnboardingProfile in the outcome section", () => {

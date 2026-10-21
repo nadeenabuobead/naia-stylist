@@ -1551,36 +1551,27 @@ describe("§N — Finishing Layer does not repeat a Complete the Look suggestion
 // Must not promise one rating instantly changes future recommendations, and
 // must not touch the existing outcome-writing action at all.
 
+// UPDATED 2026-10-21 — the entire "Your Feedback Helps nAia Learn" / "After you wear this"
+// widget was removed from result.tsx by request (fix(styleme): remove premature post-wear
+// feedback prompt from result page, e41e064, integrated here). See outcome-contract.test.ts
+// §O.7 for the corresponding update and rationale: UI removed, backend (api.styleme-
+// outcome.tsx, outcome-persistence.server.ts) untouched. The two copy/ordering tests below
+// tested a widget that no longer exists in this file at all, so they're replaced with a
+// single absence check; the "action export" test was checking result.tsx's OWN component-
+// level variable names (outcomeStatus/whatWorked/etc., set by useState, never by result.tsx's
+// own `action` export) under a name that implied it verified the backend — it verifies the
+// real backend route's field names instead now, which is what it was actually trying to
+// protect.
 describe("result.tsx — feedback-helps-nAia-learn explanatory copy", () => {
-  it("renders the explanatory heading and copy immediately before the feedback controls", () => {
-    assert.ok(resultSrc.includes("Your Feedback Helps nAia Learn"), "explanatory heading present");
-    assert.ok(
-      resultSrc.includes("Rate your looks to help nAia understand what works for you and make future"),
-      "explanatory copy present",
-    );
-    const explanationIndex = resultSrc.indexOf("Your Feedback Helps nAia Learn");
-    // The "After you wear this" label also renders in the separate, already-
-    // saved/read-only summary branch (shows "Noted." + an Edit button, no
-    // input controls) — find the occurrence immediately following the
-    // explanation, which is the actual feedback-controls branch.
-    const afterYouWearIndex = resultSrc.indexOf("After you wear this", explanationIndex);
-    assert.ok(explanationIndex > -1 && afterYouWearIndex > -1, "both blocks exist");
-    assert.ok(explanationIndex < afterYouWearIndex, "explanation renders before the feedback/rating controls, not after");
+  it("the removed explanatory heading and prompt no longer render anywhere in result.tsx", () => {
+    assert.ok(!resultSrc.includes("Your Feedback Helps nAia Learn"), "the explanatory heading must be gone, not just unreachable");
+    assert.ok(!resultSrc.includes("After you wear this"), "the prompt must be gone, not just unreachable");
   });
 
-  it("does not promise one individual rating instantly changes future recommendations", () => {
-    const explanationStart = resultSrc.indexOf("Your Feedback Helps nAia Learn");
-    const explanationBlock = resultSrc.slice(
-      explanationStart,
-      resultSrc.indexOf("After you wear this", explanationStart),
-    );
-    assert.ok(!/instantly|immediately changes|right away/i.test(explanationBlock), "no instant-change promise");
-  });
-
-  it("the existing outcome action/evidence-writing behavior is unchanged — same action export, same field names", () => {
-    assert.ok(resultSrc.includes("export async function action"), "action export still present");
-    assert.ok(resultSrc.includes("outcomeStatus"), "outcomeStatus still collected");
-    assert.ok(resultSrc.includes("whatWorked"), "whatWorked still collected");
-    assert.ok(resultSrc.includes("whatFeltOff") || resultSrc.includes("didntWearReasons"), "friction/non-wear fields still collected");
+  it("the real backend route (api.styleme-outcome.tsx) still collects the same evidence fields, untouched by the UI removal", () => {
+    const outcomeRouteSrc = readFileSync(join(__dirname, "..", "api.styleme-outcome.tsx"), "utf8");
+    assert.ok(outcomeRouteSrc.includes("outcomeStatus"), "outcomeStatus still collected");
+    assert.ok(outcomeRouteSrc.includes("whatWorked"), "whatWorked still collected");
+    assert.ok(outcomeRouteSrc.includes("whatFeltOff") || outcomeRouteSrc.includes("didntWearReasons"), "friction/non-wear fields still collected");
   });
 });

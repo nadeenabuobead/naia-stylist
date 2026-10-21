@@ -299,23 +299,24 @@ describe("CR-F — every id result.tsx reads from the client is re-verified agai
     assert.match(src, /if \(!session \|\| session\.customerId !== naiaCustomer\.id\)/, "a session that resolves but belongs to another customer must be rejected, not just a missing session");
   });
 
-  // KNOWN GAP, confirmed during final acceptance (2026-10-21) by reading the separate
-  // security branch's own work (security/cross-customer-isolation-20261021, read-only —
-  // not merged or edited here, per this session's standing restriction on security
-  // branches): this guard's `naiaCustomer &&` prefix means the whole ownership check is
-  // SKIPPED for an UNAUTHENTICATED request, so an unauthenticated caller can currently
-  // regenerate another customer's session. The security branch already fixes this exact
-  // line (`if (!naiaCustomer || session.customerId !== naiaCustomer.id)`) as part of its
-  // active remediation. This test intentionally pins CURRENT (pre-fix) behavior on THIS
-  // branch, not a security property — it exists to detect ownership checks disappearing
-  // entirely, not to certify this line as safe. Do not treat a pass here as "verified
-  // secure"; treat it as "unauthenticated regen still open, matching the security branch's
-  // own diagnosis" until that branch's fix is merged in. See STEP 6 of the final report.
-  test("CR-F.2 the regenerate action re-checks ownership when a customer IS authenticated (known gap: not when unauthenticated — see comment above)", () => {
+  // UPDATED 2026-10-21 during the WI + security integration (df00020 merged in via
+  // security/cross-customer-isolation-20261021 @ 17522e0). CR-F.2 used to pin a CONFIRMED
+  // GAP — this guard's `naiaCustomer &&` prefix skipped the whole check for an
+  // unauthenticated request, so an unauthenticated caller could regenerate another
+  // customer's session. The security branch's own fix (df00020, "close 4 cross-customer
+  // PostOutfitReview IDORs") tightens this to `!naiaCustomer || ...`, now present in the
+  // merged file. Converted from a gap-assertion into a permanent protection test per the
+  // integration's own instruction: do not delete tests documenting a vulnerability, convert
+  // them once the fix lands so a regression (e.g. someone reverting to `naiaCustomer &&`)
+  // is caught again.
+  test("CR-F.2 the regenerate action rejects BOTH an unauthenticated caller and one authenticated as someone else", () => {
     const src = route();
     const regenAt = src.indexOf('intent === "regenerate"');
-    const scope = src.slice(regenAt, regenAt + 500);
-    assert.match(scope, /if \(naiaCustomer && session\.customerId !== naiaCustomer\.id\)/, "regenerate re-checks ownership of the session it was handed when authenticated — but see the KNOWN GAP comment above for the unauthenticated case");
+    const scope = src.slice(regenAt, regenAt + 900);
+    assert.match(
+      scope, /if \(!naiaCustomer \|\| session\.customerId !== naiaCustomer\.id\)/,
+      "regenerate must reject when unauthenticated (!naiaCustomer) OR when authenticated as the wrong customer — the pre-fix `naiaCustomer && ...` form skipped the check entirely for an unauthenticated caller",
+    );
   });
 
   test("CR-F.3 both the save and pending-save actions reject a suggestion owned by someone else", () => {
@@ -324,58 +325,71 @@ describe("CR-F — every id result.tsx reads from the client is re-verified agai
     assert.ok(matches.length >= 2, `expected both the completed-Passport save path and the pending-save path to check this; found ${matches.length}`);
   });
 
-  test("CR-F.4 every one of these four ownership checks responds with the SAME uniform not-found shape — never a distinguishing message", () => {
-    // A 404 that reads differently for \"doesn't exist\" vs \"exists but isn't yours\" is an
-    // enumeration oracle. All four call sites must use the identical generic shape.
+  // UPDATED 2026-10-21: all four ownership checks (CR-F.1/2/5/6) now use the SAME
+  // `!naiaCustomer || <row>.customerId !== naiaCustomer.id` shape, uniformly rejecting an
+  // unauthenticated caller and a wrongly-authenticated one with the identical generic
+  // "Not found"/404 — never a distinguishing oracle between "doesn't exist" and "exists but
+  // isn't yours".
+  test("CR-F.4 generate, regenerate, review and the direct-sessionId loader all reject with the SAME uniform not-found shape", () => {
     const src = route();
-    const checks = [
-      /if \(!session \|\| session\.customerId !== naiaCustomer\.id\) \{[\s\S]{0,40}return data\(\s*\{/,
-      /if \(naiaCustomer && session\.customerId !== naiaCustomer\.id\) \{\s*return data\(\{ error: "Not found" \}, \{ status: 404 \}\);/,
+    const uniformChecks = [
+      /if \(!session \|\| session\.customerId !== naiaCustomer\.id\) \{[\s\S]{0,40}return data\(\s*\{/, // CR-F.1 (loader)
+      /if \(!naiaCustomer \|\| session\.customerId !== naiaCustomer\.id\) \{\s*return data\(\{ error: "Session not found" \}, \{ status: 404 \}\);/, // CR-F.6 (generate)
+      /if \(!naiaCustomer \|\| session\.customerId !== naiaCustomer\.id\) \{\s*return data\(\{ error: "Not found" \}, \{ status: 404 \}\);/, // CR-F.2 (regenerate)
+      /if \(!naiaCustomer \|\| reviewSession\.customerId !== naiaCustomer\.id\) \{\s*return data\(\{ error: "Session not found" \}, \{ status: 404 \}\);/, // CR-F.5 (review)
     ];
-    for (const re of checks) assert.match(src, re);
+    for (const re of uniformChecks) assert.match(src, re, `expected to find: ${re}`);
     const pendingPathChecks = (src.match(/if \(!suggestion \|\| suggestion\.session\.customerId !== naiaCustomer\.id\) \{\s*return data\(\{ error: "Not found" \}, \{ status: 404 \}\);/g) ?? []).length;
     assert.equal(pendingPathChecks, 2, "both suggestion-ownership checks must use the identical generic 'Not found' / 404 shape");
   });
 
-  // CONFIRMED, SEVERE GAP — found during final acceptance (2026-10-21) while scoping CR-F,
-  // by reading (read-only; not merged or edited) the separate security branch
-  // security/cross-customer-isolation-20261021's own diff. The "review" intent (post-outfit
-  // feedback) on THIS branch has NO ownership check at all: it loads a StylingSession by a
-  // bare client-supplied sessionId and then writes/overwrites a PostOutfitReview keyed to
-  // THAT session's customerId — any authenticated (or, since there is no naiaCustomer guard
-  // at all on this branch, any unauthenticated) caller who supplies another customer's
-  // sessionId can create or silently overwrite that customer's review. The security branch
-  // already adds `if (!naiaCustomer || reviewSession.customerId !== naiaCustomer.id) return
-  // data({ error: "Session not found" }, { status: 404 })` right after the existing
-  // `!reviewSession` check. NOT fixed here — fixing it would duplicate/diverge from the
-  // security branch's own remediation, which this session is instructed to coordinate with
-  // rather than repeat. This test documents the absence so it cannot be silently assumed
-  // fixed; see STEP 6 of the final report (BLOCKED BY SECURITY DEPLOYMENT).
-  test("CR-F.5 [KNOWN GAP, NOT FIXED HERE] the 'review' intent has NO ownership check on this branch — documents absence, does not assert safety", () => {
+  // UPDATED 2026-10-21: was CONFIRMED, SEVERE GAP — the "review" intent (post-outfit
+  // feedback) had NO ownership check at all: it loaded a StylingSession by a bare
+  // client-supplied sessionId and wrote/overwrote a PostOutfitReview keyed to THAT
+  // session's customerId, letting any caller (authenticated as anyone, or not at all)
+  // create or silently overwrite another customer's review. Fixed by df00020 on the
+  // security branch, now merged in. Converted into a permanent protection test.
+  test("CR-F.5 the 'review' intent now rejects a session owned by someone else before writing a PostOutfitReview", () => {
     const src = route();
     const reviewAt = src.indexOf('intent === "review"');
     assert.ok(reviewAt > -1, "the review intent must still exist");
     const reviewSessionAt = src.indexOf("const reviewSession = await prisma.stylingSession.findUnique", reviewAt);
-    const nextCheckAt = src.indexOf("if (!reviewSession", reviewSessionAt);
-    const afterCheck = src.slice(nextCheckAt, nextCheckAt + 400);
-    assert.doesNotMatch(
-      afterCheck, /reviewSession\.customerId !== naiaCustomer\.id/,
-      "if this now matches, the ownership check has been added (e.g. the security branch's fix was merged in) — this test should be deleted, not updated to assert it, since the security branch owns that fix",
-    );
+    const scope = src.slice(reviewSessionAt, reviewSessionAt + 900);
+    // Both checks must be present, and in order: the existence check first, the ownership
+    // check second — ownership of a session that doesn't exist is meaningless to ask.
+    const existsAt = scope.search(/if \(!reviewSession \|\| !reviewSession\.suggestions\[0\]\)/);
+    const ownerAt = scope.search(/if \(!naiaCustomer \|\| reviewSession\.customerId !== naiaCustomer\.id\)/);
+    assert.ok(existsAt > -1, "the existence check must still be present");
+    assert.ok(ownerAt > -1, "the ownership check must now be present — this is the permanent protection for the fixed IDOR");
+    assert.ok(existsAt < ownerAt, "existence must be checked before ownership");
   });
 
-  // Same class of confirmed, pre-existing, NOT-fixed-here gap as CR-F.5, on the "generate"
-  // intent (the very first StyleMe result generation for a session) — also matches the
-  // security branch's own diagnosis and fix.
-  test("CR-F.6 [KNOWN GAP, NOT FIXED HERE] the 'generate' intent has NO ownership check on this branch — documents absence, does not assert safety", () => {
+  // UPDATED 2026-10-21: was the same class of confirmed, severe gap as CR-F.5, on the
+  // "generate" intent (the very first StyleMe result generation for a session). Fixed by
+  // the same df00020 commit, now merged in. Converted into a permanent protection test.
+  test("CR-F.6 the 'generate' intent now rejects a session owned by someone else before generating a suggestion", () => {
     const src = route();
     const genAt = src.indexOf('intent === "generate"');
     assert.ok(genAt > -1, "the generate intent must still exist");
     const sessionAt = src.indexOf("const session = await prisma.stylingSession.findUnique", genAt);
-    const scope = src.slice(sessionAt, sessionAt + 400);
-    assert.doesNotMatch(
-      scope, /session\.customerId !== naiaCustomer\.id/,
-      "if this now matches, the ownership check has been added (e.g. the security branch's fix was merged in) — this test should be deleted, not updated to assert it, since the security branch owns that fix",
+    const scope = src.slice(sessionAt, sessionAt + 900);
+    assert.match(
+      scope, /if \(!naiaCustomer \|\| session\.customerId !== naiaCustomer\.id\)/,
+      "the generate intent must reject a session it does not own — this is the permanent protection for the fixed IDOR",
+    );
+  });
+
+  // NEW 2026-10-21: the fourth ownership fix named alongside CR-F.2/5/6 — a legacy route,
+  // not result.tsx, so it needs its own source reader. Also fixed by df00020.
+  test("CR-F.7 api.outfit-rating.jsx (legacy route) rejects both an existing review owned by someone else and a session owned by someone else", () => {
+    const src = readFileSync(join(process.cwd(), "app/routes/api.outfit-rating.jsx"), "utf8");
+    assert.match(
+      src, /if \(existing && existing\.customerId !== customer\.id\)/,
+      "updating an existing review must reject when it belongs to a different customer",
+    );
+    assert.match(
+      src, /if \(linkedSession && linkedSession\.customerId !== customer\.id\)/,
+      "creating a new review must reject when the linked session belongs to a different customer",
     );
   });
 });
