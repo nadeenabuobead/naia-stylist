@@ -192,7 +192,8 @@ describe("T10: loader computes displayImageUrl from imagePublicId server-side", 
       "loader must produce a displayImageUrl field for each item",
     );
     const loaderIdx = closet.indexOf("export async function loader");
-    const loaderBlock = closet.slice(loaderIdx, loaderIdx + 1500);
+    const loaderEndIdx = closet.indexOf("export async function action", loaderIdx);
+    const loaderBlock = closet.slice(loaderIdx, loaderEndIdx > loaderIdx ? loaderEndIdx : loaderIdx + 1500);
     assert.ok(
       loaderBlock.includes("buildPrivateDownloadUrl"),
       "loader must use buildPrivateDownloadUrl to generate display URLs",
