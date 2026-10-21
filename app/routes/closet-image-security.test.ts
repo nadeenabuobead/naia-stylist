@@ -28,6 +28,7 @@
 //   T23 preview endpoint: Layer 3 suitability runs before analysis (L2→L3→analysis order)
 //   T24 preview endpoint: requiresReupload:true on asset-deleting failures; NEEDS_CLARIFICATION preserves asset
 //   T25 preview endpoint: passes downloadUrl (not publicId) to previewAnalyzeGarment (CDN cannot serve private assets)
+//   T26 edit photo replacement clears the stale photo-consent stamp (2026-10-21)
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -321,6 +322,24 @@ describe("T17: edit deletes old asset only after DB update succeeds", () => {
     assert.ok(photoUpdateIdx !== -1, "edit block must have a photo-replacement DB update call");
     assert.ok(deleteOldIdx !== -1, "edit block must call deleteCloudinaryAsset(oldPublicId, ...) for old-asset cleanup");
     assert.ok(photoUpdateIdx < deleteOldIdx, "old-asset deleteCloudinaryAsset must appear AFTER the DB update");
+  });
+});
+
+// ── T26: edit photo replacement clears the stale consent stamp ─────────────
+
+describe("T26: photo replacement clears photoConsentAt/photoConsentVersion", () => {
+  it("the photo-replacement DB update nulls out the old photo's consent stamp", () => {
+    const editIdx = closet.indexOf('intent === "edit"');
+    assert.ok(editIdx !== -1, "edit handler must exist");
+    const block = closet.slice(editIdx, editIdx + 14000);
+    const pipelineStart = block.indexOf("validatePublicIdOwnership(newPublicId");
+    const updateIdx = block.indexOf("closetItem.update(", pipelineStart);
+    const nextDeleteIdx = block.indexOf("deleteCloudinaryAsset(oldPublicId", updateIdx);
+    const updateBlock = block.slice(updateIdx, nextDeleteIdx > updateIdx ? nextDeleteIdx : updateIdx + 2000);
+    assert.ok(
+      /photoConsentAt:\s*null/.test(updateBlock) && /photoConsentVersion:\s*null/.test(updateBlock),
+      "replacing a photo must clear the old consent stamp, not leave it describing a different image",
+    );
   });
 });
 

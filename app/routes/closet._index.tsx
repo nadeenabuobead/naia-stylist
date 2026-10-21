@@ -796,6 +796,18 @@ export async function action({ request }: ActionFunctionArgs) {
         customerNote: editCustomerNote,
         // Image replaced — stale intelligence is no longer current; reanalysis below.
         analysisStatus: "pending",
+        // Photo consent (2026-10-21) — the consent timestamp/version recorded
+        // for the OLD photo must not keep describing a different, never
+        // explicitly-consented-to image after replacement. Cleared here, not
+        // re-stamped: this flow does not yet collect a fresh consent checkbox
+        // for a replacement upload (unlike "add" — see photo-consent.server.ts
+        // for why that half of the fix needs its own UI pass with live
+        // verification, not a drive-by addition). Clearing is purely
+        // defensive — nothing in the live code path currently reads this
+        // field to gate anything — and leaves the record honest rather than
+        // silently carrying forward a stale affirmative.
+        photoConsentAt: null,
+        photoConsentVersion: null,
       },
     });
 
