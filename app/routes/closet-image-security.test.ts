@@ -28,7 +28,8 @@
 //   T23 preview endpoint: Layer 3 suitability runs before analysis (L2→L3→analysis order)
 //   T24 preview endpoint: requiresReupload:true on asset-deleting failures; NEEDS_CLARIFICATION preserves asset
 //   T25 preview endpoint: passes downloadUrl (not publicId) to previewAnalyzeGarment (CDN cannot serve private assets)
-//   T26 edit photo replacement clears the stale photo-consent stamp (2026-10-21)
+//   T26 edit photo replacement stamps the NEW photo's own consent, never the old one's (2026-10-21)
+//   T27 edit photo replacement requires consent before verification/moderation runs; rejection preserves the existing item (2026-10-21)
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -313,7 +314,12 @@ describe("T17: edit deletes old asset only after DB update succeeds", () => {
   it("oldPublicId delete appears after prisma.closetItem.update in edit block", () => {
     const editIdx = closet.indexOf('intent === "edit"');
     assert.ok(editIdx !== -1, "edit handler must exist");
-    const block = closet.slice(editIdx, editIdx + 14000);
+    // Bounded by the action's own final fallback, not a fixed character
+    // count — the edit block has grown past fixed windows before (T10's
+    // original bug) and will again; anchoring to a real, stable marker
+    // means this doesn't silently need re-tuning on unrelated edits.
+    const actionEndIdx = closet.indexOf('"Unknown intent"', editIdx);
+    const block = closet.slice(editIdx, actionEndIdx > editIdx ? actionEndIdx : editIdx + 14000);
     // Anchor: photo pipeline starts at ownership check
     const pipelineStart = block.indexOf("validatePublicIdOwnership(newPublicId");
     assert.ok(pipelineStart !== -1, "photo pipeline anchor must exist");
@@ -325,10 +331,10 @@ describe("T17: edit deletes old asset only after DB update succeeds", () => {
   });
 });
 
-// ── T26: edit photo replacement clears the stale consent stamp ─────────────
+// ── T26: edit photo replacement requires and records fresh consent ─────────
 
-describe("T26: photo replacement clears photoConsentAt/photoConsentVersion", () => {
-  it("the photo-replacement DB update nulls out the old photo's consent stamp", () => {
+describe("T26: photo replacement stamps the NEW photo's own consent, never the old one's", () => {
+  it("the photo-replacement DB update spreads buildConsentStamp(editConsentGiven), not a literal null", () => {
     const editIdx = closet.indexOf('intent === "edit"');
     assert.ok(editIdx !== -1, "edit handler must exist");
     const block = closet.slice(editIdx, editIdx + 14000);
@@ -337,8 +343,44 @@ describe("T26: photo replacement clears photoConsentAt/photoConsentVersion", () 
     const nextDeleteIdx = block.indexOf("deleteCloudinaryAsset(oldPublicId", updateIdx);
     const updateBlock = block.slice(updateIdx, nextDeleteIdx > updateIdx ? nextDeleteIdx : updateIdx + 2000);
     assert.ok(
-      /photoConsentAt:\s*null/.test(updateBlock) && /photoConsentVersion:\s*null/.test(updateBlock),
-      "replacing a photo must clear the old consent stamp, not leave it describing a different image",
+      /buildConsentStamp\(\s*editConsentGiven\s*\)/.test(updateBlock),
+      "the photo-replacement update must stamp a fresh consent for the new photo via buildConsentStamp — never a hardcoded null, and never the old photo's stamp",
+    );
+  });
+});
+
+// ── T27: edit photo replacement requires consent BEFORE the pipeline runs ───
+
+describe("T27: edit photo replacement rejects without consent, before verification/moderation", () => {
+  const editIdx = closet.indexOf('intent === "edit"');
+  const pipelineStart = closet.indexOf("validatePublicIdOwnership(newPublicId", editIdx);
+  // The photo-replacement update is the first closetItem.update AFTER the
+  // pipeline starts — not the earlier one in the meta-only-edit branch above it.
+  // All positions below are absolute offsets into `closet`, compared directly
+  // — no re-slicing into a shorter substring, which previously truncated
+  // mid-token and made a later indexOf silently return -1.
+  const photoUpdateIdx = closet.indexOf("closetItem.update(", pipelineStart);
+  const ownershipIdx = closet.indexOf("validatePublicIdOwnership(newPublicId", pipelineStart);
+  const consentIdx = closet.indexOf("extractConsentGiven(", pipelineStart);
+  const verifyIdx = closet.indexOf("verifyCloudinaryAsset(newPublicId", pipelineStart);
+
+  it("extractConsentGiven is checked, and appears before the Cloudinary verify call, in the photo-replacement block", () => {
+    assert.ok(ownershipIdx !== -1 && consentIdx !== -1 && verifyIdx !== -1, "ownership, consent, and verify calls must all exist in the photo-replacement block");
+    assert.ok(ownershipIdx < consentIdx, "ownership must be checked before consent (consent rejection deletes the asset)");
+    assert.ok(consentIdx < verifyIdx && consentIdx < photoUpdateIdx, "consent must be checked before any Cloudinary verification/moderation runs, and well before the eventual DB update");
+  });
+
+  it("a missing-consent rejection deletes only the new asset and returns before the photo-replacement closetItem.update call", () => {
+    const rejectBlock = closet.slice(consentIdx, consentIdx + 400);
+    assert.ok(
+      /deleteCloudinaryAsset\(newPublicId/.test(rejectBlock) &&
+      /status:\s*400/.test(rejectBlock),
+      "withheld consent must delete the newly uploaded asset and reject with 400, before touching the existing item",
+    );
+    const rejectReturnIdx = closet.indexOf("return data(", consentIdx);
+    assert.ok(
+      rejectReturnIdx !== -1 && rejectReturnIdx < photoUpdateIdx,
+      "the consent-rejection return must happen before the item's DB row is ever updated",
     );
   });
 });

@@ -615,13 +615,28 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // ── Photo replacement: full security pipeline (mirrors "add") ─────────────
 
-    // 1. Ownership check — newPublicId must be in the customer's folder.
+    // 1. Ownership check — newPublicId must be in the customer's folder. Must
+    //    run before the consent check below: a consent rejection deletes the
+    //    asset, and that delete must never be reachable for a publicId this
+    //    customer does not own (same reasoning as "add" — see its own comment).
     const ownership = validatePublicIdOwnership(newPublicId, customer.id);
     if (!ownership.ok) {
       return data({ error: ownership.error }, { status: 400 });
     }
 
-    // 2. Verify via Cloudinary Admin API.
+    // 2. Photo consent (2026-10-21) — required before a replacement photo is
+    //    accepted, same wording/versioning as "add". Checked before any
+    //    verification/moderation runs, and before the existing item row is
+    //    touched at all — rejection deletes only the newly uploaded asset and
+    //    leaves the item's current photo and its existing consent record
+    //    completely untouched.
+    const editConsentGiven = extractConsentGiven({ photoConsentGiven: formData.get("photoConsentGiven") === "true" });
+    if (!editConsentGiven) {
+      await deleteCloudinaryAsset(newPublicId, "private");
+      return data({ error: "Photo consent is required to replace this item's photo." }, { status: 400 });
+    }
+
+    // 3. Verify via Cloudinary Admin API.
     const verify = await verifyCloudinaryAsset(newPublicId, "private");
     if (!verify.ok) {
       await deleteCloudinaryAsset(newPublicId, "private");
@@ -643,20 +658,20 @@ export async function action({ request }: ActionFunctionArgs) {
       return data({ error: "Uploaded file must be an image." }, { status: 400 });
     }
 
-    // 3. Format allowlist.
+    // 4. Format allowlist.
     const EDIT_ALLOWED_FORMATS = new Set(["jpg", "jpeg", "png", "webp", "heic", "heif"]);
     if (!EDIT_ALLOWED_FORMATS.has(editFormat)) {
       await deleteCloudinaryAsset(newPublicId, "private");
       return data({ error: `File type "${editFormat}" is not accepted. Use JPG, PNG, WEBP, or HEIC.` }, { status: 400 });
     }
 
-    // 4. File-size cap.
+    // 5. File-size cap.
     if (editBytes > 5 * 1024 * 1024) {
       await deleteCloudinaryAsset(newPublicId, "private");
       return data({ error: `Image is too large (${(editBytes / 1024 / 1024).toFixed(1)} MB). Maximum is 5 MB.` }, { status: 400 });
     }
 
-    // 5. Dimension bounds.
+    // 6. Dimension bounds.
     const EDIT_MIN_DIM = 200, EDIT_MAX_DIM = 8000;
     if (editWidth !== null && editWidth < EDIT_MIN_DIM) {
       await deleteCloudinaryAsset(newPublicId, "private");
@@ -675,7 +690,7 @@ export async function action({ request }: ActionFunctionArgs) {
       return data({ error: `Image height (${editHeight} px) exceeds the maximum of ${EDIT_MAX_DIM} px.` }, { status: 400 });
     }
 
-    // 6. Magic-byte check.
+    // 7. Magic-byte check.
     const editCfg = getCloudinaryConfig();
     if (!editCfg) {
       await deleteCloudinaryAsset(newPublicId, "private");
@@ -796,18 +811,12 @@ export async function action({ request }: ActionFunctionArgs) {
         customerNote: editCustomerNote,
         // Image replaced — stale intelligence is no longer current; reanalysis below.
         analysisStatus: "pending",
-        // Photo consent (2026-10-21) — the consent timestamp/version recorded
-        // for the OLD photo must not keep describing a different, never
-        // explicitly-consented-to image after replacement. Cleared here, not
-        // re-stamped: this flow does not yet collect a fresh consent checkbox
-        // for a replacement upload (unlike "add" — see photo-consent.server.ts
-        // for why that half of the fix needs its own UI pass with live
-        // verification, not a drive-by addition). Clearing is purely
-        // defensive — nothing in the live code path currently reads this
-        // field to gate anything — and leaves the record honest rather than
-        // silently carrying forward a stale affirmative.
-        photoConsentAt: null,
-        photoConsentVersion: null,
+        // Photo consent (2026-10-21) — stamps the NEW photo's own consent,
+        // never carrying the old photo's timestamp/version forward. Reaching
+        // this point already required editConsentGiven to be true (checked
+        // in step 2, above, before any verification/moderation even ran), so
+        // this is always a fresh, explicit affirmative for this exact image.
+        ...buildConsentStamp(editConsentGiven),
       },
     });
 
@@ -1085,6 +1094,11 @@ export default function Closet() {
   const [editBrand, setEditBrand] = useState("");
   const [editPublicId, setEditPublicId] = useState("");
   const [editImageUrl, setEditImageUrl] = useState("");
+  // Required before a replacement photo is accepted — same wording/versioning
+  // as the "add" consent checkbox (photo-consent.server.ts). Irrelevant for a
+  // meta-only edit (no new photo), so it's never checked unless editPublicId
+  // is actually set.
+  const [editPhotoConsentGiven, setEditPhotoConsentGiven] = useState(false);
   const editBlobUrlRef = useRef<string | null>(null);
   const editPanelRef  = useRef<HTMLDivElement>(null);  // top of edit panel
   const editPhotoRef  = useRef<HTMLDivElement>(null);  // photo section inside panel
@@ -1365,6 +1379,10 @@ export default function Closet() {
   // ── Edit helpers ──────────────────────────────────────────────────────────
 
   async function uploadToCloudinaryForEdit(file: File) {
+    if (!editPhotoConsentGiven) {
+      setEditUploadError("Please confirm photo consent before uploading a replacement photo.");
+      return;
+    }
     setEditUploading(true);
     setEditUploadError(null);
 
@@ -1432,6 +1450,7 @@ export default function Closet() {
     setEditBrand(item.brand ?? "");
     setEditPublicId("");
     setEditImageUrl("");
+    setEditPhotoConsentGiven(false);
     setEditUploadError(null);
     setEditRelationships(item.garmentRelationships ?? []);
     setEditNote(item.customerNote ?? "");
@@ -1447,6 +1466,7 @@ export default function Closet() {
     setEditPublicId("");
     if (editBlobUrlRef.current) { URL.revokeObjectURL(editBlobUrlRef.current); editBlobUrlRef.current = null; }
     setEditImageUrl("");
+    setEditPhotoConsentGiven(false);
     setEditUploadError(null);
     setEditRelationships([]);
     setEditNote("");
@@ -1464,6 +1484,9 @@ export default function Closet() {
         colors: JSON.stringify(editColors),
         brand: editBrand,
         newPublicId: editPublicId,   // empty string = meta-only edit; publicId = photo replacement
+        // Only meaningful when newPublicId is set — a meta-only edit never
+        // reaches the server's consent check at all.
+        photoConsentGiven: String(editPhotoConsentGiven),
         garmentRelationships: JSON.stringify(editRelationships),
         customerNote: editNote,
       },
@@ -1945,7 +1968,25 @@ export default function Closet() {
                 }
               </div>
               <div className="cl-edit-upload-side">
-                <label className="cl-upload-box" style={{ minHeight: "72px", cursor: "pointer" }}>
+                {!editPublicId && (
+                  <div style={{ marginBottom: "8px", padding: "12px 16px", background: "rgba(34,21,22,0.03)", border: "1px solid var(--naia-border)" }}>
+                    <label className="psa-consent-row">
+                      <input
+                        type="checkbox"
+                        id="closet-edit-photo-consent"
+                        className="psa-consent-check"
+                        checked={editPhotoConsentGiven}
+                        onChange={e => setEditPhotoConsentGiven(e.target.checked)}
+                        disabled={editUploading}
+                      />
+                      <span>I consent to nAia analysing this photo to identify and describe this item.</span>
+                    </label>
+                  </div>
+                )}
+                <label
+                  className="cl-upload-box"
+                  style={{ minHeight: "72px", cursor: editUploading || (!editPublicId && !editPhotoConsentGiven) ? "default" : "pointer", opacity: editPublicId || editPhotoConsentGiven ? 1 : 0.5 }}
+                >
                   {editUploading
                     ? <span className="cl-upload-hint">Uploading…</span>
                     : editPublicId
@@ -1957,7 +1998,7 @@ export default function Closet() {
                     accept="image/*"
                     style={{ display: "none" }}
                     onChange={e => { const f = e.target.files?.[0]; if (f) uploadToCloudinaryForEdit(f); }}
-                    disabled={editUploading || editFetcher.state === "submitting"}
+                    disabled={editUploading || editFetcher.state === "submitting" || !editPhotoConsentGiven}
                   />
                 </label>
                 <p className="cl-upload-notice" style={{ marginTop: "4px", marginBottom: "0" }}>
