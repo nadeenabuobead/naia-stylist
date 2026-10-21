@@ -32,17 +32,31 @@ describe("UX-1 — Save Look confirmation points at the real Saved Looks destina
     assert.doesNotMatch(src, /Saved to your nAia Passport\./, "old wording must not survive alongside the new copy");
   });
 
-  test("UX-1.2 'View Saved Looks' links to /style-me — the real, already-existing page that shows saved looks (badged SAVED), not a fabricated destination", () => {
+  test("UX-1.2 'View Saved Looks' links directly to the Your StyleMe Looks section via anchor, not a bare page top", () => {
     const src = resultSrc();
     const bannerAt = src.indexOf("sm-banner-saved");
     const scope = src.slice(bannerAt, bannerAt + 400);
-    assert.match(scope, /<Link to="\/style-me" className="sm-banner-cta">View Saved Looks/);
+    assert.match(scope, /<Link to="\/style-me#your-styleme-looks" className="sm-banner-cta">View Saved Looks/,
+      "must land on the section itself, not just the top of /style-me — Start a New Session / Recent Feedback sit above it");
   });
 
-  test("UX-1.3 /style-me (StyleMeIndex) genuinely queries SavedLook and badges saved entries — the destination is real, not invented", () => {
+  test("UX-1.3 /style-me (StyleMeIndex) genuinely queries SavedLook and badges saved entries, and the anchor target id actually exists there", () => {
     const indexSrc = readFileSync(join(process.cwd(), "app/routes/style-me/_index.tsx"), "utf8");
     assert.match(indexSrc, /prisma\.savedLook\.findMany/, "the page must actually read SavedLook records");
     assert.match(indexSrc, /session\.saved && <span className="sml-card-saved-badge">SAVED<\/span>/, "a saved look must be visibly marked as such on this page");
+    assert.match(indexSrc, /id="your-styleme-looks"/, "the section the banner links to must carry the matching anchor id");
+  });
+
+  test("UX-1.6 /my-naia/saved is a confirmed dead end (unconditional redirect to /style-me), not a viable alternative destination", () => {
+    // Revisit from the second staging pass: before anchoring to /style-me, confirm there
+    // isn't a cleaner, purpose-built page being missed. There is one (my-naia.saved.tsx,
+    // titled "Saved Looks", with a real SavedLook query) — but its loader redirects away
+    // before ever reaching that query, and nothing in the app links to it. /style-me is the
+    // genuine destination, not a fallback chosen in its absence.
+    const myNaiaSavedSrc = readFileSync(join(process.cwd(), "app/routes/my-naia.saved.tsx"), "utf8");
+    const loaderAt = myNaiaSavedSrc.indexOf("export async function loader");
+    const loaderOpening = myNaiaSavedSrc.slice(loaderAt, loaderAt + 150);
+    assert.match(loaderOpening, /return redirect\("\/style-me"\);/, "the loader must still redirect away unconditionally, confirming this route is not a live alternative");
   });
 
   test("UX-1.4 the banner still only renders after a real save (isSaved), not unconditionally", () => {

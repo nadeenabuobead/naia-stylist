@@ -265,8 +265,13 @@ export default function StyleMeIndex() {
         </p>
       </section>
 
-      {/* Your StyleMe Looks */}
-      <section className="bos-section">
+      {/* Your StyleMe Looks — id is the direct-navigation target for "View Saved Looks" on
+          the result page's save confirmation (result.tsx), so a save lands here without
+          scrolling past Start a New Session / Recent Feedback above. /my-naia/saved exists
+          and genuinely queries SavedLook, but its own loader unconditionally redirects here
+          (return redirect("/style-me") before ever reaching that query — a deliberate dead
+          end, not an oversight), so this section, not that route, is the real destination. */}
+      <section className="bos-section" id="your-styleme-looks">
         <div className="sml-section-label">Your StyleMe Looks</div>
 
         {recentSessions.length > 0 ? (

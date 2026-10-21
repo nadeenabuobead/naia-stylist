@@ -1602,7 +1602,7 @@ export default function StyleMeResult() {
         <div className="sm-banner sm-banner-saved">
           <p className="sm-banner-text">Look saved to My Looks!</p>
           <div className="sm-banner-actions">
-            <Link to="/style-me" className="sm-banner-cta">View Saved Looks →</Link>
+            <Link to="/style-me#your-styleme-looks" className="sm-banner-cta">View Saved Looks →</Link>
           </div>
         </div>
       )}
