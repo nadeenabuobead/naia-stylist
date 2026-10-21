@@ -252,7 +252,9 @@ describe("T13: edit intent validates item ownership before photo pipeline", () =
 
   it("checks existing.customerId !== customer.id before processing photo", () => {
     assert.ok(editIdx !== -1, "edit handler must exist");
-    const block = closet.slice(editIdx, editIdx + 1000);
+    // Window widened: the replace-photo review fix (2026-10-22) added pattern/occasions/
+    // seasons form-field reads just before this check, pushing it further from editIdx.
+    const block = closet.slice(editIdx, editIdx + 1600);
     assert.ok(
       block.includes("existing.customerId !== customer.id") ||
       block.includes("existing.customerId === customer.id"),
@@ -295,7 +297,11 @@ describe("T16: edit deletes new (failed) asset before DB update on pipeline fail
   it("deleteCloudinaryAsset(newPublicId) appears before the photo-replacement DB update", () => {
     const editIdx = closet.indexOf('intent === "edit"');
     assert.ok(editIdx !== -1, "edit handler must exist");
-    const block = closet.slice(editIdx, editIdx + 14000);
+    // Bounded by the action's own final fallback, not a fixed character count — same
+    // reasoning as T17 below (this block has grown past fixed windows before, e.g. the
+    // replace-photo review fix of 2026-10-22, and will again).
+    const actionEndIdx = closet.indexOf('"Unknown intent"', editIdx);
+    const block = closet.slice(editIdx, actionEndIdx > editIdx ? actionEndIdx : editIdx + 18000);
     // Anchor: photo pipeline starts at the ownership check for newPublicId
     const pipelineStart = block.indexOf("validatePublicIdOwnership(newPublicId");
     assert.ok(pipelineStart !== -1, "edit block must call validatePublicIdOwnership(newPublicId, ...) to start the photo pipeline");
@@ -337,7 +343,10 @@ describe("T26: photo replacement stamps the NEW photo's own consent, never the o
   it("the photo-replacement DB update spreads buildConsentStamp(editConsentGiven), not a literal null", () => {
     const editIdx = closet.indexOf('intent === "edit"');
     assert.ok(editIdx !== -1, "edit handler must exist");
-    const block = closet.slice(editIdx, editIdx + 14000);
+    // Same reasoning as T16/T17 above — bounded by the action's own final fallback
+    // rather than a fixed character count that keeps needing re-tuning.
+    const actionEndIdx = closet.indexOf('"Unknown intent"', editIdx);
+    const block = closet.slice(editIdx, actionEndIdx > editIdx ? actionEndIdx : editIdx + 18000);
     const pipelineStart = block.indexOf("validatePublicIdOwnership(newPublicId");
     const updateIdx = block.indexOf("closetItem.update(", pipelineStart);
     const nextDeleteIdx = block.indexOf("deleteCloudinaryAsset(oldPublicId", updateIdx);
