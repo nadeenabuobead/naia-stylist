@@ -1126,12 +1126,37 @@ export const FINISHING_SUITABILITY_MAX_GAP_BELOW_BASE = 1;
 // test cleared it even though the band floor was 4.
 export const FINISHING_STRICT_SLOTS = new Set<string>(["bag", "accessory"]);
 
+// A bag/accessory can clear the formality-rank checks below entirely (its
+// formality tag is within band, or simply unset) and still be visually wrong
+// for a business-casual-and-up occasion because it is physically oversized —
+// the real case this closes: an oversized tote recommended for a polished
+// dinner, where the outfit's own explanation already knew a smaller bag would
+// read better. Business-casual (rank 3) and up is where this starts to read
+// as a real mismatch; casual/smart-casual contexts are exactly where an
+// oversized tote is a normal, deliberate choice, so the exclusion does not
+// reach that far down.
+export const OVERSIZED_EXCLUSION_MIN_BAND = 3;
+
 export function finishingPieceIsSuitable(
   pieceFormalityRank: number | null,
   baseRegisterRank: number | null,
   targetBand: { min: number; max: number },
   slot?: string,
+  // Structural-size signal (2026-10-24) — independent of, and evaluated before,
+  // the formality-rank logic below (which is otherwise byte-identical to
+  // before this change). Fail-open like every other signal here: absent
+  // silhouette/fitProfile data never excludes anything.
+  pieceStructure?: { silhouette?: string | null; fitProfile?: string | null },
 ): boolean {
+  if (
+    slot !== undefined &&
+    FINISHING_STRICT_SLOTS.has(slot) &&
+    targetBand.min >= OVERSIZED_EXCLUSION_MIN_BAND &&
+    (pieceStructure?.silhouette === "oversized" || pieceStructure?.fitProfile === "oversized")
+  ) {
+    return false;
+  }
+
   if (pieceFormalityRank === null) return true;          // unknown → keep
   const belowBandFloor = pieceFormalityRank < targetBand.min;
   if (!belowBandFloor) return true;

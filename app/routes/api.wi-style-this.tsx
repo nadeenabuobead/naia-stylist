@@ -79,14 +79,21 @@ export async function action({ request }: ActionFunctionArgs) {
   // into the same null (no ownership-leak signal), and a partial multi-garment
   // handoff (silently dropping just the bad id) would be exactly the kind of
   // silent garment loss this feature exists to eliminate.
-  const resolvedItems: ClosetAnchorInput[] = [];
-  for (const id of closetItemIds) {
-    const resolved = await resolveClosetAnchor(naiaCustomer.id, id);
-    if (!resolved) {
-      return fail("invalid-garment");
-    }
-    resolvedItems.push(resolved);
+  //
+  // Run in parallel, not a sequential loop (2026-10-24): each call is one
+  // independent, read-only DB lookup with no shared state between garments —
+  // a 4-garment WI combination was paying for 4 serialized round-trips to the
+  // database before this redirect could even start, which is the actual
+  // "Complete This Look feels slow" backend delay, not anything in the
+  // browser. Promise.all preserves input order in its result array, so
+  // resolvedItems[0] is still reliably the anchor below.
+  const resolutions = await Promise.all(
+    closetItemIds.map((id) => resolveClosetAnchor(naiaCustomer.id, id)),
+  );
+  if (resolutions.some((r) => r === null)) {
+    return fail("invalid-garment");
   }
+  const resolvedItems = resolutions as ClosetAnchorInput[];
 
   // Reject two garments that would claim the same core clothing slot (e.g. two
   // tops) — an "incompatible category" combination that must never silently let

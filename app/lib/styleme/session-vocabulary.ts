@@ -388,3 +388,12 @@ export function translateIntentionsToEngineSignals(
   }
   return out;
 }
+
+// Presentational only (2026-10-24) — NOT a violation of contract rule 2 above:
+// this decides how wide an option's pill renders on the mobile two-column
+// quiz grid, nothing about ranking/gating/eligibility/signal. A short label
+// ("Dinner") fits half-width; a long one ("Softer / more flexible fabrics")
+// would wrap awkwardly at half-width, so it spans the full row instead.
+export function isLongOptionLabel(label: string): boolean {
+  return label.length > 20;
+}

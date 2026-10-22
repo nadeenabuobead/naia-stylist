@@ -1333,6 +1333,15 @@ a.mn-action:focus-visible,
   .sm-step-buttons .sm-btn-back { order: 2; }
   .sm-step-buttons .sm-continue { order: 1; }
   .sm-heading { font-size: clamp(26px, 8vw, 34px); }
+  /* Balanced two-column option grid (2026-10-24) — flex-wrap left pill widths
+     to content, so rows were inconsistent (one short pill next to empty
+     space, or an awkward mid-word wrap on a longer label). A long label gets
+     .sm-pill--wide (see session-vocabulary.ts isLongOptionLabel) to span both
+     columns instead of wrapping inside a half-width cell. Desktop keeps the
+     original flex-wrap layout — this is mobile-only. */
+  .sm-pills { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .sm-pill { padding: 12px 14px; text-align: center; }
+  .sm-pill--wide { grid-column: 1 / -1; }
   .sm-result-bar { padding: 16px 20px; }
   .sm-banner { flex-direction: column; align-items: flex-start; gap: 12px; padding: 16px 20px; }
   .sm-banner-actions { flex-wrap: wrap; }
@@ -2779,10 +2788,13 @@ a.mn-action:focus-visible,
 .sv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
 .sv-card { border: 1px solid var(--naia-border); background: var(--naia-surface); padding: 20px; }
 .sv-card-thumb { aspect-ratio: 4/5; background: rgba(40, 21, 12, 0.04); border: 1px solid var(--naia-border); display: flex; align-items: center; justify-content: center; overflow: hidden; margin-bottom: 16px; }
-.sv-card-thumb img { width: 100%; height: 100%; object-fit: cover; }
+/* object-fit: contain (2026-10-24, was cover) — cover was cropping the garment's
+   own silhouette to fill the tile; the existing background lets the letterboxed
+   space read as intentional rather than broken. */
+.sv-card-thumb img { width: 100%; height: 100%; object-fit: contain; }
 .sv-card-thumb-placeholder { display: flex; gap: 4px; align-items: center; justify-content: center; height: 100%; }
 .sv-card-thumb-img-tile { width: 52px; height: 66px; background: rgba(40, 21, 12, 0.06); overflow: hidden; }
-.sv-card-thumb-img-tile img { width: 100%; height: 100%; object-fit: cover; }
+.sv-card-thumb-img-tile img { width: 100%; height: 100%; object-fit: contain; }
 .sv-card-title { font-family: var(--naia-ff-display); font-weight: 300; font-size: 20px; line-height: 1.1; color: var(--naia-ink); margin-bottom: 4px; display: block; text-decoration: none; transition: color 0.13s; }
 .sv-card-title:hover { color: var(--naia-accent); }
 .sv-card-meta { font-family: var(--naia-ff-body); font-size: 13px; font-style: italic; color: var(--naia-muted); margin-bottom: 12px; }

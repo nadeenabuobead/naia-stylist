@@ -1857,6 +1857,7 @@ export function buildNaiaOutfitCandidates(
       altBaseRegisterRank,
       bTargetRange,
       slot,
+      { silhouette: item.silhouette, fitProfile: item.fitProfile },
     );
   };
   let candidateB: OutfitCandidate | null = null;
@@ -4584,6 +4585,7 @@ export function selectAdditionalClosetGarments(
             baseRegisterRank,
             finishingTargetBand,
             slot,
+            { silhouette: c.item.silhouette, fitProfile: c.item.fitProfile },
           ))
       : candidates;
 

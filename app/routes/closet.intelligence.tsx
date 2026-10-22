@@ -30,7 +30,7 @@
 // Pinned by app/routes/closet.intelligence-promotion.test.ts.
 
 import { useState, useEffect, useRef } from "react";
-import { Link, useLoaderData, Form, useNavigation, useSearchParams } from "react-router";
+import { Link, useLoaderData, Form, useFetcher, useNavigation, useSearchParams } from "react-router";
 import { data, redirect, type LoaderFunctionArgs, type ActionFunctionArgs, type LinksFunction } from "react-router";
 import prisma from "../db.server";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
@@ -584,6 +584,33 @@ function EvidenceThumb({ card }: { card: GarmentCard | undefined }) {
   return <Thumb card={card} height={100} />;
 }
 
+/**
+ * "Complete This Look" — the multi-garment StyleMe handoff, now shared between
+ * the combination card itself and its preview modal (2026-10-24; was modal-only).
+ * Its own fetcher (not a page-level one) because several of these can be
+ * mounted at once — one per combination card — and only the one actually
+ * clicked should show loading/disabled state; the others must stay live.
+ *
+ * Immediate loading feedback + duplicate-submission prevention: disabled and
+ * relabelled for the whole time fetcher.state isn't idle, same pattern this
+ * codebase already uses for Save Look / New Look (style-me/result.tsx) and the
+ * Closet edit panel's submit buttons.
+ */
+function CompleteLookForm({ garmentIds, className }: { garmentIds: string[]; className?: string }) {
+  const fetcher = useFetcher();
+  const isSubmitting = fetcher.state !== "idle";
+  return (
+    <fetcher.Form method="post" action="/api/wi-style-this" className={className}>
+      {garmentIds.map((id) => (
+        <input key={id} type="hidden" name="closetItemId" value={id} />
+      ))}
+      <button type="submit" className="wip-link wi-style-cta" disabled={isSubmitting} aria-busy={isSubmitting}>
+        {isSubmitting ? "Completing…" : "Complete This Look →"}
+      </button>
+    </fetcher.Form>
+  );
+}
+
 function cap(s: string): string {
   return s.length > 0 ? s[0].toUpperCase() + s.slice(1) : s;
 }
@@ -924,14 +951,7 @@ export default function WardrobeIntelligencePage() {
           {/* Every garment in the combination is submitted — api.wi-style-this.tsx
               resolves, ownership-checks and eligibility-gates each one, preserving
               all of them through the StyleMe session rather than just the first. */}
-          <Form method="post" action="/api/wi-style-this">
-            {look.garmentIds.map((id) => (
-              <input key={id} type="hidden" name="closetItemId" value={id} />
-            ))}
-            <button type="submit" className="wip-link wi-style-cta">
-              Complete This Look →
-            </button>
-          </Form>
+          <CompleteLookForm garmentIds={look.garmentIds} />
         </DialogShell>
       );
     }
@@ -1287,18 +1307,35 @@ export default function WardrobeIntelligencePage() {
                 </div>
                 <div className="wip-mood-grid" style={{ "--mood-cols": shown.length >= 5 ? 3 : shown.length === 4 ? 2 : shown.length } as React.CSSProperties}>
                   {shown.map((look, i) => (
-                    <button key={look.id} type="button" className="wip-mood-tile" onClick={() => setDialog({ kind: "moodboardLook", lookId: look.id })}>
-                      <div className={`wip-mood-collage wip-mood-collage--n${Math.min(look.garmentIds.length, 4)}`}>
-                        {look.garmentIds.map((id) => <Thumb key={id} card={byId.get(id)} height={140} />)}
-                      </div>
-                      <div className="wip-mood-card-body">
-                        <span className="wip-mood-meta">{String(i + 1).padStart(2, "0")} · {REGISTER_LABEL[look.register]}</span>
-                        <p className="wip-mood-reason">{shortReason(look.reason)}</p>
-                        <div className="wip-mood-chips">
-                          {look.garmentIds.map((id) => <span key={id} className="wip-chip">{cardLabel(byId.get(id))}</span>)}
+                    <div key={look.id} className="wip-mood-tile">
+                      <button type="button" className="wip-mood-tile-trigger" onClick={() => setDialog({ kind: "moodboardLook", lookId: look.id })}>
+                        <div className={`wip-mood-collage wip-mood-collage--n${Math.min(look.garmentIds.length, 4)}`}>
+                          {/* height is a threshold flag here, not the real rendered size —
+                              .wip-mood-collage .wip-thumb forces height:100% !important
+                              regardless of this prop. 140 fell 10px under Thumb's own
+                              "No photo yet" caption threshold (height >= 150), so a
+                              garment with no photo (e.g. one whose photo was removed via
+                              the privacy delete-photo control, which deliberately keeps
+                              the garment itself in Wardrobe Intelligence) rendered as a
+                              bare, backgroundless, uncaptioned monogram here — reading as
+                              genuinely blank rather than "no photo yet". 150 is the
+                              smallest value that lets the existing, already-designed
+                              fallback caption show; no new UI, no placeholder image. */}
+                          {look.garmentIds.map((id) => <Thumb key={id} card={byId.get(id)} height={150} />)}
                         </div>
-                      </div>
-                    </button>
+                        <div className="wip-mood-card-body">
+                          <span className="wip-mood-meta">{String(i + 1).padStart(2, "0")} · {REGISTER_LABEL[look.register]}</span>
+                          <p className="wip-mood-reason">{shortReason(look.reason)}</p>
+                          <div className="wip-mood-chips">
+                            {look.garmentIds.map((id) => <span key={id} className="wip-chip">{cardLabel(byId.get(id))}</span>)}
+                          </div>
+                        </div>
+                      </button>
+                      {/* 2026-10-24: available directly on the card, not just inside the
+                          preview modal — same multi-garment handoff, every garment id
+                          submitted, unchanged from the modal's own instance below. */}
+                      <CompleteLookForm garmentIds={look.garmentIds} className="wip-mood-complete-form" />
+                    </div>
                   ))}
                 </div>
               </section>
@@ -1741,8 +1778,14 @@ const css = `
   .wip-mood-grid{display:grid;grid-template-columns:repeat(var(--mood-cols,1),1fr);gap:16px;max-width:740px;margin:0 auto}
   @media(max-width:860px){.wip-mood-grid{grid-template-columns:repeat(min(var(--mood-cols,1),2),1fr)}}
   @media(max-width:560px){.wip-mood-grid{grid-template-columns:1fr}}
-  .wip-mood-tile{display:block;width:100%;border:1px solid var(--naia-border);border-radius:8px;background:var(--naia-surface);padding:9px;text-align:left;cursor:pointer}
+  /* 2026-10-24: split from a single <button> into a <div> (this card shell)
+     wrapping an inner trigger button (opens the preview modal) plus a
+     sibling Form ("Complete This Look", now also available directly on the
+     card) — a <button>/<form> cannot nest inside another <button>. */
+  .wip-mood-tile{border:1px solid var(--naia-border);border-radius:8px;background:var(--naia-surface);padding:9px}
   .wip-mood-tile:hover{border-color:rgba(40,21,12,0.3)}
+  .wip-mood-tile-trigger{display:block;width:100%;background:none;border:none;padding:0;margin:0;text-align:left;cursor:pointer;font:inherit;color:inherit}
+  .wip-mood-complete-form{margin-top:10px}
   /* A fixed height (not aspect-ratio) is what makes the 360-420px target
      reliable now that composition varies by piece count below — an
      aspect-ratio can't describe an asymmetric 1-large/2-small layout the

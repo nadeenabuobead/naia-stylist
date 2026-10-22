@@ -1976,6 +1976,71 @@ describe("§WI-21 combination eligibility matches the Coverage section", () => {
     );
     assert.ok(found, "a crossover-eligible layer over genuinely ordinary pieces must still be able to represent Everyday");
   });
+
+  it("§WI-21g layering coherence (2026-10-24): the same hoodie over ANOTHER knitwear top does not represent Everyday", () => {
+    // Live bug: an "Everyday" combination paired a black Nike zip-up hoodie with a
+    // beige sweater and wide-leg jeans — two competing casual knitwear layers, not
+    // a deliberate one. Nothing in the pre-existing gates caught this: both pieces
+    // are lightweight/medium (weightBalanced passes), and sharing a casual
+    // formality/occasion tag was enough for the old reasons.length > 0 bar.
+    const passport: WardrobePassport = { ...PASSPORT, dressingPreferences: [] };
+    const hoodie = makeGarment({
+      id: "hoodie", name: "Black Nike Zip-Up Hoodie", category: "ACTIVEWEAR", slot: "outerwear",
+      formality: "casual", occasions: ["casual", "weekend", "travel", "gym"], subcategory: "zip-up hoodie",
+    });
+    const sweater = makeGarment({
+      id: "sweater", name: "Beige Sweater", category: "TOPS", slot: "top",
+      formality: "casual", subcategory: "sweater",
+    });
+    const jeans = makeGarment({
+      id: "jeans", name: "Wide-Leg Jeans", category: "BOTTOMS", slot: "bottom",
+      formality: "casual",
+    });
+
+    const result = run([hoodie, sweater, jeans, ...filler(3)], { passport });
+
+    const everydayCombos = result.pairings.bestByRegister.everyday ?? [];
+    const found = everydayCombos.some((combo) =>
+      combo.garmentIds.includes(hoodie.id) && combo.garmentIds.includes(sweater.id),
+    );
+    assert.ok(!found, "a crossover hoodie layered over another knitwear top must not represent Everyday");
+  });
+
+  it("§WI-21h layering coherence does not affect an UNRELATED hoodie+ordinary-top pairing in the same wardrobe", () => {
+    // Isolation check: §WI-21g's wardrobe also contains a plain tee (from filler
+    // or added explicitly) — the hoodie+tee pairing must still be able to combine,
+    // proving the new rule only fires for the specific crossover-layer-over-
+    // knitwear shape, not crossover layers in general.
+    const passport: WardrobePassport = { ...PASSPORT, dressingPreferences: [] };
+    const hoodie = makeGarment({
+      id: "hoodie2", name: "Black Nike Zip-Up Hoodie", category: "ACTIVEWEAR", slot: "outerwear",
+      formality: "casual", occasions: ["casual", "weekend", "travel", "gym"], subcategory: "zip-up hoodie",
+    });
+    const sweater = makeGarment({
+      id: "sweater2", name: "Beige Sweater", category: "TOPS", slot: "top",
+      formality: "casual", subcategory: "sweater",
+    });
+    const tee = makeGarment({
+      id: "tee2", name: "White Cotton Tee", category: "TOPS", slot: "top",
+      formality: "casual",
+    });
+    const jeans = makeGarment({
+      id: "jeans2", name: "Wide-Leg Jeans", category: "BOTTOMS", slot: "bottom",
+      formality: "casual",
+    });
+
+    const result = run([hoodie, sweater, tee, jeans, ...filler(3)], { passport });
+
+    const everydayCombos = result.pairings.bestByRegister.everyday ?? [];
+    const hoodieWithTee = everydayCombos.some((combo) =>
+      combo.garmentIds.includes(hoodie.id) && combo.garmentIds.includes(tee.id) && combo.garmentIds.includes(jeans.id),
+    );
+    const hoodieWithSweater = everydayCombos.some((combo) =>
+      combo.garmentIds.includes(hoodie.id) && combo.garmentIds.includes(sweater.id),
+    );
+    assert.ok(hoodieWithTee, "the hoodie+tee+jeans combination must still be able to represent Everyday");
+    assert.ok(!hoodieWithSweater, "the hoodie+sweater pairing must still not represent Everyday, even alongside a valid tee combo");
+  });
 });
 
 // ── StyleMe-feedback evidence wiring — V1 ───────────────────────────────────

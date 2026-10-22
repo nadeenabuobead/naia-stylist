@@ -949,6 +949,25 @@ function wornBeyondSport(g: WardrobeGarment): boolean {
 }
 
 /**
+ * The other kind of casual knitwear layer — a sweater, cardigan, or pullover.
+ * A crossover piece (a zip-up hoodie, sweatshirt, etc.) stacked over a plain
+ * tee reads as an everyday layer; the same piece stacked over ANOTHER
+ * knitwear-style top reads as two competing casual layers, not a styled one.
+ * Used only by the layering-coherence check in scorePair, below.
+ */
+const LAYERING_TOP_SUBCATEGORIES: ReadonlySet<string> = new Set([
+  "sweater", "cardigan", "pullover", "jumper", "knit top", "turtleneck",
+]);
+function isLayeringStyleTop(g: WardrobeGarment): boolean {
+  const sub = norm(g.subcategory);
+  if (sub === null) return false;
+  for (const token of LAYERING_TOP_SUBCATEGORIES) {
+    if (sub === token || sub.includes(token)) return true;
+  }
+  return false;
+}
+
+/**
  * May these two pieces meet at all?
  *
  * Ordinary clothes: yes, the usual gates decide. Two functional pieces: only
@@ -1351,6 +1370,24 @@ function scorePair(a: WardrobeGarment, b: WardrobeGarment): PairScore {
   }
 
   reasons.sort((x, y) => y.weight - x.weight);
+
+  // Layering coherence (2026-10-24): confirmed live case — a black zip-up hoodie
+  // paired with a beige sweater and wide-leg jeans as an "Everyday" combination.
+  // Nothing above catches this: a lightweight hoodie and a medium sweater are
+  // not "both substantial" (weightBalanced passes), and sharing a casual
+  // formality/occasion tag is exactly the weak, generic kind of reason this
+  // raises the bar on for this one pairing shape. Only fires when one piece is
+  // a genuine crossover functional layer (isCrossoverLayer) stacked against
+  // ANOTHER knitwear-style top — a plain tee or shirt underneath is unaffected,
+  // so the existing hoodie+jeans+tee "Everyday" case does not change.
+  const crossoverLayer = isCrossoverLayer(a) ? a : isCrossoverLayer(b) ? b : null;
+  if (crossoverLayer) {
+    const otherPiece = crossoverLayer === a ? b : a;
+    if (isLayeringStyleTop(otherPiece) && (reasons[0]?.weight ?? 0) < 4) {
+      return { compatible: false, reasons: [] };
+    }
+  }
+
   // A pairing needs at least one positive, evidenced reason — never "compatible by default".
   return { compatible: reasons.length > 0, reasons };
 }

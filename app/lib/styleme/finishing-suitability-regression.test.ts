@@ -325,6 +325,69 @@ describe("FS-H — a bag is judged on the band floor alone", () => {
   });
 });
 
+// ── FS-K: an oversized bag is unsuitable for a business-casual-and-up occasion,
+//          independent of its formality tag (2026-10-24) ──────────────────────
+
+describe("FS-K — oversized structure excludes a bag even when its formality tag would pass", () => {
+  // Live bug: StyleMe recommended an oversized green tote for a "polished dinner" session
+  // while its OWN generated explanation acknowledged a smaller evening bag would suit
+  // better. The formality-rank check alone never looked at size/structure, so a tote whose
+  // formality tag happened to be unset or in-band sailed through regardless of how
+  // oversized it actually was. "dinner" + "formality-polished" resolves to band {3,4}.
+  const band = { min: 3, max: 4 };
+
+  test("FS-K.1 an oversized bag is unsuitable at business-casual and up, even with unknown formality", () => {
+    assert.equal(finishingPieceIsSuitable(null, 4, band, "bag", { silhouette: "oversized" }), false);
+  });
+
+  test("FS-K.2 fitProfile: 'oversized' triggers the same exclusion as silhouette", () => {
+    assert.equal(finishingPieceIsSuitable(null, 4, band, "bag", { fitProfile: "oversized" }), false);
+  });
+
+  test("FS-K.3 a casual/smart-casual band never excludes an oversized bag — it's a normal choice there", () => {
+    assert.equal(finishingPieceIsSuitable(null, 1, { min: 1, max: 2 }, "bag", { silhouette: "oversized" }), true);
+  });
+
+  test("FS-K.4 unknown structure data is fail-open, same as every other signal in this gate", () => {
+    assert.equal(finishingPieceIsSuitable(null, 4, band, "bag", {}), true);
+    assert.equal(finishingPieceIsSuitable(null, 4, band, "bag"), true);
+  });
+
+  test("FS-K.5 a non-strict slot (shoe) is unaffected by the oversized check", () => {
+    assert.equal(finishingPieceIsSuitable(null, 4, band, "shoe", { silhouette: "oversized" }), true);
+  });
+
+  // End-to-end fixtures need "dinner" in each item's occasions tag — scoring
+  // requires a matching occasion tag to clear a positive score at all (a
+  // separate, pre-existing gate this fix does not touch), and these items'
+  // default occasions list (set by the g() helper, above) does not include it.
+  const DINNER_TAGS = ["dinner", "formal", "party"];
+
+  test("FS-K.6 end to end: the oversized tote is dropped, a smaller structured bag is picked instead", () => {
+    const items = [
+      g({ id: "top", category: "TOPS", formality: "business-casual", occasions: DINNER_TAGS, approvedProfile: prof("smart-casual") }),
+      g({ id: "trousers", category: "BOTTOMS", formality: "business-casual", occasions: DINNER_TAGS }),
+      g({ id: "heels", category: "SHOES", formality: "business-formal", occasions: DINNER_TAGS }),
+      g({ id: "oversized-tote", category: "BAGS", formality: "business-casual", occasions: DINNER_TAGS, silhouette: "oversized" }),
+      g({ id: "structured-clutch", category: "BAGS", formality: "business-casual", occasions: DINNER_TAGS, fitProfile: "structured" }),
+    ];
+    const p = picked(A("top", "top"), items, S("dinner", "formality-polished"));
+    assert.ok(!p.includes("bag:oversized-tote"), `the oversized tote must not survive; got ${p.join(" | ")}`);
+    assert.ok(p.includes("bag:structured-clutch"), `the structured bag should be picked instead; got ${p.join(" | ")}`);
+  });
+
+  test("FS-K.7 with no structured alternative in the closet, the slot is simply left unfilled — never a worse bag forced in", () => {
+    const items = [
+      g({ id: "top", category: "TOPS", formality: "business-casual", occasions: DINNER_TAGS, approvedProfile: prof("smart-casual") }),
+      g({ id: "trousers", category: "BOTTOMS", formality: "business-casual", occasions: DINNER_TAGS }),
+      g({ id: "heels", category: "SHOES", formality: "business-formal", occasions: DINNER_TAGS }),
+      g({ id: "oversized-tote", category: "BAGS", formality: "business-casual", occasions: DINNER_TAGS, silhouette: "oversized" }),
+    ];
+    const p = picked(A("top", "top"), items, S("dinner", "formality-polished"));
+    assert.ok(!p.includes("bag:oversized-tote"), `the oversized tote must still not survive; got ${p.join(" | ")}`);
+  });
+});
+
 // ── FS-I: the alternative candidates obey the same gate ─────────────────────
 
 describe("FS-I — B/C/D/E cannot re-admit what A rejected", () => {

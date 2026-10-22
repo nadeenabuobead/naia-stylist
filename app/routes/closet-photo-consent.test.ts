@@ -99,6 +99,41 @@ describe("closet._index.tsx UI — upload is gated behind the consent checkbox",
   });
 });
 
+describe("closet._index.tsx UI — a different replacement photo requires FRESH consent (2026-10-24)", () => {
+  // Bug: editPhotoConsentGiven (the edit/replace-photo consent flag, distinct
+  // from photoConsentGiven above) was never reset when the customer abandoned
+  // one replacement photo for another within the same edit session — the
+  // stale "true" silently carried over to a photo it was never given for.
+
+  it("resetEditPhoto resets editPhotoConsentGiven, not just the photo/preview state", () => {
+    const resetIdx = closetIndex.indexOf("function resetEditPhoto()");
+    assert.ok(resetIdx !== -1, "resetEditPhoto must exist");
+    const resetBlock = closetIndex.slice(resetIdx, resetIdx + 900);
+    assert.ok(resetBlock.includes("setEditPhotoConsentGiven(false)"));
+  });
+
+  it("selecting a DIFFERENT photo directly (not via 'Choose a different photo') also resets consent first", () => {
+    // The upload input isn't disabled just because a photo is already staged
+    // (only while uploading/submitting/consent-withheld), so a customer can
+    // pick a second file without ever going through resetEditPhoto's own link
+    // — this onChange must route that case through the same reset.
+    const onChangeIdx = closetIndex.indexOf("if (editPublicId) {");
+    assert.ok(onChangeIdx !== -1, "the edit-photo onChange's editPublicId branch must exist");
+    const onChangeBlock = closetIndex.slice(onChangeIdx, onChangeIdx + 600);
+    assert.ok(onChangeBlock.includes("resetEditPhoto()"));
+  });
+
+  it("server-side consent verification for the replacement-photo save is unchanged by this UI fix", () => {
+    // The real enforcement was always server-side (extractConsentGiven in the
+    // edit intent) — this fix is a UX correction on top of it, not a
+    // replacement for it.
+    const editIntentIdx = closetIndex.indexOf('if (intent === "edit")');
+    assert.ok(editIntentIdx !== -1);
+    const editBlock = closetIndex.slice(editIntentIdx, editIntentIdx + 6000);
+    assert.ok(editBlock.includes("editConsentGiven"));
+  });
+});
+
 describe("api.closet-preview-analyze.ts — consent required before any AI analysis", () => {
   it("imports extractConsentGiven from photo-consent.server", () => {
     assert.ok(previewAnalyze.includes('from "~/lib/photo-consent.server"'));

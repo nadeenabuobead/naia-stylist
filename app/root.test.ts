@@ -19,6 +19,35 @@ import { describe, it } from "node:test";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SRC = readFileSync(resolve(__dirname, "root.jsx"), "utf-8");
 
+describe("root.jsx — ScrollToTop respects a navigation hash (2026-10-24)", () => {
+  // Bug: ScrollToTop unconditionally called window.scrollTo(0, 0) on every
+  // pathname change — this runs in a useEffect AFTER the DOM commits, so it
+  // always won the race against any hash-anchor scroll (e.g. "View Saved
+  // Looks" -> /style-me#your-styleme-looks) and silently cancelled it. This
+  // affected every hash-carrying navigation in the app, not just that one.
+  const fnBody = SRC.slice(SRC.indexOf("function ScrollToTop()"), SRC.indexOf("export function meta()"));
+
+  it("reads hash from useLocation, not just pathname", () => {
+    assert.match(fnBody, /const\s*\{\s*pathname,\s*hash\s*\}\s*=\s*useLocation\(\)/);
+  });
+
+  it("when a hash is present, scrolls the target element into view instead of forcing the top", () => {
+    assert.match(fnBody, /if\s*\(hash\)/);
+    assert.match(fnBody, /document\.getElementById\(hash\.slice\(1\)\)/);
+    assert.match(fnBody, /scrollIntoView\(\)/);
+  });
+
+  it("still defaults to scrolling to the top for an ordinary navigation with no hash", () => {
+    assert.match(fnBody, /window\.scrollTo\(0,\s*0\)/);
+  });
+
+  it("the effect re-runs on both pathname and hash changes", () => {
+    const effectIdx = fnBody.indexOf("useEffect(");
+    const depsBlock = fnBody.slice(effectIdx, effectIdx + 500);
+    assert.match(depsBlock, /\[pathname,\s*hash\]/);
+  });
+});
+
 describe("root.jsx — Layout wraps both the normal app and the ErrorBoundary", () => {
   it("exports a Layout component containing the full <html>/<head>/<body> document shell", () => {
     assert.match(SRC, /export\s+function\s+Layout\s*\(\s*\{\s*children\s*\}\s*\)/);

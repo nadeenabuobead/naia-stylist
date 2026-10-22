@@ -174,15 +174,25 @@ describe("CIP-G — the moodboard combination handoff is a working form, not a l
     // combination ever reached StyleMe. Fixed as part of the multi-garment handoff
     // (see wi-multi-garment-handoff.test.ts for the engine-side preservation proof);
     // this test now pins that every id is submitted, not just one.
+    //
+    // 2026-10-24: the dialog's own Form/input/button markup moved into a shared
+    // CompleteLookForm component (also used directly on the combination card —
+    // see CIP-S below) — the dialog itself now just passes garmentIds through, so
+    // the per-garment submission contract is verified on the component definition.
     const src = read(LIVE);
     const idx = src.indexOf("A real combination from what you already own.");
     assert.notEqual(idx, -1, "expected the moodboard dialog to still exist");
     const scope = src.slice(idx, src.indexOf("</DialogShell>", idx));
-    assert.match(scope, /<Form method="post" action="\/api\/wi-style-this">/);
-    assert.doesNotMatch(scope, /value=\{look\.garmentIds\[0\]\}/, "must not regress to submitting only the first garment");
-    assert.match(scope, /\{look\.garmentIds\.map\(/, "every garment id must be submitted");
-    assert.match(scope, /<input key=\{id\} type="hidden" name="closetItemId" value=\{id\} \/>/);
-    assert.match(scope, /type="submit"/, "decorative text would be a regression, not a fix");
+    assert.match(scope, /<CompleteLookForm garmentIds=\{look\.garmentIds\}/, "the dialog must pass every garment id through, not just garmentIds[0]");
+    assert.doesNotMatch(scope, /garmentIds\[0\]/, "must not regress to submitting only the first garment");
+
+    const fnIdx = src.indexOf("function CompleteLookForm(");
+    assert.notEqual(fnIdx, -1, "expected the shared CompleteLookForm component to exist");
+    const fnScope = src.slice(fnIdx, src.indexOf("\n}", fnIdx));
+    assert.match(fnScope, /action="\/api\/wi-style-this"/);
+    assert.match(fnScope, /\{garmentIds\.map\(/, "every garment id must be submitted");
+    assert.match(fnScope, /<input key=\{id\} type="hidden" name="closetItemId" value=\{id\} \/>/);
+    assert.match(fnScope, /type="submit"/, "decorative text would be a regression, not a fix");
   });
 
   // UPDATED 2026-10-21 — relabelled from "Style this look in StyleMe" to "Complete This
@@ -556,5 +566,77 @@ describe("CIP-R — editingCompleteness resets once a fresh answer actually land
     const block = src.slice(idx, idx + 300);
     assert.match(block, /navigation\.state === "idle" && wasSubmittingCompleteness\.current/);
     assert.match(block, /setEditingCompleteness\(false\)/);
+  });
+});
+
+// ── CIP-S: "Complete This Look" on the card itself, with loading feedback ───
+//
+// UX correction (2026-10-24): previously only reachable inside the preview
+// modal — clicking a combination card opened the modal, and only there could
+// the handoff actually be submitted. Also closes a separate report: a slow
+// backend response (see api.wi-style-this.tsx's parallel-resolve fix) with no
+// loading indicator read as a broken/unresponsive button, and nothing stopped
+// a second click mid-flight from firing a duplicate submission.
+
+describe("CIP-S — Complete This Look is on the card directly, with its own loading state", () => {
+  test("CIP-S.1 the combination card itself renders CompleteLookForm, not only the preview modal", () => {
+    const src = read(LIVE);
+    const gridIdx = src.indexOf('className="wip-mood-grid"');
+    assert.notEqual(gridIdx, -1, "expected the moodboard grid to exist");
+    const tileScope = src.slice(gridIdx, src.indexOf("</section>", gridIdx));
+    assert.match(tileScope, /<CompleteLookForm garmentIds=\{look\.garmentIds\}/, "the card itself must render the handoff, not just the modal");
+  });
+
+  test("CIP-S.2 the card's trigger (opens the modal) and the handoff form are siblings, not nested — a <form> cannot nest inside a <button>", () => {
+    const src = read(LIVE);
+    const gridIdx = src.indexOf('className="wip-mood-grid"');
+    const tileScope = src.slice(gridIdx, src.indexOf("</section>", gridIdx));
+    const triggerClose = tileScope.indexOf("</button>");
+    const completeFormAt = tileScope.indexOf("<CompleteLookForm");
+    assert.ok(triggerClose !== -1 && completeFormAt !== -1 && triggerClose < completeFormAt,
+      "the modal-opening button must close before CompleteLookForm renders");
+  });
+
+  test("CIP-S.3 CompleteLookForm uses its own fetcher, not a page-level one — multiple cards must not share loading state", () => {
+    const src = read(LIVE);
+    const fnIdx = src.indexOf("function CompleteLookForm(");
+    assert.notEqual(fnIdx, -1);
+    const fnScope = src.slice(fnIdx, src.indexOf("\n}", fnIdx));
+    assert.match(fnScope, /const fetcher = useFetcher\(\)/, "each mounted instance gets its own fetcher");
+  });
+
+  test("CIP-S.4 the button is disabled and relabelled while submitting — immediate feedback and duplicate-submission prevention", () => {
+    const src = read(LIVE);
+    const fnIdx = src.indexOf("function CompleteLookForm(");
+    const fnScope = src.slice(fnIdx, src.indexOf("\n}", fnIdx));
+    assert.match(fnScope, /isSubmitting\s*=\s*fetcher\.state\s*!==\s*"idle"/);
+    assert.match(fnScope, /disabled=\{isSubmitting\}/, "disabling is what actually prevents a second click from double-submitting");
+    assert.match(fnScope, /isSubmitting\s*\?\s*"Completing…"/, "the label itself must change, not just a silent disabled state");
+  });
+});
+
+// ── CIP-T: combination-card thumbnails never read as genuinely blank ───────
+//
+// A garment with no photo (e.g. one whose photo was removed via the privacy
+// delete-photo control, which deliberately keeps the garment itself eligible
+// in Wardrobe Intelligence) rendered on a combination card as a bare,
+// backgroundless, uncaptioned monogram — Thumb's own "No photo yet" caption
+// only renders at height >= 150, and this call site passed 140.
+
+describe("CIP-T — a photo-less garment on a combination card still shows the 'No photo yet' caption", () => {
+  test("CIP-T.1 the moodboard collage's Thumb height clears the caption threshold", () => {
+    const src = read(LIVE);
+    const gridIdx = src.indexOf('className="wip-mood-grid"');
+    const tileScope = src.slice(gridIdx, src.indexOf("</section>", gridIdx));
+    const thumbMatch = tileScope.match(/<Thumb key=\{id\} card=\{byId\.get\(id\)\} height=\{(\d+)\}/);
+    assert.ok(thumbMatch, "expected the collage Thumb call to exist");
+    assert.ok(Number(thumbMatch![1]) >= 150, `height must be >= 150 to clear Thumb's own caption threshold; got ${thumbMatch![1]}`);
+  });
+
+  test("CIP-T.2 Thumb's fallback caption threshold itself is unchanged — this fix is the call site, not the shared component", () => {
+    const src = read(LIVE);
+    const fnIdx = src.indexOf("function Thumb(");
+    const fnScope = src.slice(fnIdx, src.indexOf("\n}", fnIdx));
+    assert.match(fnScope, /height >= 150/, "the shared Thumb component's own threshold must not be altered by this fix");
   });
 });

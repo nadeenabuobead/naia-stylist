@@ -19,6 +19,7 @@ import {
   STYLEME_OCCASION_OPTIONS,
   STYLEME_OCCASION_REV3_TO_CANONICAL,
   STYLEME_FORMALITY_OPTIONS,
+  isLongOptionLabel,
 } from "~/lib/styleme/session-vocabulary";
 
 export const links: LinksFunction = () => [
@@ -249,7 +250,7 @@ export default function StyleMeOccasion() {
               key={occ.id}
               type="button"
               onClick={() => selectOccasion(occ.id)}
-              className={`sm-pill${selected === occ.id ? " sm-pill--on" : ""}`}
+              className={`sm-pill${selected === occ.id ? " sm-pill--on" : ""}${isLongOptionLabel(occ.label) ? " sm-pill--wide" : ""}`}
             >
               {occ.label}
             </button>
@@ -277,7 +278,7 @@ export default function StyleMeOccasion() {
                   key={f.id}
                   type="button"
                   onClick={() => setSelectedFormality(f.id)}
-                  className={`sm-pill${selectedFormality === f.id ? " sm-pill--on" : ""}`}
+                  className={`sm-pill${selectedFormality === f.id ? " sm-pill--on" : ""}${isLongOptionLabel(f.label) ? " sm-pill--wide" : ""}`}
                 >
                   {f.label}
                 </button>

@@ -11,7 +11,7 @@ import { useState } from "react";
 import { getSession, commitSession } from "~/lib/session.server.js";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { SESSION_QUESTIONS, SESSION_QUESTION_IDS as SQ } from "~/lib/ai/signal-contract.js";
-import { STYLEME_ACTIVE_INTENTION_OPTIONS } from "~/lib/styleme/session-vocabulary";
+import { STYLEME_ACTIVE_INTENTION_OPTIONS, isLongOptionLabel } from "~/lib/styleme/session-vocabulary";
 import { SmPage } from "~/components/style-me/SmPage";
 import { SmContinue } from "~/components/style-me/SmContinue";
 import naiaStyles from "~/styles/naia-design-system.css?url";
@@ -88,7 +88,7 @@ export default function IntentionPage() {
               key={option.id}
               type="button"
               onClick={() => toggle(option.id)}
-              className={`sm-pill${selected.includes(option.id) ? " sm-pill--on" : ""}`}
+              className={`sm-pill${selected.includes(option.id) ? " sm-pill--on" : ""}${isLongOptionLabel(option.label) ? " sm-pill--wide" : ""}`}
             >
               {option.label}
             </button>

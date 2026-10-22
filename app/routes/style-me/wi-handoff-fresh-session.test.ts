@@ -136,11 +136,12 @@ describe("WIF-B — what the click established is preserved", () => {
 
   it("WIF-B.6 ownership is still re-verified server-side — now for every submitted garment, not just one", () => {
     // Was resolveClosetAnchor(naiaCustomer.id, closetItemId) against a single id.
-    // The multi-garment handoff (see wi-multi-garment-handoff.test.ts) loops this
-    // same ownership check over every id a combination submits, failing the whole
-    // set closed on the first one that doesn't resolve.
+    // The multi-garment handoff (see wi-multi-garment-handoff.test.ts) resolves this
+    // same ownership check for every id a combination submits — in parallel
+    // (Promise.all, 2026-10-24) rather than a sequential loop, since each lookup is
+    // independent — failing the whole set closed if even one doesn't resolve.
     const src = route();
-    assert.match(src, /for \(const id of closetItemIds\)/, "must loop over every submitted id");
+    assert.match(src, /closetItemIds\.map\(\(id\) =>/, "must resolve every submitted id");
     assert.match(src, /resolveClosetAnchor\(naiaCustomer\.id, id\)/, "each one is still ownership-checked server-side");
   });
 });

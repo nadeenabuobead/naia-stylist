@@ -1886,86 +1886,6 @@ export default function StyleMeResult() {
           </div>
         </div>
 
-        {/* Actions — moved directly below the look itself (anchor + outfit + finishing
-            pieces) so the primary actions are reachable without scrolling through Also
-            Works / Why This Works / the sensory grid / Virtual Try-On below. */}
-        <div className="sm-result-actions">
-          {/* PRIMARY — Save Look (hidden when pending-save banner is already handling save) */}
-          {!showPendingBanner && (
-            <button
-              type="button"
-              disabled={isSaved || saveFetcher.state !== "idle"}
-              onClick={() => {
-                if (!isSaved) {
-                  saveFetcher.submit({ intent: "save", suggestionId: suggestion.id }, { method: "post" });
-                }
-              }}
-              className={`sm-result-action-btn${isSaved ? " sm-result-action-btn--accent" : " sm-result-action-btn--primary"}`}
-            >
-              {saveFetcher.state !== "idle" && !isSaved ? "Saving…" : isSaved ? "Saved" : "Save Look"}
-            </button>
-          )}
-          {/* SECONDARY */}
-          <button
-            type="button"
-            disabled={generateFetcher.state !== "idle"}
-            onClick={() => {
-              const sid = (suggestion as any)?.sessionId ?? loaderData.sessionId;
-              if (!sid) return;
-              isRerollingRef.current = true;
-              generateFetcher.submit({ intent: "regenerate", sessionId: sid }, { method: "post" });
-            }}
-            className="sm-result-action-btn"
-          >
-            {generateFetcher.state !== "idle" ? "Finding your look…" : "New Look, Same Vibe"}
-          </button>
-          <Form method="post">
-            <input type="hidden" name="intent" value="adjust-vibe" />
-            <button type="submit" className="sm-result-action-btn">Adjust Vibe</button>
-          </Form>
-          {/* TERTIARY */}
-          <Form method="post">
-            <input type="hidden" name="intent" value="start-over" />
-            <button type="submit" className="sm-result-action-btn">Start Over</button>
-          </Form>
-          {generateFetcher.data?.sameCombination && (
-            <p className="sm-same-combination-msg">
-              nAia couldn&rsquo;t find a different combination with your available pieces.
-            </p>
-          )}
-          {/* Fail-closed recovery: New Look refused rather than silently dropping a required
-              companion it could not re-verify. The current look above is untouched — this is
-              a sibling message to sameCombination, not an error-page takeover (the action
-              deliberately returns a distinct field, never `error`, so the error-state branch
-              above is never triggered and the existing suggestion stays on screen). */}
-          {generateFetcher.data?.companionRecoveryBlocked && (
-            <p className="sm-same-combination-msg" role="alert">
-              {generateFetcher.data.companionRecoveryMessage}{" "}
-              <Link to="/closet/intelligence">Go to Wardrobe Intelligence →</Link>
-            </p>
-          )}
-          {suggestionMeta?.outcome !== "closet-led" && (
-            // nAia is the stylist; NADINE is the brand being bought. Both the label and the
-            // destination are derived, because a NADINE hero used to be offered as
-            // "Shop nAia" — and, when a closet piece came first in the look, linked to the
-            // storefront instead of the piece she had just been shown.
-            <a
-              href={resolveCommerceCtaHref({
-                outcome: suggestionMeta?.outcome,
-                mode: suggestionMeta?.mode,
-                items: suggestion.items,
-              })}
-              className="sm-result-action-btn"
-            >
-              {resolveCommerceCtaLabel({
-                outcome: suggestionMeta?.outcome,
-                mode: suggestionMeta?.mode,
-                items: suggestion.items,
-              })}
-            </a>
-          )}
-        </div>
-
         {/* Alternatives */}
         {!isNoMatch && suggestionMeta?.alternatives && suggestionMeta.alternatives.length > 0 && (
           <div className="sm-result-section">
@@ -2169,6 +2089,89 @@ export default function StyleMeResult() {
             )}
           </div>
         )}
+
+        {/* Actions — moved back to the bottom (2026-10-24), after the explanations,
+            finishing advice and Virtual Try-On above: desktop/mobile testing found that
+            surfacing the actions mid-page (right after Finishing Layer, ahead of Also
+            Works / Why This Works / VTO) meant the customer committed to Save Look /
+            New Look before seeing the full styling rationale. The compact garment grid
+            above keeps this page short enough that the extra scroll is minor. */}
+        <div className="sm-result-actions">
+          {/* PRIMARY — Save Look (hidden when pending-save banner is already handling save) */}
+          {!showPendingBanner && (
+            <button
+              type="button"
+              disabled={isSaved || saveFetcher.state !== "idle"}
+              onClick={() => {
+                if (!isSaved) {
+                  saveFetcher.submit({ intent: "save", suggestionId: suggestion.id }, { method: "post" });
+                }
+              }}
+              className={`sm-result-action-btn${isSaved ? " sm-result-action-btn--accent" : " sm-result-action-btn--primary"}`}
+            >
+              {saveFetcher.state !== "idle" && !isSaved ? "Saving…" : isSaved ? "Saved" : "Save Look"}
+            </button>
+          )}
+          {/* SECONDARY */}
+          <button
+            type="button"
+            disabled={generateFetcher.state !== "idle"}
+            onClick={() => {
+              const sid = (suggestion as any)?.sessionId ?? loaderData.sessionId;
+              if (!sid) return;
+              isRerollingRef.current = true;
+              generateFetcher.submit({ intent: "regenerate", sessionId: sid }, { method: "post" });
+            }}
+            className="sm-result-action-btn"
+          >
+            {generateFetcher.state !== "idle" ? "Finding your look…" : "New Look, Same Vibe"}
+          </button>
+          <Form method="post">
+            <input type="hidden" name="intent" value="adjust-vibe" />
+            <button type="submit" className="sm-result-action-btn">Adjust Vibe</button>
+          </Form>
+          {/* TERTIARY */}
+          <Form method="post">
+            <input type="hidden" name="intent" value="start-over" />
+            <button type="submit" className="sm-result-action-btn">Start Over</button>
+          </Form>
+          {generateFetcher.data?.sameCombination && (
+            <p className="sm-same-combination-msg">
+              nAia couldn&rsquo;t find a different combination with your available pieces.
+            </p>
+          )}
+          {/* Fail-closed recovery: New Look refused rather than silently dropping a required
+              companion it could not re-verify. The current look above is untouched — this is
+              a sibling message to sameCombination, not an error-page takeover (the action
+              deliberately returns a distinct field, never `error`, so the error-state branch
+              above is never triggered and the existing suggestion stays on screen). */}
+          {generateFetcher.data?.companionRecoveryBlocked && (
+            <p className="sm-same-combination-msg" role="alert">
+              {generateFetcher.data.companionRecoveryMessage}{" "}
+              <Link to="/closet/intelligence">Go to Wardrobe Intelligence →</Link>
+            </p>
+          )}
+          {suggestionMeta?.outcome !== "closet-led" && (
+            // nAia is the stylist; NADINE is the brand being bought. Both the label and the
+            // destination are derived, because a NADINE hero used to be offered as
+            // "Shop nAia" — and, when a closet piece came first in the look, linked to the
+            // storefront instead of the piece she had just been shown.
+            <a
+              href={resolveCommerceCtaHref({
+                outcome: suggestionMeta?.outcome,
+                mode: suggestionMeta?.mode,
+                items: suggestion.items,
+              })}
+              className="sm-result-action-btn"
+            >
+              {resolveCommerceCtaLabel({
+                outcome: suggestionMeta?.outcome,
+                mode: suggestionMeta?.mode,
+                items: suggestion.items,
+              })}
+            </a>
+          )}
+        </div>
 
         {loaderData.qaExportEnabled && (
           <div style={{ marginTop: "1.5rem", textAlign: "center" }}>

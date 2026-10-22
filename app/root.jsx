@@ -2,8 +2,24 @@ import { Links, Meta, Outlet, Scripts, ScrollRestoration, useLocation, useRouteE
 import { useEffect } from "react";
 
 function ScrollToTop() {
-  const { pathname } = useLocation();
-  useEffect(() => { window.scrollTo(0, 0); }, [pathname]);
+  const { pathname, hash } = useLocation();
+  // 2026-10-24: a navigation carrying a hash (e.g. "View Saved Looks" ->
+  // /style-me#your-styleme-looks) must land on that section, not the top of
+  // the page. This effect runs after the DOM commits, so an unconditional
+  // scrollTo(0,0) here always wins the race against the browser's own
+  // hash-scroll and silently cancels it — every anchor-link navigation in the
+  // app was affected, not just this one. Scroll to the hash target instead
+  // when one is present; only default to the top when there isn't.
+  useEffect(() => {
+    if (hash) {
+      const target = document.getElementById(hash.slice(1));
+      if (target) {
+        target.scrollIntoView();
+        return;
+      }
+    }
+    window.scrollTo(0, 0);
+  }, [pathname, hash]);
   return null;
 }
 

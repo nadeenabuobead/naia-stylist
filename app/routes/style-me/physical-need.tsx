@@ -15,6 +15,7 @@ import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import {
   STYLEME_FIT_COMFORT_OPTIONS,
   STYLEME_FIT_COMFORT_EXCLUSIVE_ID,
+  isLongOptionLabel,
 } from "~/lib/styleme/session-vocabulary";
 import { SmPage } from "~/components/style-me/SmPage";
 import { SmContinue } from "~/components/style-me/SmContinue";
@@ -107,7 +108,7 @@ export default function PhysicalNeedPage() {
               key={option.id}
               type="button"
               onClick={() => toggle(option.id)}
-              className={`sm-pill${selected.includes(option.id) ? " sm-pill--on" : ""}`}
+              className={`sm-pill${selected.includes(option.id) ? " sm-pill--on" : ""}${isLongOptionLabel(option.label) ? " sm-pill--wide" : ""}`}
             >
               {option.label}
             </button>

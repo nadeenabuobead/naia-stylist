@@ -110,32 +110,46 @@ describe("RD-3 — sm-item-card--primary (previously a no-op class) now has a re
 
 // ── 4. Primary actions reachable without scrolling the full secondary tail ──
 
-describe("RD-4 — Actions moved directly below the look, ahead of Also Works / Why This Works / VTO", () => {
-  test("RD-4.1 the Actions block now appears BEFORE the Alternatives (Also Works) section, not after", () => {
+describe("RD-4 — Actions moved back to the bottom (2026-10-24), after Also Works / Why This Works / VTO", () => {
+  // Reversal of the 2026-10-21 move: that move put Actions right after Finishing
+  // Layer so they were reachable without scrolling; UX testing found customers
+  // committing to Save Look / New Look before seeing the full styling rationale,
+  // so Actions is back at the bottom — after the explanations, finishing advice
+  // and Virtual Try-On, same conventional placement as before that move.
+  test("RD-4.1 the Actions block now appears AFTER the Alternatives (Also Works) section, not before", () => {
     const src = resultSrc();
     const finishingLayerAt = src.indexOf('<p className="sm-result-section-head">Finishing Layer</p>');
-    const actionsAt = src.indexOf('<div className="sm-result-actions">');
     const alternativesAt = src.indexOf("{/* Alternatives */}");
+    const actionsAt = src.indexOf('<div className="sm-result-actions">');
     assert.ok(finishingLayerAt > -1 && actionsAt > -1 && alternativesAt > -1, "sanity: all three markers must exist");
     assert.ok(
-      finishingLayerAt < actionsAt && actionsAt < alternativesAt,
-      "order must be Finishing Layer -> Actions -> Alternatives; actions must no longer sit after the sensory grid / VTO content",
+      finishingLayerAt < alternativesAt && alternativesAt < actionsAt,
+      "order must be Finishing Layer -> Alternatives -> Actions; actions must sit after the explanations/VTO content, not before",
     );
   });
 
-  test("RD-4.2 the Actions block still appears strictly before the sensory grid and Virtual Try-On section", () => {
+  test("RD-4.2 the Actions block appears strictly AFTER the sensory grid and Virtual Try-On section", () => {
     const src = resultSrc();
     const actionsAt = src.indexOf('<div className="sm-result-actions">');
     const sensoryAt = src.indexOf('<div className="sm-sensory-grid">');
     const vtoAt = src.indexOf('<div className="sm-vto-section"');
     assert.ok(actionsAt > -1 && sensoryAt > -1 && vtoAt > -1);
-    assert.ok(actionsAt < sensoryAt && actionsAt < vtoAt);
+    assert.ok(actionsAt > sensoryAt && actionsAt > vtoAt);
+  });
+
+  test("RD-4.2b the Actions block appears AFTER the 'See This Look On Me' section and before the dev-only QA export button", () => {
+    const src = resultSrc();
+    const tryOnSectionAt = src.indexOf("See This Look On Me");
+    const actionsAt = src.indexOf('<div className="sm-result-actions">');
+    const qaExportAt = src.indexOf("{loaderData.qaExportEnabled && (");
+    assert.ok(tryOnSectionAt > -1 && actionsAt > -1 && qaExportAt > -1);
+    assert.ok(tryOnSectionAt < actionsAt && actionsAt < qaExportAt);
   });
 
   test("RD-4.3 all four preserved actions — Save Look, New Look Same Vibe, Adjust Vibe, Start Over — are all still present with their original intents/handlers, unchanged by the move", () => {
     const src = resultSrc();
     const actionsAt = src.indexOf('<div className="sm-result-actions">');
-    const nextSectionAt = src.indexOf("{/* Alternatives */}");
+    const nextSectionAt = src.indexOf("{loaderData.qaExportEnabled && (");
     const block = src.slice(actionsAt, nextSectionAt);
     assert.match(block, /saveFetcher\.submit\(\{ intent: "save", suggestionId: suggestion\.id \}/, "Save Look");
     assert.match(block, /generateFetcher\.submit\(\{ intent: "regenerate", sessionId: sid \}/, "New Look, Same Vibe");
@@ -147,7 +161,7 @@ describe("RD-4 — Actions moved directly below the look, ahead of Also Works / 
     // Guards against the move silently dropping either message instead of just repositioning it.
     const src = resultSrc();
     const actionsAt = src.indexOf('<div className="sm-result-actions">');
-    const nextSectionAt = src.indexOf("{/* Alternatives */}");
+    const nextSectionAt = src.indexOf("{loaderData.qaExportEnabled && (");
     const block = src.slice(actionsAt, nextSectionAt);
     assert.match(block, /generateFetcher\.data\?\.sameCombination/);
     assert.match(block, /generateFetcher\.data\?\.companionRecoveryBlocked/);

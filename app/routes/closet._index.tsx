@@ -1712,6 +1712,11 @@ export default function Closet() {
     setEditPreviewFailed(false);
     setEditAiSummaryLine("");
     setEditUploadError(null);
+    // Photo consent (2026-10-24): a DIFFERENT replacement photo requires its own
+    // fresh, explicit consent — never silently carry forward the tick given for
+    // the photo being abandoned. Re-disables the upload input (it's gated on
+    // this flag) until the customer re-confirms for whichever photo comes next.
+    setEditPhotoConsentGiven(false);
   }
 
   function handleCreateDifferentPiece() {
@@ -2356,7 +2361,21 @@ export default function Closet() {
                     type="file"
                     accept="image/*"
                     style={{ display: "none" }}
-                    onChange={e => { const f = e.target.files?.[0]; if (f) uploadToCloudinaryForEdit(f); }}
+                    onChange={e => {
+                      const f = e.target.files?.[0];
+                      if (!f) return;
+                      if (editPublicId) {
+                        // A DIFFERENT replacement photo, selected directly rather than
+                        // via "Choose a different photo" — same consent requirement:
+                        // resetEditPhoto clears the stale consent tick, the input
+                        // re-disables itself, and this exact file must be re-selected
+                        // once consent is freshly given again.
+                        resetEditPhoto();
+                        e.target.value = "";
+                        return;
+                      }
+                      uploadToCloudinaryForEdit(f);
+                    }}
                     disabled={editUploading || editFetcher.state === "submitting" || !editPhotoConsentGiven}
                   />
                 </label>

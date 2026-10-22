@@ -121,7 +121,9 @@ describe("Wardrobe Intelligence -> StyleMe handoff", () => {
     // ownership check over every id a combination submits — same scoping, now per-id.
     const handoff = apiSrc("api.wi-style-this.tsx");
     assert.ok(handoff.includes("resolveClosetAnchor"), "imports the ownership-checked resolver");
-    assert.ok(handoff.includes("for (const id of closetItemIds)"), "loops over every submitted id");
+    // 2026-10-24: resolves every submitted id in parallel (Promise.all), not a
+    // sequential for-loop — still scoped per-id to the authenticated customer.
+    assert.ok(handoff.includes("closetItemIds.map((id) =>"), "maps over every submitted id");
     assert.ok(
       handoff.includes("resolveClosetAnchor(naiaCustomer.id, id)"),
       "each one is scoped to the authenticated customer's id, not an id read from the form alone",
@@ -154,8 +156,14 @@ describe("Wardrobe Intelligence -> StyleMe handoff", () => {
       handoff.slice(failDeclIdx, failDeclIdx + 120).includes('redirect(`/closet/intelligence?wiStyleError=${reason}`)'),
       "fails back to the WI page, not into a broken StyleMe session",
     );
-    const idx = handoff.indexOf("if (!resolved)");
-    const block = handoff.slice(idx, idx + 120);
+    // 2026-10-24: resolution now runs in parallel (Promise.all) rather than a
+    // sequential for-loop with a per-item "if (!resolved)" check — each
+    // resolveClosetAnchor call is an independent DB lookup, so a multi-garment
+    // combination no longer pays for N serialized round-trips. The fail-closed
+    // contract (any null resolution fails the WHOLE set) is unchanged.
+    const idx = handoff.indexOf("resolutions.some((r) => r === null)");
+    assert.ok(idx > -1, "the resolution-failure check must still exist");
+    const block = handoff.slice(idx, idx + 90);
     assert.ok(block.includes('return fail("invalid-garment")'), "the resolution-failure branch uses the fail-closed helper");
     // The failure check must come before the anchor's own session.set call.
     const anchorSet = handoff.indexOf('session.set("styleMeClosetAnchorId"');

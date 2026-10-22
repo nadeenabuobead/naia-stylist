@@ -11,12 +11,15 @@
 // at all — never a broken-image icon.
 function CollageTile({ src, alt }: { src: string; alt: string }) {
   return (
-    <div style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden" }}>
+    // 2026-10-24: a visible background so object-fit: contain's letterboxing
+    // (which replaced "cover" — cover was cropping the garment's own silhouette
+    // to fill the tile) reads as intentional rather than a transparent gap.
+    <div style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden", background: "color-mix(in oklab, var(--bg) 92%, white)" }}>
       <img
         src={src}
         alt={alt}
         loading="lazy"
-        style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+        style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }}
         onError={(e) => {
           e.currentTarget.style.display = "none";
           const fallback = e.currentTarget.nextElementSibling as HTMLElement | null;
