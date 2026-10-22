@@ -232,10 +232,15 @@ describe("T11: ownership validated before any AI call", () => {
 
 describe("T12: new records set imageUrl to null", () => {
   it("imageUrl: null is written alongside imagePublicId in the create call", () => {
-    const createIdx = closet.indexOf("imagePublicId:");
-    const nearby = closet.slice(Math.max(0, createIdx - 100), createIdx + 300);
+    // Anchored on the create call itself, not the first "imagePublicId:" in the
+    // file — other, earlier reads/writes of imagePublicId (e.g. the replace
+    // idempotency check added 2026-10-23) would otherwise shift this window
+    // away from the actual create() and silently stop testing anything real.
+    const createIdx = closet.indexOf("prisma.closetItem.create(");
+    assert.ok(createIdx !== -1, "closetItem.create call must exist");
+    const nearby = closet.slice(createIdx, createIdx + 400);
     assert.ok(
-      nearby.includes("imageUrl: null"),
+      nearby.includes("imagePublicId:") && nearby.includes("imageUrl: null"),
       "imageUrl must be null for new private-upload records",
     );
   });

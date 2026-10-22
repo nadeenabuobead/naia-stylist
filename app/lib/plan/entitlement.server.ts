@@ -204,6 +204,12 @@ export async function checkEntitlement(
   customerId: string,
   membershipStatus: MembershipStatus,
   feature: EntitlementFeature,
+  // excludeItemId: for a closet replace-in-progress, the old item being replaced
+  // is still present in the table at check time but is about to be removed as
+  // part of the same operation — exclude it so an at-capacity customer can swap
+  // one piece for another without being blocked by a slot that is already
+  // spoken for. Ignored by every feature other than "closet".
+  options?: { excludeItemId?: string },
 ): Promise<EntitlementCheck> {
   const limits = getMembershipAllowances(membershipStatus);
   const window = getUsageWindow();
@@ -211,7 +217,12 @@ export async function checkEntitlement(
 
   switch (feature) {
     case "closet": {
-      const count = await prisma.closetItem.count({ where: { customerId } });
+      const count = await prisma.closetItem.count({
+        where: {
+          customerId,
+          ...(options?.excludeItemId ? { id: { not: options.excludeItemId } } : {}),
+        },
+      });
       if (count >= limits.closetItems) return { allowed: false, reason: "at_capacity" };
       return { allowed: true };
     }

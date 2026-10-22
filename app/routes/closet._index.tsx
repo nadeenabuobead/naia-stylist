@@ -265,6 +265,9 @@ export async function action({ request }: ActionFunctionArgs) {
     const name = formData.get("name") as string;
     const category = formData.get("category") as string;
     const publicId = (formData.get("publicId") as string)?.trim();
+    // Set only when this "add" is the create-half of a Closet replacement
+    // (Different Piece + Replace) — see the replace-resolution block below.
+    const replaceItemId = (formData.get("replaceItemId") as string | null)?.trim() || null;
     const colors = normalizeColors(JSON.parse((formData.get("colors") as string) || "[]"));
     const primaryColor = colors[0] ?? null; // deterministic — colors[0] is always the primary colour
     const pattern = formData.get("pattern") as string;
@@ -308,16 +311,84 @@ export async function action({ request }: ActionFunctionArgs) {
       return data({ error: "Photo consent is required to add an item." }, { status: 400 });
     }
 
-    // ── Closet capacity enforcement (immediate — no flag required) ────────────
-    // Storage entitlement: customer can free capacity by deleting items.
-    const capacityCheck = await checkEntitlement(customer.id, customer.membershipStatus, "closet");
-    if (!capacityCheck.allowed) {
-      return data(
-        { error: "Your closet is full. Remove some items to add new ones." },
-        { status: 403 },
-      );
+    // ── Idempotency (2026-10-23) ───────────────────────────────────────────────
+    // A duplicate submission (double-click, network retry) must never create a
+    // second ClosetItem for the same uploaded photo, and must never treat an
+    // old item that a PRIOR successful attempt already removed as an error.
+    // publicId is a one-time-use upload handle the client generates fresh for
+    // each new photo, so "a ClosetItem already exists with this exact
+    // imagePublicId, for this customer" is a reliable signal that this exact
+    // request has already been processed at least once before.
+    const existingByPublicId = await prisma.closetItem.findFirst({
+      where: { customerId: customer.id, imagePublicId: publicId },
+    });
+    const isRetryOfCreate = existingByPublicId !== null;
+
+    // ── Replace resolution (2026-10-23) ────────────────────────────────────────
+    // Only set when this "add" is the create-half of "Different Piece + Replace".
+    // Resolving this BEFORE the capacity check below is what lets an at-capacity
+    // customer swap one piece for another — see checkEntitlement's excludeItemId.
+    //
+    // Safety contract: a garment that has ever appeared in a saved look or a
+    // past StyleMe outfit is NEVER passed to deleteClosetItemWithImage. The
+    // actual onDelete behaviour of OutfitItem/SavedLookItem's foreign key is
+    // not established in this codebase (no migration captures their original
+    // creation), so correctness here does not depend on knowing it: if no such
+    // row exists for this item, there is nothing for any FK behaviour to act on
+    // and the delete is unambiguously safe regardless of how it's configured.
+    let replaceTarget: { id: string } | null = null;
+    let replaceHasHistory = false;
+    if (replaceItemId) {
+      replaceTarget = await prisma.closetItem.findFirst({
+        where: { id: replaceItemId, customerId: customer.id },
+        select: { id: true },
+      });
+      if (!replaceTarget) {
+        if (!isRetryOfCreate) {
+          // Fresh request: a replace target that doesn't resolve to an item this
+          // customer owns is not something to silently ignore — fail clearly
+          // rather than guess at intent, and clean up the orphaned upload.
+          await deleteCloudinaryAsset(publicId, "private");
+          return data({ error: "The item to replace could not be found." }, { status: 404 });
+        }
+        // Retry of an already-processed request: the new item exists and the old
+        // one is already gone — the desired end state already holds, whether
+        // from this exact operation's own prior attempt or a separate manual
+        // delete in between. Nothing left to do for the old item.
+      } else {
+        const historyCount =
+          (await prisma.outfitItem.count({ where: { closetItemId: replaceTarget.id } })) +
+          (await prisma.savedLookItem.count({ where: { closetItemId: replaceTarget.id } }));
+        replaceHasHistory = historyCount > 0;
+      }
     }
 
+    // ── Closet capacity enforcement (immediate — no flag required) ────────────
+    // Storage entitlement: customer can free capacity by deleting items.
+    // Skipped entirely on a retry — nothing new is being created, so there is no
+    // capacity question to re-ask.
+    if (!isRetryOfCreate) {
+      const capacityCheck = await checkEntitlement(
+        customer.id,
+        customer.membershipStatus,
+        "closet",
+        replaceTarget && !replaceHasHistory ? { excludeItemId: replaceTarget.id } : undefined,
+      );
+      if (!capacityCheck.allowed) {
+        // Deliberately does NOT delete the just-uploaded asset here (unchanged from
+        // the pre-replace behaviour) — the customer can free capacity and resubmit
+        // without re-uploading.
+        return data(
+          { error: "Your closet is full. Remove some items to add new ones." },
+          { status: 403 },
+        );
+      }
+    }
+
+    // Everything through item creation is skipped on a retry — the item from the
+    // prior successful attempt (existingByPublicId) is reused as-is below instead.
+    let newItem: { id: string; category: string; garmentRelationships: string[]; updatedAt: Date; tryOnEligibility: string | null } | null = null;
+    if (!isRetryOfCreate) {
     // 2. Verify via Cloudinary Admin API — authoritative format/bytes/dimensions.
     const verify = await verifyCloudinaryAsset(publicId, "private");
     if (!verify.ok) {
@@ -473,7 +544,7 @@ export async function action({ request }: ActionFunctionArgs) {
       bytes: serverBytes,
     });
 
-    const newItem = await prisma.closetItem.create({
+    const createdItem = await prisma.closetItem.create({
       data: {
         customer: { connect: { id: customer.id } },
         name: name || null,
@@ -501,8 +572,8 @@ export async function action({ request }: ActionFunctionArgs) {
 
     try {
       await recordJourneyEventAwaited(
-        emitClosetItemAdded({ customerId: customer.id, closetItemId: newItem.id, category: newItem.category, tryOnEligibility: newItem.tryOnEligibility ?? null }),
-        `closet_item_added:${newItem.id}:v1`,
+        emitClosetItemAdded({ customerId: customer.id, closetItemId: createdItem.id, category: createdItem.category, tryOnEligibility: createdItem.tryOnEligibility ?? null }),
+        `closet_item_added:${createdItem.id}:v1`,
       );
     } catch { /* event emission never blocks the response */ }
 
@@ -513,9 +584,9 @@ export async function action({ request }: ActionFunctionArgs) {
     // The outer .catch ensures even a persistFailure DB error cannot surface here.
     // Items always exit this action as "ready" or "failed" — never permanently "pending".
     await analyzeClosetGarment({
-      closetItemId: newItem.id,
+      closetItemId: createdItem.id,
       imagePublicId: publicId,
-      category: newItem.category,
+      category: createdItem.category,
       userPrimaryColor: primaryColor || null,
       userPattern:      pattern || null,
       userOccasions:    occasions.length > 0 ? occasions : [],
@@ -523,7 +594,7 @@ export async function action({ request }: ActionFunctionArgs) {
     }).catch(() => {});
 
     // Re-evaluate eligibility now that subcategory is set (subcategory-gated categories).
-    await refreshVtoEligibility(newItem.id, category, {
+    await refreshVtoEligibility(createdItem.id, category, {
       width: serverWidth ?? undefined,
       height: serverHeight ?? undefined,
       format: serverFormat,
@@ -532,13 +603,44 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // Taste evidence — extract from garmentRelationships on new item
     try {
-      const evRows = extractClosetEvidence({ id: newItem.id, customerId: customer.id, category: newItem.category, garmentRelationships: newItem.garmentRelationships, updatedAt: newItem.updatedAt });
-      await writeSourceEvidence(customer.id, "CLOSET_RELATIONSHIP", newItem.id, evRows);
+      const evRows = extractClosetEvidence({ id: createdItem.id, customerId: customer.id, category: createdItem.category, garmentRelationships: createdItem.garmentRelationships, updatedAt: createdItem.updatedAt });
+      await writeSourceEvidence(customer.id, "CLOSET_RELATIONSHIP", createdItem.id, evRows);
     } catch (err) {
       console.error("taste-evidence: failed to write closet create evidence", err);
     }
+    newItem = createdItem;
+    } else {
+      newItem = existingByPublicId;
+    }
 
-    return data({ success: true });
+    // ── Replace outcome (2026-10-23) ───────────────────────────────────────────
+    // "replaced"      — old item removed; the swap is complete.
+    // "kept-history"  — old item has saved-look/outfit history; never attempted.
+    // "kept-failed"   — removal was attempted (no history) but did not succeed;
+    //                   the new item still exists, so this must never be
+    //                   reported to the customer as a successful replacement.
+    // null            — this was not a replace at all (ordinary add/"Keep Both").
+    let replaceOutcome: "replaced" | "kept-history" | "kept-failed" | null = null;
+    if (replaceTarget) {
+      if (replaceHasHistory) {
+        replaceOutcome = "kept-history";
+      } else {
+        try {
+          // A NOT_FOUND result here (deleted: false) means the item is already
+          // gone — a prior attempt's delete already succeeded, or a rare
+          // concurrent delete elsewhere. Either way the desired end state (old
+          // item gone) already holds, so this still counts as "replaced", not
+          // failed — only a thrown error is a genuine removal failure.
+          await deleteClosetItemWithImage(replaceTarget.id, customer.id);
+          replaceOutcome = "replaced";
+        } catch (err) {
+          console.error("closet-replace: failed to remove original item after creating replacement", err);
+          replaceOutcome = "kept-failed";
+        }
+      }
+    }
+
+    return data({ success: true, replace: replaceOutcome });
   }
 
   if (intent === "delete") {
@@ -1114,7 +1216,7 @@ export default function Closet() {
   }, [addStep]);
 
   // ── Edit state ────────────────────────────────────────────────────────────
-  const editFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const editFetcher = useFetcher<{ success?: boolean; error?: string; replace?: "replaced" | "kept-history" | "kept-failed" | null }>();
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editCategory, setEditCategory] = useState("TOPS");
@@ -1156,6 +1258,17 @@ export default function Closet() {
   const [editPattern, setEditPattern] = useState("");
   const [editOccasions, setEditOccasions] = useState<string[]>([]);
   const [editSeasons, setEditSeasons] = useState<string[]>([]);
+
+  // ── Replace vs Keep Both (2026-10-23) ──────────────────────────────────────
+  // Only reachable after "Different Piece" — a second, explicit question, since
+  // "Different Piece" alone was previously silently equivalent to "Keep Both"
+  // with no way to ask for the original to be removed. null = not yet answered.
+  const [editReplaceChoice, setEditReplaceChoice] = useState<"replace" | "keep" | null>(null);
+  // Set when the server reports success but the replace could not be fully
+  // completed as requested (kept-history or kept-failed) — the panel stays
+  // open to show this instead of silently closing as if nothing needs the
+  // customer's attention. null = no notice pending (ordinary close-on-success).
+  const [editReplaceNotice, setEditReplaceNotice] = useState<"kept-history" | "kept-failed" | null>(null);
 
   // Revoke both blob preview URLs when the component unmounts.
   useEffect(() => {
@@ -1549,11 +1662,20 @@ export default function Closet() {
     if (p) {
       if (p.name) setEditName(p.name);
       if (p.category && CATEGORIES.includes(p.category)) setEditCategory(p.category);
-      if (p.primaryColor) setEditColors([p.primaryColor]);
+      // Colour (2026-10-23): always set from the NEW photo's own read, even when
+      // the AI had no opinion — never silently keep the OLD item's colour, which
+      // openEdit pre-filled before this new photo existed. A customer who clicks
+      // through without noticing an empty field must see an empty field, not a
+      // stale value quietly re-confirmed as if they'd reviewed it.
+      setEditColors(p.primaryColor ? [p.primaryColor] : []);
       if (p.pattern) {
         const uiPattern = (PATTERN_AI_TO_UI as Record<string, string>)[p.pattern] ?? p.pattern;
         setEditPattern(uiPattern);
       }
+    } else {
+      // Preview failed entirely — same reasoning as above, do not leave the old
+      // item's colour sitting in the form unlabelled as if it were reviewed.
+      setEditColors([]);
     }
     setEditPhotoDecision("same");
   }
@@ -1573,6 +1695,7 @@ export default function Closet() {
     setEditRelationships([]);
     setEditNote("");
     setEditPhotoDecision("different");
+    setEditReplaceChoice(null); // ask Replace-vs-Keep-Both next, before any fields show
   }
 
   // Lets the customer pick yet another photo instead, from the review step. Does not
@@ -1584,6 +1707,7 @@ export default function Closet() {
     setEditImageUrl("");
     setEditPublicId("");
     setEditPhotoDecision(null);
+    setEditReplaceChoice(null);
     setEditPreviewSuggestion(null);
     setEditPreviewFailed(false);
     setEditAiSummaryLine("");
@@ -1594,7 +1718,10 @@ export default function Closet() {
     if (!editPublicId || !editCategory) return;
     // Reuses the "add" action verbatim — same ownership/capacity/moderation checks,
     // same final analysis call, same entitlement enforcement as any other new item.
-    // The original item (and its photo) are never referenced here at all.
+    // replaceItemId is the ONLY addition: set only when the customer explicitly
+    // chose "Replace" (not "Keep Both"), and it never carries any of the old
+    // item's own field values forward — only its id, so the server can decide
+    // whether removing it is safe (see the action's replace-resolution block).
     editFetcher.submit(
       {
         intent: "add",
@@ -1610,6 +1737,7 @@ export default function Closet() {
         garmentRelationships: JSON.stringify(editRelationships),
         customerNote: editNote,
         photoConsentGiven: String(editPhotoConsentGiven),
+        replaceItemId: editReplaceChoice === "replace" && editingItemId ? editingItemId : "",
       },
       { method: "post" }
     );
@@ -1633,6 +1761,8 @@ export default function Closet() {
     setEditOccasions(item.occasions ?? []);
     setEditSeasons(item.seasons ?? []);
     setEditPhotoDecision(null);
+    setEditReplaceChoice(null);
+    setEditReplaceNotice(null);
     setEditAnalyzing(false);
     setEditPreviewFailed(false);
     setEditAiSummaryLine("");
@@ -1657,6 +1787,8 @@ export default function Closet() {
     setEditOccasions([]);
     setEditSeasons([]);
     setEditPhotoDecision(null);
+    setEditReplaceChoice(null);
+    setEditReplaceNotice(null);
     setEditAnalyzing(false);
     setEditPreviewFailed(false);
     setEditAiSummaryLine("");
@@ -1717,9 +1849,18 @@ export default function Closet() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [addFetcher.state, addFetcher.data]);
 
-  // Close the edit panel when the server reports success.
+  // Close the edit panel when the server reports success — UNLESS the new piece
+  // was created but the old one could not be fully replaced as requested
+  // (kept-history or kept-failed). That must never look like a silent, ordinary
+  // success: the panel stays open showing an explicit notice (see JSX) instead,
+  // and the customer dismisses it themselves once they've read it.
   useEffect(() => {
     if (!editFetcher.data?.success) return;
+    const outcome = editFetcher.data?.replace;
+    if (outcome === "kept-history" || outcome === "kept-failed") {
+      setEditReplaceNotice(outcome);
+      return;
+    }
     closeEdit();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editFetcher.data]);
@@ -2156,6 +2297,24 @@ export default function Closet() {
               <button type="button" className="cl-form-cancel" onClick={closeEdit}>✕ Cancel</button>
             </div>
 
+            {editReplaceNotice ? (
+              // The new piece WAS created server-side — this is never shown for an
+              // outright failure, only when the old piece could not be fully
+              // replaced as requested. Never phrased as "Replacement successful";
+              // the customer must be able to tell this apart from a full replace.
+              <div style={{ margin: "4px 0 16px", padding: "14px 16px", background: "rgba(34,21,22,0.03)", border: "1px solid var(--naia-border)" }}>
+                <p className="cl-ai-meta" style={{ marginBottom: "10px" }}>
+                  {editReplaceNotice === "kept-history"
+                    ? `Your new piece has been added. We couldn't automatically remove "${editingItem?.name ?? "the original item"}" — it appears in your saved looks or outfit history, so removing it could affect those. You can remove it manually from My Closet using the delete button on that item, if you're sure.`
+                    : `Your new piece has been added, but we couldn't remove "${editingItem?.name ?? "the original item"}" due to a temporary issue. Please remove it manually from My Closet, or try again in a moment.`
+                  }
+                </p>
+                <button type="button" className="cl-submit" style={{ marginTop: 0 }} onClick={closeEdit}>
+                  Done
+                </button>
+              </div>
+            ) : (
+            <>
             <div ref={editPhotoRef} style={{ scrollMarginTop: "72px" }}>
             <div className="cl-label">Photo</div>
             <div className="cl-edit-photo-row">
@@ -2248,14 +2407,48 @@ export default function Closet() {
               </div>
             )}
 
+            {/* ── Replace vs Keep Both (2026-10-23) ───────────────────────────
+                Only reachable after "Different Piece" — this is the question
+                "Different Piece" never used to ask. Before this, choosing
+                "Different Piece" was silently always "Keep Both": the original
+                item had no way to be removed as part of this same action. */}
+            {editPhotoDecision === "different" && editReplaceChoice === null && (
+              <div style={{ margin: "4px 0 16px", padding: "14px 16px", background: "rgba(34,21,22,0.03)", border: "1px solid var(--naia-border)" }}>
+                <p className="cl-label" style={{ marginBottom: "8px" }}>
+                  Does this replace &ldquo;{editingItem?.name ?? "this item"}&rdquo; in your Closet, or is it an addition?
+                </p>
+                <div style={{ display: "flex", gap: "12px" }}>
+                  <button type="button" className="cl-submit" style={{ flex: 1, marginTop: 0 }} onClick={() => setEditReplaceChoice("replace")}>
+                    Replace
+                  </button>
+                  <button
+                    type="button"
+                    className="cl-submit"
+                    style={{ flex: 1, marginTop: 0, background: "transparent", color: "var(--naia-ink, #111)", border: "1px solid var(--naia-border)" }}
+                    onClick={() => setEditReplaceChoice("keep")}
+                  >
+                    Keep Both
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Normal fields: shown immediately for a meta-only edit (no new photo), or
-                once same-piece/different-piece has been answered above. */}
-            {(!editPublicId || editPhotoDecision !== null) && (
+                once same-piece/different-piece (and, for a different piece,
+                replace-vs-keep-both) has been answered above. */}
+            {(!editPublicId || editPhotoDecision === "same" || (editPhotoDecision === "different" && editReplaceChoice !== null)) && (
               <>
-                {editPhotoDecision === "different" && (
+                {editPhotoDecision === "different" && editReplaceChoice === "keep" && (
                   <p className="cl-ai-meta" style={{ marginBottom: "12px" }}>
                     This will be added as a brand-new piece. Your original item stays in My Closet
                     unchanged — you can delete it separately afterwards if you no longer need it.
+                  </p>
+                )}
+                {editPhotoDecision === "different" && editReplaceChoice === "replace" && (
+                  <p className="cl-ai-meta" style={{ marginBottom: "12px" }}>
+                    This will replace &ldquo;{editingItem?.name ?? "the original item"}&rdquo; in your Closet. If it has
+                    existing saved-look or outfit history, we&rsquo;ll keep it in place and let you know rather than
+                    removing it automatically.
                   </p>
                 )}
 
@@ -2290,6 +2483,15 @@ export default function Closet() {
                     );
                   })}
                 </div>
+                {/* Colour (2026-10-23): visible whenever this is a replacement-photo
+                    review, the AI preview ran, and it had no confident colour for the
+                    NEW photo — never just a silent empty field indistinguishable from
+                    "customer hasn't picked yet". */}
+                {editPublicId && editColors.length === 0 && editPreviewSuggestion && !editPreviewSuggestion.primaryColor && (
+                  <p className="cl-ai-meta" style={{ marginTop: "-10px", marginBottom: "16px" }}>
+                    We couldn&rsquo;t confidently detect a colour from this photo — please select one.
+                  </p>
+                )}
 
                 {/* Pattern/Occasions/Season — only part of the replace-photo review (same
                     reason as the decision prompt above): a meta-only edit never shows
@@ -2377,7 +2579,7 @@ export default function Closet() {
                     onClick={handleCreateDifferentPiece}
                     disabled={!editCategory || editUploading || editFetcher.state === "submitting"}
                   >
-                    {editFetcher.state === "submitting" ? "Saving…" : "Add as New Piece"}
+                    {editFetcher.state === "submitting" ? "Saving…" : editReplaceChoice === "replace" ? "Replace This Piece" : "Add as New Piece"}
                   </button>
                 ) : (
                   <button
@@ -2390,6 +2592,8 @@ export default function Closet() {
                   </button>
                 )}
               </>
+            )}
+            </>
             )}
           </div>
         )}

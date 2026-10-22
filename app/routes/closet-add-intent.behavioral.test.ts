@@ -23,7 +23,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("~/db.server", () => ({
   default: {
     customer: { findUnique: vi.fn() },
-    closetItem: { create: vi.fn() },
+    // findFirst defaults to null (not a duplicate submission) — this file's own
+    // tests predate the replace/idempotency check and never exercise it directly;
+    // see closet-replace.behavioral.test.ts for that behaviour.
+    closetItem: { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn() },
     journeyEvent: { create: vi.fn().mockResolvedValue({}) },
   },
 }));
@@ -168,7 +171,9 @@ describe("closet._index action (add) — consent enforced server-side, not just 
       context: {},
     } as any);
 
-    expect(mockEntitlement()).toHaveBeenCalledWith(CUSTOMER_A.id, CUSTOMER_A.membershipStatus, "closet");
+    // 4th arg is the replace-aware exclusion option (2026-10-23) — undefined for an
+    // ordinary add with no replaceItemId; see closet-replace.behavioral.test.ts.
+    expect(mockEntitlement()).toHaveBeenCalledWith(CUSTOMER_A.id, CUSTOMER_A.membershipStatus, "closet", undefined);
     expect(res.init.status).toBe(403);
     expect(mockDelete()).not.toHaveBeenCalled();
   });

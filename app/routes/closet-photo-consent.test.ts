@@ -35,7 +35,10 @@ describe("closet._index.tsx action — server-side consent enforcement on final 
     const publicIdIdx = closetIndex.indexOf('if (!publicId) return data({ error: "Image upload reference required."');
     const ownershipIdx = closetIndex.indexOf("validatePublicIdOwnership(publicId");
     const consentIdx = closetIndex.indexOf("extractConsentGiven({ photoConsentGiven:");
-    const capacityIdx = closetIndex.indexOf("checkEntitlement(customer.id");
+    // Anchored on the call itself, not "checkEntitlement(customer.id" on one
+    // line — the replace-aware capacity check (2026-10-23) spans multiple
+    // lines for its new 4th argument.
+    const capacityIdx = closetIndex.indexOf("checkEntitlement(");
     assert.ok(publicIdIdx > -1 && ownershipIdx > -1 && consentIdx > -1 && capacityIdx > -1);
     assert.ok(publicIdIdx < ownershipIdx, "ownership check comes after the publicId check");
     assert.ok(ownershipIdx < consentIdx, "ownership check now comes before the consent check");

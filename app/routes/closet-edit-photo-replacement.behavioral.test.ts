@@ -24,7 +24,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("~/db.server", () => ({
   default: {
     customer: { findUnique: vi.fn() },
-    closetItem: { findUnique: vi.fn(), update: vi.fn(), create: vi.fn() },
+    // findFirst defaults to null (not a duplicate submission) — this file's own
+    // DIFFERENT PIECE tests submit intent=add and predate the replace/idempotency
+    // check; see closet-replace.behavioral.test.ts for that behaviour.
+    closetItem: { findUnique: vi.fn(), findFirst: vi.fn().mockResolvedValue(null), update: vi.fn(), create: vi.fn() },
     journeyEvent: { create: vi.fn().mockResolvedValue({}) },
   },
 }));
