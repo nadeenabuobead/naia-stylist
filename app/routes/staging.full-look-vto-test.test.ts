@@ -31,6 +31,12 @@ vi.mock("~/lib/ai/styleme-anchor.server", () => ({
 vi.mock("~/lib/image-suitability.server", () => ({
   screenGarmentSuitability: vi.fn(),
 }));
+vi.mock("~/lib/plan/plan-limits.server", () => ({
+  getMembershipAllowances: vi.fn(),
+}));
+vi.mock("~/lib/plan/entitlement.server", () => ({
+  getEntitlementSummary: vi.fn(),
+}));
 
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { loadWardrobeIntelligence } from "~/lib/ai/wardrobe-intelligence.server";
@@ -38,6 +44,8 @@ import { loadNaiaModel, computeModelReadinessFromRecord } from "~/lib/ai/my-naia
 import { resolveOwnedWiGarments } from "~/lib/ai/poc-wi-combination-resolver.server";
 import { resolveClosetAnchor } from "~/lib/ai/styleme-anchor.server";
 import { screenGarmentSuitability } from "~/lib/image-suitability.server";
+import { getMembershipAllowances } from "~/lib/plan/plan-limits.server";
+import { getEntitlementSummary } from "~/lib/plan/entitlement.server";
 import prisma from "~/db.server";
 import { loader, action, isAuthorizedStagingTestAccount } from "./staging.full-look-vto-test";
 
@@ -48,9 +56,15 @@ const mockReadiness = () => computeModelReadinessFromRecord as ReturnType<typeof
 const mockResolveOwned = () => resolveOwnedWiGarments as ReturnType<typeof vi.fn>;
 const mockResolveAnchor = () => resolveClosetAnchor as ReturnType<typeof vi.fn>;
 const mockScreenSuitability = () => screenGarmentSuitability as ReturnType<typeof vi.fn>;
+const mockAllowances = () => getMembershipAllowances as ReturnType<typeof vi.fn>;
+const mockEntitlementSummary = () => getEntitlementSummary as ReturnType<typeof vi.fn>;
 const mockProfileFind = () => (prisma as unknown as { onboardingProfile: { findUnique: ReturnType<typeof vi.fn> } }).onboardingProfile.findUnique;
 
-const SARA = { id: "sara-cust-1", shopifyCustomerId: "sara-shop-1" };
+const SARA = { id: "sara-cust-1", shopifyCustomerId: "sara-shop-1", membershipStatus: "MEMBER" };
+
+function entitlementSummary(completed: number, inFlight: number) {
+  return { vto: { monthlyCompleted: completed, monthlyInFlight: inFlight } };
+}
 
 const EXPECTED_PAIRING = {
   id: "pair-expected",
@@ -222,6 +236,11 @@ describe("action — the only path that generates anything", () => {
       Promise.resolve({ type: "closet", id: closetItemId, imageUrl: `https://mock.example/${closetItemId}.jpg` }),
     );
     mockScreenSuitability().mockResolvedValue({ status: "PASS" });
+    // Default: plenty of room for the whole 3-step chain (MEMBER allowance,
+    // zero prior usage). Individual tests below override these.
+    mockAllowances().mockReturnValue({ vtoPerMonth: 10 });
+    mockEntitlementSummary().mockResolvedValue(entitlementSummary(0, 0));
+    delete process.env.VTO_MONTHLY_LIMIT_OVERRIDE;
   });
 
   it("GT.11 — refuses without consent=yes, and never even re-resolves ownership", async () => {
@@ -285,6 +304,94 @@ describe("action — the only path that generates anything", () => {
     const res = await action({ request: formRequest() } as never);
     expect(res.init?.status).toBe(400);
     expect(res.data).toEqual({ ok: false, reason: "garment_not_eligible" });
+  });
+
+  describe("GT.33-40 — Stage 2A quota pre-check for the full 3-step chain", () => {
+    it("GT.33 — zero allowance (NONE tier) refuses before any image is touched", async () => {
+      mockAllowances().mockReturnValue({ vtoPerMonth: 0 });
+      mockEntitlementSummary().mockResolvedValue(entitlementSummary(0, 0));
+      const res = await action({ request: formRequest() } as never);
+      expect(res.init?.status).toBe(400);
+      expect(res.data).toEqual({ ok: false, reason: "quota_insufficient_for_full_look" });
+      expect(mockResolveAnchor()).not.toHaveBeenCalled();
+      expect(mockScreenSuitability()).not.toHaveBeenCalled();
+    });
+
+    it("GT.34 — insufficient allowance (room for fewer than 3) refuses, even with room for 1 or 2", async () => {
+      mockAllowances().mockReturnValue({ vtoPerMonth: 10 });
+      mockEntitlementSummary().mockResolvedValue(entitlementSummary(8, 0)); // 2 remaining — not enough for 3
+      const res = await action({ request: formRequest() } as never);
+      expect(res.init?.status).toBe(400);
+      expect(res.data).toEqual({ ok: false, reason: "quota_insufficient_for_full_look" });
+    });
+
+    it("GT.35 — exactly 3 remaining is sufficient (the boundary is inclusive)", async () => {
+      mockAllowances().mockReturnValue({ vtoPerMonth: 10 });
+      mockEntitlementSummary().mockResolvedValue(entitlementSummary(7, 0)); // exactly 3 remaining
+      const res = await action({ request: formRequest() } as never);
+      expect(res.data).toMatchObject({ ok: true });
+    });
+
+    it("GT.36 — sufficient allowance (plenty of room) proceeds to the image/suitability steps", async () => {
+      mockAllowances().mockReturnValue({ vtoPerMonth: 10 });
+      mockEntitlementSummary().mockResolvedValue(entitlementSummary(0, 0));
+      const res = await action({ request: formRequest() } as never);
+      expect(res.data).toMatchObject({ ok: true });
+      expect(mockResolveAnchor()).toHaveBeenCalled();
+    });
+
+    it("GT.37 — in-flight (not just completed) jobs count against the chain's allowance", async () => {
+      mockAllowances().mockReturnValue({ vtoPerMonth: 10 });
+      mockEntitlementSummary().mockResolvedValue(entitlementSummary(0, 8)); // 8 in-flight, 2 remaining
+      const res = await action({ request: formRequest() } as never);
+      expect(res.data).toEqual({ ok: false, reason: "quota_insufficient_for_full_look" });
+    });
+
+    it("GT.38 — entitlement-override isolation: VTO_MONTHLY_LIMIT_OVERRIDE must NOT widen this check", async () => {
+      // The standard allowance genuinely has no room (vtoPerMonth: 2), but a
+      // staging override is set far above it. If this check incorrectly
+      // routed through the override-aware path, it would wrongly pass.
+      process.env.VTO_MONTHLY_LIMIT_OVERRIDE = "100";
+      mockAllowances().mockReturnValue({ vtoPerMonth: 2 });
+      mockEntitlementSummary().mockResolvedValue(entitlementSummary(0, 0));
+      const res = await action({ request: formRequest() } as never);
+      expect(res.data).toEqual({ ok: false, reason: "quota_insufficient_for_full_look" });
+      delete process.env.VTO_MONTHLY_LIMIT_OVERRIDE;
+    });
+
+    it("GT.39 — entitlement-override isolation, the other direction: a low override must NOT narrow a genuinely sufficient standard allowance", async () => {
+      process.env.VTO_MONTHLY_LIMIT_OVERRIDE = "1";
+      mockAllowances().mockReturnValue({ vtoPerMonth: 10 });
+      mockEntitlementSummary().mockResolvedValue(entitlementSummary(0, 0));
+      const res = await action({ request: formRequest() } as never);
+      expect(res.data).toMatchObject({ ok: true });
+      delete process.env.VTO_MONTHLY_LIMIT_OVERRIDE;
+    });
+
+    it("GT.40 — fails closed, not open, when usage/membership cannot be established reliably", async () => {
+      mockEntitlementSummary().mockRejectedValue(new Error("transient DB error"));
+      const res = await action({ request: formRequest() } as never);
+      expect(res.init?.status).toBe(400);
+      expect(res.data).toEqual({ ok: false, reason: "quota_insufficient_for_full_look" });
+    });
+
+    it("GT.41 — enforced unconditionally, regardless of ENTITLEMENT_ENFORCEMENT", async () => {
+      process.env.ENTITLEMENT_ENFORCEMENT = "false";
+      mockAllowances().mockReturnValue({ vtoPerMonth: 0 });
+      mockEntitlementSummary().mockResolvedValue(entitlementSummary(0, 0));
+      const res = await action({ request: formRequest() } as never);
+      expect(res.data).toEqual({ ok: false, reason: "quota_insufficient_for_full_look" });
+      delete process.env.ENTITLEMENT_ENFORCEMENT;
+    });
+
+    it("GT.42 — the quota reason exposes no usage numbers, limits, or customer-identifying detail", async () => {
+      mockAllowances().mockReturnValue({ vtoPerMonth: 0 });
+      mockEntitlementSummary().mockResolvedValue(entitlementSummary(0, 0));
+      const res = await action({ request: formRequest() } as never);
+      const serialized = JSON.stringify(res.data);
+      expect(serialized).not.toMatch(/sara|cust|\d/);
+      expect(res.data).toEqual({ ok: false, reason: "quota_insufficient_for_full_look" });
+    });
   });
 
   it("GT.26 — refuses when a garment's image is unresolvable (resolveClosetAnchor returns null), and never reaches the third garment", async () => {

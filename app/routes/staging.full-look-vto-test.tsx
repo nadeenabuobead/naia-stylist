@@ -67,11 +67,18 @@
 //   DEFERRED (requires Sara's actual nAia Model body photo):
 //     - Everything behind the remaining SWAP POINT below (the real model
 //       photo) and the real FASHN call itself.
-//   KNOWINGLY NOT ADDRESSED HERE (separately tracked, pre-existing issue,
-//   not something to silently fold into this test):
-//     - VTO quota/entitlement (ENTITLEMENT_ENFORCEMENT) — already flagged
-//       elsewhere in this project as having its own unresolved scoping bug.
-//       This route does not call checkEntitlement at all.
+//     - A hard, atomic, per-customer spending ceiling and durable multi-
+//       credit usage accounting — see hasQuotaRoomForFullLookChain's own
+//       header comment for exactly what the Stage 2A pre-check below does
+//       and does NOT provide; it is sufficient only while FASHN stays mocked.
+//   PARTIALLY ADDRESSED (2026-11-03, Stage 2A): a quota pre-check now runs
+//   before any image is resolved — see hasQuotaRoomForFullLookChain below.
+//   It is deliberately NOT routed through checkEntitlement/getEffectiveVtoLimit
+//   (isolated from the pre-existing, unresolved VTO_MONTHLY_LIMIT_OVERRIDE
+//   scoping bug flagged elsewhere in this project) and is enforced regardless
+//   of ENTITLEMENT_ENFORCEMENT. It is a non-atomic read-before-write check,
+//   explicitly not a substitute for real paid-use concurrency/spending
+//   protection — see its own comment for the full caveat.
 //
 // AUTH / AUTHORIZATION / CSRF: identity comes only from
 // getCurrentNaiaCustomer(request) — the real session cookie
@@ -118,10 +125,14 @@ import { loadNaiaModel, computeModelReadinessFromRecord } from "~/lib/ai/my-naia
 import { isVtoCategoryAllowed } from "~/lib/ai/closet-eligibility";
 import { resolveClosetAnchor } from "~/lib/ai/styleme-anchor.server";
 import { screenGarmentSuitability } from "~/lib/image-suitability.server";
+import { getMembershipAllowances } from "~/lib/plan/plan-limits.server";
+import { getEntitlementSummary } from "~/lib/plan/entitlement.server";
+import type { MembershipStatus } from "@prisma/client";
 import prisma from "~/db.server";
 import { resolveOwnedWiGarments, type WiResolvedGarmentMetadata } from "~/lib/ai/poc-wi-combination-resolver.server";
 import {
   runSequentialFullLookTryOn,
+  MAX_CHAIN_LENGTH,
   type SequentialTryOnGarmentInput,
 } from "~/lib/ai/poc-sequential-full-look-vto.server";
 import type { RunTryOnOptions } from "~/lib/ai/fashn-try-on.server";
@@ -312,6 +323,70 @@ const MOCK_MODEL_IMAGE_DATA_URL = "data:image/png;base64,bW9ja21vZGVsaW1hZ2U=";
 
 const MAX_CONSENT_AGE_MS = 15 * 60 * 1000; // same window and constant as api.trigger-tryon.tsx
 
+// ── Stage 2A: quota pre-check for the full 3-step chain (2026-11-03) ────────
+//
+// PROVISIONAL POLICY, not a final pricing decision: a 3-garment Full-Look
+// generation is treated here as costing MAX_CHAIN_LENGTH (3) VTO quota units,
+// not 1 — because it costs 3x a normal single-garment VTO in real FASHN
+// credits. The request must not even START unless the customer has room for
+// the WORST case (all 3 steps succeeding), not just room for one — a chain
+// that runs out of allowance partway through would still have genuinely
+// spent credits on the steps that did succeed.
+//
+// DELIBERATELY ISOLATED FROM THE SHARED PRODUCTION ENTITLEMENT SYSTEM:
+//   - Uses getMembershipAllowances(status).vtoPerMonth — the raw, standard
+//     per-tier allowance — NOT getEffectiveVtoLimit(status). That function
+//     applies VTO_MONTHLY_LIMIT_OVERRIDE, a staging/QA override meant to
+//     raise the limit for every tier in every environment (a separate,
+//     already-flagged, unresolved scoping issue). This one-off test must
+//     never inherit that override in either direction — not this check, not
+//     checkEntitlement, not getEffectiveVtoLimit, not the override env var
+//     itself, are touched or modified by this change.
+//   - Usage counts (monthlyCompleted + monthlyInFlight) are read via the
+//     existing, unmodified getEntitlementSummary — the same real DB counts
+//     every other feature already relies on, just not run through the
+//     override-aware limit.
+//   - Enforced UNCONDITIONALLY, regardless of process.env.ENTITLEMENT_ENFORCEMENT.
+//     A new fail-closed safeguard should not depend on an existing flag
+//     whose current value in whatever environment this eventually runs in
+//     is not this route's concern.
+//
+// NOT ATOMIC — AND NOT SUFFICIENT AUTHORISATION FOR REAL SPENDING:
+//   This is a plain read-before-write, exactly the same non-atomic pattern
+//   entitlement.server.ts's own header comment already documents and
+//   accepts for every other feature's identical quota check ("acceptable
+//   for staging [low concurrency]... before enabling ENTITLEMENT_ENFORCEMENT
+//   in production, [other features'] guards must be wrapped in Serializable
+//   transactions"). Two near-simultaneous requests from the same customer
+//   could both pass this check. For the MOCKED prototype this route runs
+//   today, that is an accepted, explicitly-flagged residual risk — not
+//   because it is harmless, but because nothing here can actually overspend:
+//   no FASHN call happens, no credit is at risk, and only one allowlisted
+//   staging test account can ever reach this route at all.
+//   This changes completely the moment real FASHN calls are ever enabled.
+//   Before that happens, this route needs, at minimum: durable per-customer
+//   concurrency protection (a real reservation, held in a Serializable
+//   transaction or equivalent, not a plain count-then-compare), real usage
+//   accounting for a multi-credit chain (today's VirtualTryOnJob model has
+//   no concept of a job costing more than 1 unit), and a hard, enforced
+//   spending ceiling independent of this quota check. This pre-check alone
+//   must never be read or represented as having solved any of that.
+async function hasQuotaRoomForFullLookChain(
+  customer: { id: string; membershipStatus: MembershipStatus },
+): Promise<boolean> {
+  try {
+    const allowance = getMembershipAllowances(customer.membershipStatus);
+    const summary = await getEntitlementSummary(customer.id, customer.membershipStatus);
+    const used = summary.vto.monthlyCompleted + summary.vto.monthlyInFlight;
+    const remaining = allowance.vtoPerMonth - used;
+    return remaining >= MAX_CHAIN_LENGTH;
+  } catch {
+    // Membership or usage could not be established reliably — fail closed,
+    // never fail open to "allowed".
+    return false;
+  }
+}
+
 // ── Action — the only way anything "generates" ───────────────────────────────
 // Every branch below returns the same shape (ActionResult) so a consumer
 // (this file's own tests, the page component) never has to guess which
@@ -385,6 +460,16 @@ export async function action({ request }: ActionFunctionArgs) {
   const ineligible = outcome.garments.find((g) => !isVtoCategoryAllowed(g.category, g.subcategory));
   if (ineligible) {
     return data({ ok: false, reason: "garment_not_eligible" } as ActionResult, { status: 400 });
+  }
+
+  // ── Quota pre-check — the request must not start unless there is room for
+  // the whole 3-step chain. See the large comment on hasQuotaRoomForFullLookChain
+  // above for the policy, isolation from VTO_MONTHLY_LIMIT_OVERRIDE, and the
+  // explicit non-atomicity caveat. No customer-identifying or numeric detail
+  // is exposed in the response — just a flat, safe reason code. ───────────
+  const hasQuotaRoom = await hasQuotaRoomForFullLookChain(customer);
+  if (!hasQuotaRoom) {
+    return data({ ok: false, reason: "quota_insufficient_for_full_look" } as ActionResult, { status: 400 });
   }
 
   // ── Per-garment image resolution + suitability screening — real, not a
