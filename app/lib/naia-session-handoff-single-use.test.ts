@@ -364,7 +364,7 @@ describe("auth.shopify.login.tsx — the 'already has a session' cross-domain ca
   it("an existing session with a captured origin host now routes through /auth/shopify/handoff instead of redirecting straight there", async () => {
     const nonce = buildHandoffNonceCookie();
     const request = loginRequest({ origin_host: ORIGIN_HOST, origin_nonce_hash: nonce.nonceHash });
-    const res: any = await loginLoader({ request, params: {}, context: {} });
+    const res: any = await loginLoader({ request, params: {}, context: {} } as never);
     const location = res.headers.get("Location");
     expect(location).toMatch(new RegExp(`^https://${ORIGIN_HOST}/auth/shopify/handoff\\?`));
     const locationUrl = new URL(location);
@@ -381,7 +381,7 @@ describe("auth.shopify.login.tsx — the 'already has a session' cross-domain ca
       request: loginRequest({ origin_host: ORIGIN_HOST, origin_nonce_hash: nonce.nonceHash }),
       params: {},
       context: {},
-    });
+    } as never);
     const handoffLocation = new URL(loginRes.headers.get("Location"));
     const h = handoffLocation.searchParams.get("h")!;
     const rawNonce = nonce.cookieHeader.match(/__naia_handoff_nonce=([^;]+)/)![1];
@@ -393,7 +393,7 @@ describe("auth.shopify.login.tsx — the 'already has a session' cross-domain ca
       }),
       params: {},
       context: {},
-    });
+    } as never);
     expect(handoffRes.headers.get("Location")).toBe("/my-naia");
     const setCookie = handoffRes.headers.getSetCookie?.() ?? [handoffRes.headers.get("Set-Cookie")];
     expect(setCookie.some((c: string) => c?.includes("__naia_tok="))).toBe(true);
@@ -404,7 +404,7 @@ describe("auth.shopify.login.tsx — the 'already has a session' cross-domain ca
       request: loginRequest({ origin_host: ORIGIN_HOST }), // no origin_nonce_hash
       params: {},
       context: {},
-    });
+    } as never);
     expect(res.status).toBe(400);
     expect(mockCreate()).not.toHaveBeenCalled();
   });
@@ -414,7 +414,7 @@ describe("auth.shopify.login.tsx — the 'already has a session' cross-domain ca
       request: loginRequest({}), // no origin_host at all
       params: {},
       context: {},
-    });
+    } as never);
     expect(res.headers.get("Location")).toBe("/my-naia");
     expect(mockCreate()).not.toHaveBeenCalled();
   });
