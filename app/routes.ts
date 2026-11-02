@@ -128,6 +128,11 @@ export default [
   route("api/staging-omar-fix", "routes/api.staging-omar-fix.ts"),
   route("api/staging-saved-looks-audit", "routes/api.staging-saved-looks-audit.jsx"),
   route("staging/designer-preview", "routes/staging.designer-preview.jsx"),
+  // Full-Look VTO — staging-only, mock-only test harness (blocked in
+  // production by NAIA_PROJECT_VARIANT; further gated to an explicit
+  // customer allowlist via FULL_LOOK_VTO_TEST_CUSTOMER_IDS). Model photo and
+  // FASHN are both still fully mocked — see the route's own header.
+  route("staging/full-look-vto-test", "routes/staging.full-look-vto-test.tsx"),
 
   // ── Standalone Internal Admin Portal ─────────────────────────────────────
   // login and logout are flat (PUBLIC) — they must NOT be children of the

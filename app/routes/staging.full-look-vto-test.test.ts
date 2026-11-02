@@ -7,7 +7,8 @@
 //
 // Run: npx vitest run app/routes/staging.full-look-vto-test.test.ts
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { readFileSync } from "node:fs";
 
 vi.mock("~/lib/naia-session.server", () => ({
   getCurrentNaiaCustomer: vi.fn(),
@@ -588,5 +589,104 @@ describe("action — the only path that generates anything", () => {
       expect(res.init?.status).toBe(400);
       expect(res.data).toMatchObject({ ok: false, creditsUsed: 0 });
     });
+  });
+});
+
+// ── Phase A — route registration ─────────────────────────────────────────────
+// Added once app/routes.ts actually wires this module into the live
+// application. Same text-based contract-check convention as
+// customer-routes.test.ts's "my-naia/saved route is still registered in
+// routes.ts" — a real file read, not an assumption that registering it once
+// means it stays registered.
+
+describe("Phase A — route registration", () => {
+  it("RT.1 — app/routes.ts registers this exact route module", () => {
+    const routesSrc = readFileSync(new URL("../routes.ts", import.meta.url), "utf8");
+    expect(routesSrc).toContain("routes/staging.full-look-vto-test.tsx");
+  });
+
+  it("RT.2 — the registered URL path lives under staging/, matching every other staging-only test route's convention", () => {
+    const routesSrc = readFileSync(new URL("../routes.ts", import.meta.url), "utf8");
+    const match = routesSrc.match(/route\("([^"]*)",\s*"routes\/staging\.full-look-vto-test\.tsx"\)/);
+    expect(match).not.toBeNull();
+    expect(match![1]).toMatch(/^staging\//);
+  });
+});
+
+// ── Phase A — mock isolation: cannot fall back to real FASHN or real photo
+// bytes ───────────────────────────────────────────────────────────────────────
+// Registering the route changes exactly one thing: reachability. These tests
+// pin that nothing about going live changes what the route actually DOES —
+// no real network call, no real model photo — so that a future, separately
+// approved change intended only to swap in the real FASHN call (or the real
+// model photo) can't silently do both at once, and so a regression that
+// accidentally drops the mock options object is caught here, not in
+// production.
+
+describe("Phase A — mock isolation: cannot fall back to real FASHN or real photo bytes", () => {
+  beforeEach(() => {
+    process.env.NAIA_PROJECT_VARIANT = "staging";
+    process.env.FULL_LOOK_VTO_TEST_CUSTOMER_IDS = "sara-shop-1";
+    mockCustomer().mockResolvedValue(SARA);
+    mockLoadWI().mockResolvedValue(wiBundle([EXPECTED_PAIRING]));
+    mockResolveOwned().mockResolvedValue(EXPECTED_RESOLVED);
+    mockResolveAnchor().mockImplementation((_customerId: string, closetItemId: string) =>
+      Promise.resolve({ type: "closet", id: closetItemId, imageUrl: `https://mock.example/${closetItemId}.jpg` }),
+    );
+    mockScreenSuitability().mockResolvedValue({ status: "PASS" });
+    mockAllowances().mockReturnValue({ vtoPerMonth: 10 });
+    mockEntitlementSummary().mockResolvedValue(entitlementSummary(0, 0));
+    delete process.env.VTO_MONTHLY_LIMIT_OVERRIDE;
+    mockCooldown().mockResolvedValue({ ok: true });
+    let jobSeq = 0;
+    mockCreateOrFindJob().mockImplementation(() => {
+      jobSeq += 1;
+      return Promise.resolve({ ok: true, created: true, job: fakeJob(`iso-job-${jobSeq}`) });
+    });
+    mockAdvanceJob().mockImplementation((job: { id: string }, status: string, extras: Record<string, unknown> = {}) =>
+      Promise.resolve({ ok: true, job: fakeJob(job.id, { status, ...extras }) }),
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("RT.3 — a full successful mock run never calls the real global fetch", async () => {
+    const realFetch = vi.fn();
+    vi.stubGlobal("fetch", realFetch);
+    const res = await action({ request: formRequest() } as never);
+    expect(res.data).toMatchObject({ ok: true, mock: true });
+    expect(realFetch).not.toHaveBeenCalled();
+  });
+
+  it("RT.4 — a simulated mid-chain failure also never calls the real global fetch", async () => {
+    const realFetch = vi.fn();
+    vi.stubGlobal("fetch", realFetch);
+    const res = await action({ request: formRequest({ __simulateFailureAtStep: "1" }) } as never);
+    expect(res.data).toMatchObject({ ok: false, reason: "step_failed" });
+    expect(realFetch).not.toHaveBeenCalled();
+  });
+
+  it("RT.5 — the route module never imports the real model-photo downloader, and still references its own mock constant", () => {
+    const routeSrc = readFileSync(new URL("./staging.full-look-vto-test.tsx", import.meta.url), "utf8");
+    // The real downloader's name may appear in the "SWAP POINT" doc comment
+    // (documenting the future, separately-approved change) — it must never
+    // appear in an actual import statement.
+    expect(routeSrc).not.toMatch(/import\s*\{[^}]*downloadModelPhotoAsDataUrl[^}]*\}/);
+    expect(routeSrc).toContain("MOCK_MODEL_IMAGE_DATA_URL");
+    expect(routeSrc).toContain("initialModelImageDataUrl: MOCK_MODEL_IMAGE_DATA_URL");
+  });
+
+  it("RT.6 — the FASHN options passed into the chain are always this file's own mock factory, never omitted or bare", () => {
+    const routeSrc = readFileSync(new URL("./staging.full-look-vto-test.tsx", import.meta.url), "utf8");
+    const chainCallIndex = routeSrc.indexOf("runJobTrackedFullLookChain(");
+    const mockCallIndex = routeSrc.indexOf("createMockFashnFetch(failAtStepIndex)", chainCallIndex);
+    expect(chainCallIndex).toBeGreaterThan(-1);
+    expect(mockCallIndex).toBeGreaterThan(chainCallIndex);
+    // Nothing resembling "..., {})" — an omitted/defaults-accepting options
+    // arg — appears between the call and its mock factory argument.
+    const between = routeSrc.slice(chainCallIndex, mockCallIndex);
+    expect(between).not.toMatch(/,\s*\{\s*\}\s*\)/);
   });
 });
