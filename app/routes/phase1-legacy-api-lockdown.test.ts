@@ -91,6 +91,93 @@ describe("§A — api.quick-style.jsx retired (no live caller; /quick-style has 
   });
 });
 
+describe("§A — api.style.jsx retired (2026-11-02 follow-up to commit 97a70f1)", () => {
+  // 97a70f1 added a mandatory authenticate.admin() gate to api.style.jsx.
+  // This follow-up goes further: the only real caller was the AI-stylist-
+  // preview prototype on app._index.jsx (the embedded admin's home page),
+  // which was itself a stale prototype superseded by the real nAia Admin
+  // dashboard and the customer-facing /style-me flow. Retiring both closes
+  // the unauthenticated-billable-Anthropic-call exposure at the root instead
+  // of just gating it.
+
+  it("A10 — route file no longer exists", () => {
+    assert.equal(existsSync(routePath("api.style.jsx")), false, "api.style.jsx must stay deleted");
+  });
+
+  it("A11 — route is not registered in app/routes.ts", () => {
+    assert.ok(
+      !routesConfig.includes(`"routes/api.style.jsx"`),
+      "app/routes.ts must not reference api.style.jsx",
+    );
+    assert.ok(
+      !routesConfig.includes(`route("api/style"`),
+      "the api/style path must not be registered",
+    );
+  });
+
+  it("A12 — the gate test from the prior commit is gone too (it tested deleted code)", () => {
+    assert.equal(
+      existsSync(routePath("api.style.test.ts")),
+      false,
+      "api.style.test.ts tested the now-deleted route and should not remain as a stale fixture",
+    );
+  });
+});
+
+describe("§A — app/routes.ts has no filesystem-based auto-discovery that could silently resurrect a deleted route file", () => {
+  // Retiring a route by deleting its file and registration entry is only
+  // sufficient if nothing else scans app/routes/ by filename convention.
+  // React Router's flatRoutes()/fs-routes would do exactly that — confirmed
+  // absent here. If this ever changes, every retirement in this file (and
+  // in §A above) needs re-auditing, since a resurrected file would need no
+  // registration at all to become reachable again.
+  it("A13 — routes.ts does not call flatRoutes() or import @react-router/fs-routes", () => {
+    assert.ok(!routesConfig.includes("flatRoutes"), "no flatRoutes() usage expected in routes.ts");
+    assert.ok(!routesConfig.includes("fs-routes"), "no @react-router/fs-routes import expected in routes.ts");
+  });
+
+  it("A14 — routes.ts exports a plain array of explicit route() entries only", () => {
+    assert.match(routesConfig, /export default \[/, "routes.ts must export a literal array");
+  });
+});
+
+describe("§A — app._index.jsx (embedded admin home page) prototype retired alongside api.style.jsx", () => {
+  const appIndex = readRoute("app._index.jsx");
+
+  it("A15 — no fetch call to the retired /api/style endpoint remains", () => {
+    assert.ok(!appIndex.includes('fetch("/api/style"'), "app._index.jsx must not call the retired /api/style route");
+    assert.ok(!appIndex.includes("callAI"), "the AI-stylist-preview callAI() handler must be removed");
+  });
+
+  it("A16 — the product-recommendation/scoring prototype logic is gone", () => {
+    for (const marker of ["scoreProduct", "getFeelingKeywordMap", "getEventKeywordMap", "parseStylingResult", "GetNaiaProducts"]) {
+      assert.ok(!appIndex.includes(marker), `prototype helper "${marker}" should be removed, not just unused`);
+    }
+  });
+
+  it("A17 — the auth-bounce-suppression try/catch around authenticate.admin() is preserved", () => {
+    // See closet-intelligence.test.ts §CI.35 — removing this, or letting a
+    // thrown auth error propagate from this specific loader, reintroduces
+    // a token-exchange redirect loop on the embedded app's first load.
+    const loaderBody = appIndex.slice(
+      appIndex.indexOf("export async function loader"),
+      appIndex.indexOf("export default function"),
+    );
+    assert.ok(loaderBody.includes("authenticate.admin(request)"), "loader must still call authenticate.admin()");
+    const tryPos = loaderBody.indexOf("try {");
+    const catchPos = loaderBody.indexOf("} catch"); // "} catch" only matches real code, not the prose comment above it
+    const authPos = loaderBody.indexOf("authenticate.admin(request)");
+    assert.ok(
+      tryPos > -1 && catchPos > -1 && tryPos < authPos && authPos < catchPos,
+      "authenticate.admin(request) must still be wrapped in its own try/catch",
+    );
+  });
+
+  it("A18 — the working nav link to the real nAia Admin dashboard still exists", () => {
+    assert.ok(appIndex.includes("/app/naia-admin"), "home page must still link merchants to the real admin dashboard");
+  });
+});
+
 describe("§A — api.closet.jsx kept live, patched in place (see b1-53 in batch1-integration.test.ts)", () => {
   const closetApi = readRoute("api.closet.jsx");
 
@@ -420,6 +507,10 @@ describe("§D — no remaining unauthenticated fetch to a paid AI/scan provider"
 
   it("D2 — api.quick-style.jsx's direct unauthenticated Anthropic call is gone", () => {
     assert.equal(existsSync(routePath("api.quick-style.jsx")), false);
+  });
+
+  it("D2b — api.style.jsx's direct unauthenticated Anthropic call is gone (2026-11-02)", () => {
+    assert.equal(existsSync(routePath("api.style.jsx")), false);
   });
 
   it("D3 — Bodygram's paid scan-token call is gated behind auth (see B2)", () => {
