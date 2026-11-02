@@ -47,12 +47,26 @@
 //       The checkbox is additionally required as a second, explicit
 //       "I agree to this one-off test" signal; it does not replace the
 //       timestamp check.
-//   DEFERRED (requires the actual image, not just a DB field):
-//     - screenGarmentSuitability — api.trigger-tryon.tsx's image-based
-//       suitability screen for the closet source. Cannot run without
-//       fetching the real garment photo, which this route does not do.
-//     - Everything behind the two SWAP POINTs below (the real model photo,
-//       the real per-garment signed URLs) and the real FASHN call itself.
+//     - Per-garment image resolution + suitability screening (2026-11-02):
+//       resolveClosetAnchor resolves each garment's real, ownership-scoped
+//       signed Cloudinary URL (the exact function api.wi-style-this.tsx and
+//       api.trigger-tryon.tsx's closet path both already use); FASHN never
+//       sees it since the chain call below is still fully mocked (see
+//       createMockFashnFetch) — the URL is built, not fetched, by this step.
+//       screenGarmentSuitability then runs the real, unmocked production
+//       image-based AI screen (api.trigger-tryon.tsx's own suitability gate
+//       for the closet source) against that URL. A missing/unresolvable
+//       image or a non-PASS screening result fails the whole set closed —
+//       never a silent skip, never a placeholder substituted in. This is
+//       the one gate in this route that, when it actually RUNS against a
+//       real account, does read real Closet garment image bytes (via the
+//       AI vision call inside screenGarmentSuitability) — unlike every
+//       other gate above, which only reads DB fields. It has only ever been
+//       exercised here against mocked images/mocked services; see
+//       staging.full-look-vto-test.test.ts.
+//   DEFERRED (requires Sara's actual nAia Model body photo):
+//     - Everything behind the remaining SWAP POINT below (the real model
+//       photo) and the real FASHN call itself.
 //   KNOWINGLY NOT ADDRESSED HERE (separately tracked, pre-existing issue,
 //   not something to silently fold into this test):
 //     - VTO quota/entitlement (ENTITLEMENT_ENFORCEMENT) — already flagged
@@ -86,13 +100,15 @@
 //   - GET never touches FASHN, a model photo, or a garment image. It only
 //     reads garment name/category/subcategory metadata and a boolean
 //     nAia Model readiness flag. Opening this page spends nothing.
-//   - POST (the only way anything generates) uses a MOCK model image and
-//     MOCK garment "product images" — synthetic data: URLs, never Sara's
-//     real nAia Model photo and never a real signed Cloudinary URL. The
-//     two call sites that would need to change to go real are marked
-//     "SWAP POINT" below; neither is touched here.
+//   - POST (the only way anything generates) uses a MOCK model image —
+//     synthetic data: URL, never Sara's real nAia Model photo. That one
+//     remaining call site is marked "SWAP POINT" below; it is not touched
+//     here. Garment "product images" are now real, ownership-verified,
+//     screened Closet image URLs (2026-11-02) — see the per-garment
+//     resolution block above.
 //   - The FASHN call itself is fully mocked (createMockFashnFetch) — no
-//     real network request to api.fashn.ai happens from this route today.
+//     real network request to api.fashn.ai happens from this route today,
+//     regardless of how real the garment image URLs passed into it are.
 
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { data, Form, useActionData, useLoaderData } from "react-router";
@@ -100,6 +116,8 @@ import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { loadWardrobeIntelligence } from "~/lib/ai/wardrobe-intelligence.server";
 import { loadNaiaModel, computeModelReadinessFromRecord } from "~/lib/ai/my-naia-model.server";
 import { isVtoCategoryAllowed } from "~/lib/ai/closet-eligibility";
+import { resolveClosetAnchor } from "~/lib/ai/styleme-anchor.server";
+import { screenGarmentSuitability } from "~/lib/image-suitability.server";
 import prisma from "~/db.server";
 import { resolveOwnedWiGarments, type WiResolvedGarmentMetadata } from "~/lib/ai/poc-wi-combination-resolver.server";
 import {
@@ -292,13 +310,6 @@ const MOCK_MODEL_IMAGE_DATA_URL = "data:image/png;base64,bW9ja21vZGVsaW1hZ2U=";
 // with downloadModelPhotoAsDataUrl(naiaModel.bodyPublicId, naiaModel.bodyFormat,
 // naiaModel.deliveryType) from fashn-tryon-service.server.ts — not done here.
 
-const MOCK_PRODUCT_IMAGE_URL = "https://example.com/mock-product-image.png";
-// SWAP POINT (garment photos): going real means resolving each garment's
-// actual signed Cloudinary URL (resolveClosetAnchor / buildPrivateDownloadUrl)
-// instead of this placeholder — not done here. screenGarmentSuitability
-// (image-based) also belongs here once this swap happens; it cannot run
-// against a placeholder URL today.
-
 const MAX_CONSENT_AGE_MS = 15 * 60 * 1000; // same window and constant as api.trigger-tryon.tsx
 
 // ── Action — the only way anything "generates" ───────────────────────────────
@@ -376,6 +387,26 @@ export async function action({ request }: ActionFunctionArgs) {
     return data({ ok: false, reason: "garment_not_eligible" } as ActionResult, { status: 400 });
   }
 
+  // ── Per-garment image resolution + suitability screening — real, not a
+  // placeholder. resolveClosetAnchor re-verifies ownership AGAIN (defense
+  // in depth, same as every other check in this action) and returns the
+  // garment's real signed Cloudinary URL; screenGarmentSuitability then runs
+  // the real production AI screen against it. Each garment is resolved and
+  // screened individually, and ANY failure fails the whole set closed —
+  // never a silent skip, never a placeholder substituted in its place. ────
+  const resolvedImageUrlById = new Map<string, string>();
+  for (const g of outcome.garments) {
+    const anchor = await resolveClosetAnchor(customer.id, g.closetItemId);
+    if (!anchor || !anchor.imageUrl) {
+      return data({ ok: false, reason: "garment_image_unavailable" } as ActionResult, { status: 400 });
+    }
+    const suitability = await screenGarmentSuitability(anchor.imageUrl, { declaredCategory: g.category });
+    if (suitability.status !== "PASS") {
+      return data({ ok: false, reason: "garment_not_suitable" } as ActionResult, { status: 400 });
+    }
+    resolvedImageUrlById.set(g.closetItemId, anchor.imageUrl);
+  }
+
   const consent: VirtualTryOnConsent = {
     virtualTryOnConsent: true,
     policyVersion: "1.0-staging-test",
@@ -387,7 +418,7 @@ export async function action({ request }: ActionFunctionArgs) {
     label: g.name ?? g.closetItemId,
     category: g.category,
     subcategory: g.subcategory,
-    productImageUrl: MOCK_PRODUCT_IMAGE_URL,
+    productImageUrl: resolvedImageUrlById.get(g.closetItemId)!,
   }));
 
   // Test-harness-only knob — lets this route's own tests (and only this

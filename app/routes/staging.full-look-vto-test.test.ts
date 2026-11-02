@@ -25,11 +25,19 @@ vi.mock("~/db.server", () => ({
 vi.mock("~/lib/ai/poc-wi-combination-resolver.server", () => ({
   resolveOwnedWiGarments: vi.fn(),
 }));
+vi.mock("~/lib/ai/styleme-anchor.server", () => ({
+  resolveClosetAnchor: vi.fn(),
+}));
+vi.mock("~/lib/image-suitability.server", () => ({
+  screenGarmentSuitability: vi.fn(),
+}));
 
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { loadWardrobeIntelligence } from "~/lib/ai/wardrobe-intelligence.server";
 import { loadNaiaModel, computeModelReadinessFromRecord } from "~/lib/ai/my-naia-model.server";
 import { resolveOwnedWiGarments } from "~/lib/ai/poc-wi-combination-resolver.server";
+import { resolveClosetAnchor } from "~/lib/ai/styleme-anchor.server";
+import { screenGarmentSuitability } from "~/lib/image-suitability.server";
 import prisma from "~/db.server";
 import { loader, action, isAuthorizedStagingTestAccount } from "./staging.full-look-vto-test";
 
@@ -38,6 +46,8 @@ const mockLoadWI = () => loadWardrobeIntelligence as ReturnType<typeof vi.fn>;
 const mockLoadModel = () => loadNaiaModel as ReturnType<typeof vi.fn>;
 const mockReadiness = () => computeModelReadinessFromRecord as ReturnType<typeof vi.fn>;
 const mockResolveOwned = () => resolveOwnedWiGarments as ReturnType<typeof vi.fn>;
+const mockResolveAnchor = () => resolveClosetAnchor as ReturnType<typeof vi.fn>;
+const mockScreenSuitability = () => screenGarmentSuitability as ReturnType<typeof vi.fn>;
 const mockProfileFind = () => (prisma as unknown as { onboardingProfile: { findUnique: ReturnType<typeof vi.fn> } }).onboardingProfile.findUnique;
 
 const SARA = { id: "sara-cust-1", shopifyCustomerId: "sara-shop-1" };
@@ -205,6 +215,13 @@ describe("action — the only path that generates anything", () => {
     mockCustomer().mockResolvedValue(SARA);
     mockLoadWI().mockResolvedValue(wiBundle([EXPECTED_PAIRING]));
     mockResolveOwned().mockResolvedValue(EXPECTED_RESOLVED);
+    // Default: every garment resolves a real-shaped (but entirely mock) image
+    // URL and passes screening. Individual tests below override these to
+    // exercise each failure mode.
+    mockResolveAnchor().mockImplementation((_customerId: string, closetItemId: string) =>
+      Promise.resolve({ type: "closet", id: closetItemId, imageUrl: `https://mock.example/${closetItemId}.jpg` }),
+    );
+    mockScreenSuitability().mockResolvedValue({ status: "PASS" });
   });
 
   it("GT.11 — refuses without consent=yes, and never even re-resolves ownership", async () => {
@@ -268,6 +285,71 @@ describe("action — the only path that generates anything", () => {
     const res = await action({ request: formRequest() } as never);
     expect(res.init?.status).toBe(400);
     expect(res.data).toEqual({ ok: false, reason: "garment_not_eligible" });
+  });
+
+  it("GT.26 — refuses when a garment's image is unresolvable (resolveClosetAnchor returns null), and never reaches the third garment", async () => {
+    mockResolveAnchor().mockResolvedValueOnce({ type: "closet", id: "g-blazer", imageUrl: "https://mock.example/first.jpg" }); // 1st garment: resolves fine, screened
+    mockResolveAnchor().mockResolvedValueOnce(null); // 2nd garment: no longer resolvable — removed/not owned at this exact moment
+    const res = await action({ request: formRequest() } as never);
+    expect(res.init?.status).toBe(400);
+    expect(res.data).toEqual({ ok: false, reason: "garment_image_unavailable" });
+    expect(mockResolveAnchor()).toHaveBeenCalledTimes(2); // fails on the 2nd — the 3rd garment is never even looked up
+    expect(mockScreenSuitability()).toHaveBeenCalledTimes(1); // only the 1st garment, which resolved successfully, was screened
+  });
+
+  it("GT.27 — refuses when a garment resolves but has no image at all (imageUrl null)", async () => {
+    mockResolveAnchor().mockResolvedValueOnce({ type: "closet", id: "g-trousers", imageUrl: "https://mock.example/g-trousers.jpg" });
+    mockResolveAnchor().mockResolvedValueOnce({ type: "closet", id: "g-shirt", imageUrl: null });
+    const res = await action({ request: formRequest() } as never);
+    expect(res.init?.status).toBe(400);
+    expect(res.data).toEqual({ ok: false, reason: "garment_image_unavailable" });
+  });
+
+  it("GT.28 — refuses when a garment's image fails suitability screening", async () => {
+    mockScreenSuitability()
+      .mockResolvedValueOnce({ status: "PASS" })
+      .mockResolvedValueOnce({ status: "RETRY_IMAGE", subCode: "image_too_blurry" });
+    const res = await action({ request: formRequest() } as never);
+    expect(res.init?.status).toBe(400);
+    expect(res.data).toEqual({ ok: false, reason: "garment_not_suitable" });
+  });
+
+  it("GT.29 — refuses when a garment's image is NEEDS_CLARIFICATION, not just RETRY_IMAGE", async () => {
+    mockScreenSuitability()
+      .mockResolvedValueOnce({ status: "PASS" })
+      .mockResolvedValueOnce({ status: "PASS" })
+      .mockResolvedValueOnce({ status: "NEEDS_CLARIFICATION", subCode: "category_mismatch" });
+    const res = await action({ request: formRequest() } as never);
+    expect(res.init?.status).toBe(400);
+    expect(res.data).toEqual({ ok: false, reason: "garment_not_suitable" });
+  });
+
+  it("GT.30 — all three garments must individually pass screening — not sampled, not skipped", async () => {
+    const res = await action({ request: formRequest() } as never);
+    expect(res.data).toMatchObject({ ok: true });
+    expect(mockResolveAnchor()).toHaveBeenCalledTimes(3);
+    expect(mockScreenSuitability()).toHaveBeenCalledTimes(3);
+    const screenedUrls = mockScreenSuitability().mock.calls.map((c: unknown[]) => c[0]);
+    expect(new Set(screenedUrls).size).toBe(3); // three distinct garments, three distinct images screened
+  });
+
+  it("GT.31 — the real resolved image URL (not a placeholder) is what reaches suitability screening", async () => {
+    mockResolveAnchor().mockImplementation((_customerId: string, closetItemId: string) =>
+      Promise.resolve({ type: "closet", id: closetItemId, imageUrl: `https://real-signed-url.example/${closetItemId}` }),
+    );
+    await action({ request: formRequest() } as never);
+    const screenedUrls = mockScreenSuitability().mock.calls.map((c: unknown[]) => c[0]);
+    for (const url of screenedUrls) {
+      expect(url).toMatch(/^https:\/\/real-signed-url\.example\//);
+      expect(url).not.toMatch(/mock-product-image/);
+    }
+  });
+
+  it("GT.32 — ownership is re-verified per garment at the image-resolution step too (defense in depth)", async () => {
+    await action({ request: formRequest() } as never);
+    for (const closetItemId of ["g-blazer", "g-shirt", "g-trousers"]) {
+      expect(mockResolveAnchor()).toHaveBeenCalledWith("sara-cust-1", closetItemId);
+    }
   });
 
   it("GT.12 — with every gate satisfied, runs the full 3-step mock chain and returns a final mock image", async () => {
