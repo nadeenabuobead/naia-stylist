@@ -1,4 +1,17 @@
 export async function action({ request }) {
+  // Mandatory, fail-closed auth gate — added 2026-11-02 security remediation.
+  // This route has no customer-facing caller; its only known caller is the
+  // embedded Shopify admin preview tool in app._index.jsx, which runs inside
+  // a page already gated the same way. Further below, the optional lookup of
+  // a customer session (used only to enrich the AI prompt with past review
+  // history) must never be mistaken for this gate. See api.style.test.ts.
+  const { authenticate } = await import("../shopify.server.js");
+  try {
+    await authenticate.admin(request);
+  } catch {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
     const body = await request.json();
     const {
