@@ -18,6 +18,9 @@ vi.mock("~/lib/ai/wardrobe-intelligence.server", () => ({
 vi.mock("~/lib/ai/my-naia-model.server", () => ({
   loadNaiaModel: vi.fn(),
   computeModelReadinessFromRecord: vi.fn(),
+  checkCustomerCooldown: vi.fn(),
+  createOrFindTryOnJob: vi.fn(),
+  advanceTryOnJob: vi.fn(),
 }));
 vi.mock("~/db.server", () => ({
   default: { onboardingProfile: { findUnique: vi.fn() } },
@@ -40,7 +43,10 @@ vi.mock("~/lib/plan/entitlement.server", () => ({
 
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { loadWardrobeIntelligence } from "~/lib/ai/wardrobe-intelligence.server";
-import { loadNaiaModel, computeModelReadinessFromRecord } from "~/lib/ai/my-naia-model.server";
+import {
+  loadNaiaModel, computeModelReadinessFromRecord,
+  checkCustomerCooldown, createOrFindTryOnJob, advanceTryOnJob,
+} from "~/lib/ai/my-naia-model.server";
 import { resolveOwnedWiGarments } from "~/lib/ai/poc-wi-combination-resolver.server";
 import { resolveClosetAnchor } from "~/lib/ai/styleme-anchor.server";
 import { screenGarmentSuitability } from "~/lib/image-suitability.server";
@@ -53,6 +59,20 @@ const mockCustomer = () => getCurrentNaiaCustomer as ReturnType<typeof vi.fn>;
 const mockLoadWI = () => loadWardrobeIntelligence as ReturnType<typeof vi.fn>;
 const mockLoadModel = () => loadNaiaModel as ReturnType<typeof vi.fn>;
 const mockReadiness = () => computeModelReadinessFromRecord as ReturnType<typeof vi.fn>;
+const mockCooldown = () => checkCustomerCooldown as ReturnType<typeof vi.fn>;
+const mockCreateOrFindJob = () => createOrFindTryOnJob as ReturnType<typeof vi.fn>;
+const mockAdvanceJob = () => advanceTryOnJob as ReturnType<typeof vi.fn>;
+
+function fakeJob(id: string, overrides: Record<string, unknown> = {}) {
+  return {
+    id, customerId: "sara-cust-1", naiaModelId: "model-1", productHandle: "fulllook-poc:step",
+    provider: "FASHN", predictionId: null, status: "CREATED",
+    virtualTryOnConsentAt: new Date(), consentPolicyVersion: "1.0", saveTryOnResultConsentAt: null,
+    idempotencyKey: `key-${id}`, requestFingerprint: null, errorCode: null,
+    createdAt: new Date(), updatedAt: new Date(), completedAt: null, lastActivityAt: new Date(),
+    ...overrides,
+  };
+}
 const mockResolveOwned = () => resolveOwnedWiGarments as ReturnType<typeof vi.fn>;
 const mockResolveAnchor = () => resolveClosetAnchor as ReturnType<typeof vi.fn>;
 const mockScreenSuitability = () => screenGarmentSuitability as ReturnType<typeof vi.fn>;
@@ -241,6 +261,18 @@ describe("action — the only path that generates anything", () => {
     mockAllowances().mockReturnValue({ vtoPerMonth: 10 });
     mockEntitlementSummary().mockResolvedValue(entitlementSummary(0, 0));
     delete process.env.VTO_MONTHLY_LIMIT_OVERRIDE;
+    // Default: Stage 2B job-tracked chain's dependencies all succeed cleanly —
+    // no cooldown block, every createOrFindTryOnJob call creates a fresh job,
+    // every advanceTryOnJob call succeeds. Individual tests override these.
+    mockCooldown().mockResolvedValue({ ok: true });
+    let jobSeq = 0;
+    mockCreateOrFindJob().mockImplementation(() => {
+      jobSeq += 1;
+      return Promise.resolve({ ok: true, created: true, job: fakeJob(`route-job-${jobSeq}`) });
+    });
+    mockAdvanceJob().mockImplementation((job: { id: string }, status: string, extras: Record<string, unknown> = {}) =>
+      Promise.resolve({ ok: true, job: fakeJob(job.id, { status, ...extras }) }),
+    );
   });
 
   it("GT.11 — refuses without consent=yes, and never even re-resolves ownership", async () => {
@@ -479,6 +511,7 @@ describe("action — the only path that generates anything", () => {
     const res = await action({
       request: formRequest({ __simulateFailureAtStep: "1" }),
     } as never);
+    expect(res.init?.status).toBe(400);
     const body = res.data;
     expect(body.ok).toBe(false);
     if (body.ok) throw new Error("unreachable");
@@ -504,5 +537,56 @@ describe("action — the only path that generates anything", () => {
     await expect(
       action({ request: formRequest() } as never),
     ).rejects.toMatchObject({ status: 404 });
+  });
+
+  describe("GT.43-48 — Stage 2B job-tracked chain, exercised through the real action", () => {
+    it("GT.43 — a cooldown/active-job block surfaces as duplicate_attempt_blocked, before any garment image is touched", async () => {
+      mockCooldown().mockResolvedValue({ ok: false, reason: "ACTIVE_JOB" });
+      const res = await action({ request: formRequest() } as never);
+      expect(res.init?.status).toBe(400);
+      expect(res.data).toMatchObject({ ok: false, reason: "duplicate_attempt_blocked", creditsUsed: 0, steps: [] });
+    });
+
+    it("GT.44 — a prior claimed reservation surfaces as full_look_test_already_attempted", async () => {
+      mockCreateOrFindJob().mockResolvedValueOnce({ ok: true, created: false, job: fakeJob("prior-job", { status: "COMPLETED" }) });
+      const res = await action({ request: formRequest() } as never);
+      expect(res.init?.status).toBe(400);
+      expect(res.data).toMatchObject({ ok: false, reason: "full_look_test_already_attempted", creditsUsed: 0, steps: [] });
+    });
+
+    it("GT.45 — the real naiaModel id and bodyPublicId are passed through to job creation, not placeholders", async () => {
+      mockLoadModel().mockResolvedValue({ id: "real-model-id-77", bodyPublicId: "real-body-pub-77", bodyModerationStatus: "APPROVED" });
+      await action({ request: formRequest() } as never);
+      const firstCallArgs = mockCreateOrFindJob().mock.calls[0][0];
+      expect(firstCallArgs.naiaModelId).toBe("real-model-id-77");
+      expect(firstCallArgs.bodyPublicId).toBe("real-body-pub-77");
+    });
+
+    it("GT.46 — sequential progression: three distinct jobs are created, in order, for a successful chain", async () => {
+      const res = await action({ request: formRequest() } as never);
+      expect(res.data).toMatchObject({ ok: true, creditsUsed: 3 });
+      expect(mockCreateOrFindJob()).toHaveBeenCalledTimes(3);
+      expect(mockCooldown()).toHaveBeenCalledTimes(1); // never re-checked between steps
+    });
+
+    it("GT.47 — a mid-chain failure reports the real step index and only the genuinely completed credits", async () => {
+      const res = await action({ request: formRequest({ __simulateFailureAtStep: "1" }) } as never);
+      expect(res.init?.status).toBe(400);
+      const body = res.data;
+      expect(body).toMatchObject({ ok: false, creditsUsed: 1, failedStepIndex: 1 });
+      if (body.ok) throw new Error("unreachable");
+      expect(body.steps).toEqual([
+        { label: "Beige Tailored Trousers", slot: "bottom", ok: true },
+        { label: "Blue Chambray Button-Up Shirt", slot: "top", ok: false },
+      ]);
+      expect(mockCreateOrFindJob()).toHaveBeenCalledTimes(2); // the third garment's job is never even created
+    });
+
+    it("GT.48 — createOrFindTryOnJob itself failing fails the request closed, not open", async () => {
+      mockCreateOrFindJob().mockResolvedValueOnce({ ok: false, error: "boom", code: "ACTIVE_JOB_EXISTS" });
+      const res = await action({ request: formRequest() } as never);
+      expect(res.init?.status).toBe(400);
+      expect(res.data).toMatchObject({ ok: false, creditsUsed: 0 });
+    });
   });
 });

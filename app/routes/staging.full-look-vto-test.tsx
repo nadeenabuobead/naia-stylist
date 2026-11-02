@@ -15,8 +15,12 @@
 // among whatever candidates the engine currently ranks, re-verifies
 // ownership of every garment (resolveOwnedWiGarments), checks every
 // non-photo production VTO gate that applies (see "PROTECTIONS" below),
-// then runs the isolated sequential VTO POC (runSequentialFullLookTryOn)
-// against it.
+// then runs it through the job-tracked sequential chain
+// (poc-job-tracked-full-look-chain.server.ts, Stage 2B) — the real
+// VirtualTryOnJob lifecycle (cooldown, Serializable active-job lock, a
+// race-safe single-attempt reservation) wrapped around each step's FASHN
+// interaction, which is still only ever reached through a mock in every
+// test in this project.
 //
 // WHY A NAMED COMBINATION, NOT "WHATEVER RANKS #1": the WI pairing engine
 // re-ranks on every load as the Closet/Passport change. Taking
@@ -67,18 +71,29 @@
 //   DEFERRED (requires Sara's actual nAia Model body photo):
 //     - Everything behind the remaining SWAP POINT below (the real model
 //       photo) and the real FASHN call itself.
-//     - A hard, atomic, per-customer spending ceiling and durable multi-
-//       credit usage accounting — see hasQuotaRoomForFullLookChain's own
-//       header comment for exactly what the Stage 2A pre-check below does
-//       and does NOT provide; it is sufficient only while FASHN stays mocked.
+//     - A verified, explicitly-approved execution-time allowance for the
+//       real run — see poc-job-tracked-full-look-chain.server.ts's "Issue 3"
+//       section. No maxDuration/functions config exists anywhere in this
+//       repo today, and a worst-case 3-step real chain (~270s) would exceed
+//       Vercel's default function timeout. NOT resolved here — reported,
+//       not assumed away, and nothing in this codebase changes it.
 //   PARTIALLY ADDRESSED (2026-11-03, Stage 2A): a quota pre-check now runs
 //   before any image is resolved — see hasQuotaRoomForFullLookChain below.
 //   It is deliberately NOT routed through checkEntitlement/getEffectiveVtoLimit
 //   (isolated from the pre-existing, unresolved VTO_MONTHLY_LIMIT_OVERRIDE
 //   scoping bug flagged elsewhere in this project) and is enforced regardless
-//   of ENTITLEMENT_ENFORCEMENT. It is a non-atomic read-before-write check,
-//   explicitly not a substitute for real paid-use concurrency/spending
-//   protection — see its own comment for the full caveat.
+//   of ENTITLEMENT_ENFORCEMENT.
+//   ADDRESSED (2026-11-03, Stage 2B): the chain now runs through
+//   runJobTrackedFullLookChain (poc-job-tracked-full-look-chain.server.ts)
+//   instead of the DB-free orchestrator — real VirtualTryOnJob rows, the
+//   real Serializable active-job lock, a race-safe single-attempt
+//   reservation keyed off the existing idempotencyKey unique constraint
+//   (not a count query), and correct per-step cooldown placement (checked
+//   once, before step 1 — checking it before every step would self-block
+//   the chain on its own just-completed prior step; see that file's own
+//   header for why). Multi-credit accounting falls out of this for free:
+//   up to 3 real job rows, one per genuinely attempted step, is exactly
+//   what the existing quota-counting queries already count correctly.
 //
 // AUTH / AUTHORIZATION / CSRF: identity comes only from
 // getCurrentNaiaCustomer(request) — the real session cookie
@@ -130,11 +145,11 @@ import { getEntitlementSummary } from "~/lib/plan/entitlement.server";
 import type { MembershipStatus } from "@prisma/client";
 import prisma from "~/db.server";
 import { resolveOwnedWiGarments, type WiResolvedGarmentMetadata } from "~/lib/ai/poc-wi-combination-resolver.server";
+import { MAX_CHAIN_LENGTH } from "~/lib/ai/poc-sequential-full-look-vto.server";
 import {
-  runSequentialFullLookTryOn,
-  MAX_CHAIN_LENGTH,
-  type SequentialTryOnGarmentInput,
-} from "~/lib/ai/poc-sequential-full-look-vto.server";
+  runJobTrackedFullLookChain,
+  type JobTrackedChainGarmentInput,
+} from "~/lib/ai/poc-job-tracked-full-look-chain.server";
 import type { RunTryOnOptions } from "~/lib/ai/fashn-try-on.server";
 import type { VirtualTryOnConsent } from "~/lib/ai/virtual-try-on.types";
 
@@ -499,7 +514,7 @@ export async function action({ request }: ActionFunctionArgs) {
   };
 
   const ordered = sortForDisplay(outcome.garments);
-  const garments: SequentialTryOnGarmentInput[] = ordered.map((g) => ({
+  const garments: JobTrackedChainGarmentInput[] = ordered.map((g) => ({
     label: g.name ?? g.closetItemId,
     category: g.category,
     subcategory: g.subcategory,
@@ -512,8 +527,19 @@ export async function action({ request }: ActionFunctionArgs) {
   const rawFailAt = form.get("__simulateFailureAtStep");
   const failAtStepIndex = typeof rawFailAt === "string" && rawFailAt !== "" ? Number(rawFailAt) : null;
 
-  const report = await runSequentialFullLookTryOn(
-    { customerId: customer.id, initialModelImageDataUrl: MOCK_MODEL_IMAGE_DATA_URL, garments, consent },
+  // ── Stage 2B: job-tracked chain execution — see
+  // poc-job-tracked-full-look-chain.server.ts for the full design (cooldown
+  // checked once, the race-safe single-attempt reservation, and the
+  // still-unresolved execution-timeout caveat for the real run). ──────────
+  const report = await runJobTrackedFullLookChain(
+    {
+      customerId: customer.id,
+      naiaModelId: naiaModel.id,
+      bodyPublicId: naiaModel.bodyPublicId,
+      initialModelImageDataUrl: MOCK_MODEL_IMAGE_DATA_URL,
+      garments,
+      consent,
+    },
     createMockFashnFetch(failAtStepIndex),
   );
 
@@ -522,7 +548,7 @@ export async function action({ request }: ActionFunctionArgs) {
       ok: true,
       mock: true,
       creditsUsed: report.creditsUsed,
-      steps: report.steps.map((s) => ({ label: s.garment.label, slot: s.slot, ok: true })),
+      steps: report.steps.map((s, i) => ({ label: s.label, slot: ordered[i]?.slot ?? "unknown", ok: s.ok })),
       finalImageDataUrl: report.finalImageDataUrl,
     } as ActionResult);
   }
@@ -532,9 +558,9 @@ export async function action({ request }: ActionFunctionArgs) {
     mock: true,
     reason: report.reason,
     creditsUsed: report.creditsUsed,
-    failedStepIndex: "failedStepIndex" in report ? report.failedStepIndex : undefined,
-    steps: report.steps.map((s) => ({ label: s.garment.label, slot: s.slot, ok: s.result.ok })),
-  } as ActionResult);
+    failedStepIndex: report.failedStepIndex,
+    steps: report.steps.map((s, i) => ({ label: s.label, slot: ordered[i]?.slot ?? "unknown", ok: s.ok })),
+  } as ActionResult, { status: 400 });
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
