@@ -34,8 +34,17 @@ describe("LookCollage.tsx — garment images preserve their full silhouette, not
     assert.match(tileBody, /background:\s*"color-mix/);
   });
 
-  it("the <img> sets an explicit objectPosition, not left to an implicit default", () => {
-    assert.match(collageSrc, /objectPosition:\s*"center"/);
+  it("the <img> is top-aligned, not centered — this is what fixes 'garments appear at inconsistent heights' in a 3/4-image collage (2026-11-08)", () => {
+    // Centering both ways was the regression: a wide/short item (shoes, bags)
+    // letterboxes top AND bottom and so starts partway down its tile, while a
+    // tall item (trousers, dresses) fills top-to-bottom and starts at the
+    // tile's own top edge — side by side that reads as "this one sits lower"
+    // even though nothing is misaligned. Top-aligning removes the mismatch:
+    // every garment starts at the same edge of its own tile regardless of its
+    // own photo's aspect ratio. Horizontal stays centered — the reported
+    // inconsistency was specifically about vertical position.
+    assert.match(collageSrc, /objectPosition:\s*"center top"/);
+    assert.ok(!collageSrc.includes('objectPosition: "center"'), 'plain center must not reappear on its own — it reintroduces the height mismatch');
   });
 });
 

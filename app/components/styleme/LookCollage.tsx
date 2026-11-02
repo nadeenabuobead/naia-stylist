@@ -19,11 +19,23 @@ function CollageTile({ src, alt }: { src: string; alt: string }) {
         src={src}
         alt={alt}
         loading="lazy"
-        // objectPosition is explicit, not left to the (identical) default —
-        // 2026-11-08: every tile must center its garment the same way, so a
-        // differently-shaped photo never reads as "starting lower" than its
-        // neighbour purely because one relies on an implicit default.
-        style={{ width: "100%", height: "100%", objectFit: "contain", objectPosition: "center", display: "block" }}
+        // Top-aligned, not centered (2026-11-08) — this is what actually
+        // fixes "garments appear at inconsistent heights" in a 3/4-image
+        // collage. With contain centered both ways, a wide/short item
+        // (shoes, bags) letterboxes top AND bottom, so its visible content
+        // starts partway down the tile — while a tall item (trousers,
+        // dresses) fills top-to-bottom and starts right at the tile's own
+        // top edge. Side by side, that reads as "this one sits lower" even
+        // though nothing is actually misaligned — it's a direct consequence
+        // of centering unequal letterbox amounts. Top-aligning removes the
+        // mismatch directly: every garment now starts at the same edge of
+        // its own tile regardless of its own photo's aspect ratio. This
+        // does NOT change how much of each tile a given image fills (that
+        // part is an inherent trade-off of fitting varying real photos into
+        // equal, non-cropping, non-distorting tiles) — only where the
+        // resulting whitespace falls, left/right stays centered since the
+        // reported inconsistency was specifically about vertical position.
+        style={{ width: "100%", height: "100%", objectFit: "contain", objectPosition: "center top", display: "block" }}
         onError={(e) => {
           e.currentTarget.style.display = "none";
           const fallback = e.currentTarget.nextElementSibling as HTMLElement | null;
