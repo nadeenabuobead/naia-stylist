@@ -47,7 +47,7 @@
 // status. No new schema, no new field: the reservation IS the existing
 // unique idempotency key.
 //
-// ── Issue 3 — execution timeout (NOT resolved here, flagged) ────────────────
+// ── Issue 3 — execution timeout (still NOT resolved by code; documented) ───
 // A full 3-step chain, each step polling runFashnTryOn's existing ~90s
 // ceiling, is up to ~270s of synchronous wall-clock time in the worst case.
 // No maxDuration/functions config exists anywhere in this repo today (and
@@ -56,12 +56,53 @@
 // This module does not change that: it still runs all 3 steps synchronously
 // within one call. It is safe here ONLY because every test below uses a
 // mock fetch that resolves instantly — there is no real wall-clock risk
-// until FASHN is real. Before the real run, this needs either a verified,
-// explicitly-approved execution-time allowance, or restructuring onto the
-// existing async submit-then-poll pattern (submitTryOnToProvider +
-// the separate poll route) across multiple requests instead of one. Neither
-// is decided or implemented here — this is a known, reported blocker, not a
-// silently-resolved one.
+// until FASHN is real.
+//
+// Confirmed read-only (2026-11-02, via `vercel teams ls`): the team owning
+// naia-stylist-staging is on Vercel's Hobby plan. Per Vercel's current
+// documentation, Hobby's default AND maximum function duration under Fluid
+// Compute (stated enabled by default) is 300s — which covers the ~270s
+// worst case, by a 30-second margin, PROVIDED Fluid Compute is actually
+// active for this specific project. That one fact could not be confirmed
+// via any read-only CLI command (`vercel project inspect` does not surface
+// it) — it needs a one-click Vercel Dashboard → Settings → Functions check,
+// not a configuration change. If a platform timeout kill does occur
+// mid-step, it is an abrupt termination, not a normal return — this
+// module's own cleanup code (see markFailedBestEffort and the i === 0
+// staleness check below) is what recovers from that, not anything that
+// runs during the kill itself.
+//
+// Decision still required before the real run: either that one Dashboard
+// confirmation, or restructuring onto the existing async submit-then-poll
+// pattern (submitTryOnToProvider + the separate poll route) across multiple
+// requests instead of one. Neither is decided or implemented here.
+//
+// ── Priority 1/2 corrections (2026-11-02) ───────────────────────────────────
+// 1-2. Orphaned-job fix: every advanceTryOnJob failure now triggers a
+//      best-effort FAILED-marking cleanup (markFailedBestEffort) so the
+//      active-job lock is never left held by a job this function has
+//      already given up on. That cleanup itself never throws — a second
+//      database write is not guaranteed to succeed any more than the first.
+// 3. Minimal safe stale-job signal: when the one-time reservation (i === 0)
+//    is already claimed, the reason now distinguishes a job that has been
+//    active for longer than STALE_ACTIVE_JOB_MS (a crashed/orphaned job)
+//    from one genuinely resolved — "full_look_test_stale_job_needs_manual_review"
+//    vs "full_look_test_already_attempted". This NEVER automatically
+//    unblocks the lock or touches FASHN; it only gives whoever reviews it a
+//    clearly different, actionable signal instead of an identical generic
+//    refusal for both cases.
+// 4. After a successful (and potentially already-billed) FASHN call, this
+//    function never calls runFashnTryOn again for that same step under any
+//    circumstance — a bookkeeping failure after that point reports
+//    "step_outcome_uncertain" (distinct from "step_failed", since FASHN did
+//    not report failure) rather than silently retrying or mischaracterizing
+//    a paid success as a failure.
+// 6. creditsUsed is now computed by one function (creditsUsedSoFar) used at
+//    every return site, instead of two interchangeable-but-inconsistent
+//    expressions.
+// 7. garments.length !== MAX_CHAIN_LENGTH now fails closed immediately
+//    (invalid_chain_length) instead of silently permitting a different
+//    chain length.
 
 import {
   checkCustomerCooldown,
@@ -69,9 +110,37 @@ import {
   advanceTryOnJob,
 } from "./my-naia-model.server.js";
 import { runFashnTryOn, type RunTryOnOptions } from "./fashn-try-on.server.js";
-import type { VirtualTryOnConsent } from "./virtual-try-on.types.js";
+import { MAX_CHAIN_LENGTH } from "./poc-sequential-full-look-vto.server.js";
+import {
+  ACTIVE_STATUSES,
+  type VirtualTryOnConsent,
+  type VirtualTryOnJobRecord,
+} from "./virtual-try-on.types.js";
 
 const RESERVATION_KEY_PREFIX = "fulllook-poc-reservation:";
+
+// Reuses entitlement.server.ts's own VTO in-flight staleness threshold
+// (same constant, same reasoning) rather than inventing a new one: a job
+// still "active" well past the time any real step could legitimately take
+// is a crashed/orphaned job, not one genuinely still in progress.
+const STALE_ACTIVE_JOB_MS = 10 * 60 * 1000;
+
+/**
+ * Best-effort cleanup: marks a job FAILED so the active-job lock releases.
+ * Never throws — a second database write is not guaranteed to succeed any
+ * more than the first one was, and the caller already has a real result
+ * (success or failure) to return regardless of whether this cleanup lands.
+ * If this itself fails, the job stays active until STALE_ACTIVE_JOB_MS
+ * makes it recognizable as stale on a later attempt (see i === 0 handling
+ * below) — never silently retried, never left permanently unexplained.
+ */
+async function markFailedBestEffort(job: VirtualTryOnJobRecord, errorCode: string): Promise<void> {
+  try {
+    await advanceTryOnJob(job, "FAILED", { errorCode });
+  } catch {
+    // Swallowed deliberately. See doc comment above.
+  }
+}
 
 export interface JobTrackedChainGarmentInput {
   label: string;
@@ -95,11 +164,20 @@ export interface JobTrackedChainStepResult {
   ok: boolean;
 }
 
+export type JobTrackedChainReason =
+  | "invalid_chain_length"
+  | "duplicate_attempt_blocked"
+  | "full_look_test_already_attempted"
+  | "full_look_test_stale_job_needs_manual_review"
+  | "job_creation_failed"
+  | "step_outcome_uncertain"
+  | "step_failed";
+
 export type JobTrackedChainReport =
   | { ok: true; creditsUsed: number; steps: JobTrackedChainStepResult[]; finalImageDataUrl: string }
   | {
       ok: false;
-      reason: "duplicate_attempt_blocked" | "full_look_test_already_attempted" | "job_creation_failed" | "step_failed";
+      reason: JobTrackedChainReason;
       creditsUsed: number;
       steps: JobTrackedChainStepResult[];
       failedStepIndex?: number;
@@ -111,6 +189,14 @@ export async function runJobTrackedFullLookChain(
 ): Promise<JobTrackedChainReport> {
   const { customerId, naiaModelId, bodyPublicId, garments, consent } = args;
 
+  // ── Requirement #7 — this module exists for exactly one shape of request:
+  // the three-garment Full-Look chain. A caller passing any other length is
+  // a programming error, not a runtime condition to silently accept (e.g.
+  // reporting a hollow {ok:true, creditsUsed:0} for an empty array). ───────
+  if (garments.length !== MAX_CHAIN_LENGTH) {
+    return { ok: false, reason: "invalid_chain_length", creditsUsed: 0, steps: [] };
+  }
+
   // ── Cooldown — once, before step 1 only. See header for why. ─────────────
   const cooldown = await checkCustomerCooldown(customerId);
   if (!cooldown.ok) {
@@ -118,6 +204,7 @@ export async function runJobTrackedFullLookChain(
   }
 
   const steps: JobTrackedChainStepResult[] = [];
+  const creditsUsedSoFar = () => steps.filter((s) => s.ok).length; // Requirement #6 — one expression, used everywhere.
   let currentModelImage = args.initialModelImageDataUrl;
   let priorJobId: string | null = null;
 
@@ -143,27 +230,47 @@ export async function runJobTrackedFullLookChain(
     });
 
     if (!jobResult.ok) {
-      return { ok: false, reason: "job_creation_failed", creditsUsed: steps.length, steps };
+      return { ok: false, reason: "job_creation_failed", creditsUsed: creditsUsedSoFar(), steps };
     }
 
     if (!jobResult.created) {
-      // Step 1: this exact customer already claimed the one-time
-      // reservation before (any status) — refuse, regardless of step index,
-      // though in practice this can only happen at i === 0.
-      return {
-        ok: false,
-        reason: i === 0 ? "full_look_test_already_attempted" : "duplicate_attempt_blocked",
-        creditsUsed: steps.length,
-        steps,
-      };
+      if (i === 0) {
+        // The one-time reservation was already claimed. Requirement #3 — a
+        // minimal, SAFE recovery signal: distinguish a legitimately
+        // resolved prior attempt from one that has been sitting active far
+        // longer than any real step could take (a crashed/orphaned job),
+        // without ever assuming it is safe to reuse or resubmit. This never
+        // unblocks the lock itself and never touches FASHN — it only gives
+        // whoever is operating this test a clearly different, actionable
+        // signal, so a genuinely stuck job doesn't read identically to a
+        // deliberately completed one.
+        const existing = jobResult.job;
+        const isStale =
+          (ACTIVE_STATUSES as readonly string[]).includes(existing.status) &&
+          Date.now() - existing.lastActivityAt.getTime() > STALE_ACTIVE_JOB_MS;
+        return {
+          ok: false,
+          reason: isStale ? "full_look_test_stale_job_needs_manual_review" : "full_look_test_already_attempted",
+          creditsUsed: creditsUsedSoFar(),
+          steps,
+        };
+      }
+      // Steps 2+: in practice only reachable if some other, genuinely
+      // concurrent request claimed a colliding key — treated the same as
+      // any other concurrency block.
+      return { ok: false, reason: "duplicate_attempt_blocked", creditsUsed: creditsUsedSoFar(), steps };
     }
 
     const job = jobResult.job;
     priorJobId = job.id;
 
+    // ── Requirements #1/#2 — if this fails, no FASHN call has happened yet
+    // for this step (zero billing risk), so best-effort cleanup is purely
+    // about releasing the lock, not about an uncertain paid outcome. ───────
     const submitted = await advanceTryOnJob(job, "SUBMITTED", {});
     if (!submitted.ok) {
-      return { ok: false, reason: "job_creation_failed", creditsUsed: steps.length, steps };
+      await markFailedBestEffort(job, "state_error_before_submission");
+      return { ok: false, reason: "job_creation_failed", creditsUsed: creditsUsedSoFar(), steps };
     }
 
     const result = await runFashnTryOn(
@@ -178,20 +285,40 @@ export async function runJobTrackedFullLookChain(
     );
 
     if (!result.ok) {
-      await advanceTryOnJob(submitted.job, "FAILED", { errorCode: result.code });
+      // FASHN itself reported failure — not billed, per FASHN's own policy.
+      await markFailedBestEffort(submitted.job, result.code);
       steps.push({ label: garment.label, jobId: job.id, ok: false });
-      return { ok: false, reason: "step_failed", creditsUsed: steps.filter((s) => s.ok).length, steps, failedStepIndex: i };
+      return { ok: false, reason: "step_failed", creditsUsed: creditsUsedSoFar(), steps, failedStepIndex: i };
     }
 
+    // ── Requirement #4 — the FASHN call above already succeeded (and is
+    // potentially already billed). From here on, NOTHING in this function
+    // ever calls runFashnTryOn again for this same step, no matter what
+    // happens next — only our own bookkeeping may fail, never the paid
+    // operation being silently repeated. If the bookkeeping can't confirm
+    // completion, the honest answer is "uncertain," not "failed" (FASHN did
+    // not fail) and not "succeeded" (we can't confirm the record) — the
+    // image this step produced is still used to advance the chain in
+    // memory (currentModelImage below), because the generation itself
+    // genuinely happened; what's uncertain is only whether this job's row
+    // correctly reflects that. ────────────────────────────────────────────
     const processing = await advanceTryOnJob(submitted.job, "PROCESSING", { predictionId: result.predictionId });
     if (!processing.ok) {
-      return { ok: false, reason: "job_creation_failed", creditsUsed: steps.filter((s) => s.ok).length, steps };
+      await markFailedBestEffort(submitted.job, "state_error_after_provider_success");
+      steps.push({ label: garment.label, jobId: job.id, ok: true });
+      return { ok: false, reason: "step_outcome_uncertain", creditsUsed: creditsUsedSoFar(), steps, failedStepIndex: i };
     }
-    await advanceTryOnJob(processing.job, "COMPLETED", {});
+
+    const completed = await advanceTryOnJob(processing.job, "COMPLETED", {});
+    if (!completed.ok) {
+      await markFailedBestEffort(processing.job, "state_error_after_provider_success");
+      steps.push({ label: garment.label, jobId: job.id, ok: true });
+      return { ok: false, reason: "step_outcome_uncertain", creditsUsed: creditsUsedSoFar(), steps, failedStepIndex: i };
+    }
 
     steps.push({ label: garment.label, jobId: job.id, ok: true });
     currentModelImage = result.outputDataUrl;
   }
 
-  return { ok: true, creditsUsed: steps.length, steps, finalImageDataUrl: currentModelImage };
+  return { ok: true, creditsUsed: creditsUsedSoFar(), steps, finalImageDataUrl: currentModelImage };
 }

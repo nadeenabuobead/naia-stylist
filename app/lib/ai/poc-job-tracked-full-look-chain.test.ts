@@ -221,3 +221,125 @@ describe("duplicate-attempt prevention — composed", () => {
     expect(report).toMatchObject({ ok: false, reason: "job_creation_failed", creditsUsed: 0 });
   });
 });
+
+/** Makes the Nth call to advanceTryOnJob (1-indexed, across the whole test)
+ * resolve with `response`; every other call falls back to the normal
+ * succeed-with-the-requested-status behavior from beforeEach. */
+function failOnNthAdvanceCall(n: number, response: unknown) {
+  let count = 0;
+  mockAdvance().mockImplementation((job: { id: string }, status: string, extras: Record<string, unknown> = {}) => {
+    count += 1;
+    if (count === n) return Promise.resolve(response);
+    return Promise.resolve({ ok: true, job: fakeJob(job.id, { status, ...extras }) });
+  });
+}
+
+describe("Priority 1 — orphaned-job cleanup on transition failure", () => {
+  it("JTC.15 — a failure advancing SUBMITTED triggers best-effort FAILED cleanup and halts before any FASHN call", async () => {
+    failOnNthAdvanceCall(1, { ok: false, error: "db error" });
+    const report = await runJobTrackedFullLookChain(BASE_ARGS, mockFashnFetch());
+    expect(report).toMatchObject({ ok: false, reason: "job_creation_failed", creditsUsed: 0, steps: [] });
+    expect(mockAdvance()).toHaveBeenCalledTimes(2);
+    expect(mockAdvance().mock.calls[1][1]).toBe("FAILED");
+    expect(mockAdvance().mock.calls[1][2]).toMatchObject({ errorCode: "state_error_before_submission" });
+    expect(mockCreateOrFind()).toHaveBeenCalledTimes(1); // step 2's job is never created
+  });
+
+  it("JTC.16 — a failure advancing PROCESSING (after a genuinely successful, billable FASHN call) is reported as uncertain, not as a clean failure, and still counts the credit", async () => {
+    failOnNthAdvanceCall(2, { ok: false, error: "db error" });
+    const report = await runJobTrackedFullLookChain(BASE_ARGS, mockFashnFetch());
+    expect(report).toMatchObject({ ok: false, reason: "step_outcome_uncertain", creditsUsed: 1, failedStepIndex: 0 });
+    if (report.ok) throw new Error("unreachable");
+    expect(report.steps.map((s) => s.ok)).toEqual([true]);
+    expect(mockAdvance().mock.calls[2][1]).toBe("FAILED"); // cleanup attempt
+    expect(mockAdvance().mock.calls[2][2]).toMatchObject({ errorCode: "state_error_after_provider_success" });
+    expect(mockCreateOrFind()).toHaveBeenCalledTimes(1); // chain halts — step 2 never even attempted
+  });
+
+  it("JTC.17 — a failure advancing COMPLETED (after a genuinely successful FASHN call) is reported as uncertain, never auto-retried", async () => {
+    failOnNthAdvanceCall(3, { ok: false, error: "db error" });
+    const report = await runJobTrackedFullLookChain(BASE_ARGS, mockFashnFetch());
+    expect(report).toMatchObject({ ok: false, reason: "step_outcome_uncertain", creditsUsed: 1, failedStepIndex: 0 });
+    if (report.ok) throw new Error("unreachable");
+    expect(report.steps.map((s) => s.ok)).toEqual([true]);
+    expect(mockAdvance().mock.calls[3][1]).toBe("FAILED"); // cleanup attempt
+    expect(mockAdvance().mock.calls[3][2]).toMatchObject({ errorCode: "state_error_after_provider_success" });
+  });
+});
+
+describe("Priority 1 — cleanup failure itself is swallowed", () => {
+  it("JTC.18 — cleanup's own advanceTryOnJob call resolving {ok:false} does not change or crash the original report", async () => {
+    mockAdvance().mockImplementation(() => Promise.resolve({ ok: false, error: "db down" }));
+    const report = await runJobTrackedFullLookChain(BASE_ARGS, mockFashnFetch());
+    expect(report).toMatchObject({ ok: false, reason: "job_creation_failed", creditsUsed: 0, steps: [] });
+  });
+
+  it("JTC.19 — cleanup's own advanceTryOnJob call throwing synchronously does not propagate out of the chain", async () => {
+    let count = 0;
+    mockAdvance().mockImplementation(() => {
+      count += 1;
+      if (count === 1) return Promise.resolve({ ok: false, error: "db error" }); // SUBMITTED fails
+      throw new Error("connection reset"); // cleanup attempt throws
+    });
+    const report = await runJobTrackedFullLookChain(BASE_ARGS, mockFashnFetch());
+    expect(report).toMatchObject({ ok: false, reason: "job_creation_failed", creditsUsed: 0, steps: [] });
+  });
+
+  it("JTC.20 — cleanup's own advanceTryOnJob call rejecting does not propagate out of the chain", async () => {
+    let count = 0;
+    mockAdvance().mockImplementation(() => {
+      count += 1;
+      if (count === 1) return Promise.resolve({ ok: false, error: "db error" });
+      return Promise.reject(new Error("connection reset"));
+    });
+    const report = await runJobTrackedFullLookChain(BASE_ARGS, mockFashnFetch());
+    expect(report).toMatchObject({ ok: false, reason: "job_creation_failed", creditsUsed: 0, steps: [] });
+  });
+});
+
+describe("Priority 1/3 — stale active job gets a distinct, non-automatic signal", () => {
+  it("JTC.21 — an ACTIVE reservation job older than the staleness threshold is flagged for manual review, never auto-unblocked", async () => {
+    const old = new Date(Date.now() - 11 * 60 * 1000); // 11 minutes — past the 10-minute threshold
+    mockCreateOrFind().mockResolvedValueOnce({ ok: true, created: false, job: fakeJob("stuck-job", { status: "PROCESSING", lastActivityAt: old }) });
+    const report = await runJobTrackedFullLookChain(BASE_ARGS, mockFashnFetch());
+    expect(report).toMatchObject({ ok: false, reason: "full_look_test_stale_job_needs_manual_review", creditsUsed: 0 });
+    expect(mockAdvance()).not.toHaveBeenCalled(); // never touched — no auto-unblock, no FASHN re-attempt
+  });
+
+  it("JTC.22 — an ACTIVE reservation job within the staleness threshold is a genuine duplicate attempt, not stale", async () => {
+    const recent = new Date(Date.now() - 30 * 1000); // 30 seconds ago
+    mockCreateOrFind().mockResolvedValueOnce({ ok: true, created: false, job: fakeJob("in-progress-job", { status: "SUBMITTED", lastActivityAt: recent }) });
+    const report = await runJobTrackedFullLookChain(BASE_ARGS, mockFashnFetch());
+    expect(report).toMatchObject({ ok: false, reason: "full_look_test_already_attempted", creditsUsed: 0 });
+  });
+
+  it("JTC.23 — a COMPLETED reservation job, even an old one, is reported as already-attempted, never as stale (it isn't active)", async () => {
+    const old = new Date(Date.now() - 60 * 60 * 1000); // 1 hour ago
+    mockCreateOrFind().mockResolvedValueOnce({ ok: true, created: false, job: fakeJob("done-job", { status: "COMPLETED", lastActivityAt: old }) });
+    const report = await runJobTrackedFullLookChain(BASE_ARGS, mockFashnFetch());
+    expect(report).toMatchObject({ ok: false, reason: "full_look_test_already_attempted", creditsUsed: 0 });
+  });
+});
+
+describe("Requirement #7 — exactly three garments, no silent acceptance of other lengths", () => {
+  it("JTC.24 — two garments is rejected before any DB call", async () => {
+    const report = await runJobTrackedFullLookChain({ ...BASE_ARGS, garments: GARMENTS.slice(0, 2) }, mockFashnFetch());
+    expect(report).toMatchObject({ ok: false, reason: "invalid_chain_length", creditsUsed: 0, steps: [] });
+    expect(mockCooldown()).not.toHaveBeenCalled();
+    expect(mockCreateOrFind()).not.toHaveBeenCalled();
+  });
+
+  it("JTC.25 — four garments is rejected before any DB call", async () => {
+    const report = await runJobTrackedFullLookChain(
+      { ...BASE_ARGS, garments: [...GARMENTS, { ...GARMENTS[0], label: "Scarf" }] },
+      mockFashnFetch(),
+    );
+    expect(report).toMatchObject({ ok: false, reason: "invalid_chain_length", creditsUsed: 0, steps: [] });
+    expect(mockCreateOrFind()).not.toHaveBeenCalled();
+  });
+
+  it("JTC.26 — zero garments is rejected, never silently reported as a hollow success", async () => {
+    const report = await runJobTrackedFullLookChain({ ...BASE_ARGS, garments: [] }, mockFashnFetch());
+    expect(report).toMatchObject({ ok: false, reason: "invalid_chain_length", creditsUsed: 0, steps: [] });
+  });
+});
