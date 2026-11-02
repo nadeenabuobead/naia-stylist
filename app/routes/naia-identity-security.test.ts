@@ -414,7 +414,8 @@ describe("§E repository-wide legacy token scan", () => {
     "app/routes/api.customer-profile.jsx",
     "app/routes/api.outfit-history.jsx",
     "app/routes/api.save-look.jsx",
-    "app/routes/api.style.jsx",
+    // api.style.jsx retired 2026-11-02 (security remediation) — removed from
+    // this list because the file no longer exists; see app/routes.ts.
     "app/routes/api.track_event.jsx",
   ];
 

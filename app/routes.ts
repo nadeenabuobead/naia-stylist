@@ -41,7 +41,14 @@ export default [
   route("api/customer-auth", "routes/api.customer-auth.jsx"),
   route("api/closet", "routes/api.closet.jsx"),
   route("api/closet-preview-analyze", "routes/api.closet-preview-analyze.ts"),
-  route("api/style", "routes/api.style.jsx"),
+  // api/style retired 2026-11-02 — security remediation. Had no auth gate at
+  // all (an optional authenticateCustomer() lookup was used only to enrich
+  // the AI prompt, never to gate the request) and called Anthropic directly.
+  // Its only caller was the AI-stylist-preview prototype on the embedded
+  // admin's home page (app._index.jsx), itself retired in the same change —
+  // real admin tooling lives at /app/naia-admin, and customer-facing styling
+  // lives at /style-me. See api/tryon and api/quick-style above for the same
+  // bug class, fixed 2026-10-19.
   route("api/outfit-history", "routes/api.outfit-history.jsx"),
   route("api/outfit-rating", "routes/api.outfit-rating.jsx"),
   route("api/naia-products", "routes/api.naia-products.jsx"),
