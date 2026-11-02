@@ -9,14 +9,18 @@
 // time by a safe margin. No background process transitions stale jobs to TIMED_OUT,
 // so the threshold prevents a stuck job from permanently blocking future VTO use.
 //
-// Concurrency note: monthly quota checks are read-before-write and are NOT atomic.
-// Two simultaneous requests from the same customer can both pass the check. This
-// is acceptable for staging (low concurrency). Before enabling ENTITLEMENT_ENFORCEMENT
-// in production, StyleMe and BuySkip guards must be wrapped in Serializable
-// transactions (VTO already has this via createOrFindTryOnJob). Document this
-// before flipping the production flag.
+// Concurrency note: checkEntitlement() itself is still read-before-write and NOT
+// atomic — it answers "is there room right now," nothing more. It remains useful
+// as a cheap early fast-fail before expensive work (e.g. skip the AI call
+// entirely for a customer clearly already over quota). The actual race — two
+// simultaneous requests both passing that read before either writes its
+// usage-consuming row — is closed by reserveStyleMeSlot/reserveBuySkipSlot
+// below, which re-verify the count and perform the create in one Serializable
+// transaction, mirroring VTO's existing createOrFindTryOnJob. Callers should
+// use checkEntitlement for display/early-exit and the reserve* functions for
+// the actual quota-consuming write, once ENTITLEMENT_ENFORCEMENT is enabled.
 
-import type { MembershipStatus } from "@prisma/client";
+import type { MembershipStatus, Prisma } from "@prisma/client";
 import prisma from "~/db.server";
 import { getMembershipAllowances, getEffectiveVtoLimit, getEffectiveStyleMeLimit } from "./plan-limits.server";
 import { getUsageWindow, formatResetDate } from "./usage-window.server";
@@ -36,6 +40,14 @@ const VTO_IN_FLIGHT_STALE_MS = 10 * 60 * 1000; // 10 minutes
 // production billing protections, and every other feature's quota logic are
 // untouched by this constant.
 const MOCK_VTO_PRODUCT_HANDLE_PREFIX = "fulllook-poc:";
+
+// ── Transaction retry (mirrors my-naia-model.server.ts's VTO job creation) ────
+const MAX_TX_RETRIES = 2;
+
+function isSerializationError(e: unknown): boolean {
+  // Prisma P2034: Transaction failed due to a write conflict or a deadlock.
+  return (e as any)?.code === "P2034";
+}
 
 // ── Qualifying StyleMe condition ───────────────────────────────────────────────
 // A StyleMe session counts toward quota only if it is a root session (parentSessionId = null)
@@ -305,4 +317,93 @@ export async function checkEntitlement(
     default:
       return { allowed: true };
   }
+}
+
+// ── Atomic reservation ──────────────────────────────────────────────────────────
+// Closes the race checkEntitlement() cannot: re-verifies the monthly count and
+// performs the caller's create inside one Serializable transaction, so two
+// concurrent requests from the same customer cannot both pass the count check
+// before either commits. Only called from a route when ENTITLEMENT_ENFORCEMENT
+// is enabled — when it's off, callers keep creating directly, unchanged.
+//
+// A P2002 (unique constraint — e.g. BuySkip's idempotencyKey) is NOT caught
+// here; it propagates so the caller's own existing idempotent-repeat handling
+// (already required to exist for duplicate submissions) runs unchanged.
+
+export type RunReservationFn = <T>(
+  fn: (tx: Pick<typeof prisma, "stylingSession" | "buyOrSkipAnalysis">) => Promise<T>,
+) => Promise<T>;
+
+const _runReservationTransaction: RunReservationFn = (fn) =>
+  prisma.$transaction(
+    (tx: Pick<typeof prisma, "stylingSession" | "buyOrSkipAnalysis">) => fn(tx),
+    { isolationLevel: "Serializable" },
+  );
+
+export type ReserveResult<T> =
+  | { allowed: true; record: T }
+  | { allowed: false; reason: "quota_exceeded" };
+
+export async function reserveStyleMeSlot(
+  customerId: string,
+  membershipStatus: MembershipStatus,
+  sessionData: Prisma.StylingSessionUncheckedCreateInput,
+  _runTransaction: RunReservationFn = _runReservationTransaction,
+): Promise<ReserveResult<Awaited<ReturnType<typeof prisma.stylingSession.create>>>> {
+  const effectiveLimit = getEffectiveStyleMeLimit(membershipStatus);
+  const window = getUsageWindow();
+  const qualifyingWhere = qualifyingStyleMeWhere(customerId);
+
+  for (let attempt = 0; attempt <= MAX_TX_RETRIES; attempt++) {
+    try {
+      return await _runTransaction(async (tx) => {
+        const used = await tx.stylingSession.count({
+          where: { ...qualifyingWhere, createdAt: { gte: window.start, lt: window.end } },
+        });
+        if (used >= effectiveLimit) {
+          return { allowed: false, reason: "quota_exceeded" };
+        }
+        const record = await tx.stylingSession.create({ data: sessionData });
+        return { allowed: true, record };
+      });
+    } catch (e) {
+      if (isSerializationError(e) && attempt < MAX_TX_RETRIES) continue;
+      throw e;
+    }
+  }
+  // Unreachable — loop always returns or throws.
+  throw new Error("Unexpected exit from reserveStyleMeSlot retry loop");
+}
+
+export async function reserveBuySkipSlot(
+  customerId: string,
+  membershipStatus: MembershipStatus,
+  analysisData: Prisma.BuyOrSkipAnalysisUncheckedCreateInput,
+  _runTransaction: RunReservationFn = _runReservationTransaction,
+): Promise<ReserveResult<Awaited<ReturnType<typeof prisma.buyOrSkipAnalysis.create>>>> {
+  const limits = getMembershipAllowances(membershipStatus);
+  const window = getUsageWindow();
+
+  for (let attempt = 0; attempt <= MAX_TX_RETRIES; attempt++) {
+    try {
+      return await _runTransaction(async (tx) => {
+        const used = await tx.buyOrSkipAnalysis.count({
+          where: {
+            customerId,
+            verdict: { in: ["BUY", "SKIP", "MAYBE"] },
+            createdAt: { gte: window.start, lt: window.end },
+          },
+        });
+        if (used >= limits.buySkipPerMonth) {
+          return { allowed: false, reason: "quota_exceeded" };
+        }
+        const record = await tx.buyOrSkipAnalysis.create({ data: analysisData });
+        return { allowed: true, record };
+      });
+    } catch (e) {
+      if (isSerializationError(e) && attempt < MAX_TX_RETRIES) continue;
+      throw e;
+    }
+  }
+  throw new Error("Unexpected exit from reserveBuySkipSlot retry loop");
 }

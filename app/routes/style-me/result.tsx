@@ -47,7 +47,8 @@ import { VtoExperience } from "~/components/VtoExperience";
 import { RecommendationFeedbackWidget } from "~/components/RecommendationFeedbackWidget";
 import { loadSessionFeedback } from "~/lib/ai/feedback-persistence.server";
 import { loadOutcomeForSuggestion } from "~/lib/ai/outcome-persistence.server";
-import { checkEntitlement } from "~/lib/plan/entitlement.server";
+import type { Prisma } from "@prisma/client";
+import { reserveStyleMeSlot } from "~/lib/plan/entitlement.server";
 import { buildCustomerJourneyContext, buildEphemeralContextSignals } from "~/lib/ai/journey-context.server";
 import { emitSessionStarted, emitRecommendationServed, emitLookSaved, emitInSessionReviewSubmitted, recordJourneyEvent, recordJourneyEventAwaited } from "~/lib/ai/journey-events.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
@@ -392,26 +393,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
       resolvedCustomerId = guest.id;
     }
 
-    // Quota guard — behind ENTITLEMENT_ENFORCEMENT flag; disabled in production until
-    // billing and upgrade flow exist. Concurrency note: this check is read-before-write
-    // and is NOT atomic. Before enabling in production, wrap in a Serializable transaction.
-    const isEnforced = process.env.ENTITLEMENT_ENFORCEMENT === "true";
-    if (isEnforced && naiaCustomer) {
-      const entCheck = await checkEntitlement(naiaCustomer.id, naiaCustomer.membershipStatus, "styleMe");
-      if (!entCheck.allowed) {
-        return data(
-          { isLoading: false, isAuthenticated: true, naiaModelIsReady, devTryOnEnabled, vtoEnabled,
-            isStagingProject,
-            qaExportEnabled,
-            tryOnFixtureTokens: {} as Record<string, string>, sessionId: null, mood: null,
-            currentMood: null, desiredFeeling: null, occasion: null, suggestion: null,
-            pendingState: null as "needs_passport" | "ready_to_save" | null,
-            existingOutfitFeedback: null, existingOutcome: null,
-            error: "You've used all your StyleMe sessions for this month." },
-          { status: 429 },
-        );
-      }
-    }
+    // The old non-atomic guard here (checkEntitlement, gated on `naiaCustomer`
+    // truthy) is superseded below by reserveStyleMeSlot — same quota rule,
+    // but atomic AND guest-inclusive (see that block's own comment for why
+    // the old `isEnforced && naiaCustomer` gate let a guest through
+    // unlimited). Removed rather than kept alongside, to avoid two
+    // independent StyleMe-quota code paths disagreeing with each other.
 
     // If this session was started via Adjust Vibe, the source session ID was stored
     // in the cookie by the adjust-vibe action. We link it here so the new session
@@ -431,27 +418,66 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const sessionStyleMeMode = resolveStyleMeMode(parentMode, cookieSession.get("styleMeMode"));
 
     const moodFirst = mood ?? null;
-    const stylingSession = await prisma.stylingSession.create({
-      data: {
-        customerId: resolvedCustomerId,
-        currentMood: moodFirst,
-        desiredFeeling: feelings?.[0] || null,
-        occasion,
-        bodyNeeds: bodyNeeds ?? [],
-        formalityConditional,
-        practicalIds,
-        styleFrom: source === "my-closet" ? "CLOSET" : source === "naia-piece" ? "NAIA" : "BOTH",
-        closetAnchorId: (source === "my-closet" || source === "both") ? (closetAnchorId ?? null) : null,
-        anchorProvenance: (source === "my-closet" || source === "both") ? anchorProvenance : null,
-        parentSessionId: adjustVibeSourceId,
-        styleMeMode: sessionStyleMeMode,
-        // Rev 3 — Psychology-First (Group 5). Wording context only; zero product scoring.
-        ...(isRev3Session && {
-          state: rev3State,
-          intentions: rev3Intentions,
-        }),
-      },
-    });
+    // Built as a variable (not inline in the create() call) so the SAME
+    // data shape can also be passed into reserveStyleMeSlot's atomic
+    // count-and-create transaction below. Includes every field HEAD's own
+    // inline create() was writing (anchorProvenance, styleMeMode) — the
+    // atomic-reservation commit this was merged from predates those two
+    // fields, so its own sessionData needed both added, not just the
+    // subset it originally had.
+    const sessionData: Prisma.StylingSessionUncheckedCreateInput = {
+      customerId: resolvedCustomerId,
+      currentMood: moodFirst,
+      desiredFeeling: feelings?.[0] || null,
+      occasion,
+      bodyNeeds: bodyNeeds ?? [],
+      formalityConditional,
+      practicalIds,
+      styleFrom: source === "my-closet" ? "CLOSET" : source === "naia-piece" ? "NAIA" : "BOTH",
+      closetAnchorId: (source === "my-closet" || source === "both") ? (closetAnchorId ?? null) : null,
+      anchorProvenance: (source === "my-closet" || source === "both") ? anchorProvenance : null,
+      parentSessionId: adjustVibeSourceId,
+      styleMeMode: sessionStyleMeMode,
+      // Rev 3 — Psychology-First (Group 5). Wording context only; zero product scoring.
+      ...(isRev3Session && {
+        state: rev3State,
+        intentions: rev3Intentions,
+      }),
+    };
+
+    // Quota guard — behind ENTITLEMENT_ENFORCEMENT flag; disabled in production until
+    // billing and upgrade flow exist. Applies to guests too: an unauthenticated
+    // visitor is treated as membershipStatus NONE (0 allowance), the same tier a
+    // real signed-up non-member gets — previously this guard only ran `&& naiaCustomer`,
+    // so a guest fell straight through to the create below with no limit at all,
+    // the one path in this codebase where the shared guest row was allowed to
+    // consume a paid-feature write unlimited times. Atomic: the count re-check and
+    // the create happen inside one Serializable transaction (reserveStyleMeSlot),
+    // so two concurrent requests from the same customer can't both pass the count
+    // before either commits — mirrors VTO's existing createOrFindTryOnJob.
+    const isEnforced = process.env.ENTITLEMENT_ENFORCEMENT === "true";
+    let stylingSession;
+    if (isEnforced) {
+      const membershipStatusForCheck = naiaCustomer?.membershipStatus ?? "NONE";
+      const reservation = await reserveStyleMeSlot(resolvedCustomerId, membershipStatusForCheck, sessionData);
+      if (!reservation.allowed) {
+        return data(
+          { isLoading: false, isAuthenticated: !!naiaCustomer, naiaModelIsReady, devTryOnEnabled, vtoEnabled,
+            isStagingProject,
+            tryOnFixtureTokens: {} as Record<string, string>, sessionId: null, mood: null,
+            currentMood: null, desiredFeeling: null, occasion: null, suggestion: null,
+            pendingState: null as "needs_passport" | "ready_to_save" | null,
+            existingOutfitFeedback: null, existingOutcome: null,
+            error: naiaCustomer
+              ? "You've used all your StyleMe sessions for this month."
+              : "Sign in or join nAia to start styling." },
+          { status: 429 },
+        );
+      }
+      stylingSession = reservation.record;
+    } else {
+      stylingSession = await prisma.stylingSession.create({ data: sessionData });
+    }
 
     return data(
       {

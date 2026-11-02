@@ -14,7 +14,7 @@ import {
 import { emitBuySkipSubmitted, recordJourneyEventAwaited } from "../lib/ai/journey-events.server";
 import { ALL_QUESTIONS, ALL_OPTION_LABELS } from "../lib/onboarding/quiz-data";
 import { splitStyleExpression } from "../lib/passport/rev7-vocabulary";
-import { checkEntitlement } from "../lib/plan/entitlement.server";
+import { checkEntitlement, reserveBuySkipSlot } from "../lib/plan/entitlement.server";
 import { moderateImageContent } from "../lib/image-moderation.server";
 import { screenGarmentSuitability } from "../lib/image-suitability.server";
 import { extractConsentGiven, buildConsentStamp } from "../lib/photo-consent.server";
@@ -1073,82 +1073,156 @@ Respond ONLY with valid JSON, no markdown:
     const persistedVerdict = verdictMap[analysis.verdict] ?? "INCOMPLETE";
     let analysisRecord;
     {
+      const analysisData = {
+        customerId: naiaCustomer.id,
+        verdict: persistedVerdict,
+        reasoning:
+          typeof analysis.finalThought === "string" && analysis.finalThought.trim() !== ""
+            ? analysis.finalThought.slice(0, 1000)
+            : "No reasoning provided.",
+        productName: null,
+        // S0: store private asset reference, not a public CDN URL.
+        // imageUrl is kept null for new records; imagePublicId + imageFormat are the canonical refs.
+        imageUrl: null,
+        imagePublicId: publicId,
+        imageFormat: serverFormat,
+        source: "buy-or-skip",
+        schemaVersion: "2.0",
+        idempotencyKey,
+        // Batch 3 — rich fields
+        confidence:   typeof analysis.confidence === "number" ? analysis.confidence : null,
+        category:     normalizedCategory || null,
+        colors:       Array.isArray(color) ? color.filter(c => typeof c === "string") : [],
+        forOccasion:  typeof forOccasion === "string" && forOccasion.trim() ? forOccasion.trim().slice(0, 500) : null,
+        whatLike:     typeof whatLike    === "string" && whatLike.trim()    ? whatLike.trim().slice(0, 500)    : null,
+        unsureAbout:  typeof unsureAbout === "string" && unsureAbout.trim() ? unsureAbout.trim().slice(0, 500) : null,
+        colorNote:    typeof colorNote   === "string" && colorNote.trim()   ? colorNote.trim().slice(0, 200)   : null,
+        itemSize:     typeof size        === "string" && size.trim()        ? size.trim().slice(0, 100)        : null,
+        fullAnalysis: {
+          verdict:               analysis.verdict,
+          confidence:            analysis.confidence,
+          itemType:              analysis.itemType             ?? null,
+          detectedColor:         typeof analysis.detectedColor === "string" && analysis.detectedColor.trim() ? analysis.detectedColor.trim() : null,
+          styleDNAMatch:         analysis.styleDNAMatch        ?? null,
+          detailedAnalysis:      analysis.detailedAnalysis     ?? null,
+          occasionFit:           analysis.occasionFit          ?? null,
+          whatLikeEval:          analysis.whatLikeEval         ?? null,
+          concernEval:           analysis.concernEval          ?? null,
+          closetPairings:        analysis.closetPairings       ?? [],
+          fillsGap:              analysis.fillsGap              ?? null,
+          occasions:             analysis.occasions             ?? [],
+          productSnapshot:       analysis.productSnapshot       ?? null,
+          beforeYouBuy:          Array.isArray(analysis.beforeYouBuy) ? analysis.beforeYouBuy.filter(s => typeof s === "string" && s.trim()) : [],
+          buyIf:                 typeof analysis.buyIf  === "string" && analysis.buyIf.trim()  ? analysis.buyIf.trim()  : null,
+          skipIf:                typeof analysis.skipIf === "string" && analysis.skipIf.trim() ? analysis.skipIf.trim() : null,
+          betterDirection:       typeof analysis.betterDirection === "string" && analysis.betterDirection.trim() ? analysis.betterDirection.trim() : null,
+          finalThought:          analysis.finalThought          ?? null,
+        },
+      };
+
+      // Built as a variable (not inline in the create() call below) so the
+      // SAME data shape can also be passed into reserveBuySkipSlot's atomic
+      // count-and-create transaction — see the ENTITLEMENT_ENFORCEMENT
+      // branch below. Must stay in sync with every field this app actually
+      // records for a BuyOrSkipAnalysis row; verified against HEAD's full
+      // field set when this was merged, not just the subset the original
+      // atomic-reservation commit happened to have at its own fork point.
+      const analysisData = {
+        customerId: naiaCustomer.id,
+        verdict: persistedVerdict,
+        reasoning:
+          typeof analysis.finalThought === "string" && analysis.finalThought.trim() !== ""
+            ? analysis.finalThought.slice(0, 1000)
+            : "No reasoning provided.",
+        productName: null,
+        // S0: store private asset reference, not a public CDN URL.
+        // imageUrl is kept null for new records; imagePublicId + imageFormat are the canonical refs.
+        imageUrl: null,
+        imagePublicId: publicId,
+        imageFormat: serverFormat,
+        source: "buy-or-skip",
+        schemaVersion: "2.0",
+        idempotencyKey,
+        ...buildConsentStamp(consentGiven),
+        // Batch 3 — rich fields
+        // A vetoed verdict has no AI confidence of its own (see applyVerdictOverride) —
+        // the scalar column's own contract is "AI confidence 0-100", which no longer
+        // describes a deterministically-decided verdict, so it is null here, not a
+        // stale number from the discarded BUY.
+        confidence:   typeof analysis.confidence === "number" ? analysis.confidence : null,
+        category:     normalizedCategory || null,
+        colors:       Array.isArray(color) ? color.filter(c => typeof c === "string") : [],
+        forOccasion:  typeof forOccasion === "string" && forOccasion.trim() ? forOccasion.trim().slice(0, 500) : null,
+        whatLike:     typeof whatLike    === "string" && whatLike.trim()    ? whatLike.trim().slice(0, 500)    : null,
+        unsureAbout:  typeof unsureAbout === "string" && unsureAbout.trim() ? unsureAbout.trim().slice(0, 500) : null,
+        colorNote:    typeof colorNote   === "string" && colorNote.trim()   ? colorNote.trim().slice(0, 200)   : null,
+        itemSize:     typeof size        === "string" && size.trim()        ? size.trim().slice(0, 100)        : null,
+        fullAnalysis: {
+          verdict:               analysis.verdict,
+          confidence:            analysis.confidence,
+          itemType:              analysis.itemType             ?? null,
+          detectedColor:         typeof analysis.detectedColor === "string" && analysis.detectedColor.trim() ? analysis.detectedColor.trim() : null,
+          styleDNAMatch:         analysis.styleDNAMatch        ?? null,
+          detailedAnalysis:      analysis.detailedAnalysis     ?? null,
+          occasionFit:           analysis.occasionFit          ?? null,
+          whatLikeEval:          analysis.whatLikeEval         ?? null,
+          concernEval:           analysis.concernEval          ?? null,
+          closetPairings:        analysis.closetPairings       ?? [],
+          fillsGap:              analysis.fillsGap              ?? null,
+          occasions:             analysis.occasions             ?? [],
+          productSnapshot:       analysis.productSnapshot       ?? null,
+          beforeYouBuy:          Array.isArray(analysis.beforeYouBuy) ? analysis.beforeYouBuy.filter(s => typeof s === "string" && s.trim()) : [],
+          buyIf:                 typeof analysis.buyIf  === "string" && analysis.buyIf.trim()  ? analysis.buyIf.trim()  : null,
+          skipIf:                typeof analysis.skipIf === "string" && analysis.skipIf.trim() ? analysis.skipIf.trim() : null,
+          betterDirection:       typeof analysis.betterDirection === "string" && analysis.betterDirection.trim() ? analysis.betterDirection.trim() : null,
+          finalThought:          analysis.finalThought          ?? null,
+          // Code-computed decision evidence (Phase 8 contract) + any deterministic
+          // override applied on top of the model's own verdict. verdictOverridden
+          // distinguishes "model decided BUY and code let it stand" from
+          // "model decided BUY and a confirmed hard-constraint violation vetoed it".
+          // modelConfidence preserves the AI's own confidence in its (now-discarded)
+          // BUY verdict for the record — see applyVerdictOverride.
+          verdictOverridden:     analysis.verdictOverridden,
+          verdictOverrideReason: analysis.verdictOverrideReason,
+          modelVerdict:          analysis.modelVerdict,
+          modelConfidence:       analysis.modelConfidence,
+          decisionEvidence,
+          // Phase 3 — Shared Customer Intelligence. Diagnostic only: the
+          // one structural WI finding (if any) that was surfaced as
+          // context for this analysis. Never itself a verdict signal.
+          wardrobeIntelligenceContext: wardrobeContext
+            ? {
+                source:  wardrobeContext.source,
+                dimension: wardrobeContext.dimension,
+                value:   wardrobeContext.value,
+                support: wardrobeContext.support,
+              }
+            : null,
+        },
+      };
+
       try {
-        analysisRecord = await prisma.buyOrSkipAnalysis.create({
-          data: {
-            customerId: naiaCustomer.id,
-            verdict: persistedVerdict,
-            reasoning:
-              typeof analysis.finalThought === "string" && analysis.finalThought.trim() !== ""
-                ? analysis.finalThought.slice(0, 1000)
-                : "No reasoning provided.",
-            productName: null,
-            // S0: store private asset reference, not a public CDN URL.
-            // imageUrl is kept null for new records; imagePublicId + imageFormat are the canonical refs.
-            imageUrl: null,
-            imagePublicId: publicId,
-            imageFormat: serverFormat,
-            source: "buy-or-skip",
-            schemaVersion: "2.0",
-            idempotencyKey,
-            ...buildConsentStamp(consentGiven),
-            // Batch 3 — rich fields
-            // A vetoed verdict has no AI confidence of its own (see applyVerdictOverride) —
-            // the scalar column's own contract is "AI confidence 0-100", which no longer
-            // describes a deterministically-decided verdict, so it is null here, not a
-            // stale number from the discarded BUY.
-            confidence:   typeof analysis.confidence === "number" ? analysis.confidence : null,
-            category:     normalizedCategory || null,
-            colors:       Array.isArray(color) ? color.filter(c => typeof c === "string") : [],
-            forOccasion:  typeof forOccasion === "string" && forOccasion.trim() ? forOccasion.trim().slice(0, 500) : null,
-            whatLike:     typeof whatLike    === "string" && whatLike.trim()    ? whatLike.trim().slice(0, 500)    : null,
-            unsureAbout:  typeof unsureAbout === "string" && unsureAbout.trim() ? unsureAbout.trim().slice(0, 500) : null,
-            colorNote:    typeof colorNote   === "string" && colorNote.trim()   ? colorNote.trim().slice(0, 200)   : null,
-            itemSize:     typeof size        === "string" && size.trim()        ? size.trim().slice(0, 100)        : null,
-            fullAnalysis: {
-              verdict:               analysis.verdict,
-              confidence:            analysis.confidence,
-              itemType:              analysis.itemType             ?? null,
-              detectedColor:         typeof analysis.detectedColor === "string" && analysis.detectedColor.trim() ? analysis.detectedColor.trim() : null,
-              styleDNAMatch:         analysis.styleDNAMatch        ?? null,
-              detailedAnalysis:      analysis.detailedAnalysis     ?? null,
-              occasionFit:           analysis.occasionFit          ?? null,
-              whatLikeEval:          analysis.whatLikeEval         ?? null,
-              concernEval:           analysis.concernEval          ?? null,
-              closetPairings:        analysis.closetPairings       ?? [],
-              fillsGap:              analysis.fillsGap              ?? null,
-              occasions:             analysis.occasions             ?? [],
-              productSnapshot:       analysis.productSnapshot       ?? null,
-              beforeYouBuy:          Array.isArray(analysis.beforeYouBuy) ? analysis.beforeYouBuy.filter(s => typeof s === "string" && s.trim()) : [],
-              buyIf:                 typeof analysis.buyIf  === "string" && analysis.buyIf.trim()  ? analysis.buyIf.trim()  : null,
-              skipIf:                typeof analysis.skipIf === "string" && analysis.skipIf.trim() ? analysis.skipIf.trim() : null,
-              betterDirection:       typeof analysis.betterDirection === "string" && analysis.betterDirection.trim() ? analysis.betterDirection.trim() : null,
-              finalThought:          analysis.finalThought          ?? null,
-              // Code-computed decision evidence (Phase 8 contract) + any deterministic
-              // override applied on top of the model's own verdict. verdictOverridden
-              // distinguishes "model decided BUY and code let it stand" from
-              // "model decided BUY and a confirmed hard-constraint violation vetoed it".
-              // modelConfidence preserves the AI's own confidence in its (now-discarded)
-              // BUY verdict for the record — see applyVerdictOverride.
-              verdictOverridden:     analysis.verdictOverridden,
-              verdictOverrideReason: analysis.verdictOverrideReason,
-              modelVerdict:          analysis.modelVerdict,
-              modelConfidence:       analysis.modelConfidence,
-              decisionEvidence,
-              // Phase 3 — Shared Customer Intelligence. Diagnostic only: the
-              // one structural WI finding (if any) that was surfaced as
-              // context for this analysis. Never itself a verdict signal.
-              wardrobeIntelligenceContext: wardrobeContext
-                ? {
-                    source:  wardrobeContext.source,
-                    dimension: wardrobeContext.dimension,
-                    value:   wardrobeContext.value,
-                    support: wardrobeContext.support,
-                  }
-                : null,
-            },
-          },
-        });
+        // Authoritative, atomic re-check — the quota guard at the top of this
+        // function (step 1b) is a cheap early fast-fail to skip the AI call
+        // entirely when clearly over quota, but it's read-before-write and
+        // NOT atomic. This is the actual enforcement point: the count
+        // re-check and the create happen inside one Serializable transaction
+        // (reserveBuySkipSlot), so two concurrent requests from the same
+        // customer can't both pass the count before either commits. Only
+        // takes this path when ENTITLEMENT_ENFORCEMENT is on; otherwise
+        // behavior is unchanged from before this fix.
+        if (process.env.ENTITLEMENT_ENFORCEMENT === "true") {
+          const reservation = await reserveBuySkipSlot(naiaCustomer.id, naiaCustomer.membershipStatus, analysisData);
+          if (!reservation.allowed) {
+            return json(
+              { error: "quota_exceeded", message: "You've used all your Buy or Skip checks for this month." },
+              { status: 429 },
+            );
+          }
+          analysisRecord = reservation.record;
+        } else {
+          analysisRecord = await prisma.buyOrSkipAnalysis.create({ data: analysisData });
+        }
       } catch (dbErr) {
         if (dbErr?.code === "P2002") {
           // Idempotent repeat — same bucket/customer/image hit a concurrent write.

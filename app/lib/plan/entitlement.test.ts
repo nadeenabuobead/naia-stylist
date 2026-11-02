@@ -223,7 +223,12 @@ describe("ENT-18 — closet enforcement is immediate (no flag)", () => {
 describe("ENT-19 — monthly guards check ENTITLEMENT_ENFORCEMENT flag", () => {
   it("StyleMe guard in result.tsx checks ENTITLEMENT_ENFORCEMENT", () => {
     assert.ok(resultTsx.includes("ENTITLEMENT_ENFORCEMENT"), "StyleMe guard must check flag");
-    assert.ok(resultTsx.includes("checkEntitlement"), "StyleMe guard must use checkEntitlement");
+    // 2026-11: reserveStyleMeSlot replaced checkEntitlement here — StyleMe has
+    // no expensive external call between the check and the write (unlike
+    // BuySkip's AI analysis step below), so a single atomic reservation is
+    // the complete guard; there's no separate cheap-early-exit check to keep.
+    // See ENT-32/ENT-33 for the guest-bypass and atomicity assertions.
+    assert.ok(resultTsx.includes("reserveStyleMeSlot"), "StyleMe guard must use the atomic reserveStyleMeSlot");
   });
 
   it("BuySkip guard in api.wishlist.jsx checks ENTITLEMENT_ENFORCEMENT", () => {
@@ -363,5 +368,77 @@ describe("ENT-32 — mock VTO jobs (fulllook-poc: namespace) excluded from real 
     const matches = entSvc.match(/NOT: \{ productHandle: \{ startsWith: MOCK_VTO_PRODUCT_HANDLE_PREFIX \} \}/g) ?? [];
     assert.ok(matches.length >= 4,
               `expected the exclusion in all 4 VTO count call sites (summary completed+inFlight, checkEntitlement completed+inFlight) — found ${matches.length}`);
+  });
+});
+
+// ENT-36..39 renumbered from the incoming commit's own ENT-32..35 — both this
+// branch and the one above independently claimed ENT-32 for unrelated
+// features (VTO mock-job exclusion here vs. the guest-bypass/atomic-
+// reservation work below); renumbered on merge to avoid a duplicate test ID,
+// no content changed.
+
+describe("ENT-36 — StyleMe guest bypass closed: the quota guard no longer requires naiaCustomer to run", () => {
+  it("result.tsx does not gate the StyleMe quota check on naiaCustomer being truthy", () => {
+    assert.ok(
+      !resultTsx.includes("isEnforced && naiaCustomer"),
+      "the old guard ran the quota check only for authenticated customers — a guest fell through with zero limit",
+    );
+  });
+
+  it("result.tsx treats a guest as membershipStatus NONE, not as exempt from the check", () => {
+    assert.match(resultTsx, /naiaCustomer\?\.membershipStatus\s*\?\?\s*"NONE"/);
+  });
+
+  it("result.tsx no longer imports checkEntitlement — the atomic reserveStyleMeSlot replaced it", () => {
+    assert.ok(!resultTsx.includes("checkEntitlement"), "checkEntitlement must not still be imported/used in result.tsx");
+    assert.match(resultTsx, /import\s*\{\s*reserveStyleMeSlot\s*\}\s*from\s*"~\/lib\/plan\/entitlement\.server"/);
+  });
+});
+
+describe("ENT-37 — StyleMe and BuySkip quota writes are atomic (Serializable transaction), not read-before-write", () => {
+  it("entitlement.server.ts exports reserveStyleMeSlot and reserveBuySkipSlot", () => {
+    assert.ok(entSvc.includes("export async function reserveStyleMeSlot"));
+    assert.ok(entSvc.includes("export async function reserveBuySkipSlot"));
+  });
+
+  it("the reservation transaction runs at Serializable isolation, matching VTO's createOrFindTryOnJob", () => {
+    assert.match(entSvc, /isolationLevel:\s*"Serializable"/);
+  });
+
+  it("result.tsx creates the StylingSession via reserveStyleMeSlot when enforcement is on, not a bare prisma.stylingSession.create inside that branch", () => {
+    const enforcedBlockStart = resultTsx.indexOf("if (isEnforced) {");
+    const enforcedBlockEnd = resultTsx.indexOf("} else {", enforcedBlockStart);
+    const enforcedBlock = resultTsx.slice(enforcedBlockStart, enforcedBlockEnd);
+    assert.match(enforcedBlock, /reserveStyleMeSlot\(/);
+    assert.ok(!enforcedBlock.includes("prisma.stylingSession.create"), "the enforced branch must reserve atomically, not create directly");
+  });
+
+  it("api.wishlist.jsx creates the BuyOrSkipAnalysis via reserveBuySkipSlot when enforcement is on", () => {
+    assert.match(wishlist, /import\s*\{[^}]*reserveBuySkipSlot[^}]*\}\s*from\s*"\.\.\/lib\/plan\/entitlement\.server"/);
+    const enforcedBlockStart = wishlist.indexOf('if (process.env.ENTITLEMENT_ENFORCEMENT === "true") {', wishlist.indexOf("Persist analysis"));
+    const enforcedBlockEnd = wishlist.indexOf("} else {", enforcedBlockStart);
+    const enforcedBlock = wishlist.slice(enforcedBlockStart, enforcedBlockEnd);
+    assert.match(enforcedBlock, /reserveBuySkipSlot\(/);
+  });
+});
+
+describe("ENT-38 — BuySkip already rejected the shared guest row before this change — confirming, not introducing, this protection", () => {
+  it("api.wishlist.jsx explicitly rejects the shared guest customer row before any analysis write", () => {
+    assert.match(wishlist, /shopifyCustomerId\s*===\s*"guest"/);
+    const guestCheckIdx = wishlist.indexOf('shopifyCustomerId === "guest"');
+    const createIdx = wishlist.indexOf("buyOrSkipAnalysis.create");
+    assert.ok(guestCheckIdx > -1 && createIdx > -1 && guestCheckIdx < createIdx, "the guest check must run before the analysis is ever created");
+  });
+});
+
+describe("ENT-39 — the two dead, unauthenticated legacy AI routes are removed, not merely firewalled", () => {
+  it("api.quick-style.jsx and api.tryon.jsx no longer exist as route files", () => {
+    assert.throws(() => readFile("app/routes/api.quick-style.jsx"));
+    assert.throws(() => readFile("app/routes/api.tryon.jsx"));
+  });
+
+  it("routes.ts no longer registers either dead route", () => {
+    assert.ok(!routes.includes('"routes/api.quick-style.jsx"'));
+    assert.ok(!routes.includes('"routes/api.tryon.jsx"'));
   });
 });
