@@ -19,7 +19,11 @@ function CollageTile({ src, alt }: { src: string; alt: string }) {
         src={src}
         alt={alt}
         loading="lazy"
-        style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }}
+        // objectPosition is explicit, not left to the (identical) default —
+        // 2026-11-08: every tile must center its garment the same way, so a
+        // differently-shaped photo never reads as "starting lower" than its
+        // neighbour purely because one relies on an implicit default.
+        style={{ width: "100%", height: "100%", objectFit: "contain", objectPosition: "center", display: "block" }}
         onError={(e) => {
           e.currentTarget.style.display = "none";
           const fallback = e.currentTarget.nextElementSibling as HTMLElement | null;
@@ -46,10 +50,27 @@ export function LookCollage({ images, extraCount, alt }: { images: string[]; ext
     return <div style={{ display: "grid", placeItems: "center", width: "100%", height: "100%" }}>{EMPTY_LOOK_ICON}</div>;
   }
 
+  // 2026-11-08: the 2-image case used to split the card side by side
+  // (gridTemplateColumns: "1fr 1fr", one row) — on this card's 4:5 portrait
+  // frame, that gives each tile a ~2:5 (very narrow, very tall) box. Most
+  // garment photos aren't that elongated, so object-fit: contain had to
+  // shrink almost every image down to a sliver to fit the width, leaving
+  // large, inconsistent empty margins above and below — worse for wide
+  // items (shoes, bags) than narrow ones (trousers), which is exactly the
+  // "some tiles have excessive whitespace, items start lower/higher than
+  // others" inconsistency reported. Stacking instead (one column, two rows)
+  // gives each tile a ~8:5 (moderately wide) box — much closer to how wide
+  // most garment photos actually are, so contain now only needs mild,
+  // similar-sized letterboxing regardless of the photo's own shape. The 3/4
+  // -image case is unchanged: dividing the same 4:5 frame into a 2x2 grid
+  // already gives each tile that same 4:5 ratio, which was never the
+  // problem — only the 2-image split was the outlier shape.
   const gridStyle: React.CSSProperties =
     images.length === 1
       ? { display: "grid", width: "100%", height: "100%" }
-      : { display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: images.length === 2 ? "1fr" : "1fr 1fr", gap: "2px", width: "100%", height: "100%" };
+      : images.length === 2
+      ? { display: "grid", gridTemplateColumns: "1fr", gridTemplateRows: "1fr 1fr", gap: "2px", width: "100%", height: "100%" }
+      : { display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "1fr 1fr", gap: "2px", width: "100%", height: "100%" };
 
   return (
     <div style={{ position: "relative", width: "100%", height: "100%" }}>
