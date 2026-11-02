@@ -9,7 +9,7 @@ import {
   shouldBounceToStorefront,
 } from "~/lib/shopify-customer-oauth.server";
 import { getSession, commitSession } from "~/lib/session.server";
-import { resolveNaiaSession, buildHandoffNonceCookie } from "~/lib/naia-session.server";
+import { resolveNaiaSession, buildHandoffNonceCookie, createNaiaSession } from "~/lib/naia-session.server";
 
 // A SHA-256 hex digest — the exact, fixed shape buildHandoffNonceCookie's
 // hash always produces. Anything else is not a value this app generated,
@@ -17,6 +17,17 @@ import { resolveNaiaSession, buildHandoffNonceCookie } from "~/lib/naia-session.
 function validateNonceHash(raw: string | null): string | null {
   if (!raw) return null;
   return /^[a-f0-9]{64}$/i.test(raw) ? raw : null;
+}
+
+// Pulls just the cookie's own value out of a Set-Cookie header string, so it
+// can be carried in a URL query param instead of a cookie for one hop. Same
+// helper as auth.shopify.callback.tsx's own copy (not shared on purpose —
+// see the cross-domain handoff comment below for why these two call sites
+// are kept independent rather than refactored into one).
+function extractSessionCookieValue(setCookieHeader: string): string {
+  const eq = setCookieHeader.indexOf("=");
+  const semi = setCookieHeader.indexOf(";");
+  return setCookieHeader.slice(eq + 1, semi === -1 ? undefined : semi);
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -70,7 +81,50 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   // If caller already has a valid nAia session skip OAuth entirely
   const existing = await resolveNaiaSession(request);
-  if (existing) return redirect(finalReturnTarget);
+  if (existing) {
+    // Cross-domain handoff (2026-11-02): mirrors auth.shopify.callback.tsx's
+    // own fix for the identical failure mode (see that file's "if
+    // (originHost) {" block and its comment for the full history). A bare
+    // redirect straight to finalReturnTarget sets no cookie at all on
+    // originHost — a cookie set on THIS response is scoped to the host
+    // serving it, never a different one — so the browser would land there
+    // with no session, requireCurrentNaiaCustomer would see "not
+    // authenticated," bounce back to this exact login route, find the SAME
+    // already-authenticated identity here again, and repeat forever:
+    // ERR_TOO_MANY_REDIRECTS. The 2026-10-20 fix covered a FRESH OAuth
+    // success in auth.shopify.callback.tsx but missed this already-has-a-
+    // session shortcut, which takes the identical cross-domain redirect
+    // without ever reaching that fix.
+    if (originHost) {
+      if (!originNonceHash) {
+        return new Response("Missing browser-binding nonce", { status: 400 });
+      }
+
+      const HANDOFF_PENDING_MS = 60_000;
+      const pendingExpiresAt = new Date(Date.now() + HANDOFF_PENDING_MS);
+
+      let rawToken: string;
+      try {
+        rawToken = await createNaiaSession(existing.id, request, undefined, pendingExpiresAt);
+      } catch {
+        return new Response("Session creation failed", { status: 502 });
+      }
+
+      const handoff = await getSession();
+      handoff.set("handoff_raw_token", rawToken);
+      handoff.set("handoff_origin_host", originHost);
+      handoff.set("handoff_expires_at", pendingExpiresAt.getTime());
+      handoff.set("handoff_origin_nonce_hash", originNonceHash);
+      const handoffCookie = await commitSession(handoff);
+      const handoffValue = extractSessionCookieValue(handoffCookie);
+      const handoffUrl = new URL(`https://${originHost}/auth/shopify/handoff`);
+      handoffUrl.searchParams.set("h", handoffValue);
+      handoffUrl.searchParams.set("return_to", returnTo);
+      return redirect(handoffUrl.toString());
+    }
+
+    return redirect(finalReturnTarget);
+  }
 
   const oidcConfig   = await getOidcConfig();
   const pkce         = generatePkceBundle();

@@ -25,21 +25,28 @@
 //
 // Run: npx vitest run app/lib/naia-session-handoff-single-use.test.ts
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("~/db.server", () => ({
   default: {
-    naiaSession: { updateMany: vi.fn(), create: vi.fn().mockResolvedValue({}) },
+    naiaSession: {
+      updateMany: vi.fn(),
+      create: vi.fn().mockResolvedValue({}),
+      findUnique: vi.fn().mockResolvedValue(null),
+      update: vi.fn().mockResolvedValue({}),
+    },
   },
 }));
 
 import prisma from "~/db.server";
 import { promoteHandoffSession, createNaiaSession, buildHandoffNonceCookie, verifyHandoffNonce } from "./naia-session.server";
 import { loader as handoffLoader } from "../routes/auth.shopify.handoff";
+import { loader as loginLoader } from "../routes/auth.shopify.login";
 import { getSession, commitSession } from "./session.server";
 
 const mockUpdateMany = () => (prisma as any).naiaSession.updateMany as ReturnType<typeof vi.fn>;
 const mockCreate = () => (prisma as any).naiaSession.create as ReturnType<typeof vi.fn>;
+const mockFindUnique = () => (prisma as any).naiaSession.findUnique as ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -312,5 +319,103 @@ describe("auth.shopify.handoff.tsx — the success path, replay, and browser-bin
       context: {},
     });
     expect(res.headers.get("Location")).toBe("/my-naia");
+  });
+});
+
+// ── auth.shopify.login.tsx — the "already has a session" cross-domain case
+// (2026-11-02) ────────────────────────────────────────────────────────────
+//
+// Root cause: ERR_TOO_MANY_REDIRECTS on a Preview deployment. The 2026-10-20
+// fix above covers a FRESH OAuth success landing back on an origin host —
+// but a caller who ALREADY has a valid nAia session (set on the storefront
+// host from earlier use) takes a completely different, earlier-return
+// branch in auth.shopify.login.tsx that was never updated: it redirected
+// straight to `https://${originHost}${returnTo}` with no cookie transfer at
+// all. The browser lands on originHost with no session, bounces back here,
+// finds the SAME existing session again, and repeats forever. Reproduced
+// below using only a mocked DB layer — no real Shopify credentials, no
+// customer data, and no network calls of any kind.
+describe("auth.shopify.login.tsx — the 'already has a session' cross-domain case", () => {
+  const STOREFRONT_HOST = "naia-stylist-staging.vercel.app";
+  const ORIGIN_HOST = "naia-stylist-staging-r6gp0w3zs-nadeenabuobeads-projects.vercel.app";
+  const savedStorefrontHost = process.env.STOREFRONT_HOST;
+
+  beforeEach(() => {
+    process.env.STOREFRONT_HOST = STOREFRONT_HOST;
+    mockFindUnique().mockResolvedValue({
+      tokenHash: "irrelevant-mock-does-not-check-this",
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      customer: { id: "existing-customer-1", shopifyCustomerId: "shop-existing-1", onboardingProfile: null },
+    });
+  });
+  afterEach(() => {
+    if (savedStorefrontHost !== undefined) process.env.STOREFRONT_HOST = savedStorefrontHost;
+    else delete process.env.STOREFRONT_HOST;
+  });
+
+  function loginRequest(params: Record<string, string>) {
+    const url = new URL(`https://${STOREFRONT_HOST}/auth/shopify/login`);
+    for (const [k, v] of Object.entries({ return_to: "/my-naia", _sf: "1", ...params })) {
+      url.searchParams.set(k, v);
+    }
+    return new Request(url.toString(), { headers: { Cookie: "__naia_tok=existing-raw-token-abc123" } });
+  }
+
+  it("an existing session with a captured origin host now routes through /auth/shopify/handoff instead of redirecting straight there", async () => {
+    const nonce = buildHandoffNonceCookie();
+    const request = loginRequest({ origin_host: ORIGIN_HOST, origin_nonce_hash: nonce.nonceHash });
+    const res: any = await loginLoader({ request, params: {}, context: {} });
+    const location = res.headers.get("Location");
+    expect(location).toMatch(new RegExp(`^https://${ORIGIN_HOST}/auth/shopify/handoff\\?`));
+    const locationUrl = new URL(location);
+    expect(locationUrl.searchParams.get("return_to")).toBe("/my-naia");
+    expect(locationUrl.searchParams.has("h")).toBe(true);
+    // The fix reuses createNaiaSession, which does hit the database —
+    // confirming the new path is actually live, not a no-op.
+    expect(mockCreate()).toHaveBeenCalledTimes(1);
+  });
+
+  it("the handoff built from an existing session redeems successfully end to end, through the real auth.shopify.handoff.tsx loader", async () => {
+    const nonce = buildHandoffNonceCookie();
+    const loginRes: any = await loginLoader({
+      request: loginRequest({ origin_host: ORIGIN_HOST, origin_nonce_hash: nonce.nonceHash }),
+      params: {},
+      context: {},
+    });
+    const handoffLocation = new URL(loginRes.headers.get("Location"));
+    const h = handoffLocation.searchParams.get("h")!;
+    const rawNonce = nonce.cookieHeader.match(/__naia_handoff_nonce=([^;]+)/)![1];
+
+    mockUpdateMany().mockResolvedValue({ count: 1 });
+    const handoffRes: any = await handoffLoader({
+      request: new Request(handoffLocation.toString(), {
+        headers: { Cookie: `__naia_handoff_nonce=${rawNonce}` },
+      }),
+      params: {},
+      context: {},
+    });
+    expect(handoffRes.headers.get("Location")).toBe("/my-naia");
+    const setCookie = handoffRes.headers.getSetCookie?.() ?? [handoffRes.headers.get("Set-Cookie")];
+    expect(setCookie.some((c: string) => c?.includes("__naia_tok="))).toBe(true);
+  });
+
+  it("fails closed — refuses to build a handoff when the nonce hash never made it this far, before touching the database", async () => {
+    const res: any = await loginLoader({
+      request: loginRequest({ origin_host: ORIGIN_HOST }), // no origin_nonce_hash
+      params: {},
+      context: {},
+    });
+    expect(res.status).toBe(400);
+    expect(mockCreate()).not.toHaveBeenCalled();
+  });
+
+  it("the no-origin-host path is completely unchanged — still a bare redirect to finalReturnTarget", async () => {
+    const res: any = await loginLoader({
+      request: loginRequest({}), // no origin_host at all
+      params: {},
+      context: {},
+    });
+    expect(res.headers.get("Location")).toBe("/my-naia");
+    expect(mockCreate()).not.toHaveBeenCalled();
   });
 });
