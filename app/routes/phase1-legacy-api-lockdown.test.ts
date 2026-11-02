@@ -500,7 +500,16 @@ describe("§D — no remaining unauthenticated fetch to a paid AI/scan provider"
       const allowed = ["api.trigger-tryon.tsx", "api.tryon-status.$jobId.tsx", "api.staging-full-look-vto.tsx"];
       if (allowed.includes(entry.name)) continue;
       const src = readFileSync(join(routesDir, entry.name), "utf8");
-      if (src.includes("api.fashn.ai")) offenders.push(entry.name);
+      // Strip full-line `//` comments before scanning: a route documenting,
+      // in prose, that it does NOT call FASHN (e.g. staging.full-look-vto-
+      // test.tsx's own header, which is entirely FASHN-mocked) must not trip
+      // this check the same way a real `FASHN_BASE = "https://api.fashn.ai"`
+      // constant in executable code would.
+      const codeOnly = src
+        .split("\n")
+        .filter((line) => !line.trim().startsWith("//"))
+        .join("\n");
+      if (codeOnly.includes("api.fashn.ai")) offenders.push(entry.name);
     }
     assert.deepEqual(offenders, [], `unexpected direct FASHN calls outside the hardened routes: ${offenders.join(", ")}`);
   });
