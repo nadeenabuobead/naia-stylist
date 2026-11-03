@@ -209,8 +209,15 @@ export async function validateIdToken(
 }
 
 // ---------------------------------------------------------------------------
-// Customer Account API — discover GraphQL endpoint + fetch verified customer
-// identity, including the name fields used to populate the nAia Customer row.
+// Customer Account API — discover GraphQL endpoint + fetch the customer's
+// identity (cryptographically verified via the id_token/GID above), plus the
+// name and email fields used to populate the nAia Customer row. The email
+// is Shopify's own on-file value for the account that just completed OIDC
+// login — not user-submitted input — so it is trusted the same way
+// firstName/lastName already are. The Customer Account API exposes no
+// separate "email verified" flag; nAia does not claim this email address
+// has itself been confirmed deliverable or owned, only that it is the
+// address Shopify has on file for this authenticated account.
 // ---------------------------------------------------------------------------
 
 let customerAccountApiEndpoint: string | null = null;
@@ -219,6 +226,7 @@ export interface ShopifyCustomerProfile {
   customerId: string;
   firstName:  string | null;
   lastName:   string | null;
+  email:      string | null;
 }
 
 export async function fetchCustomerProfile(accessToken: string): Promise<ShopifyCustomerProfile> {
@@ -250,7 +258,7 @@ export async function fetchCustomerProfile(accessToken: string): Promise<Shopify
         "Origin":        process.env.SHOPIFY_APP_URL!,
         "User-Agent":    "nAia Stylist Staging",
       },
-      body: JSON.stringify({ query: "query CurrentCustomer { customer { id firstName lastName } }" }),
+      body: JSON.stringify({ query: "query CurrentCustomer { customer { id firstName lastName emailAddress { emailAddress } } }" }),
     });
   } catch {
     throw new Error("customer_identity_query_failed");
@@ -258,7 +266,14 @@ export async function fetchCustomerProfile(accessToken: string): Promise<Shopify
   if (!gqlRes.ok) throw new Error("customer_identity_query_failed");
 
   const body = await gqlRes.json() as {
-    data?: { customer?: { id?: unknown; firstName?: unknown; lastName?: unknown } };
+    data?: {
+      customer?: {
+        id?:           unknown;
+        firstName?:    unknown;
+        lastName?:     unknown;
+        emailAddress?: { emailAddress?: unknown } | null;
+      };
+    };
     errors?: unknown;
   };
   if (body.errors) throw new Error("customer_identity_query_failed");
@@ -272,11 +287,13 @@ export async function fetchCustomerProfile(accessToken: string): Promise<Shopify
 
   const rawFirstName = body.data?.customer?.firstName;
   const rawLastName  = body.data?.customer?.lastName;
+  const rawEmail     = body.data?.customer?.emailAddress?.emailAddress;
 
   return {
     customerId: numericId,
     firstName:  typeof rawFirstName === "string" ? rawFirstName : null,
     lastName:   typeof rawLastName === "string" ? rawLastName : null,
+    email:      typeof rawEmail === "string" ? rawEmail : null,
   };
 }
 
