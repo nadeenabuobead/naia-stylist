@@ -442,3 +442,75 @@ describe("ENT-39 — the two dead, unauthenticated legacy AI routes are removed,
     assert.ok(!routes.includes('"routes/api.tryon.jsx"'));
   });
 });
+
+describe("ENT-36 — Closet's atomic reservation stays unconditional, same posture as checkEntitlement before it", () => {
+  it("entitlement.server.ts exports reserveClosetSlot", () => {
+    assert.ok(entSvc.includes("export async function reserveClosetSlot"));
+  });
+
+  it("neither closet._index.tsx nor api.closet.jsx gates reserveClosetSlot behind ENTITLEMENT_ENFORCEMENT", () => {
+    // Checks for the actual gating CODE pattern, not bare presence of the
+    // flag name — this file's own explanatory comments mention the flag by
+    // name specifically to say Closet does NOT use it, which a bare
+    // string-presence check can't distinguish from a real gate.
+    for (const [label, src] of [["closet._index.tsx", closetRt], ["api.closet.jsx", closetApi]] as const) {
+      const reserveIdx = src.indexOf("reserveClosetSlot");
+      assert.ok(reserveIdx > -1, `${label} must call reserveClosetSlot`);
+      assert.ok(
+        !src.includes('ENTITLEMENT_ENFORCEMENT === "true"'),
+        `${label} must not have gained a real ENTITLEMENT_ENFORCEMENT gate — Closet capacity remains unconditional`,
+      );
+    }
+  });
+
+  it("closet._index.tsx creates the ClosetItem via reserveClosetSlot, not a bare prisma.closetItem.create(...) call, in the add-intent branch", () => {
+    const addIntentStart = closetRt.indexOf('if (intent === "add")');
+    const deleteIntentStart = closetRt.indexOf('if (intent === "delete")');
+    const addBlock = closetRt.slice(addIntentStart, deleteIntentStart);
+    assert.match(addBlock, /reserveClosetSlot\(/);
+    // Matches the real call shape (with the open paren) — this block's own
+    // comment explaining the change mentions "prisma.closetItem.create" by
+    // name without a paren, which a bare substring check would misfire on.
+    assert.ok(!addBlock.includes("prisma.closetItem.create("), "the add-intent branch must reserve atomically, not create directly");
+  });
+
+  it("closet._index.tsx reserves AFTER every validation gate (ownership, Cloudinary verify, moderation, suitability) — a rejected upload structurally cannot consume a quota slot", () => {
+    // Scoped to the add-intent block only — the later edit-intent branch
+    // re-runs these same gate functions for its own, unrelated purpose,
+    // which would otherwise make a whole-file lastIndexOf() look like the
+    // reservation ran before the gates.
+    const addIntentStart = closetRt.indexOf('if (intent === "add")');
+    const deleteIntentStart = closetRt.indexOf('if (intent === "delete")');
+    const addBlock = closetRt.slice(addIntentStart, deleteIntentStart);
+    const reserveIdx = addBlock.indexOf("reserveClosetSlot(");
+    const lastGateIdx = Math.max(
+      addBlock.lastIndexOf("validatePublicIdOwnership"),
+      addBlock.lastIndexOf("moderateImageContent"),
+      addBlock.lastIndexOf("screenGarmentSuitability"),
+    );
+    assert.ok(reserveIdx > lastGateIdx, "reserveClosetSlot must run after ownership/moderation/suitability checks, not before — a failed upload must never reach it");
+  });
+
+  it("closet._index.tsx deletes the Cloudinary asset if the atomic reservation is lost to a concurrent upload, so a blocked item never leaves an orphaned asset", () => {
+    const reserveIdx = closetRt.indexOf("reserveClosetSlot(");
+    const notAllowedIdx = closetRt.indexOf("!reservation.allowed", reserveIdx);
+    const blockEnd = closetRt.indexOf("return data(", notAllowedIdx);
+    const block = closetRt.slice(notAllowedIdx, blockEnd);
+    assert.match(block, /deleteCloudinaryAsset\(publicId,\s*"private"\)/);
+  });
+
+  it("api.closet.jsx's add action uses reserveClosetSlot", () => {
+    const addIntentStart = closetApi.indexOf('act === "add"');
+    const syncIntentStart = closetApi.indexOf('act === "sync"');
+    const addBlock = closetApi.slice(addIntentStart, syncIntentStart);
+    assert.match(addBlock, /reserveClosetSlot\(/);
+  });
+
+  it("api.closet.jsx's sync action caps the batch to remaining capacity inside a transaction, not an unbounded createMany after a boolean check", () => {
+    const syncIntentStart = closetApi.indexOf('act === "sync"');
+    const deleteIntentStart = closetApi.indexOf('act === "delete"');
+    const syncBlock = closetApi.slice(syncIntentStart, deleteIntentStart);
+    assert.match(syncBlock, /\$transaction/, "sync must run inside a transaction");
+    assert.match(syncBlock, /\.slice\(0,\s*remaining\)/, "the batch must be capped to remaining capacity, not created in full");
+  });
+});

@@ -14,11 +14,17 @@
 // as a cheap early fast-fail before expensive work (e.g. skip the AI call
 // entirely for a customer clearly already over quota). The actual race — two
 // simultaneous requests both passing that read before either writes its
-// usage-consuming row — is closed by reserveStyleMeSlot/reserveBuySkipSlot
-// below, which re-verify the count and perform the create in one Serializable
-// transaction, mirroring VTO's existing createOrFindTryOnJob. Callers should
-// use checkEntitlement for display/early-exit and the reserve* functions for
-// the actual quota-consuming write, once ENTITLEMENT_ENFORCEMENT is enabled.
+// usage-consuming row — is closed by reserveStyleMeSlot/reserveBuySkipSlot/
+// reserveClosetSlot below, which re-verify the count and perform the create in
+// one Serializable transaction, mirroring VTO's existing createOrFindTryOnJob.
+// Callers should use checkEntitlement for display/early-exit and the reserve*
+// functions for the actual quota-consuming write.
+//
+// reserveClosetSlot, unlike the other two, is NOT behind ENTITLEMENT_ENFORCEMENT
+// — Closet capacity enforcement is unconditional by existing design (see
+// closet._index.tsx's own "immediate — no flag required" comment; it's a
+// storage cap, not a trial gate), so the atomic version is unconditional too.
+// The other two only take their atomic path once ENTITLEMENT_ENFORCEMENT is on.
 
 import type { MembershipStatus, Prisma } from "@prisma/client";
 import prisma from "~/db.server";
@@ -331,18 +337,18 @@ export async function checkEntitlement(
 // (already required to exist for duplicate submissions) runs unchanged.
 
 export type RunReservationFn = <T>(
-  fn: (tx: Pick<typeof prisma, "stylingSession" | "buyOrSkipAnalysis">) => Promise<T>,
+  fn: (tx: Pick<typeof prisma, "stylingSession" | "buyOrSkipAnalysis" | "closetItem">) => Promise<T>,
 ) => Promise<T>;
 
 const _runReservationTransaction: RunReservationFn = (fn) =>
   prisma.$transaction(
-    (tx: Pick<typeof prisma, "stylingSession" | "buyOrSkipAnalysis">) => fn(tx),
+    (tx: Pick<typeof prisma, "stylingSession" | "buyOrSkipAnalysis" | "closetItem">) => fn(tx),
     { isolationLevel: "Serializable" },
   );
 
 export type ReserveResult<T> =
   | { allowed: true; record: T }
-  | { allowed: false; reason: "quota_exceeded" };
+  | { allowed: false; reason: "quota_exceeded" | "at_capacity" };
 
 export async function reserveStyleMeSlot(
   customerId: string,
@@ -406,4 +412,33 @@ export async function reserveBuySkipSlot(
     }
   }
   throw new Error("Unexpected exit from reserveBuySkipSlot retry loop");
+}
+
+export async function reserveClosetSlot(
+  customerId: string,
+  membershipStatus: MembershipStatus,
+  itemData: Prisma.ClosetItemCreateInput,
+  _runTransaction: RunReservationFn = _runReservationTransaction,
+): Promise<ReserveResult<Awaited<ReturnType<typeof prisma.closetItem.create>>>> {
+  const limits = getMembershipAllowances(membershipStatus);
+
+  for (let attempt = 0; attempt <= MAX_TX_RETRIES; attempt++) {
+    try {
+      return await _runTransaction(async (tx) => {
+        // Closet is a hard-delete model — every row is an active item, no
+        // window filter (matches checkEntitlement's "closet" case and
+        // getEntitlementSummary's own count exactly).
+        const used = await tx.closetItem.count({ where: { customerId } });
+        if (used >= limits.closetItems) {
+          return { allowed: false, reason: "at_capacity" };
+        }
+        const record = await tx.closetItem.create({ data: itemData });
+        return { allowed: true, record };
+      });
+    } catch (e) {
+      if (isSerializationError(e) && attempt < MAX_TX_RETRIES) continue;
+      throw e;
+    }
+  }
+  throw new Error("Unexpected exit from reserveClosetSlot retry loop");
 }

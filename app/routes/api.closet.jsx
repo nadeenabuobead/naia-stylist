@@ -1,7 +1,13 @@
 import { authenticateCustomer } from "../customer-auth.server";
 import prisma from "../db.server";
 import { deleteClosetItemWithImage } from "../lib/closet-item-deletion.server.js";
-import { checkEntitlement } from "../lib/plan/entitlement.server";
+import { checkEntitlement, reserveClosetSlot } from "../lib/plan/entitlement.server";
+import { getMembershipAllowances } from "../lib/plan/plan-limits.server";
+
+function isSerializationError(e) {
+  return e?.code === "P2034";
+}
+const MAX_SYNC_TX_RETRIES = 2;
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -76,24 +82,29 @@ export async function action({ request }) {
     if (!name?.trim()) {
       return Response.json({ error: "Name required" }, { status: 400, headers: CORS });
     }
-    const capacityCheck = await checkEntitlement(customer.id, customer.membershipStatus, "closet");
-    if (!capacityCheck.allowed) {
+    // Atomic: reserveClosetSlot re-verifies the count and creates inside one
+    // Serializable transaction, so two concurrent "add" calls (or an "add"
+    // racing a "sync") from the same customer can't both pass the count
+    // before either commits — the bare checkEntitlement check this replaced
+    // was read-before-write only. Mirrors closet._index.tsx's canonical path.
+    //
+    // imageUrl is forced null, never a client-supplied value — this path has
+    // no Cloudinary ownership check and no Layer 2/3 moderation, so it must
+    // not be able to attach an arbitrary, unscreened image to a closet item
+    // (preserved from this route's existing security contract; `image` isn't
+    // even read from the request body on this action). Items added through
+    // this path can have a photo attached afterwards through the canonical,
+    // moderated upload flow in closet._index.tsx (same ClosetItem row).
+    const reservation = await reserveClosetSlot(customer.id, customer.membershipStatus, {
+      customer: { connect: { id: customer.id } },
+      name: name.trim(),
+      category: normalizeCategory(category),
+      imageUrl: null,
+    });
+    if (!reservation.allowed) {
       return Response.json({ error: "Your closet is full. Remove some items to add new ones." }, { status: 403, headers: CORS });
     }
-    // A client-supplied `image` value is never trusted here — this path has no
-    // Cloudinary ownership check and no Layer 2/3 moderation, so it must not
-    // be able to attach an arbitrary, unscreened image to a closet item. Items
-    // added through this path can have a photo attached afterwards through the
-    // canonical, moderated upload flow in closet._index.tsx (same ClosetItem row).
-    const item = await prisma.closetItem.create({
-      data: {
-        customerId: customer.id,
-        name: name.trim(),
-        category: normalizeCategory(category),
-        imageUrl: null,
-      },
-    });
-    return Response.json({ item }, { headers: CORS });
+    return Response.json({ item: reservation.record }, { headers: CORS });
   }
 
   // ─── SYNC from localStorage (merge, skip duplicates) ──────────────────────
@@ -103,34 +114,59 @@ export async function action({ request }) {
       return Response.json({ error: "Items array required" }, { status: 400, headers: CORS });
     }
 
+    // Cheap early fast-fail — skip the batch entirely if clearly already at
+    // capacity. Not atomic on its own; see the transaction below.
     const capacityCheck = await checkEntitlement(customer.id, customer.membershipStatus, "closet");
     if (!capacityCheck.allowed) {
       return Response.json({ error: "Your closet is full. Remove some items to add new ones.", merged: 0 }, { status: 403, headers: CORS });
     }
 
-    const existing = await prisma.closetItem.findMany({
-      where: { customerId: customer.id },
-      select: { name: true, category: true },
-    });
-    const existingSet = new Set(existing.map(e => `${e.name}::${e.category}`));
+    // Atomic: re-verify the count AND cap the batch to the customer's actual
+    // remaining capacity inside one Serializable transaction. The check
+    // above only answers "is the customer currently at capacity" — a
+    // boolean — not "how many more fit". Without this, a customer with a
+    // single slot left and a 500-item sync payload would have had all 500
+    // created in one unbounded createMany call; two concurrent syncs could
+    // likewise both pass the boolean check and together blow past the cap.
+    const limits = getMembershipAllowances(customer.membershipStatus);
+    let merged = 0;
+    for (let attempt = 0; attempt <= MAX_SYNC_TX_RETRIES; attempt++) {
+      try {
+        merged = await prisma.$transaction(async (tx) => {
+          const existing = await tx.closetItem.findMany({
+            where: { customerId: customer.id },
+            select: { name: true, category: true },
+          });
+          const existingSet = new Set(existing.map(e => `${e.name}::${e.category}`));
+          const remaining = Math.max(0, limits.closetItems - existing.length);
 
-    // See the "add" action above — client-supplied image data is never
-    // trusted on this unmoderated legacy path.
-    const toCreate = items
-      .filter(i => {
-        if (!i.name?.trim()) return false;
-        const cat = normalizeCategory(i.category);
-        return !existingSet.has(`${i.name.trim()}::${cat}`);
-      })
-      .map(i => ({
-        customerId: customer.id,
-        name: i.name.trim(),
-        category: normalizeCategory(i.category),
-        imageUrl: null,
-      }));
+          // See the "add" action above — client-supplied image data is never
+          // trusted on this unmoderated legacy path, hence imageUrl: null
+          // unconditionally (not i.image ?? null).
+          const toCreate = items
+            .filter(i => {
+              if (!i.name?.trim()) return false;
+              const cat = normalizeCategory(i.category);
+              return !existingSet.has(`${i.name.trim()}::${cat}`);
+            })
+            .slice(0, remaining)
+            .map(i => ({
+              customerId: customer.id,
+              name: i.name.trim(),
+              category: normalizeCategory(i.category),
+              imageUrl: null,
+            }));
 
-    if (toCreate.length > 0) {
-      await prisma.closetItem.createMany({ data: toCreate });
+          if (toCreate.length > 0) {
+            await tx.closetItem.createMany({ data: toCreate });
+          }
+          return toCreate.length;
+        }, { isolationLevel: "Serializable" });
+        break;
+      } catch (e) {
+        if (isSerializationError(e) && attempt < MAX_SYNC_TX_RETRIES) continue;
+        throw e;
+      }
     }
 
     const allItems = await prisma.closetItem.findMany({
@@ -138,7 +174,7 @@ export async function action({ request }) {
       orderBy: { createdAt: "desc" },
     });
 
-    return Response.json({ items: allItems, merged: toCreate.length }, { headers: CORS });
+    return Response.json({ items: allItems, merged }, { headers: CORS });
   }
 
   // ─── DELETE an item ────────────────────────────────────────────────────────

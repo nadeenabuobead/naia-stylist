@@ -21,7 +21,7 @@ import { extractClosetEvidence } from "~/lib/ai/taste-extraction.server";
 import { writeSourceEvidence } from "~/lib/ai/taste-reconcile.server";
 import { loadNaiaModel, computeModelReadinessFromRecord } from "~/lib/ai/my-naia-model.server";
 import { VtoExperience } from "~/components/VtoExperience";
-import { checkEntitlement } from "~/lib/plan/entitlement.server";
+import { checkEntitlement, reserveClosetSlot } from "~/lib/plan/entitlement.server";
 import { displayColors } from "~/lib/closet-card-colors";
 
 // Option B shell: MyNaiaLayout + naiaStyles (NADINE header, My nAia navigation)
@@ -544,31 +544,61 @@ export async function action({ request }: ActionFunctionArgs) {
       bytes: serverBytes,
     });
 
-    const createdItem = await prisma.closetItem.create({
-      data: {
-        customer: { connect: { id: customer.id } },
-        name: name || null,
-        category,
-        imageUrl: null,                // private upload — null for new records
-        imagePublicId: publicId,
-        imageFormat: serverFormat,
-        colors,
-        primaryColor: primaryColor || null,
-        pattern: pattern || null,
-        brand: brand || null,
-        occasions: occasions.length > 0 ? occasions : [],
-        seasons: seasons.length > 0 ? seasons : [],
-        tryOnEligibility: stageA.eligible,
-        tryOnAssessedAt: new Date(stageA.assessedAt),
-        tryOnCustomerHint: stageA.customerHint,
-        tryOnInternalNote: stageA.internalNote,
-        garmentRelationships,
-        customerNote,
-        ...buildConsentStamp(consentGiven),
-        // Garment intelligence — pending immediately; analysis fires below
-        analysisStatus: "pending",
-      },
+    // Authoritative, atomic re-check — the capacity check above (before any of
+    // the Cloudinary/moderation/suitability work) is a cheap early fast-fail,
+    // read-before-write and NOT atomic. This is the actual enforcement point:
+    // the count re-check and the create happen inside one Serializable
+    // transaction (reserveClosetSlot), so two concurrent uploads from the
+    // same customer can't both pass the count before either commits —
+    // mirrors reserveStyleMeSlot/reserveBuySkipSlot and VTO's existing
+    // createOrFindTryOnJob. Unconditional, same as the early check — Closet
+    // capacity is not behind ENTITLEMENT_ENFORCEMENT.
+    //
+    // colors and the consent stamp spread were added to the inline create()
+    // call this replaced AFTER the atomic-reservation commit's own fork
+    // point — both restored here so the atomic path records exactly what
+    // the current inline path would have, nothing silently dropped.
+    const reservation = await reserveClosetSlot(customer.id, customer.membershipStatus, {
+      customer: { connect: { id: customer.id } },
+      name: name || null,
+      // category is a validated-at-runtime string (checked above), not a
+      // statically-typed ClosetCategory — same unchecked cast the inline
+      // prisma.closetItem.create call this replaced relied on implicitly.
+      category: category as any,
+      imageUrl: null,                // private upload — null for new records
+      imagePublicId: publicId,
+      imageFormat: serverFormat,
+      colors,
+      primaryColor: primaryColor || null,
+      pattern: pattern || null,
+      brand: brand || null,
+      occasions: occasions.length > 0 ? occasions : [],
+      seasons: seasons.length > 0 ? seasons : [],
+      tryOnEligibility: stageA.eligible,
+      tryOnAssessedAt: new Date(stageA.assessedAt),
+      tryOnCustomerHint: stageA.customerHint,
+      tryOnInternalNote: stageA.internalNote,
+      garmentRelationships,
+      customerNote,
+      ...buildConsentStamp(consentGiven),
+      // Garment intelligence — pending immediately; analysis fires below
+      analysisStatus: "pending",
     });
+    if (!reservation.allowed) {
+      // A concurrent upload won the race since the early check above — this
+      // asset was already verified/moderated but must not be kept orphaned.
+      await deleteCloudinaryAsset(publicId, "private");
+      return data(
+        { error: "Your closet is full. Remove some items to add new ones." },
+        { status: 403 },
+      );
+    }
+    // Named createdItem, not newItem — staging renamed this variable
+    // independently after reserveClosetSlot's own fork point (newItem is a
+    // DIFFERENT, outer variable unifying this "created" case with the
+    // "found existing item by publicId" case in the else branch below); every
+    // downstream reference in this function already expects createdItem.
+    const createdItem = reservation.record;
 
     try {
       await recordJourneyEventAwaited(

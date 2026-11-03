@@ -1,9 +1,10 @@
 // app/lib/plan/entitlement-reservation.test.ts
 //
-// Behavioral tests for reserveStyleMeSlot/reserveBuySkipSlot — the atomic
-// closers for checkEntitlement's documented non-atomic race. Same DI/mock-
-// transaction convention as my-naia-model.test.ts's CC.1-7 (VTO's
-// createOrFindTryOnJob), which these two functions deliberately mirror.
+// Behavioral tests for reserveStyleMeSlot/reserveBuySkipSlot/reserveClosetSlot
+// — the atomic closers for checkEntitlement's documented non-atomic race.
+// Same DI/mock-transaction convention as my-naia-model.test.ts's CC.1-7
+// (VTO's createOrFindTryOnJob), which these three functions deliberately
+// mirror.
 //
 // No real Prisma, no real DB, no real transaction — the injected
 // _runTransaction stands in for prisma.$transaction, exactly like VTO's
@@ -24,7 +25,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Prisma } from "@prisma/client";
-import { reserveStyleMeSlot, reserveBuySkipSlot, type RunReservationFn } from "./entitlement.server";
+import { reserveStyleMeSlot, reserveBuySkipSlot, reserveClosetSlot, type RunReservationFn } from "./entitlement.server";
 
 const CUSTOMER_ID = "cust-reservation-test";
 
@@ -257,5 +258,124 @@ describe("reserveBuySkipSlot", () => {
     assert.equal(capturedWhere.customerId, CUSTOMER_ID);
     assert.deepEqual(capturedWhere.verdict, { in: ["BUY", "SKIP", "MAYBE"] });
     assert.ok(!capturedWhere.verdict.in.includes("INCOMPLETE"), "a failed/unrecognized-verdict analysis must not count toward quota");
+  });
+});
+
+// ── reserveClosetSlot ────────────────────────────────────────────────────────
+
+describe("reserveClosetSlot", () => {
+  const itemData: Prisma.ClosetItemCreateInput = {
+    customer: { connect: { id: CUSTOMER_ID } },
+    name: "test item",
+    category: "TOPS",
+  };
+
+  it("RSV.14 — below the limit (249/250): allowed, count-check and create both happen inside the same transaction call", async () => {
+    let countCalledBeforeCreate = false;
+    const mockTx: RunReservationFn = async (fn) =>
+      fn({
+        closetItem: {
+          count: async () => { countCalledBeforeCreate = true; return 249; },
+          create: async ({ data }: any) => {
+            assert.equal(countCalledBeforeCreate, true, "create must happen after the count check, inside the same transaction");
+            return { id: "item-1", ...data };
+          },
+        },
+      } as any);
+
+    const result = await reserveClosetSlot(CUSTOMER_ID, "MEMBER", itemData, mockTx);
+    assert.equal(result.allowed, true);
+    if (!result.allowed) throw new Error("unreachable");
+    assert.equal(result.record.id, "item-1");
+  });
+
+  it("RSV.15 — at the limit (250/250): blocked with at_capacity, create is never called", async () => {
+    const mockTx: RunReservationFn = async (fn) =>
+      fn({
+        closetItem: {
+          count: async () => 250, // MEMBER's closetItems allowance
+          create: async () => { throw new Error("create must not be called at capacity"); },
+        },
+      } as any);
+
+    const result = await reserveClosetSlot(CUSTOMER_ID, "MEMBER", itemData, mockTx);
+    assert.equal(result.allowed, false);
+    if (result.allowed) throw new Error("unreachable");
+    assert.equal(result.reason, "at_capacity");
+  });
+
+  it("RSV.16 — membershipStatus NONE is blocked unconditionally (closetItems allowance is 0)", async () => {
+    const mockTx: RunReservationFn = async (fn) =>
+      fn({
+        closetItem: {
+          count: async () => 0,
+          create: async () => { throw new Error("create must not be called for membershipStatus NONE"); },
+        },
+      } as any);
+
+    const result = await reserveClosetSlot(CUSTOMER_ID, "NONE", itemData, mockTx);
+    assert.equal(result.allowed, false);
+  });
+
+  it("RSV.17 — concurrent uploads: two reservations racing the last slot — the one whose transaction observes the updated count is correctly blocked", async () => {
+    // Simulates the outcome a real Serializable transaction guarantees: the
+    // second transaction to actually run its count query sees the first
+    // one's committed row. This cannot execute two real overlapping network
+    // requests against a live Postgres instance (see file header) — it
+    // proves reserveClosetSlot correctly blocks once the count reflects the
+    // other request's commit, which is exactly what Postgres serializes
+    // concurrent transactions into.
+    let committedCount = 249;
+    const mockTx: RunReservationFn = async (fn) =>
+      fn({
+        closetItem: {
+          count: async () => committedCount,
+          create: async ({ data }: any) => {
+            committedCount++; // the "other" request's commit becomes visible
+            return { id: "item-first", ...data };
+          },
+        },
+      } as any);
+
+    const first = await reserveClosetSlot(CUSTOMER_ID, "MEMBER", itemData, mockTx);
+    assert.equal(first.allowed, true, "first reservation fills the last slot (249 -> 250)");
+
+    const second = await reserveClosetSlot(CUSTOMER_ID, "MEMBER", itemData, mockTx);
+    assert.equal(second.allowed, false, "second reservation now observes 250/250 and is blocked");
+    if (second.allowed) throw new Error("unreachable");
+    assert.equal(second.reason, "at_capacity");
+  });
+
+  it("RSV.18 — retries once on a P2034 serialization conflict (two closets genuinely racing on the same row), then succeeds", async () => {
+    let txCalls = 0;
+    const mockTx: RunReservationFn = async (fn) => {
+      txCalls++;
+      if (txCalls === 1) throw p2034();
+      return fn({
+        closetItem: {
+          count: async () => 100,
+          create: async ({ data }: any) => ({ id: "item-after-retry", ...data }),
+        },
+      } as any);
+    };
+
+    const result = await reserveClosetSlot(CUSTOMER_ID, "MEMBER", itemData, mockTx);
+    assert.equal(result.allowed, true);
+    assert.equal(txCalls, 2);
+  });
+
+  it("RSV.19 — the count query is a plain customerId match with no date window — Closet is a hard-delete model, every row is active", async () => {
+    let capturedWhere: any = null;
+    const mockTx: RunReservationFn = async (fn) =>
+      fn({
+        closetItem: {
+          count: async ({ where }: any) => { capturedWhere = where; return 0; },
+          create: async ({ data }: any) => ({ id: "x", ...data }),
+        },
+      } as any);
+
+    await reserveClosetSlot(CUSTOMER_ID, "MEMBER", itemData, mockTx);
+
+    assert.deepEqual(capturedWhere, { customerId: CUSTOMER_ID }, "no createdAt window — unlike the monthly features, every existing row counts");
   });
 });
