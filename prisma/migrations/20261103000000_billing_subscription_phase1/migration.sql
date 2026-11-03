@@ -74,7 +74,7 @@ ALTER TABLE "Subscription" ADD CONSTRAINT "Subscription_customerId_fkey"
 CREATE TABLE "BillingTransaction" (
     "id"                        TEXT NOT NULL,
     "customerId"                TEXT NOT NULL,
-    "subscriptionId"            TEXT,
+    "subscriptionId"            TEXT NOT NULL,
     "type"                      "BillingTransactionType" NOT NULL,
     "status"                    "BillingTransactionStatus" NOT NULL,
     "amount"                    INTEGER NOT NULL,
@@ -106,11 +106,14 @@ ALTER TABLE "BillingTransaction" ADD CONSTRAINT "BillingTransaction_customerId_f
     FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
--- SetNull — losing the Subscription parent must not block deleting this
--- ledger row; the transaction stands on its own via customerId and the
--- provider identifiers.
+-- Restrict, not SetNull — the link from a financial transaction to the
+-- subscription it funded must never be silently dropped; it is part of the
+-- audit trail reconciliation requires. subscriptionId is required (every
+-- transaction type happens in the context of an already-existing
+-- Subscription row), so deleting a Subscription with any transactions is a
+-- blocked, deliberate decision rather than a silent one.
 ALTER TABLE "BillingTransaction" ADD CONSTRAINT "BillingTransaction_subscriptionId_fkey"
-    FOREIGN KEY ("subscriptionId") REFERENCES "Subscription"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+    FOREIGN KEY ("subscriptionId") REFERENCES "Subscription"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- 7. CreateTable: ProcessedWebhookEvent
 -- Idempotency ledger for provider webhook deliveries. No foreign key to

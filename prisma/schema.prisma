@@ -182,14 +182,17 @@ model WardrobeSnapshot {
 // Phase 3 (provider integration) builds the checkout/webhook code that
 // writes to them; nothing here is wired into any route yet.
 //
-// Known cross-branch gap, not resolved here: this branch does not include
-// the Phase 2 privacy-remediation work (customer-privacy.server.ts /
+// LAUNCH BLOCKER, not resolved here: this branch does not include the
+// Phase 2 privacy-remediation work (customer-privacy.server.ts /
 // eraseCustomerData) — it lives on a separate, as-yet-unmerged branch. The
 // onDelete: Restrict choices below are the correct structural stance
 // regardless (financial records need a deliberate retention policy, not a
-// silent cascade-delete), but reconciling them with the real erasure flow
-// is integration work for when the two lineages merge, not something
-// resolvable from this branch alone.
+// silent cascade-delete), but retention and erasure MUST be explicitly
+// reconciled — before any real billing launch, not as an afterthought —
+// once the two lineages merge. Until that reconciliation lands,
+// eraseCustomerData's unconditional prisma.customer.delete() will throw
+// (not silently misbehave) for any customer who has real billing history,
+// which is the deliberately loud, safe failure mode in the meantime.
 // ============================================
 
 enum SubscriptionStatus {
@@ -307,12 +310,18 @@ model BillingTransaction {
   // deliberately, never cascade through it silently.
   customer Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
 
-  subscriptionId String?
-  // SetNull, not Restrict: unlike Customer, losing the Subscription parent
-  // (which should essentially never happen in practice) must not block
-  // deleting this ledger row's own lifecycle — the transaction record still
-  // stands on its own via customerId, amount, and provider identifiers.
-  subscription Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  // Required, not nullable: every transaction type this model records
+  // (initial payment, renewal, refund, every add-on kind) happens in the
+  // context of a Subscription that already exists by the time the
+  // transaction is recorded — the Subscription row is always created at
+  // checkout-initiation, before any payment can confirm. Restrict, not
+  // SetNull: a financial ledger row must never have its link to the
+  // subscription it funded silently dropped — that link is itself part of
+  // the audit trail reconciliation requires. Restrict makes "delete a
+  // Subscription that still has transactions" a deliberate, blocked
+  // decision instead of a silent, destructive one.
+  subscriptionId String
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
 
   type   BillingTransactionType
   status BillingTransactionStatus

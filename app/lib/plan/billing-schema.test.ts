@@ -139,9 +139,11 @@ describe("BILL-05 — review point 4: billing retention vs. customer privacy del
     assert.match(txn, /customer\s+Customer\s+@relation\([^)]*onDelete:\s*Restrict/);
   });
 
-  it("BillingTransaction.subscriptionId uses onDelete: SetNull, not Restrict — losing the parent Subscription must not block deleting the ledger row itself", () => {
+  it("BillingTransaction.subscriptionId is required and uses onDelete: Restrict — a financial transaction's link to the subscription it funded must never be silently dropped via SetNull", () => {
     const txn = modelBlock("BillingTransaction");
-    assert.match(txn, /subscription\s+Subscription\?\s+@relation\([^)]*onDelete:\s*SetNull/);
+    assert.match(txn, /subscriptionId\s+String\b(?!\?)/, "subscriptionId must be required, not nullable");
+    assert.match(txn, /subscription\s+Subscription\s+@relation\([^)]*onDelete:\s*Restrict/);
+    assert.ok(!txn.includes("onDelete: SetNull"), "BillingTransaction must not SetNull its subscription link");
   });
 });
 
@@ -221,8 +223,8 @@ describe("BILL-09 — review point 8: billing history and reconciling payments a
     assert.match(txn, /occurredAt\s+DateTime/);
   });
 
-  it("BillingTransaction links back to its Subscription (nullable) for cross-referencing which entitlement period a payment funded", () => {
-    assert.match(modelBlock("BillingTransaction"), /subscriptionId\s+String\?/);
+  it("BillingTransaction links back to its Subscription (required — the link is never dropped) for cross-referencing which entitlement period a payment funded", () => {
+    assert.match(modelBlock("BillingTransaction"), /subscriptionId\s+String\b(?!\?)/);
   });
 
   it("every BillingTransaction is attributable to a customer for a full billing-history query", () => {
@@ -239,9 +241,11 @@ describe("BILL-10 — migration file matches the schema, and touches nothing els
     assert.ok(!migration.includes('ALTER TABLE "Customer"'), "this migration must not alter the existing Customer table");
   });
 
-  it("the migration's foreign keys match the schema's Restrict/SetNull choices exactly", () => {
+  it("the migration's foreign keys match the schema's Restrict choices exactly, including the corrected subscriptionId link", () => {
     assert.ok(migration.includes('FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE RESTRICT'));
-    assert.match(migration, /BillingTransaction_subscriptionId_fkey[\s\S]*?ON DELETE SET NULL/);
+    assert.match(migration, /BillingTransaction_subscriptionId_fkey[\s\S]*?ON DELETE RESTRICT/);
+    assert.ok(!migration.includes("ON DELETE SET NULL"), "no FK in this migration should use SetNull after the correction");
+    assert.match(migration, /"subscriptionId"\s+TEXT NOT NULL/);
   });
 
   it("entitlement.server.ts's existing checkEntitlement/reserve* calls are untouched by this schema change — Phase 1 is additive data model only", () => {
