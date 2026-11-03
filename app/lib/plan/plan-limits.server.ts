@@ -52,7 +52,7 @@ export interface AddonDefinition {
 
 export const ADDON_CATALOG: AddonDefinition[] = [
   { label: "StyleMe Pack",      description: "+5 StyleMe sessions",                               price: "AED 15" },
-  { label: "VTO Pack",          description: "+10 Virtual Try-Ons",                               price: "AED 15" },
+  { label: "VTO Pack",          description: "+10 Virtual Try-Ons",                               price: "AED 10" },
   { label: "Buy or Skip Pack",  description: "+5 checks",                                          price: "AED 10" },
   { label: "Trend Edit Add-on", description: "+1 Personalised Trend Edit",                        price: "AED 10" },
   { label: "nAia Boost",        description: "+5 StyleMe / +5 Buy or Skip / +10 VTO / +1 Trend Edit", price: "AED 25" },

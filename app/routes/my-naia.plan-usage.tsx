@@ -1,8 +1,11 @@
 // app/routes/my-naia.plan-usage.tsx
 // /my-naia/plan-usage — nAia Membership account page.
 // Shows membership allowances, monthly usage, closet capacity, and add-on catalog.
-// Billing, purchase flows, renewal dates and subscription state are intentionally absent.
+// Add-on purchase flows remain intentionally absent (see CUSTOMER_FACING_ADDON_LABELS
+// below) — only the membership subscribe flow is wired, to the Phase 3 Stripe
+// checkout implementation (POST /api/billing-checkout).
 
+import { useState } from "react";
 import { useLoaderData, Link } from "react-router";
 import type { LoaderFunctionArgs, LinksFunction } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
@@ -107,6 +110,37 @@ export default function PlanUsagePage() {
   const isMember = membershipStatus === "MEMBER";
   const pricing = `AED ${membershipPricing.monthly.amount}/month · AED ${membershipPricing.annual.amount}/year`;
 
+  const [subscribing, setSubscribing] = useState<"MONTHLY" | "ANNUAL" | null>(null);
+  const [subscribeError, setSubscribeError] = useState<string | null>(null);
+
+  async function handleSubscribe(planType: "MONTHLY" | "ANNUAL") {
+    setSubscribing(planType);
+    setSubscribeError(null);
+    try {
+      const res = await fetch("/api/billing-checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ planType }),
+      });
+      const data = await res.json();
+      if (data.ok && data.url) {
+        window.location.href = data.url;
+        return;
+      }
+      setSubscribeError(
+        data.code === "subscription_already_exists"
+          ? "You already have a membership in progress — check your email or try again shortly."
+          : data.code === "auth_required"
+          ? "Your session expired — please sign in again."
+          : "Could not start checkout. Please try again.",
+      );
+    } catch {
+      setSubscribeError("Could not reach the checkout service. Please try again.");
+    } finally {
+      setSubscribing(null);
+    }
+  }
+
   // ── StyleMe
   const smValue = usageLabel(styleMe.monthlyUsed, styleMe.monthlyLimit, "sessions");
   const smExhausted = styleMe.monthlyUsed >= styleMe.monthlyLimit;
@@ -162,6 +196,53 @@ export default function PlanUsagePage() {
             <div style={{ marginTop: "0.4rem", fontSize: "0.72rem", color: "var(--fg-55)", letterSpacing: "0.08em" }}>
               {pricing}
             </div>
+            {!isMember && (
+              <div style={{ marginTop: "1rem", display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  onClick={() => handleSubscribe("MONTHLY")}
+                  disabled={subscribing !== null}
+                  style={{
+                    padding: "0.65rem 1.4rem",
+                    fontSize: "0.72rem",
+                    letterSpacing: "0.1em",
+                    textTransform: "uppercase",
+                    background: "var(--fg)",
+                    color: "var(--bg, #fff)",
+                    border: "none",
+                    borderRadius: "2px",
+                    cursor: subscribing !== null ? "default" : "pointer",
+                    opacity: subscribing !== null ? 0.6 : 1,
+                  }}
+                >
+                  {subscribing === "MONTHLY" ? "Starting checkout…" : `Subscribe Monthly — AED ${membershipPricing.monthly.amount}`}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSubscribe("ANNUAL")}
+                  disabled={subscribing !== null}
+                  style={{
+                    padding: "0.65rem 1.4rem",
+                    fontSize: "0.72rem",
+                    letterSpacing: "0.1em",
+                    textTransform: "uppercase",
+                    background: "transparent",
+                    color: "var(--fg)",
+                    border: "1px solid var(--fg-40, var(--fg-55))",
+                    borderRadius: "2px",
+                    cursor: subscribing !== null ? "default" : "pointer",
+                    opacity: subscribing !== null ? 0.6 : 1,
+                  }}
+                >
+                  {subscribing === "ANNUAL" ? "Starting checkout…" : `Choose Annual — AED ${membershipPricing.annual.amount}`}
+                </button>
+              </div>
+            )}
+            {subscribeError && (
+              <div style={{ marginTop: "0.6rem", fontSize: "0.72rem", color: "var(--c-alert, #c0392b)", letterSpacing: "0.03em" }}>
+                {subscribeError}
+              </div>
+            )}
           </div>
         </section>
 

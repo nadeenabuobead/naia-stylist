@@ -278,21 +278,43 @@ describe("plan-usage component — add-ons", () => {
   it("marks add-ons as not-yet-purchasable instead of offering a fake checkout", () => {
     const html = render(baseSummary());
     expect(html).toContain("Coming soon");
-    expect(html).not.toContain("<form");
-    expect(html).not.toContain("<button");
+    // Scoped to the Add-ons section specifically — the membership section
+    // above it has a real, backend-connected Subscribe button, but add-on
+    // purchase is still unimplemented and must not render a fake checkout
+    // control of its own.
+    const addonsSection = html.slice(html.indexOf("Add-ons"), html.indexOf("Add-ons") + 2000);
+    expect(addonsSection).not.toContain("<form");
+    expect(addonsSection).not.toContain("<button");
   });
 
-  it("reflects the authoritative AED 15 price for the VTO +10 pack", () => {
+  it("reflects the authoritative AED 10 price for the VTO +10 pack", () => {
     const html = render(baseSummary());
     expect(html).toContain("+10 Virtual Try-Ons");
     const addonSection = html.slice(html.indexOf("VTO Pack"));
-    expect(addonSection.slice(0, 400)).toContain("AED 15");
+    expect(addonSection.slice(0, 400)).toContain("AED 10");
+  });
+});
+
+describe("plan-usage component — membership Subscribe buttons", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("a NONE customer sees both Subscribe buttons with the correct AED 39/AED 299 prices", () => {
+    const html = render(baseSummary({ membershipStatus: "NONE" }));
+    expect(html).toContain("<button");
+    expect(html).toContain(`Subscribe Monthly — AED ${MEMBERSHIP_PRICING.monthly.amount}`);
+    expect(html).toContain(`Choose Annual — AED ${MEMBERSHIP_PRICING.annual.amount}`);
+  });
+
+  it("a MEMBER customer (already subscribed) does not see Subscribe buttons", () => {
+    const html = render(baseSummary({ membershipStatus: "MEMBER" }));
+    expect(html).not.toContain("Subscribe Monthly");
+    expect(html).not.toContain("Choose Annual");
   });
 });
 
 // ── Customer-facing add-on allowlist ──────────────────────────────────────────
 // Current approved package is only StyleMe Pack (+5, AED 15) and VTO Pack
-// (+10, AED 15). ADDON_CATALOG in plan-limits.server.ts also holds four
+// (+10, AED 10). ADDON_CATALOG in plan-limits.server.ts also holds four
 // legacy/internal entries (Buy or Skip Pack, Trend Edit Add-on, nAia Boost,
 // Closet Expansion) that are not approved for customer display yet — they
 // must stay out of the rendered page without being deleted from the shared
@@ -323,11 +345,11 @@ describe("plan-usage component — only approved add-ons render", () => {
     expect(section).toContain("AED 15");
   });
 
-  it("2. VTO +10 renders at AED 15", () => {
+  it("2. VTO +10 renders at AED 10", () => {
     const html = render(baseSummary());
     const section = html.slice(html.indexOf("VTO Pack"), html.indexOf("VTO Pack") + 400);
     expect(section).toContain("+10 Virtual Try-Ons");
-    expect(section).toContain("AED 15");
+    expect(section).toContain("AED 10");
   });
 
   it("3. Buy or Skip Pack does not render", () => {
