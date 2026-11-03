@@ -259,6 +259,25 @@ export interface EffectiveAllowances {
 
 export interface EffectiveEntitlementContext {
   window: UsageWindow;
+  // The upper bound every QUOTA-COUNTING query must use in its createdAt
+  // filter — NOT window.end. Financial-safety fix (2026-11): for a
+  // subscription whose renewal has failed (PAST_DUE/"unpaid", within the
+  // 7-day grace period), the provider does not advance currentPeriodEnd —
+  // window.end stays frozen at the stale, already-elapsed boundary. Any
+  // createdAt filter using window.end directly as `lt` would then exclude
+  // EVERYTHING created from that point onward (today's new usage included)
+  // from the count entirely, since it falls strictly AFTER that frozen
+  // boundary — making quota enforcement silently unlimited for the entire
+  // grace period, for any customer who had not already exhausted their
+  // allowance before the renewal failed. countingEnd is never allowed to
+  // fall behind "now": it is window.end when that's still in the future,
+  // and "now" (plus 1ms, to keep the upper bound exclusive-safe) otherwise
+  // — so new usage is always counted against the SAME allowance rather
+  // than silently escaping it. Display (window.label/formatResetDate) and
+  // add-on exact-period matching (addonAppliesToPeriodStart/End) must
+  // keep using window.end itself, unchanged — only counting queries use
+  // this field.
+  countingEnd: Date;
   allowances: EffectiveAllowances;
   subscription: EntitledSubscription | null;
 }
@@ -288,7 +307,11 @@ export async function resolveEffectiveContext(
   const _hasAnySubscriptionRecord = deps.hasAnySubscriptionRecord ?? hasAnySubscriptionRecord;
 
   const subscription = await _getSubscription(customerId);
-  const window = getUsageWindow(toWindowInput(subscription));
+  const now = new Date();
+  const window = getUsageWindow(toWindowInput(subscription), now);
+  // See EffectiveEntitlementContext.countingEnd's own comment — never let
+  // the counting upper bound fall behind "now".
+  const countingEnd = window.end > now ? window.end : new Date(now.getTime() + 1);
 
   if (!subscription) {
     // Null here is ambiguous on its own (see hasAnySubscriptionRecord above)
@@ -304,6 +327,7 @@ export async function resolveEffectiveContext(
     const fallbackBase = getMembershipAllowances(fallbackStatus);
     return {
       window,
+      countingEnd,
       subscription: null,
       allowances: {
         closetItems: fallbackBase.closetItems,
@@ -327,6 +351,7 @@ export async function resolveEffectiveContext(
   const addons = await _getAddonTotals(customerId, window);
   return {
     window,
+    countingEnd,
     subscription,
     allowances: {
       closetItems: base.closetItems + addons.closetExpansion,
@@ -387,7 +412,7 @@ export async function getEntitlementSummary(
   membershipStatus: MembershipStatus,
   _contextDeps: EffectiveContextDeps = {},
 ): Promise<EntitlementSummary> {
-  const { window, allowances } = await resolveEffectiveContext(customerId, membershipStatus, _contextDeps);
+  const { window, countingEnd, allowances } = await resolveEffectiveContext(customerId, membershipStatus, _contextDeps);
   const resetDate = formatResetDate(window);
   const staleThreshold = new Date(Date.now() - VTO_IN_FLIGHT_STALE_MS);
 
@@ -403,9 +428,12 @@ export async function getEntitlementSummary(
   // Awaiting one at a time means each query holds and releases the connection
   // before the next asks for it — same data, no queuing.
 
-  // StyleMe: qualifying root sessions in current window
+  // StyleMe: qualifying root sessions in current window. Uses countingEnd,
+  // not window.end — see EffectiveEntitlementContext.countingEnd: every
+  // OTHER function in this file already reads through countingEnd, which
+  // this one had not yet been updated to match until this merge.
   const monthlyQualifyingCount = await prisma.stylingSession.count({
-    where: { ...qualifyingWhere, createdAt: { gte: window.start, lt: window.end } },
+    where: { ...qualifyingWhere, createdAt: { gte: window.start, lt: countingEnd } },
   });
 
   // BuySkip: usable analyses in current window
@@ -413,7 +441,7 @@ export async function getEntitlementSummary(
     where: {
       customerId,
       verdict: { in: ["BUY", "SKIP", "MAYBE"] },
-      createdAt: { gte: window.start, lt: window.end },
+      createdAt: { gte: window.start, lt: countingEnd },
     },
   });
 
@@ -427,7 +455,7 @@ export async function getEntitlementSummary(
       customerId,
       status: "COMPLETED",
       isTest: false,
-      createdAt: { gte: window.start, lt: window.end },
+      createdAt: { gte: window.start, lt: countingEnd },
       NOT: { productHandle: { startsWith: MOCK_VTO_PRODUCT_HANDLE_PREFIX } },
     },
   });
@@ -451,7 +479,7 @@ export async function getEntitlementSummary(
   // truth — JourneyEvent's trend_edit_generated is analytics-only and is
   // never read here.
   const monthlyPersonalisedTrendUsed = await prisma.personalisedTrendEditUsage.count({
-    where: { customerId, createdAt: { gte: window.start, lt: window.end } },
+    where: { customerId, createdAt: { gte: window.start, lt: countingEnd } },
   });
 
   return {
@@ -519,7 +547,7 @@ export async function checkEntitlement(
   options?: { excludeItemId?: string },
   _contextDeps: EffectiveContextDeps = {},
 ): Promise<EntitlementCheck> {
-  const { window, allowances } = await resolveEffectiveContext(customerId, membershipStatus, _contextDeps);
+  const { window, countingEnd, allowances } = await resolveEffectiveContext(customerId, membershipStatus, _contextDeps);
   const staleThreshold = new Date(Date.now() - VTO_IN_FLIGHT_STALE_MS);
 
   switch (feature) {
@@ -536,7 +564,7 @@ export async function checkEntitlement(
 
     case "styleMe": {
       const monthlyUsed = await prisma.stylingSession.count({
-        where: { ...qualifyingStyleMeWhere(customerId), createdAt: { gte: window.start, lt: window.end } },
+        where: { ...qualifyingStyleMeWhere(customerId), createdAt: { gte: window.start, lt: countingEnd } },
       });
       if (monthlyUsed < allowances.styleMePerMonth) return { allowed: true };
       return { allowed: false, reason: "quota_exceeded" };
@@ -547,7 +575,7 @@ export async function checkEntitlement(
         where: {
           customerId,
           verdict: { in: ["BUY", "SKIP", "MAYBE"] },
-          createdAt: { gte: window.start, lt: window.end },
+          createdAt: { gte: window.start, lt: countingEnd },
         },
       });
       if (count >= allowances.buySkipPerMonth) return { allowed: false, reason: "quota_exceeded" };
@@ -561,8 +589,8 @@ export async function checkEntitlement(
             customerId,
             status: "COMPLETED",
             isTest: false,
-            createdAt: { gte: window.start, lt: window.end },
             NOT: { productHandle: { startsWith: MOCK_VTO_PRODUCT_HANDLE_PREFIX } },
+            createdAt: { gte: window.start, lt: countingEnd },
           },
         }),
         prisma.virtualTryOnJob.count({
@@ -588,7 +616,7 @@ export async function checkEntitlement(
       // Real count against PersonalisedTrendEditUsage — the customer
       // entitlement/usage source of truth. JourneyEvent is never read here.
       const count = await prisma.personalisedTrendEditUsage.count({
-        where: { customerId, createdAt: { gte: window.start, lt: window.end } },
+        where: { customerId, createdAt: { gte: window.start, lt: countingEnd } },
       });
       if (count >= allowances.personalisedTrendPerMonth) return { allowed: false, reason: "quota_exceeded" };
       return { allowed: true };
@@ -639,7 +667,7 @@ export async function reserveStyleMeSlot(
   // that's no different from a concurrent membership change mid-reservation,
   // which this design never tried to close atomically either; the actual
   // race this function exists to close is the count-vs-limit race, below.
-  const { window, allowances } = await resolveEffectiveContext(customerId, membershipStatus, _contextDeps);
+  const { window, countingEnd, allowances } = await resolveEffectiveContext(customerId, membershipStatus, _contextDeps);
   const effectiveLimit = allowances.styleMePerMonth;
   const qualifyingWhere = qualifyingStyleMeWhere(customerId);
 
@@ -647,7 +675,7 @@ export async function reserveStyleMeSlot(
     try {
       return await _runTransaction(async (tx) => {
         const used = await tx.stylingSession.count({
-          where: { ...qualifyingWhere, createdAt: { gte: window.start, lt: window.end } },
+          where: { ...qualifyingWhere, createdAt: { gte: window.start, lt: countingEnd } },
         });
         if (used >= effectiveLimit) {
           return { allowed: false, reason: "quota_exceeded" };
@@ -675,7 +703,7 @@ export async function reserveBuySkipSlot(
   // VTO, and Closet are the only add-ons) — allowances.buySkipPerMonth is
   // always just the base membership figure, resolved the same way as
   // before Phase 2, just now through the shared resolver.
-  const { window, allowances } = await resolveEffectiveContext(customerId, membershipStatus, _contextDeps);
+  const { window, countingEnd, allowances } = await resolveEffectiveContext(customerId, membershipStatus, _contextDeps);
 
   for (let attempt = 0; attempt <= MAX_TX_RETRIES; attempt++) {
     try {
@@ -684,7 +712,7 @@ export async function reserveBuySkipSlot(
           where: {
             customerId,
             verdict: { in: ["BUY", "SKIP", "MAYBE"] },
-            createdAt: { gte: window.start, lt: window.end },
+            createdAt: { gte: window.start, lt: countingEnd },
           },
         });
         if (used >= allowances.buySkipPerMonth) {

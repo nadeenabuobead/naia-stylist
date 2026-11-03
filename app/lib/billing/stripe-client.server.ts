@@ -107,19 +107,22 @@ async function stripeRequest(
   path: string,
   params: Record<string, unknown> = {},
   { _fetch = fetch, _getSecretKey = () => process.env.STRIPE_SECRET_KEY }: StripeRequestDeps = {},
+  idempotencyKey?: string,
 ): Promise<any> {
   const secretKey = _getSecretKey();
   if (!secretKey) throw new StripeNotConfiguredError();
   assertTestModeKey(secretKey);
 
-  const init: RequestInit = {
-    method,
-    headers: {
-      Authorization: `Bearer ${secretKey}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-      "Stripe-Version": STRIPE_API_VERSION,
-    },
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${secretKey}`,
+    "Content-Type": "application/x-www-form-urlencoded",
+    "Stripe-Version": STRIPE_API_VERSION,
   };
+  // Lets a retried or genuinely concurrent request collapse to the SAME
+  // Stripe object instead of creating a second one — see createCheckoutSession.
+  if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
+
+  const init: RequestInit = { method, headers };
 
   let url = `${STRIPE_API_BASE}${path}`;
   if (method === "GET") {
@@ -160,11 +163,37 @@ export interface StripeCheckoutSession {
   payment_status: string;
 }
 
+// 5-minute bucket: two requests for the SAME customer+plan within the same
+// bucket collapse to the SAME Stripe Checkout Session (Stripe's own
+// idempotency layer returns the cached object for a repeated key instead of
+// creating a second one) — this is what actually closes the race a DB-side
+// "does a Subscription row already exist" check cannot: that check only
+// ever sees something once the customer has FINISHED a checkout and the
+// webhook has landed, which can be minutes away, while genuinely
+// concurrent requests (two tabs, a double-click, a retried/interrupted
+// request after a network drop) race on THIS call, long before any
+// Subscription row exists to check against. Bucketed rather than a single
+// permanent per-customer-per-plan key so a genuinely later, separate
+// subscribe attempt (after this bucket has passed) still gets a fresh
+// session rather than being handed back an old, likely-expired one.
+const CHECKOUT_IDEMPOTENCY_BUCKET_MS = 5 * 60 * 1000;
+
+export function computeCheckoutIdempotencyKey(customerId: string, planType: string, now: Date = new Date()): string {
+  const bucket = Math.floor(now.getTime() / CHECKOUT_IDEMPOTENCY_BUCKET_MS);
+  return `checkout:${customerId}:${planType}:${bucket}`;
+}
+
+export interface CreateCheckoutSessionDeps extends StripeRequestDeps {
+  _now?: () => Date;
+}
+
 export async function createCheckoutSession(
   input: CreateCheckoutSessionInput,
-  deps: StripeRequestDeps = {},
+  deps: CreateCheckoutSessionDeps = {},
 ): Promise<StripeCheckoutSession> {
+  const { _now = () => new Date(), ...requestDeps } = deps;
   const interval = input.planType === "MONTHLY" ? "month" : "year";
+  const idempotencyKey = computeCheckoutIdempotencyKey(input.customerId, input.planType, _now());
   return stripeRequest(
     "POST",
     "/checkout/sessions",
@@ -198,7 +227,8 @@ export async function createCheckoutSession(
       },
       metadata: { customerId: input.customerId, planType: input.planType },
     },
-    deps,
+    requestDeps,
+    idempotencyKey,
   );
 }
 

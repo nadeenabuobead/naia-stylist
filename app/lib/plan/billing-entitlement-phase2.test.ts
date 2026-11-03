@@ -572,3 +572,111 @@ describe("PH2-14 — PAST_DUE grace period is time-bounded, independent of the p
     assert.match(entSvc, /export function isPastDueGraceExpired/);
   });
 });
+
+// ── 13 — a failed/unpaid renewal must never give UNLIMITED usage during the
+// (otherwise correctly 7-day-bounded) PAST_DUE grace period ────────────────
+//
+// Found during the follow-up financial-safety review (2026-11): when a
+// renewal fails, Stripe does not advance currentPeriodEnd — it stays
+// frozen at the already-elapsed boundary while the subscription sits
+// PAST_DUE. Every quota-counting query filters createdAt BETWEEN
+// window.start AND window.end — if window.end is used directly and is
+// now in the past, anything created AFTER that frozen boundary (i.e.
+// everything created "today", during the grace period) falls OUTSIDE the
+// counted range entirely and is invisibly never counted. A customer who
+// had not already exhausted their allowance before the failed renewal
+// could then create an UNLIMITED number of new StyleMe/BuySkip/VTO items
+// for the whole grace period, since each one silently escapes the count.
+// countingEnd fixes this: it is window.end when that's still in the
+// future (the normal case, unaffected), and "now" when window.end has
+// already elapsed — so new usage is always counted against the SAME
+// allowance instead of escaping it, without resetting the count (which
+// would be the OPPOSITE bug — granting a fresh allowance mid-grace-period).
+describe("PH2-15 — countingEnd prevents unlimited usage when a stale, unrenewed period's window.end has already elapsed", () => {
+  it("for a HEALTHY subscription (window.end still in the future), countingEnd equals window.end exactly — no behaviour change", async () => {
+    // Computed relative to real 'now' (not a hardcoded future date like the
+    // rest of this file's fixtures) specifically so this assertion can
+    // never become stale/flaky as real time passes — countingEnd's own
+    // comparison is against the SAME real 'now' resolveEffectiveContext
+    // calls internally.
+    const now = new Date();
+    const futurePeriodEnd = new Date(now.getTime() + 20 * 24 * 60 * 60 * 1000);
+    const futurePeriodStart = new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000);
+    const sub: EntitledSubscription = {
+      id: "sub-healthy",
+      planType: "MONTHLY",
+      currentPeriodStart: futurePeriodStart,
+      currentPeriodEnd: futurePeriodEnd,
+      status: "ACTIVE",
+    };
+    const deps: EffectiveContextDeps = {
+      getSubscription: async () => sub,
+      getAddonTotals: async () => ({ styleMeBoost: 0, vtoBoost: 0, closetExpansion: 0 }),
+    };
+    const ctx = await resolveEffectiveContext(CUSTOMER_ID, "MEMBER", deps);
+    assert.equal(ctx.countingEnd.getTime(), ctx.window.end.getTime());
+  });
+
+  it("for a PAST_DUE subscription whose period elapsed days ago, countingEnd extends to 'now' — NOT frozen at the stale window.end", async () => {
+    const now = new Date();
+    const stalePeriodEnd = new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000); // 5 days ago — within the 7-day grace period
+    const stalePeriodStart = new Date(stalePeriodEnd.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const pastDueSub: EntitledSubscription = {
+      id: "sub-grace",
+      planType: "MONTHLY",
+      currentPeriodStart: stalePeriodStart,
+      currentPeriodEnd: stalePeriodEnd,
+      status: "PAST_DUE",
+    };
+    const deps: EffectiveContextDeps = {
+      getSubscription: async () => pastDueSub,
+      getAddonTotals: async () => ({ styleMeBoost: 0, vtoBoost: 0, closetExpansion: 0 }),
+    };
+    const ctx = await resolveEffectiveContext(CUSTOMER_ID, "MEMBER", deps);
+    assert.equal(ctx.window.end.getTime(), stalePeriodEnd.getTime(), "window.end itself (display/add-on-matching) must stay the real, unmodified period boundary");
+    assert.ok(ctx.countingEnd.getTime() > stalePeriodEnd.getTime(), "countingEnd must extend past the stale, already-elapsed window.end");
+    assert.ok(
+      Math.abs(ctx.countingEnd.getTime() - now.getTime()) < 5000,
+      "countingEnd must track 'now', not drift to some other arbitrary future point",
+    );
+  });
+
+  it("countingEnd never moves BACKWARD relative to window.start — a stale window still counts everything from its own start, nothing resets", async () => {
+    const now = new Date();
+    const stalePeriodEnd = new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000);
+    const stalePeriodStart = new Date(stalePeriodEnd.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const pastDueSub: EntitledSubscription = {
+      id: "sub-grace-2",
+      planType: "MONTHLY",
+      currentPeriodStart: stalePeriodStart,
+      currentPeriodEnd: stalePeriodEnd,
+      status: "PAST_DUE",
+    };
+    const deps: EffectiveContextDeps = {
+      getSubscription: async () => pastDueSub,
+      getAddonTotals: async () => ({ styleMeBoost: 0, vtoBoost: 0, closetExpansion: 0 }),
+    };
+    const ctx = await resolveEffectiveContext(CUSTOMER_ID, "MEMBER", deps);
+    assert.equal(ctx.window.start.getTime(), stalePeriodStart.getTime());
+    assert.ok(ctx.countingEnd.getTime() > ctx.window.start.getTime());
+  });
+
+  it("every quota-counting call site uses countingEnd, not window.end, in its createdAt filter — getEntitlementSummary, checkEntitlement, reserveStyleMeSlot, reserveBuySkipSlot", () => {
+    const entSvc = readFile("app/lib/plan/entitlement.server.ts");
+    const occurrences = entSvc.match(/createdAt:\s*\{\s*gte:\s*window\.start,\s*lt:\s*countingEnd\s*\}/g) ?? [];
+    assert.equal(occurrences.length, 8, "all 8 known quota-counting createdAt filters (StyleMe/BuySkip/VTO-completed x2 summary+check, StyleMe/BuySkip reserve) must use countingEnd");
+    // And the inverse — window.end must never appear as a createdAt upper bound anymore.
+    const staleOccurrences = entSvc.match(/createdAt:\s*\{\s*gte:\s*window\.start,\s*lt:\s*window\.end\s*\}/g) ?? [];
+    assert.equal(staleOccurrences.length, 0, "no createdAt filter may use window.end directly as its upper bound — that is exactly the bug this fix closes");
+  });
+
+  it("add-on exact-period matching still uses window.end directly, unaffected by this fix — add-ons are tied to the real billing period, not extended to 'now'", () => {
+    const entSvc = readFile("app/lib/plan/entitlement.server.ts");
+    const fn = entSvc.slice(
+      entSvc.indexOf("async function getApplicableAddonTotals"),
+      entSvc.indexOf("\n}", entSvc.indexOf("async function getApplicableAddonTotals")),
+    );
+    const occurrences = fn.match(/addonAppliesToPeriodEnd:\s*window\.end/g) ?? [];
+    assert.equal(occurrences.length, 2, "both StyleMe and VTO add-on exact-period matches must still compare against the real window.end");
+  });
+});

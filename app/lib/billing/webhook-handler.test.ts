@@ -27,13 +27,39 @@ import {
 } from "./webhook-handler.server";
 
 const CUSTOMER_ID = "cust-webhook-test";
-const NO_AUTHORITATIVE = async () => null; // forces fallback to the webhook body
+// A failed authoritative fetch — financial-safety review requirement:
+// customer.subscription.updated/.deleted must REFUSE (not fall back to the
+// embedded webhook body) when this happens. Named for what it represents,
+// not what the old behavior used to do with it.
+const AUTHORITATIVE_FETCH_FAILS = async () => null;
 
 // All event.created values in this file sit on the 1_700_000_000-unix-seconds
 // scale — providerSyncedAt must sit on the SAME scale for the out-of-order
 // guard's comparisons to mean what each test intends. 300s before the base
 // "current" instant used by the "newer event" tests below.
 const BASE_TS = 1_700_000_000;
+
+// A successful authoritative fetch result — the ONLY data source
+// customer.subscription.updated/.deleted may act on. Shape matches
+// StripeSubscriptionSnapshot.
+function authoritativeSnapshot(overrides: Partial<{
+  id: string;
+  status: string;
+  customer: string;
+  current_period_start: number | null;
+  current_period_end: number | null;
+  cancel_at_period_end: boolean;
+}> = {}) {
+  return {
+    id: "sub_stripe_1",
+    status: "active",
+    customer: "cus_stripe_1",
+    current_period_start: BASE_TS - 2_592_000,
+    current_period_end: BASE_TS,
+    cancel_at_period_end: false,
+    ...overrides,
+  };
+}
 
 function baseSubscription(overrides: Partial<SubscriptionRecord> = {}): SubscriptionRecord {
   return {
@@ -224,7 +250,7 @@ describe("processStripeWebhookEvent — asynchronous payment confirmation", () =
     assert.deepEqual(result, { ok: true, deduped: false, action: "subscription_activated" });
   });
 
-  it("WH.17 — async_payment_succeeded on an ALREADY-active subscription is a safe no-op, not a duplicate charge", async () => {
+  it("WH.17 — async_payment_succeeded on an ALREADY-active subscription skips the (now redundant) status write, but STILL attempts to record the charge — a prior crash between activation and charge-recording must be able to self-heal on retry, not permanently lose the charge", async () => {
     let transactionCalls = 0;
     let updateCalls = 0;
     const active = baseSubscription({ status: "ACTIVE" });
@@ -240,9 +266,17 @@ describe("processStripeWebhookEvent — asynchronous payment confirmation", () =
       data: { object: { client_reference_id: CUSTOMER_ID, subscription: "sub_stripe_1", amount_total: 3900 } },
     });
     const result = await processStripeWebhookEvent(event, deps);
-    assert.equal(transactionCalls, 0);
-    assert.equal(updateCalls, 0);
-    assert.deepEqual(result, { ok: true, deduped: false, action: "already_active" });
+    assert.equal(updateCalls, 0, "already ACTIVE — no redundant status write needed");
+    assert.equal(transactionCalls, 1, "the charge-recording attempt must still happen — a REAL retry relies on providerTransactionId's uniqueness, not this skip, to avoid a true duplicate");
+    assert.deepEqual(result, { ok: true, deduped: false, action: "already_active_charge_reconciled" });
+  });
+
+  it("WH.17b — createBillingTransaction's own idempotent-create hardening (not this function) is what prevents a GENUINE duplicate charge on a true retry — verified directly against isUniqueConstraintViolation", () => {
+    const duplicateChargeError = Object.assign(new Error("Unique constraint failed"), {
+      code: "P2002",
+      meta: { target: ["providerTransactionId"] },
+    });
+    assert.equal(isUniqueConstraintViolation(duplicateChargeError, "providerTransactionId"), true);
   });
 
   it("WH.18 — async_payment_succeeded arriving AFTER the subscription was already canceled/expired must not resurrect it", async () => {
@@ -307,7 +341,7 @@ describe("processStripeWebhookEvent — asynchronous payment confirmation", () =
 // authoritative-state re-fetch ──────────────────────────────────────────────
 
 describe("processStripeWebhookEvent — subscription sync + out-of-order guard", () => {
-  it("WH.6 — a newer event updates status, period dates, and cancelAtPeriodEnd (falling back to the webhook body when the authoritative fetch is unavailable)", async () => {
+  it("WH.6 — a newer event updates status, period dates, and cancelAtPeriodEnd from the AUTHORITATIVE fetch result", async () => {
     let updateId: string | null = null;
     let updateInput: any = null;
     const existing = baseSubscription();
@@ -316,27 +350,48 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
       findSubscriptionByProviderSubscriptionId: async () => existing,
       updateSubscriptionById: async (id, input) => { updateId = id; updateInput = input; },
       recordProcessedEvent: async () => {},
-      retrieveAuthoritativeSubscription: NO_AUTHORITATIVE,
+      retrieveAuthoritativeSubscription: async () => authoritativeSnapshot({
+        status: "active",
+        current_period_start: 1_700_100_000,
+        current_period_end: 1_702_700_000,
+        cancel_at_period_end: true,
+      }),
     };
     const event = makeEvent({
       type: "customer.subscription.updated",
       created: 1_700_100_000, // newer than existing.providerSyncedAt
-      data: {
-        object: {
-          id: "sub_stripe_1",
-          status: "active",
-          current_period_start: 1_700_100_000,
-          current_period_end: 1_702_700_000,
-          cancel_at_period_end: true,
-          customer: "cus_stripe_1",
-        },
-      },
+      data: { object: { id: "sub_stripe_1" } }, // deliberately sparse — only authoritative data should matter
     });
     const result = await processStripeWebhookEvent(event, deps);
     assert.equal(updateId, "sub-row-1");
     assert.equal(updateInput.status, "ACTIVE");
     assert.equal(updateInput.cancelAtPeriodEnd, true);
     assert.deepEqual(result, { ok: true, deduped: false, action: "subscription_synced" });
+  });
+
+  it("WH.6a — when the authoritative Stripe fetch FAILS, the function REFUSES to apply anything from the embedded webhook body — financial-safety review requirement", async () => {
+    let updateCalls = 0;
+    let recordCalls = 0;
+    const existing = baseSubscription();
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findSubscriptionByProviderSubscriptionId: async () => existing,
+      updateSubscriptionById: async () => { updateCalls++; },
+      recordProcessedEvent: async () => { recordCalls++; },
+      retrieveAuthoritativeSubscription: AUTHORITATIVE_FETCH_FAILS,
+    };
+    // This body, if trusted, would incorrectly reactivate/extend the
+    // subscription — exactly the unsafe entitlement change that must never
+    // happen on unconfirmed data.
+    const event = makeEvent({
+      type: "customer.subscription.updated",
+      created: 1_700_100_000,
+      data: { object: { id: "sub_stripe_1", status: "active", cancel_at_period_end: false } },
+    });
+    const result = await processStripeWebhookEvent(event, deps);
+    assert.equal(updateCalls, 0, "must never write Subscription state from unconfirmed data");
+    assert.equal(recordCalls, 0, "must NOT mark this event as processed — Stripe's retry needs another chance once the fetch can succeed");
+    assert.deepEqual(result, { ok: false, reason: "authoritative_subscription_fetch_failed" });
   });
 
   it("WH.6b — when the authoritative Stripe fetch succeeds, its data is used INSTEAD OF the (differing) embedded webhook object", async () => {
@@ -378,7 +433,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
       findSubscriptionByProviderSubscriptionId: async () => existing,
       updateSubscriptionById: async () => { updateCalls++; },
       recordProcessedEvent: async () => {},
-      retrieveAuthoritativeSubscription: NO_AUTHORITATIVE,
+      retrieveAuthoritativeSubscription: async () => authoritativeSnapshot({ status: "past_due" }),
     };
     // event.created is well before providerSyncedAt — a delayed/out-of-order redelivery
     const event = makeEvent({
@@ -400,7 +455,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
       findSubscriptionByCustomerId: async (customerId) => { lookupCustomerId = customerId; return existing; },
       updateSubscriptionById: async () => {},
       recordProcessedEvent: async () => {},
-      retrieveAuthoritativeSubscription: NO_AUTHORITATIVE,
+      retrieveAuthoritativeSubscription: async () => authoritativeSnapshot({ status: "active" }),
     };
     const event = makeEvent({
       type: "customer.subscription.updated",
@@ -412,7 +467,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
     assert.equal(result.ok, true);
   });
 
-  it("WH.8b — NO existing row anywhere (neither providerSubscriptionId nor metadata lookup) now CREATES a row from the event's own data, instead of silently dropping it", async () => {
+  it("WH.8b — NO existing row anywhere (neither providerSubscriptionId nor metadata lookup) now CREATES a row from the AUTHORITATIVE fetch result, instead of silently dropping it", async () => {
     let created: any = null;
     let updateInput: any = null;
     const deps: WebhookHandlerDeps = {
@@ -422,21 +477,18 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
       createSubscription: async (input) => { created = input; return { ...baseSubscription(), ...input, id: "sub-from-sync" }; },
       updateSubscriptionById: async (_id, input) => { updateInput = input; },
       recordProcessedEvent: async () => {},
-      retrieveAuthoritativeSubscription: NO_AUTHORITATIVE,
+      retrieveAuthoritativeSubscription: async () => authoritativeSnapshot({
+        id: "sub_stripe_new",
+        status: "active",
+        customer: "cus_new",
+        current_period_start: 1_700_000_000,
+        current_period_end: 1_702_600_000,
+      }),
     };
     const event = makeEvent({
       type: "customer.subscription.updated",
       created: 1_700_200_000,
-      data: {
-        object: {
-          id: "sub_stripe_new",
-          status: "active",
-          customer: "cus_new",
-          current_period_start: 1_700_000_000,
-          current_period_end: 1_702_600_000,
-          metadata: { customerId: CUSTOMER_ID, planType: "ANNUAL" },
-        },
-      },
+      data: { object: { id: "sub_stripe_new", metadata: { customerId: CUSTOMER_ID, planType: "ANNUAL" } } },
     });
     const result = await processStripeWebhookEvent(event, deps);
     assert.equal(created.customerId, CUSTOMER_ID);
@@ -455,11 +507,11 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
       findSubscriptionByCustomerId: async () => null,
       createSubscription: async () => { createCalls++; return baseSubscription(); },
       recordProcessedEvent: async () => {},
-      retrieveAuthoritativeSubscription: NO_AUTHORITATIVE,
+      retrieveAuthoritativeSubscription: async () => authoritativeSnapshot({ id: "sub_unknown", status: "active" }),
     };
     const event = makeEvent({
       type: "customer.subscription.updated",
-      data: { object: { id: "sub_unknown", status: "active" } },
+      data: { object: { id: "sub_unknown" } },
     });
     const result = await processStripeWebhookEvent(event, deps);
     assert.equal(createCalls, 0);
@@ -474,7 +526,10 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
       findSubscriptionByProviderSubscriptionId: async () => existing,
       updateSubscriptionById: async (_id, input) => { updateInput = input; },
       recordProcessedEvent: async () => {},
-      retrieveAuthoritativeSubscription: NO_AUTHORITATIVE,
+      // Stripe keeps a canceled subscription retrievable (status "canceled")
+      // rather than truly deleting it — the authoritative fetch succeeding
+      // with status "canceled" is the normal case for a .deleted event.
+      retrieveAuthoritativeSubscription: async () => authoritativeSnapshot({ status: "canceled" }),
     };
     const event = makeEvent({
       type: "customer.subscription.deleted",
@@ -494,7 +549,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
       findSubscriptionByProviderSubscriptionId: async () => existing,
       updateSubscriptionById: async (_id, input) => { updateInput = input; },
       recordProcessedEvent: async () => {},
-      retrieveAuthoritativeSubscription: NO_AUTHORITATIVE,
+      retrieveAuthoritativeSubscription: async () => authoritativeSnapshot({ status: "canceled" }),
     };
     const event = makeEvent({
       type: "customer.subscription.deleted",
@@ -505,6 +560,24 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
     assert.equal(updateInput.status, "EXPIRED");
   });
 
+  it("WH.10b — customer.subscription.deleted whose authoritative fetch fails REFUSES — a cancellation must not be guessed from the embedded body either, in either direction", async () => {
+    let updateCalls = 0;
+    let recordCalls = 0;
+    const existing = baseSubscription({ status: "PAST_DUE" });
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findSubscriptionByProviderSubscriptionId: async () => existing,
+      updateSubscriptionById: async () => { updateCalls++; },
+      recordProcessedEvent: async () => { recordCalls++; },
+      retrieveAuthoritativeSubscription: AUTHORITATIVE_FETCH_FAILS,
+    };
+    const event = makeEvent({ type: "customer.subscription.deleted", created: 1_700_300_000, data: { object: { id: "sub_stripe_1" } } });
+    const result = await processStripeWebhookEvent(event, deps);
+    assert.equal(updateCalls, 0);
+    assert.equal(recordCalls, 0);
+    assert.deepEqual(result, { ok: false, reason: "authoritative_subscription_fetch_failed" });
+  });
+
   it("WH.21 — entering PAST_DUE stamps pastDueSince; leaving it clears pastDueSince", async () => {
     let enteringInput: any = null;
     const activeExisting = baseSubscription({ status: "ACTIVE", pastDueSince: null });
@@ -512,14 +585,14 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
       makeEvent({
         type: "customer.subscription.updated",
         created: 1_700_300_000,
-        data: { object: { id: "sub_stripe_1", status: "past_due" } },
+        data: { object: { id: "sub_stripe_1" } },
       }),
       {
         findProcessedEvent: async () => null,
         findSubscriptionByProviderSubscriptionId: async () => activeExisting,
         updateSubscriptionById: async (_id, input) => { enteringInput = input; },
         recordProcessedEvent: async () => {},
-        retrieveAuthoritativeSubscription: NO_AUTHORITATIVE,
+        retrieveAuthoritativeSubscription: async () => authoritativeSnapshot({ status: "past_due" }),
       },
     );
     assert.ok(enteringInput.pastDueSince, "entering PAST_DUE must stamp pastDueSince");
@@ -530,14 +603,14 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
       makeEvent({
         type: "customer.subscription.updated",
         created: 1_700_300_000,
-        data: { object: { id: "sub_stripe_1", status: "active" } },
+        data: { object: { id: "sub_stripe_1" } },
       }),
       {
         findProcessedEvent: async () => null,
         findSubscriptionByProviderSubscriptionId: async () => pastDueExisting,
         updateSubscriptionById: async (_id, input) => { leavingInput = input; },
         recordProcessedEvent: async () => {},
-        retrieveAuthoritativeSubscription: NO_AUTHORITATIVE,
+        retrieveAuthoritativeSubscription: async () => authoritativeSnapshot({ status: "active" }),
       },
     );
     assert.equal(leavingInput.pastDueSince, null, "leaving PAST_DUE must clear pastDueSince");
@@ -549,11 +622,11 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
       findSubscriptionByProviderSubscriptionId: async () => null,
       findSubscriptionByCustomerId: async () => null,
       recordProcessedEvent: async () => {},
-      retrieveAuthoritativeSubscription: NO_AUTHORITATIVE,
+      retrieveAuthoritativeSubscription: async () => authoritativeSnapshot({ id: "sub_unknown", status: "active" }),
     };
     const event = makeEvent({
       type: "customer.subscription.updated",
-      data: { object: { id: "sub_unknown", status: "active" } },
+      data: { object: { id: "sub_unknown" } },
     });
     const result = await processStripeWebhookEvent(event, deps);
     assert.deepEqual(result, { ok: true, deduped: false, action: "ignored" });

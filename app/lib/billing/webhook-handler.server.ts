@@ -21,14 +21,18 @@
 //     Rather than trust the embedded webhook object (which is a snapshot
 //     taken at send time, and Stripe does not guarantee webhook delivery
 //     order), this re-fetches the AUTHORITATIVE subscription object from
-//     Stripe and writes from that — the event only triggers the sync, per
-//     the schema's own providerSyncedAt design note. Falls back to the
-//     webhook body only if the re-fetch itself fails. Matched primarily by
-//     providerSubscriptionId; if no row exists yet anywhere (out-of-order
-//     relative to checkout.session.completed), CREATES one from the
-//     authoritative data instead of dropping the event — a prior version
-//     of this handler silently dropped this case, permanently losing the
-//     event's data since Stripe does not redeliver an event we 200'd.
+//     Stripe and writes ONLY from that — the event only triggers the sync,
+//     per the schema's own providerSyncedAt design note. Financial-safety
+//     review requirement: if the re-fetch itself fails, this REFUSES to
+//     apply anything (returns ok:false, does NOT record the event as
+//     processed) rather than falling back to the embedded, unconfirmed
+//     webhook body — an entitlement-affecting write must never be made on
+//     data we couldn't verify. Matched primarily by providerSubscriptionId;
+//     if no row exists yet anywhere (out-of-order relative to
+//     checkout.session.completed), CREATES one from the authoritative data
+//     instead of dropping the event — a prior version of this handler
+//     silently dropped this case, permanently losing the event's data
+//     since Stripe does not redeliver an event we 200'd.
 //   - invoice.paid with billing_reason "subscription_cycle": a renewal
 //     charge — records SUBSCRIPTION_RENEWAL (SUCCEEDED). Any other
 //     billing_reason is ignored here; the initial charge is recorded by
@@ -267,10 +271,10 @@ async function defaultRetrieveAuthoritativeSubscription(providerSubscriptionId: 
   try {
     return await stripeRetrieveSubscription(providerSubscriptionId);
   } catch {
-    // If the authoritative fetch itself fails (network issue, or the test
-    // fixture object is gone), callers fall back to the webhook body —
-    // better to apply a possibly-stale-but-signed payload than to drop the
-    // event entirely.
+    // A null return tells the caller the authoritative fetch failed — the
+    // caller (customer.subscription.updated/.deleted in
+    // processStripeWebhookEvent) must refuse to apply any entitlement
+    // change in that case, never fall back to the embedded webhook body.
     return null;
   }
 }
@@ -367,6 +371,8 @@ export async function processStripeWebhookEvent(
       ? await _findSubscriptionByProviderSubscriptionId(obj.subscription)
       : await _findSubscriptionByCustomerId(customerId);
 
+    const wasAlreadyActive = sub?.status === "ACTIVE";
+
     if (!sub) {
       sub = await _createSubscription({
         customerId,
@@ -375,12 +381,20 @@ export async function processStripeWebhookEvent(
         providerCustomerId: obj.customer ?? null,
         providerSubscriptionId: obj.subscription ?? null,
       });
-    } else if (sub.status === "ACTIVE") {
-      // Already active — a retried/duplicate confirmation, nothing to do.
-      action = "already_active";
-      return;
-    } else if (sub.status === "INCOMPLETE") {
-      await _updateSubscriptionById(sub.id, { status: "ACTIVE", pastDueSince: null });
+    } else if (sub.status === "INCOMPLETE" || sub.status === "ACTIVE") {
+      if (!wasAlreadyActive) {
+        await _updateSubscriptionById(sub.id, { status: "ACTIVE", pastDueSince: null });
+      }
+      // else: already active — no status write needed, but STILL fall
+      // through to the billing-transaction step below. A prior attempt at
+      // this same activation may have crashed AFTER setting ACTIVE but
+      // BEFORE recording the charge; returning early here (as an earlier
+      // version of this function did) would permanently lose that charge
+      // on every future retry, since this branch would always take the
+      // same "nothing to do" exit. providerTransactionId's uniqueness is
+      // what makes the create below safe to attempt unconditionally — a
+      // genuine duplicate confirmation still no-ops, but a lost-on-retry
+      // charge gets a real chance to be recorded.
     } else {
       // PAST_DUE/CANCELED/EXPIRED — a late payment confirmation arriving
       // after this subscription's fate was already decided by other, more
@@ -402,7 +416,7 @@ export async function processStripeWebhookEvent(
         occurredAt: eventCreatedAt,
       });
     }
-    action = "subscription_activated";
+    action = wasAlreadyActive ? "already_active_charge_reconciled" : "subscription_activated";
   }
 
   switch (event.type) {
@@ -470,29 +484,38 @@ export async function processStripeWebhookEvent(
     case "customer.subscription.updated":
     case "customer.subscription.deleted": {
       const providerSubscriptionId: string = obj.id;
-      let existing = await _findSubscriptionByProviderSubscriptionId(providerSubscriptionId);
 
+      // Financial-safety review requirement: an entitlement-affecting
+      // write (status/period/cancellation) must NEVER be made from the
+      // embedded webhook body alone — that body is a signed, genuine
+      // Stripe event, but it is still just a snapshot taken at send time,
+      // and Stripe explicitly does not guarantee webhook delivery order.
+      // If the authoritative re-fetch itself fails (network issue, Stripe
+      // outage), refuse rather than guess from stale/unconfirmed data.
+      // Returning here WITHOUT calling _recordProcessedEvent is
+      // deliberate: this event is NOT marked processed, so Stripe's own
+      // retry schedule gets another chance once the fetch can succeed,
+      // rather than this event being silently, permanently treated as
+      // "handled" despite never actually being safely applied.
+      const authoritative = await _retrieveAuthoritativeSubscription(providerSubscriptionId);
+      if (!authoritative) {
+        return { ok: false, reason: "authoritative_subscription_fetch_failed" };
+      }
+
+      let existing = await _findSubscriptionByProviderSubscriptionId(providerSubscriptionId);
       if (!existing) {
         const metaCustomerId = obj.metadata?.customerId as string | undefined;
         if (metaCustomerId) existing = await _findSubscriptionByCustomerId(metaCustomerId);
       }
 
-      // Re-fetch authoritative state from Stripe rather than trust the
-      // embedded webhook object — see the module header and
-      // stripe-client.server.ts's retrieveSubscription for why.
-      const authoritative = await _retrieveAuthoritativeSubscription(providerSubscriptionId);
-      const source = authoritative ?? obj;
-      const stripeStatus: string =
-        event.type === "customer.subscription.deleted" && !authoritative ? "canceled" : source.status;
-
       if (!existing) {
         // Genuinely out-of-order relative to checkout.session.completed —
         // rather than silently drop this event (Stripe will not redeliver
-        // an event we 200'd), create the row directly from this event's
-        // own data. checkout.session.completed, when it eventually
-        // arrives/is processed, will find this row (by providerSubscriptionId
-        // or customerId) via the same lookups above and update it in place
-        // rather than creating a duplicate.
+        // an event we 200'd), create the row directly from the
+        // AUTHORITATIVE data. checkout.session.completed, when it
+        // eventually arrives/is processed, will find this row (by
+        // providerSubscriptionId or customerId) via the same lookups
+        // above and update it in place rather than creating a duplicate.
         const metaCustomerId = obj.metadata?.customerId as string | undefined;
         if (!metaCustomerId) break; // nothing to key a new row on
         const planType: BillingPlanType = obj.metadata?.planType === "ANNUAL" ? "ANNUAL" : "MONTHLY";
@@ -500,15 +523,15 @@ export async function processStripeWebhookEvent(
         const created = await _createSubscription({
           customerId: metaCustomerId,
           planType,
-          status: mapStripeSubscriptionStatus(stripeStatus, null),
-          providerCustomerId: typeof source.customer === "string" ? source.customer : null,
+          status: mapStripeSubscriptionStatus(authoritative.status, null),
+          providerCustomerId: typeof authoritative.customer === "string" ? authoritative.customer : null,
           providerSubscriptionId,
         });
         await _updateSubscriptionById(created.id, {
-          currentPeriodStart: source.current_period_start ? new Date(source.current_period_start * 1000) : null,
-          currentPeriodEnd: source.current_period_end ? new Date(source.current_period_end * 1000) : null,
-          cancelAtPeriodEnd: Boolean(source.cancel_at_period_end),
-          pastDueSince: mapStripeSubscriptionStatus(stripeStatus, null) === "PAST_DUE" ? eventCreatedAt : null,
+          currentPeriodStart: authoritative.current_period_start ? new Date(authoritative.current_period_start * 1000) : null,
+          currentPeriodEnd: authoritative.current_period_end ? new Date(authoritative.current_period_end * 1000) : null,
+          cancelAtPeriodEnd: Boolean(authoritative.cancel_at_period_end),
+          pastDueSince: mapStripeSubscriptionStatus(authoritative.status, null) === "PAST_DUE" ? eventCreatedAt : null,
           providerSyncedAt: eventCreatedAt,
         });
         action = "subscription_created_from_sync";
@@ -528,7 +551,7 @@ export async function processStripeWebhookEvent(
         break;
       }
 
-      const mappedStatus = mapStripeSubscriptionStatus(stripeStatus, { cancelAtPeriodEnd: existing.cancelAtPeriodEnd });
+      const mappedStatus = mapStripeSubscriptionStatus(authoritative.status, { cancelAtPeriodEnd: existing.cancelAtPeriodEnd });
       const isTerminal = mappedStatus === "CANCELED" || mappedStatus === "EXPIRED";
       const enteringPastDue = mappedStatus === "PAST_DUE" && existing.status !== "PAST_DUE";
       const leavingPastDue = mappedStatus !== "PAST_DUE" && existing.status === "PAST_DUE";
@@ -536,10 +559,10 @@ export async function processStripeWebhookEvent(
       await _updateSubscriptionById(existing.id, {
         status: mappedStatus,
         providerSubscriptionId,
-        providerCustomerId: typeof source.customer === "string" ? source.customer : existing.providerCustomerId,
-        currentPeriodStart: source.current_period_start ? new Date(source.current_period_start * 1000) : existing.currentPeriodStart,
-        currentPeriodEnd: source.current_period_end ? new Date(source.current_period_end * 1000) : existing.currentPeriodEnd,
-        cancelAtPeriodEnd: Boolean(source.cancel_at_period_end),
+        providerCustomerId: typeof authoritative.customer === "string" ? authoritative.customer : existing.providerCustomerId,
+        currentPeriodStart: authoritative.current_period_start ? new Date(authoritative.current_period_start * 1000) : existing.currentPeriodStart,
+        currentPeriodEnd: authoritative.current_period_end ? new Date(authoritative.current_period_end * 1000) : existing.currentPeriodEnd,
+        cancelAtPeriodEnd: Boolean(authoritative.cancel_at_period_end),
         ...(enteringPastDue ? { pastDueSince: eventCreatedAt } : {}),
         ...(leavingPastDue ? { pastDueSince: null } : {}),
         ...(isTerminal ? { endedAt: eventCreatedAt } : {}),

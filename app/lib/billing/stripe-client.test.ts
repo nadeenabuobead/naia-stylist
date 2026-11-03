@@ -13,6 +13,7 @@ import {
   createBillingPortalSession,
   retrieveSubscription,
   toStripeFormBody,
+  computeCheckoutIdempotencyKey,
   StripeNotConfiguredError,
   StripeLiveModeBlockedError,
   StripeApiError,
@@ -175,6 +176,62 @@ describe("retrieveSubscription — authoritative state fetch", () => {
       () => retrieveSubscription("sub_1", { _fetch: fn, _getSecretKey: () => "sk_live_x" }),
       StripeLiveModeBlockedError,
     );
+  });
+});
+
+describe("computeCheckoutIdempotencyKey — collapsing concurrent/interrupted Checkout creation (financial-safety review)", () => {
+  it("SC.17 — two calls for the SAME customer+plan within the same time bucket produce the IDENTICAL key", () => {
+    const now = new Date("2026-11-10T12:00:00.000Z");
+    const aMomentLater = new Date("2026-11-10T12:00:30.000Z"); // 30s later, same 5-minute bucket
+    const key1 = computeCheckoutIdempotencyKey("cust-1", "MONTHLY", now);
+    const key2 = computeCheckoutIdempotencyKey("cust-1", "MONTHLY", aMomentLater);
+    assert.equal(key1, key2, "two genuinely concurrent (or quickly retried) requests must collapse to the same Stripe idempotency key");
+  });
+
+  it("SC.18 — a different customer, even in the exact same instant, never shares a key with another customer", () => {
+    const now = new Date("2026-11-10T12:00:00.000Z");
+    const key1 = computeCheckoutIdempotencyKey("cust-1", "MONTHLY", now);
+    const key2 = computeCheckoutIdempotencyKey("cust-2", "MONTHLY", now);
+    assert.notEqual(key1, key2);
+  });
+
+  it("SC.19 — the SAME customer choosing a different plan in the same instant gets a DIFFERENT key — these are genuinely different checkout intents", () => {
+    const now = new Date("2026-11-10T12:00:00.000Z");
+    const monthly = computeCheckoutIdempotencyKey("cust-1", "MONTHLY", now);
+    const annual = computeCheckoutIdempotencyKey("cust-1", "ANNUAL", now);
+    assert.notEqual(monthly, annual);
+  });
+
+  it("SC.20 — a request well outside the bucket window (a genuinely later, separate attempt) gets a FRESH key, not a stale reused one", () => {
+    const now = new Date("2026-11-10T12:00:00.000Z");
+    const anHourLater = new Date("2026-11-10T13:00:00.000Z");
+    const key1 = computeCheckoutIdempotencyKey("cust-1", "MONTHLY", now);
+    const key2 = computeCheckoutIdempotencyKey("cust-1", "MONTHLY", anHourLater);
+    assert.notEqual(key1, key2, "a later, separate subscribe attempt must not be handed back an old (likely-expired) session via a stale idempotency key");
+  });
+
+  it("SC.21 — createCheckoutSession actually sends the computed key as the Idempotency-Key header", async () => {
+    const { fn, calls } = fakeFetch({ id: "cs_test_1", url: "https://checkout.stripe.com/x" });
+    const now = new Date("2026-11-10T12:00:00.000Z");
+    await createCheckoutSession(
+      { customerId: "cust-1", planType: "MONTHLY", amountMinorUnits: 3900, currency: "aed", successUrl: "https://x", cancelUrl: "https://y" },
+      { _fetch: fn, _getSecretKey: () => "sk_test_abc", _now: () => now },
+    );
+    const headers = calls[0].init.headers as Record<string, string>;
+    assert.equal(headers["Idempotency-Key"], computeCheckoutIdempotencyKey("cust-1", "MONTHLY", now));
+  });
+
+  it("SC.22 — two createCheckoutSession calls racing within the same bucket send the SAME Idempotency-Key header — this is what makes Stripe itself collapse the race, not a DB-side check that can't see it in time", async () => {
+    const { fn, calls } = fakeFetch({ id: "cs_test_1", url: "https://checkout.stripe.com/x" });
+    const now = new Date("2026-11-10T12:00:00.000Z");
+    const input = { customerId: "cust-1", planType: "MONTHLY" as const, amountMinorUnits: 3900, currency: "aed", successUrl: "https://x", cancelUrl: "https://y" };
+    await Promise.all([
+      createCheckoutSession(input, { _fetch: fn, _getSecretKey: () => "sk_test_abc", _now: () => now }),
+      createCheckoutSession(input, { _fetch: fn, _getSecretKey: () => "sk_test_abc", _now: () => now }),
+    ]);
+    const key1 = (calls[0].init.headers as Record<string, string>)["Idempotency-Key"];
+    const key2 = (calls[1].init.headers as Record<string, string>)["Idempotency-Key"];
+    assert.equal(key1, key2);
   });
 });
 
