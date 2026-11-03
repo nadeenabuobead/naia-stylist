@@ -150,8 +150,18 @@ export function getFullLookStepIdempotencyKey(
   customerId: string,
   stepIndex: number,
   priorJobId: string | null,
+  // Omitted by every default/production-shaped caller — falls back to the
+  // EXACT original permanent key, byte-identical to before this field
+  // existed. Only a caller that explicitly sets this (see
+  // FullLookChainContext.reservationScope) ever gets a different key — and
+  // only for step 0, the one reservation slot. See that field's own doc
+  // comment for the full safety story (server-only, staging-only, never
+  // touches the single-garment production path).
+  reservationScope?: string,
 ): string {
-  if (stepIndex === 0) return `${REAL_RESERVATION_KEY_PREFIX}${customerId}`;
+  if (stepIndex === 0) {
+    return `${REAL_RESERVATION_KEY_PREFIX}${customerId}${reservationScope ? `:${reservationScope}` : ""}`;
+  }
   return `${REAL_STEP_KEY_PREFIX}${priorJobId}:${stepIndex}`;
 }
 
@@ -193,6 +203,24 @@ export async function uploadIntermediateStepResult(
   const result = await uploadCloudinaryPrivate(publicId, outputDataUrl, "private", _fetch, _getConfig);
   if (!result.ok) return { ok: false, errorCode: result.errorCode };
   return { ok: true };
+}
+
+// Signed, short-lived (10-min, same expiry as buildPrivateDownloadUrl's own
+// default) read-only URL for DISPLAYING an intermediate step's image to the
+// authorised tester — not used internally by the chain itself (that's
+// downloadIntermediateStepResult, below, which fetches bytes to feed the
+// next step). Added for the QA pause checkpoint (2026-11-03): intermediate
+// images still follow the exact same retention as before — this function
+// only signs a URL for an asset that already exists; it changes nothing
+// about when that asset is deleted.
+export function buildIntermediateStepResultUrl(
+  customerId: string,
+  jobId: string,
+  _getConfig: () => CloudinaryConfig | null = getCloudinaryConfig,
+): string | null {
+  const cfg = _getConfig();
+  if (!cfg) return null;
+  return buildPrivateDownloadUrl(cfg, deriveIntermediateStepPublicId(customerId, jobId), "png", "private");
 }
 
 export async function downloadIntermediateStepResult(
@@ -279,6 +307,21 @@ export interface FullLookChainContext {
   // submitTryOnToProvider's own defaults (generation_mode "fast", no prompt).
   finalStepPrompt?: string;
   finalStepGenerationMode?: "fast" | "balanced" | "quality";
+  // Second-(and-later)-test mechanism (2026-11-03). Omitted by default —
+  // every caller that doesn't set this gets the EXACT original permanent,
+  // customer-scoped, one-time-ever reservation (step 0's idempotency key is
+  // unchanged). When set, step 0's key becomes scoped to this value, so a
+  // NEW, independent 3-call chain can run for the same customer WITHOUT
+  // touching, deleting, or reusing any prior (unscoped or differently
+  // scoped) chain's rows — they remain exactly as they are, under their own
+  // keys, forever. This value must come ONLY from a server-side source the
+  // route controls (e.g. an operator-set env var), never from client
+  // request input — see staging.full-look-vto-real.tsx's own use of this
+  // field for the actual authorization gate. This field does not exist on,
+  // and is never read by, the real single-garment production path
+  // (fashn-tryon-service.server.ts) — production idempotency there is
+  // completely unaffected by this field's existence.
+  reservationScope?: string;
 }
 
 // ── Walk the chain via deterministic keys — no new schema ───────────────────
@@ -300,11 +343,16 @@ export interface WalkChainDeps {
 export async function walkFullLookChainJobs(
   customerId: string,
   deps: WalkChainDeps = { _findJobFn: defaultFindJobByIdempotencyKey },
+  // Omitted ⇒ walks the original unscoped chain, unchanged. A scoped walk
+  // only ever sees that scope's own rows — it cannot discover, and will
+  // never be confused with, any other scope's (including the unscoped
+  // first test's) rows, since they live under entirely different keys.
+  reservationScope?: string,
 ): Promise<VirtualTryOnJobRecord[]> {
   const jobs: VirtualTryOnJobRecord[] = [];
   let priorJobId: string | null = null;
   for (let i = 0; i < MAX_CHAIN_LENGTH; i++) {
-    const key = getFullLookStepIdempotencyKey(customerId, i, priorJobId);
+    const key = getFullLookStepIdempotencyKey(customerId, i, priorJobId, reservationScope);
     const job = await findJobByIdempotencyKey(key, deps._findJobFn);
     if (!job) break;
     jobs.push(job);
@@ -335,7 +383,7 @@ export async function submitFullLookRealStep(
   priorJobId: string | null,
 ): Promise<SubmitStepResult> {
   const garment = ctx.garments[stepIndex];
-  const idempotencyKey = getFullLookStepIdempotencyKey(ctx.customerId, stepIndex, priorJobId);
+  const idempotencyKey = getFullLookStepIdempotencyKey(ctx.customerId, stepIndex, priorJobId, ctx.reservationScope);
 
   const jobResult = await createOrFindTryOnJob({
     customerId: ctx.customerId,
@@ -498,12 +546,45 @@ export async function pollFullLookRealStep(
 // isn't final, immediately submit the next one in the SAME request — one
 // extra cheap POST, never a poll loop).
 
+export interface IntermediateStepPreview {
+  stepIndex: number;
+  label: string;
+  url: string;
+}
+
 export type ChainAdvanceResult =
   | { status: "NOT_STARTED" }
   | { status: "PROCESSING"; stepIndex: number }
+  // QA pause checkpoint (2026-11-03): reached once the second-to-last step
+  // (shirt) is COMPLETED and BEFORE the final (blazer) step is ever
+  // submitted. Stable across repeated polls/refreshes — see the fast-path
+  // check below — so a browser refresh while paused shows the exact same
+  // state, never auto-advances, and never re-fetches FASHN. intermediates
+  // carries a signed, short-lived URL per completed-so-far step for
+  // display; cleanup is deliberately NOT run yet (see advanceFullLookChain
+  // — cleanup only fires from the COMPLETED/FAILED branches, never this
+  // one), so these URLs remain valid until the chain reaches a terminal
+  // state.
+  | { status: "AWAITING_CONTINUE"; intermediates: IntermediateStepPreview[] }
   | { status: "COMPLETED"; resultUrl: string }
   | { status: "FAILED"; failedStepIndex: number; errorCode: string | null }
   | { status: "SUBMIT_ERROR"; reason: string };
+
+// Returns null (not a partial list) if any single URL fails to build —
+// Cloudinary misconfiguration should surface as SUBMIT_ERROR, not as a
+// broken image silently shown to the tester.
+function buildIntermediatePreviews(
+  ctx: FullLookChainContext,
+  jobs: readonly VirtualTryOnJobRecord[],
+): IntermediateStepPreview[] | null {
+  const previews: IntermediateStepPreview[] = [];
+  for (let i = 0; i < jobs.length; i++) {
+    const url = buildIntermediateStepResultUrl(ctx.customerId, jobs[i].id);
+    if (!url) return null;
+    previews.push({ stepIndex: i, label: ctx.garments[i]?.label ?? `step ${i + 1}`, url });
+  }
+  return previews;
+}
 
 // ── Intermediate-image retention — best-effort cleanup at chain's end ───────
 //
@@ -533,7 +614,7 @@ export async function advanceFullLookChain(
   ctx: FullLookChainContext,
   deps: WalkChainDeps = { _findJobFn: defaultFindJobByIdempotencyKey },
 ): Promise<ChainAdvanceResult> {
-  const jobs = await walkFullLookChainJobs(ctx.customerId, deps);
+  const jobs = await walkFullLookChainJobs(ctx.customerId, deps, ctx.reservationScope);
 
   if (jobs.length === 0) {
     return { status: "NOT_STARTED" };
@@ -552,6 +633,19 @@ export async function advanceFullLookChain(
     return { status: "COMPLETED", resultUrl };
   }
 
+  // ── QA pause checkpoint — fast path ───────────────────────────────────────
+  // The second-to-last step (shirt) is already COMPLETED and the final
+  // (blazer) step has never been submitted. Stable on every repeated call —
+  // no FASHN status check, no submission — so a refresh, a duplicate poll,
+  // or a long gap while the tester reviews the images all land here
+  // identically. Cleanup is NOT run here: these are exactly the images the
+  // tester needs to see.
+  if (lastJob.status === "COMPLETED" && lastStepIndex === MAX_CHAIN_LENGTH - 2) {
+    const intermediates = buildIntermediatePreviews(ctx, jobs);
+    if (!intermediates) return { status: "SUBMIT_ERROR", reason: "NOT_CONFIGURED" };
+    return { status: "AWAITING_CONTINUE", intermediates };
+  }
+
   const poll = await pollFullLookRealStep(ctx, lastJob, lastStepIndex);
 
   if (poll.status === "FAILED") {
@@ -566,14 +660,61 @@ export async function advanceFullLookChain(
     return { status: "PROCESSING", stepIndex: lastStepIndex };
   }
 
-  // STEP_COMPLETE — this step is done but isn't final; submit the next one
-  // now, within this same request (one more cheap POST, no poll loop).
+  // STEP_COMPLETE — this step (poll.job) just finished. If the NEXT step is
+  // the final one, STOP here instead of auto-submitting: this is the one
+  // moment the chain pauses for explicit human review (continueToFinalStep,
+  // below) rather than advancing on its own. Any other step keeps the
+  // original immediate-auto-advance behavior.
   const nextIndex = lastStepIndex + 1;
+  if (nextIndex === MAX_CHAIN_LENGTH - 1) {
+    const intermediates = buildIntermediatePreviews(ctx, [...jobs.slice(0, -1), poll.job]);
+    if (!intermediates) return { status: "SUBMIT_ERROR", reason: "NOT_CONFIGURED" };
+    return { status: "AWAITING_CONTINUE", intermediates };
+  }
+
   const submit = await submitFullLookRealStep(ctx, nextIndex, poll.job.id);
   if (!submit.ok) {
     return { status: "SUBMIT_ERROR", reason: submit.reason };
   }
   return { status: "PROCESSING", stepIndex: nextIndex };
+}
+
+// ── Continue past the QA pause checkpoint — the ONLY way the final step is
+// ever submitted ─────────────────────────────────────────────────────────────
+//
+// Re-derives the chain's current position from DB state alone (same
+// walkFullLookChainJobs every other entry point uses) rather than trusting
+// anything persisted client-side, so this is safe to call from a duplicate
+// click, a resubmitted form, or a retried request:
+//   - Called while genuinely paused (second-to-last step COMPLETED, final
+//     step never submitted): submits the final step exactly once.
+//   - Called again after that submission already exists (second click,
+//     network retry): submitFullLookRealStep's own createOrFindTryOnJob
+//     idempotency finds the existing row and returns alreadySubmitted:true
+//     — no new FASHN call.
+//   - Called when the chain isn't actually at the pause point (too early,
+//     already past it, or never started): fails closed with a reason, no
+//     I/O against FASHN at all.
+export type ContinueResult =
+  | { ok: true }
+  | { ok: false; reason: string };
+
+export async function continueToFinalStep(
+  ctx: FullLookChainContext,
+  deps: WalkChainDeps = { _findJobFn: defaultFindJobByIdempotencyKey },
+): Promise<ContinueResult> {
+  const jobs = await walkFullLookChainJobs(ctx.customerId, deps, ctx.reservationScope);
+  const lastStepIndex = jobs.length - 1;
+
+  if (lastStepIndex !== MAX_CHAIN_LENGTH - 2 || jobs[lastStepIndex]?.status !== "COMPLETED") {
+    return { ok: false, reason: "not_awaiting_continue" };
+  }
+
+  const submit = await submitFullLookRealStep(ctx, MAX_CHAIN_LENGTH - 1, jobs[lastStepIndex].id);
+  if (!submit.ok) {
+    return { ok: false, reason: submit.reason };
+  }
+  return { ok: true };
 }
 
 // ── Start the chain — called once by the submit action ──────────────────────
@@ -595,7 +736,7 @@ export async function startOrResumeFullLookChain(
     return { ok: false, reason: "invalid_chain_length" };
   }
 
-  const jobs = await walkFullLookChainJobs(ctx.customerId, deps);
+  const jobs = await walkFullLookChainJobs(ctx.customerId, deps, ctx.reservationScope);
 
   if (jobs.length > 0) {
     // Chain already started (by this request or an earlier one) — resume,

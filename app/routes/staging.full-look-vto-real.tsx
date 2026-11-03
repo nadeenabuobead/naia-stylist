@@ -94,6 +94,7 @@ import {
 import {
   startOrResumeFullLookChain,
   advanceFullLookChain,
+  continueToFinalStep,
   isCompatibleModelPhotoFormat,
   type FullLookChainContext,
   type FullLookRealGarmentInput,
@@ -101,6 +102,22 @@ import {
 
 function notFound(): never {
   throw new Response("Not Found", { status: 404 });
+}
+
+// ── Second-(and-later)-test reservation scope ───────────────────────────────
+//
+// Server-side only — NEVER read from request input. Omitted (undefined) by
+// default, which keeps step 0's idempotency key exactly as it was: one
+// permanent reservation per customer, forever. Setting this env var is a
+// deliberate, separate, operator-only action (not a UI control a tester can
+// toggle) that opens exactly one NEW, independent 3-call chain for the same
+// customer — the first test's rows are never touched, deleted, or reused;
+// they remain reachable forever under the unscoped key. See
+// FullLookChainContext.reservationScope's own doc comment in
+// full-look-tryon-real.server.ts for the full safety story.
+function getReservationScope(): string | undefined {
+  const scope = process.env.FULL_LOOK_VTO_REAL_TEST_SCOPE;
+  return scope && scope.trim().length > 0 ? scope.trim() : undefined;
 }
 
 // ── Loader — poll the chain's current state; never submits step 0 ──────────
@@ -165,6 +182,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     },
     finalStepPrompt: FINAL_STEP_VISUAL_PROMPT,
     finalStepGenerationMode: FINAL_STEP_GENERATION_MODE,
+    reservationScope: getReservationScope(),
   };
 
   const result = await advanceFullLookChain(ctx);
@@ -187,6 +205,12 @@ export async function action({ request }: ActionFunctionArgs) {
   if (!customer || !isAuthorizedStagingTestAccount(customer)) notFound();
 
   const form = await request.formData();
+  // "continue" is the ONLY way the final (blazer) step is ever submitted —
+  // see continueToFinalStep's own doc comment. Any other/missing value
+  // (including a malformed or replayed form) falls back to "start", which
+  // is itself idempotent-safe (startOrResumeFullLookChain never resubmits
+  // an already-started chain).
+  const intent = form.get("intent") === "continue" ? "continue" : "start";
 
   if (form.get("consent") !== "yes") {
     return data({ ok: false, reason: "consent_required" } as ActionStartResult, { status: 400 });
@@ -233,6 +257,44 @@ export async function action({ request }: ActionFunctionArgs) {
   // .server.ts's isCompatibleModelPhotoFormat doc comment). ────────────────
   if (!isCompatibleModelPhotoFormat(naiaModel.bodyFormat)) {
     return data({ ok: false, reason: "model_photo_format_unsupported" } as ActionStartResult, { status: 400 });
+  }
+
+  // ── "continue" — the QA pause checkpoint's only exit. Eligibility, the
+  // quota pre-check, and suitability screening all already ran (and
+  // passed) for these exact 3 garments when the chain started; re-running
+  // the AI suitability screen here would be pure waste, not a safety gain
+  // — only ownership is re-verified (resolveClosetAnchor's own check),
+  // matching the loader's own convention. Consent/confirmReal above are
+  // re-validated with a FRESH timestamp (committing to the most expensive,
+  // quality-mode step deserves its own explicit, recent confirmation). ────
+  if (intent === "continue") {
+    const continueGarments: FullLookRealGarmentInput[] = [];
+    for (const g of sortForDisplay(outcome.garments)) {
+      const anchor = await resolveClosetAnchor(customer.id, g.closetItemId);
+      if (!anchor || !anchor.imageUrl) {
+        return data({ ok: false, reason: "garment_image_unavailable" } as ActionStartResult, { status: 400 });
+      }
+      continueGarments.push({ label: g.name ?? g.closetItemId, productImageUrl: anchor.imageUrl });
+    }
+
+    const continueCtx: FullLookChainContext = {
+      customerId: customer.id,
+      naiaModelId: naiaModel.id,
+      bodyPublicId: naiaModel.bodyPublicId,
+      bodyFormat: naiaModel.bodyFormat,
+      deliveryType: naiaModel.deliveryType,
+      garments: continueGarments,
+      consent: { virtualTryOnConsent: true, policyVersion: "1.0-staging-real-test", consentedAt: consentAt.toISOString() },
+      finalStepPrompt: FINAL_STEP_VISUAL_PROMPT,
+      finalStepGenerationMode: FINAL_STEP_GENERATION_MODE,
+      reservationScope: getReservationScope(),
+    };
+
+    const continueResult = await continueToFinalStep(continueCtx);
+    if (!continueResult.ok) {
+      return data({ ok: false, reason: continueResult.reason } as ActionStartResult, { status: 400 });
+    }
+    return data({ ok: true } as ActionStartResult);
   }
 
   const ineligible = outcome.garments.find((g) => !isVtoCategoryAllowed(g.category, g.subcategory));
@@ -282,6 +344,7 @@ export async function action({ request }: ActionFunctionArgs) {
     consent,
     finalStepPrompt: FINAL_STEP_VISUAL_PROMPT,
     finalStepGenerationMode: FINAL_STEP_GENERATION_MODE,
+    reservationScope: getReservationScope(),
   };
 
   const result = await startOrResumeFullLookChain(ctx);
@@ -308,8 +371,12 @@ export default function StagingFullLookVtoReal() {
   const actionData = useActionData<typeof action>();
   const revalidator = useRevalidator();
   const [confirmArmed, setConfirmArmed] = useState(false);
+  const [continueConfirmArmed, setContinueConfirmArmed] = useState(false);
 
   const chain = loaderData.ok ? loaderData.chain : null;
+  // Polling stops on its own once AWAITING_CONTINUE is reached — nothing
+  // will change until the tester explicitly submits the Continue form, so
+  // there is nothing to gain from keeping the interval running.
   const isProcessing = chain?.status === "PROCESSING";
 
   useEffect(() => {
@@ -342,6 +409,7 @@ export default function StagingFullLookVtoReal() {
             if (input) input.value = new Date().toISOString();
           }}
         >
+          <input type="hidden" name="intent" value="start" />
           <input type="hidden" name="virtualTryOnConsentAt" value="" />
           <label>
             <input type="checkbox" name="consent" value="yes" required /> I consent to this one staging test.
@@ -365,11 +433,62 @@ export default function StagingFullLookVtoReal() {
       )}
 
       {actionData && !actionData.ok && (
-        <p>Could not start: {actionData.reason}</p>
+        <p>Could not continue: {actionData.reason}</p>
       )}
 
       {chain && chain.status === "PROCESSING" && (
         <p>Step {chain.stepIndex + 1} of 3 in progress — checking again in a few seconds…</p>
+      )}
+
+      {chain && chain.status === "AWAITING_CONTINUE" && (
+        <div>
+          <p style={{ fontWeight: "bold" }}>
+            Paused before the blazer step — review the trousers and shirt results below.
+          </p>
+          <p>
+            These images are shown via short-lived, ownership-protected signed links and will be
+            deleted automatically once the chain finishes (success or failure) — they are not kept
+            indefinitely and are never publicly reachable.
+          </p>
+          <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
+            {chain.intermediates.map((step) => (
+              <div key={step.stepIndex}>
+                <p>Step {step.stepIndex + 1}: {step.label}</p>
+                <img src={step.url} alt={`Intermediate result after step ${step.stepIndex + 1}`} width={300} />
+              </div>
+            ))}
+          </div>
+
+          <Form
+            method="post"
+            onSubmit={(e) => {
+              const input = e.currentTarget.elements.namedItem("virtualTryOnConsentAt") as HTMLInputElement | null;
+              if (input) input.value = new Date().toISOString();
+            }}
+          >
+            <input type="hidden" name="intent" value="continue" />
+            <input type="hidden" name="virtualTryOnConsentAt" value="" />
+            <label>
+              <input type="checkbox" name="consent" value="yes" required /> I have reviewed the shirt
+              result above and consent to continuing.
+            </label>
+            <br />
+            <label>
+              <input
+                type="checkbox"
+                name="confirmReal"
+                value="yes-real-fashn-calls"
+                required
+                onChange={(e) => setContinueConfirmArmed(e.currentTarget.checked)}
+              />{" "}
+              I understand this submits the final, Quality-mode, real FASHN call for the blazer.
+            </label>
+            <br />
+            <button type="submit" disabled={!continueConfirmArmed}>
+              Continue to blazer
+            </button>
+          </Form>
+        </div>
       )}
 
       {chain && chain.status === "FAILED" && (

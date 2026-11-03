@@ -31,7 +31,7 @@ vi.mock("./fashn-tryon-service.server.js", () => ({
 
 vi.mock("../cloudinary-admin.server.js", () => ({
   uploadCloudinaryPrivate: vi.fn(),
-  buildPrivateDownloadUrl: vi.fn(() => "https://cloudinary.mock/download"),
+  buildPrivateDownloadUrl: vi.fn((_cfg: unknown, publicId: string) => `https://cloudinary.mock/download?public_id=${publicId}`),
   getCloudinaryConfig: vi.fn(() => ({ cloudName: "mock", apiKey: "mock", apiSecret: "mock" })),
   deleteCloudinaryAsset: vi.fn(async () => ({ ok: true })),
 }));
@@ -49,6 +49,7 @@ import {
   pollFullLookRealStep,
   advanceFullLookChain,
   startOrResumeFullLookChain,
+  continueToFinalStep,
   REAL_PRODUCT_HANDLE_PREFIX,
   type FullLookChainContext,
 } from "./full-look-tryon-real.server.js";
@@ -719,5 +720,202 @@ describe("prompt placement — final step only", () => {
 
     expect(result).toEqual({ status: "COMPLETED", resultUrl: "https://signed.example/final.png" });
     expect(mockDeleteAsset()).toHaveBeenCalledTimes(2); // job-0 and job-1's intermediates, unchanged behavior
+  });
+});
+
+// ── QA pause checkpoint — fresh transition and stable re-poll ───────────────
+
+describe("advanceFullLookChain — pause before the final (blazer) step", () => {
+  it("FL.36 — a FRESH shirt completion returns AWAITING_CONTINUE instead of auto-submitting the blazer", async () => {
+    const job0 = fakeJob("job-0", { status: "COMPLETED" });
+    const job1 = fakeJob("job-1", { status: "PROCESSING", predictionId: "pred-1" });
+    const _findJobFn = vi.fn(async (where: { idempotencyKey: string }) => {
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 0, null)) return job0;
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 1, "job-0")) return job1;
+      return null;
+    });
+    (global.fetch as ReturnType<typeof vi.fn>).mockImplementation(async (url: string | URL | Request) => {
+      const u = url.toString();
+      if (u.includes("/v1/status/")) {
+        return new Response(JSON.stringify({ status: "completed", output: [PNG_DATA_URL] }), { status: 200 });
+      }
+      return new Response(new Uint8Array([1, 2, 3]).buffer, { status: 200 });
+    });
+    mockUploadPrivate().mockResolvedValue({ ok: true, publicId: "x", format: "png", version: "1" });
+    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job1, status: "COMPLETED" } });
+
+    const result = await advanceFullLookChain(baseCtx(), { _findJobFn });
+
+    expect(result.status).toBe("AWAITING_CONTINUE");
+    if (result.status === "AWAITING_CONTINUE") {
+      expect(result.intermediates.map((p) => p.stepIndex)).toEqual([0, 1]);
+      expect(result.intermediates[0].url).toContain("job-0");
+      expect(result.intermediates[1].url).toContain("job-1");
+    }
+    expect(mockSubmitProvider()).not.toHaveBeenCalled(); // blazer NEVER auto-submitted
+    expect(mockDeleteAsset()).not.toHaveBeenCalled(); // images still needed for review — not cleaned up yet
+  });
+
+  it("FL.37 — a repeated poll while paused returns the SAME AWAITING_CONTINUE, with zero FASHN calls (fast path)", async () => {
+    const job0 = fakeJob("job-0", { status: "COMPLETED" });
+    const job1 = fakeJob("job-1", { status: "COMPLETED" }); // already resolved by an earlier poll
+    const _findJobFn = vi.fn(async (where: { idempotencyKey: string }) => {
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 0, null)) return job0;
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 1, "job-0")) return job1;
+      return null;
+    });
+
+    const result = await advanceFullLookChain(baseCtx(), { _findJobFn });
+
+    expect(result.status).toBe("AWAITING_CONTINUE");
+    expect(global.fetch).not.toHaveBeenCalled(); // no FASHN status check — pure DB-derived fast path
+    expect(mockSubmitProvider()).not.toHaveBeenCalled();
+  });
+});
+
+describe("continueToFinalStep", () => {
+  it("FL.38 — at the pause point, submits exactly the blazer step", async () => {
+    const job0 = fakeJob("job-0", { status: "COMPLETED" });
+    const job1 = fakeJob("job-1", { status: "COMPLETED" });
+    const _findJobFn = vi.fn(async (where: { idempotencyKey: string }) => {
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 0, null)) return job0;
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 1, "job-0")) return job1;
+      return null;
+    });
+    const job2 = fakeJob("job-2");
+    mockCreateOrFind().mockResolvedValue({ ok: true, job: job2, created: true });
+    mockAdvance()
+      .mockResolvedValueOnce({ ok: true, job: { ...job2, status: "SUBMITTED" } })
+      .mockResolvedValueOnce({ ok: true, job: { ...job2, status: "PROCESSING", predictionId: "pred-2" } });
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(new Uint8Array([1, 2, 3]).buffer, { status: 200 }),
+    );
+    mockSubmitProvider().mockResolvedValue({ ok: true, predictionId: "pred-2" });
+
+    const result = await continueToFinalStep(baseCtx(), { _findJobFn });
+
+    expect(result).toEqual({ ok: true });
+    expect(mockSubmitProvider()).toHaveBeenCalledTimes(1);
+    const createArgs = mockCreateOrFind().mock.calls[0][0];
+    expect(createArgs.idempotencyKey).toBe(getFullLookStepIdempotencyKey("cust-1", 2, "job-1"));
+  });
+
+  it("FL.39 — a duplicate click (job already exists for the final step) is idempotent — no second FASHN call", async () => {
+    const job0 = fakeJob("job-0", { status: "COMPLETED" });
+    const job1 = fakeJob("job-1", { status: "COMPLETED" });
+    const _findJobFn = vi.fn(async (where: { idempotencyKey: string }) => {
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 0, null)) return job0;
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 1, "job-0")) return job1;
+      return null;
+    });
+    const existingJob2 = fakeJob("job-2", { status: "PROCESSING", predictionId: "pred-2" });
+    mockCreateOrFind().mockResolvedValue({ ok: true, job: existingJob2, created: false });
+
+    const result = await continueToFinalStep(baseCtx(), { _findJobFn });
+
+    expect(result).toEqual({ ok: true });
+    expect(mockSubmitProvider()).not.toHaveBeenCalled();
+  });
+
+  it("FL.40 — called too early (shirt not yet completed) fails closed with zero I/O against FASHN or the provider", async () => {
+    const job0 = fakeJob("job-0", { status: "COMPLETED" });
+    const job1 = fakeJob("job-1", { status: "PROCESSING", predictionId: "pred-1" });
+    const _findJobFn = vi.fn(async (where: { idempotencyKey: string }) => {
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 0, null)) return job0;
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 1, "job-0")) return job1;
+      return null;
+    });
+
+    const result = await continueToFinalStep(baseCtx(), { _findJobFn });
+
+    expect(result).toEqual({ ok: false, reason: "not_awaiting_continue" });
+    expect(mockCreateOrFind()).not.toHaveBeenCalled();
+    expect(mockSubmitProvider()).not.toHaveBeenCalled();
+  });
+
+  it("FL.41 — called after the blazer step already completed (chain fully done) fails closed, never resubmits", async () => {
+    const job0 = fakeJob("job-0", { status: "COMPLETED" });
+    const job1 = fakeJob("job-1", { status: "COMPLETED" });
+    const job2 = fakeJob("job-2", { status: "COMPLETED" });
+    const _findJobFn = vi.fn(async (where: { idempotencyKey: string }) => {
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 0, null)) return job0;
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 1, "job-0")) return job1;
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 2, "job-1")) return job2;
+      return null;
+    });
+
+    const result = await continueToFinalStep(baseCtx(), { _findJobFn });
+
+    expect(result).toEqual({ ok: false, reason: "not_awaiting_continue" });
+    expect(mockCreateOrFind()).not.toHaveBeenCalled();
+    expect(mockSubmitProvider()).not.toHaveBeenCalled();
+  });
+});
+
+// ── Second-(and-later)-test reservation scope ───────────────────────────────
+
+describe("reservationScope — independent, non-destructive second-test mechanism", () => {
+  it("FL.42 — omitted scope produces the exact original permanent key (regression)", () => {
+    expect(getFullLookStepIdempotencyKey("cust-1", 0, null)).toBe(
+      getFullLookStepIdempotencyKey("cust-1", 0, null, undefined),
+    );
+  });
+
+  it("FL.43 — two different scopes for the same customer produce two different, independent step-0 keys", () => {
+    const keyA = getFullLookStepIdempotencyKey("cust-1", 0, null, "qa-second-test-2026-11-04");
+    const keyB = getFullLookStepIdempotencyKey("cust-1", 0, null, "qa-third-test-2026-11-10");
+    const unscoped = getFullLookStepIdempotencyKey("cust-1", 0, null);
+    expect(keyA).not.toBe(keyB);
+    expect(keyA).not.toBe(unscoped);
+    expect(keyB).not.toBe(unscoped);
+  });
+
+  it("FL.44 — scope does not affect step 1/2 key derivation (those are already unique via priorJobId)", () => {
+    expect(getFullLookStepIdempotencyKey("cust-1", 1, "job-0", "any-scope")).toBe(
+      getFullLookStepIdempotencyKey("cust-1", 1, "job-0"),
+    );
+  });
+
+  it("FL.45 — starting a SCOPED chain for a customer whose UNSCOPED chain already completed does not touch, read, or require deleting the first chain's rows", async () => {
+    // The unscoped reservation is already fully consumed (first test complete).
+    // A scoped walk must never even query for it — it only ever looks up
+    // keys that include the scope suffix.
+    const scope = "qa-second-test-2026-11-04";
+    const _findJobFn = vi.fn(async (where: { idempotencyKey: string }) => {
+      // The unscoped key would be getFullLookStepIdempotencyKey("cust-1", 0, null)
+      // (no scope) — if the walk ever queries that, this mock intentionally
+      // returns a COMPLETED job, which would corrupt the scoped chain's view
+      // if scope weren't actually isolating the two. Asserting it's never
+      // queried is the real regression guard.
+      const unscopedKey = getFullLookStepIdempotencyKey("cust-1", 0, null);
+      if (where.idempotencyKey === unscopedKey) {
+        throw new Error("regression: scoped walk queried the UNSCOPED key");
+      }
+      return null; // scoped chain genuinely hasn't started yet
+    });
+
+    const jobs = await walkFullLookChainJobs("cust-1", { _findJobFn }, scope);
+    expect(jobs).toEqual([]);
+    expect(_findJobFn).toHaveBeenCalledWith({ idempotencyKey: getFullLookStepIdempotencyKey("cust-1", 0, null, scope) });
+  });
+
+  it("FL.46 — startOrResumeFullLookChain with a scope starts a fresh chain even though the unscoped reservation is already claimed", async () => {
+    const scope = "qa-second-test-2026-11-04";
+    const _findJobFn = vi.fn(async () => null); // nothing exists yet under the scoped key
+    mockCooldown().mockResolvedValue({ ok: true });
+    const job = fakeJob("job-scoped-0");
+    mockCreateOrFind().mockResolvedValue({ ok: true, job, created: true });
+    mockAdvance()
+      .mockResolvedValueOnce({ ok: true, job: { ...job, status: "SUBMITTED" } })
+      .mockResolvedValueOnce({ ok: true, job: { ...job, status: "PROCESSING", predictionId: "pred-0" } });
+    mockDownloadPhoto().mockResolvedValue({ ok: true, dataUrl: PNG_DATA_URL });
+    mockSubmitProvider().mockResolvedValue({ ok: true, predictionId: "pred-0" });
+
+    const ctx = { ...baseCtx(), reservationScope: scope };
+    const result = await startOrResumeFullLookChain(ctx, { _findJobFn });
+
+    expect(result).toEqual({ ok: true, stepIndex: 0 });
+    const createArgs = mockCreateOrFind().mock.calls[0][0];
+    expect(createArgs.idempotencyKey).toBe(getFullLookStepIdempotencyKey("cust-1", 0, null, scope));
   });
 });

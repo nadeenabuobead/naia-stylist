@@ -43,6 +43,7 @@ vi.mock("~/lib/ai/full-look-work-combination.server", () => ({
 vi.mock("~/lib/ai/full-look-tryon-real.server", () => ({
   startOrResumeFullLookChain: vi.fn(),
   advanceFullLookChain: vi.fn(),
+  continueToFinalStep: vi.fn(),
   isCompatibleModelPhotoFormat: vi.fn(),
 }));
 
@@ -59,6 +60,7 @@ import {
 import {
   startOrResumeFullLookChain,
   advanceFullLookChain,
+  continueToFinalStep,
   isCompatibleModelPhotoFormat,
 } from "~/lib/ai/full-look-tryon-real.server";
 import { loader, action } from "./staging.full-look-vto-real";
@@ -74,6 +76,7 @@ const mockResolveWork = () => resolveExpectedWorkCombination as ReturnType<typeo
 const mockQuota = () => hasQuotaRoomForFullLookChain as ReturnType<typeof vi.fn>;
 const mockStartChain = () => startOrResumeFullLookChain as ReturnType<typeof vi.fn>;
 const mockAdvanceChain = () => advanceFullLookChain as ReturnType<typeof vi.fn>;
+const mockContinueChain = () => continueToFinalStep as ReturnType<typeof vi.fn>;
 const mockCompatibleFormat = () => isCompatibleModelPhotoFormat as ReturnType<typeof vi.fn>;
 
 const SARA = { id: "sara-cust-1", shopifyCustomerId: "sara-shop-1", membershipStatus: "MEMBER" };
@@ -280,5 +283,81 @@ describe("loader — poll only", () => {
     await loader({ request: {} as Request } as never);
     const ctx = mockAdvanceChain().mock.calls[0][0];
     expect(ctx.garments.every((g: { productImageUrl: string }) => g.productImageUrl.startsWith("https://closet.example/"))).toBe(true);
+  });
+
+  it("RT.24 — the QA pause checkpoint (AWAITING_CONTINUE) and its intermediate previews pass through verbatim", async () => {
+    const intermediates = [
+      { stepIndex: 0, label: "Beige Tailored Trousers", url: "https://signed.example/step1.png" },
+      { stepIndex: 1, label: "Blue Chambray Button-Up Shirt", url: "https://signed.example/step2.png" },
+    ];
+    mockAdvanceChain().mockResolvedValue({ status: "AWAITING_CONTINUE", intermediates });
+    const res = await loader({ request: {} as Request } as never);
+    expect(res.data).toEqual({ ok: true, modelReady: true, chain: { status: "AWAITING_CONTINUE", intermediates } });
+  });
+});
+
+// ── Action — "continue" intent (the QA pause checkpoint's only exit) ────────
+
+describe("action — intent=continue", () => {
+  it("RT.25 — requires its own fresh consent checkbox, independent of the start form", async () => {
+    const res = await action({ request: formRequest({ intent: "continue", consent: "no" }) } as never);
+    expect(res.data).toEqual({ ok: false, reason: "consent_required" });
+    expect(mockContinueChain()).not.toHaveBeenCalled();
+    expect(mockStartChain()).not.toHaveBeenCalled();
+  });
+
+  it("RT.26 — requires its own fresh real-confirmation checkbox", async () => {
+    const res = await action({ request: formRequest({ intent: "continue", confirmReal: "no" }) } as never);
+    expect(res.data).toEqual({ ok: false, reason: "real_confirmation_required" });
+    expect(mockContinueChain()).not.toHaveBeenCalled();
+  });
+
+  it("RT.27 — rejects an expired consent timestamp exactly like the start form", async () => {
+    const stale = new Date(Date.now() - 16 * 60 * 1000).toISOString();
+    const res = await action({ request: formRequest({ intent: "continue", virtualTryOnConsentAt: stale }) } as never);
+    expect(res.data).toEqual({ ok: false, reason: "consent_expired" });
+    expect(mockContinueChain()).not.toHaveBeenCalled();
+  });
+
+  it("RT.28 — never re-runs the quota pre-check or AI suitability screen (already passed at chain start)", async () => {
+    mockContinueChain().mockResolvedValue({ ok: true });
+    await action({ request: formRequest({ intent: "continue" }) } as never);
+    expect(mockQuota()).not.toHaveBeenCalled();
+    expect(mockScreenSuitability()).not.toHaveBeenCalled();
+    expect(mockCategoryAllowed()).not.toHaveBeenCalled();
+  });
+
+  it("RT.29 — still re-verifies garment ownership (resolveClosetAnchor) and fails closed if it can't", async () => {
+    mockResolveAnchor().mockResolvedValueOnce(null);
+    const res = await action({ request: formRequest({ intent: "continue" }) } as never);
+    expect(res.data).toEqual({ ok: false, reason: "garment_image_unavailable" });
+    expect(mockContinueChain()).not.toHaveBeenCalled();
+  });
+
+  it("RT.30 — on success, delegates to continueToFinalStep with the real resolved garments and never touches startOrResumeFullLookChain", async () => {
+    mockContinueChain().mockResolvedValue({ ok: true });
+    const res = await action({ request: formRequest({ intent: "continue" }) } as never);
+    expect(res.data).toEqual({ ok: true });
+    expect(mockContinueChain()).toHaveBeenCalledTimes(1);
+    expect(mockStartChain()).not.toHaveBeenCalled();
+    const ctx = mockContinueChain().mock.calls[0][0];
+    expect(ctx.garments).toEqual([
+      { label: "Beige Tailored Trousers", productImageUrl: "https://closet.example/g-trousers.jpg" },
+      { label: "Blue Chambray Button-Up Shirt", productImageUrl: "https://closet.example/g-shirt.jpg" },
+      { label: "Beige Tailored Blazer", productImageUrl: "https://closet.example/g-blazer.jpg" },
+    ]);
+  });
+
+  it("RT.31 — surfaces continueToFinalStep's own rejection reason (e.g. called at the wrong time) without crashing", async () => {
+    mockContinueChain().mockResolvedValue({ ok: false, reason: "not_awaiting_continue" });
+    const res = await action({ request: formRequest({ intent: "continue" }) } as never);
+    expect(res.data).toEqual({ ok: false, reason: "not_awaiting_continue" });
+  });
+
+  it("RT.32 — a plain start request (no intent, or intent!=\"continue\") is completely unaffected — still calls startOrResumeFullLookChain", async () => {
+    mockStartChain().mockResolvedValue({ ok: true, stepIndex: 0 });
+    const res = await action({ request: formRequest() } as never); // no intent field at all
+    expect(res.data).toEqual({ ok: true, stepIndex: 0 });
+    expect(mockContinueChain()).not.toHaveBeenCalled();
   });
 });
