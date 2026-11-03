@@ -135,23 +135,34 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { data, Form, useActionData, useLoaderData } from "react-router";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
-import { loadWardrobeIntelligence } from "~/lib/ai/wardrobe-intelligence.server";
 import { loadNaiaModel, computeModelReadinessFromRecord } from "~/lib/ai/my-naia-model.server";
 import { isVtoCategoryAllowed } from "~/lib/ai/closet-eligibility";
 import { resolveClosetAnchor } from "~/lib/ai/styleme-anchor.server";
 import { screenGarmentSuitability } from "~/lib/image-suitability.server";
-import { getMembershipAllowances } from "~/lib/plan/plan-limits.server";
-import { getEntitlementSummary } from "~/lib/plan/entitlement.server";
-import type { MembershipStatus } from "@prisma/client";
-import prisma from "~/db.server";
-import { resolveOwnedWiGarments, type WiResolvedGarmentMetadata } from "~/lib/ai/poc-wi-combination-resolver.server";
-import { MAX_CHAIN_LENGTH } from "~/lib/ai/poc-sequential-full-look-vto.server";
+import {
+  resolveExpectedWorkCombination,
+  sortForDisplay,
+  hasQuotaRoomForFullLookChain,
+  MAX_CONSENT_AGE_MS,
+} from "~/lib/ai/full-look-work-combination.server";
 import {
   runJobTrackedFullLookChain,
   type JobTrackedChainGarmentInput,
 } from "~/lib/ai/poc-job-tracked-full-look-chain.server";
 import type { RunTryOnOptions } from "~/lib/ai/fashn-try-on.server";
 import type { VirtualTryOnConsent } from "~/lib/ai/virtual-try-on.types";
+
+// resolveExpectedWorkCombination, sortForDisplay, hasQuotaRoomForFullLookChain,
+// and MAX_CONSENT_AGE_MS used to be defined AND exported directly from this
+// route file. Moved to full-look-work-combination.server.ts (2026-11-03) and
+// deliberately NOT re-exported here: exporting a function that transitively
+// imports a `.server.ts` module from a ROUTE file broke the production
+// build — React Router only strips server-only code from loader/action/
+// middleware/headers, not arbitrary named exports, so a stray non-route
+// export with a server-only dependency fails the build even though nothing
+// in this specific route ever rendered a client component. Any other
+// consumer (e.g. staging.full-look-vto-real.tsx) imports these directly
+// from full-look-work-combination.server.ts, not from this file.
 
 // ── Gate ──────────────────────────────────────────────────────────────────────
 
@@ -172,101 +183,6 @@ export function isAuthorizedStagingTestAccount(customer: GateableCustomer): bool
 
 function notFound(): never {
   throw new Response("Not Found", { status: 404 });
-}
-
-// ── Passport mapping ──────────────────────────────────────────────────────────
-// Deliberately duplicated from closet.intelligence.tsx's own profile→
-// WardrobePassport mapping rather than imported — that file is a
-// customer-facing route and stays untouched. This is a small, inert data
-// shape, not the VTO infrastructure itself.
-
-function mapProfileToPassport(profile: Record<string, unknown>) {
-  return {
-    lifestyle: (profile.lifestyle as string[]) ?? [],
-    favoriteColors: (profile.favoriteColors as string[]) ?? [],
-    avoidColors: (profile.avoidColors as string[]) ?? [],
-    stylePersonalities: (profile.stylePersonalities as string[]) ?? [],
-    silhouette: (profile.silhouette as string[]) ?? [],
-    structure: (profile.structure as string | null) ?? null,
-    fitPreferences: (profile.fitPreferences as string[]) ?? [],
-    styleStruggles: (profile.styleStruggles as string[]) ?? [],
-    styleSupport: (profile.styleSupport as string[]) ?? [],
-    becoming: (profile.becoming as string[]) ?? [],
-    styleExpression: (profile.styleExpression as string[]) ?? undefined,
-    styleDirections: (profile.styleDirections as string[]) ?? undefined,
-    explorationLevel: (profile.explorationLevel as string | null) ?? null,
-    dressingHabits: (profile.dressingHabits as string[]) ?? undefined,
-    dressingPreferences: (profile.dressingPreferences as string[]) ?? [],
-    coveragePreferences: (profile.coveragePreferences as string[]) ?? undefined,
-    preferredCoverage: (profile.preferredCoverage as string | null) ?? null,
-    dressingRequirementsNote: (profile.dressingRequirementsNote as string | null) ?? null,
-    fitConcerns: (profile.fitConcerns as string[]) ?? undefined,
-    dressesFor: (profile.dressesFor as string[]) ?? undefined,
-    neutralVsColour: (profile.neutralVsColour as string | null) ?? null,
-    colourIntensity: (profile.colourIntensity as string | null) ?? null,
-    printAppetite: (profile.printAppetite as string | null) ?? null,
-  };
-}
-
-const DISPLAY_SLOT_ORDER: Record<string, number> = { dress: 0, set: 0, bottom: 0, top: 1, outerwear: 2 };
-function sortForDisplay(garments: WiResolvedGarmentMetadata[]): WiResolvedGarmentMetadata[] {
-  return [...garments].sort((a, b) => (DISPLAY_SLOT_ORDER[a.slot] ?? 9) - (DISPLAY_SLOT_ORDER[b.slot] ?? 9));
-}
-
-// ── The one, named, already-confirmed combination ────────────────────────────
-// Deliberately hardcoded to this single validated real-world case, not a
-// general "take the top Work pairing" mechanism. Matched by name, against
-// whatever the pairing engine currently ranks — never substituted for a
-// different combination if this exact one isn't found.
-
-const EXPECTED_WORK_GARMENT_NAMES = [
-  "Beige Tailored Blazer",
-  "Blue Chambray Button-Up Shirt",
-  "Beige Tailored Trousers",
-] as const;
-
-function normalizeName(s: string | null): string {
-  return (s ?? "").trim().toLowerCase();
-}
-
-function matchesExpectedCombination(garments: WiResolvedGarmentMetadata[]): boolean {
-  if (garments.length !== EXPECTED_WORK_GARMENT_NAMES.length) return false;
-  const expected = new Set(EXPECTED_WORK_GARMENT_NAMES.map((n) => normalizeName(n)));
-  const actual = new Set(garments.map((g) => normalizeName(g.name)));
-  if (actual.size !== expected.size) return false;
-  for (const name of actual) if (!expected.has(name)) return false;
-  return true;
-}
-
-// ── Real-Work-pairing resolution, shared by loader and action ───────────────
-
-type WorkPairingOutcome =
-  | { ok: true; reason: string; garments: WiResolvedGarmentMetadata[] }
-  | { ok: false; reason: "expected_combination_not_found" | "ownership_check_failed" };
-
-async function resolveExpectedWorkCombination(customerId: string): Promise<WorkPairingOutcome> {
-  const profile = await prisma.onboardingProfile.findUnique({ where: { customerId } });
-  const passport = profile ? mapProfileToPassport(profile as unknown as Record<string, unknown>) : null;
-
-  const { intelligence } = await loadWardrobeIntelligence(customerId, {
-    imageUrlById: new Map(), // never resolved here — metadata-only, matches the WI pairing engine's own needs
-    passport,
-  });
-
-  const candidates = intelligence.pairings.bestByRegister.work ?? [];
-
-  for (const pairing of candidates) {
-    if (pairing.garmentIds.length !== EXPECTED_WORK_GARMENT_NAMES.length) continue;
-
-    const resolved = await resolveOwnedWiGarments(customerId, pairing.garmentIds);
-    if (!resolved) return { ok: false, reason: "ownership_check_failed" };
-
-    if (matchesExpectedCombination(resolved)) {
-      return { ok: true, reason: pairing.reason, garments: resolved };
-    }
-  }
-
-  return { ok: false, reason: "expected_combination_not_found" };
 }
 
 // ── Loader — metadata + readiness only, zero generation, zero cost ──────────
@@ -362,71 +278,10 @@ const MOCK_MODEL_IMAGE_DATA_URL = "data:image/png;base64,bW9ja21vZGVsaW1hZ2U=";
 // with downloadModelPhotoAsDataUrl(naiaModel.bodyPublicId, naiaModel.bodyFormat,
 // naiaModel.deliveryType) from fashn-tryon-service.server.ts — not done here.
 
-const MAX_CONSENT_AGE_MS = 15 * 60 * 1000; // same window and constant as api.trigger-tryon.tsx
-
-// ── Stage 2A: quota pre-check for the full 3-step chain (2026-11-03) ────────
-//
-// PROVISIONAL POLICY, not a final pricing decision: a 3-garment Full-Look
-// generation is treated here as costing MAX_CHAIN_LENGTH (3) VTO quota units,
-// not 1 — because it costs 3x a normal single-garment VTO in real FASHN
-// credits. The request must not even START unless the customer has room for
-// the WORST case (all 3 steps succeeding), not just room for one — a chain
-// that runs out of allowance partway through would still have genuinely
-// spent credits on the steps that did succeed.
-//
-// DELIBERATELY ISOLATED FROM THE SHARED PRODUCTION ENTITLEMENT SYSTEM:
-//   - Uses getMembershipAllowances(status).vtoPerMonth — the raw, standard
-//     per-tier allowance — NOT getEffectiveVtoLimit(status). That function
-//     applies VTO_MONTHLY_LIMIT_OVERRIDE, a staging/QA override meant to
-//     raise the limit for every tier in every environment (a separate,
-//     already-flagged, unresolved scoping issue). This one-off test must
-//     never inherit that override in either direction — not this check, not
-//     checkEntitlement, not getEffectiveVtoLimit, not the override env var
-//     itself, are touched or modified by this change.
-//   - Usage counts (monthlyCompleted + monthlyInFlight) are read via the
-//     existing, unmodified getEntitlementSummary — the same real DB counts
-//     every other feature already relies on, just not run through the
-//     override-aware limit.
-//   - Enforced UNCONDITIONALLY, regardless of process.env.ENTITLEMENT_ENFORCEMENT.
-//     A new fail-closed safeguard should not depend on an existing flag
-//     whose current value in whatever environment this eventually runs in
-//     is not this route's concern.
-//
-// NOT ATOMIC — AND NOT SUFFICIENT AUTHORISATION FOR REAL SPENDING:
-//   This is a plain read-before-write, exactly the same non-atomic pattern
-//   entitlement.server.ts's own header comment already documents and
-//   accepts for every other feature's identical quota check ("acceptable
-//   for staging [low concurrency]... before enabling ENTITLEMENT_ENFORCEMENT
-//   in production, [other features'] guards must be wrapped in Serializable
-//   transactions"). Two near-simultaneous requests from the same customer
-//   could both pass this check. For the MOCKED prototype this route runs
-//   today, that is an accepted, explicitly-flagged residual risk — not
-//   because it is harmless, but because nothing here can actually overspend:
-//   no FASHN call happens, no credit is at risk, and only one allowlisted
-//   staging test account can ever reach this route at all.
-//   This changes completely the moment real FASHN calls are ever enabled.
-//   Before that happens, this route needs, at minimum: durable per-customer
-//   concurrency protection (a real reservation, held in a Serializable
-//   transaction or equivalent, not a plain count-then-compare), real usage
-//   accounting for a multi-credit chain (today's VirtualTryOnJob model has
-//   no concept of a job costing more than 1 unit), and a hard, enforced
-//   spending ceiling independent of this quota check. This pre-check alone
-//   must never be read or represented as having solved any of that.
-async function hasQuotaRoomForFullLookChain(
-  customer: { id: string; membershipStatus: MembershipStatus },
-): Promise<boolean> {
-  try {
-    const allowance = getMembershipAllowances(customer.membershipStatus);
-    const summary = await getEntitlementSummary(customer.id, customer.membershipStatus);
-    const used = summary.vto.monthlyCompleted + summary.vto.monthlyInFlight;
-    const remaining = allowance.vtoPerMonth - used;
-    return remaining >= MAX_CHAIN_LENGTH;
-  } catch {
-    // Membership or usage could not be established reliably — fail closed,
-    // never fail open to "allowed".
-    return false;
-  }
-}
+// MAX_CONSENT_AGE_MS and hasQuotaRoomForFullLookChain now live in
+// full-look-work-combination.server.ts (imported above) — see that file's
+// header and this route's own earlier comment for why they moved out of
+// this route file instead of being re-exported from it.
 
 // ── Action — the only way anything "generates" ───────────────────────────────
 // Every branch below returns the same shape (ActionResult) so a consumer
