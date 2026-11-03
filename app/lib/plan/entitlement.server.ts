@@ -119,6 +119,24 @@ export function isSubscriptionStatusEntitled(status: SubscriptionStatus): boolea
   return (ENTITLED_SUBSCRIPTION_STATUSES as readonly string[]).includes(status);
 }
 
+// PAST_DUE's grace period is 7 days — see the schema's PAST_DUE enum
+// comment. This is enforced HERE, independently of the connected Stripe
+// account's own dunning/retry schedule: Phase 3 security review (2026-11)
+// found that nothing previously enforced this boundary, so a subscription
+// could grant paid access for as long as Stripe kept retrying a failed
+// renewal, including a "paid access, indefinitely" outcome if the account
+// were ever configured with a very long or unlimited retry window. A
+// PAST_DUE row whose grace period has elapsed is treated exactly as if it
+// were EXPIRED — the stored status column is left as-is (no write here;
+// this is a read-time filter, not a reconciliation job) and gets corrected
+// for real the next time a webhook syncs this subscription.
+const PAST_DUE_GRACE_PERIOD_MS = 7 * 24 * 60 * 60 * 1000;
+
+export function isPastDueGraceExpired(pastDueSince: Date | null, now: Date = new Date()): boolean {
+  if (!pastDueSince) return false;
+  return now.getTime() - pastDueSince.getTime() > PAST_DUE_GRACE_PERIOD_MS;
+}
+
 export type EntitledSubscription = {
   id: string;
   planType: "MONTHLY" | "ANNUAL";
@@ -132,11 +150,19 @@ export type EntitledSubscription = {
 // this returns null for everyone today — the richer behaviour below only
 // activates once real or synthetic rows exist.
 async function getCurrentSubscription(customerId: string): Promise<EntitledSubscription | null> {
-  return prisma.subscription.findFirst({
+  const sub = await prisma.subscription.findFirst({
     where: { customerId, status: { in: [...ENTITLED_SUBSCRIPTION_STATUSES] } },
     orderBy: { createdAt: "desc" },
-    select: { id: true, planType: true, currentPeriodStart: true, currentPeriodEnd: true, status: true },
+    select: { id: true, planType: true, currentPeriodStart: true, currentPeriodEnd: true, status: true, pastDueSince: true },
   });
+  if (!sub) return null;
+  if (sub.status === "PAST_DUE" && isPastDueGraceExpired(sub.pastDueSince)) {
+    // Grace period elapsed — never grant paid access past this boundary,
+    // regardless of what Stripe's own retry schedule is still doing.
+    return null;
+  }
+  const { pastDueSince, ...rest } = sub;
+  return rest;
 }
 
 // getCurrentSubscription only ever returns an ACTIVE/PAST_DUE row or null —

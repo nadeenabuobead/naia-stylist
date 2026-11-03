@@ -259,6 +259,19 @@ model Subscription {
   canceledAt        DateTime?
   endedAt           DateTime?
 
+  // When this subscription MOST RECENTLY entered PAST_DUE (set on that
+  // transition, cleared back to null on any transition out of PAST_DUE —
+  // to ACTIVE, CANCELED, or EXPIRED). Exists to enforce the approved 7-day
+  // grace period (see the PAST_DUE enum comment above) INDEPENDENTLY of
+  // whatever retry/dunning schedule the Stripe account happens to be
+  // configured with — a subscription must never grant paid access for an
+  // unbounded PAST_DUE window just because the provider's own retries
+  // haven't given up yet. Phase 3 review fix (2026-11): entitlement.
+  // server.ts's getCurrentSubscription treats a PAST_DUE row whose grace
+  // period has elapsed exactly as if it were EXPIRED, regardless of what
+  // the stored status column still says.
+  pastDueSince DateTime?
+
   // Out-of-order webhook / reconciliation guard. Providers do not guarantee
   // webhook delivery order — a redelivered or delayed event must never
   // overwrite newer state with older data. The processing rule this field

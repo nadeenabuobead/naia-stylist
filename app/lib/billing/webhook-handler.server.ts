@@ -4,38 +4,83 @@
 //
 // Chosen event flow (documented here because it is a real design decision,
 // not an obvious mechanical mapping):
-//   - checkout.session.completed: creates the Subscription row the moment
-//     payment is confirmed (session.payment_status === "paid"). Status is
-//     ACTIVE only when paid; INCOMPLETE otherwise. Period dates are NOT set
-//     here — Checkout Sessions don't carry them without an extra expand
-//     round-trip — they arrive moments later via customer.subscription.*
-//     (see below), which Stripe fires immediately after Checkout completes
-//     and on every renewal. Also records the SUBSCRIPTION_INITIAL ledger
-//     entry.
-//   - customer.subscription.updated / .deleted: the source of truth for
-//     status, currentPeriodStart/End, and cancelAtPeriodEnd from this point
-//     on. Matched primarily by providerSubscriptionId; if no row exists yet
-//     (the rare case this event is delivered before checkout.session.
-//     completed is processed), falls back to the subscription object's own
-//     metadata.customerId — set at Checkout creation for exactly this
-//     reason — to create the row instead of dropping the event.
+//   - checkout.session.completed: creates the Subscription row. Activates
+//     (ACTIVE) ONLY when payment_status is already "paid" at this point —
+//     true for every synchronous payment method (cards). For asynchronous
+//     methods (bank debits etc.), payment_status is "unpaid" here and the
+//     row is created INCOMPLETE; activation then happens later from
+//     checkout.session.async_payment_succeeded (or the row is marked
+//     EXPIRED from .async_payment_failed). Records SUBSCRIPTION_INITIAL
+//     only once payment is actually confirmed — never at session creation.
+//   - checkout.session.async_payment_succeeded / .async_payment_failed:
+//     the deferred confirmation for asynchronous payment methods — see
+//     above. Required precisely because checkout.session.completed firing
+//     does NOT itself mean payment succeeded for these methods.
+//   - customer.subscription.updated / .deleted: the ongoing source of
+//     truth for status, currentPeriodStart/End, and cancelAtPeriodEnd.
+//     Rather than trust the embedded webhook object (which is a snapshot
+//     taken at send time, and Stripe does not guarantee webhook delivery
+//     order), this re-fetches the AUTHORITATIVE subscription object from
+//     Stripe and writes from that — the event only triggers the sync, per
+//     the schema's own providerSyncedAt design note. Falls back to the
+//     webhook body only if the re-fetch itself fails. Matched primarily by
+//     providerSubscriptionId; if no row exists yet anywhere (out-of-order
+//     relative to checkout.session.completed), CREATES one from the
+//     authoritative data instead of dropping the event — a prior version
+//     of this handler silently dropped this case, permanently losing the
+//     event's data since Stripe does not redeliver an event we 200'd.
 //   - invoice.paid with billing_reason "subscription_cycle": a renewal
-//     charge — records SUBSCRIPTION_RENEWAL. Any other billing_reason
-//     (e.g. the very first invoice) is intentionally ignored here; the
-//     initial charge is already recorded by checkout.session.completed.
+//     charge — records SUBSCRIPTION_RENEWAL (SUCCEEDED). Any other
+//     billing_reason is ignored here; the initial charge is recorded by
+//     checkout.session.completed / .async_payment_succeeded, not here.
+//   - invoice.payment_failed: records a FAILED BillingTransaction ledger
+//     entry (SUBSCRIPTION_INITIAL or _RENEWAL depending on billing_reason)
+//     for billing-history/support visibility. Deliberately does NOT itself
+//     change Subscription.status — customer.subscription.updated is the
+//     single place status transitions happen, avoiding two code paths
+//     fighting over the same field.
 //
 // Subscription activation is strictly payment-confirmed: nothing here ever
 // sets status ACTIVE except in direct response to a payment_status "paid"
-// or a provider-reported "active" status — never from Checkout Session
-// creation alone, matching the schema's own INCOMPLETE comment.
+// (sync or async) or a provider-reported "active" status — never from
+// Checkout Session creation alone, matching the schema's own INCOMPLETE
+// comment.
+//
+// Idempotency against PARTIAL retries (not just exact redelivery): the
+// processed-event ledger is still written last (see below for why), so a
+// crash between business logic succeeding and the ledger write committing
+// would, on Stripe's retry, cause business logic to run again. Rather than
+// wrap everything in one giant transaction (a larger structural change than
+// this review calls for), each create operation is made idempotent against
+// its OWN already-unique columns: Subscription.providerSubscriptionId and
+// BillingTransaction.providerTransactionId are both @unique in the schema,
+// so a retried create hits a P2002 instead of creating a duplicate row —
+// and that P2002 is caught here and treated as "already done," letting the
+// retry proceed to successfully record the ledger entry on this attempt,
+// rather than permanently failing on every future retry too. This is a
+// deliberately different stance from reserveBuySkipSlot's P2002 handling
+// (RSV.11), which lets a client-supplied idempotencyKey collision propagate
+// to the caller — that represents a genuinely conflicting concurrent user
+// action the caller must see, not a safe provider-retry to absorb silently.
 //
 // Open product decisions (flagged, not silently resolved — see the
-// mapStripeSubscriptionStatus comments below): how Stripe's "trialing" and
-// "unpaid" statuses should map, since this product has no trial-period
-// concept today.
+// mapStripeSubscriptionStatus comments below): how Stripe's "trialing"
+// status should map, since this product has no trial-period concept today.
+// "unpaid" maps to PAST_DUE and is now safe to do so because PAST_DUE
+// itself is time-bounded (see pastDueSince / GRACE_PERIOD_MS below) —
+// access is never indefinite regardless of the provider's own retry
+// schedule.
 
 import type { SubscriptionStatus, BillingPlanType } from "@prisma/client";
 import prisma from "~/db.server";
+import { retrieveSubscription as stripeRetrieveSubscription, type StripeSubscriptionSnapshot } from "./stripe-client.server";
+
+export function isUniqueConstraintViolation(err: unknown, field?: string): boolean {
+  if (!err || typeof err !== "object" || (err as any).code !== "P2002") return false;
+  if (!field) return true;
+  const target = (err as any).meta?.target;
+  return Array.isArray(target) ? target.includes(field) : target === field;
+}
 
 // ── DI surface — mirrors EffectiveContextDeps/RunReservationFn conventions
 // already established in entitlement.server.ts. Every function defaults to
@@ -52,6 +97,7 @@ export interface SubscriptionRecord {
   currentPeriodEnd: Date | null;
   cancelAtPeriodEnd: boolean;
   providerSyncedAt: Date | null;
+  pastDueSince: Date | null;
 }
 
 export interface WebhookHandlerDeps {
@@ -84,6 +130,7 @@ export interface WebhookHandlerDeps {
       cancelAtPeriodEnd: boolean;
       canceledAt: Date | null;
       endedAt: Date | null;
+      pastDueSince: Date | null;
       providerSyncedAt: Date;
     }>,
   ) => Promise<void>;
@@ -91,11 +138,13 @@ export interface WebhookHandlerDeps {
     customerId: string;
     subscriptionId: string;
     type: "SUBSCRIPTION_INITIAL" | "SUBSCRIPTION_RENEWAL";
+    status: "SUCCEEDED" | "FAILED";
     amount: number;
     currency: string;
     providerTransactionId: string | null;
     occurredAt: Date;
   }) => Promise<void>;
+  retrieveAuthoritativeSubscription?: (providerSubscriptionId: string) => Promise<StripeSubscriptionSnapshot | null>;
 }
 
 async function defaultFindProcessedEvent(provider: string, providerEventId: string) {
@@ -113,16 +162,24 @@ async function defaultRecordProcessedEvent(input: {
   customerId: string | null;
   payload: unknown;
 }) {
-  await prisma.processedWebhookEvent.create({
-    data: {
-      provider: input.provider,
-      providerEventId: input.providerEventId,
-      eventType: input.eventType,
-      eventCreatedAt: input.eventCreatedAt,
-      customerId: input.customerId,
-      payload: input.payload as any,
-    },
-  });
+  try {
+    await prisma.processedWebhookEvent.create({
+      data: {
+        provider: input.provider,
+        providerEventId: input.providerEventId,
+        eventType: input.eventType,
+        eventCreatedAt: input.eventCreatedAt,
+        customerId: input.customerId,
+        payload: input.payload as any,
+      },
+    });
+  } catch (err) {
+    // A genuinely concurrent duplicate delivery lost the race to record
+    // this exact event — the business logic above already ran idempotently
+    // (every create it performed is itself guarded the same way), so this
+    // is a safe no-op, not a failure.
+    if (!isUniqueConstraintViolation(err, "provider_providerEventId")) throw err;
+  }
 }
 
 async function defaultFindSubscriptionByProviderSubscriptionId(providerSubscriptionId: string) {
@@ -140,16 +197,32 @@ async function defaultCreateSubscription(input: {
   providerCustomerId: string | null;
   providerSubscriptionId: string | null;
 }) {
-  return prisma.subscription.create({
-    data: {
-      customerId: input.customerId,
-      planType: input.planType,
-      status: input.status,
-      provider: "stripe",
-      providerCustomerId: input.providerCustomerId,
-      providerSubscriptionId: input.providerSubscriptionId,
-    },
-  });
+  try {
+    return await prisma.subscription.create({
+      data: {
+        customerId: input.customerId,
+        planType: input.planType,
+        status: input.status,
+        provider: "stripe",
+        providerCustomerId: input.providerCustomerId,
+        providerSubscriptionId: input.providerSubscriptionId,
+      },
+    });
+  } catch (err) {
+    // A retried checkout.session.completed (e.g. the ledger write failed
+    // after this create succeeded on a prior attempt) must not create a
+    // second row for the SAME Stripe subscription — providerSubscriptionId
+    // is @unique precisely so this is detectable rather than silently
+    // duplicated. Fetch and reuse the row that already exists instead of
+    // throwing, so the retry can still succeed overall.
+    if (input.providerSubscriptionId && isUniqueConstraintViolation(err, "providerSubscriptionId")) {
+      const existing = await prisma.subscription.findFirst({
+        where: { providerSubscriptionId: input.providerSubscriptionId },
+      });
+      if (existing) return existing;
+    }
+    throw err;
+  }
 }
 
 async function defaultUpdateSubscriptionById(id: string, input: Record<string, unknown>) {
@@ -160,24 +233,46 @@ async function defaultCreateBillingTransaction(input: {
   customerId: string;
   subscriptionId: string;
   type: "SUBSCRIPTION_INITIAL" | "SUBSCRIPTION_RENEWAL";
+  status: "SUCCEEDED" | "FAILED";
   amount: number;
   currency: string;
   providerTransactionId: string | null;
   occurredAt: Date;
 }) {
-  await prisma.billingTransaction.create({
-    data: {
-      customerId: input.customerId,
-      subscriptionId: input.subscriptionId,
-      type: input.type,
-      status: "SUCCEEDED",
-      amount: input.amount,
-      currency: input.currency,
-      provider: "stripe",
-      providerTransactionId: input.providerTransactionId,
-      occurredAt: input.occurredAt,
-    },
-  });
+  try {
+    await prisma.billingTransaction.create({
+      data: {
+        customerId: input.customerId,
+        subscriptionId: input.subscriptionId,
+        type: input.type,
+        status: input.status,
+        amount: input.amount,
+        currency: input.currency,
+        provider: "stripe",
+        providerTransactionId: input.providerTransactionId,
+        occurredAt: input.occurredAt,
+      },
+    });
+  } catch (err) {
+    // Same retry-safety rationale as defaultCreateSubscription above —
+    // providerTransactionId is @unique, so a retried record-the-charge
+    // call for the SAME Stripe payment_intent is a safe no-op, not an
+    // error: the charge was already recorded by an earlier attempt.
+    if (input.providerTransactionId && isUniqueConstraintViolation(err, "providerTransactionId")) return;
+    throw err;
+  }
+}
+
+async function defaultRetrieveAuthoritativeSubscription(providerSubscriptionId: string): Promise<StripeSubscriptionSnapshot | null> {
+  try {
+    return await stripeRetrieveSubscription(providerSubscriptionId);
+  } catch {
+    // If the authoritative fetch itself fails (network issue, or the test
+    // fixture object is gone), callers fall back to the webhook body —
+    // better to apply a possibly-stale-but-signed payload than to drop the
+    // event entirely.
+    return null;
+  }
 }
 
 // ── Stripe status → our SubscriptionStatus ──────────────────────────────────
@@ -189,12 +284,12 @@ async function defaultCreateBillingTransaction(input: {
 // per the schema's own CANCELED/EXPIRED distinction. This can only be
 // decided by consulting existing DB state, never the incoming payload alone.
 //
-// trialing and unpaid have no clean mapping because this product has no
-// trial-period concept and "unpaid" sits in an ambiguous pre-terminal
-// state — both are flagged in the Phase 3 report as open product
-// decisions. The conservative choice made here: trialing -> INCOMPLETE
-// (never grant unpaid access), unpaid -> PAST_DUE (keep the existing grace
-// period machinery, since Stripe's own retry schedule hasn't yet given up).
+// trialing has no clean mapping because this product has no trial-period
+// concept — flagged as an open product decision. The conservative choice:
+// trialing -> INCOMPLETE (never grant unpaid access). unpaid -> PAST_DUE is
+// safe specifically because PAST_DUE is itself time-bounded by
+// pastDueSince / GRACE_PERIOD_MS in entitlement.server.ts, independent of
+// the provider's own dunning schedule.
 export function mapStripeSubscriptionStatus(
   stripeStatus: string,
   existing: { cancelAtPeriodEnd: boolean } | null,
@@ -244,6 +339,7 @@ export async function processStripeWebhookEvent(
   const _createSubscription = deps.createSubscription ?? defaultCreateSubscription;
   const _updateSubscriptionById = deps.updateSubscriptionById ?? defaultUpdateSubscriptionById;
   const _createBillingTransaction = deps.createBillingTransaction ?? defaultCreateBillingTransaction;
+  const _retrieveAuthoritativeSubscription = deps.retrieveAuthoritativeSubscription ?? defaultRetrieveAuthoritativeSubscription;
 
   // ── Idempotency ────────────────────────────────────────────────────────────
   // Same event id redelivered (Stripe retries on anything but a 2xx, and
@@ -258,32 +354,115 @@ export async function processStripeWebhookEvent(
   let resolvedCustomerId: string | null = null;
   let action = "ignored";
 
+  // Shared by checkout.session.completed and .async_payment_succeeded —
+  // both represent "payment for this Checkout Session is now confirmed,"
+  // just at different times depending on the payment method.
+  async function activateFromCheckoutSession(): Promise<void> {
+    const customerId: string | undefined = obj.client_reference_id ?? obj.metadata?.customerId;
+    if (!customerId) return;
+    resolvedCustomerId = customerId;
+    const planType: BillingPlanType = obj.metadata?.planType === "ANNUAL" ? "ANNUAL" : "MONTHLY";
+
+    let sub = obj.subscription
+      ? await _findSubscriptionByProviderSubscriptionId(obj.subscription)
+      : await _findSubscriptionByCustomerId(customerId);
+
+    if (!sub) {
+      sub = await _createSubscription({
+        customerId,
+        planType,
+        status: "ACTIVE",
+        providerCustomerId: obj.customer ?? null,
+        providerSubscriptionId: obj.subscription ?? null,
+      });
+    } else if (sub.status === "ACTIVE") {
+      // Already active — a retried/duplicate confirmation, nothing to do.
+      action = "already_active";
+      return;
+    } else if (sub.status === "INCOMPLETE") {
+      await _updateSubscriptionById(sub.id, { status: "ACTIVE", pastDueSince: null });
+    } else {
+      // PAST_DUE/CANCELED/EXPIRED — a late payment confirmation arriving
+      // after this subscription's fate was already decided by other, more
+      // authoritative/later events (e.g. a subsequent cancellation). Must
+      // not resurrect it to ACTIVE on a stale confirmation.
+      action = "superseded_by_later_state";
+      return;
+    }
+
+    if (typeof obj.amount_total === "number") {
+      await _createBillingTransaction({
+        customerId,
+        subscriptionId: sub.id,
+        type: "SUBSCRIPTION_INITIAL",
+        status: "SUCCEEDED",
+        amount: obj.amount_total,
+        currency: (obj.currency ?? "aed").toUpperCase(),
+        providerTransactionId: obj.payment_intent ?? null,
+        occurredAt: eventCreatedAt,
+      });
+    }
+    action = "subscription_activated";
+  }
+
   switch (event.type) {
     case "checkout.session.completed": {
       const customerId: string | undefined = obj.client_reference_id ?? obj.metadata?.customerId;
-      const planType: BillingPlanType = obj.metadata?.planType === "ANNUAL" ? "ANNUAL" : "MONTHLY";
       if (customerId) {
         resolvedCustomerId = customerId;
         const paid = obj.payment_status === "paid";
-        const sub = await _createSubscription({
-          customerId,
-          planType,
-          status: paid ? "ACTIVE" : "INCOMPLETE",
-          providerCustomerId: obj.customer ?? null,
-          providerSubscriptionId: obj.subscription ?? null,
-        });
-        if (paid && typeof obj.amount_total === "number") {
-          await _createBillingTransaction({
-            customerId,
-            subscriptionId: sub.id,
-            type: "SUBSCRIPTION_INITIAL",
-            amount: obj.amount_total,
-            currency: (obj.currency ?? "aed").toUpperCase(),
-            providerTransactionId: obj.payment_intent ?? null,
-            occurredAt: eventCreatedAt,
-          });
+        if (paid) {
+          // Synchronous payment method (card, etc.) — payment is already
+          // confirmed. Funnel through the SAME find-or-create-then-activate
+          // path async_payment_succeeded uses below, so a row that was
+          // already created by an out-of-order customer.subscription.*
+          // sync (see that case) is reused and activated here rather than
+          // a second, divergent row being created.
+          await activateFromCheckoutSession();
+        } else {
+          // Asynchronous payment method — nothing confirmed yet.
+          // Activation is deferred to async_payment_succeeded/failed;
+          // never assumed from session creation alone. Still check for an
+          // existing row first (the same out-of-order-sync case applies)
+          // rather than blindly creating a second one.
+          const planType: BillingPlanType = obj.metadata?.planType === "ANNUAL" ? "ANNUAL" : "MONTHLY";
+          const existingSub = obj.subscription
+            ? await _findSubscriptionByProviderSubscriptionId(obj.subscription)
+            : await _findSubscriptionByCustomerId(customerId);
+          if (!existingSub) {
+            await _createSubscription({
+              customerId,
+              planType,
+              status: "INCOMPLETE",
+              providerCustomerId: obj.customer ?? null,
+              providerSubscriptionId: obj.subscription ?? null,
+            });
+          }
+          action = "subscription_created_pending_async_payment";
         }
-        action = "subscription_created";
+      }
+      break;
+    }
+
+    case "checkout.session.async_payment_succeeded": {
+      await activateFromCheckoutSession();
+      break;
+    }
+
+    case "checkout.session.async_payment_failed": {
+      const customerId: string | undefined = obj.client_reference_id ?? obj.metadata?.customerId;
+      if (customerId) {
+        resolvedCustomerId = customerId;
+        const sub = obj.subscription
+          ? await _findSubscriptionByProviderSubscriptionId(obj.subscription)
+          : await _findSubscriptionByCustomerId(customerId);
+        if (sub && sub.status !== "ACTIVE") {
+          // The deferred payment definitively failed — this Checkout
+          // attempt is dead. EXPIRED, not left lingering as INCOMPLETE
+          // forever, so it reads clearly in billing history/support.
+          await _updateSubscriptionById(sub.id, { status: "EXPIRED", endedAt: eventCreatedAt });
+          action = "async_payment_failed";
+        }
       }
       break;
     }
@@ -294,38 +473,75 @@ export async function processStripeWebhookEvent(
       let existing = await _findSubscriptionByProviderSubscriptionId(providerSubscriptionId);
 
       if (!existing) {
-        // Out-of-order delivery relative to checkout.session.completed, or
-        // the subscription object's own metadata is the only identity we
-        // have yet. Fall back to it rather than dropping the event.
         const metaCustomerId = obj.metadata?.customerId as string | undefined;
-        if (metaCustomerId) {
-          existing = await _findSubscriptionByCustomerId(metaCustomerId);
-        }
+        if (metaCustomerId) existing = await _findSubscriptionByCustomerId(metaCustomerId);
       }
-      if (!existing) break; // genuinely nothing to reconcile against yet
+
+      // Re-fetch authoritative state from Stripe rather than trust the
+      // embedded webhook object — see the module header and
+      // stripe-client.server.ts's retrieveSubscription for why.
+      const authoritative = await _retrieveAuthoritativeSubscription(providerSubscriptionId);
+      const source = authoritative ?? obj;
+      const stripeStatus: string =
+        event.type === "customer.subscription.deleted" && !authoritative ? "canceled" : source.status;
+
+      if (!existing) {
+        // Genuinely out-of-order relative to checkout.session.completed —
+        // rather than silently drop this event (Stripe will not redeliver
+        // an event we 200'd), create the row directly from this event's
+        // own data. checkout.session.completed, when it eventually
+        // arrives/is processed, will find this row (by providerSubscriptionId
+        // or customerId) via the same lookups above and update it in place
+        // rather than creating a duplicate.
+        const metaCustomerId = obj.metadata?.customerId as string | undefined;
+        if (!metaCustomerId) break; // nothing to key a new row on
+        const planType: BillingPlanType = obj.metadata?.planType === "ANNUAL" ? "ANNUAL" : "MONTHLY";
+        resolvedCustomerId = metaCustomerId;
+        const created = await _createSubscription({
+          customerId: metaCustomerId,
+          planType,
+          status: mapStripeSubscriptionStatus(stripeStatus, null),
+          providerCustomerId: typeof source.customer === "string" ? source.customer : null,
+          providerSubscriptionId,
+        });
+        await _updateSubscriptionById(created.id, {
+          currentPeriodStart: source.current_period_start ? new Date(source.current_period_start * 1000) : null,
+          currentPeriodEnd: source.current_period_end ? new Date(source.current_period_end * 1000) : null,
+          cancelAtPeriodEnd: Boolean(source.cancel_at_period_end),
+          pastDueSince: mapStripeSubscriptionStatus(stripeStatus, null) === "PAST_DUE" ? eventCreatedAt : null,
+          providerSyncedAt: eventCreatedAt,
+        });
+        action = "subscription_created_from_sync";
+        break;
+      }
 
       resolvedCustomerId = existing.customerId;
 
       // ── Out-of-order guard ───────────────────────────────────────────────
       // Never let a stale/delayed redelivery overwrite newer state with
-      // older data — only apply if this event is actually newer than the
-      // last synced state.
+      // older data — only apply if THIS EVENT is actually newer than the
+      // last synced state. (The authoritative re-fetch above protects
+      // against an incomplete/malformed embedded payload; this guard
+      // protects against applying a genuinely outdated webhook at all.)
       if (existing.providerSyncedAt && eventCreatedAt <= existing.providerSyncedAt) {
         action = "stale_event_ignored";
         break;
       }
 
-      const stripeStatus: string = event.type === "customer.subscription.deleted" ? "canceled" : obj.status;
       const mappedStatus = mapStripeSubscriptionStatus(stripeStatus, { cancelAtPeriodEnd: existing.cancelAtPeriodEnd });
       const isTerminal = mappedStatus === "CANCELED" || mappedStatus === "EXPIRED";
+      const enteringPastDue = mappedStatus === "PAST_DUE" && existing.status !== "PAST_DUE";
+      const leavingPastDue = mappedStatus !== "PAST_DUE" && existing.status === "PAST_DUE";
 
       await _updateSubscriptionById(existing.id, {
         status: mappedStatus,
         providerSubscriptionId,
-        providerCustomerId: typeof obj.customer === "string" ? obj.customer : existing.providerCustomerId,
-        currentPeriodStart: obj.current_period_start ? new Date(obj.current_period_start * 1000) : existing.currentPeriodStart,
-        currentPeriodEnd: obj.current_period_end ? new Date(obj.current_period_end * 1000) : existing.currentPeriodEnd,
-        cancelAtPeriodEnd: Boolean(obj.cancel_at_period_end),
+        providerCustomerId: typeof source.customer === "string" ? source.customer : existing.providerCustomerId,
+        currentPeriodStart: source.current_period_start ? new Date(source.current_period_start * 1000) : existing.currentPeriodStart,
+        currentPeriodEnd: source.current_period_end ? new Date(source.current_period_end * 1000) : existing.currentPeriodEnd,
+        cancelAtPeriodEnd: Boolean(source.cancel_at_period_end),
+        ...(enteringPastDue ? { pastDueSince: eventCreatedAt } : {}),
+        ...(leavingPastDue ? { pastDueSince: null } : {}),
         ...(isTerminal ? { endedAt: eventCreatedAt } : {}),
         providerSyncedAt: eventCreatedAt,
       });
@@ -344,12 +560,36 @@ export async function processStripeWebhookEvent(
         customerId: existing.customerId,
         subscriptionId: existing.id,
         type: "SUBSCRIPTION_RENEWAL",
+        status: "SUCCEEDED",
         amount: obj.amount_paid,
         currency: (obj.currency ?? "aed").toUpperCase(),
         providerTransactionId: obj.payment_intent ?? null,
         occurredAt: eventCreatedAt,
       });
       action = "renewal_recorded";
+      break;
+    }
+
+    case "invoice.payment_failed": {
+      const providerSubscriptionId: string | undefined = obj.subscription;
+      if (!providerSubscriptionId) break;
+      const existing = await _findSubscriptionByProviderSubscriptionId(providerSubscriptionId);
+      if (!existing) break;
+      resolvedCustomerId = existing.customerId;
+      // Status transitions (e.g. to PAST_DUE) are handled exclusively by
+      // customer.subscription.updated, which Stripe fires alongside this —
+      // this event only records the failed-charge ledger entry.
+      await _createBillingTransaction({
+        customerId: existing.customerId,
+        subscriptionId: existing.id,
+        type: obj.billing_reason === "subscription_cycle" ? "SUBSCRIPTION_RENEWAL" : "SUBSCRIPTION_INITIAL",
+        status: "FAILED",
+        amount: typeof obj.amount_due === "number" ? obj.amount_due : 0,
+        currency: (obj.currency ?? "aed").toUpperCase(),
+        providerTransactionId: obj.payment_intent ?? null,
+        occurredAt: eventCreatedAt,
+      });
+      action = "payment_failure_recorded";
       break;
     }
 

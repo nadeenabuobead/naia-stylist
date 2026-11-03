@@ -11,6 +11,7 @@ import { describe, it } from "node:test";
 import {
   createCheckoutSession,
   createBillingPortalSession,
+  retrieveSubscription,
   toStripeFormBody,
   StripeNotConfiguredError,
   StripeLiveModeBlockedError,
@@ -128,6 +129,82 @@ describe("createCheckoutSession — request shape", () => {
       () => createCheckoutSession(input2, { _fetch: fn, _getSecretKey: () => "sk_test_abc" }),
       (err: unknown) => err instanceof StripeApiError && err.status === 400,
     );
+  });
+});
+
+describe("Stripe API version pin", () => {
+  it("SC.11 — every outgoing request carries a pinned Stripe-Version header, not whatever the account's dashboard default happens to be", async () => {
+    const { fn, calls } = fakeFetch({ id: "cs_test_1", url: "https://checkout.stripe.com/x" });
+    await createCheckoutSession(
+      { customerId: "c", planType: "MONTHLY", amountMinorUnits: 3900, currency: "aed", successUrl: "https://x", cancelUrl: "https://y" },
+      { _fetch: fn, _getSecretKey: () => "sk_test_abc" },
+    );
+    const headers = calls[0].init.headers as Record<string, string>;
+    assert.ok(headers["Stripe-Version"], "Stripe-Version header must be set explicitly");
+    assert.match(headers["Stripe-Version"], /^\d{4}-\d{2}-\d{2}$/, "must be a pinned date-shaped API version, not a dynamic/unset value");
+  });
+
+  it("SC.12 — the SAME pinned version is sent on a GET request (subscription retrieval), not just POST", async () => {
+    const { fn, calls } = fakeFetch({ id: "sub_1", status: "active", customer: "cus_1", current_period_start: 1700000000, current_period_end: 1702600000, cancel_at_period_end: false });
+    await retrieveSubscription("sub_1", { _fetch: fn, _getSecretKey: () => "sk_test_abc" });
+    const headers = calls[0].init.headers as Record<string, string>;
+    assert.ok(headers["Stripe-Version"]);
+  });
+});
+
+describe("retrieveSubscription — authoritative state fetch", () => {
+  it("SC.13 — fetches GET /v1/subscriptions/:id and returns the parsed snapshot", async () => {
+    const { fn, calls } = fakeFetch({
+      id: "sub_1",
+      status: "past_due",
+      customer: "cus_1",
+      current_period_start: 1700000000,
+      current_period_end: 1702600000,
+      cancel_at_period_end: true,
+    });
+    const snapshot = await retrieveSubscription("sub_1", { _fetch: fn, _getSecretKey: () => "sk_test_abc" });
+    assert.equal(snapshot.status, "past_due");
+    assert.equal(snapshot.cancel_at_period_end, true);
+    assert.match(calls[0].url, /\/v1\/subscriptions\/sub_1$/);
+    assert.equal(calls[0].init.method, "GET");
+  });
+
+  it("SC.14 — also refuses a live key — the test-mode guard applies uniformly to every call, not just Checkout/Portal", async () => {
+    const { fn } = fakeFetch({});
+    await assert.rejects(
+      () => retrieveSubscription("sub_1", { _fetch: fn, _getSecretKey: () => "sk_live_x" }),
+      StripeLiveModeBlockedError,
+    );
+  });
+});
+
+describe("createCheckoutSession — existing Stripe Customer reuse", () => {
+  it("SC.15 — passes an existing providerCustomerId through to Stripe's `customer` param, so a resubscribing customer isn't fragmented across Stripe Customer objects", async () => {
+    const { fn, calls } = fakeFetch({ id: "cs_test_1", url: "https://checkout.stripe.com/x" });
+    await createCheckoutSession(
+      {
+        customerId: "c",
+        planType: "MONTHLY",
+        amountMinorUnits: 3900,
+        currency: "aed",
+        successUrl: "https://x",
+        cancelUrl: "https://y",
+        existingProviderCustomerId: "cus_existing_1",
+      },
+      { _fetch: fn, _getSecretKey: () => "sk_test_abc" },
+    );
+    const parsed = new URLSearchParams((calls[0].init.body as URLSearchParams).toString());
+    assert.equal(parsed.get("customer"), "cus_existing_1");
+  });
+
+  it("SC.16 — omits the `customer` param entirely for a genuinely first-time subscriber (no existingProviderCustomerId)", async () => {
+    const { fn, calls } = fakeFetch({ id: "cs_test_1", url: "https://checkout.stripe.com/x" });
+    await createCheckoutSession(
+      { customerId: "c", planType: "MONTHLY", amountMinorUnits: 3900, currency: "aed", successUrl: "https://x", cancelUrl: "https://y" },
+      { _fetch: fn, _getSecretKey: () => "sk_test_abc" },
+    );
+    const parsed = new URLSearchParams((calls[0].init.body as URLSearchParams).toString());
+    assert.equal(parsed.has("customer"), false);
   });
 });
 

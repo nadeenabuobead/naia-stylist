@@ -41,6 +41,7 @@ import {
 import {
   resolveEffectiveContext,
   isSubscriptionStatusEntitled,
+  isPastDueGraceExpired,
   reserveStyleMeSlot,
   reserveClosetSlot,
   type EffectiveContextDeps,
@@ -517,5 +518,57 @@ describe("PH2-13 — a tracked but non-entitled Subscription row forces the NONE
     );
     assert.match(fn, /prisma\.subscription\.count/, "existence must be checked with no status filter, unlike getCurrentSubscription's ACTIVE/PAST_DUE-scoped query");
     assert.doesNotMatch(fn, /status:/, "the existence check must not filter by status — that would collapse back into the same ambiguity it exists to resolve");
+  });
+});
+
+// ── 12 — PAST_DUE's 7-day grace period must be enforced independently of
+// the provider's own dunning/retry schedule (Phase 3 security review) ──────
+//
+// Prior to this fix, PAST_DUE (which Stripe's "unpaid" status also maps to)
+// was entitled with no time bound at all — a subscription could grant paid
+// access for however long the connected Stripe account's retry settings
+// happened to keep trying, including indefinitely if misconfigured. This
+// is now enforced via Subscription.pastDueSince + isPastDueGraceExpired,
+// applied as a READ-TIME filter inside getCurrentSubscription (not a write/
+// reconciliation job) — so no amount of Stripe-side retry configuration can
+// ever grant access past the 7-day boundary.
+describe("PH2-14 — PAST_DUE grace period is time-bounded, independent of the provider's retry schedule", () => {
+  const entSvc = readFile("app/lib/plan/entitlement.server.ts");
+
+  it("isPastDueGraceExpired is false for a pastDueSince within the last 7 days", () => {
+    const now = new Date("2026-11-10T00:00:00Z");
+    const enteredPastDue = new Date("2026-11-05T00:00:00Z"); // 5 days ago
+    assert.equal(isPastDueGraceExpired(enteredPastDue, now), false);
+  });
+
+  it("isPastDueGraceExpired is true once more than 7 days have elapsed since pastDueSince", () => {
+    const now = new Date("2026-11-10T00:00:00Z");
+    const enteredPastDue = new Date("2026-11-01T00:00:00Z"); // 9 days ago
+    assert.equal(isPastDueGraceExpired(enteredPastDue, now), true);
+  });
+
+  it("isPastDueGraceExpired is exactly false at 7 days minus one second, true at 7 days plus one second — boundary precision", () => {
+    const enteredPastDue = new Date("2026-11-01T00:00:00Z");
+    const justUnder = new Date(enteredPastDue.getTime() + 7 * 24 * 60 * 60 * 1000 - 1000);
+    const justOver = new Date(enteredPastDue.getTime() + 7 * 24 * 60 * 60 * 1000 + 1000);
+    assert.equal(isPastDueGraceExpired(enteredPastDue, justUnder), false);
+    assert.equal(isPastDueGraceExpired(enteredPastDue, justOver), true);
+  });
+
+  it("isPastDueGraceExpired is false when pastDueSince is null — nothing to expire, so this alone must never force a non-entitled outcome", () => {
+    assert.equal(isPastDueGraceExpired(null, new Date("2026-11-10T00:00:00Z")), false);
+  });
+
+  it("getCurrentSubscription's source consults isPastDueGraceExpired and returns null when it's true, never trusting the stored PAST_DUE status alone past the boundary", () => {
+    const fn = entSvc.slice(
+      entSvc.indexOf("async function getCurrentSubscription"),
+      entSvc.indexOf("\n}", entSvc.indexOf("async function getCurrentSubscription")),
+    );
+    assert.match(fn, /isPastDueGraceExpired\(/, "getCurrentSubscription must consult the grace-period check, not just the raw status column");
+    assert.match(fn, /return null/, "an expired-grace-period PAST_DUE row must resolve to null (treated exactly as non-entitled), not be returned");
+  });
+
+  it("the grace-period check is a pure, directly-testable function — not buried only inside the DB-touching default, consistent with this file's isSubscriptionStatusEntitled convention", () => {
+    assert.match(entSvc, /export function isPastDueGraceExpired/);
   });
 });
