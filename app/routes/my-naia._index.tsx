@@ -349,7 +349,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       id: true, createdAt: true, currentMood: true, desiredFeeling: true, occasion: true, styleFrom: true,
       suggestions: {
         take: 1, select: { id: true, outfitName: true,
-          items: { take: 5, select: { itemType: true, closetItemId: true, productTitle: true, productImageUrl: true, closetItem: { select: { name: true, imageUrl: true, imagePublicId: true, imageFormat: true } } } } }
+          items: { take: 5, select: { itemType: true, closetItemId: true, productTitle: true, productImageUrl: true, closetItem: { select: { name: true, imageUrl: true, imagePublicId: true, imageFormat: true, category: true } } } } }
       },
       review: { select: { id: true } },
     },

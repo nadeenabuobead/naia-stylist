@@ -112,7 +112,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const cloudinaryConfig = getCloudinaryConfig();
   const itemImageSelect = {
     itemType: true, closetItemId: true, productTitle: true, productImageUrl: true,
-    closetItem: { select: { name: true, imageUrl: true, imagePublicId: true, imageFormat: true } },
+    closetItem: { select: { name: true, imageUrl: true, imagePublicId: true, imageFormat: true, category: true } },
   } as const;
 
   const [profile, closetCount, recentRaw] = await Promise.all([
