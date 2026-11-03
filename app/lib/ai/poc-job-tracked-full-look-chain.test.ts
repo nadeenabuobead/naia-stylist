@@ -222,6 +222,35 @@ describe("duplicate-attempt prevention — composed", () => {
   });
 });
 
+describe("reservationScope (2026-11-03) — opt-in repeatable testing, zero change to the unscoped default", () => {
+  it("JTC.15 — omitted entirely (the default), step 1's key is byte-for-byte identical to before this change", async () => {
+    await runJobTrackedFullLookChain(BASE_ARGS, mockFashnFetch());
+    const firstCallArgs = mockCreateOrFind().mock.calls[0][0];
+    expect(firstCallArgs.idempotencyKey).toBe("fulllook-poc-reservation:cust-1");
+  });
+
+  it("JTC.16 — two calls with DIFFERENT reservationScope values produce two DIFFERENT step-1 keys — a fresh reservation per scope, not a permanent lock", async () => {
+    await runJobTrackedFullLookChain({ ...BASE_ARGS, reservationScope: "2026-11-03T10:00:00.000Z" }, mockFashnFetch());
+    await runJobTrackedFullLookChain({ ...BASE_ARGS, reservationScope: "2026-11-03T11:00:00.000Z" }, mockFashnFetch());
+    const keys = mockCreateOrFind().mock.calls
+      .map((c: unknown[]) => (c[0] as { idempotencyKey: string }).idempotencyKey)
+      .filter((k: string) => k.startsWith("fulllook-poc-reservation:"));
+    expect(keys).toEqual([
+      "fulllook-poc-reservation:cust-1:2026-11-03T10:00:00.000Z",
+      "fulllook-poc-reservation:cust-1:2026-11-03T11:00:00.000Z",
+    ]);
+  });
+
+  it("JTC.17 — two calls with the SAME reservationScope still produce the SAME step-1 key — a genuine retry of one submission still collides correctly", async () => {
+    await runJobTrackedFullLookChain({ ...BASE_ARGS, reservationScope: "2026-11-03T10:00:00.000Z" }, mockFashnFetch());
+    await runJobTrackedFullLookChain({ ...BASE_ARGS, reservationScope: "2026-11-03T10:00:00.000Z" }, mockFashnFetch());
+    const keys = mockCreateOrFind().mock.calls
+      .map((c: unknown[]) => (c[0] as { idempotencyKey: string }).idempotencyKey)
+      .filter((k: string) => k.startsWith("fulllook-poc-reservation:"));
+    expect(keys[0]).toBe(keys[1]);
+  });
+});
+
 /** Makes the Nth call to advanceTryOnJob (1-indexed, across the whole test)
  * resolve with `response`; every other call falls back to the normal
  * succeed-with-the-requested-status behavior from beforeEach. */

@@ -350,3 +350,18 @@ describe("ENT-30 — entitlement service uses membershipStatus not plan", () => 
               "intro buySkip logic must be removed");
   });
 });
+
+// ENT-32  staging-only Full-Look VTO mock jobs (fulllook-poc: namespace) excluded from real VTO usage
+
+describe("ENT-32 — mock VTO jobs (fulllook-poc: namespace) excluded from real usage counting", () => {
+  it("defines the exclusion prefix as the exact namespace the mock harness writes", () => {
+    assert.ok(entSvc.includes('"fulllook-poc:"'),
+              "must define the mock-test productHandle prefix exactly as poc-job-tracked-full-look-chain.server.ts writes it");
+  });
+
+  it("both getEntitlementSummary VTO count queries exclude the mock namespace", () => {
+    const matches = entSvc.match(/NOT: \{ productHandle: \{ startsWith: MOCK_VTO_PRODUCT_HANDLE_PREFIX \} \}/g) ?? [];
+    assert.ok(matches.length >= 4,
+              `expected the exclusion in all 4 VTO count call sites (summary completed+inFlight, checkEntitlement completed+inFlight) — found ${matches.length}`);
+  });
+});

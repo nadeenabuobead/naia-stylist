@@ -55,6 +55,7 @@ import { getMembershipAllowances } from "~/lib/plan/plan-limits.server";
 import { getEntitlementSummary } from "~/lib/plan/entitlement.server";
 import prisma from "~/db.server";
 import { loader, action, isAuthorizedStagingTestAccount } from "./staging.full-look-vto-test";
+import { isValidModelImageDataUrl } from "~/lib/ai/fashn-try-on.server";
 
 const mockCustomer = () => getCurrentNaiaCustomer as ReturnType<typeof vi.fn>;
 const mockLoadWI = () => loadWardrobeIntelligence as ReturnType<typeof vi.fn>;
@@ -506,6 +507,39 @@ describe("action — the only path that generates anything", () => {
     ]);
     expect(typeof body.finalImageDataUrl).toBe("string");
     expect(body.finalImageDataUrl.startsWith("data:image/png;base64,")).toBe(true);
+  });
+
+  it("GT.49 — the final mock image actually decodes to a real PNG — not just a data: URL with the right prefix (2026-11-03 regression)", async () => {
+    // Root cause this pins: the original mock payload's base64 decoded to
+    // the literal text "mockoutput${stepIndex}" — a template-literal
+    // interpolation that was base64-ENCODED AS TEXT instead of ever being
+    // evaluated, so every prior assertion (startsWith the right prefix)
+    // passed while the browser still rendered a broken-image icon. This
+    // test decodes the actual payload and checks real PNG structure, the
+    // one thing a string-prefix check could never catch.
+    const res = await action({ request: formRequest() } as never);
+    const body = res.data;
+    if (!body.ok) throw new Error("unreachable");
+    expect(body.finalImageDataUrl.startsWith("data:image/png;base64,")).toBe(true);
+    const base64Payload = body.finalImageDataUrl.replace(/^data:image\/png;base64,/, "");
+    const bytes = Buffer.from(base64Payload, "base64");
+    expect(bytes.length).toBeGreaterThan(1000); // a real, non-trivial rendered image, not a 1x1 placeholder
+    // PNG magic number: 89 50 4E 47 0D 0A 1A 0A
+    expect(bytes.subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  });
+
+  it("GT.50 — the final mock image also passes runFashnTryOn's own isValidModelImageDataUrl — it must, since it becomes the NEXT step's model-image input (2026-11-03 regression)", async () => {
+    // Root cause this pins: an earlier SVG-based fix for GT.49 passed GT.49
+    // itself but broke steps 2 and 3 — runJobTrackedFullLookChain feeds each
+    // step's output back in as the next step's modelImageDataUrl, and
+    // runFashnTryOn's own isValidModelImageDataUrl only accepts
+    // jpeg/jpg/png/webp, never svg+xml. Importing and calling the REAL
+    // production validator here (not a hand-copied regex) means this can
+    // never silently drift from whatever that function actually enforces.
+    const res = await action({ request: formRequest() } as never);
+    const body = res.data;
+    if (!body.ok) throw new Error("unreachable");
+    expect(isValidModelImageDataUrl(body.finalImageDataUrl)).toBe(true);
   });
 
   it("GT.13 — a simulated mid-chain failure halts before the next step and is reported clearly", async () => {

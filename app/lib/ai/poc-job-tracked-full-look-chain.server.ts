@@ -156,6 +156,19 @@ export interface JobTrackedChainArgs {
   initialModelImageDataUrl: string;
   garments: readonly JobTrackedChainGarmentInput[]; // already ordered body-outward by the caller
   consent: VirtualTryOnConsent;
+  // Optional (2026-11-03) — extends the one-time reservation key so a NEW
+  // value here claims a FRESH reservation instead of colliding with a prior
+  // one. Omitted entirely by default: every existing and future caller that
+  // doesn't pass this gets the exact original behavior — one permanent,
+  // customer-scoped reservation, ever, full stop — which is the correct and
+  // unchanged protection for a real, billable run. This exists only for a
+  // mock-only, zero-billing-risk caller (the staging test route) that needs
+  // to let the SAME QA account repeat the test across separate submissions
+  // without a manual database deletion each time. Passing the per-submission
+  // consent timestamp as this value is exactly that: deterministic within
+  // one submission (so a genuine retry of the identical request still
+  // collides correctly), but different across separate, deliberate attempts.
+  reservationScope?: string;
 }
 
 export interface JobTrackedChainStepResult {
@@ -217,7 +230,7 @@ export async function runJobTrackedFullLookChain(
     // colliding, and not itself a second reservation check. ────────────────
     const idempotencyKey =
       i === 0
-        ? `${RESERVATION_KEY_PREFIX}${customerId}`
+        ? `${RESERVATION_KEY_PREFIX}${customerId}${args.reservationScope ? `:${args.reservationScope}` : ""}`
         : `fulllook-poc-step:${priorJobId}:${i + 1}`;
 
     const jobResult = await createOrFindTryOnJob({

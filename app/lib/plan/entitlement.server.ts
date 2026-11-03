@@ -24,6 +24,19 @@ import { getUsageWindow, formatResetDate } from "./usage-window.server";
 // ── VTO stale threshold ────────────────────────────────────────────────────────
 const VTO_IN_FLIGHT_STALE_MS = 10 * 60 * 1000; // 10 minutes
 
+// ── Mock-only staging test exclusion (2026-11-03) ──────────────────────────────
+// productHandle values of this exact shape are written ONLY by the staging-only
+// Full-Look VTO mock harness (poc-job-tracked-full-look-chain.server.ts /
+// staging.full-look-vto-test.tsx) — confirmed by grep across the codebase, no
+// real customer-facing VTO path (api.trigger-tryon.tsx included) ever produces
+// a Shopify product handle with this prefix. Excluding it here means a real
+// customer's real usage is completely unaffected (they never have a row that
+// matches), while the one staging QA account's repeated mock runs stop
+// counting against its own monthly VTO allowance. Real VTO accounting,
+// production billing protections, and every other feature's quota logic are
+// untouched by this constant.
+const MOCK_VTO_PRODUCT_HANDLE_PREFIX = "fulllook-poc:";
+
 // ── Qualifying StyleMe condition ───────────────────────────────────────────────
 // A StyleMe session counts toward quota only if it is a root session (parentSessionId = null)
 // AND it successfully produced at least one OutfitSuggestion with non-null moodDescription
@@ -130,6 +143,7 @@ export async function getEntitlementSummary(
       customerId,
       status: "COMPLETED",
       createdAt: { gte: window.start, lt: window.end },
+      NOT: { productHandle: { startsWith: MOCK_VTO_PRODUCT_HANDLE_PREFIX } },
     },
   });
 
@@ -139,6 +153,7 @@ export async function getEntitlementSummary(
       customerId,
       status: { in: ["CREATED", "SUBMITTED", "PROCESSING"] },
       lastActivityAt: { gte: staleThreshold },
+      NOT: { productHandle: { startsWith: MOCK_VTO_PRODUCT_HANDLE_PREFIX } },
     },
   });
 
@@ -256,6 +271,7 @@ export async function checkEntitlement(
             customerId,
             status: "COMPLETED",
             createdAt: { gte: window.start, lt: window.end },
+            NOT: { productHandle: { startsWith: MOCK_VTO_PRODUCT_HANDLE_PREFIX } },
           },
         }),
         prisma.virtualTryOnJob.count({
@@ -263,6 +279,7 @@ export async function checkEntitlement(
             customerId,
             status: { in: ["CREATED", "SUBMITTED", "PROCESSING"] },
             lastActivityAt: { gte: staleThreshold },
+            NOT: { productHandle: { startsWith: MOCK_VTO_PRODUCT_HANDLE_PREFIX } },
           },
         }),
       ]);
