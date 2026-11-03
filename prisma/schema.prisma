@@ -108,6 +108,13 @@ model Customer {
   styleTendencies         StyleTendency[]
   wardrobeSnapshots       WardrobeSnapshot[]
   personalisedTrendEditUsage PersonalisedTrendEditUsage[]
+  // Billing — Phase 1 (schema only, no activation, no payment collection).
+  // No new scalar field added to Customer itself: provider customer/
+  // subscription identifiers live on Subscription/BillingTransaction, not
+  // here. This is deliberate, not an oversight — see Subscription's own
+  // comment for why.
+  subscriptions       Subscription[]
+  billingTransactions BillingTransaction[]
 
   // ── Secondary use of this customer's data for NADINE design research ──────
   //
@@ -162,6 +169,214 @@ model WardrobeSnapshot {
   summary     Json
 
   @@index([customerId, takenAt])
+}
+
+// ============================================
+// BILLING — PHASE 1 (schema only)
+//
+// Scope: additive data model for the paid-membership lifecycle approved
+// 2026-11-03. No payment collection, no real provider calls, no activation
+// path, and ENTITLEMENT_ENFORCEMENT is untouched — Customer.membershipStatus
+// remains the single value every existing checkEntitlement/reserve* call
+// reads, unchanged in shape. These models exist to receive that data once
+// Phase 3 (provider integration) builds the checkout/webhook code that
+// writes to them; nothing here is wired into any route yet.
+//
+// Known cross-branch gap, not resolved here: this branch does not include
+// the Phase 2 privacy-remediation work (customer-privacy.server.ts /
+// eraseCustomerData) — it lives on a separate, as-yet-unmerged branch. The
+// onDelete: Restrict choices below are the correct structural stance
+// regardless (financial records need a deliberate retention policy, not a
+// silent cascade-delete), but reconciling them with the real erasure flow
+// is integration work for when the two lineages merge, not something
+// resolvable from this branch alone.
+// ============================================
+
+enum SubscriptionStatus {
+  INCOMPLETE // Checkout started, no confirmed payment yet. Customer.membershipStatus
+             // MUST stay NONE for a subscription in this state — activation is gated
+             // on a payment-confirmation webhook, never on checkout/session creation.
+  ACTIVE
+  PAST_DUE   // A renewal payment failed; access is retained during the approved
+             // 7-day grace period (coordinated with the provider's own retry
+             // schedule) before falling through to EXPIRED.
+  CANCELED   // Customer-initiated. Per product decision, access is retained until
+             // currentPeriodEnd — cancellation sets cancelAtPeriodEnd immediately,
+             // but status only moves to CANCELED once the provider confirms the
+             // subscription has actually ended.
+  EXPIRED    // PAST_DUE grace period exhausted with no resolution, or a non-renewed
+             // subscription's period has simply ended.
+}
+
+enum BillingPlanType {
+  MONTHLY
+  ANNUAL // Pays once for 12 months; usage still resets on a monthly cadence
+         // anchored to the subscription's own start date, not the calendar
+         // month and not the full annual period — see usage-window design.
+}
+
+// One row per subscription object's current lifecycle state — mutated in
+// place as webhooks arrive, mirroring how a provider's own subscription
+// object is itself a single long-lived, mutable record (Stripe subscriptions
+// keep one id across status changes). This model answers "what is this
+// customer entitled to right now." For "what did this customer actually pay,
+// and when" — the historical, immutable ledger — see BillingTransaction.
+model Subscription {
+  id         String   @id @default(cuid())
+  customerId String
+  // Deliberately NOT Cascade: a financial/billing record must not be
+  // silently destroyed by a customer-erasure flow — UAE tax law and standard
+  // financial record-keeping practice require retention independent of a
+  // data-subject erasure request (a well-established tension in data-
+  // protection frameworks generally, not unique to this app). Restrict makes
+  // that conflict loud and structural: Customer.delete() will throw if any
+  // Subscription row still references it, forcing a deliberate, billing-
+  // aware erasure path to be built (anonymize what erasure requires while
+  // retaining what the law requires) rather than silently cascading away
+  // financial records or silently blocking erasure for everyone. See the
+  // module header above re: the still-separate Phase 2 privacy branch.
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+
+  status   SubscriptionStatus
+  planType BillingPlanType
+
+  provider               String  // "stripe" — named explicitly; not assumed to be the only provider forever.
+  providerCustomerId     String? // Null until the provider-side customer object exists (created at first checkout).
+  providerSubscriptionId String? @unique // Null until the provider confirms the subscription object.
+
+  // Nullable: genuinely unknown while INCOMPLETE — there is no period until
+  // a payment has actually succeeded. Non-null from the first ACTIVE
+  // confirmation onward. Left at their last known values on CANCELED/
+  // EXPIRED — never cleared — so "what period was this customer last paid
+  // through" stays answerable for support and audit.
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+
+  cancelAtPeriodEnd Boolean   @default(false)
+  canceledAt        DateTime?
+  endedAt           DateTime?
+
+  // Out-of-order webhook / reconciliation guard. Providers do not guarantee
+  // webhook delivery order — a redelivered or delayed event must never
+  // overwrite newer state with older data. The processing rule this field
+  // supports: never trust a webhook payload's values directly; re-fetch the
+  // authoritative subscription object from the provider, compare ITS event
+  // timestamp against providerSyncedAt, and only apply + advance this field
+  // if the incoming state is actually newer. The same rule applies equally
+  // to a periodic reconciliation pass re-fetching from the provider, not
+  // just to live webhook delivery — one staleness guard serves both.
+  providerSyncedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  billingTransactions BillingTransaction[]
+
+  @@index([customerId])
+  @@index([providerSubscriptionId])
+  @@index([providerCustomerId])
+}
+
+enum BillingTransactionType {
+  SUBSCRIPTION_INITIAL
+  SUBSCRIPTION_RENEWAL
+  SUBSCRIPTION_REFUND
+  ADDON_STYLEME_BOOST
+  ADDON_VTO_BOOST
+  ADDON_CLOSET_EXPANSION
+}
+
+enum BillingTransactionStatus {
+  SUCCEEDED
+  FAILED
+  REFUNDED
+}
+
+// The immutable billing-history ledger — one row per actual financial event
+// (initial subscription payment, each renewal charge, each add-on purchase,
+// each refund). This, not Subscription, is the source for "customer billing
+// history" and for reconciling what was paid against what was/is entitled —
+// Subscription only ever holds current state, so historical renewal amounts
+// and dates are not reconstructable from it alone.
+model BillingTransaction {
+  id         String   @id @default(cuid())
+  customerId String
+  // Same Restrict rationale as Subscription above — this IS the financial
+  // record retention law and reconciliation require; it must survive a
+  // customer-erasure flow or that flow must be updated to handle it
+  // deliberately, never cascade through it silently.
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+
+  subscriptionId String?
+  // SetNull, not Restrict: unlike Customer, losing the Subscription parent
+  // (which should essentially never happen in practice) must not block
+  // deleting this ledger row's own lifecycle — the transaction record still
+  // stands on its own via customerId, amount, and provider identifiers.
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
+  type   BillingTransactionType
+  status BillingTransactionStatus
+
+  amount   Int    // Minor currency units (fils) — avoids float rounding on money. AED 39.00 = 3900.
+  currency String @default("AED")
+
+  provider              String
+  providerTransactionId String? @unique
+
+  // Add-on fields — null for SUBSCRIPTION_* transaction types.
+  // addonQuantityGranted: e.g. 5 for a StyleMe boost, 10 for a VTO boost, 250
+  // for a Closet expansion.
+  // addonAppliesToPeriodStart/End: the EXACT usage-period window a StyleMe/
+  // VTO top-up is valid for (one-time, current-period-only, per product
+  // decision) — compared for an exact match against the customer's current
+  // resolved usage window, not a loose date-range overlap. Deliberately
+  // left null for ADDON_CLOSET_EXPANSION: Closet capacity is cumulative and
+  // permanent while membership is active, not tied to a single usage
+  // window (per product decision) — and critically, an expired/lapsed
+  // membership must NEVER trigger deleting existing Closet items just
+  // because the effective limit may drop; this model holds no mechanism
+  // that could do that, deliberately, and none should be added later
+  // without a conscious product decision to allow data loss.
+  addonQuantityGranted      Int?
+  addonAppliesToPeriodStart DateTime?
+  addonAppliesToPeriodEnd   DateTime?
+
+  occurredAt DateTime // The provider's own event time for this transaction — not our local processing time.
+  createdAt  DateTime @default(now())
+
+  @@index([customerId])
+  @@index([subscriptionId])
+}
+
+// Idempotency ledger for provider webhook deliveries. Deliberately NOT a
+// Prisma relation to Customer: this is an operational log, not customer
+// data — some events may never resolve to a known customer (malformed or
+// unexpected payloads), and this table must never block, or be affected by,
+// customer erasure. The (provider, providerEventId) unique constraint is
+// what makes processing idempotent: inserting this row and applying the
+// event's side effects in the same transaction means a redelivered event
+// either never gets this far (unique violation) or is a no-op in practice —
+// the same pattern already used for the Shopify privacy-webhook and
+// StyleMe/BuySkip/Closet quota-reservation idempotency elsewhere in this
+// codebase, applied here to billing.
+model ProcessedWebhookEvent {
+  id              String   @id @default(cuid())
+  provider        String
+  providerEventId String
+  eventType       String
+  // The provider's own event timestamp — distinct from processedAt (our
+  // local processing time). Compared against Subscription.providerSyncedAt
+  // to reject a stale, out-of-order redelivery rather than apply it blindly.
+  eventCreatedAt DateTime
+  processedAt    DateTime @default(now())
+
+  // Loose reference only — see the no-relation rationale above.
+  customerId String?
+
+  payload Json? // Raw event payload, for reconciliation/debugging.
+
+  @@unique([provider, providerEventId])
+  @@index([customerId])
 }
 
 // ============================================
