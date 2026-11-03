@@ -360,4 +360,18 @@ describe("action — intent=continue", () => {
     expect(res.data).toEqual({ ok: true, stepIndex: 0 });
     expect(mockContinueChain()).not.toHaveBeenCalled();
   });
+
+  it("RT.33 — an expired-pause rejection ('continue_window_expired') surfaces exactly like any other refusal, without crashing", async () => {
+    mockContinueChain().mockResolvedValue({ ok: false, reason: "continue_window_expired" });
+    const res = await action({ request: formRequest({ intent: "continue" }) } as never);
+    expect(res.data).toEqual({ ok: false, reason: "continue_window_expired" });
+  });
+});
+
+describe("loader — EXPIRED pause pass-through", () => {
+  it("RT.34 — an expired chain's EXPIRED status passes through to the page verbatim", async () => {
+    mockAdvanceChain().mockResolvedValue({ status: "EXPIRED" });
+    const res = await loader({ request: {} as Request } as never);
+    expect(res.data).toEqual({ ok: true, modelReady: true, chain: { status: "EXPIRED" } });
+  });
 });

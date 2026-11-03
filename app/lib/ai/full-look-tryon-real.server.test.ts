@@ -771,6 +771,42 @@ describe("advanceFullLookChain — pause before the final (blazer) step", () => 
     expect(global.fetch).not.toHaveBeenCalled(); // no FASHN status check — pure DB-derived fast path
     expect(mockSubmitProvider()).not.toHaveBeenCalled();
   });
+
+  it("FL.47 — a pause well within the 30-minute window stays AWAITING_CONTINUE, not EXPIRED (boundary sanity)", async () => {
+    const recentCompletedAt = new Date(Date.now() - 5 * 60 * 1000); // 5 minutes ago
+    const job0 = fakeJob("job-0", { status: "COMPLETED", completedAt: recentCompletedAt });
+    const job1 = fakeJob("job-1", { status: "COMPLETED", completedAt: recentCompletedAt });
+    const _findJobFn = vi.fn(async (where: { idempotencyKey: string }) => {
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 0, null)) return job0;
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 1, "job-0")) return job1;
+      return null;
+    });
+
+    const result = await advanceFullLookChain(baseCtx(), { _findJobFn });
+
+    expect(result.status).toBe("AWAITING_CONTINUE");
+    expect(mockDeleteAsset()).not.toHaveBeenCalled();
+  });
+
+  it("FL.48 — a pause older than 30 minutes returns EXPIRED and cleans up BOTH intermediate images", async () => {
+    const staleCompletedAt = new Date(Date.now() - 31 * 60 * 1000); // 31 minutes ago
+    const job0 = fakeJob("job-0", { status: "COMPLETED", completedAt: staleCompletedAt });
+    const job1 = fakeJob("job-1", { status: "COMPLETED", completedAt: staleCompletedAt });
+    const _findJobFn = vi.fn(async (where: { idempotencyKey: string }) => {
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 0, null)) return job0;
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 1, "job-0")) return job1;
+      return null;
+    });
+
+    const result = await advanceFullLookChain(baseCtx(), { _findJobFn });
+
+    expect(result).toEqual({ status: "EXPIRED" });
+    expect(mockDeleteAsset()).toHaveBeenCalledTimes(2);
+    expect(mockDeleteAsset()).toHaveBeenCalledWith(expect.stringContaining("job-0"), "private");
+    expect(mockDeleteAsset()).toHaveBeenCalledWith(expect.stringContaining("job-1"), "private");
+    expect(global.fetch).not.toHaveBeenCalled(); // never checked FASHN — expiry is purely timestamp-derived
+    expect(mockSubmitProvider()).not.toHaveBeenCalled();
+  });
 });
 
 describe("continueToFinalStep", () => {
@@ -849,6 +885,49 @@ describe("continueToFinalStep", () => {
     expect(result).toEqual({ ok: false, reason: "not_awaiting_continue" });
     expect(mockCreateOrFind()).not.toHaveBeenCalled();
     expect(mockSubmitProvider()).not.toHaveBeenCalled();
+  });
+
+  it("FL.42b — refuses an EXPIRED pause (>30 min since shirt completed) with zero FASHN or job-creation I/O — cannot unexpectedly resume billable generation", async () => {
+    const staleCompletedAt = new Date(Date.now() - 45 * 60 * 1000); // 45 minutes ago
+    const job0 = fakeJob("job-0", { status: "COMPLETED", completedAt: staleCompletedAt });
+    const job1 = fakeJob("job-1", { status: "COMPLETED", completedAt: staleCompletedAt });
+    const _findJobFn = vi.fn(async (where: { idempotencyKey: string }) => {
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 0, null)) return job0;
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 1, "job-0")) return job1;
+      return null;
+    });
+
+    const result = await continueToFinalStep(baseCtx(), { _findJobFn });
+
+    expect(result).toEqual({ ok: false, reason: "continue_window_expired" });
+    expect(mockCreateOrFind()).not.toHaveBeenCalled();
+    expect(mockSubmitProvider()).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("FL.42c — a pause well within the window still succeeds normally (regression against the new expiry check)", async () => {
+    const recentCompletedAt = new Date(Date.now() - 2 * 60 * 1000); // 2 minutes ago
+    const job0 = fakeJob("job-0", { status: "COMPLETED", completedAt: recentCompletedAt });
+    const job1 = fakeJob("job-1", { status: "COMPLETED", completedAt: recentCompletedAt });
+    const _findJobFn = vi.fn(async (where: { idempotencyKey: string }) => {
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 0, null)) return job0;
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 1, "job-0")) return job1;
+      return null;
+    });
+    const job2 = fakeJob("job-2");
+    mockCreateOrFind().mockResolvedValue({ ok: true, job: job2, created: true });
+    mockAdvance()
+      .mockResolvedValueOnce({ ok: true, job: { ...job2, status: "SUBMITTED" } })
+      .mockResolvedValueOnce({ ok: true, job: { ...job2, status: "PROCESSING", predictionId: "pred-2" } });
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(new Uint8Array([1, 2, 3]).buffer, { status: 200 }),
+    );
+    mockSubmitProvider().mockResolvedValue({ ok: true, predictionId: "pred-2" });
+
+    const result = await continueToFinalStep(baseCtx(), { _findJobFn });
+
+    expect(result).toEqual({ ok: true });
+    expect(mockSubmitProvider()).toHaveBeenCalledTimes(1);
   });
 });
 

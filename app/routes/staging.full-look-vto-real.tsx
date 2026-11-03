@@ -498,6 +498,14 @@ export default function StagingFullLookVtoReal() {
         </p>
       )}
 
+      {chain && chain.status === "EXPIRED" && (
+        <p>
+          This paused review window expired before Continue was submitted. The trousers and shirt
+          preview images have been deleted. The blazer step was never submitted — no credits were
+          spent on it. A new attempt requires manual review.
+        </p>
+      )}
+
       {chain && chain.status === "COMPLETED" && (
         <div>
           <p>Complete. Result is stored privately and shown below via a short-lived signed link.</p>

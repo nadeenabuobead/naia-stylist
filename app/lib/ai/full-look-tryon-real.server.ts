@@ -552,6 +552,29 @@ export interface IntermediateStepPreview {
   url: string;
 }
 
+// ── QA pause abandonment — expiry, not deletion-on-a-timer ──────────────────
+//
+// The pause checkpoint has no natural terminal event if the tester simply
+// closes the tab — unlike every other outcome in this chain, nothing ever
+// calls FASHN or Cloudinary again to tell us "done." Rather than deleting
+// images on a background timer (no cron infrastructure exists in this app,
+// and one would be a new architectural surface, not the smallest fix), this
+// is a PURE, DERIVED check: compare now() against the shirt job's own
+// completedAt (an already-persisted, honest timestamp — never mutated by
+// this check). No new DB field, no new job-status transition — COMPLETED
+// has zero allowed outgoing transitions in ALLOWED_TRANSITIONS by design,
+// and the shirt step genuinely did complete, so that must never change.
+//
+// 30 minutes is deliberately longer than MAX_CONSENT_AGE_MS (15 min): the
+// tester needs real time to look at two images and decide, not just submit
+// a form. Once expired, this is permanent — completedAt never changes, so
+// every later poll independently re-derives the same EXPIRED verdict.
+const QA_PAUSE_EXPIRY_MS = 30 * 60 * 1000;
+
+function isAwaitingContinueExpired(job: VirtualTryOnJobRecord): boolean {
+  return job.completedAt != null && Date.now() - job.completedAt.getTime() > QA_PAUSE_EXPIRY_MS;
+}
+
 export type ChainAdvanceResult =
   | { status: "NOT_STARTED" }
   | { status: "PROCESSING"; stepIndex: number }
@@ -566,6 +589,15 @@ export type ChainAdvanceResult =
   // one), so these URLs remain valid until the chain reaches a terminal
   // state.
   | { status: "AWAITING_CONTINUE"; intermediates: IntermediateStepPreview[] }
+  // Abandoned pause (2026-11-04): more than QA_PAUSE_EXPIRY_MS has passed
+  // since the shirt step completed with no Continue submission. Terminal in
+  // effect (continueToFinalStep refuses once expired — see its own check),
+  // though not a job-status mutation — see isAwaitingContinueExpired above.
+  // Intermediate images are cleaned up the moment this is first observed
+  // (and, harmlessly, on every later poll too — see advanceFullLookChain's
+  // own comment on why re-attempting a delete here is an accepted
+  // trade-off, not a bug).
+  | { status: "EXPIRED" }
   | { status: "COMPLETED"; resultUrl: string }
   | { status: "FAILED"; failedStepIndex: number; errorCode: string | null }
   | { status: "SUBMIT_ERROR"; reason: string };
@@ -641,6 +673,10 @@ export async function advanceFullLookChain(
   // identically. Cleanup is NOT run here: these are exactly the images the
   // tester needs to see.
   if (lastJob.status === "COMPLETED" && lastStepIndex === MAX_CHAIN_LENGTH - 2) {
+    if (isAwaitingContinueExpired(lastJob)) {
+      await cleanupIntermediateStepResults(ctx.customerId, jobs.map((j) => j.id));
+      return { status: "EXPIRED" };
+    }
     const intermediates = buildIntermediatePreviews(ctx, jobs);
     if (!intermediates) return { status: "SUBMIT_ERROR", reason: "NOT_CONFIGURED" };
     return { status: "AWAITING_CONTINUE", intermediates };
@@ -708,6 +744,13 @@ export async function continueToFinalStep(
 
   if (lastStepIndex !== MAX_CHAIN_LENGTH - 2 || jobs[lastStepIndex]?.status !== "COMPLETED") {
     return { ok: false, reason: "not_awaiting_continue" };
+  }
+
+  // ── Expired pause — refuse before any FASHN I/O. A session abandoned long
+  // enough to expire must never resume billable generation just because a
+  // stale tab happened to still have the Continue button rendered. ────────
+  if (isAwaitingContinueExpired(jobs[lastStepIndex])) {
+    return { ok: false, reason: "continue_window_expired" };
   }
 
   const submit = await submitFullLookRealStep(ctx, MAX_CHAIN_LENGTH - 1, jobs[lastStepIndex].id);
