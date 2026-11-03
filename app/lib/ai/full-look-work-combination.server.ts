@@ -99,10 +99,11 @@ const EXPECTED_WORK_GARMENT_NAMES = [
 // real test to actually confirm the shirt is identifiable; this change only
 // gives the model the best documented chance of it.
 export const FINAL_STEP_VISUAL_PROMPT =
-  "Wear the beige tailored blazer open over the existing blue chambray shirt. " +
-  "Keep the blue shirt visibly identifiable through the blazer opening, " +
-  "preserving its colour, collar and realistic layering. Preserve the beige " +
-  "tailored trousers and the model's identity.";
+  "Wear the beige tailored blazer open over the existing blue chambray shirt, " +
+  "worn normally with both arms inside the sleeves — not draped over the " +
+  "shoulders. Keep the blue shirt visibly identifiable through the blazer " +
+  "opening, preserving its colour, collar and realistic layering. Preserve " +
+  "the beige tailored trousers and the model's identity.";
 export const FINAL_STEP_GENERATION_MODE = "quality" as const;
 
 function normalizeName(s: string | null): string {
