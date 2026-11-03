@@ -33,6 +33,51 @@ describe("LookCollage.tsx — garment images preserve their full silhouette, not
     const tileBody = collageSrc.slice(tileIdx, collageSrc.indexOf("</div>", tileIdx));
     assert.match(tileBody, /background:\s*"color-mix/);
   });
+
+  it("the <img> is top-aligned, not centered — this is what fixes 'garments appear at inconsistent heights' in a 3/4-image collage (2026-11-08)", () => {
+    // Centering both ways was the regression: a wide/short item (shoes, bags)
+    // letterboxes top AND bottom and so starts partway down its tile, while a
+    // tall item (trousers, dresses) fills top-to-bottom and starts at the
+    // tile's own top edge — side by side that reads as "this one sits lower"
+    // even though nothing is misaligned. Top-aligning removes the mismatch:
+    // every garment starts at the same edge of its own tile regardless of its
+    // own photo's aspect ratio. Horizontal stays centered — the reported
+    // inconsistency was specifically about vertical position.
+    assert.match(collageSrc, /objectPosition:\s*"center top"/);
+    assert.ok(!collageSrc.includes('objectPosition: "center"'), 'plain center must not reappear on its own — it reintroduces the height mismatch');
+  });
+});
+
+describe("LookCollage.tsx — tile shapes are consistent across how many images a look has (2026-11-08)", () => {
+  // Source-string assertions against the literal gridStyle expression, same
+  // convention as the rest of this file — no DOM rendering harness exists
+  // in this codebase.
+  const gridStyleIdx = collageSrc.indexOf("const gridStyle");
+  const gridStyleSrc = collageSrc.slice(gridStyleIdx, collageSrc.indexOf(";\n", collageSrc.indexOf("return (", gridStyleIdx)));
+
+  it("a 2-image look stacks tiles into one column, two rows — not side by side", () => {
+    // The old side-by-side split (gridTemplateColumns: "1fr 1fr", one row)
+    // gave each tile a ~2:5 box on this card's 4:5 frame — so narrow that
+    // any garment photo wider than a trouser leg (shoes, bags) had to shrink
+    // to a sliver to fit, with large, inconsistent empty margins depending
+    // on the photo's own shape. Stacking gives each tile a ~8:5 box instead.
+    const twoImageBranch = gridStyleSrc.slice(
+      gridStyleSrc.indexOf("images.length === 2"),
+      gridStyleSrc.indexOf("images.length === 2") + 150,
+    );
+    assert.match(twoImageBranch, /gridTemplateColumns:\s*"1fr"/, "2-image case must be a single column");
+    assert.match(twoImageBranch, /gridTemplateRows:\s*"1fr 1fr"/, "2-image case must be two rows (stacked)");
+  });
+
+  it("the 3/4-image case is unchanged: a 2x2 grid, which already gave each tile the card's own 4:5 ratio", () => {
+    assert.match(gridStyleSrc, /gridTemplateColumns:\s*"1fr 1fr"/, "3/4-image case keeps two columns");
+    assert.match(gridStyleSrc, /gridTemplateRows:\s*"1fr 1fr"/, "3/4-image case keeps two rows");
+  });
+
+  it("every multi-image layout still uses a consistent, small gap between tiles", () => {
+    const occurrences = gridStyleSrc.match(/gap:\s*"2px"/g) ?? [];
+    assert.equal(occurrences.length, 2, "both the 2-image and 3/4-image branches must use the same gap");
+  });
 });
 
 describe("naia-design-system.css — Saved Looks thumbnails preserve the full garment silhouette", () => {
