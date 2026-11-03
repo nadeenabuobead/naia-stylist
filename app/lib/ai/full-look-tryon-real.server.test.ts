@@ -33,12 +33,13 @@ vi.mock("../cloudinary-admin.server.js", () => ({
   uploadCloudinaryPrivate: vi.fn(),
   buildPrivateDownloadUrl: vi.fn(() => "https://cloudinary.mock/download"),
   getCloudinaryConfig: vi.fn(() => ({ cloudName: "mock", apiKey: "mock", apiSecret: "mock" })),
+  deleteCloudinaryAsset: vi.fn(async () => ({ ok: true })),
 }));
 
 import { checkCustomerCooldown, createOrFindTryOnJob, advanceTryOnJob } from "./my-naia-model.server.js";
 import { submitTryOnToProvider } from "./fashn-try-on.server.js";
 import { downloadModelPhotoAsDataUrl, uploadTryOnResult, buildTryOnResultUrl } from "./fashn-tryon-service.server.js";
-import { uploadCloudinaryPrivate } from "../cloudinary-admin.server.js";
+import { uploadCloudinaryPrivate, deleteCloudinaryAsset } from "../cloudinary-admin.server.js";
 import {
   getFullLookStepIdempotencyKey,
   isCompatibleModelPhotoFormat,
@@ -61,6 +62,7 @@ const mockDownloadPhoto = () => downloadModelPhotoAsDataUrl as ReturnType<typeof
 const mockUploadResult = () => uploadTryOnResult as ReturnType<typeof vi.fn>;
 const mockBuildResultUrl = () => buildTryOnResultUrl as ReturnType<typeof vi.fn>;
 const mockUploadPrivate = () => uploadCloudinaryPrivate as ReturnType<typeof vi.fn>;
+const mockDeleteAsset = () => deleteCloudinaryAsset as ReturnType<typeof vi.fn>;
 
 const CONSENT: VirtualTryOnConsent = {
   virtualTryOnConsent: true,
@@ -437,6 +439,118 @@ describe("advanceFullLookChain", () => {
     const result = await advanceFullLookChain(baseCtx(), { _findJobFn });
     expect(result).toEqual({ status: "COMPLETED", resultUrl: "https://signed.example/final.png" });
     expect(mockBuildResultUrl()).toHaveBeenCalledWith("cust-1", "job-2");
+  });
+
+  it("FL.26 — retention: the final step's fresh completion deletes both prior steps' intermediate assets exactly once", async () => {
+    const job0 = fakeJob("job-0", { status: "COMPLETED" });
+    const job1 = fakeJob("job-1", { status: "COMPLETED" });
+    const job2 = fakeJob("job-2", { status: "PROCESSING", predictionId: "pred-2" });
+    const _findJobFn = vi.fn(async (where: { idempotencyKey: string }) => {
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 0, null)) return job0;
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 1, "job-0")) return job1;
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 2, "job-1")) return job2;
+      return null;
+    });
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(JSON.stringify({ status: "completed", output: [PNG_DATA_URL] }), { status: 200 }),
+    );
+    mockUploadResult().mockResolvedValue({ ok: true });
+    mockAdvance().mockResolvedValue({ ok: true, job: { ...job2, status: "COMPLETED" } });
+    mockBuildResultUrl().mockReturnValue("https://signed.example/final.png");
+
+    const result = await advanceFullLookChain(baseCtx(), { _findJobFn });
+
+    expect(result).toEqual({ status: "COMPLETED", resultUrl: "https://signed.example/final.png" });
+    expect(mockDeleteAsset()).toHaveBeenCalledTimes(2);
+    expect(mockDeleteAsset()).toHaveBeenCalledWith(expect.stringContaining("job-0"), "private");
+    expect(mockDeleteAsset()).toHaveBeenCalledWith(expect.stringContaining("job-1"), "private");
+    // Never deletes the final step's own asset — that one is the real deliverable, uploaded via uploadTryOnResult.
+    for (const call of mockDeleteAsset().mock.calls) {
+      expect(String(call[0])).not.toContain("job-2");
+    }
+
+    // A SECOND poll against the now-terminal chain must not delete anything again.
+    mockDeleteAsset().mockClear();
+    const job2Completed = fakeJob("job-2", { status: "COMPLETED" });
+    const _findJobFn2 = vi.fn(async (where: { idempotencyKey: string }) => {
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 0, null)) return job0;
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 1, "job-0")) return job1;
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 2, "job-1")) return job2Completed;
+      return null;
+    });
+    await advanceFullLookChain(baseCtx(), { _findJobFn: _findJobFn2 });
+    expect(mockDeleteAsset()).not.toHaveBeenCalled();
+  });
+
+  it("FL.27 — retention: a fresh FAILED transition on a later step still cleans up the earlier, already-completed steps' intermediate assets", async () => {
+    const job0 = fakeJob("job-0", { status: "COMPLETED" });
+    const job1 = fakeJob("job-1", { status: "PROCESSING", predictionId: "pred-1" });
+    const _findJobFn = vi.fn(async (where: { idempotencyKey: string }) => {
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 0, null)) return job0;
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 1, "job-0")) return job1;
+      return null;
+    });
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(JSON.stringify({ status: "failed", error: "provider error" }), { status: 200 }),
+    );
+    mockAdvance().mockResolvedValue({ ok: true, job: { ...job1, status: "FAILED" } });
+
+    const result = await advanceFullLookChain(baseCtx(), { _findJobFn });
+
+    expect(result).toEqual({ status: "FAILED", failedStepIndex: 1, errorCode: null });
+    expect(mockDeleteAsset()).toHaveBeenCalledTimes(1);
+    expect(mockDeleteAsset()).toHaveBeenCalledWith(expect.stringContaining("job-0"), "private");
+  });
+
+  it("FL.28 — a delete failure during cleanup is swallowed — the chain's own COMPLETED/FAILED result is unaffected", async () => {
+    const job0 = fakeJob("job-0", { status: "COMPLETED" });
+    const job1 = fakeJob("job-1", { status: "PROCESSING", predictionId: "pred-1" });
+    const _findJobFn = vi.fn(async (where: { idempotencyKey: string }) => {
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 0, null)) return job0;
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 1, "job-0")) return job1;
+      return null;
+    });
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(JSON.stringify({ status: "failed", error: "provider error" }), { status: 200 }),
+    );
+    mockAdvance().mockResolvedValue({ ok: true, job: { ...job1, status: "FAILED" } });
+    mockDeleteAsset().mockRejectedValue(new Error("cloudinary down"));
+
+    const result = await advanceFullLookChain(baseCtx(), { _findJobFn });
+    expect(result).toEqual({ status: "FAILED", failedStepIndex: 1, errorCode: null });
+  });
+});
+
+describe("concurrency — the idempotency reservation, not a client-side lock, is what prevents a double submission", () => {
+  it("FL.29 — two concurrent submitFullLookRealStep calls for the same step: only the one createOrFindTryOnJob reports created:true ever reaches the provider", async () => {
+    // Simulates createOrFindTryOnJob's own Serializable-transaction race outcome:
+    // whichever call wins gets created:true: the other sees the row the winner
+    // just inserted. This module's OWN job is to never call submitTryOnToProvider
+    // for the created:false branch — that guarantee is what this test checks.
+    const winnerJob = fakeJob("job-0");
+    let callCount = 0;
+    mockCreateOrFind().mockImplementation(async () => {
+      callCount += 1;
+      if (callCount === 1) return { ok: true, job: winnerJob, created: true };
+      return { ok: true, job: { ...winnerJob, status: "PROCESSING", predictionId: "pred-0" }, created: false };
+    });
+    mockAdvance()
+      .mockResolvedValueOnce({ ok: true, job: { ...winnerJob, status: "SUBMITTED" } })
+      .mockResolvedValueOnce({ ok: true, job: { ...winnerJob, status: "PROCESSING", predictionId: "pred-0" } });
+    mockDownloadPhoto().mockResolvedValue({ ok: true, dataUrl: PNG_DATA_URL });
+    mockSubmitProvider().mockResolvedValue({ ok: true, predictionId: "pred-0" });
+
+    const [first, second] = await Promise.all([
+      submitFullLookRealStep(baseCtx(), 0, null),
+      submitFullLookRealStep(baseCtx(), 0, null),
+    ]);
+
+    const results = [first, second];
+    const submitted = results.filter((r) => r.ok && !r.alreadySubmitted);
+    const resumed = results.filter((r) => r.ok && r.alreadySubmitted);
+    expect(submitted.length).toBe(1);
+    expect(resumed.length).toBe(1);
+    expect(mockSubmitProvider()).toHaveBeenCalledTimes(1); // exactly one real FASHN call, regardless of the race
   });
 });
 

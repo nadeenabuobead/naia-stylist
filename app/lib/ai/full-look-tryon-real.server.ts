@@ -57,10 +57,21 @@
 // intermediate step's image is never confused with, or retained alongside,
 // the one real deliverable (the final result, uploaded via the existing,
 // unmodified uploadTryOnResult/deriveTryOnResultPublicId — approved for this
-// reuse explicitly). Intermediate images are a private implementation detail
-// of the chain, not a customer-facing preview, and are never deleted by this
-// module (no privacy-deletion flow references them yet — a real-rollout gap
-// to close before any customer-facing exposure, not this authorised test).
+// reuse explicitly). Intermediate images are a private implementation
+// detail of the chain, never a customer-facing preview, and never reachable
+// via buildTryOnResultUrl (which only ever derives the FINAL result's public
+// id). RETENTION (2026-11-03): advanceFullLookChain deletes every prior
+// step's intermediate asset the moment the chain reaches a terminal state
+// (COMPLETED or FAILED) — by then each one has already served its one
+// purpose (feeding the next step) or never will. Best-effort: a delete
+// failure is swallowed, not retried or surfaced, since by that point the
+// chain's own outcome is already decided and an orphaned intermediate asset
+// is a storage-hygiene issue, not a correctness or privacy-blocking one (it
+// is still private, ownership-scoped by its customerId-prefixed path, and
+// not linked from anywhere a customer could reach). Still a real-rollout
+// gap this does NOT close: there is no scheduled/background sweep for a
+// chain that is abandoned mid-flight (e.g. the customer never returns to
+// poll again) — that case is outside this authorised test's scope.
 //
 // BILLING / VTO ALLOWANCE (verified, not decided here): this module makes NO
 // new decision about how 3 real FASHN calls should count against a
@@ -111,7 +122,9 @@ import {
   uploadCloudinaryPrivate,
   buildPrivateDownloadUrl,
   getCloudinaryConfig,
+  deleteCloudinaryAsset,
   type CloudinaryConfig,
+  type DeleteAssetFn,
 } from "../cloudinary-admin.server.js";
 import { MAX_CHAIN_LENGTH } from "./poc-sequential-full-look-vto.server.js";
 import type { VirtualTryOnConsent, VirtualTryOnJobRecord } from "./virtual-try-on.types.js";
@@ -476,6 +489,30 @@ export type ChainAdvanceResult =
   | { status: "FAILED"; failedStepIndex: number; errorCode: string | null }
   | { status: "SUBMIT_ERROR"; reason: string };
 
+// ── Intermediate-image retention — best-effort cleanup at chain's end ───────
+//
+// Called exactly once per chain: the moment a poll call OBSERVES the fresh
+// PROCESSING → COMPLETED/FAILED transition (see the two call sites below).
+// A later poll against an already-terminal chain takes the fast path at the
+// top of advanceFullLookChain and never reaches here again, so this never
+// re-fires on every subsequent poll. jobIds is every step BEFORE the
+// terminal one — the only steps that could ever have an intermediate asset
+// (the terminal step's own output either became the real result, via
+// uploadTryOnResult, or was never produced at all).
+async function cleanupIntermediateStepResults(
+  customerId: string,
+  jobIds: readonly string[],
+  _deleteAsset: DeleteAssetFn = deleteCloudinaryAsset,
+): Promise<void> {
+  for (const jobId of jobIds) {
+    try {
+      await _deleteAsset(deriveIntermediateStepPublicId(customerId, jobId), "private");
+    } catch {
+      // Best-effort only — see this module's own RETENTION comment above.
+    }
+  }
+}
+
 export async function advanceFullLookChain(
   ctx: FullLookChainContext,
   deps: WalkChainDeps = { _findJobFn: defaultFindJobByIdempotencyKey },
@@ -502,9 +539,11 @@ export async function advanceFullLookChain(
   const poll = await pollFullLookRealStep(ctx, lastJob, lastStepIndex);
 
   if (poll.status === "FAILED") {
+    await cleanupIntermediateStepResults(ctx.customerId, jobs.slice(0, -1).map((j) => j.id));
     return { status: "FAILED", failedStepIndex: lastStepIndex, errorCode: poll.job.errorCode };
   }
   if (poll.status === "COMPLETED") {
+    await cleanupIntermediateStepResults(ctx.customerId, jobs.slice(0, -1).map((j) => j.id));
     return { status: "COMPLETED", resultUrl: poll.resultUrl };
   }
   if (poll.status === "PROCESSING") {
