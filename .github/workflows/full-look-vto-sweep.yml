@@ -1,0 +1,74 @@
+# .github/workflows/full-look-vto-sweep.yml
+#
+# Independent trigger for the Full-Look VTO QA-pause cleanup sweep —
+# app/routes/api.staging-full-look-vto-sweep.ts. Makes the cleanup actually
+# automatic, since Vercel Cron cannot reach this project's staging
+# environment (verified: Vercel Cron always targets a project's PRODUCTION
+# deployment; this project's staging is deliberately Preview-only, aliased
+# to a stable domain, never promoted to Production).
+#
+# NOT ACTIVE YET. GitHub only honors a `schedule` trigger from the copy of
+# this file that exists on the repository's DEFAULT branch (verified
+# against GitHub's own docs: "This event will only trigger a workflow run
+# if the workflow file exists on the default branch") — this file commit
+# sits on an integration branch (and, separately, on a workflow-only
+# branch prepared for independent activation), so nothing fires until it
+# is pushed and merged to `main`, both explicit, separate actions
+# requiring approval that were not taken here.
+#
+# Requires a repository secret named FULL_LOOK_VTO_SWEEP_SECRET, which
+# does NOT exist yet and was not created by this change. Its value must
+# equal the Vercel project's own FULL_LOOK_VTO_SWEEP_SECRET (Preview
+# scope) — a secret DEDICATED to this one endpoint's one capability
+# (deleting already-abandoned intermediate images), never
+# STAGING_SEED_SECRET or WI_QA_LOGIN_SECRET, which also gate customer/
+# session creation and much broader staging access. A leak of this value
+# exposes nothing beyond "can trigger this one cleanup sweep." Add it via
+# GitHub → this repo → Settings → Secrets and variables → Actions → New
+# repository secret — a step for a human with repo-admin access, not
+# taken here.
+#
+# Targets the STABLE ALIAS domain deliberately, not an ephemeral Preview
+# URL: an unaliased deployment sits behind Vercel Authentication (an SSO
+# wall checked before any application code runs), which this workflow has
+# no way to pass — only the aliased custom domain is exempt from that
+# check (verified empirically: curl/vercel curl against the aliased domain
+# reaches this app's own 401, never Vercel's login redirect). This means
+# the sweep can only succeed in practice once the target commit — the one
+# carrying api.staging-full-look-vto-sweep.ts — is the one aliased to
+# naia-stylist-staging.vercel.app.
+#
+# If the repository is public: GitHub auto-disables scheduled workflows
+# after 60 days of repository inactivity (re-enable from the Actions tab
+# if that happens) — not a concern on a private repository. Repository
+# visibility was not checked here (no API access available) — confirm it
+# yourself if this matters to you.
+
+name: Full-Look VTO QA pause sweep
+
+on:
+  schedule:
+    # Every 10 minutes — well within GitHub's 5-minute floor for scheduled
+    # workflows, and tight enough that an abandoned pause (30-minute
+    # expiry) is cleaned up within roughly one cycle of becoming eligible,
+    # not up to a day later the way Vercel's own Hobby-plan cron would be.
+    - cron: "*/10 * * * *"
+  # Lets a human fire one sweep on demand from the Actions tab, without
+  # waiting for the schedule — zero cost, no new auth surface.
+  workflow_dispatch: {}
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Invoke the staging sweep endpoint
+        run: |
+          status=$(curl -s -o /tmp/response.json -w "%{http_code}" \
+            "https://naia-stylist-staging.vercel.app/api/staging-full-look-vto-sweep" \
+            -H "x-full-look-sweep-secret: ${{ secrets.FULL_LOOK_VTO_SWEEP_SECRET }}")
+          echo "HTTP status: $status"
+          cat /tmp/response.json
+          if [ "$status" != "200" ]; then
+            echo "Sweep request failed (HTTP $status)" >&2
+            exit 1
+          fi
