@@ -198,6 +198,13 @@ interface ActionStartResult {
   ok: boolean;
   reason?: string;
   stepIndex?: number;
+  // Diagnostic only — set ONLY alongside reason: "garment_not_suitable", to
+  // surface exactly which of the 3 garments failed and why, since the
+  // suitability loop below stops at the first failure and the bare `reason`
+  // string alone cannot distinguish trousers/shirt/blazer. Never influences
+  // the pass/fail decision itself — purely visibility into a decision
+  // already made by screenGarmentSuitability.
+  garmentDetail?: { name: string; category: string; subCode: string };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -323,7 +330,14 @@ export async function action({ request }: ActionFunctionArgs) {
     }
     const suitability = await screenGarmentSuitability(anchor.imageUrl, { declaredCategory: g.category });
     if (suitability.status !== "PASS") {
-      return data({ ok: false, reason: "garment_not_suitable" } as ActionStartResult, { status: 400 });
+      return data(
+        {
+          ok: false,
+          reason: "garment_not_suitable",
+          garmentDetail: { name: g.name ?? g.closetItemId, category: g.category, subCode: suitability.subCode },
+        } as ActionStartResult,
+        { status: 400 },
+      );
     }
     resolvedGarments.push({ label: g.name ?? g.closetItemId, productImageUrl: anchor.imageUrl });
   }
@@ -433,7 +447,15 @@ export default function StagingFullLookVtoReal() {
       )}
 
       {actionData && !actionData.ok && (
-        <p>Could not continue: {actionData.reason}</p>
+        <p>
+          Could not continue: {actionData.reason}
+          {actionData.garmentDetail && (
+            <>
+              {" "}— {actionData.garmentDetail.name} ({actionData.garmentDetail.category}):{" "}
+              {actionData.garmentDetail.subCode}
+            </>
+          )}
+        </p>
       )}
 
       {chain && chain.status === "PROCESSING" && (

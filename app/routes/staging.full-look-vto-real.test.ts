@@ -215,7 +215,38 @@ describe("action — pre-flight gates", () => {
   it("RT.15 — fails closed when the real AI suitability screen does not PASS", async () => {
     mockScreenSuitability().mockResolvedValueOnce({ status: "RETRY_IMAGE", subCode: "assessment_failed" });
     const res = await action({ request: formRequest() } as never);
-    expect(res.data).toEqual({ ok: false, reason: "garment_not_suitable" });
+    expect(res.data).toEqual({
+      ok: false,
+      reason: "garment_not_suitable",
+      garmentDetail: { name: "Beige Tailored Trousers", category: "BOTTOMS", subCode: "assessment_failed" },
+    });
+    expect(mockStartChain()).not.toHaveBeenCalled();
+  });
+
+  it("RT.15a — identifies the SECOND garment (shirt) by name/category/subCode when it is the one that fails, not the first", async () => {
+    mockScreenSuitability()
+      .mockResolvedValueOnce({ status: "PASS" })
+      .mockResolvedValueOnce({ status: "NEEDS_CLARIFICATION", subCode: "category_mismatch" });
+    const res = await action({ request: formRequest() } as never);
+    expect(res.data).toEqual({
+      ok: false,
+      reason: "garment_not_suitable",
+      garmentDetail: { name: "Blue Chambray Button-Up Shirt", category: "TOPS", subCode: "category_mismatch" },
+    });
+    expect(mockStartChain()).not.toHaveBeenCalled();
+  });
+
+  it("RT.15b — identifies the THIRD garment (blazer) when the first two pass", async () => {
+    mockScreenSuitability()
+      .mockResolvedValueOnce({ status: "PASS" })
+      .mockResolvedValueOnce({ status: "PASS" })
+      .mockResolvedValueOnce({ status: "RETRY_IMAGE", subCode: "garment_excessively_cropped" });
+    const res = await action({ request: formRequest() } as never);
+    expect(res.data).toEqual({
+      ok: false,
+      reason: "garment_not_suitable",
+      garmentDetail: { name: "Beige Tailored Blazer", category: "OUTERWEAR", subCode: "garment_excessively_cropped" },
+    });
     expect(mockStartChain()).not.toHaveBeenCalled();
   });
 
