@@ -684,6 +684,11 @@ model StylingSession {
   events                 StylingEvent[]
   recommendationFeedback RecommendationFeedback[]
   adminReview            StylingSessionAdminReview?
+
+  // Formalizes an index 20260905100000_plan_entitlement already creates on
+  // this FK column — the migration had it right; schema.prisma was just
+  // missing the matching declaration.
+  @@index([parentSessionId])
 }
 
 enum StyleSource {
