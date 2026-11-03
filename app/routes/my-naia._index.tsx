@@ -734,7 +734,7 @@ export default function MyNaiaOverview() {
                       : session.styleFrom === "BOTH" ? "NADINE + My Closet"
                       : "NADINE";
                     return (
-                      <article key={session.id} style={{ display: "flex", flexDirection: "column" }}>
+                      <article key={session.id} style={{ display: "flex", flexDirection: "column", maxWidth: "340px", marginInline: "auto", width: "100%" }}>
                         <Link
                           to={`/style-me/result?sessionId=${session.id}`}
                           style={{
