@@ -406,3 +406,72 @@ describe("loader — EXPIRED pause pass-through", () => {
     expect(res.data).toEqual({ ok: true, modelReady: true, chain: { status: "EXPIRED" } });
   });
 });
+
+// ── Action — intent=diagnose ─────────────────────────────────────────────────
+//
+// Never allowed to start a chain, create a reservation, call FASHN, or
+// consume VTO allowance — it exists specifically so a tester can see each
+// garment's suitability result without risking "Start" un-expectedly
+// PASSing on a retry (the AI suitability check is not guaranteed
+// deterministic run-to-run).
+
+describe("action — intent=diagnose", () => {
+  it("RT.35 — never requires consent/confirmReal, and never touches the real-submission path", async () => {
+    const res = await action({ request: formRequest({ intent: "diagnose", consent: "no", confirmReal: "" }) } as never);
+    expect(res.data.ok).toBe(true);
+    expect(mockStartChain()).not.toHaveBeenCalled();
+    expect(mockContinueChain()).not.toHaveBeenCalled();
+    expect(mockQuota()).not.toHaveBeenCalled();
+    expect(mockLoadModel()).not.toHaveBeenCalled();
+  });
+
+  it("RT.36 — reports all 3 garments' suitability results, not just the first failure", async () => {
+    mockScreenSuitability()
+      .mockResolvedValueOnce({ status: "PASS" })
+      .mockResolvedValueOnce({ status: "NEEDS_CLARIFICATION", subCode: "category_mismatch" })
+      .mockResolvedValueOnce({ status: "RETRY_IMAGE", subCode: "garment_excessively_cropped" });
+
+    const res = await action({ request: formRequest({ intent: "diagnose" }) } as never);
+
+    expect(res.data).toEqual({
+      ok: true,
+      diagnostic: true,
+      garmentResults: [
+        { name: "Beige Tailored Trousers", category: "BOTTOMS", status: "PASS", subCode: undefined },
+        { name: "Blue Chambray Button-Up Shirt", category: "TOPS", status: "NEEDS_CLARIFICATION", subCode: "category_mismatch" },
+        { name: "Beige Tailored Blazer", category: "OUTERWEAR", status: "RETRY_IMAGE", subCode: "garment_excessively_cropped" },
+      ],
+    });
+    expect(mockStartChain()).not.toHaveBeenCalled();
+  });
+
+  it("RT.37 — reports IMAGE_UNAVAILABLE for a garment whose Closet anchor can't be resolved, and still checks the rest", async () => {
+    mockResolveAnchor()
+      .mockResolvedValueOnce(null) // trousers
+      .mockResolvedValueOnce({ imageUrl: "https://closet.example/g-shirt.jpg" })
+      .mockResolvedValueOnce({ imageUrl: "https://closet.example/g-blazer.jpg" });
+
+    const res = await action({ request: formRequest({ intent: "diagnose" }) } as never);
+
+    expect(res.data.ok).toBe(true);
+    expect(res.data.garmentResults![0]).toEqual({
+      name: "Beige Tailored Trousers",
+      category: "BOTTOMS",
+      status: "IMAGE_UNAVAILABLE",
+    });
+    expect(res.data.garmentResults).toHaveLength(3);
+    expect(mockScreenSuitability()).toHaveBeenCalledTimes(2); // skipped for the unavailable garment
+  });
+
+  it("RT.38 — fails closed with the diagnostic flag when the expected Work combination isn't found, still without touching the real path", async () => {
+    mockResolveWork().mockResolvedValue({ ok: false, reason: "expected_combination_not_found" });
+    const res = await action({ request: formRequest({ intent: "diagnose" }) } as never);
+    expect(res.data).toEqual({ ok: false, diagnostic: true, reason: "expected_combination_not_found" });
+    expect(mockStartChain()).not.toHaveBeenCalled();
+  });
+
+  it("RT.39 — 404s outside the auth gate exactly like every other intent", async () => {
+    mockGate().mockReturnValue(false);
+    await expect(action({ request: formRequest({ intent: "diagnose" }) } as never)).rejects.toMatchObject({ status: 404 });
+  });
+});

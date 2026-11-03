@@ -205,6 +205,13 @@ interface ActionStartResult {
   // the pass/fail decision itself — purely visibility into a decision
   // already made by screenGarmentSuitability.
   garmentDetail?: { name: string; category: string; subCode: string };
+  // Diagnostic-only fields — set ONLY when intent === "diagnose". This path
+  // NEVER touches naiaModel/consent/quota/startOrResumeFullLookChain and
+  // therefore can never start a chain, create a reservation, call FASHN, or
+  // consume VTO allowance — see the "diagnose" branch below for why that's
+  // true by construction, not just by convention.
+  diagnostic?: boolean;
+  garmentResults?: Array<{ name: string; category: string; status: string; subCode?: string }>;
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -213,11 +220,53 @@ export async function action({ request }: ActionFunctionArgs) {
 
   const form = await request.formData();
   // "continue" is the ONLY way the final (blazer) step is ever submitted —
-  // see continueToFinalStep's own doc comment. Any other/missing value
+  // see continueToFinalStep's own doc comment. "diagnose" is a dead end that
+  // returns before any of the other branches. Any other/missing value
   // (including a malformed or replayed form) falls back to "start", which
   // is itself idempotent-safe (startOrResumeFullLookChain never resubmits
   // an already-started chain).
-  const intent = form.get("intent") === "continue" ? "continue" : "start";
+  const rawIntent = form.get("intent");
+  const intent = rawIntent === "continue" ? "continue" : rawIntent === "diagnose" ? "diagnose" : "start";
+
+  // ── Diagnostic-only: reports per-garment suitability for all 3 garments
+  // without stopping at the first failure, so a tester can see every
+  // result in one pass instead of retrying "Start" and risking the
+  // non-deterministic AI check unexpectedly PASSing on a retry and
+  // beginning a real, billable chain. Deliberately placed BEFORE every
+  // consent/confirmReal/quota/model check below — this branch returns
+  // unconditionally and can never fall through into the real-submission
+  // code path. Calls the exact same screenGarmentSuitability used by the
+  // real "start" path (so results match what "Start" would see) but never
+  // calls loadNaiaModel, hasQuotaRoomForFullLookChain, or
+  // startOrResumeFullLookChain — no reservation, no FASHN call, no VTO
+  // allowance touched. ──────────────────────────────────────────────────
+  if (intent === "diagnose") {
+    const outcome = await resolveExpectedWorkCombination(customer.id);
+    if (!outcome.ok) {
+      return data({ ok: false, diagnostic: true, reason: outcome.reason } as ActionStartResult, { status: 400 });
+    }
+
+    const garmentResults: Array<{ name: string; category: string; status: string; subCode?: string }> = [];
+    for (const g of sortForDisplay(outcome.garments)) {
+      const anchor = await resolveClosetAnchor(customer.id, g.closetItemId);
+      if (!anchor || !anchor.imageUrl) {
+        garmentResults.push({ name: g.name ?? g.closetItemId, category: g.category, status: "IMAGE_UNAVAILABLE" });
+        continue;
+      }
+      const suitability = await screenGarmentSuitability(anchor.imageUrl, { declaredCategory: g.category });
+      garmentResults.push({
+        name: g.name ?? g.closetItemId,
+        category: g.category,
+        status: suitability.status,
+        subCode: suitability.status === "PASS" ? undefined : suitability.subCode,
+      });
+    }
+
+    return data(
+      { ok: true, diagnostic: true, garmentResults } as ActionStartResult,
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  }
 
   if (form.get("consent") !== "yes") {
     return data({ ok: false, reason: "consent_required" } as ActionStartResult, { status: 400 });
@@ -416,6 +465,58 @@ export default function StagingFullLookVtoReal() {
       <p>nAia Model ready: {loaderData.modelReady ? "yes" : "no"}</p>
 
       {(!chain || chain.status === "NOT_STARTED") && (
+        <div style={{ border: "1px solid #999", padding: 12, marginBottom: 16 }}>
+          <p style={{ fontWeight: "bold" }}>
+            Diagnostic only — checks all 3 garments, never starts generation
+          </p>
+          <p>
+            Does NOT submit to FASHN, does NOT create a reservation, does NOT
+            consume VTO allowance. Safe to run as many times as you like.
+          </p>
+          <Form method="post">
+            <input type="hidden" name="intent" value="diagnose" />
+            <button type="submit">Check garment suitability (diagnostic only)</button>
+          </Form>
+
+          {actionData && actionData.diagnostic && !actionData.ok && (
+            <p>Could not run diagnostic: {actionData.reason}</p>
+          )}
+
+          {actionData && actionData.diagnostic && actionData.ok && actionData.garmentResults && (
+            <table style={{ marginTop: 12, borderCollapse: "collapse" }}>
+              <thead>
+                <tr>
+                  <th style={{ border: "1px solid #ccc", padding: "4px 8px", textAlign: "left" }}>Garment</th>
+                  <th style={{ border: "1px solid #ccc", padding: "4px 8px", textAlign: "left" }}>Category</th>
+                  <th style={{ border: "1px solid #ccc", padding: "4px 8px", textAlign: "left" }}>Result</th>
+                  <th style={{ border: "1px solid #ccc", padding: "4px 8px", textAlign: "left" }}>Sub-code</th>
+                </tr>
+              </thead>
+              <tbody>
+                {actionData.garmentResults.map((g) => (
+                  <tr key={g.name}>
+                    <td style={{ border: "1px solid #ccc", padding: "4px 8px" }}>{g.name}</td>
+                    <td style={{ border: "1px solid #ccc", padding: "4px 8px" }}>{g.category}</td>
+                    <td
+                      style={{
+                        border: "1px solid #ccc",
+                        padding: "4px 8px",
+                        fontWeight: "bold",
+                        color: g.status === "PASS" ? "green" : "darkred",
+                      }}
+                    >
+                      {g.status}
+                    </td>
+                    <td style={{ border: "1px solid #ccc", padding: "4px 8px" }}>{g.subCode ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {(!chain || chain.status === "NOT_STARTED") && (
         <Form
           method="post"
           onSubmit={(e) => {
@@ -446,7 +547,7 @@ export default function StagingFullLookVtoReal() {
         </Form>
       )}
 
-      {actionData && !actionData.ok && (
+      {actionData && !actionData.ok && !actionData.diagnostic && (
         <p>
           Could not continue: {actionData.reason}
           {actionData.garmentDetail && (
