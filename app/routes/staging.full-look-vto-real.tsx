@@ -120,9 +120,35 @@ function getReservationScope(): string | undefined {
   return scope && scope.trim().length > 0 ? scope.trim() : undefined;
 }
 
+// ── Resilience wrapper (2026-11-04) ─────────────────────────────────────────
+//
+// Root cause of the "Something went wrong" generic error screen a tester hit
+// on this route: a transient Prisma Postgres connectivity outage (confirmed
+// via Vercel runtime logs — PrismaClientInitializationError, "Can't reach
+// database server at pooled.db.prisma.io:5432", thrown from
+// resolveNaiaSession during getCurrentNaiaCustomer, which crashed the whole
+// loader with an unhandled exception). This was NOT specific to this route
+// or to the diagnostic feature — the SAME error, at the SAME time, also hit
+// the pre-existing, unrelated api.staging-full-look-vto-sweep endpoint
+// (confirmed via the same logs), and the outage had already resolved itself
+// within about a minute (confirmed via a live retry). No garment-suitability
+// rule, auth check, or diagnostic logic was at fault.
+//
+// This wrapper doesn't (and can't) fix a database outage — it only changes
+// what a tester sees WHEN one happens again: an unexpected exception
+// (anything that reaches here is NOT one of the intentional typed
+// `data(...)` responses above, nor the intentional notFound() 404, which is
+// re-thrown unchanged) now resolves to a clearly-labeled, retryable
+// "temporarily_unavailable" state instead of crashing into the framework's
+// generic error boundary. Logged via console.error so it's still visible in
+// Vercel's runtime logs for investigation.
+function isIntentionalResponse(err: unknown): err is Response {
+  return err instanceof Response;
+}
+
 // ── Loader — poll the chain's current state; never submits step 0 ──────────
 
-export async function loader({ request }: LoaderFunctionArgs) {
+async function loaderImpl({ request }: LoaderFunctionArgs) {
   const customer = await getCurrentNaiaCustomer(request);
   if (!customer || !isAuthorizedStagingTestAccount(customer)) notFound();
 
@@ -192,6 +218,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
   );
 }
 
+export async function loader(args: LoaderFunctionArgs) {
+  try {
+    return await loaderImpl(args);
+  } catch (err) {
+    if (isIntentionalResponse(err)) throw err; // preserve the notFound() 404 gate
+    console.error("staging.full-look-vto-real loader failed unexpectedly", err);
+    return data(
+      { ok: false as const, reason: "temporarily_unavailable" },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+}
+
 // ── Action — the only way step 0 is ever submitted ───────────────────────────
 
 interface ActionStartResult {
@@ -214,7 +253,7 @@ interface ActionStartResult {
   garmentResults?: Array<{ name: string; category: string; status: string; subCode?: string }>;
 }
 
-export async function action({ request }: ActionFunctionArgs) {
+async function actionImpl({ request }: ActionFunctionArgs) {
   const customer = await getCurrentNaiaCustomer(request);
   if (!customer || !isAuthorizedStagingTestAccount(customer)) notFound();
 
@@ -417,6 +456,19 @@ export async function action({ request }: ActionFunctionArgs) {
   return data({ ok: true, stepIndex: result.stepIndex } as ActionStartResult);
 }
 
+export async function action(args: ActionFunctionArgs) {
+  try {
+    return await actionImpl(args);
+  } catch (err) {
+    if (isIntentionalResponse(err)) throw err; // preserve the notFound() 404 gate
+    console.error("staging.full-look-vto-real action failed unexpectedly", err);
+    return data(
+      { ok: false, reason: "temporarily_unavailable" } as ActionStartResult,
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 //
 // Refresh-safety: this component holds NO client-side chain state of its own.
@@ -451,6 +503,9 @@ export default function StagingFullLookVtoReal() {
   }, [isProcessing, revalidator]);
 
   if (!loaderData.ok) {
+    if (loaderData.reason === "temporarily_unavailable") {
+      return <p>Temporarily unavailable (transient error) — please reload and try again.</p>;
+    }
     return <p>Could not find the expected Work combination: {loaderData.reason}</p>;
   }
 

@@ -475,3 +475,39 @@ describe("action — intent=diagnose", () => {
     await expect(action({ request: formRequest({ intent: "diagnose" }) } as never)).rejects.toMatchObject({ status: 404 });
   });
 });
+
+// ── Resilience — unexpected exceptions never crash into the generic error
+// boundary ──────────────────────────────────────────────────────────────────
+//
+// Root cause of the real-world "Something went wrong" page a tester hit:
+// a transient PrismaClientInitializationError (DB unreachable) thrown deep
+// inside getCurrentNaiaCustomer, uncaught, crashing the loader. These tests
+// simulate that same shape of failure (an unexpected throw from a dependency)
+// and confirm it now degrades to a labeled, retryable state instead.
+
+describe("loader/action — unexpected exceptions degrade gracefully", () => {
+  it("RT.40 — loader: an unexpected throw (e.g. a DB outage inside getCurrentNaiaCustomer) returns a labeled 503, not a crash", async () => {
+    mockCustomer().mockRejectedValueOnce(new Error("Can't reach database server at pooled.db.prisma.io:5432"));
+    const res = await loader({ request: {} as Request } as never);
+    expect(res.data).toEqual({ ok: false, reason: "temporarily_unavailable" });
+    expect(res.init?.status).toBe(503);
+  });
+
+  it("RT.41 — loader: the intentional notFound() 404 gate is NOT swallowed by the resilience wrapper", async () => {
+    mockCustomer().mockResolvedValue(null);
+    await expect(loader({ request: {} as Request } as never)).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("RT.42 — action: an unexpected throw (e.g. a DB outage mid-diagnose) returns a labeled 503, not a crash", async () => {
+    mockResolveAnchor().mockRejectedValueOnce(new Error("Can't reach database server at pooled.db.prisma.io:5432"));
+    const res = await action({ request: formRequest({ intent: "diagnose" }) } as never);
+    expect(res.data).toEqual({ ok: false, reason: "temporarily_unavailable" });
+    expect(res.init?.status).toBe(503);
+    expect(mockStartChain()).not.toHaveBeenCalled();
+  });
+
+  it("RT.43 — action: the intentional notFound() 404 gate is NOT swallowed by the resilience wrapper", async () => {
+    mockGate().mockReturnValue(false);
+    await expect(action({ request: formRequest() } as never)).rejects.toMatchObject({ status: 404 });
+  });
+});
