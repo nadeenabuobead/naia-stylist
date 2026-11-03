@@ -9,11 +9,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, it } from "node:test";
+import { Prisma } from "@prisma/client";
 import {
   usableName,
   resolveNameUpdate,
   usableEmail,
   resolveEmailUpdate,
+  isEmailUniqueConstraintViolation,
 } from "./shopify-customer-name-sync.server.ts";
 
 const CALLBACK_PATH = resolve(import.meta.dirname, "../routes/auth.shopify.callback.tsx");
@@ -176,8 +178,23 @@ describe("auth.shopify.callback.tsx — name sync is actually wired in", () => {
   it("an email unique-constraint collision on sync retries with the name-only subset instead of failing login", () => {
     const syncIdx = callbackSrc.indexOf("resolveNameUpdate(");
     const guardBlock = callbackSrc.slice(syncIdx, syncIdx + 1200);
-    assert.ok(guardBlock.includes('"email" in emailUpdate'), "the P2002 branch specifically checks whether email was part of the write");
+    assert.ok(
+      guardBlock.includes("isEmailUniqueConstraintViolation(err)"),
+      "the retry is gated on the error's own meta.target confirming an email collision, not inferred from the write shape alone",
+    );
+    assert.ok(guardBlock.includes('"email" in emailUpdate'), "the branch also checks that email was actually part of this write");
     assert.ok(guardBlock.includes("data: nameUpdate"), "the retry writes only the name subset, dropping the colliding email");
+  });
+
+  it("an unrelated P2002 on sync (not confirmed as an email collision) is never retried as one", () => {
+    const syncIdx = callbackSrc.indexOf("resolveNameUpdate(");
+    const guardBlock = callbackSrc.slice(syncIdx, syncIdx + 1200);
+    // The retry condition is a conjunction starting with isEmailUniqueConstraintViolation(err) —
+    // a plain `err.code === "P2002"` check alone no longer appears in this guard.
+    assert.ok(
+      !/err\s*instanceof\s*Prisma\.PrismaClientKnownRequestError\s*&&\s*\n?\s*err\.code\s*===\s*"P2002"/.test(guardBlock),
+      "the sync-retry guard no longer reacts to a bare P2002 code without confirming the field",
+    );
   });
 
   it("no code path infers a name from the email address", () => {
@@ -211,13 +228,89 @@ describe("auth.shopify.callback.tsx — name sync is actually wired in", () => {
     const createIdx = callbackSrc.indexOf("prisma.customer.create(");
     const rest = callbackSrc.slice(createIdx, createIdx + 1600);
     assert.ok(
-      rest.includes("if (!customer && emailAtCreate) {"),
-      "a still-missing customer row after the P2002 re-read is treated as an email collision, not a shopifyCustomerId race",
+      rest.includes("if (!customer && emailAtCreate && isEmailUniqueConstraintViolation(err)) {"),
+      "a still-missing customer row after the P2002 re-read is only treated as an email collision once the error's own meta.target confirms it",
     );
     assert.ok(
       /prisma\.customer\.create\(\{\s*data:\s*\{\s*shopifyCustomerId,\s*firstName: usableName\(shopifyProfile\.firstName\),\s*lastName:\s*usableName\(shopifyProfile\.lastName\),\s*\},/.test(rest),
       "the retry create call omits the email field entirely",
     );
+  });
+
+  it("a still-missing row after re-read that is NOT confirmed as an email collision fails loudly instead of guessing", () => {
+    const createIdx = callbackSrc.indexOf("prisma.customer.create(");
+    const rest = callbackSrc.slice(createIdx, createIdx + 1600);
+    // The retry-without-email block is gated behind isEmailUniqueConstraintViolation(err);
+    // when that's false, control falls straight to the existing `if (!customer) return fail(...)`
+    // below it — there is no other branch that would otherwise resolve `customer`.
+    const guardIdx = rest.indexOf("if (!customer && emailAtCreate && isEmailUniqueConstraintViolation(err)) {");
+    assert.ok(guardIdx !== -1, "the explicit email-collision guard is present");
+    const afterGuard = rest.slice(guardIdx);
+    assert.ok(
+      /\}\s*\n\s*if \(!customer\) return fail\(502, "Database error"\);/.test(afterGuard),
+      "an unconfirmed collision (or no row) still reaches the generic Database error failure, never a silent success",
+    );
+  });
+});
+
+describe("isEmailUniqueConstraintViolation()", () => {
+  it("a P2002 whose meta.target names email is recognised", () => {
+    const err = new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+      code: "P2002", clientVersion: "6.19.2", meta: { target: ["email"] },
+    });
+    assert.equal(isEmailUniqueConstraintViolation(err), true);
+  });
+
+  it("a P2002 whose meta.target is a constraint-name STRING containing 'email' is recognised", () => {
+    const err = new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+      code: "P2002", clientVersion: "6.19.2", meta: { target: "Customer_email_key" },
+    });
+    assert.equal(isEmailUniqueConstraintViolation(err), true);
+  });
+
+  it("a composite target that happens to include email among other fields is still recognised", () => {
+    const err = new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+      code: "P2002", clientVersion: "6.19.2", meta: { target: ["shopifyCustomerId", "email"] },
+    });
+    assert.equal(isEmailUniqueConstraintViolation(err), true);
+  });
+
+  it("a P2002 on a DIFFERENT unique field (shopifyCustomerId) is NOT mistaken for an email collision", () => {
+    const err = new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+      code: "P2002", clientVersion: "6.19.2", meta: { target: ["shopifyCustomerId"] },
+    });
+    assert.equal(isEmailUniqueConstraintViolation(err), false);
+  });
+
+  it("a P2002 on a differently-named constraint STRING is NOT mistaken for an email collision", () => {
+    const err = new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+      code: "P2002", clientVersion: "6.19.2", meta: { target: "Customer_shopifyCustomerId_key" },
+    });
+    assert.equal(isEmailUniqueConstraintViolation(err), false);
+  });
+
+  it("a P2002 with no meta at all is NOT assumed to be an email collision", () => {
+    const err = new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+      code: "P2002", clientVersion: "6.19.2",
+    });
+    assert.equal(isEmailUniqueConstraintViolation(err), false);
+  });
+
+  it("a different Prisma error code (not P2002) is never treated as any kind of unique collision", () => {
+    const err = new Prisma.PrismaClientKnownRequestError("Record not found", {
+      code: "P2025", clientVersion: "6.19.2", meta: { target: ["email"] },
+    });
+    assert.equal(isEmailUniqueConstraintViolation(err), false);
+  });
+
+  it("a plain (non-Prisma) Error is never treated as an email collision", () => {
+    assert.equal(isEmailUniqueConstraintViolation(new Error("some other db error")), false);
+  });
+
+  it("a non-error value is never treated as an email collision", () => {
+    assert.equal(isEmailUniqueConstraintViolation(null), false);
+    assert.equal(isEmailUniqueConstraintViolation(undefined), false);
+    assert.equal(isEmailUniqueConstraintViolation("P2002"), false);
   });
 });
 

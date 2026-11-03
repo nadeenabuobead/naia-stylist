@@ -14,6 +14,7 @@ import {
   resolveNameUpdate,
   usableEmail,
   resolveEmailUpdate,
+  isEmailUniqueConstraintViolation,
 } from "~/lib/shopify-customer-name-sync.server";
 import { getSession, commitSession } from "~/lib/session.server";
 import {
@@ -200,10 +201,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
           return fail(502, "Database error");
         }
         // Re-read found nothing, so the collision wasn't the shopifyCustomerId
-        // race above — it was the email unique constraint colliding with an
-        // unrelated existing row. Login must never fail over that; retry
-        // once without email rather than blocking account creation.
-        if (!customer && emailAtCreate) {
+        // race above. Confirm via the error's own meta.target — not just by
+        // elimination — that this was specifically the email unique
+        // constraint before dropping email and retrying; any other cause is
+        // a genuinely unrelated database error and must fail loudly, not be
+        // silently reinterpreted as an email collision.
+        if (!customer && emailAtCreate && isEmailUniqueConstraintViolation(err)) {
           try {
             customer = await prisma.customer.create({
               data: {
@@ -236,12 +239,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
     try {
       customer = await prisma.customer.update({ where: { id: customer.id }, data: profileUpdate });
     } catch (err) {
-      // Non-fatal — login must never fail over a profile-sync write. If the
-      // email specifically collided with another row's unique email, retry
-      // with the name-only subset so a legitimate name sync still lands.
+      // Non-fatal — login must never fail over a profile-sync write. Retry
+      // with the name-only subset ONLY when the error's own meta.target
+      // confirms this was specifically an email collision (never inferred
+      // just from "we happened to include email in this write") — any other
+      // cause falls through unretried rather than being mis-handled as one.
       if (
-        err instanceof Prisma.PrismaClientKnownRequestError &&
-        err.code === "P2002" &&
+        isEmailUniqueConstraintViolation(err) &&
         "email" in emailUpdate &&
         Object.keys(nameUpdate).length > 0
       ) {

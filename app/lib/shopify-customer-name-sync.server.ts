@@ -5,6 +5,8 @@
 // callback owns fetching the Shopify profile and writing the Prisma row;
 // this module only decides what, if anything, should change.
 
+import { Prisma } from "@prisma/client";
+
 export function usableName(value: string | null | undefined): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
@@ -60,4 +62,30 @@ export function resolveEmailUpdate(
     return { email: candidate };
   }
   return {};
+}
+
+// ---------------------------------------------------------------------------
+// Safety check for the OAuth callback's collision-recovery branches: a P2002
+// is Prisma's generic "a unique constraint was violated" code — it does not
+// by itself say WHICH field. Dropping email and retrying is only safe to do
+// in response to an email collision specifically; blindly reacting to any
+// P2002 risks silently swallowing (and mis-handling) a completely unrelated
+// uniqueness violation — e.g. the Customer.shopifyCustomerId constraint, or a
+// future unique field this module has never heard of. Checking the error's
+// own meta.target is the only way to know which constraint actually fired,
+// rather than inferring it from surrounding control flow.
+//
+// Postgres (this app's only datasource) reports meta.target as a string[] of
+// column names for P2002; a bare string naming the constraint is handled
+// too, for resilience against a differently-shaped driver error.
+// ---------------------------------------------------------------------------
+
+export function isEmailUniqueConstraintViolation(err: unknown): boolean {
+  if (!(err instanceof Prisma.PrismaClientKnownRequestError)) return false;
+  if (err.code !== "P2002") return false;
+
+  const target = (err.meta as { target?: unknown } | undefined)?.target;
+  if (Array.isArray(target)) return target.includes("email");
+  if (typeof target === "string") return target.includes("email");
+  return false;
 }

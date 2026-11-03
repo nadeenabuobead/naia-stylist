@@ -81,10 +81,25 @@ function makeCallbackRequest(): Request {
   );
 }
 
+// meta.target is what the real callback now inspects (isEmailUniqueConstraintViolation) —
+// every "this IS an email collision" fixture below must carry it, same as a real
+// Postgres P2002 would.
 function p2002(message: string) {
   return new Prisma.PrismaClientKnownRequestError(message, {
     code: "P2002",
     clientVersion: "6.19.2",
+    meta: { target: ["email"] },
+  });
+}
+
+// A P2002 that is NOT an email collision — some other unique constraint fired.
+// Used to prove the collision-recovery branches never misattribute an unrelated
+// uniqueness violation to email.
+function p2002Unrelated(message: string) {
+  return new Prisma.PrismaClientKnownRequestError(message, {
+    code: "P2002",
+    clientVersion: "6.19.2",
+    meta: { target: ["shopifyCustomerId"] },
   });
 }
 
@@ -173,6 +188,32 @@ describe("auth.shopify.callback loader — email collision AT CREATION", () => {
     // and the session is created for the correct (still email-less) row.
     expect(mockCreateNaiaSession).toHaveBeenCalledWith("cust-2", expect.anything(), "id-token-abc");
     expect((response as Response).status).toBe(302);
+  });
+
+  it("an UNRELATED P2002 at creation (not an email collision) is never retried as one — fails loudly instead", async () => {
+    const { loader } = await import("./auth.shopify.callback");
+
+    mockFetchCustomerProfile.mockResolvedValue({
+      customerId: "777", firstName: "Morgan", lastName: "Diaz", email: "morgan@example.com",
+    });
+
+    mockFindUnique.mockResolvedValueOnce(null); // no existing row
+    // The create collides on SOME unique constraint that is NOT email (meta.target
+    // names shopifyCustomerId) — e.g. a genuinely unexpected/unrelated DB conflict.
+    mockCreate.mockRejectedValueOnce(p2002Unrelated("Unique constraint failed on the fields: (`shopifyCustomerId`)"));
+    // Re-read still finds nothing for this shopifyCustomerId either.
+    mockFindUnique.mockResolvedValueOnce(null);
+
+    const response = await loader({ request: makeCallbackRequest(), params: {}, context: {} } as any);
+
+    // Only the ONE create attempt happens — isEmailUniqueConstraintViolation(err)
+    // is false, so the email-dropping retry is correctly never attempted.
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+    expect(mockUpdate).not.toHaveBeenCalled();
+    // The unrelated failure surfaces as a genuine error, not a silent
+    // "must have been email" recovery that would mask what really happened.
+    expect(mockCreateNaiaSession).not.toHaveBeenCalled();
+    expect((response as Response).status).toBe(502);
   });
 });
 
@@ -265,6 +306,30 @@ describe("auth.shopify.callback loader — email collision ON LOGIN SYNC", () =>
     // The session is created for the ORIGINAL row (cust-6), proving the failed
     // sync never silently fell through to some other customer record.
     expect(mockCreateNaiaSession).toHaveBeenCalledWith("cust-6", expect.anything(), "id-token-abc");
+    expect((response as Response).status).toBe(302);
+  });
+
+  it("an UNRELATED P2002 on sync (not an email collision) is never retried with the name-only subset", async () => {
+    const { loader } = await import("./auth.shopify.callback");
+
+    mockFetchCustomerProfile.mockResolvedValue({
+      customerId: "888", firstName: "Riley", lastName: "Nguyen", email: "riley-new@example.com",
+    });
+    mockFindUnique.mockResolvedValueOnce({
+      id: "cust-8", shopifyCustomerId: "888", firstName: "Riley Old", lastName: "Nguyen", email: "riley-old@example.com",
+    });
+    // The update collides on some unique constraint that is NOT email.
+    mockUpdate.mockRejectedValueOnce(p2002Unrelated("Unique constraint failed on the fields: (`shopifyCustomerId`)"));
+
+    const response = await loader({ request: makeCallbackRequest(), params: {}, context: {} } as any);
+
+    // Only the ONE update attempt happens — isEmailUniqueConstraintViolation(err)
+    // is false, so the name-only retry is correctly never attempted, even though
+    // nameUpdate was non-empty and would otherwise have satisfied that condition.
+    expect(mockUpdate).toHaveBeenCalledTimes(1);
+    // Login still proceeds non-fatally — but with the ORIGINAL (pre-update) row,
+    // never silently promoted to some other customer.
+    expect(mockCreateNaiaSession).toHaveBeenCalledWith("cust-8", expect.anything(), "id-token-abc");
     expect((response as Response).status).toBe(302);
   });
 });
