@@ -1073,53 +1073,6 @@ Respond ONLY with valid JSON, no markdown:
     const persistedVerdict = verdictMap[analysis.verdict] ?? "INCOMPLETE";
     let analysisRecord;
     {
-      const analysisData = {
-        customerId: naiaCustomer.id,
-        verdict: persistedVerdict,
-        reasoning:
-          typeof analysis.finalThought === "string" && analysis.finalThought.trim() !== ""
-            ? analysis.finalThought.slice(0, 1000)
-            : "No reasoning provided.",
-        productName: null,
-        // S0: store private asset reference, not a public CDN URL.
-        // imageUrl is kept null for new records; imagePublicId + imageFormat are the canonical refs.
-        imageUrl: null,
-        imagePublicId: publicId,
-        imageFormat: serverFormat,
-        source: "buy-or-skip",
-        schemaVersion: "2.0",
-        idempotencyKey,
-        // Batch 3 — rich fields
-        confidence:   typeof analysis.confidence === "number" ? analysis.confidence : null,
-        category:     normalizedCategory || null,
-        colors:       Array.isArray(color) ? color.filter(c => typeof c === "string") : [],
-        forOccasion:  typeof forOccasion === "string" && forOccasion.trim() ? forOccasion.trim().slice(0, 500) : null,
-        whatLike:     typeof whatLike    === "string" && whatLike.trim()    ? whatLike.trim().slice(0, 500)    : null,
-        unsureAbout:  typeof unsureAbout === "string" && unsureAbout.trim() ? unsureAbout.trim().slice(0, 500) : null,
-        colorNote:    typeof colorNote   === "string" && colorNote.trim()   ? colorNote.trim().slice(0, 200)   : null,
-        itemSize:     typeof size        === "string" && size.trim()        ? size.trim().slice(0, 100)        : null,
-        fullAnalysis: {
-          verdict:               analysis.verdict,
-          confidence:            analysis.confidence,
-          itemType:              analysis.itemType             ?? null,
-          detectedColor:         typeof analysis.detectedColor === "string" && analysis.detectedColor.trim() ? analysis.detectedColor.trim() : null,
-          styleDNAMatch:         analysis.styleDNAMatch        ?? null,
-          detailedAnalysis:      analysis.detailedAnalysis     ?? null,
-          occasionFit:           analysis.occasionFit          ?? null,
-          whatLikeEval:          analysis.whatLikeEval         ?? null,
-          concernEval:           analysis.concernEval          ?? null,
-          closetPairings:        analysis.closetPairings       ?? [],
-          fillsGap:              analysis.fillsGap              ?? null,
-          occasions:             analysis.occasions             ?? [],
-          productSnapshot:       analysis.productSnapshot       ?? null,
-          beforeYouBuy:          Array.isArray(analysis.beforeYouBuy) ? analysis.beforeYouBuy.filter(s => typeof s === "string" && s.trim()) : [],
-          buyIf:                 typeof analysis.buyIf  === "string" && analysis.buyIf.trim()  ? analysis.buyIf.trim()  : null,
-          skipIf:                typeof analysis.skipIf === "string" && analysis.skipIf.trim() ? analysis.skipIf.trim() : null,
-          betterDirection:       typeof analysis.betterDirection === "string" && analysis.betterDirection.trim() ? analysis.betterDirection.trim() : null,
-          finalThought:          analysis.finalThought          ?? null,
-        },
-      };
-
       // Built as a variable (not inline in the create() call below) so the
       // SAME data shape can also be passed into reserveBuySkipSlot's atomic
       // count-and-create transaction — see the ENTITLEMENT_ENFORCEMENT

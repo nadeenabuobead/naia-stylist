@@ -134,12 +134,12 @@ describe("ENT-09 — VTO completed counts COMPLETED status only", () => {
   });
 });
 
-describe("ENT-10 — VTO quota = completed + inFlight >= effectiveVtoLimit", () => {
-  it("entitlement check adds completed and inFlight before comparing to effectiveVtoLimit", () => {
+describe("ENT-10 — VTO quota = completed + inFlight >= the override-aware VTO allowance", () => {
+  it("entitlement check adds completed and inFlight before comparing to the resolved allowance", () => {
     assert.ok(entSvc.includes("completed + inFlight") || entSvc.includes("vtoCompleted + vtoInFlight"),
               "must sum completed and inFlight for quota check");
-    assert.ok(entSvc.includes("effectiveVtoLimit"),
-              "must use effectiveVtoLimit (not limits.vtoPerMonth) for enforcement");
+    assert.ok(entSvc.includes("effectiveVtoLimit") || entSvc.includes("allowances.vtoPerMonth"),
+              "must use the override-aware VTO figure (not a raw/hardcoded limits.vtoPerMonth) for enforcement");
   });
 });
 
@@ -150,17 +150,25 @@ describe("ENT-24 — entitlement service imports getEffectiveVtoLimit", () => {
   });
 });
 
-describe("ENT-25 — getEntitlementSummary uses effectiveVtoLimit for display", () => {
-  it("monthlyLimit in VTO summary uses effectiveVtoLimit", () => {
-    assert.ok(entSvc.includes("monthlyLimit: effectiveVtoLimit"),
-              "vto.monthlyLimit must be effectiveVtoLimit, not limits.vtoPerMonth");
+describe("ENT-25 — getEntitlementSummary uses the override-aware VTO allowance for display", () => {
+  it("monthlyLimit in VTO summary is allowances.vtoPerMonth, sourced from resolveEffectiveContext", () => {
+    // 2026-11 (Phase 2): the call site itself reads allowances.vtoPerMonth,
+    // not a bare effectiveVtoLimit local — resolveEffectiveContext is now
+    // the one place that calls getEffectiveVtoLimit (the override-aware
+    // function) and feeds its result into allowances.vtoPerMonth. Checking
+    // both halves together is what proves the override still reaches this
+    // display value, now one layer removed from the call site itself.
+    assert.ok(entSvc.includes("monthlyLimit: allowances.vtoPerMonth"),
+              "vto.monthlyLimit must read allowances.vtoPerMonth, not a raw limits.vtoPerMonth");
+    assert.match(entSvc, /resolveEffectiveContext[\s\S]*?getEffectiveVtoLimit/,
+              "allowances.vtoPerMonth must ultimately derive from getEffectiveVtoLimit inside resolveEffectiveContext");
   });
 });
 
-describe("ENT-26 — checkEntitlement VTO enforcement uses effectiveVtoLimit", () => {
-  it("VTO enforcement check compares against effectiveVtoLimit", () => {
-    assert.ok(entSvc.includes("completed + inFlight >= effectiveVtoLimit"),
-              "enforcement must use effectiveVtoLimit");
+describe("ENT-26 — checkEntitlement VTO enforcement uses the override-aware VTO allowance", () => {
+  it("VTO enforcement check compares against allowances.vtoPerMonth, not a raw limit", () => {
+    assert.ok(entSvc.includes("completed + inFlight >= allowances.vtoPerMonth"),
+              "enforcement must compare against allowances.vtoPerMonth");
     assert.ok(!entSvc.includes("completed + inFlight >= limits.vtoPerMonth"),
               "must not compare against raw limits.vtoPerMonth");
   });
@@ -316,19 +324,24 @@ describe("ENT-27 — entitlement service imports getEffectiveStyleMeLimit", () =
   });
 });
 
-describe("ENT-28 — getEntitlementSummary uses effectiveStyleMeLimit for display", () => {
-  it("styleMe.monthlyLimit uses effectiveStyleMeLimit, not limits.styleMePerMonth", () => {
-    assert.ok(entSvc.includes("monthlyLimit: effectiveStyleMeLimit"),
-              "styleMe.monthlyLimit must be effectiveStyleMeLimit");
+describe("ENT-28 — getEntitlementSummary uses the override-aware StyleMe allowance for display", () => {
+  it("styleMe.monthlyLimit is allowances.styleMePerMonth, sourced from resolveEffectiveContext", () => {
+    // 2026-11 (Phase 2): same indirection as ENT-25/VTO — the call site
+    // reads allowances.styleMePerMonth; resolveEffectiveContext is the one
+    // place that calls getEffectiveStyleMeLimit and feeds its result in.
+    assert.ok(entSvc.includes("monthlyLimit: allowances.styleMePerMonth"),
+              "styleMe.monthlyLimit must read allowances.styleMePerMonth");
     assert.ok(!entSvc.includes("monthlyLimit: limits.styleMePerMonth"),
-              "must not reference limits.styleMePerMonth directly for monthlyLimit");
+              "must not reference a raw limits.styleMePerMonth directly for monthlyLimit");
+    assert.match(entSvc, /resolveEffectiveContext[\s\S]*?getEffectiveStyleMeLimit/,
+              "allowances.styleMePerMonth must ultimately derive from getEffectiveStyleMeLimit inside resolveEffectiveContext");
   });
 });
 
-describe("ENT-29 — checkEntitlement styleMe enforcement uses effectiveStyleMeLimit", () => {
-  it("styleMe case compares monthlyUsed against effectiveStyleMeLimit", () => {
-    assert.ok(entSvc.includes("monthlyUsed < effectiveStyleMeLimit"),
-              "enforcement must use effectiveStyleMeLimit");
+describe("ENT-29 — checkEntitlement styleMe enforcement uses the override-aware StyleMe allowance", () => {
+  it("styleMe case compares monthlyUsed against allowances.styleMePerMonth, not a raw limit", () => {
+    assert.ok(entSvc.includes("monthlyUsed < allowances.styleMePerMonth"),
+              "enforcement must compare against allowances.styleMePerMonth");
     assert.ok(!entSvc.includes("monthlyUsed < limits.styleMePerMonth"),
               "must not compare against raw limits.styleMePerMonth");
   });

@@ -25,11 +25,25 @@
 // closet._index.tsx's own "immediate — no flag required" comment; it's a
 // storage cap, not a trial gate), so the atomic version is unconditional too.
 // The other two only take their atomic path once ENTITLEMENT_ENFORCEMENT is on.
+//
+// Phase 2 (billing-cycle-aware windows + add-on entitlements): every
+// function below now resolves its window and allowances through
+// resolveEffectiveContext(), which looks up the customer's current
+// ENTITLED subscription (ACTIVE/PAST_DUE only — see
+// isSubscriptionStatusEntitled) and, only when one exists, layers on
+// applicable add-on grants. For a customer with no such subscription —
+// which, before Phase 3's real billing wiring, is every customer — this
+// resolves to EXACTLY today's behaviour: the calendar-month window and the
+// bare membership allowance, no add-ons. Nothing here changes behaviour
+// until real or synthetic Subscription/BillingTransaction rows exist.
+// ENTITLEMENT_ENFORCEMENT itself is untouched — this phase only makes the
+// window/allowance CALCULATION billing-aware, it does not change which
+// features are gated behind the flag today.
 
-import type { MembershipStatus, Prisma } from "@prisma/client";
+import type { MembershipStatus, Prisma, SubscriptionStatus } from "@prisma/client";
 import prisma from "~/db.server";
 import { getMembershipAllowances, getEffectiveVtoLimit, getEffectiveStyleMeLimit } from "./plan-limits.server";
-import { getUsageWindow, formatResetDate } from "./usage-window.server";
+import { getUsageWindow, formatResetDate, type SubscriptionWindowInput, type UsageWindow } from "./usage-window.server";
 
 // ── VTO stale threshold ────────────────────────────────────────────────────────
 const VTO_IN_FLIGHT_STALE_MS = 10 * 60 * 1000; // 10 minutes
@@ -72,6 +86,184 @@ function qualifyingStyleMeWhere(customerId: string) {
       },
     },
   } as const;
+}
+
+// ── Subscription resolution (Phase 2) ───────────────────────────────────────────
+// A subscription is entitled — eligible to influence allowance/window
+// calculation at all — only in these two statuses. INCOMPLETE (checkout
+// started, no confirmed payment), CANCELED (ended), and EXPIRED must all be
+// treated as "no subscription" by every function below, exactly as if the
+// customer had never subscribed. PAST_DUE is included deliberately: the
+// approved 7-day grace period for a failed renewal retains access.
+const ENTITLED_SUBSCRIPTION_STATUSES = ["ACTIVE", "PAST_DUE"] as const satisfies readonly SubscriptionStatus[];
+
+export function isSubscriptionStatusEntitled(status: SubscriptionStatus): boolean {
+  return (ENTITLED_SUBSCRIPTION_STATUSES as readonly string[]).includes(status);
+}
+
+export type EntitledSubscription = {
+  id: string;
+  planType: "MONTHLY" | "ANNUAL";
+  currentPeriodStart: Date | null;
+  currentPeriodEnd: Date | null;
+  status: SubscriptionStatus;
+};
+
+// Looks up the customer's current entitled subscription, if any. Before
+// Phase 3 (real billing), every customer has zero Subscription rows, so
+// this returns null for everyone today — the richer behaviour below only
+// activates once real or synthetic rows exist.
+async function getCurrentSubscription(customerId: string): Promise<EntitledSubscription | null> {
+  return prisma.subscription.findFirst({
+    where: { customerId, status: { in: [...ENTITLED_SUBSCRIPTION_STATUSES] } },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, planType: true, currentPeriodStart: true, currentPeriodEnd: true, status: true },
+  });
+}
+
+// Narrows a Subscription record to what getUsageWindow needs. A null
+// currentPeriodStart/End can't actually occur for an ACTIVE/PAST_DUE row in
+// practice (those dates are set on first payment confirmation, before
+// status ever becomes ACTIVE) — handled defensively anyway, falling back
+// to the calendar-month window rather than crashing on a malformed record.
+function toWindowInput(subscription: EntitledSubscription | null): SubscriptionWindowInput | null {
+  if (!subscription || !subscription.currentPeriodStart || !subscription.currentPeriodEnd) return null;
+  return {
+    planType: subscription.planType,
+    currentPeriodStart: subscription.currentPeriodStart,
+    currentPeriodEnd: subscription.currentPeriodEnd,
+  };
+}
+
+// ── Add-on totals (Phase 2) ──────────────────────────────────────────────────────
+// StyleMe/VTO boosts are one-time, current-usage-period-only top-ups — an
+// EXACT match against the resolved window's own start/end, not a loose
+// date-range overlap, so a boost bought for a different period can never
+// silently apply to this one. Closet expansions are cumulative and
+// permanent while membership is active — no period filter at all, matching
+// addonAppliesToPeriodStart/End being left null on those rows.
+export interface AddonTotals {
+  styleMeBoost: number;
+  vtoBoost: number;
+  closetExpansion: number;
+}
+
+async function getApplicableAddonTotals(customerId: string, window: UsageWindow): Promise<AddonTotals> {
+  const [styleMe, vto, closet] = await Promise.all([
+    prisma.billingTransaction.aggregate({
+      where: {
+        customerId,
+        type: "ADDON_STYLEME_BOOST",
+        status: "SUCCEEDED",
+        addonAppliesToPeriodStart: window.start,
+        addonAppliesToPeriodEnd: window.end,
+      },
+      _sum: { addonQuantityGranted: true },
+    }),
+    prisma.billingTransaction.aggregate({
+      where: {
+        customerId,
+        type: "ADDON_VTO_BOOST",
+        status: "SUCCEEDED",
+        addonAppliesToPeriodStart: window.start,
+        addonAppliesToPeriodEnd: window.end,
+      },
+      _sum: { addonQuantityGranted: true },
+    }),
+    prisma.billingTransaction.aggregate({
+      where: { customerId, type: "ADDON_CLOSET_EXPANSION", status: "SUCCEEDED" },
+      _sum: { addonQuantityGranted: true },
+    }),
+  ]);
+  return {
+    styleMeBoost: styleMe._sum.addonQuantityGranted ?? 0,
+    vtoBoost: vto._sum.addonQuantityGranted ?? 0,
+    closetExpansion: closet._sum.addonQuantityGranted ?? 0,
+  };
+}
+
+// ── Effective allowances (Phase 2) ──────────────────────────────────────────────
+// Base membership allowance, boosted by add-ons — but ONLY while the
+// customer's subscription is genuinely entitled (getCurrentSubscription
+// already filters to ACTIVE/PAST_DUE, so reaching the add-on branch below
+// at all already proves entitlement). An expired, canceled, or
+// never-confirmed subscription gets the bare base allowance (0 for NONE)
+// regardless of any add-on purchased in the past — add-ons boost an active
+// membership, they do not survive past it and never substitute for one.
+// This is what keeps requirement 7 true even for a customer with add-on
+// history: losing the subscription loses the boost along with the base
+// allowance, in the same step, because both come from the same branch.
+export interface EffectiveAllowances {
+  closetItems: number;
+  styleMePerMonth: number;
+  buySkipPerMonth: number;
+  vtoPerMonth: number;
+  personalisedTrendPerMonth: number;
+}
+
+export interface EffectiveEntitlementContext {
+  window: UsageWindow;
+  allowances: EffectiveAllowances;
+  subscription: EntitledSubscription | null;
+}
+
+// DI surface for resolveEffectiveContext and everything that calls it —
+// mirrors the existing _runTransaction convention (RunReservationFn) rather
+// than introducing a second, differently-shaped pattern. Every public
+// function below threads this through as one optional trailing parameter,
+// defaulting to the real Prisma-backed implementations, so every existing
+// caller (routes, and every pre-Phase-2 test exercising these functions
+// with a mocked _runTransaction) is completely unaffected — they simply
+// never pass it, and get real subscription/add-on lookups exactly as they
+// would without this parameter existing.
+export interface EffectiveContextDeps {
+  getSubscription?: (customerId: string) => Promise<EntitledSubscription | null>;
+  getAddonTotals?: (customerId: string, window: UsageWindow) => Promise<AddonTotals>;
+}
+
+export async function resolveEffectiveContext(
+  customerId: string,
+  membershipStatus: MembershipStatus,
+  deps: EffectiveContextDeps = {},
+): Promise<EffectiveEntitlementContext> {
+  const _getSubscription = deps.getSubscription ?? getCurrentSubscription;
+  const _getAddonTotals = deps.getAddonTotals ?? getApplicableAddonTotals;
+
+  const subscription = await _getSubscription(customerId);
+  const window = getUsageWindow(toWindowInput(subscription));
+  const base = getMembershipAllowances(membershipStatus);
+  // Staging-only overrides (VTO_MONTHLY_LIMIT_OVERRIDE / STYLEME_MONTHLY_LIMIT_OVERRIDE)
+  // apply to the base figure regardless of billing — they are a QA tool, not
+  // a billing concept, and add-ons layer on top of whichever base is active.
+  const effectiveStyleMeBase = getEffectiveStyleMeLimit(membershipStatus);
+  const effectiveVtoBase = getEffectiveVtoLimit(membershipStatus);
+
+  if (!subscription) {
+    return {
+      window,
+      subscription: null,
+      allowances: {
+        closetItems: base.closetItems,
+        styleMePerMonth: effectiveStyleMeBase,
+        buySkipPerMonth: base.buySkipPerMonth,
+        vtoPerMonth: effectiveVtoBase,
+        personalisedTrendPerMonth: base.personalisedTrendPerMonth,
+      },
+    };
+  }
+
+  const addons = await _getAddonTotals(customerId, window);
+  return {
+    window,
+    subscription,
+    allowances: {
+      closetItems: base.closetItems + addons.closetExpansion,
+      styleMePerMonth: effectiveStyleMeBase + addons.styleMeBoost,
+      buySkipPerMonth: base.buySkipPerMonth,
+      vtoPerMonth: effectiveVtoBase + addons.vtoBoost,
+      personalisedTrendPerMonth: base.personalisedTrendPerMonth,
+    },
+  };
 }
 
 // ── Entitlement summary types ──────────────────────────────────────────────────
@@ -121,11 +313,9 @@ export interface EntitlementSummary {
 export async function getEntitlementSummary(
   customerId: string,
   membershipStatus: MembershipStatus,
+  _contextDeps: EffectiveContextDeps = {},
 ): Promise<EntitlementSummary> {
-  const limits = getMembershipAllowances(membershipStatus);
-  const effectiveVtoLimit = getEffectiveVtoLimit(membershipStatus);
-  const effectiveStyleMeLimit = getEffectiveStyleMeLimit(membershipStatus);
-  const window = getUsageWindow();
+  const { window, allowances } = await resolveEffectiveContext(customerId, membershipStatus, _contextDeps);
   const resetDate = formatResetDate(window);
   const staleThreshold = new Date(Date.now() - VTO_IN_FLIGHT_STALE_MS);
 
@@ -155,21 +345,27 @@ export async function getEntitlementSummary(
     },
   });
 
-  // VTO: completed jobs in current window
+  // VTO: completed jobs in current window. isTest excludes the proper,
+  // schema-level test-job flag; the productHandle prefix exclusion is the
+  // older, staging-only mock-harness heuristic — kept alongside rather than
+  // dropped here, since reconciling whether one supersedes the other is a
+  // separate, later concern (not decided by this merge).
   const vtoCompleted = await prisma.virtualTryOnJob.count({
     where: {
       customerId,
       status: "COMPLETED",
+      isTest: false,
       createdAt: { gte: window.start, lt: window.end },
       NOT: { productHandle: { startsWith: MOCK_VTO_PRODUCT_HANDLE_PREFIX } },
     },
   });
 
-  // VTO: genuinely active in-flight jobs (not stale)
+  // VTO: genuinely active in-flight jobs (not stale, not a test job)
   const vtoInFlight = await prisma.virtualTryOnJob.count({
     where: {
       customerId,
       status: { in: ["CREATED", "SUBMITTED", "PROCESSING"] },
+      isTest: false,
       lastActivityAt: { gte: staleThreshold },
       NOT: { productHandle: { startsWith: MOCK_VTO_PRODUCT_HANDLE_PREFIX } },
     },
@@ -191,19 +387,19 @@ export async function getEntitlementSummary(
     windowLabel: window.label,
 
     styleMe: {
-      monthlyLimit: effectiveStyleMeLimit,
+      monthlyLimit: allowances.styleMePerMonth,
       monthlyUsed: monthlyQualifyingCount,
       resetDate,
     },
 
     buySkip: {
-      monthlyLimit: limits.buySkipPerMonth,
+      monthlyLimit: allowances.buySkipPerMonth,
       monthlyUsed: monthlyBuySkipUsed,
       resetDate,
     },
 
     vto: {
-      monthlyLimit: effectiveVtoLimit,
+      monthlyLimit: allowances.vtoPerMonth,
       monthlyCompleted: vtoCompleted,
       monthlyInFlight: vtoInFlight,
       resetDate,
@@ -211,12 +407,18 @@ export async function getEntitlementSummary(
 
     closet: {
       currentCount: closetCount,
-      limit: limits.closetItems,
-      atCapacity: closetCount >= limits.closetItems,
+      limit: allowances.closetItems,
+      atCapacity: closetCount >= allowances.closetItems,
     },
 
     personalisedTrend: {
-      monthlyLimit: limits.personalisedTrendPerMonth,
+      // monthlyUsed is a real count (PersonalisedTrendEditUsage), not the
+      // null the incoming commit's own "V1: enforcement deferred" stance
+      // predates — that table and its tracking query exist now (see
+      // monthlyPersonalisedTrendUsed above). allowances, not limits — this
+      // function's own resolveEffectiveContext destructure never declares
+      // a `limits` binding.
+      monthlyLimit: allowances.personalisedTrendPerMonth,
       monthlyUsed: monthlyPersonalisedTrendUsed,
     },
   };
@@ -243,9 +445,9 @@ export async function checkEntitlement(
   // one piece for another without being blocked by a slot that is already
   // spoken for. Ignored by every feature other than "closet".
   options?: { excludeItemId?: string },
+  _contextDeps: EffectiveContextDeps = {},
 ): Promise<EntitlementCheck> {
-  const limits = getMembershipAllowances(membershipStatus);
-  const window = getUsageWindow();
+  const { window, allowances } = await resolveEffectiveContext(customerId, membershipStatus, _contextDeps);
   const staleThreshold = new Date(Date.now() - VTO_IN_FLIGHT_STALE_MS);
 
   switch (feature) {
@@ -256,16 +458,15 @@ export async function checkEntitlement(
           ...(options?.excludeItemId ? { id: { not: options.excludeItemId } } : {}),
         },
       });
-      if (count >= limits.closetItems) return { allowed: false, reason: "at_capacity" };
+      if (count >= allowances.closetItems) return { allowed: false, reason: "at_capacity" };
       return { allowed: true };
     }
 
     case "styleMe": {
-      const effectiveStyleMeLimit = getEffectiveStyleMeLimit(membershipStatus);
       const monthlyUsed = await prisma.stylingSession.count({
         where: { ...qualifyingStyleMeWhere(customerId), createdAt: { gte: window.start, lt: window.end } },
       });
-      if (monthlyUsed < effectiveStyleMeLimit) return { allowed: true };
+      if (monthlyUsed < allowances.styleMePerMonth) return { allowed: true };
       return { allowed: false, reason: "quota_exceeded" };
     }
 
@@ -277,17 +478,17 @@ export async function checkEntitlement(
           createdAt: { gte: window.start, lt: window.end },
         },
       });
-      if (count >= limits.buySkipPerMonth) return { allowed: false, reason: "quota_exceeded" };
+      if (count >= allowances.buySkipPerMonth) return { allowed: false, reason: "quota_exceeded" };
       return { allowed: true };
     }
 
     case "vto": {
-      const effectiveVtoLimit = getEffectiveVtoLimit(membershipStatus);
       const [completed, inFlight] = await Promise.all([
         prisma.virtualTryOnJob.count({
           where: {
             customerId,
             status: "COMPLETED",
+            isTest: false,
             createdAt: { gte: window.start, lt: window.end },
             NOT: { productHandle: { startsWith: MOCK_VTO_PRODUCT_HANDLE_PREFIX } },
           },
@@ -296,12 +497,13 @@ export async function checkEntitlement(
           where: {
             customerId,
             status: { in: ["CREATED", "SUBMITTED", "PROCESSING"] },
+            isTest: false,
             lastActivityAt: { gte: staleThreshold },
             NOT: { productHandle: { startsWith: MOCK_VTO_PRODUCT_HANDLE_PREFIX } },
           },
         }),
       ]);
-      if (completed + inFlight >= effectiveVtoLimit) {
+      if (completed + inFlight >= allowances.vtoPerMonth) {
         return { allowed: false, reason: "quota_exceeded" };
       }
       return { allowed: true };
@@ -310,13 +512,13 @@ export async function checkEntitlement(
     case "personalisedTrend": {
       // Binary membership short-circuit first — NONE has zero allowance
       // regardless of usage, same as every other feature's zero-limit case.
-      if (limits.personalisedTrendPerMonth <= 0) return { allowed: false, reason: "quota_exceeded" };
+      if (allowances.personalisedTrendPerMonth <= 0) return { allowed: false, reason: "quota_exceeded" };
       // Real count against PersonalisedTrendEditUsage — the customer
       // entitlement/usage source of truth. JourneyEvent is never read here.
       const count = await prisma.personalisedTrendEditUsage.count({
         where: { customerId, createdAt: { gte: window.start, lt: window.end } },
       });
-      if (count >= limits.personalisedTrendPerMonth) return { allowed: false, reason: "quota_exceeded" };
+      if (count >= allowances.personalisedTrendPerMonth) return { allowed: false, reason: "quota_exceeded" };
       return { allowed: true };
     }
 
@@ -355,9 +557,18 @@ export async function reserveStyleMeSlot(
   membershipStatus: MembershipStatus,
   sessionData: Prisma.StylingSessionUncheckedCreateInput,
   _runTransaction: RunReservationFn = _runReservationTransaction,
+  _contextDeps: EffectiveContextDeps = {},
 ): Promise<ReserveResult<Awaited<ReturnType<typeof prisma.stylingSession.create>>>> {
-  const effectiveLimit = getEffectiveStyleMeLimit(membershipStatus);
-  const window = getUsageWindow();
+  // Resolved once, before the retry loop — same shape as before Phase 2
+  // (the base allowance/window were already computed once up front); the
+  // addition here is that the resolution itself can now include a billing-
+  // cycle window and add-on boost. A concurrent add-on purchase landing in
+  // the same instant as a reservation attempt is not specially guarded —
+  // that's no different from a concurrent membership change mid-reservation,
+  // which this design never tried to close atomically either; the actual
+  // race this function exists to close is the count-vs-limit race, below.
+  const { window, allowances } = await resolveEffectiveContext(customerId, membershipStatus, _contextDeps);
+  const effectiveLimit = allowances.styleMePerMonth;
   const qualifyingWhere = qualifyingStyleMeWhere(customerId);
 
   for (let attempt = 0; attempt <= MAX_TX_RETRIES; attempt++) {
@@ -386,9 +597,13 @@ export async function reserveBuySkipSlot(
   membershipStatus: MembershipStatus,
   analysisData: Prisma.BuyOrSkipAnalysisUncheckedCreateInput,
   _runTransaction: RunReservationFn = _runReservationTransaction,
+  _contextDeps: EffectiveContextDeps = {},
 ): Promise<ReserveResult<Awaited<ReturnType<typeof prisma.buyOrSkipAnalysis.create>>>> {
-  const limits = getMembershipAllowances(membershipStatus);
-  const window = getUsageWindow();
+  // No add-on type exists for Buy or Skip in the approved catalog (StyleMe,
+  // VTO, and Closet are the only add-ons) — allowances.buySkipPerMonth is
+  // always just the base membership figure, resolved the same way as
+  // before Phase 2, just now through the shared resolver.
+  const { window, allowances } = await resolveEffectiveContext(customerId, membershipStatus, _contextDeps);
 
   for (let attempt = 0; attempt <= MAX_TX_RETRIES; attempt++) {
     try {
@@ -400,7 +615,7 @@ export async function reserveBuySkipSlot(
             createdAt: { gte: window.start, lt: window.end },
           },
         });
-        if (used >= limits.buySkipPerMonth) {
+        if (used >= allowances.buySkipPerMonth) {
           return { allowed: false, reason: "quota_exceeded" };
         }
         const record = await tx.buyOrSkipAnalysis.create({ data: analysisData });
@@ -419,8 +634,17 @@ export async function reserveClosetSlot(
   membershipStatus: MembershipStatus,
   itemData: Prisma.ClosetItemCreateInput,
   _runTransaction: RunReservationFn = _runReservationTransaction,
+  _contextDeps: EffectiveContextDeps = {},
 ): Promise<ReserveResult<Awaited<ReturnType<typeof prisma.closetItem.create>>>> {
-  const limits = getMembershipAllowances(membershipStatus);
+  // Closet capacity is unconditional (not behind ENTITLEMENT_ENFORCEMENT),
+  // so this now runs resolveEffectiveContext's extra subscription lookup on
+  // every closet upload — one cheap, indexed findFirst, accepted as the
+  // cost of correctly layering in cumulative Closet-expansion add-ons here.
+  // A lapsed/canceled subscription falls back to the bare base allowance
+  // (0 for NONE) via the same branch that drops the add-on boost — the cap
+  // can drop, but nothing here ever deletes an existing ClosetItem; it only
+  // ever gates NEW creates, exactly as before Phase 2.
+  const { allowances } = await resolveEffectiveContext(customerId, membershipStatus, _contextDeps);
 
   for (let attempt = 0; attempt <= MAX_TX_RETRIES; attempt++) {
     try {
@@ -429,7 +653,7 @@ export async function reserveClosetSlot(
         // window filter (matches checkEntitlement's "closet" case and
         // getEntitlementSummary's own count exactly).
         const used = await tx.closetItem.count({ where: { customerId } });
-        if (used >= limits.closetItems) {
+        if (used >= allowances.closetItems) {
           return { allowed: false, reason: "at_capacity" };
         }
         const record = await tx.closetItem.create({ data: itemData });

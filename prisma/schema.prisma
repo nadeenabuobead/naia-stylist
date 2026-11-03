@@ -1350,6 +1350,18 @@ model VirtualTryOnJob {
 
   errorCode String? // Safe provider/customer error code — never a stack trace
 
+  // Phase 2 (billing) — a job created for staging/QA testing of the try-on
+  // pipeline itself (e.g. against FASHN's sandbox/test mode once that
+  // exists), never a real customer generation. Defaults to false so every
+  // existing row and every existing write path is unaffected. Every VTO
+  // quota-counting query in entitlement.server.ts filters isTest: false —
+  // a test job must never consume or appear to consume a real customer's
+  // paid monthly allowance. No code path sets this to true yet; this field
+  // exists so that one can be built (a staging fixture, a QA harness) with
+  // an explicit, structural guarantee already in place, rather than relying
+  // on convention to keep test traffic out of real quota counts later.
+  isTest Boolean @default(false)
+
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   completedAt    DateTime?

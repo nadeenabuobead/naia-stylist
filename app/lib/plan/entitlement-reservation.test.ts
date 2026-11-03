@@ -25,9 +25,18 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Prisma } from "@prisma/client";
-import { reserveStyleMeSlot, reserveBuySkipSlot, reserveClosetSlot, type RunReservationFn } from "./entitlement.server";
+import { reserveStyleMeSlot, reserveBuySkipSlot, reserveClosetSlot, type RunReservationFn, type EffectiveContextDeps } from "./entitlement.server";
 
 const CUSTOMER_ID = "cust-reservation-test";
+
+// Phase 2 added a real (un-mocked by default) subscription lookup inside
+// every reserve* function. Every test below predates Phase 2 and was
+// written to test the base-allowance case — no subscription — so this
+// mock preserves that exact original intent explicitly, rather than
+// letting the real lookup hit a database that doesn't exist in this
+// environment. Phase-2-specific tests (RSV.20+) pass their own synthetic
+// subscription instead.
+const NO_SUBSCRIPTION: EffectiveContextDeps = { getSubscription: async () => null };
 
 function p2034() {
   return Object.assign(new Error("Serialization failure"), { code: "P2034" });
@@ -54,7 +63,7 @@ describe("reserveStyleMeSlot", () => {
       } as any);
     };
 
-    const result = await reserveStyleMeSlot(CUSTOMER_ID, "MEMBER", sessionData, mockTx);
+    const result = await reserveStyleMeSlot(CUSTOMER_ID, "MEMBER", sessionData, mockTx, NO_SUBSCRIPTION);
 
     assert.equal(txCalls, 1, "exactly one transaction attempt for a clean success");
     assert.equal(result.allowed, true);
@@ -71,7 +80,7 @@ describe("reserveStyleMeSlot", () => {
         },
       } as any);
 
-    const result = await reserveStyleMeSlot(CUSTOMER_ID, "MEMBER", sessionData, mockTx);
+    const result = await reserveStyleMeSlot(CUSTOMER_ID, "MEMBER", sessionData, mockTx, NO_SUBSCRIPTION);
     assert.equal(result.allowed, false);
     if (result.allowed) throw new Error("unreachable");
     assert.equal(result.reason, "quota_exceeded");
@@ -89,7 +98,7 @@ describe("reserveStyleMeSlot", () => {
         },
       } as any);
 
-    const result = await reserveStyleMeSlot(CUSTOMER_ID, "NONE", sessionData, mockTx);
+    const result = await reserveStyleMeSlot(CUSTOMER_ID, "NONE", sessionData, mockTx, NO_SUBSCRIPTION);
     assert.equal(result.allowed, false);
     if (result.allowed) throw new Error("unreachable");
     assert.equal(result.reason, "quota_exceeded");
@@ -108,7 +117,7 @@ describe("reserveStyleMeSlot", () => {
       } as any);
     };
 
-    const result = await reserveStyleMeSlot(CUSTOMER_ID, "MEMBER", sessionData, mockTx);
+    const result = await reserveStyleMeSlot(CUSTOMER_ID, "MEMBER", sessionData, mockTx, NO_SUBSCRIPTION);
     assert.equal(result.allowed, true);
     assert.equal(txCalls, 2, "must retry exactly once on P2034");
   });
@@ -116,7 +125,7 @@ describe("reserveStyleMeSlot", () => {
   it("RSV.5 — propagates the error once MAX_TX_RETRIES is exhausted", async () => {
     const mockTx: RunReservationFn = async (_fn) => { throw p2034(); };
     await assert.rejects(
-      () => reserveStyleMeSlot(CUSTOMER_ID, "MEMBER", sessionData, mockTx),
+      () => reserveStyleMeSlot(CUSTOMER_ID, "MEMBER", sessionData, mockTx, NO_SUBSCRIPTION),
       (e: any) => e.code === "P2034",
     );
   });
@@ -128,7 +137,7 @@ describe("reserveStyleMeSlot", () => {
       throw Object.assign(new Error("connection terminated"), { code: "P1017" });
     };
     await assert.rejects(
-      () => reserveStyleMeSlot(CUSTOMER_ID, "MEMBER", sessionData, mockTx),
+      () => reserveStyleMeSlot(CUSTOMER_ID, "MEMBER", sessionData, mockTx, NO_SUBSCRIPTION),
       (e: any) => e.code === "P1017",
     );
     assert.equal(txCalls, 1, "a non-conflict error must not trigger the retry loop");
@@ -144,7 +153,7 @@ describe("reserveStyleMeSlot", () => {
         },
       } as any);
 
-    await reserveStyleMeSlot(CUSTOMER_ID, "MEMBER", sessionData, mockTx);
+    await reserveStyleMeSlot(CUSTOMER_ID, "MEMBER", sessionData, mockTx, NO_SUBSCRIPTION);
 
     assert.equal(capturedWhere.customerId, CUSTOMER_ID);
     assert.equal(capturedWhere.parentSessionId, null, "root sessions only — continuations never consume quota");
@@ -177,7 +186,7 @@ describe("reserveBuySkipSlot", () => {
         },
       } as any);
 
-    const result = await reserveBuySkipSlot(CUSTOMER_ID, "MEMBER", analysisData, mockTx);
+    const result = await reserveBuySkipSlot(CUSTOMER_ID, "MEMBER", analysisData, mockTx, NO_SUBSCRIPTION);
     assert.equal(result.allowed, true);
     if (!result.allowed) throw new Error("unreachable");
     assert.equal(result.record.id, "analysis-1");
@@ -192,7 +201,7 @@ describe("reserveBuySkipSlot", () => {
         },
       } as any);
 
-    const result = await reserveBuySkipSlot(CUSTOMER_ID, "MEMBER", analysisData, mockTx);
+    const result = await reserveBuySkipSlot(CUSTOMER_ID, "MEMBER", analysisData, mockTx, NO_SUBSCRIPTION);
     assert.equal(result.allowed, false);
     if (result.allowed) throw new Error("unreachable");
     assert.equal(result.reason, "quota_exceeded");
@@ -207,7 +216,7 @@ describe("reserveBuySkipSlot", () => {
         },
       } as any);
 
-    const result = await reserveBuySkipSlot(CUSTOMER_ID, "NONE", analysisData, mockTx);
+    const result = await reserveBuySkipSlot(CUSTOMER_ID, "NONE", analysisData, mockTx, NO_SUBSCRIPTION);
     assert.equal(result.allowed, false);
   });
 
@@ -220,7 +229,7 @@ describe("reserveBuySkipSlot", () => {
       throw Object.assign(new Error("Unique constraint failed"), { code: "P2002" });
     };
     await assert.rejects(
-      () => reserveBuySkipSlot(CUSTOMER_ID, "MEMBER", analysisData, mockTx),
+      () => reserveBuySkipSlot(CUSTOMER_ID, "MEMBER", analysisData, mockTx, NO_SUBSCRIPTION),
       (e: any) => e.code === "P2002",
     );
   });
@@ -238,7 +247,7 @@ describe("reserveBuySkipSlot", () => {
       } as any);
     };
 
-    const result = await reserveBuySkipSlot(CUSTOMER_ID, "MEMBER", analysisData, mockTx);
+    const result = await reserveBuySkipSlot(CUSTOMER_ID, "MEMBER", analysisData, mockTx, NO_SUBSCRIPTION);
     assert.equal(result.allowed, true);
     assert.equal(txCalls, 2);
   });
@@ -253,7 +262,7 @@ describe("reserveBuySkipSlot", () => {
         },
       } as any);
 
-    await reserveBuySkipSlot(CUSTOMER_ID, "MEMBER", analysisData, mockTx);
+    await reserveBuySkipSlot(CUSTOMER_ID, "MEMBER", analysisData, mockTx, NO_SUBSCRIPTION);
 
     assert.equal(capturedWhere.customerId, CUSTOMER_ID);
     assert.deepEqual(capturedWhere.verdict, { in: ["BUY", "SKIP", "MAYBE"] });
@@ -283,7 +292,7 @@ describe("reserveClosetSlot", () => {
         },
       } as any);
 
-    const result = await reserveClosetSlot(CUSTOMER_ID, "MEMBER", itemData, mockTx);
+    const result = await reserveClosetSlot(CUSTOMER_ID, "MEMBER", itemData, mockTx, NO_SUBSCRIPTION);
     assert.equal(result.allowed, true);
     if (!result.allowed) throw new Error("unreachable");
     assert.equal(result.record.id, "item-1");
@@ -298,7 +307,7 @@ describe("reserveClosetSlot", () => {
         },
       } as any);
 
-    const result = await reserveClosetSlot(CUSTOMER_ID, "MEMBER", itemData, mockTx);
+    const result = await reserveClosetSlot(CUSTOMER_ID, "MEMBER", itemData, mockTx, NO_SUBSCRIPTION);
     assert.equal(result.allowed, false);
     if (result.allowed) throw new Error("unreachable");
     assert.equal(result.reason, "at_capacity");
@@ -313,7 +322,7 @@ describe("reserveClosetSlot", () => {
         },
       } as any);
 
-    const result = await reserveClosetSlot(CUSTOMER_ID, "NONE", itemData, mockTx);
+    const result = await reserveClosetSlot(CUSTOMER_ID, "NONE", itemData, mockTx, NO_SUBSCRIPTION);
     assert.equal(result.allowed, false);
   });
 
@@ -337,10 +346,10 @@ describe("reserveClosetSlot", () => {
         },
       } as any);
 
-    const first = await reserveClosetSlot(CUSTOMER_ID, "MEMBER", itemData, mockTx);
+    const first = await reserveClosetSlot(CUSTOMER_ID, "MEMBER", itemData, mockTx, NO_SUBSCRIPTION);
     assert.equal(first.allowed, true, "first reservation fills the last slot (249 -> 250)");
 
-    const second = await reserveClosetSlot(CUSTOMER_ID, "MEMBER", itemData, mockTx);
+    const second = await reserveClosetSlot(CUSTOMER_ID, "MEMBER", itemData, mockTx, NO_SUBSCRIPTION);
     assert.equal(second.allowed, false, "second reservation now observes 250/250 and is blocked");
     if (second.allowed) throw new Error("unreachable");
     assert.equal(second.reason, "at_capacity");
@@ -359,7 +368,7 @@ describe("reserveClosetSlot", () => {
       } as any);
     };
 
-    const result = await reserveClosetSlot(CUSTOMER_ID, "MEMBER", itemData, mockTx);
+    const result = await reserveClosetSlot(CUSTOMER_ID, "MEMBER", itemData, mockTx, NO_SUBSCRIPTION);
     assert.equal(result.allowed, true);
     assert.equal(txCalls, 2);
   });
@@ -374,7 +383,7 @@ describe("reserveClosetSlot", () => {
         },
       } as any);
 
-    await reserveClosetSlot(CUSTOMER_ID, "MEMBER", itemData, mockTx);
+    await reserveClosetSlot(CUSTOMER_ID, "MEMBER", itemData, mockTx, NO_SUBSCRIPTION);
 
     assert.deepEqual(capturedWhere, { customerId: CUSTOMER_ID }, "no createdAt window — unlike the monthly features, every existing row counts");
   });

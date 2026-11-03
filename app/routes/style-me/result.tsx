@@ -464,6 +464,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         return data(
           { isLoading: false, isAuthenticated: !!naiaCustomer, naiaModelIsReady, devTryOnEnabled, vtoEnabled,
             isStagingProject,
+            qaExportEnabled,
             tryOnFixtureTokens: {} as Record<string, string>, sessionId: null, mood: null,
             currentMood: null, desiredFeeling: null, occasion: null, suggestion: null,
             pendingState: null as "needs_passport" | "ready_to_save" | null,

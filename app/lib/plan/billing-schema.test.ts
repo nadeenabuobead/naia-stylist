@@ -248,9 +248,17 @@ describe("BILL-10 — migration file matches the schema, and touches nothing els
     assert.match(migration, /"subscriptionId"\s+TEXT NOT NULL/);
   });
 
-  it("entitlement.server.ts's existing checkEntitlement/reserve* calls are untouched by this schema change — Phase 1 is additive data model only", () => {
+  it("checkEntitlement/reserve*'s public signatures (customerId, membershipStatus, ...) are unchanged — this schema itself is additive only", () => {
+    // This test originally asserted entitlement.server.ts had NO reference
+    // to Subscription at all — correct for Phase 1, which was schema-only.
+    // Phase 2 (billing-entitlement-phase2.test.ts) deliberately wires
+    // Subscription/BillingTransaction lookups in; that file is the real,
+    // positive coverage for that wiring now. What this migration/schema
+    // commit itself must still guarantee — independent of whichever phase
+    // of application code exists on top of it — is that it never silently
+    // removes a scalar field or changes an existing function's required
+    // parameters. That's what's checked here instead.
     const entSvc = readFile("app/lib/plan/entitlement.server.ts");
-    assert.ok(!entSvc.includes("Subscription"), "entitlement.server.ts must not yet reference the new billing models — that is Phase 2+");
-    assert.ok(entSvc.includes("membershipStatus: MembershipStatus"), "checkEntitlement's signature must be unchanged in Phase 1");
+    assert.ok(entSvc.includes("membershipStatus: MembershipStatus"), "checkEntitlement's required parameters must be unchanged by any billing phase");
   });
 });
