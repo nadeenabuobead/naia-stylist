@@ -50,6 +50,7 @@ import {
   advanceFullLookChain,
   startOrResumeFullLookChain,
   continueToFinalStep,
+  sweepAbandonedFullLookPauses,
   REAL_PRODUCT_HANDLE_PREFIX,
   type FullLookChainContext,
 } from "./full-look-tryon-real.server.js";
@@ -996,5 +997,94 @@ describe("reservationScope — independent, non-destructive second-test mechanis
     expect(result).toEqual({ ok: true, stepIndex: 0 });
     const createArgs = mockCreateOrFind().mock.calls[0][0];
     expect(createArgs.idempotencyKey).toBe(getFullLookStepIdempotencyKey("cust-1", 0, null, scope));
+  });
+});
+
+// ── sweepAbandonedFullLookPauses — independent cleanup ───────────────────────
+
+describe("sweepAbandonedFullLookPauses", () => {
+  function shirtJobWithTrousers(
+    shirtId: string,
+    trousersId: string,
+    overrides: Partial<VirtualTryOnJobRecord> = {},
+  ): VirtualTryOnJobRecord {
+    return fakeJob(shirtId, {
+      customerId: "cust-1",
+      idempotencyKey: `fulllook-real-step:${trousersId}:1`,
+      status: "COMPLETED",
+      ...overrides,
+    });
+  }
+
+  it("SW.1 — a shirt job well within the window is skipped, no deletes", async () => {
+    const recent = new Date(Date.now() - 5 * 60 * 1000);
+    const shirt = shirtJobWithTrousers("shirt-1", "trousers-1", { completedAt: recent });
+    const _findShirtJobs = vi.fn(async () => [shirt]);
+    const _findJobFn = vi.fn(async () => null); // no blazer job exists
+
+    const result = await sweepAbandonedFullLookPauses(_findShirtJobs, _findJobFn);
+
+    expect(result).toEqual({ cleanedChains: 0, skippedActive: 1, skippedAlreadyAdvanced: 0 });
+    expect(mockDeleteAsset()).not.toHaveBeenCalled();
+    expect(_findJobFn).not.toHaveBeenCalled(); // never even checks for a blazer job on an active pause
+  });
+
+  it("SW.2 — an expired, never-continued shirt job is cleaned up (both trousers and shirt intermediates)", async () => {
+    const stale = new Date(Date.now() - 45 * 60 * 1000);
+    const shirt = shirtJobWithTrousers("shirt-1", "trousers-1", { completedAt: stale });
+    const _findShirtJobs = vi.fn(async () => [shirt]);
+    const _findJobFn = vi.fn(async () => null); // no blazer job — never continued
+
+    const result = await sweepAbandonedFullLookPauses(_findShirtJobs, _findJobFn);
+
+    expect(result).toEqual({ cleanedChains: 1, skippedActive: 0, skippedAlreadyAdvanced: 0 });
+    expect(mockDeleteAsset()).toHaveBeenCalledTimes(2);
+    expect(mockDeleteAsset()).toHaveBeenCalledWith(expect.stringContaining("trousers-1"), "private");
+    expect(mockDeleteAsset()).toHaveBeenCalledWith(expect.stringContaining("shirt-1"), "private");
+  });
+
+  it("SW.3 — an expired shirt job that already has a blazer job (continued) is left completely alone", async () => {
+    const stale = new Date(Date.now() - 45 * 60 * 1000);
+    const shirt = shirtJobWithTrousers("shirt-1", "trousers-1", { completedAt: stale });
+    const blazer = fakeJob("blazer-1");
+    const _findShirtJobs = vi.fn(async () => [shirt]);
+    const _findJobFn = vi.fn(async () => blazer); // chain already continued
+
+    const result = await sweepAbandonedFullLookPauses(_findShirtJobs, _findJobFn);
+
+    expect(result).toEqual({ cleanedChains: 0, skippedActive: 0, skippedAlreadyAdvanced: 1 });
+    expect(mockDeleteAsset()).not.toHaveBeenCalled();
+  });
+
+  it("SW.4 — a mix of active, expired, and already-advanced chains is handled independently and correctly aggregated", async () => {
+    const recent = new Date(Date.now() - 5 * 60 * 1000);
+    const stale = new Date(Date.now() - 45 * 60 * 1000);
+    const activeShirt = shirtJobWithTrousers("shirt-active", "trousers-active", { completedAt: recent });
+    const expiredShirt = shirtJobWithTrousers("shirt-expired", "trousers-expired", { completedAt: stale });
+    const advancedShirt = shirtJobWithTrousers("shirt-advanced", "trousers-advanced", { completedAt: stale });
+    const _findShirtJobs = vi.fn(async () => [activeShirt, expiredShirt, advancedShirt]);
+    const _findJobFn = vi.fn(async (where: { idempotencyKey: string }) =>
+      where.idempotencyKey === "fulllook-real-step:shirt-advanced:2" ? fakeJob("blazer-advanced") : null,
+    );
+
+    const result = await sweepAbandonedFullLookPauses(_findShirtJobs, _findJobFn);
+
+    expect(result).toEqual({ cleanedChains: 1, skippedActive: 1, skippedAlreadyAdvanced: 1 });
+    expect(mockDeleteAsset()).toHaveBeenCalledTimes(2); // only the one genuinely-abandoned chain
+    expect(mockDeleteAsset()).toHaveBeenCalledWith(expect.stringContaining("trousers-expired"), "private");
+    expect(mockDeleteAsset()).toHaveBeenCalledWith(expect.stringContaining("shirt-expired"), "private");
+  });
+
+  it("SW.5 — never mutates any VirtualTryOnJob row — only Cloudinary deletes happen", async () => {
+    const stale = new Date(Date.now() - 45 * 60 * 1000);
+    const shirt = shirtJobWithTrousers("shirt-1", "trousers-1", { completedAt: stale });
+    const _findShirtJobs = vi.fn(async () => [shirt]);
+    const _findJobFn = vi.fn(async () => null);
+
+    await sweepAbandonedFullLookPauses(_findShirtJobs, _findJobFn);
+
+    expect(mockAdvance()).not.toHaveBeenCalled();
+    expect(mockCreateOrFind()).not.toHaveBeenCalled();
+    expect(mockSubmitProvider()).not.toHaveBeenCalled();
   });
 });

@@ -150,6 +150,11 @@ export default [
   // this route does not change the mock route above in any way — different
   // path, different file, same gate function imported unmodified from it.
   route("staging/full-look-vto-real", "routes/staging.full-look-vto-real.tsx"),
+  // Independent cleanup for Full-Look VTO QA pauses abandoned permanently —
+  // see the route's own header for why Vercel Cron does NOT reach this path
+  // on this project, and the authenticated, idempotent, staging-only
+  // contract that applies regardless of how it's invoked.
+  route("api/staging-full-look-vto-sweep", "routes/api.staging-full-look-vto-sweep.ts"),
 
   // ── Standalone Internal Admin Portal ─────────────────────────────────────
   // login and logout are flat (PUBLIC) — they must NOT be children of the

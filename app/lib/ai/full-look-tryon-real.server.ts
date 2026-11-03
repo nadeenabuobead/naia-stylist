@@ -798,3 +798,84 @@ export async function startOrResumeFullLookChain(
   }
   return { ok: true, stepIndex: 0 };
 }
+
+// ── Independent cleanup — abandoned pauses no browser will ever revisit ────
+//
+// Every cleanup path above (advanceFullLookChain's fast path, FAILED/
+// COMPLETED transitions) only ever runs when SOME request arrives for THAT
+// customer's chain. If the tester closes the tab permanently during the
+// pause and never returns, nothing in this file is ever invoked again for
+// that chain — this function is the one mechanism that reclaims those
+// images without depending on any further customer request, for ANY
+// customer, in ANY reservation scope at once.
+//
+// Finds every "shirt step" (step index 1) job that is COMPLETED, has no
+// "blazer step" (step index 2) job yet (i.e. never continued — a chain that
+// DID continue is never touched, active or not), and is past
+// QA_PAUSE_EXPIRY_MS. For each, cleans up both intermediate images.
+//
+// Idempotent and safe to call repeatedly or concurrently: an
+// already-cleaned chain's assets are simply "not found" on a later sweep
+// (deleteCloudinaryAsset treats that as ok — see cleanupIntermediateStepResults),
+// and a chain that continued or is still within its active window is never
+// touched. No write to any VirtualTryOnJob row happens here — only
+// Cloudinary deletes — so there is nothing to race with job-status
+// transitions elsewhere.
+export interface SweepResult {
+  cleanedChains: number;
+  skippedActive: number;
+  skippedAlreadyAdvanced: number;
+}
+
+async function defaultFindCompletedShirtJobs(): Promise<VirtualTryOnJobRecord[]> {
+  return prisma.virtualTryOnJob.findMany({
+    where: {
+      productHandle: { startsWith: `${REAL_PRODUCT_HANDLE_PREFIX}:step2:` },
+      status: "COMPLETED",
+    },
+  }) as Promise<VirtualTryOnJobRecord[]>;
+}
+
+// The shirt step's OWN idempotencyKey already encodes the trousers job's id
+// (see getFullLookStepIdempotencyKey: `${REAL_STEP_KEY_PREFIX}${priorJobId}:${stepIndex}`)
+// — reading it back out avoids a second lookup/join for something this
+// module already guarantees is embedded in data we already have.
+function parsePriorJobIdFromStepKey(idempotencyKey: string): string | null {
+  if (!idempotencyKey.startsWith(REAL_STEP_KEY_PREFIX)) return null;
+  const rest = idempotencyKey.slice(REAL_STEP_KEY_PREFIX.length);
+  const lastColon = rest.lastIndexOf(":");
+  if (lastColon === -1) return null;
+  return rest.slice(0, lastColon);
+}
+
+export async function sweepAbandonedFullLookPauses(
+  _findShirtJobs: () => Promise<VirtualTryOnJobRecord[]> = defaultFindCompletedShirtJobs,
+  _findJobFn: (where: { idempotencyKey: string }) => Promise<VirtualTryOnJobRecord | null> = defaultFindJobByIdempotencyKey,
+  _deleteAsset: DeleteAssetFn = deleteCloudinaryAsset,
+): Promise<SweepResult> {
+  const shirtJobs = await _findShirtJobs();
+  let cleanedChains = 0;
+  let skippedActive = 0;
+  let skippedAlreadyAdvanced = 0;
+
+  for (const shirtJob of shirtJobs) {
+    if (!isAwaitingContinueExpired(shirtJob)) {
+      skippedActive++;
+      continue;
+    }
+
+    const blazerKey = `${REAL_STEP_KEY_PREFIX}${shirtJob.id}:2`;
+    const blazerJob = await _findJobFn({ idempotencyKey: blazerKey });
+    if (blazerJob) {
+      skippedAlreadyAdvanced++; // continued (or in progress) — never touch
+      continue;
+    }
+
+    const trousersJobId = parsePriorJobIdFromStepKey(shirtJob.idempotencyKey);
+    const jobIds = trousersJobId ? [trousersJobId, shirtJob.id] : [shirtJob.id];
+    await cleanupIntermediateStepResults(shirtJob.customerId, jobIds, _deleteAsset);
+    cleanedChains++;
+  }
+
+  return { cleanedChains, skippedActive, skippedAlreadyAdvanced };
+}
