@@ -9,7 +9,12 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, it } from "node:test";
-import { usableName, resolveNameUpdate } from "./shopify-customer-name-sync.server.ts";
+import {
+  usableName,
+  resolveNameUpdate,
+  usableEmail,
+  resolveEmailUpdate,
+} from "./shopify-customer-name-sync.server.ts";
 
 const CALLBACK_PATH = resolve(import.meta.dirname, "../routes/auth.shopify.callback.tsx");
 const callbackSrc = readFileSync(CALLBACK_PATH, "utf-8");
@@ -135,29 +140,44 @@ describe("auth.shopify.callback.tsx — name sync is actually wired in", () => {
     assert.ok(createBlock.includes("usableName(shopifyProfile.lastName)"), "create writes usable lastName");
   });
 
-  it("the existing-customer path calls customer.update with the resolved name update, not a raw overwrite", () => {
+  it("the existing-customer path calls customer.update with the merged profile update, not a raw overwrite", () => {
     const updateIdx = callbackSrc.indexOf("prisma.customer.update(");
     assert.ok(updateIdx !== -1, "customer.update call present");
     const updateBlock = callbackSrc.slice(updateIdx, updateIdx + 150);
-    assert.ok(updateBlock.includes("data: nameUpdate"), "update writes the resolved nameUpdate object, not raw Shopify fields");
+    assert.ok(updateBlock.includes("data: profileUpdate"), "update writes the resolved profileUpdate object, not raw Shopify fields");
   });
 
-  it("the name-sync update is skipped entirely when there is nothing to change", () => {
-    const syncIdx = callbackSrc.indexOf("resolveNameUpdate(");
-    const guardBlock = callbackSrc.slice(syncIdx, syncIdx + 400);
+  it("profileUpdate is the merge of the resolved name and email updates", () => {
     assert.ok(
-      guardBlock.includes("Object.keys(nameUpdate).length > 0"),
-      "an empty nameUpdate never reaches prisma.customer.update",
+      callbackSrc.includes("const profileUpdate = { ...nameUpdate, ...emailUpdate };"),
+      "profileUpdate merges nameUpdate and emailUpdate",
     );
   });
 
-  it("a failed name-sync write does not fail the login", () => {
+  it("the profile-sync update is skipped entirely when there is nothing to change", () => {
     const syncIdx = callbackSrc.indexOf("resolveNameUpdate(");
-    const guardBlock = callbackSrc.slice(syncIdx, syncIdx + 400);
+    const guardBlock = callbackSrc.slice(syncIdx, syncIdx + 600);
     assert.ok(
-      /catch\s*{\s*\/\/[^}]*Non-fatal/.test(guardBlock),
-      "the update is wrapped in a non-fatal catch — login proceeds regardless",
+      guardBlock.includes("Object.keys(profileUpdate).length > 0"),
+      "an empty profileUpdate never reaches prisma.customer.update",
     );
+  });
+
+  it("a failed profile-sync write does not fail the login", () => {
+    const syncIdx = callbackSrc.indexOf("resolveNameUpdate(");
+    const guardBlock = callbackSrc.slice(syncIdx, syncIdx + 1200);
+    assert.ok(guardBlock.includes("catch (err) {"), "the update's failure is caught, not left to propagate");
+    assert.ok(
+      guardBlock.includes("Non-fatal — login must never fail over a profile-sync write"),
+      "the catch is explicitly documented as non-fatal — login proceeds regardless",
+    );
+  });
+
+  it("an email unique-constraint collision on sync retries with the name-only subset instead of failing login", () => {
+    const syncIdx = callbackSrc.indexOf("resolveNameUpdate(");
+    const guardBlock = callbackSrc.slice(syncIdx, syncIdx + 1200);
+    assert.ok(guardBlock.includes('"email" in emailUpdate'), "the P2002 branch specifically checks whether email was part of the write");
+    assert.ok(guardBlock.includes("data: nameUpdate"), "the retry writes only the name subset, dropping the colliding email");
   });
 
   it("no code path infers a name from the email address", () => {
@@ -170,13 +190,42 @@ describe("auth.shopify.callback.tsx — name sync is actually wired in", () => {
     const createBlock = callbackSrc.slice(createIdx, createIdx + 300);
     assert.ok(!/firstName:\s*"[A-Za-z]/.test(createBlock), "firstName is not a hard-coded string literal");
   });
+
+  it("the create (new customer) path writes email from the Shopify profile via usableEmail", () => {
+    const createIdx = callbackSrc.indexOf("prisma.customer.create(");
+    const createBlock = callbackSrc.slice(createIdx, createIdx + 300);
+    assert.ok(createBlock.includes("email:     emailAtCreate"), "create writes the resolved emailAtCreate value");
+    assert.ok(
+      callbackSrc.includes("const emailAtCreate = usableEmail(shopifyProfile.email);"),
+      "emailAtCreate is derived via usableEmail, not the raw Shopify value",
+    );
+  });
+
+  it("no hard-coded email literal is written to the Customer row", () => {
+    const createIdx = callbackSrc.indexOf("prisma.customer.create(");
+    const createBlock = callbackSrc.slice(createIdx, createIdx + 300);
+    assert.ok(!/email:\s*"[^"]*@/.test(createBlock), "email is not a hard-coded string literal");
+  });
+
+  it("an email unique-constraint collision at creation time retries once without email instead of failing signup", () => {
+    const createIdx = callbackSrc.indexOf("prisma.customer.create(");
+    const rest = callbackSrc.slice(createIdx, createIdx + 1600);
+    assert.ok(
+      rest.includes("if (!customer && emailAtCreate) {"),
+      "a still-missing customer row after the P2002 re-read is treated as an email collision, not a shopifyCustomerId race",
+    );
+    assert.ok(
+      /prisma\.customer\.create\(\{\s*data:\s*\{\s*shopifyCustomerId,\s*firstName: usableName\(shopifyProfile\.firstName\),\s*lastName:\s*usableName\(shopifyProfile\.lastName\),\s*\},/.test(rest),
+      "the retry create call omits the email field entirely",
+    );
+  });
 });
 
-describe("shopify-customer-oauth.server.ts — the GraphQL lookup actually requests the name fields", () => {
-  it("fetchCustomerProfile queries firstName and lastName alongside id", () => {
+describe("shopify-customer-oauth.server.ts — the GraphQL lookup actually requests the name and email fields", () => {
+  it("fetchCustomerProfile queries firstName, lastName, and emailAddress.emailAddress alongside id", () => {
     assert.ok(
-      oauthSrc.includes("query CurrentCustomer { customer { id firstName lastName } }"),
-      "GraphQL query requests id, firstName, and lastName",
+      oauthSrc.includes("query CurrentCustomer { customer { id firstName lastName emailAddress { emailAddress } } }"),
+      "GraphQL query requests id, firstName, lastName, and the nested emailAddress.emailAddress field",
     );
   });
 
@@ -189,5 +238,81 @@ describe("shopify-customer-oauth.server.ts — the GraphQL lookup actually reque
       oauthSrc.includes('typeof rawLastName === "string" ? rawLastName : null'),
       "lastName defensively falls back to null",
     );
+  });
+
+  it("the profile's email falls back to null for any non-string response shape", () => {
+    assert.ok(
+      oauthSrc.includes('typeof rawEmail === "string" ? rawEmail : null'),
+      "email defensively falls back to null",
+    );
+  });
+});
+
+describe("usableEmail()", () => {
+  it("passes through a non-blank string", () => {
+    assert.equal(usableEmail("nadeen@example.com"), "nadeen@example.com");
+  });
+
+  it("trims surrounding whitespace", () => {
+    assert.equal(usableEmail("  nadeen@example.com  "), "nadeen@example.com");
+  });
+
+  it("treats null as unusable", () => {
+    assert.equal(usableEmail(null), null);
+  });
+
+  it("treats undefined as unusable", () => {
+    assert.equal(usableEmail(undefined), null);
+  });
+
+  it("treats an empty string as unusable", () => {
+    assert.equal(usableEmail(""), null);
+  });
+
+  it("treats a whitespace-only string as unusable", () => {
+    assert.equal(usableEmail("   "), null);
+  });
+});
+
+describe("resolveEmailUpdate() — new customer → Shopify email persisted", () => {
+  it("a brand-new local record (email null) adopts Shopify's verified email", () => {
+    const update = resolveEmailUpdate("nadeen@example.com", null);
+    assert.deepEqual(update, { email: "nadeen@example.com" });
+  });
+});
+
+describe("resolveEmailUpdate() — existing customer with missing email → populated on next login", () => {
+  it("local email was null — Shopify's value fills it in", () => {
+    const update = resolveEmailUpdate("nadeen@example.com", null);
+    assert.deepEqual(update, { email: "nadeen@example.com" });
+  });
+});
+
+describe("resolveEmailUpdate() — existing customer → changed Shopify email updates locally", () => {
+  it("Shopify's email changed since last sync — local value is updated to match", () => {
+    const update = resolveEmailUpdate("nadine@example.com", "nadeen@example.com");
+    assert.deepEqual(update, { email: "nadine@example.com" });
+  });
+
+  it("an already-matching value produces no update — no redundant write", () => {
+    const update = resolveEmailUpdate("nadeen@example.com", "nadeen@example.com");
+    assert.deepEqual(update, {});
+  });
+});
+
+describe("resolveEmailUpdate() — Shopify null/blank → existing valid local email preserved (never overwritten)", () => {
+  it("Shopify returns null — the existing local email is left alone, not cleared", () => {
+    const update = resolveEmailUpdate(null, "nadeen@example.com");
+    assert.deepEqual(update, {});
+  });
+
+  it("Shopify returns a blank string — the existing local email is left alone, not cleared", () => {
+    const update = resolveEmailUpdate("   ", "nadeen@example.com");
+    assert.deepEqual(update, {});
+  });
+
+  it("Shopify returns null, local email was already null — no update at all, not even a no-op write", () => {
+    const update = resolveEmailUpdate(null, null);
+    assert.deepEqual(update, {});
   });
 });

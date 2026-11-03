@@ -9,7 +9,12 @@ import {
   validateReturnTo,
   validateOriginHost,
 } from "~/lib/shopify-customer-oauth.server";
-import { usableName, resolveNameUpdate } from "~/lib/shopify-customer-name-sync.server";
+import {
+  usableName,
+  resolveNameUpdate,
+  usableEmail,
+  resolveEmailUpdate,
+} from "~/lib/shopify-customer-name-sync.server";
 import { getSession, commitSession } from "~/lib/session.server";
 import {
   createNaiaSession,
@@ -144,8 +149,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return fail(502, "No access token returned");
   }
 
-  // ── 9: resolve verified customer identity (GID + name) via Customer Account API ──
-  let shopifyProfile: { customerId: string; firstName: string | null; lastName: string | null };
+  // ── 9: resolve verified customer identity (GID + name + email) via Customer Account API ──
+  let shopifyProfile: {
+    customerId: string;
+    firstName:  string | null;
+    lastName:   string | null;
+    email:      string | null;
+  };
   try {
     shopifyProfile = await fetchCustomerProfile(tokens.access_token);
   } catch {
@@ -163,14 +173,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   if (!customer) {
     // First-time Shopify customer — create using the already-verified shopifyCustomerId,
-    // plus firstName/lastName from the same Customer Account API response, if usable.
-    // email is left null; no additional token parsing needed.
+    // plus firstName/lastName/email from the same Customer Account API response, if usable.
+    const emailAtCreate = usableEmail(shopifyProfile.email);
     try {
       customer = await prisma.customer.create({
         data: {
           shopifyCustomerId,
           firstName: usableName(shopifyProfile.firstName),
           lastName:  usableName(shopifyProfile.lastName),
+          email:     emailAtCreate,
         },
       });
     } catch (err) {
@@ -181,6 +192,23 @@ export async function loader({ request }: LoaderFunctionArgs) {
         } catch {
           return fail(502, "Database error");
         }
+        // Re-read found nothing, so the collision wasn't the shopifyCustomerId
+        // race above — it was the email unique constraint colliding with an
+        // unrelated existing row. Login must never fail over that; retry
+        // once without email rather than blocking account creation.
+        if (!customer && emailAtCreate) {
+          try {
+            customer = await prisma.customer.create({
+              data: {
+                shopifyCustomerId,
+                firstName: usableName(shopifyProfile.firstName),
+                lastName:  usableName(shopifyProfile.lastName),
+              },
+            });
+          } catch {
+            return fail(502, "Database error");
+          }
+        }
         if (!customer) return fail(502, "Database error");
       } else {
         return fail(502, "Database error");
@@ -188,18 +216,34 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
   }
 
-  // ── Sync name from Shopify on every successful login ──
-  // Never overwrites an existing usable local name with a null/blank Shopify
-  // value. A failure here is non-fatal — login proceeds with the name as-is.
-  const nameUpdate = resolveNameUpdate(
+  // ── Sync name + email from Shopify on every successful login ──
+  // Never overwrites an existing usable local value with a null/blank
+  // Shopify value. A failure here is non-fatal — login proceeds regardless.
+  const nameUpdate  = resolveNameUpdate(
     { firstName: shopifyProfile.firstName, lastName: shopifyProfile.lastName },
     { firstName: customer.firstName,       lastName: customer.lastName },
   );
-  if (Object.keys(nameUpdate).length > 0) {
+  const emailUpdate = resolveEmailUpdate(shopifyProfile.email, customer.email);
+  const profileUpdate = { ...nameUpdate, ...emailUpdate };
+  if (Object.keys(profileUpdate).length > 0) {
     try {
-      customer = await prisma.customer.update({ where: { id: customer.id }, data: nameUpdate });
-    } catch {
-      // Non-fatal — proceed with the previously-resolved customer record.
+      customer = await prisma.customer.update({ where: { id: customer.id }, data: profileUpdate });
+    } catch (err) {
+      // Non-fatal — login must never fail over a profile-sync write. If the
+      // email specifically collided with another row's unique email, retry
+      // with the name-only subset so a legitimate name sync still lands.
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === "P2002" &&
+        "email" in emailUpdate &&
+        Object.keys(nameUpdate).length > 0
+      ) {
+        try {
+          customer = await prisma.customer.update({ where: { id: customer.id }, data: nameUpdate });
+        } catch {
+          // Non-fatal — proceed with the previously-resolved customer record.
+        }
+      }
     }
   }
 
