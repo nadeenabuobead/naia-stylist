@@ -327,6 +327,7 @@ describe("PH2-09 — requirement 7: an expired, canceled, or never-confirmed sub
     const deps: EffectiveContextDeps = {
       getSubscription: async () => null, // the real query would never return an EXPIRED row — this IS that "no subscription" state
       getAddonTotals: async () => { throw new Error("getAddonTotals must never be called when there is no entitled subscription"); },
+      hasAnySubscriptionRecord: async () => false, // this test's "no subscription" case has no tracked row at all
     };
     const ctx = await resolveEffectiveContext(CUSTOMER_ID, "NONE", deps);
     assert.equal(ctx.allowances.closetItems, 0);
@@ -375,6 +376,58 @@ describe("PH2-10 — requirement 8: isTest jobs cannot consume a real customer's
   });
 });
 
+// ── 8b — reconciling isTest with Wardrobe Intelligence's independent mock-VTO
+// exclusion mechanism (integrate/wi-security-20261021, commit 4d896b1) ────────
+//
+// WI's Full-Look VTO mock harness marks its jobs with a productHandle
+// prefixed "fulllook-poc:" rather than (and before) isTest existed. Both
+// mechanisms must now apply, OR'd together, at every VTO quota-counting call
+// site: isTest alone would miss WI's EXISTING mock jobs (isTest defaults
+// false on every row created before this field existed, mock jobs included),
+// and the productHandle filter alone would miss any future harness that only
+// sets isTest. Neither filter can ever match a real customer's real job —
+// isTest defaults off and nothing sets it on yet, and a colon is not a valid
+// character in a real Shopify product handle.
+describe("PH2-12 — requirement 8b: WI's productHandle mock-exclusion namespace coexists with isTest, both excluding, neither touching real jobs", () => {
+  const entSvc = readFile("app/lib/plan/entitlement.server.ts");
+
+  it("defines the WI mock-namespace constant as exactly WI's own prefix", () => {
+    assert.match(entSvc, /const MOCK_VTO_PRODUCT_HANDLE_PREFIX\s*=\s*"fulllook-poc:"/);
+  });
+
+  it("checkEntitlement's VTO case filters out the mock productHandle prefix on both counts, alongside isTest", () => {
+    const vtoCase = entSvc.slice(entSvc.indexOf('case "vto"'), entSvc.indexOf('default:'));
+    const isTestOccurrences = vtoCase.match(/isTest:\s*false/g) ?? [];
+    const prefixOccurrences = vtoCase.match(/NOT:\s*\{\s*productHandle:\s*\{\s*startsWith:\s*MOCK_VTO_PRODUCT_HANDLE_PREFIX/g) ?? [];
+    assert.equal(isTestOccurrences.length, 2);
+    assert.equal(prefixOccurrences.length, 2, "both the completed-jobs count and the in-flight count must also exclude WI's mock productHandle namespace");
+  });
+
+  it("getEntitlementSummary's VTO counts filter out the mock productHandle prefix on both counts, alongside isTest", () => {
+    const summaryFn = entSvc.slice(entSvc.indexOf("export async function getEntitlementSummary"), entSvc.indexOf("export type EntitlementFeature"));
+    const isTestOccurrences = summaryFn.match(/isTest:\s*false/g) ?? [];
+    const prefixOccurrences = summaryFn.match(/NOT:\s*\{\s*productHandle:\s*\{\s*startsWith:\s*MOCK_VTO_PRODUCT_HANDLE_PREFIX/g) ?? [];
+    assert.equal(isTestOccurrences.length, 2);
+    assert.equal(prefixOccurrences.length, 2);
+  });
+
+  it("the mock namespace cannot collide with a real Shopify product handle — a colon is not a valid handle character", () => {
+    // Structural guarantee, not just an empirical absence: Shopify product
+    // handles are restricted to lowercase letters, digits, and hyphens.
+    // WI's prefix contains a colon, so no real handle can ever start with it.
+    const SHOPIFY_HANDLE_CHARSET = /^[a-z0-9-]+$/;
+    const prefixMatch = entSvc.match(/const MOCK_VTO_PRODUCT_HANDLE_PREFIX\s*=\s*"([^"]+)"/);
+    assert.ok(prefixMatch, "MOCK_VTO_PRODUCT_HANDLE_PREFIX must be defined");
+    assert.equal(SHOPIFY_HANDLE_CHARSET.test(prefixMatch[1]), false, "the prefix must contain a character no real handle can contain");
+  });
+
+  it("VirtualTryOnJob.productHandle is a required field, so the NOT/startsWith filter can never be bypassed by a null handle", () => {
+    const schema = readFile("prisma/schema.prisma");
+    const jobModel = schema.slice(schema.indexOf("model VirtualTryOnJob"), schema.indexOf("\n}", schema.indexOf("model VirtualTryOnJob")));
+    assert.match(jobModel, /productHandle\s+String(?!\?)/, "productHandle must not be optional, or a null handle could silently evade the NOT filter in some ORMs");
+  });
+});
+
 // ── 10 — zero-subscription backward compatibility ──────────────────────────────
 
 describe("PH2-11 — requirement 10: a customer with no Subscription row (everyone, before Phase 3) gets exactly today's behaviour", () => {
@@ -382,6 +435,7 @@ describe("PH2-11 — requirement 10: a customer with no Subscription row (everyo
     const deps: EffectiveContextDeps = {
       getSubscription: async () => null,
       getAddonTotals: async () => { throw new Error("must not be called with no subscription"); },
+      hasAnySubscriptionRecord: async () => false, // no Subscription row at all — the case this requirement covers
     };
     const ctx = await resolveEffectiveContext(CUSTOMER_ID, "MEMBER", deps);
     assert.equal(ctx.allowances.styleMePerMonth, 8);
@@ -392,10 +446,76 @@ describe("PH2-11 — requirement 10: a customer with no Subscription row (everyo
   });
 
   it("the resolved window for a subscription-less customer is the plain calendar month, unchanged from V1", async () => {
-    const deps: EffectiveContextDeps = { getSubscription: async () => null };
+    const deps: EffectiveContextDeps = {
+      getSubscription: async () => null,
+      hasAnySubscriptionRecord: async () => false,
+    };
     const ctx = await resolveEffectiveContext(CUSTOMER_ID, "MEMBER", deps);
     const now = new Date();
     assert.equal(ctx.window.start.getUTCDate(), 1);
     assert.equal(ctx.window.start.getUTCMonth(), now.getUTCMonth());
+  });
+});
+
+// ── 11 — a stale cached membershipStatus must never outrank a real,
+// tracked Subscription row that isn't entitled ─────────────────────────────────
+//
+// getCurrentSubscription (ACTIVE/PAST_DUE only) returns null in two
+// completely different situations: (a) this customer has never had a
+// Subscription row — the case requirement 10 above covers, where trusting
+// membershipStatus as-is is the intentional, approved fallback; and (b) a
+// real Subscription row exists but is INCOMPLETE/CANCELED/EXPIRED — where a
+// possibly-stale cached membershipStatus: MEMBER must NOT grant the paid
+// allowance just because no entitled row was found. hasAnySubscriptionRecord
+// is what tells these two apart.
+describe("PH2-13 — a tracked but non-entitled Subscription row forces the NONE-equivalent allowance, overriding a stale cached membershipStatus", () => {
+  const entSvc = readFile("app/lib/plan/entitlement.server.ts");
+
+  for (const deadStatus of ["EXPIRED", "CANCELED", "INCOMPLETE"] as const) {
+    it(`a ${deadStatus} Subscription row + stale cached membershipStatus: MEMBER still yields 0 on every allowance`, async () => {
+      const deps: EffectiveContextDeps = {
+        getSubscription: async () => null, // getCurrentSubscription's own ACTIVE/PAST_DUE filter would exclude this row
+        hasAnySubscriptionRecord: async () => true, // but the row exists — status is ${deadStatus}, tracked, just not entitled
+        getAddonTotals: async () => { throw new Error("getAddonTotals must never be called when there is no entitled subscription"); },
+      };
+      const ctx = await resolveEffectiveContext(CUSTOMER_ID, "MEMBER", deps);
+      assert.equal(ctx.allowances.styleMePerMonth, 0, `${deadStatus} + stale MEMBER cache must not grant the StyleMe allowance`);
+      assert.equal(ctx.allowances.vtoPerMonth, 0, `${deadStatus} + stale MEMBER cache must not grant the VTO allowance`);
+      assert.equal(ctx.allowances.buySkipPerMonth, 0, `${deadStatus} + stale MEMBER cache must not grant the Buy/Skip allowance`);
+      assert.equal(ctx.allowances.closetItems, 0, `${deadStatus} + stale MEMBER cache must not grant Closet capacity`);
+      assert.equal(ctx.subscription, null);
+    });
+  }
+
+  it("a customer with NO Subscription row at all and cached membershipStatus: MEMBER still gets the full MEMBER allowance — requirement 10's fallback is unaffected by this fix", async () => {
+    const deps: EffectiveContextDeps = {
+      getSubscription: async () => null,
+      hasAnySubscriptionRecord: async () => false, // never subscribed, ever — the one case that still trusts the cache
+    };
+    const ctx = await resolveEffectiveContext(CUSTOMER_ID, "MEMBER", deps);
+    assert.equal(ctx.allowances.styleMePerMonth, 8);
+    assert.equal(ctx.allowances.vtoPerMonth, 10);
+    assert.equal(ctx.allowances.buySkipPerMonth, 5);
+    assert.equal(ctx.allowances.closetItems, 250);
+  });
+
+  it("hasAnySubscriptionRecord is never consulted when an entitled (ACTIVE/PAST_DUE) subscription is found — only the no-entitled-subscription branch needs it", async () => {
+    const deps: EffectiveContextDeps = {
+      getSubscription: async () => activeMonthlySubscription(),
+      hasAnySubscriptionRecord: async () => { throw new Error("must not be called when an entitled subscription was already found"); },
+      getAddonTotals: async () => ({ styleMeBoost: 0, vtoBoost: 0, closetExpansion: 0 }),
+    };
+    const ctx = await resolveEffectiveContext(CUSTOMER_ID, "MEMBER", deps);
+    assert.equal(ctx.allowances.styleMePerMonth, 8);
+  });
+
+  it("defaults to a real, isolated existence check (not reusing getCurrentSubscription's own entitled-only query) when no override is supplied", () => {
+    assert.match(entSvc, /async function hasAnySubscriptionRecord\(customerId: string\): Promise<boolean>/);
+    const fn = entSvc.slice(
+      entSvc.indexOf("async function hasAnySubscriptionRecord"),
+      entSvc.indexOf("\n}", entSvc.indexOf("async function hasAnySubscriptionRecord")),
+    );
+    assert.match(fn, /prisma\.subscription\.count/, "existence must be checked with no status filter, unlike getCurrentSubscription's ACTIVE/PAST_DUE-scoped query");
+    assert.doesNotMatch(fn, /status:/, "the existence check must not filter by status — that would collapse back into the same ambiguity it exists to resolve");
   });
 });

@@ -36,7 +36,18 @@ const CUSTOMER_ID = "cust-reservation-test";
 // letting the real lookup hit a database that doesn't exist in this
 // environment. Phase-2-specific tests (RSV.20+) pass their own synthetic
 // subscription instead.
-const NO_SUBSCRIPTION: EffectiveContextDeps = { getSubscription: async () => null };
+//
+// hasAnySubscriptionRecord is stubbed false alongside it — this is the
+// reconciliation-concern-2 existence check added after Phase 2, and "no
+// subscription at all" (what this constant represents) must report no
+// tracked row either, or the fallback branch would wrongly treat every
+// test customer here as having a non-entitled Subscription row and force
+// the NONE-equivalent allowance regardless of the membershipStatus each
+// test passes in.
+const NO_SUBSCRIPTION: EffectiveContextDeps = {
+  getSubscription: async () => null,
+  hasAnySubscriptionRecord: async () => false,
+};
 
 function p2034() {
   return Object.assign(new Error("Serialization failure"), { code: "P2034" });

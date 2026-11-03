@@ -48,17 +48,35 @@ import { getUsageWindow, formatResetDate, type SubscriptionWindowInput, type Usa
 // ── VTO stale threshold ────────────────────────────────────────────────────────
 const VTO_IN_FLIGHT_STALE_MS = 10 * 60 * 1000; // 10 minutes
 
-// ── Mock-only staging test exclusion (2026-11-03) ──────────────────────────────
-// productHandle values of this exact shape are written ONLY by the staging-only
-// Full-Look VTO mock harness (poc-job-tracked-full-look-chain.server.ts /
-// staging.full-look-vto-test.tsx) — confirmed by grep across the codebase, no
-// real customer-facing VTO path (api.trigger-tryon.tsx included) ever produces
-// a Shopify product handle with this prefix. Excluding it here means a real
-// customer's real usage is completely unaffected (they never have a row that
-// matches), while the one staging QA account's repeated mock runs stop
-// counting against its own monthly VTO allowance. Real VTO accounting,
-// production billing protections, and every other feature's quota logic are
-// untouched by this constant.
+// ── Mock-VTO exclusion — reconciling two independent mechanisms ───────────────
+// Wardrobe Intelligence's staging-only Full-Look VTO mock harness
+// (poc-job-tracked-full-look-chain.server.ts, on a separate, as-yet-unmerged
+// branch — integrate/wi-security-20261021, commit 4d896b1) marks its mock
+// jobs by writing productHandle values prefixed "fulllook-poc:" — a
+// namespace confirmed (independently re-verified here, not just taken on
+// trust) to be written ONLY by that harness; no real customer-facing VTO
+// path, api.trigger-tryon.tsx included, ever produces a handle with this
+// shape, and a colon isn't even a valid character in a real Shopify product
+// handle, so this can never collide with real data by construction.
+//
+// Phase 2 (this branch) independently introduced VirtualTryOnJob.isTest for
+// the same purpose — a dedicated, explicit boolean, set server-side at job
+// creation, rather than inferred from a naming convention on a field that
+// exists for an unrelated reason. Both mechanisms now apply at every VTO
+// quota-counting call site, OR'd together (a job is excluded if EITHER
+// condition matches):
+//   - the isTest column, required to be off: not yet set true anywhere (the
+//     field defaults off and nothing flips it yet) — this is forward cover
+//     for whenever a mock harness is built that marks the field directly.
+//   - NOT productHandle startsWith "fulllook-poc:": excludes WI's EXISTING
+//     mock jobs today, on this branch and after it merges, without
+//     requiring WI's harness to change at all.
+// This way: existing WI mock jobs remain excluded unconditionally (the
+// productHandle filter alone guarantees it); a real customer's real usage
+// is unaffected by either filter (neither pattern ever matches real data);
+// and once the branches merge, WI's harness can be updated to ALSO flip the
+// isTest column on (the more robust, explicit mechanism) without needing
+// this file to change again — both conditions would simply agree.
 const MOCK_VTO_PRODUCT_HANDLE_PREFIX = "fulllook-poc:";
 
 // ── Transaction retry (mirrors my-naia-model.server.ts's VTO job creation) ────
@@ -119,6 +137,18 @@ async function getCurrentSubscription(customerId: string): Promise<EntitledSubsc
     orderBy: { createdAt: "desc" },
     select: { id: true, planType: true, currentPeriodStart: true, currentPeriodEnd: true, status: true },
   });
+}
+
+// getCurrentSubscription only ever returns an ACTIVE/PAST_DUE row or null —
+// it cannot distinguish "this customer has never had a Subscription row"
+// from "this customer has a real Subscription row, but it's INCOMPLETE,
+// CANCELED, or EXPIRED." Those two null-shaped outcomes must be treated
+// differently below, so a separate existence check (any status, any row)
+// is needed to tell them apart. A plain count — not a second findFirst — is
+// enough since only existence, not the row's content, is needed here.
+async function hasAnySubscriptionRecord(customerId: string): Promise<boolean> {
+  const count = await prisma.subscription.count({ where: { customerId } });
+  return count > 0;
 }
 
 // Narrows a Subscription record to what getUsageWindow needs. A null
@@ -219,6 +249,7 @@ export interface EffectiveEntitlementContext {
 export interface EffectiveContextDeps {
   getSubscription?: (customerId: string) => Promise<EntitledSubscription | null>;
   getAddonTotals?: (customerId: string, window: UsageWindow) => Promise<AddonTotals>;
+  hasAnySubscriptionRecord?: (customerId: string) => Promise<boolean>;
 }
 
 export async function resolveEffectiveContext(
@@ -228,30 +259,45 @@ export async function resolveEffectiveContext(
 ): Promise<EffectiveEntitlementContext> {
   const _getSubscription = deps.getSubscription ?? getCurrentSubscription;
   const _getAddonTotals = deps.getAddonTotals ?? getApplicableAddonTotals;
+  const _hasAnySubscriptionRecord = deps.hasAnySubscriptionRecord ?? hasAnySubscriptionRecord;
 
   const subscription = await _getSubscription(customerId);
   const window = getUsageWindow(toWindowInput(subscription));
+
+  if (!subscription) {
+    // Null here is ambiguous on its own (see hasAnySubscriptionRecord above)
+    // — resolve it before trusting the cached membershipStatus. A customer
+    // with a real, tracked Subscription row that simply isn't ACTIVE/PAST_DUE
+    // (INCOMPLETE/CANCELED/EXPIRED) must be forced to the NONE-equivalent
+    // allowance even if membershipStatus is still a stale cached MEMBER —
+    // the Subscription row is the source of truth once it exists. Only a
+    // customer with NO Subscription row at all gets to keep the pre-Phase-3
+    // fallback of trusting membershipStatus as-is.
+    const hasTrackedSubscription = await _hasAnySubscriptionRecord(customerId);
+    const fallbackStatus: MembershipStatus = hasTrackedSubscription ? "NONE" : membershipStatus;
+    const fallbackBase = getMembershipAllowances(fallbackStatus);
+    return {
+      window,
+      subscription: null,
+      allowances: {
+        closetItems: fallbackBase.closetItems,
+        styleMePerMonth: getEffectiveStyleMeLimit(fallbackStatus),
+        buySkipPerMonth: fallbackBase.buySkipPerMonth,
+        vtoPerMonth: getEffectiveVtoLimit(fallbackStatus),
+        personalisedTrendPerMonth: fallbackBase.personalisedTrendPerMonth,
+      },
+    };
+  }
+
+  // Reached only when getCurrentSubscription found an ACTIVE/PAST_DUE row,
+  // so membershipStatus needs no override here — the real Subscription row
+  // already proves entitlement, regardless of what the cache says.
   const base = getMembershipAllowances(membershipStatus);
   // Staging-only overrides (VTO_MONTHLY_LIMIT_OVERRIDE / STYLEME_MONTHLY_LIMIT_OVERRIDE)
   // apply to the base figure regardless of billing — they are a QA tool, not
   // a billing concept, and add-ons layer on top of whichever base is active.
   const effectiveStyleMeBase = getEffectiveStyleMeLimit(membershipStatus);
   const effectiveVtoBase = getEffectiveVtoLimit(membershipStatus);
-
-  if (!subscription) {
-    return {
-      window,
-      subscription: null,
-      allowances: {
-        closetItems: base.closetItems,
-        styleMePerMonth: effectiveStyleMeBase,
-        buySkipPerMonth: base.buySkipPerMonth,
-        vtoPerMonth: effectiveVtoBase,
-        personalisedTrendPerMonth: base.personalisedTrendPerMonth,
-      },
-    };
-  }
-
   const addons = await _getAddonTotals(customerId, window);
   return {
     window,
