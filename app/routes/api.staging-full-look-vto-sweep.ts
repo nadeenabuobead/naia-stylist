@@ -15,26 +15,29 @@
 // PRODUCTION deployment — "Vercel makes an HTTP GET request to your
 // project's production deployment URL." This project's staging environment
 // is deliberately served from a Preview-target deployment, never promoted
-// to Production (see every other staging route's own header comment on
-// why) — so a vercel.json `crons` entry here would be silently dead
-// configuration, never actually firing. No such entry exists. Until an
-// explicitly-approved external trigger (e.g. a scheduled GitHub Actions
-// workflow hitting this URL) is set up, this route is reachable only by
-// deliberate, authenticated invocation — by an operator directly, or by
-// whatever external scheduler is later approved for that purpose.
+// to Production — so a vercel.json `crons` entry here would be silently
+// dead configuration; none exists. The approved alternative is a scheduled
+// GitHub Actions workflow (.github/workflows/full-look-vto-sweep.yml)
+// hitting this path on the STABLE ALIAS domain — an unaliased Preview URL
+// sits behind Vercel Authentication, which no external request can pass.
 //
-// AUTH: two independent, header-only mechanisms, neither ever accepted from
-// a query string or body:
+// AUTH (2026-11-04): a DEDICATED secret, not a reused broader-access one.
+// Two independent, header-only mechanisms, neither ever accepted from a
+// query string or body:
 //   - Authorization: Bearer <CRON_SECRET> — Vercel's own documented
 //     convention for securing cron-triggered routes, honored here in case
 //     Vercel Cron against this path is ever made to work (e.g. a future
 //     Production-target staging setup) without any code change.
-//   - x-seed-secret matching STAGING_SEED_SECRET or WI_QA_LOGIN_SECRET —
-//     reuses the EXACT secret convention api.seed-staging.jsx already
-//     established, rather than inventing a third secret scheme for one
-//     more staging-only diagnostic endpoint.
+//   - x-full-look-sweep-secret matching FULL_LOOK_VTO_SWEEP_SECRET — a
+//     secret scoped to ONLY this endpoint's one capability (Cloudinary
+//     deletes of already-abandoned intermediate images), deliberately NOT
+//     STAGING_SEED_SECRET or WI_QA_LOGIN_SECRET (api.seed-staging.jsx's own
+//     secrets, which also gate customer/session creation and far broader
+//     staging access). A leak of this value exposes nothing beyond "can
+//     trigger this one cleanup sweep" — it cannot create accounts, log
+//     anyone in, or touch any other data.
 // Constant-time comparison on both — this gates a real (if narrowly-scoped)
-// write capability (Cloudinary deletes), not a read-only diagnostic.
+// write capability, not a read-only diagnostic.
 //
 // NEVER deletes an active (not-yet-expired) paused session, never mutates
 // any VirtualTryOnJob row, never calls FASHN, never resets any reservation.
@@ -56,12 +59,12 @@ function isAuthorizedSweepRequest(request: Request): boolean {
   const authHeader = request.headers.get("authorization");
   if (cronSecret && authHeader === `Bearer ${cronSecret}`) return true;
 
-  const provided = request.headers.get("x-seed-secret");
-  if (!provided) return false;
-  const candidates = [process.env.STAGING_SEED_SECRET, process.env.WI_QA_LOGIN_SECRET].filter(
-    (v): v is string => typeof v === "string" && v.length > 0,
-  );
-  return candidates.some((candidate) => timingSafeStringEqual(provided, candidate));
+  const dedicatedSecret = process.env.FULL_LOOK_VTO_SWEEP_SECRET;
+  const provided = request.headers.get("x-full-look-sweep-secret");
+  if (dedicatedSecret && provided) {
+    return timingSafeStringEqual(provided, dedicatedSecret);
+  }
+  return false;
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
