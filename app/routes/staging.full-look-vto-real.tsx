@@ -2,11 +2,12 @@
 //
 // STAGING-ONLY, REAL FASHN test harness for sequential full-look VTO.
 //
-// NOT REGISTERED in app/routes.ts — same deliberate, separate-later-step
-// convention as staging.full-look-vto-test.tsx (the mock harness, which this
-// route reuses the gate, Work-combination resolution, and quota policy from,
-// unmodified). Loader/action are invoked directly by this route's own test
-// file; there is no route() entry wiring this into the live application.
+// REGISTERED in app/routes.ts (2026-11-03) at staging/full-look-vto-real,
+// right below the mock harness this route reuses the gate, Work-combination
+// resolution, and quota policy from, unmodified. Registration itself grants
+// no access — isAuthorizedStagingTestAccount (NAIA_PROJECT_VARIANT==="staging"
+// + FULL_LOOK_VTO_TEST_CUSTOMER_IDS) is the real, unchanged enforcement, same
+// as the mock route, re-checked independently in both loader and action.
 //
 // WHAT'S DIFFERENT FROM THE MOCK ROUTE: this route submits real garment
 // images from Sara's real Closet (resolveClosetAnchor, already real in the

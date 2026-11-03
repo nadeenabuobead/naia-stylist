@@ -2,12 +2,13 @@
 //
 // STAGING-ONLY, MOCK-ONLY test harness for sequential full-look VTO.
 //
-// NOT REGISTERED in app/routes.ts — this module exists and is covered by
-// staging.full-look-vto-test.test.ts (loader/action invoked directly), but
-// there is no route() entry wiring this path into the app yet. That is a
-// deliberate, separate step: adding it to routes.ts is "connecting this to
-// the live application," which is explicitly a later, separately-approved
-// action, not this one.
+// REGISTERED in app/routes.ts (since 49fbd5a) at staging/full-look-vto-test —
+// the comment below describing this as unregistered predates that commit and
+// is stale; isAuthorizedStagingTestAccount (NAIA_PROJECT_VARIANT==="staging"
+// + the FULL_LOOK_VTO_TEST_CUSTOMER_IDS allowlist) is what actually isolates
+// it, not the absence of a route() entry. Also covered directly by
+// staging.full-look-vto-test.test.ts (loader/action invoked without going
+// through routing at all).
 //
 // WHAT THIS DOES: reuses the production WI pairing engine
 // (loadWardrobeIntelligence) to find the one specific, already visually

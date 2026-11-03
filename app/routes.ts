@@ -140,6 +140,16 @@ export default [
   // customer allowlist via FULL_LOOK_VTO_TEST_CUSTOMER_IDS). Model photo and
   // FASHN are both still fully mocked — see the route's own header.
   route("staging/full-look-vto-test", "routes/staging.full-look-vto-test.tsx"),
+  // Full-Look VTO — staging-only, REAL FASHN test harness (2026-11-03).
+  // Registered here for the first time; the loader/action's own
+  // isAuthorizedStagingTestAccount gate is the actual enforcement — same
+  // NAIA_PROJECT_VARIANT==="staging" strict check (never VERCEL_ENV, which
+  // can't distinguish Preview from a promoted Production deployment) plus
+  // the SAME FULL_LOOK_VTO_TEST_CUSTOMER_IDS allowlist the mock route
+  // above uses, re-checked independently on every request. Registering
+  // this route does not change the mock route above in any way — different
+  // path, different file, same gate function imported unmodified from it.
+  route("staging/full-look-vto-real", "routes/staging.full-look-vto-real.tsx"),
 
   // ── Standalone Internal Admin Portal ─────────────────────────────────────
   // login and logout are flat (PUBLIC) — they must NOT be children of the
