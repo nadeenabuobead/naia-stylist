@@ -67,7 +67,8 @@
 // the existing, unmodified entitlement system already does with these rows.
 
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { data } from "react-router";
+import { data, Form, useActionData, useLoaderData, useRevalidator } from "react-router";
+import { useEffect, useState } from "react";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { loadNaiaModel, computeModelReadinessFromRecord } from "~/lib/ai/my-naia-model.server";
 import { isVtoCategoryAllowed } from "~/lib/ai/closet-eligibility";
@@ -112,8 +113,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const naiaModel = await loadNaiaModel(customer.id);
   if (!naiaModel) {
-    return data({ ok: true as const, chain: { status: "NOT_STARTED" as const } });
+    return data({ ok: true as const, modelReady: false, chain: { status: "NOT_STARTED" as const } });
   }
+  const modelReady = computeModelReadinessFromRecord(naiaModel).isReadyForTryOn;
 
   // ── Re-resolve real, ownership-verified garment URLs fresh on every poll —
   // cheap (a DB read + a signed-URL build, no AI call) and necessary: if this
@@ -162,7 +164,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const result = await advanceFullLookChain(ctx);
   return data(
-    { ok: true as const, chain: result },
+    { ok: true as const, modelReady, chain: result },
     { headers: { "Cache-Control": "no-store" } },
   );
 }
@@ -280,4 +282,102 @@ export async function action({ request }: ActionFunctionArgs) {
     return data({ ok: false, reason: result.reason } as ActionStartResult, { status: 400 });
   }
   return data({ ok: true, stepIndex: result.stepIndex } as ActionStartResult);
+}
+
+// ── Page ──────────────────────────────────────────────────────────────────────
+//
+// Refresh-safety: this component holds NO client-side chain state of its own.
+// Every render reflects loaderData.chain, which the loader rebuilds fresh from
+// VirtualTryOnJob rows on every request — a browser refresh just re-runs the
+// loader and shows exactly the same state. The only client behaviour here is
+// polling: while the chain is PROCESSING, useRevalidator() re-runs the SAME
+// loader every 3s (same interval and mechanism api.tryon-status.$jobId.tsx's
+// client hook already uses for one garment) so progress advances without a
+// manual reload. Closing the tab and coming back later re-derives the exact
+// same state from the same DB rows — nothing is lost.
+
+export default function StagingFullLookVtoReal() {
+  const loaderData = useLoaderData<typeof loader>();
+  const actionData = useActionData<typeof action>();
+  const revalidator = useRevalidator();
+  const [confirmArmed, setConfirmArmed] = useState(false);
+
+  const chain = loaderData.ok ? loaderData.chain : null;
+  const isProcessing = chain?.status === "PROCESSING";
+
+  useEffect(() => {
+    if (!isProcessing) return;
+    const id = setInterval(() => {
+      if (revalidator.state === "idle") revalidator.revalidate();
+    }, 3000);
+    return () => clearInterval(id);
+  }, [isProcessing, revalidator]);
+
+  if (!loaderData.ok) {
+    return <p>Could not find the expected Work combination: {loaderData.reason}</p>;
+  }
+
+  return (
+    <div>
+      <p style={{ fontWeight: "bold", color: "darkred" }}>
+        REAL TEST — this submits real garment photos to the real FASHN API and
+        spends real provider credits. Capped at 3 submissions, ever, for this
+        account.
+      </p>
+      <h1>Full-Look VTO real test — Work</h1>
+      <p>nAia Model ready: {loaderData.modelReady ? "yes" : "no"}</p>
+
+      {(!chain || chain.status === "NOT_STARTED") && (
+        <Form
+          method="post"
+          onSubmit={(e) => {
+            const input = e.currentTarget.elements.namedItem("virtualTryOnConsentAt") as HTMLInputElement | null;
+            if (input) input.value = new Date().toISOString();
+          }}
+        >
+          <input type="hidden" name="virtualTryOnConsentAt" value="" />
+          <label>
+            <input type="checkbox" name="consent" value="yes" required /> I consent to this one staging test.
+          </label>
+          <br />
+          <label>
+            <input
+              type="checkbox"
+              name="confirmReal"
+              value="yes-real-fashn-calls"
+              required
+              onChange={(e) => setConfirmArmed(e.currentTarget.checked)}
+            />{" "}
+            I understand this makes up to 3 REAL, billable FASHN calls using a real customer photo.
+          </label>
+          <br />
+          <button type="submit" disabled={!confirmArmed}>
+            Start real full-look generation
+          </button>
+        </Form>
+      )}
+
+      {actionData && !actionData.ok && (
+        <p>Could not start: {actionData.reason}</p>
+      )}
+
+      {chain && chain.status === "PROCESSING" && (
+        <p>Step {chain.stepIndex + 1} of 3 in progress — checking again in a few seconds…</p>
+      )}
+
+      {chain && chain.status === "FAILED" && (
+        <p>
+          Step {chain.failedStepIndex + 1} failed ({chain.errorCode ?? "unknown error"}). Not retried
+          automatically — a new attempt requires manual review.
+        </p>
+      )}
+
+      {chain && chain.status === "COMPLETED" && (
+        <div>
+          <p>Complete. Result is stored privately and shown below via a short-lived signed link.</p>
+          <img src={chain.resultUrl} alt="Full-look real result" />
+        </div>
+      )}
+    </div>
+  );
 }

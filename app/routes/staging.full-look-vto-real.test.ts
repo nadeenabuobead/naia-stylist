@@ -242,7 +242,7 @@ describe("loader — poll only", () => {
   it("RT.18 — reports NOT_STARTED when no nAia Model exists yet", async () => {
     mockLoadModel().mockResolvedValue(null);
     const res = await loader({ request: {} as Request } as never);
-    expect(res.data).toEqual({ ok: true, chain: { status: "NOT_STARTED" } });
+    expect(res.data).toEqual({ ok: true, modelReady: false, chain: { status: "NOT_STARTED" } });
     expect(mockAdvanceChain()).not.toHaveBeenCalled();
   });
 
@@ -256,13 +256,13 @@ describe("loader — poll only", () => {
   it("RT.20 — in-progress chain returns the step index, never a raw data URL", async () => {
     mockAdvanceChain().mockResolvedValue({ status: "PROCESSING", stepIndex: 1 });
     const res = await loader({ request: {} as Request } as never);
-    expect(res.data).toEqual({ ok: true, chain: { status: "PROCESSING", stepIndex: 1 } });
+    expect(res.data).toEqual({ ok: true, modelReady: true, chain: { status: "PROCESSING", stepIndex: 1 } });
   });
 
   it("RT.21 — a completed chain returns only the signed result URL (secure, ownership-scoped access)", async () => {
     mockAdvanceChain().mockResolvedValue({ status: "COMPLETED", resultUrl: "https://signed.example/final.png" });
     const res = await loader({ request: {} as Request } as never);
-    expect(res.data).toEqual({ ok: true, chain: { status: "COMPLETED", resultUrl: "https://signed.example/final.png" } });
+    expect(res.data).toEqual({ ok: true, modelReady: true, chain: { status: "COMPLETED", resultUrl: "https://signed.example/final.png" } });
     const body = JSON.stringify(res.data);
     expect(body).not.toContain("data:image"); // never a raw inline payload
   });
@@ -270,7 +270,7 @@ describe("loader — poll only", () => {
   it("RT.22 — a failed step is reported with its step index and never silently retried by the loader", async () => {
     mockAdvanceChain().mockResolvedValue({ status: "FAILED", failedStepIndex: 1, errorCode: "PROVIDER_FAILED" });
     const res = await loader({ request: {} as Request } as never);
-    expect(res.data).toEqual({ ok: true, chain: { status: "FAILED", failedStepIndex: 1, errorCode: "PROVIDER_FAILED" } });
+    expect(res.data).toEqual({ ok: true, modelReady: true, chain: { status: "FAILED", failedStepIndex: 1, errorCode: "PROVIDER_FAILED" } });
   });
 
   it("RT.23 — passes real, ownership-verified garment URLs (not placeholders) to advanceFullLookChain", async () => {
