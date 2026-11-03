@@ -37,6 +37,8 @@ vi.mock("~/lib/ai/full-look-work-combination.server", () => ({
   hasQuotaRoomForFullLookChain: vi.fn(),
   sortForDisplay: vi.fn((g: unknown[]) => g),
   MAX_CONSENT_AGE_MS: 15 * 60 * 1000,
+  FINAL_STEP_VISUAL_PROMPT: "MOCK_FINAL_STEP_PROMPT",
+  FINAL_STEP_GENERATION_MODE: "quality",
 }));
 vi.mock("~/lib/ai/full-look-tryon-real.server", () => ({
   startOrResumeFullLookChain: vi.fn(),

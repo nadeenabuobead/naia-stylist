@@ -593,3 +593,131 @@ describe("startOrResumeFullLookChain", () => {
     expect(mockCreateOrFind()).not.toHaveBeenCalled();
   });
 });
+
+// ── Prompt placement (2026-11-03) — final-step-only visual-fidelity tuning ──
+//
+// ctxWithFinalStepTuning carries finalStepPrompt/finalStepGenerationMode,
+// unlike baseCtx() (which every test above this point already exercises
+// WITHOUT these fields — real, continuous regression coverage that omitting
+// them changes nothing). These tests confirm the one new behavior: the
+// tuning reaches submitTryOnToProvider for the FINAL step only, and job
+// tracking / retention cleanup are otherwise unaffected.
+
+describe("prompt placement — final step only", () => {
+  const FINAL_PROMPT = "Wear the beige tailored blazer open over the existing blue chambray shirt.";
+
+  function ctxWithFinalStepTuning(): FullLookChainContext {
+    return { ...baseCtx(), finalStepPrompt: FINAL_PROMPT, finalStepGenerationMode: "quality" };
+  }
+
+  it("FL.30 — step 0 (trousers) never receives the final-step prompt or generationMode, even though ctx carries them", async () => {
+    const job = fakeJob("job-0");
+    mockCreateOrFind().mockResolvedValue({ ok: true, job, created: true });
+    mockAdvance()
+      .mockResolvedValueOnce({ ok: true, job: { ...job, status: "SUBMITTED" } })
+      .mockResolvedValueOnce({ ok: true, job: { ...job, status: "PROCESSING", predictionId: "pred-0" } });
+    mockDownloadPhoto().mockResolvedValue({ ok: true, dataUrl: PNG_DATA_URL });
+    mockSubmitProvider().mockResolvedValue({ ok: true, predictionId: "pred-0" });
+
+    await submitFullLookRealStep(ctxWithFinalStepTuning(), 0, null);
+
+    const submittedInput = mockSubmitProvider().mock.calls[0][0];
+    expect(submittedInput.prompt).toBeUndefined();
+    expect(submittedInput.generationMode).toBeUndefined();
+  });
+
+  it("FL.31 — step 1 (shirt) also never receives the final-step prompt or generationMode", async () => {
+    const job = fakeJob("job-1");
+    mockCreateOrFind().mockResolvedValue({ ok: true, job, created: true });
+    mockAdvance()
+      .mockResolvedValueOnce({ ok: true, job: { ...job, status: "SUBMITTED" } })
+      .mockResolvedValueOnce({ ok: true, job: { ...job, status: "PROCESSING", predictionId: "pred-1" } });
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(new Uint8Array([1, 2, 3]).buffer, { status: 200 }),
+    );
+    mockSubmitProvider().mockResolvedValue({ ok: true, predictionId: "pred-1" });
+
+    await submitFullLookRealStep(ctxWithFinalStepTuning(), 1, "job-0");
+
+    const submittedInput = mockSubmitProvider().mock.calls[0][0];
+    expect(submittedInput.prompt).toBeUndefined();
+    expect(submittedInput.generationMode).toBeUndefined();
+  });
+
+  it("FL.32 — step 2 (blazer, final) receives exactly ctx's finalStepPrompt and finalStepGenerationMode", async () => {
+    const job = fakeJob("job-2");
+    mockCreateOrFind().mockResolvedValue({ ok: true, job, created: true });
+    mockAdvance()
+      .mockResolvedValueOnce({ ok: true, job: { ...job, status: "SUBMITTED" } })
+      .mockResolvedValueOnce({ ok: true, job: { ...job, status: "PROCESSING", predictionId: "pred-2" } });
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(new Uint8Array([1, 2, 3]).buffer, { status: 200 }),
+    );
+    mockSubmitProvider().mockResolvedValue({ ok: true, predictionId: "pred-2" });
+
+    await submitFullLookRealStep(ctxWithFinalStepTuning(), 2, "job-1");
+
+    const submittedInput = mockSubmitProvider().mock.calls[0][0];
+    expect(submittedInput.prompt).toBe(FINAL_PROMPT);
+    expect(submittedInput.generationMode).toBe("quality");
+  });
+
+  it("FL.33 — a caller that never sets finalStepPrompt/finalStepGenerationMode (e.g. baseCtx()) still submits the final step with both undefined — no silent default is invented here", async () => {
+    const job = fakeJob("job-2");
+    mockCreateOrFind().mockResolvedValue({ ok: true, job, created: true });
+    mockAdvance()
+      .mockResolvedValueOnce({ ok: true, job: { ...job, status: "SUBMITTED" } })
+      .mockResolvedValueOnce({ ok: true, job: { ...job, status: "PROCESSING", predictionId: "pred-2" } });
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(new Uint8Array([1, 2, 3]).buffer, { status: 200 }),
+    );
+    mockSubmitProvider().mockResolvedValue({ ok: true, predictionId: "pred-2" });
+
+    await submitFullLookRealStep(baseCtx(), 2, "job-1"); // baseCtx has no finalStep* fields
+
+    const submittedInput = mockSubmitProvider().mock.calls[0][0];
+    expect(submittedInput.prompt).toBeUndefined();
+    expect(submittedInput.generationMode).toBeUndefined();
+  });
+
+  it("FL.34 — job tracking is unaffected: idempotency key and productHandle for the final step are identical with or without the prompt/mode tuning", async () => {
+    const job = fakeJob("job-2");
+    mockCreateOrFind().mockResolvedValue({ ok: true, job, created: true });
+    mockAdvance()
+      .mockResolvedValueOnce({ ok: true, job: { ...job, status: "SUBMITTED" } })
+      .mockResolvedValueOnce({ ok: true, job: { ...job, status: "PROCESSING", predictionId: "pred-2" } });
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(new Uint8Array([1, 2, 3]).buffer, { status: 200 }),
+    );
+    mockSubmitProvider().mockResolvedValue({ ok: true, predictionId: "pred-2" });
+
+    await submitFullLookRealStep(ctxWithFinalStepTuning(), 2, "job-1");
+
+    const createArgs = mockCreateOrFind().mock.calls[0][0];
+    expect(createArgs.idempotencyKey).toBe(getFullLookStepIdempotencyKey("cust-1", 2, "job-1"));
+    expect(createArgs.productHandle).toBe(`${REAL_PRODUCT_HANDLE_PREFIX}:step3:Beige Tailored Blazer`);
+  });
+
+  it("FL.35 — retention cleanup still fires normally on a chain that used the final-step tuning", async () => {
+    const job0 = fakeJob("job-0", { status: "COMPLETED" });
+    const job1 = fakeJob("job-1", { status: "COMPLETED" });
+    const job2 = fakeJob("job-2", { status: "PROCESSING", predictionId: "pred-2" });
+    const _findJobFn = vi.fn(async (where: { idempotencyKey: string }) => {
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 0, null)) return job0;
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 1, "job-0")) return job1;
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 2, "job-1")) return job2;
+      return null;
+    });
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(JSON.stringify({ status: "completed", output: [PNG_DATA_URL] }), { status: 200 }),
+    );
+    mockUploadResult().mockResolvedValue({ ok: true });
+    mockAdvance().mockResolvedValue({ ok: true, job: { ...job2, status: "COMPLETED" } });
+    mockBuildResultUrl().mockReturnValue("https://signed.example/final.png");
+
+    const result = await advanceFullLookChain(ctxWithFinalStepTuning(), { _findJobFn });
+
+    expect(result).toEqual({ status: "COMPLETED", resultUrl: "https://signed.example/final.png" });
+    expect(mockDeleteAsset()).toHaveBeenCalledTimes(2); // job-0 and job-1's intermediates, unchanged behavior
+  });
+});

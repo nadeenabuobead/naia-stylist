@@ -10,6 +10,7 @@ import {
   isAllowedProductImageUrl,
   isValidModelImageDataUrl,
   hasVirtualTryOnConsent,
+  submitTryOnToProvider,
 } from "./fashn-try-on.server.ts";
 import type { VirtualTryOnInput } from "./virtual-try-on.types.ts";
 
@@ -644,5 +645,62 @@ describe("runFashnTryOn — security: no sensitive data in results", () => {
       _fetch: _fetch as typeof fetch, _sleep: noSleep, _getApiKey: () => "k",
     });
     assert.equal(runCallCount, 1, "POST /v1/run must be called exactly once per generation");
+  });
+});
+
+// ── submitTryOnToProvider — parameter selection (2026-11-03) ─────────────────
+// Covers the new optional prompt/generationMode fields added for the
+// Full-Look VTO final-step visual-fidelity improvement. Every assertion here
+// is about the RAW REQUEST BODY sent to FASHN — the one place a regression
+// could silently change behavior for the existing single-garment path too.
+
+describe("submitTryOnToProvider — parameter selection", () => {
+  it("PS.1 — default call (no prompt/generationMode) sends generation_mode:\"fast\" and omits prompt entirely — byte-identical to the pre-existing behavior", async () => {
+    let capturedBody: any = null;
+    const _fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      capturedBody = JSON.parse(init!.body as string);
+      return makeRunResponse("pred-default");
+    }) as typeof fetch;
+    const result = await submitTryOnToProvider(makeInput(), { _fetch, _getApiKey: () => "k" });
+    assert.equal(result.ok, true);
+    assert.equal(capturedBody.inputs.generation_mode, "fast");
+    assert.ok(!("prompt" in capturedBody.inputs), "prompt key must not be present when unset");
+  });
+
+  it("PS.2 — generationMode:\"quality\" with no prompt sends generation_mode:\"quality\", still omits prompt", async () => {
+    let capturedBody: any = null;
+    const _fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      capturedBody = JSON.parse(init!.body as string);
+      return makeRunResponse("pred-quality");
+    }) as typeof fetch;
+    await submitTryOnToProvider(makeInput({ generationMode: "quality" }), { _fetch, _getApiKey: () => "k" });
+    assert.equal(capturedBody.inputs.generation_mode, "quality");
+    assert.ok(!("prompt" in capturedBody.inputs));
+  });
+
+  it("PS.3 — a non-empty prompt is forwarded verbatim alongside the requested generation_mode", async () => {
+    let capturedBody: any = null;
+    const _fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      capturedBody = JSON.parse(init!.body as string);
+      return makeRunResponse("pred-prompted");
+    }) as typeof fetch;
+    const prompt = "Wear the beige tailored blazer open over the existing blue chambray shirt.";
+    await submitTryOnToProvider(makeInput({ generationMode: "quality", prompt }), { _fetch, _getApiKey: () => "k" });
+    assert.equal(capturedBody.inputs.prompt, prompt);
+    assert.equal(capturedBody.inputs.generation_mode, "quality");
+  });
+
+  it("PS.4 — every other field in the request body is unaffected by prompt/generationMode (model_name, resolution, output_format, num_images, return_base64)", async () => {
+    let capturedBody: any = null;
+    const _fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      capturedBody = JSON.parse(init!.body as string);
+      return makeRunResponse("pred-shape");
+    }) as typeof fetch;
+    await submitTryOnToProvider(makeInput({ generationMode: "quality", prompt: "x" }), { _fetch, _getApiKey: () => "k" });
+    assert.equal(capturedBody.model_name, "tryon-max");
+    assert.equal(capturedBody.inputs.resolution, "1k");
+    assert.equal(capturedBody.inputs.output_format, "png");
+    assert.equal(capturedBody.inputs.num_images, 1);
+    assert.equal(capturedBody.inputs.return_base64, true);
   });
 });

@@ -272,6 +272,13 @@ export interface FullLookChainContext {
   deliveryType: string;
   garments: readonly FullLookRealGarmentInput[]; // exactly MAX_CHAIN_LENGTH, ordered
   consent: VirtualTryOnConsent;
+  // Applied ONLY to the final (outerwear) step's FASHN request — see
+  // submitFullLookRealStep's own stepIndex check. Omitted entirely for
+  // steps 0 and 1, which always keep the prior "fast", no-prompt behavior
+  // unchanged. Both optional; omitting either here falls back to
+  // submitTryOnToProvider's own defaults (generation_mode "fast", no prompt).
+  finalStepPrompt?: string;
+  finalStepGenerationMode?: "fast" | "balanced" | "quality";
 }
 
 // ── Walk the chain via deterministic keys — no new schema ───────────────────
@@ -369,6 +376,12 @@ export async function submitFullLookRealStep(
     return { ok: false, reason: inputImage.errorCode, job: submitted.job };
   }
 
+  // ── Final-step-only tuning — see FullLookChainContext's own doc comment.
+  // Steps 0 and 1 never reach this branch; their request is byte-identical
+  // to before (no prompt, generation_mode "fast" via submitTryOnToProvider's
+  // own default). ─────────────────────────────────────────────────────────
+  const isFinalStep = stepIndex === MAX_CHAIN_LENGTH - 1;
+
   // ── Submit only — no poll. Returns immediately with a predictionId. ──────
   const fashnResult = await submitTryOnToProvider({
     customerId: ctx.customerId,
@@ -376,6 +389,9 @@ export async function submitFullLookRealStep(
     productImageUrl: garment.productImageUrl,
     productHandle: job.productHandle,
     consent: ctx.consent,
+    ...(isFinalStep
+      ? { prompt: ctx.finalStepPrompt, generationMode: ctx.finalStepGenerationMode }
+      : {}),
   });
 
   if (!fashnResult.ok) {

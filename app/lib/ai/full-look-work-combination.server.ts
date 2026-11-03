@@ -81,6 +81,30 @@ const EXPECTED_WORK_GARMENT_NAMES = [
   "Beige Tailored Trousers",
 ] as const;
 
+// ── Final-step-only generation tuning (2026-11-03) ──────────────────────────
+//
+// Scoped to this one named combination, same convention as
+// EXPECTED_WORK_GARMENT_NAMES above — not a general mechanism for arbitrary
+// garments. Addresses the observed first-real-test result (blazer applied
+// last, blue shirt underneath not visibly identifiable) using only
+// FASHN-documented tryon-max fields (prompt, generation_mode) — see
+// fashn-try-on.server.ts's VirtualTryOnInput for how these flow through.
+//
+// This is a REQUEST, not a guarantee. FASHN's own docs describe `prompt` as
+// "optional instructions to customize the try-on result" — natural-language
+// steering with no documented adherence contract — and `generation_mode:
+// "quality"` is FASHN's highest general-purpose fidelity tier, not a
+// garment-specific preservation control (no such control exists in this
+// endpoint's documented parameters). Visual success still requires the next
+// real test to actually confirm the shirt is identifiable; this change only
+// gives the model the best documented chance of it.
+export const FINAL_STEP_VISUAL_PROMPT =
+  "Wear the beige tailored blazer open over the existing blue chambray shirt. " +
+  "Keep the blue shirt visibly identifiable through the blazer opening, " +
+  "preserving its colour, collar and realistic layering. Preserve the beige " +
+  "tailored trousers and the model's identity.";
+export const FINAL_STEP_GENERATION_MODE = "quality" as const;
+
 function normalizeName(s: string | null): string {
   return (s ?? "").trim().toLowerCase();
 }

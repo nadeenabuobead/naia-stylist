@@ -33,6 +33,12 @@ export interface VirtualTryOnInput {
   productImageUrl: string;          // verified server-resolved catalog/Shopify URL
   productHandle: string;            // V8 catalog handle
   consent: VirtualTryOnConsent;
+  // Optional, FASHN-documented tryon-max fields (2026-11-03). Omitted by
+  // every existing caller — zero behavior change unless explicitly set.
+  // generationMode defaults to "fast" when omitted, exactly matching the
+  // previously-hardcoded value.
+  prompt?: string;
+  generationMode?: "fast" | "balanced" | "quality";
 }
 
 export type VirtualTryOnResultOk = {

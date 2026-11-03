@@ -88,6 +88,8 @@ import {
   hasQuotaRoomForFullLookChain,
   sortForDisplay,
   MAX_CONSENT_AGE_MS,
+  FINAL_STEP_VISUAL_PROMPT,
+  FINAL_STEP_GENERATION_MODE,
 } from "~/lib/ai/full-look-work-combination.server";
 import {
   startOrResumeFullLookChain,
@@ -161,6 +163,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       policyVersion: "1.0-staging-real-test",
       consentedAt: new Date().toISOString(),
     },
+    finalStepPrompt: FINAL_STEP_VISUAL_PROMPT,
+    finalStepGenerationMode: FINAL_STEP_GENERATION_MODE,
   };
 
   const result = await advanceFullLookChain(ctx);
@@ -276,6 +280,8 @@ export async function action({ request }: ActionFunctionArgs) {
     deliveryType: naiaModel.deliveryType,
     garments: resolvedGarments,
     consent,
+    finalStepPrompt: FINAL_STEP_VISUAL_PROMPT,
+    finalStepGenerationMode: FINAL_STEP_GENERATION_MODE,
   };
 
   const result = await startOrResumeFullLookChain(ctx);

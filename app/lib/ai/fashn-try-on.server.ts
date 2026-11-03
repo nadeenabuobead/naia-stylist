@@ -277,8 +277,11 @@ export async function submitTryOnToProvider(
           return_base64: true,
           output_format: "png",
           resolution: "1k",
-          generation_mode: "fast",
+          generation_mode: input.generationMode ?? "fast",
           num_images: 1,
+          // prompt omitted entirely (not sent as an empty string) when unset —
+          // every existing caller gets the exact previous request body.
+          ...(input.prompt ? { prompt: input.prompt } : {}),
         },
       }),
     });
