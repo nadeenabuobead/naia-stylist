@@ -140,3 +140,97 @@ describe("resolveCollageImages() — bounded, never-invented collage", () => {
     assert.equal(extraCount, 1);
   });
 });
+
+describe("resolveCollageImages() — JEWELRY-only whitespace normalization (2026-11-03, Sara visual QA)", () => {
+  function jewelryItem(id: string) {
+    return {
+      closetItemId: id,
+      productImageUrl: null,
+      closetItem: { imageUrl: null, imagePublicId: `naia-wardrobe/${CUSTOMER_ID}/${id}`, imageFormat: "jpg", category: "JEWELRY" },
+    };
+  }
+  function nonJewelryItem(id: string, category: string) {
+    return {
+      closetItemId: id,
+      productImageUrl: null,
+      closetItem: { imageUrl: null, imagePublicId: `naia-wardrobe/${CUSTOMER_ID}/${id}`, imageFormat: "jpg", category },
+    };
+  }
+
+  it("a JEWELRY item's resolved URL carries the whitespace-normalization transformation", () => {
+    const { resolvedImages } = resolveCollageImages([jewelryItem("ci-earrings")], { customerId: CUSTOMER_ID, cloudinaryConfig: CONFIG });
+    const url = decodeURIComponent(resolvedImages[0]);
+    assert.match(url, /transformation=e_trim:15\/c_pad,ar_1:1,w_500,b_auto:predominant/);
+  });
+
+  for (const category of ["TOPS", "BOTTOMS", "DRESSES", "OUTERWEAR", "SHOES", "BAGS", "ACCESSORIES", "ACTIVEWEAR", "SWIMWEAR", "LOUNGEWEAR", "OTHER"]) {
+    it(`a ${category} item is never transformed — only JEWELRY is, by design`, () => {
+      const { resolvedImages } = resolveCollageImages([nonJewelryItem(`ci-${category}`, category)], { customerId: CUSTOMER_ID, cloudinaryConfig: CONFIG });
+      const url = decodeURIComponent(resolvedImages[0]);
+      assert.doesNotMatch(url, /transformation=/);
+    });
+  }
+
+  it("an item with no category (legacy row, never backfilled) is left untransformed — fails closed, not open", () => {
+    const item = {
+      closetItemId: "ci-legacy",
+      productImageUrl: null,
+      closetItem: { imageUrl: null, imagePublicId: `naia-wardrobe/${CUSTOMER_ID}/ci-legacy`, imageFormat: "jpg", category: null },
+    };
+    const { resolvedImages } = resolveCollageImages([item], { customerId: CUSTOMER_ID, cloudinaryConfig: CONFIG });
+    const url = decodeURIComponent(resolvedImages[0]);
+    assert.doesNotMatch(url, /transformation=/);
+  });
+
+  it("a mixed collage transforms only the JEWELRY tile — trousers, top, and shoes pass through untouched", () => {
+    const items = [
+      nonJewelryItem("ci-top", "TOPS"),
+      nonJewelryItem("ci-trousers", "BOTTOMS"),
+      jewelryItem("ci-earrings"),
+      nonJewelryItem("ci-shoes", "SHOES"),
+    ];
+    const { resolvedImages, extraCount } = resolveCollageImages(items, { customerId: CUSTOMER_ID, cloudinaryConfig: CONFIG });
+    assert.equal(resolvedImages.length, 4);
+    assert.equal(extraCount, 0);
+    const decoded = resolvedImages.map(decodeURIComponent);
+    assert.doesNotMatch(decoded[0], /transformation=/);
+    assert.doesNotMatch(decoded[1], /transformation=/);
+    assert.match(decoded[2], /transformation=e_trim/);
+    assert.doesNotMatch(decoded[3], /transformation=/);
+  });
+
+  it("uses c_pad, never c_fill/c_crop/c_lfill/c_thumb — cropping a jewelry piece is explicitly disallowed", () => {
+    const { resolvedImages } = resolveCollageImages([jewelryItem("ci-ring")], { customerId: CUSTOMER_ID, cloudinaryConfig: CONFIG });
+    const url = decodeURIComponent(resolvedImages[0]);
+    assert.match(url, /c_pad/);
+    assert.doesNotMatch(url, /c_fill|c_crop|c_lfill|c_thumb/);
+  });
+
+  it("the transformed URL is still fully signed and ownership-scoped — normalization adds no new access path", () => {
+    const { resolvedImages } = resolveCollageImages([jewelryItem("ci-bracelet")], { customerId: CUSTOMER_ID, cloudinaryConfig: CONFIG });
+    const url = decodeURIComponent(resolvedImages[0]);
+    assert.match(url, /expires_at=\d+/);
+    assert.match(url, /signature=[0-9a-f]+/);
+    assert.match(url, /type=private/);
+  });
+
+  it("ownership is still enforced before normalization is even considered — another customer's JEWELRY item resolves to null, never a transformed URL", () => {
+    const item = {
+      closetItemId: "ci-1",
+      productImageUrl: null,
+      closetItem: { imageUrl: null, imagePublicId: `naia-wardrobe/${OTHER_CUSTOMER_ID}/ci-1`, imageFormat: "jpg", category: "JEWELRY" },
+    };
+    const { resolvedImages } = resolveCollageImages([item], { customerId: CUSTOMER_ID, cloudinaryConfig: CONFIG });
+    assert.equal(resolvedImages.length, 0);
+  });
+
+  it("resolveItemImage's other callers (no transformation argument) are completely unaffected by this change", () => {
+    const url = resolveItemImage(
+      jewelryItem("ci-1"),
+      { customerId: CUSTOMER_ID, cloudinaryConfig: CONFIG },
+      // no transformation argument — matches every caller except resolveCollageImages
+    );
+    assert.ok(url);
+    assert.doesNotMatch(decodeURIComponent(url!), /transformation=/);
+  });
+});
