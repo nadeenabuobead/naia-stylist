@@ -161,6 +161,28 @@ describe("processStripeWebhookEvent — checkout.session.completed (synchronous 
     assert.deepEqual(result, { ok: true, deduped: false, action: "subscription_activated" });
   });
 
+  it("WH.3b — activation also promotes Customer.membershipStatus to MEMBER (regression: a real sandbox checkout left this field stuck at NONE)", async () => {
+    let membershipCustomerId: string | null = null;
+    let membershipStatus: string | null = null;
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findSubscriptionByProviderSubscriptionId: async () => null,
+      createSubscription: async (input) => ({ ...baseSubscription(), ...input, id: "sub-new" }),
+      createBillingTransaction: async () => {},
+      recordProcessedEvent: async () => {},
+      updateCustomerMembershipStatus: async (customerId, status) => {
+        membershipCustomerId = customerId;
+        membershipStatus = status;
+      },
+    };
+    const event = makeEvent({
+      data: { object: { client_reference_id: CUSTOMER_ID, payment_status: "paid", amount_total: 3900, currency: "aed" } },
+    });
+    await processStripeWebhookEvent(event, deps);
+    assert.equal(membershipCustomerId, CUSTOMER_ID);
+    assert.equal(membershipStatus, "MEMBER");
+  });
+
   it("WH.4 — payment_status NOT 'paid' creates an INCOMPLETE Subscription and records NO transaction — activation is never granted without confirmed payment", async () => {
     let created: any = null;
     let transactionCalls = 0;
@@ -539,6 +561,51 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
     await processStripeWebhookEvent(event, deps);
     assert.equal(updateInput.status, "CANCELED");
     assert.ok(updateInput.endedAt, "a terminal transition must set endedAt");
+  });
+
+  it("WH.9b — a terminal transition (CANCELED) also demotes Customer.membershipStatus to NONE", async () => {
+    let membershipCustomerId: string | null = null;
+    let membershipStatus: string | null = null;
+    const existing = baseSubscription({ cancelAtPeriodEnd: true });
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findSubscriptionByProviderSubscriptionId: async () => existing,
+      updateSubscriptionById: async () => {},
+      recordProcessedEvent: async () => {},
+      retrieveAuthoritativeSubscription: async () => authoritativeSnapshot({ status: "canceled" }),
+      updateCustomerMembershipStatus: async (customerId, status) => {
+        membershipCustomerId = customerId;
+        membershipStatus = status;
+      },
+    };
+    const event = makeEvent({
+      type: "customer.subscription.deleted",
+      created: 1_700_300_000,
+      data: { object: { id: "sub_stripe_1" } },
+    });
+    await processStripeWebhookEvent(event, deps);
+    assert.equal(membershipCustomerId, existing.customerId);
+    assert.equal(membershipStatus, "NONE");
+  });
+
+  it("WH.9c — entering PAST_DUE does NOT change Customer.membershipStatus (grace period keeps them entitled)", async () => {
+    let membershipCalls = 0;
+    const existing = baseSubscription({ status: "ACTIVE" });
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findSubscriptionByProviderSubscriptionId: async () => existing,
+      updateSubscriptionById: async () => {},
+      recordProcessedEvent: async () => {},
+      retrieveAuthoritativeSubscription: async () => authoritativeSnapshot({ status: "past_due" }),
+      updateCustomerMembershipStatus: async () => { membershipCalls++; },
+    };
+    const event = makeEvent({
+      type: "customer.subscription.updated",
+      created: 1_700_300_000,
+      data: { object: { id: "sub_stripe_1" } },
+    });
+    await processStripeWebhookEvent(event, deps);
+    assert.equal(membershipCalls, 0, "PAST_DUE must not touch membershipStatus either way");
   });
 
   it("WH.10 — customer.subscription.deleted after a payment-failure lapse (cancelAtPeriodEnd never set) maps to EXPIRED, not CANCELED", async () => {

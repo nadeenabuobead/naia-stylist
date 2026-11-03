@@ -75,7 +75,7 @@
 // access is never indefinite regardless of the provider's own retry
 // schedule.
 
-import type { SubscriptionStatus, BillingPlanType } from "@prisma/client";
+import type { SubscriptionStatus, BillingPlanType, MembershipStatus } from "@prisma/client";
 import prisma from "~/db.server";
 import { retrieveSubscription as stripeRetrieveSubscription, type StripeSubscriptionSnapshot } from "./stripe-client.server";
 
@@ -149,6 +149,7 @@ export interface WebhookHandlerDeps {
     occurredAt: Date;
   }) => Promise<void>;
   retrieveAuthoritativeSubscription?: (providerSubscriptionId: string) => Promise<StripeSubscriptionSnapshot | null>;
+  updateCustomerMembershipStatus?: (customerId: string, status: MembershipStatus) => Promise<void>;
 }
 
 async function defaultFindProcessedEvent(provider: string, providerEventId: string) {
@@ -231,6 +232,28 @@ async function defaultCreateSubscription(input: {
 
 async function defaultUpdateSubscriptionById(id: string, input: Record<string, unknown>) {
   await prisma.subscription.update({ where: { id }, data: input as any });
+}
+
+// The Subscription row is the billing source of truth (see this file's own
+// top-of-file design note), but Customer.membershipStatus is what the
+// customer-facing UI actually reads directly (my-naia.plan-usage.tsx's
+// isMember check, getEntitlementSummary's returned membershipStatus — see
+// entitlement.server.ts) — neither re-derives it from Subscription. Without
+// this sync, a real, successfully-paid ACTIVE subscription leaves the
+// customer's own record reading "NONE" forever, with no code path to ever
+// correct it.
+async function defaultUpdateCustomerMembershipStatus(customerId: string, status: MembershipStatus) {
+  try {
+    await prisma.customer.update({ where: { id: customerId }, data: { membershipStatus: status } });
+  } catch (err) {
+    // P2025 = record not found. Subscription.customerId is FK-constrained
+    // to a real Customer row, so this cannot happen for a genuine webhook
+    // in production — only a defensive guard, not a path real traffic
+    // should ever take. A missing customer must not fail the whole event
+    // (the Subscription/BillingTransaction writes already succeeded).
+    if ((err as any)?.code === "P2025") return;
+    throw err;
+  }
 }
 
 async function defaultCreateBillingTransaction(input: {
@@ -344,6 +367,7 @@ export async function processStripeWebhookEvent(
   const _updateSubscriptionById = deps.updateSubscriptionById ?? defaultUpdateSubscriptionById;
   const _createBillingTransaction = deps.createBillingTransaction ?? defaultCreateBillingTransaction;
   const _retrieveAuthoritativeSubscription = deps.retrieveAuthoritativeSubscription ?? defaultRetrieveAuthoritativeSubscription;
+  const _updateCustomerMembershipStatus = deps.updateCustomerMembershipStatus ?? defaultUpdateCustomerMembershipStatus;
 
   // ── Idempotency ────────────────────────────────────────────────────────────
   // Same event id redelivered (Stripe retries on anything but a 2xx, and
@@ -403,6 +427,10 @@ export async function processStripeWebhookEvent(
       action = "superseded_by_later_state";
       return;
     }
+
+    // The subscription is now ACTIVE (new or reconfirmed) — promote the
+    // customer's own record. Idempotent: a no-op write if already MEMBER.
+    await _updateCustomerMembershipStatus(customerId, "MEMBER");
 
     if (typeof obj.amount_total === "number") {
       await _createBillingTransaction({
@@ -534,6 +562,9 @@ export async function processStripeWebhookEvent(
           pastDueSince: mapStripeSubscriptionStatus(authoritative.status, null) === "PAST_DUE" ? eventCreatedAt : null,
           providerSyncedAt: eventCreatedAt,
         });
+        if (created.status === "ACTIVE" || created.status === "PAST_DUE") {
+          await _updateCustomerMembershipStatus(metaCustomerId, "MEMBER");
+        }
         action = "subscription_created_from_sync";
         break;
       }
@@ -568,6 +599,18 @@ export async function processStripeWebhookEvent(
         ...(isTerminal ? { endedAt: eventCreatedAt } : {}),
         providerSyncedAt: eventCreatedAt,
       });
+      // Keep Customer.membershipStatus in lockstep with the subscription's
+      // real entitlement-affecting transitions in both directions — not
+      // just activation (handled in activateFromCheckoutSession above).
+      // PAST_DUE deliberately does NOT trigger a change here: its grace
+      // period already keeps the customer entitled (see entitlement.
+      // server.ts's PAST_DUE handling), and membershipStatus should stay
+      // whatever it already was through that window.
+      if (isTerminal) {
+        await _updateCustomerMembershipStatus(existing.customerId, "NONE");
+      } else if (mappedStatus === "ACTIVE" && existing.status !== "ACTIVE") {
+        await _updateCustomerMembershipStatus(existing.customerId, "MEMBER");
+      }
       action = "subscription_synced";
       break;
     }
