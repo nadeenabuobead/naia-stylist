@@ -166,7 +166,7 @@ describe("processStripeWebhookEvent — checkout.session.completed (synchronous 
     assert.deepEqual(result, { ok: true, deduped: false, action: "subscription_activated" });
   });
 
-  it("WH.3c — when payment_intent is absent, providerTransactionId falls back to the Stripe EVENT id, never null — a bare `null` lets Postgres accept unlimited duplicate rows on a retry, since UNIQUE never collides two NULLs", async () => {
+  it("WH.3c — when payment_intent is absent, providerTransactionId falls back to the Checkout Session's OWN id (obj.id), never a bare event id and never null", async () => {
     let transaction: any = null;
     const deps: WebhookHandlerDeps = {
       findProcessedEvent: async () => null,
@@ -176,25 +176,26 @@ describe("processStripeWebhookEvent — checkout.session.completed (synchronous 
       recordProcessedEvent: async () => {},
     };
     const event = makeEvent({
-      id: "evt_no_payment_intent",
+      id: "evt_whatever",
       data: {
         object: {
+          id: "cs_test_1",
           client_reference_id: CUSTOMER_ID,
           payment_status: "paid",
           customer: "cus_1",
           subscription: "sub_1",
           amount_total: 3900,
           currency: "aed",
-          // No payment_intent at all — some invoice/subscription-confirmation
-          // event shapes genuinely don't carry one.
+          // No payment_intent at all — some confirmation event shapes
+          // genuinely don't carry one.
         },
       },
     });
     await processStripeWebhookEvent(event, deps);
-    assert.equal(transaction.providerTransactionId, "evt_no_payment_intent");
+    assert.equal(transaction.providerTransactionId, "cs_test_1");
   });
 
-  it("WH.3d — a retried delivery of that SAME payment_intent-less event hits the unique-column P2002 (now keyed on event.id) and is absorbed, not a second duplicate row", async () => {
+  it("WH.3d — a RETRY of the exact same event hits the unique-column P2002 (keyed on the Checkout Session id) and is absorbed, not a second duplicate row", async () => {
     let createCalls = 0;
     const deps: WebhookHandlerDeps = {
       findProcessedEvent: async () => null,
@@ -217,9 +218,10 @@ describe("processStripeWebhookEvent — checkout.session.completed (synchronous 
       recordProcessedEvent: async () => {},
     };
     const event = makeEvent({
-      id: "evt_no_payment_intent_2",
+      id: "evt_whatever_2",
       data: {
         object: {
+          id: "cs_test_2",
           client_reference_id: CUSTOMER_ID,
           payment_status: "paid",
           customer: "cus_1",
@@ -238,6 +240,39 @@ describe("processStripeWebhookEvent — checkout.session.completed (synchronous 
     assert.equal(createCalls, 2, "both attempts must reach the create call — this is what proves absorption, not pre-emption");
     assert.equal(first.ok, true);
     assert.equal(second.ok, true);
+  });
+
+  it("WH.3e — TWO DIFFERENT event ids describing the SAME underlying Checkout Session must still dedupe — event-id uniqueness alone is not proof of financial-transaction uniqueness", async () => {
+    let createCalls = 0;
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null, // neither event id has been seen before — this is NOT the event-ledger dedup path
+      findSubscriptionByProviderSubscriptionId: async () => null,
+      createSubscription: async (input) => ({ ...baseSubscription(), ...input, id: "sub-new" }),
+      createBillingTransaction: async (input) => {
+        createCalls++;
+        if (createCalls === 1) return;
+        const err: any = new Error("Unique constraint failed");
+        err.code = "P2002";
+        err.meta = { target: ["providerTransactionId"] };
+        if (isUniqueConstraintViolation(err, "providerTransactionId") && input.providerTransactionId) return;
+        throw err;
+      },
+      recordProcessedEvent: async () => {},
+    };
+    const sameSessionObject = {
+      id: "cs_same_session", // the SAME underlying Checkout Session both events describe
+      client_reference_id: CUSTOMER_ID,
+      payment_status: "paid",
+      customer: "cus_1",
+      subscription: "sub_1",
+      amount_total: 3900,
+      currency: "aed",
+    };
+    const eventA = makeEvent({ id: "evt_A_distinct", data: { object: sameSessionObject } });
+    const eventB = makeEvent({ id: "evt_B_also_distinct", data: { object: sameSessionObject } });
+    await processStripeWebhookEvent(eventA, deps);
+    await processStripeWebhookEvent(eventB, deps);
+    assert.equal(createCalls, 2, "both distinct event ids reach the create call — proving the SECOND one is absorbed by the DB constraint, not by event-id dedup, which never even considered them related");
   });
 
   it("WH.3b — activation also promotes Customer.membershipStatus to MEMBER (regression: a real sandbox checkout left this field stuck at NONE)", async () => {
@@ -906,6 +941,37 @@ describe("processStripeWebhookEvent — invoice.paid renewals", () => {
     await processStripeWebhookEvent(event, deps);
     assert.equal(transactionCalls, 0);
   });
+
+  it("WH.12c — TWO DIFFERENT event ids describing the SAME underlying invoice must dedupe to ONE renewal transaction, not be treated as two separate charges", async () => {
+    let createCalls = 0;
+    const existing = baseSubscription();
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null, // neither event id has been seen — not the event-ledger dedup path
+      findSubscriptionByProviderSubscriptionId: async () => existing,
+      createBillingTransaction: async (input) => {
+        createCalls++;
+        if (createCalls === 1) return;
+        const err: any = new Error("Unique constraint failed");
+        err.code = "P2002";
+        err.meta = { target: ["providerTransactionId"] };
+        if (isUniqueConstraintViolation(err, "providerTransactionId") && input.providerTransactionId) return;
+        throw err;
+      },
+      recordProcessedEvent: async () => {},
+    };
+    const sameInvoiceObject = {
+      id: "in_same_invoice",
+      subscription: "sub_stripe_1",
+      billing_reason: "subscription_cycle",
+      amount_paid: 3900,
+      currency: "aed",
+    };
+    const eventA = makeEvent({ id: "evt_inv_A", type: "invoice.paid", data: { object: sameInvoiceObject } });
+    const eventB = makeEvent({ id: "evt_inv_B", type: "invoice.paid", data: { object: sameInvoiceObject } });
+    await processStripeWebhookEvent(eventA, deps);
+    await processStripeWebhookEvent(eventB, deps);
+    assert.equal(createCalls, 2, "both distinct event ids reach the create call; the SECOND is absorbed by the invoice-id-keyed DB constraint");
+  });
 });
 
 // ── invoice.payment_failed — failed-charge ledger entries, status untouched ─
@@ -932,6 +998,63 @@ describe("processStripeWebhookEvent — invoice.payment_failed", () => {
     assert.equal(transaction.amount, 3900);
     assert.equal(updateCalls, 0, "status transitions belong exclusively to customer.subscription.updated");
     assert.deepEqual(result, { ok: true, deduped: false, action: "payment_failure_recorded" });
+  });
+
+  it("WH.22b — TWO DIFFERENT event ids for the SAME invoice AND SAME attempt_count must dedupe to ONE failure record", async () => {
+    let createCalls = 0;
+    const existing = baseSubscription();
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findSubscriptionByProviderSubscriptionId: async () => existing,
+      createBillingTransaction: async (input) => {
+        createCalls++;
+        if (createCalls === 1) return;
+        const err: any = new Error("Unique constraint failed");
+        err.code = "P2002";
+        err.meta = { target: ["providerTransactionId"] };
+        if (isUniqueConstraintViolation(err, "providerTransactionId") && input.providerTransactionId) return;
+        throw err;
+      },
+      recordProcessedEvent: async () => {},
+    };
+    const sameAttemptObject = {
+      id: "in_dunning_1",
+      subscription: "sub_stripe_1",
+      billing_reason: "subscription_cycle",
+      amount_due: 3900,
+      currency: "aed",
+      attempt_count: 1,
+    };
+    const eventA = makeEvent({ id: "evt_fail_A", type: "invoice.payment_failed", data: { object: sameAttemptObject } });
+    const eventB = makeEvent({ id: "evt_fail_B", type: "invoice.payment_failed", data: { object: sameAttemptObject } });
+    await processStripeWebhookEvent(eventA, deps);
+    await processStripeWebhookEvent(eventB, deps);
+    assert.equal(createCalls, 2, "both distinct event ids reach the create call; the SECOND is absorbed — same invoice, same attempt");
+  });
+
+  it("WH.22c — a SECOND, genuinely DIFFERENT dunning attempt on the SAME invoice must NOT be collapsed with the first — each real-world failed charge keeps its own ledger row", async () => {
+    const existing = baseSubscription();
+    const createdTransactions: any[] = [];
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findSubscriptionByProviderSubscriptionId: async () => existing,
+      createBillingTransaction: async (input) => { createdTransactions.push(input); },
+      recordProcessedEvent: async () => {},
+    };
+    const attempt1 = makeEvent({
+      id: "evt_fail_attempt_1",
+      type: "invoice.payment_failed",
+      data: { object: { id: "in_dunning_2", subscription: "sub_stripe_1", billing_reason: "subscription_cycle", amount_due: 3900, currency: "aed", attempt_count: 1 } },
+    });
+    const attempt2 = makeEvent({
+      id: "evt_fail_attempt_2",
+      type: "invoice.payment_failed",
+      data: { object: { id: "in_dunning_2", subscription: "sub_stripe_1", billing_reason: "subscription_cycle", amount_due: 3900, currency: "aed", attempt_count: 2 } },
+    });
+    await processStripeWebhookEvent(attempt1, deps);
+    await processStripeWebhookEvent(attempt2, deps);
+    assert.equal(createdTransactions.length, 2, "two genuinely distinct dunning attempts on the same invoice must both be recorded, not collapsed into one");
+    assert.notEqual(createdTransactions[0].providerTransactionId, createdTransactions[1].providerTransactionId);
   });
 
   it("WH.23 — a first-invoice failure (billing_reason subscription_create) records SUBSCRIPTION_INITIAL, not _RENEWAL", async () => {

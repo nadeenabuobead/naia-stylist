@@ -465,10 +465,16 @@ export async function processStripeWebhookEvent(
         subscriptionId: sub.id,
         type: "SUBSCRIPTION_INITIAL",
         status: "SUCCEEDED",
+        // obj.id (the Checkout Session id) is the correct fallback, not
+        // event.id — a Checkout Session completes payment exactly once by
+        // construction, so this is a genuine financial-uniqueness key, not
+        // merely a redelivery-of-the-same-event guard. See the comment on
+        // the invoice.payment_failed branch below for why THAT one needs
+        // an attempt-aware key instead of the bare object id.
+        providerTransactionId: obj.payment_intent ?? obj.id,
+        occurredAt: eventCreatedAt,
         amount: obj.amount_total,
         currency: (obj.currency ?? "aed").toUpperCase(),
-        providerTransactionId: obj.payment_intent ?? event.id,
-        occurredAt: eventCreatedAt,
       });
     }
     action = wasAlreadyActive ? "already_active_charge_reconciled" : "subscription_activated";
@@ -675,7 +681,13 @@ export async function processStripeWebhookEvent(
         status: "SUCCEEDED",
         amount: obj.amount_paid,
         currency: (obj.currency ?? "aed").toUpperCase(),
-        providerTransactionId: obj.payment_intent ?? event.id,
+        // obj.id (the Invoice id), not event.id — an invoice transitions to
+        // paid exactly once by construction, so this is a genuine
+        // financial-uniqueness key: it also catches two DIFFERENT event ids
+        // that both describe the same underlying invoice (Stripe does not
+        // guarantee one event id per logical occurrence), not just an exact
+        // redelivery of the same event.
+        providerTransactionId: obj.payment_intent ?? obj.id,
         occurredAt: eventCreatedAt,
       });
       action = "renewal_recorded";
@@ -698,7 +710,18 @@ export async function processStripeWebhookEvent(
         status: "FAILED",
         amount: typeof obj.amount_due === "number" ? obj.amount_due : 0,
         currency: (obj.currency ?? "aed").toUpperCase(),
-        providerTransactionId: obj.payment_intent ?? event.id,
+        // Deliberately NOT the bare obj.id (Invoice id) here, unlike the
+        // invoice.paid branch above — an invoice transitions to PAID
+        // exactly once, but Stripe's own dunning schedule can fire
+        // invoice.payment_failed several times for the SAME invoice id,
+        // one per retry attempt, each a genuinely distinct real-world
+        // failed charge worth its own ledger row. Keying on the bare
+        // invoice id would collapse every retry's failure into the first
+        // one, silently losing attempts 2+ to the P2002 absorption below.
+        // attempt_count (present on every Stripe Invoice) makes each
+        // attempt's key distinct while still being fully stable across a
+        // genuine redelivery of the exact same attempt.
+        providerTransactionId: obj.payment_intent ?? `${obj.id}:attempt-${obj.attempt_count ?? 0}`,
         occurredAt: eventCreatedAt,
       });
       action = "payment_failure_recorded";
