@@ -1,4 +1,4 @@
-import { createHash, randomBytes, timingSafeEqual } from "crypto";
+import { createHash, createCipheriv, createDecipheriv, randomBytes, timingSafeEqual } from "crypto";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 
 // ---------------------------------------------------------------------------
@@ -60,10 +60,9 @@ function getJwksSet(jwksUri: string) {
 // ---------------------------------------------------------------------------
 
 export interface PkceBundle {
-  codeVerifier:  string; // stored in signed session cookie
+  codeVerifier:  string; // carried in the encrypted `state` param — see encodeOAuthState
   codeChallenge: string; // sent in authorization URL
-  state:         string; // sent in URL, stored in session, compared in callback
-  nonce:         string; // sent in URL, stored in session, compared in id_token
+  nonce:         string; // sent in URL; carried in `state`, compared in id_token
 }
 
 export function generatePkceBundle(): PkceBundle {
@@ -71,9 +70,146 @@ export function generatePkceBundle(): PkceBundle {
   const codeChallenge = createHash("sha256")
     .update(codeVerifier)
     .digest("base64url");
-  const state = randomBytes(16).toString("hex");
   const nonce = randomBytes(16).toString("hex");
-  return { codeVerifier, codeChallenge, state, nonce };
+  return { codeVerifier, codeChallenge, nonce };
+}
+
+// ---------------------------------------------------------------------------
+// OAuth state — carries the PKCE handshake THROUGH Shopify's `state` param
+// instead of a cookie.
+//
+// Integration note (2026-11-04): this replaces the SameSite=None handshake
+// cookie this app used to rely on — two independent real sandbox-environment
+// login attempts (fix/sandbox-postgres-migration-compat) lost that cookie
+// between auth.shopify.login setting it and auth.shopify.callback reading it
+// back after Shopify's hosted-login redirect. A direct curl+cookie replay
+// proved the server-side cookie mechanism was correct in isolation — the
+// browser simply wasn't reliably delivering it back through that specific
+// redirect chain. `state` has no such failure mode: Shopify's authorization
+// server is REQUIRED to echo it back verbatim, independent of cookies,
+// SameSite, or any browser tracking-prevention heuristic.
+//
+// originHost/originNonceHash are carried here too (rather than in a second,
+// separate signed value) so the cross-domain preview handoff (see
+// shouldBounceToStorefront and auth.shopify.callback's own originHost
+// branch) keeps working exactly as before — those two fields are otherwise
+// unchanged in meaning and validation (validateOriginHost below), this just
+// moves WHERE they are carried during the PKCE round trip specifically.
+//
+// AES-256-GCM gives this both confidentiality (the code_verifier never
+// appears in plaintext in a URL, browser history, or Shopify's own
+// referrer/access logs) and integrity (a tampered or forged state value
+// fails decryption outright). The authentication tag IS the CSRF binding —
+// forging a value that decrypts successfully requires SESSION_SECRET.
+//
+// bindingHash restores browser binding on top of this: state alone is a
+// self-contained, protocol-echoed URL value with NO binding to the browser
+// that started the flow, so anyone who later obtained a valid code+state
+// pair (shared-device history, a leaked Referer, a compromised network)
+// could otherwise redeem it from a different device entirely. See
+// generateBindingToken/verifyBindingToken below — the cookie it checks is
+// deliberately SameSite=Lax (not None), which browsers deliver correctly on
+// a top-level GET redirect back from Shopify, unlike the None-cookie that
+// broke the old handshake.
+const OAUTH_STATE_MAX_AGE_MS = 10 * 60 * 1000; // generous for a real login, bounded against replay
+
+function oauthStateKey(): Buffer {
+  const secret = process.env.SESSION_SECRET;
+  if (!secret) throw new Error("SESSION_SECRET is not set");
+  return createHash("sha256").update(`${secret}:oauth-state-v1`).digest();
+}
+
+export interface OAuthStatePayload {
+  verifier:        string;
+  nonce:           string;
+  returnTo:        string;
+  bindingHash:     string;
+  originHost?:     string;
+  originNonceHash?: string;
+}
+
+export function encodeOAuthState(payload: OAuthStatePayload): string {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", oauthStateKey(), iv);
+  const json = JSON.stringify({ ...payload, issuedAt: Date.now() });
+  const ciphertext = Buffer.concat([cipher.update(json, "utf8"), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return Buffer.concat([iv, authTag, ciphertext]).toString("base64url");
+}
+
+export function decodeOAuthState(token: string): OAuthStatePayload | null {
+  try {
+    const raw = Buffer.from(token, "base64url");
+    const iv = raw.subarray(0, 12);
+    const authTag = raw.subarray(12, 28);
+    const ciphertext = raw.subarray(28);
+    const decipher = createDecipheriv("aes-256-gcm", oauthStateKey(), iv);
+    decipher.setAuthTag(authTag);
+    const json = Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
+    const parsed = JSON.parse(json);
+    if (Date.now() - parsed.issuedAt > OAUTH_STATE_MAX_AGE_MS) return null;
+    if (
+      typeof parsed.verifier !== "string" ||
+      typeof parsed.nonce !== "string" ||
+      typeof parsed.returnTo !== "string" ||
+      typeof parsed.bindingHash !== "string"
+    ) {
+      return null;
+    }
+    return {
+      verifier: parsed.verifier,
+      nonce: parsed.nonce,
+      returnTo: parsed.returnTo,
+      bindingHash: parsed.bindingHash,
+      originHost: typeof parsed.originHost === "string" ? parsed.originHost : undefined,
+      originNonceHash: typeof parsed.originNonceHash === "string" ? parsed.originNonceHash : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Browser binding — a SHORT-LIVED, SameSite=Lax cookie. See encodeOAuthState's
+// own comment for why Lax (not None) and why this exists at all.
+// ---------------------------------------------------------------------------
+
+export function generateBindingToken(): string {
+  return randomBytes(32).toString("base64url");
+}
+
+export function hashBindingToken(token: string): string {
+  return createHash("sha256").update(token).digest("base64url");
+}
+
+export const OAUTH_BINDING_COOKIE_NAME = "__naia_oauth_bind";
+export const OAUTH_BINDING_COOKIE_MAX_AGE_SECONDS = OAUTH_STATE_MAX_AGE_MS / 1000;
+
+// Minimal, dependency-free single-cookie extraction — this flow only ever
+// needs to read back the one cookie it set itself.
+export function extractCookieValue(cookieHeader: string | null, name: string): string | null {
+  if (!cookieHeader) return null;
+  for (const part of cookieHeader.split(";")) {
+    const eq = part.indexOf("=");
+    if (eq === -1) continue;
+    const key = part.slice(0, eq).trim();
+    if (key === name) return part.slice(eq + 1).trim();
+  }
+  return null;
+}
+
+export function verifyBindingToken(cookieHeader: string | null, expectedHash: string): boolean {
+  const token = extractCookieValue(cookieHeader, OAUTH_BINDING_COOKIE_NAME);
+  if (!token) return false;
+  const actualHash = hashBindingToken(token);
+  try {
+    return (
+      actualHash.length === expectedHash.length &&
+      timingSafeEqual(Buffer.from(actualHash), Buffer.from(expectedHash))
+    );
+  } catch {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -82,15 +218,16 @@ export function generatePkceBundle(): PkceBundle {
 
 export function buildAuthorizationUrl(
   oidcConfig: OidcConfig,
-  bundle: PkceBundle,
-  redirectUri: string
+  bundle: Pick<PkceBundle, "codeChallenge" | "nonce">,
+  redirectUri: string,
+  state: string,
 ): string {
   const url = new URL(oidcConfig.authorization_endpoint);
   url.searchParams.set("client_id",              process.env.SHOPIFY_API_KEY!);
   url.searchParams.set("scope",                  "openid email customer-account-api:full");
   url.searchParams.set("redirect_uri",           redirectUri);
   url.searchParams.set("response_type",          "code");
-  url.searchParams.set("state",                  bundle.state);
+  url.searchParams.set("state",                  state);
   url.searchParams.set("nonce",                  bundle.nonce);
   url.searchParams.set("code_challenge",         bundle.codeChallenge);
   url.searchParams.set("code_challenge_method",  "S256");
