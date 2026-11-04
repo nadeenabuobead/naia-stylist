@@ -78,7 +78,17 @@ enum MembershipStatus {
 
 model Customer {
   id                String           @id @default(cuid())
-  shopifyCustomerId String           @unique
+  // Nullable as of the Clerk migration (2026-11-04) — a customer created
+  // through Clerk never goes through Shopify OAuth and so never gets one.
+  // Every row created before this migration already has a value; nothing
+  // backfills this to null retroactively.
+  shopifyCustomerId String?          @unique
+  // Nullable until a Customer either signs up fresh through Clerk or an
+  // existing (pre-Clerk) row completes the verified identity-linking flow —
+  // see IdentityLinkRequest. A Customer can exist with EITHER id populated,
+  // BOTH (a linked legacy account), or (transiently, mid-migration) neither
+  // on a pre-Clerk row that hasn't signed in since the cutover yet.
+  clerkUserId       String?          @unique
   email             String?          @unique
   firstName         String?
   lastName          String?
@@ -116,6 +126,13 @@ model Customer {
   subscriptions       Subscription[]
   billingTransactions BillingTransaction[]
 
+  // Clerk migration (2026-11-04) — pending, unconfirmed claims against this
+  // row from a NEW Clerk identity whose sign-up email matched. See
+  // IdentityLinkRequest's own comment for the full flow; this relation
+  // exists only so a row can be queried for its own pending claims, it is
+  // never read as "already linked" on its own.
+  identityLinkRequests IdentityLinkRequest[]
+
   // ── Secondary use of this customer's data for NADINE design research ──────
   //
   // Opt-in only, and the default is no. Declining changes nothing about the
@@ -152,6 +169,47 @@ enum AccountType {
   TEST
   DEMO
   QA
+}
+
+// ── Identity linking — Clerk migration (2026-11-04) ──────────────────────────
+//
+// A brand-new Clerk sign-up whose email matches an existing (pre-Clerk)
+// Customer row is NEVER auto-attached to that row on email match alone —
+// explicit product decision. This table is the pending, unconfirmed claim:
+// it exists from the moment the collision is detected until the person
+// either proves ownership of the matched row (a one-time code sent to the
+// email already on file — not to whatever the new Clerk signup typed, since
+// those are the same string here but the point is the code goes to the
+// address this app already trusts) or abandons the claim.
+//
+// On confirmation: the resolver sets Customer.clerkUserId to this row's
+// clerkUserId and deletes this row — see identity-linking.server.ts. Until
+// then, the new Clerk identity has no Customer row of its own and cannot
+// read or write any nAia data; it exists only to hold this one pending claim.
+model IdentityLinkRequest {
+  id         String  @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  // The new Clerk identity asking to claim customerId. Unique — a given
+  // Clerk user can have at most one open claim at a time; a second sign-up
+  // attempt with the same collision reuses/replaces this row rather than
+  // stacking a duplicate.
+  clerkUserId String @unique
+
+  // Snapshot of the email the collision was detected on, for audit purposes
+  // only — Customer.email itself is the live value this flow is protecting.
+  email String
+
+  // SHA-256 of the one-time verification code. The raw code is never
+  // persisted anywhere, same discipline as naia-session.server's tokenHash.
+  codeHash     String
+  attemptCount Int       @default(0)
+  expiresAt    DateTime
+  confirmedAt  DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([customerId])
 }
 
 /// A point-in-time reading of the wardrobe, so "what changed?" has a before.

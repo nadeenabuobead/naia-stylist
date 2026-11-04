@@ -116,10 +116,13 @@ vi.mock("~/db.server", () => {
 });
 
 import prisma from "~/db.server";
-import {
-  getCurrentNaiaCustomer,
-  requireCurrentNaiaCustomer,
-} from "~/lib/naia-session.server";
+// SUPERSEDED scope (2026-11-04): getCurrentNaiaCustomer/requireCurrentNaiaCustomer
+// no longer read the __naia_tok cookie or NaiaSession table this block mocks —
+// see naia-session.server.ts's own banner comment and clerk-session.test.ts
+// for the live, Clerk-backed path's equivalent coverage. resolveNaiaSession
+// itself is unchanged and still the real implementation behind the legacy
+// Shopify OAuth routes, so this block keeps testing IT directly.
+import { resolveNaiaSession } from "~/lib/naia-session.server";
 
 const mockFindUnique = () =>
   (prisma.naiaSession as any).findUnique as ReturnType<typeof vi.fn>;
@@ -166,14 +169,14 @@ describe("§B NaiaSession unit behaviour", () => {
 
   it("B01 — valid __naia_tok cookie resolves the customer", async () => {
     mockFindUnique().mockResolvedValueOnce(MOCK_SESSION);
-    const customer = await getCurrentNaiaCustomer(makeCookieRequest("valid-raw-token"));
+    const customer = await resolveNaiaSession(makeCookieRequest("valid-raw-token"));
     expect(customer).not.toBeNull();
     expect(customer?.id).toBe("real-customer-id");
     expect(mockFindUnique()).toHaveBeenCalledOnce();
   });
 
   it("B02 — no cookie returns null (unauthenticated)", async () => {
-    const customer = await getCurrentNaiaCustomer(makeRequestNoCookie());
+    const customer = await resolveNaiaSession(makeRequestNoCookie());
     expect(customer).toBeNull();
     // No DB call when there is no cookie — short-circuit at token extraction.
     expect(mockFindUnique()).not.toHaveBeenCalled();
@@ -181,13 +184,13 @@ describe("§B NaiaSession unit behaviour", () => {
 
   it("B03 — unknown token (not in DB) returns null", async () => {
     mockFindUnique().mockResolvedValueOnce(null);
-    const customer = await getCurrentNaiaCustomer(makeCookieRequest("unknown-token"));
+    const customer = await resolveNaiaSession(makeCookieRequest("unknown-token"));
     expect(customer).toBeNull();
   });
 
   it("B04 — expired session returns null and deletes the record", async () => {
     mockFindUnique().mockResolvedValueOnce(EXPIRED_SESSION);
-    const customer = await getCurrentNaiaCustomer(makeCookieRequest("expired-token"));
+    const customer = await resolveNaiaSession(makeCookieRequest("expired-token"));
     expect(customer).toBeNull();
     // A delete is scheduled (fire-and-forget).
     await vi.waitFor(() => expect(
@@ -200,7 +203,7 @@ describe("§B NaiaSession unit behaviour", () => {
     const url = "http://localhost/test?naia_token=" + btoa(JSON.stringify({ shopifyId: "123" }));
     const request = new Request(url);
     // NaiaSession reads only the __naia_tok cookie; the URL param is ignored entirely.
-    const customer = await getCurrentNaiaCustomer(request);
+    const customer = await resolveNaiaSession(request);
     expect(customer).toBeNull();
     expect(mockFindUnique()).not.toHaveBeenCalled();
   });
@@ -210,7 +213,7 @@ describe("§B NaiaSession unit behaviour", () => {
     const fakeData = btoa(JSON.stringify({ shopifyId: "456", email: "forged@example.com" }));
     const request  = makeRequestFakeCookie("naia_customer_data", fakeData);
     // NaiaSession reads only __naia_tok; the naia_customer_data cookie is ignored.
-    const customer = await getCurrentNaiaCustomer(request);
+    const customer = await resolveNaiaSession(request);
     expect(customer).toBeNull();
     expect(mockFindUnique()).not.toHaveBeenCalled();
   });
@@ -218,25 +221,15 @@ describe("§B NaiaSession unit behaviour", () => {
   it("B07 — forged __naia_tok with invalid base64url chars is silently rejected (no DB call)", async () => {
     // The cookie regex only matches [A-Za-z0-9_-]; non-matching chars reject at extraction.
     const request = makeRequestFakeCookie("__naia_tok", "!INVALID!TOKEN!VALUE!");
-    const customer = await getCurrentNaiaCustomer(request);
+    const customer = await resolveNaiaSession(request);
     expect(customer).toBeNull();
     expect(mockFindUnique()).not.toHaveBeenCalled();
   });
 
-  it("B08 — requireCurrentNaiaCustomer throws a redirect when no session", async () => {
-    await expect(
-      requireCurrentNaiaCustomer(makeRequestNoCookie())
-    ).rejects.toSatisfy((e: unknown) => {
-      // React Router redirect throws a Response with Location header
-      return e instanceof Response && e.status === 302;
-    });
-  });
-
-  it("B09 — requireCurrentNaiaCustomer returns the customer when session is valid", async () => {
-    mockFindUnique().mockResolvedValueOnce(MOCK_SESSION);
-    const customer = await requireCurrentNaiaCustomer(makeCookieRequest("valid-token"));
-    expect(customer.id).toBe("real-customer-id");
-  });
+  // B08/B09 (requireCurrentNaiaCustomer's own redirect-on-no-session and
+  // valid-session-resolves behavior) moved to clerk-session.test.ts — that
+  // function is Clerk-backed now, and no longer reachable from the
+  // __naia_tok cookie mocks this block sets up.
 
 });
 

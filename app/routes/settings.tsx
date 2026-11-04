@@ -33,7 +33,8 @@ import { useState, useEffect } from "react";
 import type { ActionFunctionArgs, LinksFunction, LoaderFunctionArgs } from "react-router";
 import { useLoaderData, useFetcher, useRevalidator, Link } from "react-router";
 import { data, redirect } from "react-router";
-import { requireCurrentNaiaCustomer, buildClearSessionCookieHeader } from "~/lib/naia-session.server";
+import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
+import { getAuth, clerkClient } from "@clerk/react-router/server";
 import { compileCustomerExport, eraseCustomerData } from "~/lib/customer-privacy.server";
 import prisma from "~/db.server";
 import { conciseFamilyName } from "~/lib/customer-name-display";
@@ -129,7 +130,8 @@ const SUCCESS_MESSAGES: Record<DestructiveIntent, string> = {
   "delete-account":           "Your account and all associated data have been permanently deleted.",
 };
 
-export async function action({ request }: ActionFunctionArgs) {
+export async function action(args: ActionFunctionArgs) {
+  const { request } = args;
   const customer = await requireCurrentNaiaCustomer(request);
   const formData  = await request.formData();
   const intent    = formData.get("intent");
@@ -188,9 +190,17 @@ export async function action({ request }: ActionFunctionArgs) {
       // redirects, the same pattern /auth/logout already uses, rather than
       // returning to a page for a customer who no longer has an account.
       await eraseCustomerData(customer.id);
-      return redirect("/auth/signed-out", {
-        headers: { "Set-Cookie": buildClearSessionCookieHeader() },
-      });
+      // Clerk (2026-11-04) — deleting the Customer row already makes
+      // getCurrentNaiaCustomer return null for this clerkUserId (no data
+      // leakage either way), but the Clerk session itself is a separate
+      // lifecycle Clerk owns — it does not end just because our own row is
+      // gone. Revoke it explicitly so "delete my account" actually signs
+      // the person out, not just out of nAia's own data.
+      const { sessionId } = await getAuth(args);
+      if (sessionId) {
+        await clerkClient(args).sessions.revokeSession(sessionId).catch(() => {});
+      }
+      return redirect("/auth/signed-out");
     }
   }
 

@@ -92,6 +92,21 @@ export default [
   route("passport/selfie", "routes/passport.selfie.tsx"),
   route("style-session-new", "routes/style-session-new/_index.tsx"),
   route("auth/login", "routes/auth.login/route.jsx"),
+  // Clerk — nAia's primary customer-auth provider (2026-11-04). Splat
+  // routes, per Clerk's own React Router SDK requirement: SignIn/SignUp
+  // render Clerk's own multi-step sub-paths (factor-one, verify-email,
+  // reset-password, ...) under these prefixes.
+  route("sign-in/*", "routes/sign-in.tsx"),
+  route("sign-up/*", "routes/sign-up.tsx"),
+  // Where Clerk's own <SignUp/> component redirects once IT considers the
+  // person signed up — this is where the nAia-specific Customer-provisioning
+  // step (resolveCustomerForClerkSignUp) actually runs, server-side. A
+  // separate top-level path, not nested under sign-up/*, since Clerk's own
+  // splat route owns every path under that prefix for its multi-step UI.
+  route("auth/clerk-callback", "routes/auth.clerk-callback.tsx"),
+  route("account/link-identity", "routes/account.link-identity.tsx"),
+  // Legacy — superseded by the Clerk routes above but not yet removed; see
+  // naia-session.server.ts's own SUPERSEDED banner comment.
   route("auth/shopify/login", "routes/auth.shopify.login.tsx"),
   route("auth/shopify/callback", "routes/auth.shopify.callback.tsx"),
   // Cross-domain handoff for a preview-deployment-initiated login — see

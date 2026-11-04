@@ -1,7 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
-import { redirect } from "react-router";
 import prisma from "~/db.server";
-import { validateOriginHost } from "~/lib/shopify-customer-oauth.server";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -303,54 +301,20 @@ export async function destroySessionAndGetHint(request: Request): Promise<string
 }
 
 // ---------------------------------------------------------------------------
-// Exported auth helpers for use in loaders / actions
+// SUPERSEDED (2026-11-04) — getCurrentNaiaCustomer/requireCurrentNaiaCustomer
+// used to live here, resolving the customer from the __naia_tok cookie via
+// resolveNaiaSession below. Clerk is now nAia's primary customer-auth
+// provider; both names are re-exported from clerk-session.server.ts instead
+// (same signature, same return shape — every existing caller in the app
+// needed zero changes). Everything else in this file — resolveNaiaSession,
+// createNaiaSession, promoteHandoffSession, the handoff-nonce and session
+// cookie builders, destroySessionAndGetHint — is untouched and still the
+// real implementation behind the legacy Shopify OAuth routes
+// (auth.shopify.login/callback/handoff.tsx, auth.logout.tsx), which import
+// these names directly and still work exactly as before. Nothing here was
+// deleted; this is the superseded half of the module, not dead code to
+// clean up casually — auth.shopify.* still runs, it's just no longer what
+// requireCurrentNaiaCustomer sends an unauthenticated visitor to.
 // ---------------------------------------------------------------------------
 
-export async function getCurrentNaiaCustomer(request: Request) {
-  return resolveNaiaSession(request);
-}
-
-export async function requireCurrentNaiaCustomer(request: Request) {
-  const customer = await getCurrentNaiaCustomer(request);
-  if (!customer) {
-    const url      = new URL(request.url);
-    const returnTo = encodeURIComponent(url.pathname);
-    // When STOREFRONT_HOST is set, send the browser directly to the storefront
-    // login URL (absolute). This ensures the PKCE cookie is set on the storefront
-    // domain where Shopify will deliver the callback, with no staging-domain detour.
-    // _sf=1 tells auth.shopify.login to skip its own storefront-redirect check.
-    const sfHost = process.env.STOREFRONT_HOST ?? "";
-    if (sfHost) {
-      // Preview deployments only: ephemeral preview URLs can't be registered
-      // as a Shopify redirect_uri, so the whole login/callback dance is
-      // forced onto sfHost regardless of which host this request actually
-      // came in on. Without remembering that origin, the post-auth redirect
-      // silently lands the browser on sfHost instead of the preview that
-      // started the flow. url.hostname is exactly what the browser's
-      // address bar shows — validateOriginHost is what keeps this from
-      // being an open redirect (only this app's own preview pattern, the
-      // storefront host itself, or the canonical app host are accepted;
-      // anything else is dropped, and production never sets this at all
-      // since it has no reason to differ from sfHost in the first place).
-      const originHost =
-        process.env.VERCEL_ENV !== "production" ? validateOriginHost(url.hostname) : null;
-      const crossesDomain = Boolean(originHost && originHost !== sfHost);
-
-      const headers = new Headers();
-      let nonceParam = "";
-      if (crossesDomain) {
-        const nonce = buildHandoffNonceCookie();
-        headers.append("Set-Cookie", nonce.cookieHeader);
-        nonceParam = `&origin_nonce_hash=${nonce.nonceHash}`;
-      }
-
-      const originParam = crossesDomain ? `&origin_host=${encodeURIComponent(originHost!)}` : "";
-      throw redirect(
-        `https://${sfHost}/auth/shopify/login?_sf=1&return_to=${returnTo}${originParam}${nonceParam}`,
-        { headers },
-      );
-    }
-    throw redirect(`/auth/shopify/login?return_to=${returnTo}`);
-  }
-  return customer;
-}
+export { getCurrentNaiaCustomer, requireCurrentNaiaCustomer } from "./clerk-session.server";

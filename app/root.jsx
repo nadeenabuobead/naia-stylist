@@ -1,5 +1,15 @@
-import { Links, Meta, Outlet, Scripts, ScrollRestoration, useLocation, useRouteError, isRouteErrorResponse } from "react-router";
+import { Links, Meta, Outlet, Scripts, ScrollRestoration, useLocation, useRouteError, isRouteErrorResponse, useLoaderData } from "react-router";
 import { useEffect } from "react";
+import { rootAuthLoader } from "@clerk/react-router/server";
+import { ClerkProvider } from "@clerk/react-router";
+
+// Clerk (2026-11-04) — makes the signed-in/signed-out state available to
+// every route's own loader via context, and to client components
+// (ClerkProvider below) via loaderData. Every other existing loader in the
+// app is untouched; this wraps the root loader only.
+export async function loader(args) {
+  return rootAuthLoader(args);
+}
 
 function ScrollToTop() {
   const { pathname, hash } = useLocation();
@@ -90,7 +100,12 @@ export function Layout({ children }) {
 }
 
 export default function App() {
-  return <Outlet />;
+  const loaderData = useLoaderData();
+  return (
+    <ClerkProvider loaderData={loaderData}>
+      <Outlet />
+    </ClerkProvider>
+  );
 }
 
 // Root-level ErrorBoundary — catches any uncaught loader/action/render

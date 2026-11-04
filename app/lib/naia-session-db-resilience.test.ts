@@ -1,19 +1,22 @@
 // app/lib/naia-session-db-resilience.test.ts
 //
-// Live root cause: a transient Prisma P1001 ("Can't reach database server")
-// on resolveNaiaSession's findUnique call propagated uncaught through
-// requireCurrentNaiaCustomer on an ordinary /settings navigation, and with
-// no ErrorBoundary anywhere in the app, rendered as a raw "Application
-// Error" to a customer who was, in fact, still validly signed in.
+// SUPERSEDED scope (2026-11-04): getCurrentNaiaCustomer/requireCurrentNaiaCustomer
+// no longer resolve through resolveNaiaSession/the __naia_tok cookie — see
+// clerk-session.server.ts and clerk-session.test.ts for the live path's own
+// version of this exact regression guard. resolveNaiaSession itself is
+// unchanged, still the real implementation behind the legacy Shopify OAuth
+// routes, so this file keeps testing IT directly rather than through the
+// requireCurrentNaiaCustomer wrapper it's no longer reachable from.
 //
-// The fix does NOT catch-and-return-null on a DB failure — that would
+// Original root cause this guards against: a transient Prisma P1001 ("Can't
+// reach database server") on resolveNaiaSession's findUnique call propagated
+// uncaught, and with no ErrorBoundary anywhere in the app, rendered as a raw
+// "Application Error" to a customer who was, in fact, still validly signed
+// in. The fix does NOT catch-and-return-null on a DB failure — that would
 // collapse "couldn't check" into "not signed in" and silently bounce a
 // genuinely-authenticated customer into fresh Shopify OAuth, which is its
-// own, worse regression (explicitly what this file's "misclassification"
-// tests guard against). Instead, a recognized transient-connectivity error
-// is rethrown as a typed DatabaseUnavailableError, which requireCurrent-
-// NaiaCustomer never catches — it propagates all the way to the root
-// ErrorBoundary, not into the login-redirect branch.
+// own, worse regression. Instead, a recognized transient-connectivity error
+// is rethrown as a typed DatabaseUnavailableError.
 //
 // No live DB available to this test run — prisma is mocked here exactly as
 // every other DB-touching unit in this codebase with no DB-integration
@@ -37,7 +40,7 @@ vi.mock("~/db.server", () => ({
   },
 }));
 
-import { resolveNaiaSession, requireCurrentNaiaCustomer, DatabaseUnavailableError } from "./naia-session.server";
+import { resolveNaiaSession, DatabaseUnavailableError } from "./naia-session.server";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -111,36 +114,20 @@ describe("resolveNaiaSession() — no session vs. database unavailable are diffe
   });
 });
 
-describe("requireCurrentNaiaCustomer() — a DB-unavailable error must never become a login redirect", () => {
-  it("no session — throws the normal login redirect (unchanged existing behavior)", async () => {
-    findUniqueMock.mockResolvedValue(null);
-    await expect(requireCurrentNaiaCustomer(requestWithCookie())).rejects.toMatchObject({
-      status: 302,
-    });
-  });
+describe("resolveNaiaSession() — the legacy Shopify-OAuth path's own DB-unavailable guard still holds unchanged", () => {
+  // requireCurrentNaiaCustomer itself is no longer reachable from here (see
+  // this file's header) — these exercise resolveNaiaSession directly, which
+  // is exactly what the legacy auth.shopify.* routes still call.
 
-  it("valid session — resolves to the customer, no redirect thrown", async () => {
-    const customer = { id: "cust-1" };
-    findUniqueMock.mockResolvedValue({
-      customerId: "cust-1",
-      expiresAt: new Date(Date.now() + 1000 * 60 * 60),
-      customer,
-    });
-    const result = await requireCurrentNaiaCustomer(requestWithCookie());
-    expect(result).toBe(customer);
-  });
-
-  it("MISCLASSIFICATION REGRESSION — a P1001 propagates as DatabaseUnavailableError, NOT a 302 login redirect: a signed-in customer must never be bounced into fresh Shopify auth just because the DB had a bad moment", async () => {
+  it("MISCLASSIFICATION REGRESSION — a P1001 propagates as DatabaseUnavailableError, never collapsed to null", async () => {
     findUniqueMock.mockRejectedValue(prismaKnownError("P1001", "Can't reach database server"));
-    const rejection = await requireCurrentNaiaCustomer(requestWithCookie()).catch((e) => e);
+    const rejection = await resolveNaiaSession(requestWithCookie()).catch((e) => e);
     expect(rejection).toBeInstanceOf(DatabaseUnavailableError);
-    // Explicitly not a redirect Response of any kind.
-    expect(rejection).not.toHaveProperty("status", 302);
   });
 
-  it("a pool-timeout error also propagates uncaught, never silently redirecting to login", async () => {
+  it("a pool-timeout error also propagates uncaught, never silently resolved to null", async () => {
     findUniqueMock.mockRejectedValue(prismaPoolTimeoutError());
-    const rejection = await requireCurrentNaiaCustomer(requestWithCookie()).catch((e) => e);
+    const rejection = await resolveNaiaSession(requestWithCookie()).catch((e) => e);
     expect(rejection).toBeInstanceOf(DatabaseUnavailableError);
   });
 });
