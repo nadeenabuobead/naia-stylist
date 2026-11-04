@@ -249,6 +249,12 @@ export interface StripeSubscriptionSnapshot {
   current_period_start: number | null;
   current_period_end: number | null;
   cancel_at_period_end: boolean;
+  // Present on the real Stripe response (stripeRequest returns the raw,
+  // unfiltered JSON — this interface is a type narrowing, not a runtime
+  // filter), used to derive planType authoritatively on sync rather than
+  // trusting the embedded event body's metadata. Only the one field this
+  // app actually needs is declared.
+  items?: { data: Array<{ price?: { recurring?: { interval?: string } } }> };
 }
 
 export async function retrieveSubscription(

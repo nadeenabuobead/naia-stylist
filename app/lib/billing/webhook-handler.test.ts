@@ -49,6 +49,7 @@ function authoritativeSnapshot(overrides: Partial<{
   current_period_start: number | null;
   current_period_end: number | null;
   cancel_at_period_end: boolean;
+  items: { data: Array<{ price?: { recurring?: { interval?: string } } }> };
 }> = {}) {
   return {
     id: "sub_stripe_1",
@@ -59,6 +60,10 @@ function authoritativeSnapshot(overrides: Partial<{
     cancel_at_period_end: false,
     ...overrides,
   };
+}
+
+function withInterval(interval: "month" | "year") {
+  return { items: { data: [{ price: { recurring: { interval } } }] } };
 }
 
 function baseSubscription(overrides: Partial<SubscriptionRecord> = {}): SubscriptionRecord {
@@ -159,6 +164,80 @@ describe("processStripeWebhookEvent — checkout.session.completed (synchronous 
     assert.equal(transaction.amount, 29900);
     assert.equal(transaction.subscriptionId, "sub-new");
     assert.deepEqual(result, { ok: true, deduped: false, action: "subscription_activated" });
+  });
+
+  it("WH.3c — when payment_intent is absent, providerTransactionId falls back to the Stripe EVENT id, never null — a bare `null` lets Postgres accept unlimited duplicate rows on a retry, since UNIQUE never collides two NULLs", async () => {
+    let transaction: any = null;
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findSubscriptionByProviderSubscriptionId: async () => null,
+      createSubscription: async (input) => ({ ...baseSubscription(), ...input, id: "sub-new" }),
+      createBillingTransaction: async (input) => { transaction = input; },
+      recordProcessedEvent: async () => {},
+    };
+    const event = makeEvent({
+      id: "evt_no_payment_intent",
+      data: {
+        object: {
+          client_reference_id: CUSTOMER_ID,
+          payment_status: "paid",
+          customer: "cus_1",
+          subscription: "sub_1",
+          amount_total: 3900,
+          currency: "aed",
+          // No payment_intent at all — some invoice/subscription-confirmation
+          // event shapes genuinely don't carry one.
+        },
+      },
+    });
+    await processStripeWebhookEvent(event, deps);
+    assert.equal(transaction.providerTransactionId, "evt_no_payment_intent");
+  });
+
+  it("WH.3d — a retried delivery of that SAME payment_intent-less event hits the unique-column P2002 (now keyed on event.id) and is absorbed, not a second duplicate row", async () => {
+    let createCalls = 0;
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findSubscriptionByProviderSubscriptionId: async () => null,
+      createSubscription: async (input) => ({ ...baseSubscription(), ...input, id: "sub-new" }),
+      createBillingTransaction: async (input) => {
+        createCalls++;
+        // Simulates defaultCreateBillingTransaction's own real behavior:
+        // a genuine retry hits the DB's @unique(providerTransactionId)
+        // constraint and the P2002 is absorbed as "already recorded" —
+        // see defaultCreateBillingTransaction's own try/catch, this mock
+        // exercises the CALLER's contract with it, not its internals.
+        if (createCalls === 1) return;
+        const err: any = new Error("Unique constraint failed");
+        err.code = "P2002";
+        err.meta = { target: ["providerTransactionId"] };
+        if (isUniqueConstraintViolation(err, "providerTransactionId") && input.providerTransactionId) return;
+        throw err;
+      },
+      recordProcessedEvent: async () => {},
+    };
+    const event = makeEvent({
+      id: "evt_no_payment_intent_2",
+      data: {
+        object: {
+          client_reference_id: CUSTOMER_ID,
+          payment_status: "paid",
+          customer: "cus_1",
+          subscription: "sub_1",
+          amount_total: 3900,
+          currency: "aed",
+        },
+      },
+    });
+    // First delivery.
+    const first = await processStripeWebhookEvent(event, deps);
+    // Simulated retry of the exact same event (same payload, same id) —
+    // in the real system this would only reach createBillingTransaction
+    // again if the processed-event ledger write hadn't landed yet.
+    const second = await processStripeWebhookEvent(event, deps);
+    assert.equal(createCalls, 2, "both attempts must reach the create call — this is what proves absorption, not pre-emption");
+    assert.equal(first.ok, true);
+    assert.equal(second.ok, true);
   });
 
   it("WH.3b — activation also promotes Customer.membershipStatus to MEMBER (regression: a real sandbox checkout left this field stuck at NONE)", async () => {
@@ -447,6 +526,49 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
     assert.ok(updateInput.pastDueSince, "entering PAST_DUE (per the authoritative state) must stamp pastDueSince");
   });
 
+  it("WH.6c — a monthly subscriber switched to annual (via the Billing Portal) has planType re-synced on the next update, not left stale", async () => {
+    let updateInput: any = null;
+    const existing = baseSubscription({ planType: "MONTHLY" });
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findSubscriptionByProviderSubscriptionId: async () => existing,
+      updateSubscriptionById: async (_id, input) => { updateInput = input; },
+      recordProcessedEvent: async () => {},
+      retrieveAuthoritativeSubscription: async () => authoritativeSnapshot({
+        status: "active",
+        ...withInterval("year"),
+      }),
+    };
+    const event = makeEvent({
+      type: "customer.subscription.updated",
+      created: 1_700_100_000,
+      data: { object: { id: "sub_stripe_1" } },
+    });
+    await processStripeWebhookEvent(event, deps);
+    assert.equal(updateInput.planType, "ANNUAL", "the authoritative price interval must win over the stale stored planType");
+  });
+
+  it("WH.6d — when the authoritative object carries no usable price interval, planType falls back to the EXISTING stored value, never a hardcoded default", async () => {
+    let updateInput: any = null;
+    const existing = baseSubscription({ planType: "ANNUAL" });
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findSubscriptionByProviderSubscriptionId: async () => existing,
+      updateSubscriptionById: async (_id, input) => { updateInput = input; },
+      recordProcessedEvent: async () => {},
+      // No `items` field at all — simulates an authoritative response that
+      // genuinely doesn't carry price/interval info.
+      retrieveAuthoritativeSubscription: async () => authoritativeSnapshot({ status: "active" }),
+    };
+    const event = makeEvent({
+      type: "customer.subscription.updated",
+      created: 1_700_100_000,
+      data: { object: { id: "sub_stripe_1" } },
+    });
+    await processStripeWebhookEvent(event, deps);
+    assert.equal(updateInput.planType, "ANNUAL", "must preserve the existing stored planType, not silently default to MONTHLY");
+  });
+
   it("WH.7 — a STALE (older) event is ignored — never overwrites newer state with older data", async () => {
     let updateCalls = 0;
     const existing = baseSubscription({ providerSyncedAt: new Date("2026-11-15T00:00:00Z") });
@@ -521,6 +643,31 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
     assert.deepEqual(result, { ok: true, deduped: false, action: "subscription_created_from_sync" });
   });
 
+  it("WH.8d — the authoritative price interval wins over metadata.planType when creating from an out-of-order sync too", async () => {
+    let created: any = null;
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findSubscriptionByProviderSubscriptionId: async () => null,
+      findSubscriptionByCustomerId: async () => null,
+      createSubscription: async (input) => { created = input; return { ...baseSubscription(), ...input, id: "sub-from-sync" }; },
+      updateSubscriptionById: async () => {},
+      recordProcessedEvent: async () => {},
+      retrieveAuthoritativeSubscription: async () => authoritativeSnapshot({
+        id: "sub_stripe_new",
+        status: "active",
+        ...withInterval("month"),
+      }),
+    };
+    const event = makeEvent({
+      type: "customer.subscription.updated",
+      created: 1_700_200_000,
+      // Embedded metadata claims ANNUAL — the authoritative interval (month) must win.
+      data: { object: { id: "sub_stripe_new", metadata: { customerId: CUSTOMER_ID, planType: "ANNUAL" } } },
+    });
+    await processStripeWebhookEvent(event, deps);
+    assert.equal(created.planType, "MONTHLY");
+  });
+
   it("WH.8c — NO existing row AND no metadata.customerId to key a new row on is still a safe no-op", async () => {
     let createCalls = 0;
     const deps: WebhookHandlerDeps = {
@@ -561,6 +708,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
     await processStripeWebhookEvent(event, deps);
     assert.equal(updateInput.status, "CANCELED");
     assert.ok(updateInput.endedAt, "a terminal transition must set endedAt");
+    assert.ok(updateInput.canceledAt, "CANCELED (customer-initiated) must also stamp canceledAt — previously a dead column, never written anywhere");
   });
 
   it("WH.9b — a terminal transition (CANCELED) also demotes Customer.membershipStatus to NONE", async () => {
@@ -625,6 +773,27 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
     });
     await processStripeWebhookEvent(event, deps);
     assert.equal(updateInput.status, "EXPIRED");
+  });
+
+  it("WH.10c — EXPIRED (payment-failure lapse) does NOT set canceledAt — only endedAt, since this was never a customer-initiated cancellation", async () => {
+    let updateInput: any = null;
+    const existing = baseSubscription({ cancelAtPeriodEnd: false, status: "PAST_DUE" });
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findSubscriptionByProviderSubscriptionId: async () => existing,
+      updateSubscriptionById: async (_id, input) => { updateInput = input; },
+      recordProcessedEvent: async () => {},
+      retrieveAuthoritativeSubscription: async () => authoritativeSnapshot({ status: "canceled" }),
+    };
+    const event = makeEvent({
+      type: "customer.subscription.deleted",
+      created: 1_700_300_000,
+      data: { object: { id: "sub_stripe_1" } },
+    });
+    await processStripeWebhookEvent(event, deps);
+    assert.equal(updateInput.status, "EXPIRED");
+    assert.equal(updateInput.canceledAt, undefined, "EXPIRED must not be stamped with canceledAt — that field means customer-initiated cancellation specifically");
+    assert.ok(updateInput.endedAt);
   });
 
   it("WH.10b — customer.subscription.deleted whose authoritative fetch fails REFUSES — a cancellation must not be guessed from the embedded body either, in either direction", async () => {

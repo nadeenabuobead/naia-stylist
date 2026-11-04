@@ -48,6 +48,19 @@ export async function action({ request }: ActionFunctionArgs) {
     return data({ ok: false, code: "malformed_json" }, { status: 400 });
   }
 
+  // Defense-in-depth: this app's STRIPE_SECRET_KEY is structurally
+  // restricted to test mode (assertTestModeKey, stripe-client.server.ts),
+  // but nothing on the INBOUND side enforced the same thing — Stripe issues
+  // a distinct whsec_ secret per mode, so a live event failing signature
+  // verification here is the current, incidental protection, not a
+  // structural one. event.livemode is Stripe's own authoritative signal for
+  // which mode produced this event; refusing it explicitly means mode
+  // isolation on this endpoint no longer depends only on which whsec_
+  // happens to be configured.
+  if (event.livemode === true) {
+    return data({ ok: false, code: "live_mode_event_rejected" }, { status: 400 });
+  }
+
   try {
     const result = await processStripeWebhookEvent(event);
     if (!result.ok) {

@@ -127,6 +127,7 @@ export interface WebhookHandlerDeps {
     id: string,
     input: Partial<{
       status: SubscriptionStatus;
+      planType: BillingPlanType;
       providerCustomerId: string | null;
       providerSubscriptionId: string | null;
       currentPeriodStart: Date | null;
@@ -342,10 +343,36 @@ export function mapStripeSubscriptionStatus(
   }
 }
 
+// ── Authoritative plan type (interval) derivation ───────────────────────────
+//
+// planType was previously set only once, at row creation, from the embedded
+// event body's metadata — and never touched again by customer.subscription.
+// updated. A monthly<->annual switch made through the Stripe Billing Portal
+// therefore left the stored planType permanently stale, and since missing/
+// unrecognized metadata defaults to MONTHLY, a mislabeled annual subscriber
+// would have their currentPeriodStart/End (a full year) read as the row's
+// usage window with only the monthly allowance inside it — see
+// usage-window.server.ts's window derivation. Deriving this from the
+// AUTHORITATIVE re-fetched subscription's own price interval, not the event
+// body, follows the same financial-safety principle already applied to
+// status/period/cancellation above. Returns null (not a default) when the
+// authoritative object doesn't carry a usable interval, so callers can
+// choose to fall back to existing stored state rather than silently guessing
+// MONTHLY.
+export function derivePlanTypeFromAuthoritative(
+  authoritative: Pick<StripeSubscriptionSnapshot, "items">,
+): BillingPlanType | null {
+  const interval = authoritative.items?.data?.[0]?.price?.recurring?.interval;
+  if (interval === "year") return "ANNUAL";
+  if (interval === "month") return "MONTHLY";
+  return null;
+}
+
 export interface StripeEventLike {
   id: string;
   type: string;
   created: number; // Unix seconds — Stripe's own event timestamp
+  livemode?: boolean; // checked by api.stripe-webhook.tsx before this ever runs
   data: { object: any };
 }
 
@@ -440,7 +467,7 @@ export async function processStripeWebhookEvent(
         status: "SUCCEEDED",
         amount: obj.amount_total,
         currency: (obj.currency ?? "aed").toUpperCase(),
-        providerTransactionId: obj.payment_intent ?? null,
+        providerTransactionId: obj.payment_intent ?? event.id,
         occurredAt: eventCreatedAt,
       });
     }
@@ -546,7 +573,11 @@ export async function processStripeWebhookEvent(
         // above and update it in place rather than creating a duplicate.
         const metaCustomerId = obj.metadata?.customerId as string | undefined;
         if (!metaCustomerId) break; // nothing to key a new row on
-        const planType: BillingPlanType = obj.metadata?.planType === "ANNUAL" ? "ANNUAL" : "MONTHLY";
+        // Authoritative interval first; embedded metadata only as a
+        // fallback when Stripe's own object doesn't carry a usable one.
+        const planType: BillingPlanType =
+          derivePlanTypeFromAuthoritative(authoritative) ??
+          (obj.metadata?.planType === "ANNUAL" ? "ANNUAL" : "MONTHLY");
         resolvedCustomerId = metaCustomerId;
         const created = await _createSubscription({
           customerId: metaCustomerId,
@@ -586,9 +617,17 @@ export async function processStripeWebhookEvent(
       const isTerminal = mappedStatus === "CANCELED" || mappedStatus === "EXPIRED";
       const enteringPastDue = mappedStatus === "PAST_DUE" && existing.status !== "PAST_DUE";
       const leavingPastDue = mappedStatus !== "PAST_DUE" && existing.status === "PAST_DUE";
+      // Authoritative interval takes precedence on every sync, not just at
+      // creation — see derivePlanTypeFromAuthoritative's own comment for
+      // why this matters (a portal-initiated monthly<->annual switch must
+      // not leave the stored planType stale). Falls back to the existing
+      // stored value, never a hardcoded default, when Stripe's object
+      // doesn't carry a usable interval.
+      const planType = derivePlanTypeFromAuthoritative(authoritative) ?? existing.planType;
 
       await _updateSubscriptionById(existing.id, {
         status: mappedStatus,
+        planType,
         providerSubscriptionId,
         providerCustomerId: typeof authoritative.customer === "string" ? authoritative.customer : existing.providerCustomerId,
         currentPeriodStart: authoritative.current_period_start ? new Date(authoritative.current_period_start * 1000) : existing.currentPeriodStart,
@@ -596,6 +635,13 @@ export async function processStripeWebhookEvent(
         cancelAtPeriodEnd: Boolean(authoritative.cancel_at_period_end),
         ...(enteringPastDue ? { pastDueSince: eventCreatedAt } : {}),
         ...(leavingPastDue ? { pastDueSince: null } : {}),
+        // CANCELED (customer-initiated, already flagged cancelAtPeriodEnd)
+        // vs EXPIRED (payment failures exhausting retries) is exactly the
+        // distinction mapStripeSubscriptionStatus's own comment draws —
+        // canceledAt should reflect only the former. It was declared in
+        // the dep type and schema but never actually written anywhere;
+        // endedAt alone doesn't distinguish why a subscription ended.
+        ...(mappedStatus === "CANCELED" ? { canceledAt: eventCreatedAt } : {}),
         ...(isTerminal ? { endedAt: eventCreatedAt } : {}),
         providerSyncedAt: eventCreatedAt,
       });
@@ -629,7 +675,7 @@ export async function processStripeWebhookEvent(
         status: "SUCCEEDED",
         amount: obj.amount_paid,
         currency: (obj.currency ?? "aed").toUpperCase(),
-        providerTransactionId: obj.payment_intent ?? null,
+        providerTransactionId: obj.payment_intent ?? event.id,
         occurredAt: eventCreatedAt,
       });
       action = "renewal_recorded";
@@ -652,7 +698,7 @@ export async function processStripeWebhookEvent(
         status: "FAILED",
         amount: typeof obj.amount_due === "number" ? obj.amount_due : 0,
         currency: (obj.currency ?? "aed").toUpperCase(),
-        providerTransactionId: obj.payment_intent ?? null,
+        providerTransactionId: obj.payment_intent ?? event.id,
         occurredAt: eventCreatedAt,
       });
       action = "payment_failure_recorded";

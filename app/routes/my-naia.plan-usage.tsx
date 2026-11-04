@@ -141,6 +141,33 @@ export default function PlanUsagePage() {
     }
   }
 
+  const [openingPortal, setOpeningPortal] = useState(false);
+  const [portalError, setPortalError] = useState<string | null>(null);
+
+  async function handleManageMembership() {
+    setOpeningPortal(true);
+    setPortalError(null);
+    try {
+      const res = await fetch("/api/billing-portal", { method: "POST" });
+      const data = await res.json();
+      if (data.ok && data.url) {
+        window.location.href = data.url;
+        return;
+      }
+      setPortalError(
+        data.code === "no_billing_account"
+          ? "No billing account found for your membership yet — please contact support."
+          : data.code === "auth_required"
+          ? "Your session expired — please sign in again."
+          : "Could not open billing management right now. Please try again.",
+      );
+    } catch {
+      setPortalError("Could not reach the billing management service. Please try again.");
+    } finally {
+      setOpeningPortal(false);
+    }
+  }
+
   // ── StyleMe
   const smValue = usageLabel(styleMe.monthlyUsed, styleMe.monthlyLimit, "sessions");
   const smExhausted = styleMe.monthlyUsed >= styleMe.monthlyLimit;
@@ -364,6 +391,39 @@ export default function PlanUsagePage() {
             <div style={{ marginTop: "1.25rem", fontSize: "0.72rem", color: "var(--fg-55)", letterSpacing: "0.05em", borderTop: "1px solid var(--fg-08, var(--fg-10))", paddingTop: "1rem" }}>
               Public Trend Reports are free for everyone.
             </div>
+          </Section>
+        )}
+
+        {/* ── Manage Membership (MEMBER only) ───────────────────────── */}
+        {isMember && (
+          <Section title="Membership">
+            <button
+              type="button"
+              onClick={handleManageMembership}
+              disabled={openingPortal}
+              style={{
+                padding: "0.65rem 1.4rem",
+                fontSize: "0.72rem",
+                letterSpacing: "0.1em",
+                textTransform: "uppercase",
+                background: "transparent",
+                color: "var(--fg)",
+                border: "1px solid var(--fg-40, var(--fg-55))",
+                borderRadius: "2px",
+                cursor: openingPortal ? "default" : "pointer",
+                opacity: openingPortal ? 0.6 : 1,
+              }}
+            >
+              {openingPortal ? "Opening…" : "Manage Membership"}
+            </button>
+            <div style={{ marginTop: "0.5rem", fontSize: "0.68rem", color: "var(--fg-55)", letterSpacing: "0.03em" }}>
+              Update your payment method, view invoices, or cancel your membership.
+            </div>
+            {portalError && (
+              <div style={{ marginTop: "0.6rem", fontSize: "0.72rem", color: "var(--c-alert, #c0392b)", letterSpacing: "0.03em" }}>
+                {portalError}
+              </div>
+            )}
           </Section>
         )}
 

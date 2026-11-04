@@ -278,11 +278,16 @@ describe("plan-usage component — add-ons", () => {
   it("marks add-ons as not-yet-purchasable instead of offering a fake checkout", () => {
     const html = render(baseSummary());
     expect(html).toContain("Coming soon");
-    // Scoped to the Add-ons section specifically — the membership section
-    // above it has a real, backend-connected Subscribe button, but add-on
-    // purchase is still unimplemented and must not render a fake checkout
-    // control of its own.
-    const addonsSection = html.slice(html.indexOf("Add-ons"), html.indexOf("Add-ons") + 2000);
+    // Scoped to the Add-ons section specifically, ending at the start of
+    // whichever real section renders next (Included with nAia for a
+    // MEMBER, the Public Trend Reports footer line for a NONE customer) —
+    // the membership sections above/below Add-ons have real,
+    // backend-connected buttons of their own (Subscribe, Manage
+    // Membership), but add-on purchase itself is still unimplemented and
+    // must not render a fake checkout control.
+    const addonsStart = html.indexOf("Add-ons");
+    const nextSectionStart = html.indexOf("Included with nAia", addonsStart);
+    const addonsSection = html.slice(addonsStart, nextSectionStart === -1 ? addonsStart + 2000 : nextSectionStart);
     expect(addonsSection).not.toContain("<form");
     expect(addonsSection).not.toContain("<button");
   });
@@ -309,6 +314,20 @@ describe("plan-usage component — membership Subscribe buttons", () => {
     const html = render(baseSummary({ membershipStatus: "MEMBER" }));
     expect(html).not.toContain("Subscribe Monthly");
     expect(html).not.toContain("Choose Annual");
+  });
+});
+
+describe("plan-usage component — Manage Membership (billing portal)", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("a MEMBER customer sees the Manage Membership button", () => {
+    const html = render(baseSummary({ membershipStatus: "MEMBER" }));
+    expect(html).toContain("Manage Membership");
+  });
+
+  it("a NONE customer does not see the Manage Membership button — nothing to manage yet", () => {
+    const html = render(baseSummary({ membershipStatus: "NONE" }));
+    expect(html).not.toContain("Manage Membership");
   });
 });
 
@@ -385,9 +404,16 @@ describe("plan-usage component — only approved add-ons render", () => {
   it("8. no fake checkout/action appears alongside the two approved add-ons", () => {
     const html = render(baseSummary());
     expect(html).toContain("Coming soon");
-    expect(html).not.toContain("<form");
-    expect(html).not.toContain("<button");
-    expect(html).not.toMatch(/href="\/checkout/);
+    // Scoped to the Add-ons section itself (see the identically-reasoned
+    // scoping comment on "marks add-ons as not-yet-purchasable" above) —
+    // the real membership Subscribe/Manage buttons elsewhere on the page
+    // are not what this test is about.
+    const addonsStart = html.indexOf("Add-ons");
+    const nextSectionStart = html.indexOf("Included with nAia", addonsStart);
+    const addonsSection = html.slice(addonsStart, nextSectionStart === -1 ? addonsStart + 2000 : nextSectionStart);
+    expect(addonsSection).not.toContain("<form");
+    expect(addonsSection).not.toContain("<button");
+    expect(addonsSection).not.toMatch(/href="\/checkout/);
   });
 });
 
