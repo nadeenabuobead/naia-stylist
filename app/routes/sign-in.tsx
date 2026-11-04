@@ -5,6 +5,18 @@
 // persistent sessions are both Clerk's own built-in behavior; no custom
 // nAia code or email-sending is involved in either.
 //
+// Existing-customer transition (2026-11-04): withSignUp enables Clerk's
+// own combined sign-in-or-up flow — a customer entering an email with no
+// Clerk account yet is prompted to continue into account creation WITHIN
+// this same form, no separate "click Sign Up instead" step required. This
+// is the fix for "a returning customer shouldn't have to guess they need
+// Sign Up" — it's a Clerk component prop, not a competing interface; the
+// actual collision/verification-code handling it leads into
+// (auth.clerk-callback.tsx -> resolveCustomerForClerkSignUp) is unchanged.
+// signUpForceRedirectUrl routes that sign-up half through the same
+// callback sign-up.tsx already uses, so a brand-new account created via
+// this combined form is provisioned identically either way.
+//
 // ── DESIGN INTEGRATION POINTS (visual design is being handled separately —
 // this file intentionally renders Clerk's UNSTYLED default appearance, no
 // layout/branding decisions made here) ──────────────────────────────────────
@@ -34,6 +46,15 @@
 import { useSearchParams } from "react-router";
 import { SignIn } from "@clerk/react-router";
 
+// Plain text, not styled — same "function, not look" note as the rest of
+// this file. error param values are set only by auth.clerk-callback.tsx's
+// own redirects, never user-supplied in a way that could inject arbitrary
+// copy here (the map below is a closed set; anything else renders nothing).
+const ERROR_COPY: Record<string, string> = {
+  email_in_use: "That email is already associated with a different account. Please use a different email, or contact support if this is unexpected.",
+  verification_email_failed: "We couldn't send your verification email just now. Please try again in a moment.",
+};
+
 export default function SignInPage() {
   const [searchParams] = useSearchParams();
   // requireCurrentNaiaCustomer (clerk-session.server.ts) sets return_to to
@@ -43,6 +64,19 @@ export default function SignInPage() {
   // in a redirect. Never trust this value itself; it's just carried along.
   const returnTo = searchParams.get("return_to");
   const callbackUrl = returnTo ? `/auth/clerk-callback?return_to=${encodeURIComponent(returnTo)}` : "/auth/clerk-callback";
+  const errorMessage = ERROR_COPY[searchParams.get("error") ?? ""];
 
-  return <SignIn routing="path" path="/sign-in" signUpUrl="/sign-up" forceRedirectUrl={callbackUrl} />;
+  return (
+    <>
+      {errorMessage && <p role="alert">{errorMessage}</p>}
+      <SignIn
+        routing="path"
+        path="/sign-in"
+        signUpUrl="/sign-up"
+        withSignUp
+        forceRedirectUrl={callbackUrl}
+        signUpForceRedirectUrl="/auth/clerk-callback"
+      />
+    </>
+  );
 }
