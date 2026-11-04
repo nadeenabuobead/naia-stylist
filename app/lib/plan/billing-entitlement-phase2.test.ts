@@ -669,7 +669,11 @@ describe("PH2-15 — countingEnd prevents unlimited usage when a stale, unrenewe
     // own two count sites (getEntitlementSummary, checkEntitlement) were still
     // reading window.end directly, the exact same staleness gap this whole
     // test exists to catch, just never enumerated here in the first place.
-    assert.equal(occurrences.length, 10, "all 10 known quota-counting createdAt filters (StyleMe/BuySkip/VTO-completed x2 summary+check, StyleMe/BuySkip reserve, personalisedTrend x2 summary+check) must use countingEnd");
+    // Raised to 11 (2026-11-04): reservePersonalisedTrendSlot's own atomic
+    // re-check of the account-wide count — the quota-race fix closing the
+    // gap the per-report unique constraint never covered — uses the same
+    // countingEnd-bounded filter, correctly, from the moment it was written.
+    assert.equal(occurrences.length, 11, "all 11 known quota-counting createdAt filters (StyleMe/BuySkip/VTO-completed x2 summary+check, StyleMe/BuySkip/personalisedTrend reserve, personalisedTrend x2 summary+check) must use countingEnd");
     // And the inverse — window.end must never appear as a createdAt upper bound anymore.
     const staleOccurrences = entSvc.match(/createdAt:\s*\{\s*gte:\s*window\.start,\s*lt:\s*window\.end\s*\}/g) ?? [];
     assert.equal(staleOccurrences.length, 0, "no createdAt filter may use window.end directly as its upper bound — that is exactly the bug this fix closes");

@@ -131,16 +131,33 @@ describe("§TREND-EDIT-USAGE — no alternate pre-create path exists anywhere in
     return hits;
   }
 
-  it("exactly one file calls a mutating prisma.personalisedTrendEditUsage operation — this one", () => {
-    const writers = grepRepo(/prisma\.personalisedTrendEditUsage\.(create|createMany|update|updateMany|upsert|delete|deleteMany)\s*\(/);
+  it("exactly one file calls a mutating personalisedTrendEditUsage operation — this one", () => {
+    // Anchored on the client variable's PROPERTY access, not literally
+    // "prisma." — entitlement.server.ts's reservePersonalisedTrendSlot
+    // (2026-11-04) closes the account-wide quota race by re-checking the
+    // count and writing inside its own Serializable transaction, but it
+    // delegates the actual write back through recordPersonalisedTrendEditUsage
+    // (passing its own tx client as the optional 4th param) rather than
+    // calling prisma directly — so the literal write call still lives in
+    // exactly this one file, just under whatever parameter name receives
+    // the (possibly transactional) client.
+    const writers = grepRepo(/\.personalisedTrendEditUsage\.(create|createMany|update|updateMany|upsert|delete|deleteMany)\s*\(/);
     expect(writers).toEqual(["app/lib/plan/personalised-trend-edit-usage.server.ts"]);
   });
 
-  it("exactly one production call site invokes recordPersonalisedTrendEditUsage — the customer-facing generation loader", () => {
+  it("exactly two production call sites invoke recordPersonalisedTrendEditUsage — the unenforced direct path and the enforced atomic-reservation path", () => {
+    // Was exactly one (trends.my-edits.$slug.tsx calling it directly) until
+    // the 2026-11-04 quota-race fix: entitlement.server.ts's
+    // reservePersonalisedTrendSlot is now the ENFORCED path's only caller,
+    // used whenever ENTITLEMENT_ENFORCEMENT is "true"; trends.my-edits.
+    // $slug.tsx still calls it directly, unchanged, for the unenforced
+    // fallback — same split every other reserve*Slot function in
+    // entitlement.server.ts already has between its own flag-gated atomic
+    // path and the plain path it replaces.
     const callers = grepRepo(/\brecordPersonalisedTrendEditUsage\s*\(/).filter(
       (f) => !f.endsWith("personalised-trend-edit-usage.server.ts"),
     );
-    expect(callers).toEqual(["app/routes/trends.my-edits.$slug.tsx"]);
+    expect(callers.sort()).toEqual(["app/lib/plan/entitlement.server.ts", "app/routes/trends.my-edits.$slug.tsx"]);
   });
 });
 

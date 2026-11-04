@@ -221,6 +221,34 @@ model IdentityLinkRequest {
   @@index([customerId])
 }
 
+// ── Pending Clerk cleanup — account-deletion partial-failure recovery ───────
+//
+// settings.tsx's delete-account action erases nAia's own data FIRST, then
+// deletes the Clerk user as a second, separate step — if that second step
+// fails, the real PII-bearing erasure already succeeded, but a Clerk-hosted
+// email/password would otherwise be left behind with nothing noticing. This
+// row is that durable, operator-visible record: created on that specific
+// failure, surfaced + retryable on /admin/maintenance (the same page the
+// other no-cron manual-cleanup actions already live on), resolved once a
+// retry actually succeeds.
+//
+// Deliberately NO foreign key to Customer: by the time this row is created,
+// that Customer row is already erased — customerId here is a plain audit
+// trail of which former account this orphaned credential belonged to, not
+// a live reference.
+model PendingClerkCleanup {
+  id            String    @id @default(cuid())
+  clerkUserId   String    @unique
+  customerId    String
+  lastError     String
+  attemptCount  Int       @default(1)
+  createdAt     DateTime  @default(now())
+  lastAttemptAt DateTime  @default(now())
+  resolvedAt    DateTime?
+
+  @@index([resolvedAt])
+}
+
 /// A point-in-time reading of the wardrobe, so "what changed?" has a before.
 /// Without this there is nothing honest to compare a new piece against.
 model WardrobeSnapshot {

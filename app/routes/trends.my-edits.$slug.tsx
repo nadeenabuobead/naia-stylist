@@ -18,7 +18,7 @@ import {
   matchNadineProduct,
   type NadineProductRecommendation,
 } from "~/lib/trend-product-recommendation.server";
-import { checkEntitlement, type EntitlementCheck } from "~/lib/plan/entitlement.server";
+import { checkEntitlement, reservePersonalisedTrendSlot, type EntitlementCheck } from "~/lib/plan/entitlement.server";
 import {
   recordPersonalisedTrendEditUsage,
   getTrendEditUsageState,
@@ -113,7 +113,7 @@ export function meta({ data }: { data?: LoaderData }) {
 // chose to produce a new one anyway) — the generation + write logic must
 // never diverge between the two callers.
 async function generateAndRecordEdit(
-  customer: { id: string },
+  customer: { id: string; membershipStatus: MembershipStatus },
   report: TrendReportData,
 ): Promise<{
   edit: ShopperEdit | null;
@@ -171,7 +171,28 @@ async function generateAndRecordEdit(
           edit,
           nadineRecommendation,
         };
-        await recordPersonalisedTrendEditUsage(customer.id, report.slug, snapshot);
+        // Behind ENTITLEMENT_ENFORCEMENT (same flag as every other
+        // reserve* path): re-verifies the ACCOUNT-WIDE monthly count and
+        // writes in one Serializable transaction, closing the race where a
+        // concurrent generation for a DIFFERENT report this same period
+        // already consumed the one allowance between this function's own
+        // caller checking checkEntitlement and reaching this write — see
+        // reservePersonalisedTrendSlot's own comment for why the per-report
+        // unique constraint alone never caught that. Losing this race is
+        // rare enough, and consuming no quota either way, that failing the
+        // response honestly is simpler and safer than rendering generated
+        // content with no persisted row behind it.
+        if (process.env.ENTITLEMENT_ENFORCEMENT === "true") {
+          const reservation = await reservePersonalisedTrendSlot(customer.id, customer.membershipStatus, report.slug, snapshot);
+          if (!reservation.allowed) {
+            console.error(
+              `trend_edit_quota_race_lost customer=${hashCustomerId(customer.id)} report=${report.slug} period=${periodKey}`,
+            );
+            return { edit: null, nadineRecommendation: null, hasProfile: false, generationFailed: true };
+          }
+        } else {
+          await recordPersonalisedTrendEditUsage(customer.id, report.slug, snapshot);
+        }
         // Defensive verification, not a retry/self-heal: a genuine first
         // generation must never leave a row with a null snapshot. This
         // never writes again on a bad result — see getTrendEditUsageState's

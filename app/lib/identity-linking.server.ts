@@ -37,14 +37,26 @@
 // that has ever attempted THIS customer's code, so spinning up more
 // disposable attacker accounts does not multiply the attempt budget.
 //
-// No transactional email provider is wired yet — _sendVerificationEmail
-// defaults to a stub that throws, so a misconfigured deploy fails loudly
-// instead of silently losing codes. See the integration report for why:
-// standing up a new third-party email service is a separate, explicit
-// approval, not something this phase does unprompted.
+// Transactional email: sendVerificationEmailViaResend (resend-email.server.ts)
+// is the real default — nothing here depends on Clerk's own native
+// auth-email infrastructure, by design, and vice versa. No RESEND_API_KEY
+// is configured in this worktree, so the default client still fails loudly
+// in any environment that reaches it unconfigured, same discipline the old
+// stub had; a misconfigured deploy must never look like "codes are being
+// sent" when they aren't.
+//
+// A failure sending the email — misconfiguration, Resend rate-limited,
+// Resend itself down — is caught inside startIdentityLink and reported as
+// its own typed "email-send-failed" status, never left to throw out to an
+// unrelated caller as a raw, uncaught exception (a 500 with no clear
+// customer-facing message). The already-written IdentityLinkRequest row is
+// left as-is on that failure — harmless: a retried sign-up attempt
+// generates and attempts to send a fresh code through the same upsert, and
+// an abandoned one simply expires on its own after LINK_REQUEST_TTL_MS.
 
 import { createHash, randomInt } from "crypto";
 import prisma from "~/db.server";
+import { sendVerificationEmailViaResend } from "./email/resend-email.server";
 
 export const LINK_REQUEST_TTL_MS = 15 * 60 * 1000; // 15 minutes
 export const MAX_LINK_ATTEMPTS = 5;
@@ -60,14 +72,6 @@ function hashCode(code: string): string {
   return createHash("sha256").update(code).digest("hex");
 }
 
-async function defaultSendVerificationEmail(_email: string, _code: string): Promise<void> {
-  throw new Error(
-    "identity-linking: no transactional email provider is configured. " +
-    "_sendVerificationEmail must be injected (tests) or this app's real " +
-    "sender wired in before this path can run in any live environment.",
-  );
-}
-
 export interface IdentityLinkingDeps {
   _now?: () => Date;
   _generateCode?: () => string;
@@ -78,7 +82,8 @@ export type StartIdentityLinkResult =
   | { status: "no-collision" }
   | { status: "email-already-linked" }
   | { status: "locked" }
-  | { status: "pending"; identityLinkRequestId: string };
+  | { status: "pending"; identityLinkRequestId: string }
+  | { status: "email-send-failed" };
 
 export async function startIdentityLink(
   input: { clerkUserId: string; email: string },
@@ -86,7 +91,7 @@ export async function startIdentityLink(
 ): Promise<StartIdentityLinkResult> {
   const now = deps._now ?? (() => new Date());
   const generateCode = deps._generateCode ?? generateVerificationCode;
-  const sendVerificationEmail = deps._sendVerificationEmail ?? defaultSendVerificationEmail;
+  const sendVerificationEmail = deps._sendVerificationEmail ?? sendVerificationEmailViaResend;
 
   const existing = await prisma.customer.findUnique({ where: { email: input.email } });
   if (!existing) return { status: "no-collision" };
@@ -128,7 +133,21 @@ export async function startIdentityLink(
     },
   });
 
-  await sendVerificationEmail(input.email, code);
+  try {
+    await sendVerificationEmail(input.email, code);
+  } catch (err) {
+    // Caught here, not left to propagate — a rate-limited or misconfigured
+    // send must become a typed, customer-facing-safe status, not a raw 500
+    // from an unrelated caller several layers up. The IdentityLinkRequest
+    // row above is left exactly as written: harmless either way — a
+    // retried sign-up re-runs this same upsert with a fresh code, and an
+    // abandoned one simply expires.
+    console.error(
+      `identity-linking: verification email send failed for a pending link request (clerkUserId redacted from this line on purpose — see Resend's own dashboard/logs for delivery detail)`,
+      err instanceof Error ? err.message : err,
+    );
+    return { status: "email-send-failed" };
+  }
   return { status: "pending", identityLinkRequestId: request.id };
 }
 
@@ -221,7 +240,8 @@ export type ResolveCustomerForClerkSignUpResult =
   | { status: "already-linked"; customerId: string }
   | { status: "link-pending" }
   | { status: "email-conflict" }
-  | { status: "locked" };
+  | { status: "locked" }
+  | { status: "email-send-failed" };
 
 export async function resolveCustomerForClerkSignUp(
   input: { clerkUserId: string; email: string; firstName?: string | null; lastName?: string | null },
@@ -234,6 +254,7 @@ export async function resolveCustomerForClerkSignUp(
   if (linkResult.status === "pending") return { status: "link-pending" };
   if (linkResult.status === "email-already-linked") return { status: "email-conflict" };
   if (linkResult.status === "locked") return { status: "locked" };
+  if (linkResult.status === "email-send-failed") return { status: "email-send-failed" };
 
   // "no-collision" — a genuinely new person. Created with ONLY clerkUserId
   // set; shopifyCustomerId stays null, exactly as the schema comment on

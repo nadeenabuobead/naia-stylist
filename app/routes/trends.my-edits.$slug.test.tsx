@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderToString } from "react-dom/server";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
@@ -82,6 +82,11 @@ vi.mock("~/lib/trend-product-recommendation.server", () => ({
 
 vi.mock("~/lib/plan/entitlement.server", () => ({
   checkEntitlement: vi.fn().mockResolvedValue({ allowed: true }),
+  // 2026-11-04 quota-race fix — only ever called when ENTITLEMENT_ENFORCEMENT
+  // is "true"; every existing test in this file runs with that flag unset,
+  // so this default is never exercised outside the dedicated describe block
+  // below that sets it.
+  reservePersonalisedTrendSlot: vi.fn().mockResolvedValue({ allowed: true, record: { id: "usage-mock" } }),
 }));
 
 vi.mock("~/lib/plan/personalised-trend-edit-usage.server", () => ({
@@ -126,6 +131,7 @@ import {
   recordPersonalisedTrendEditUsage,
 } from "~/lib/plan/personalised-trend-edit-usage.server";
 import { matchNadineProduct } from "~/lib/trend-product-recommendation.server";
+import { reservePersonalisedTrendSlot } from "~/lib/plan/entitlement.server";
 import MyTrendEditDetail, { loader, action } from "./trends.my-edits.$slug";
 
 const MOCK_REPORT = {
@@ -379,6 +385,101 @@ describe("trends/my-edits/:slug loader", () => {
 
     expect(getShopperEvidence).not.toHaveBeenCalled();
     expect(recordPersonalisedTrendEditUsage).not.toHaveBeenCalled();
+  });
+});
+
+// ── ENTITLEMENT_ENFORCEMENT=true — the atomic quota-race fix (2026-11-04) ───
+// Every test above runs with the flag unset, exercising the plain
+// recordPersonalisedTrendEditUsage path unchanged. These specifically set
+// the flag to prove the loader/action route through reservePersonalisedTrendSlot
+// instead, and degrade honestly (generationFailed:true, no persisted row)
+// if that atomic reservation reports the account-wide quota was lost to a
+// concurrent request for a different report in the same period.
+describe("trends/my-edits/:slug — ENTITLEMENT_ENFORCEMENT=true quota-race handling", () => {
+  const savedFlag = process.env.ENTITLEMENT_ENFORCEMENT;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.ENTITLEMENT_ENFORCEMENT = "true";
+  });
+
+  afterEach(() => {
+    if (savedFlag !== undefined) process.env.ENTITLEMENT_ENFORCEMENT = savedFlag;
+    else delete process.env.ENTITLEMENT_ENFORCEMENT;
+  });
+
+  it("loader — a successful reservation persists via reservePersonalisedTrendSlot, not the plain recordPersonalisedTrendEditUsage path", async () => {
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({ id: "cust-1", membershipStatus: "MEMBER" } as any);
+    vi.mocked(getShopperEvidence).mockResolvedValueOnce({ hasProfile: true } as any);
+    vi.mocked(buildShopperEdit).mockReturnValueOnce(MOCK_EDIT as any);
+    vi.mocked(reservePersonalisedTrendSlot).mockResolvedValueOnce({ allowed: true, record: { id: "usage-1" } } as any);
+
+    const result = await loader({
+      request: new Request("http://localhost/trends/my-edits/spring-2026-soft-structure"),
+      params: { slug: "spring-2026-soft-structure" },
+      context: {},
+    });
+
+    expect(reservePersonalisedTrendSlot).toHaveBeenCalledWith(
+      "cust-1", "MEMBER", "spring-2026-soft-structure", expect.objectContaining({ reportSlug: "spring-2026-soft-structure" }),
+    );
+    expect(recordPersonalisedTrendEditUsage).not.toHaveBeenCalled();
+    expect(result.edit).toEqual(MOCK_EDIT);
+    expect(result.generationFailed).toBe(false);
+  });
+
+  it("loader — THE FIX: losing the account-wide quota race (a concurrent generation for a different report won it first) degrades to generationFailed:true, never silently shows unbanked content", async () => {
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({ id: "cust-1", membershipStatus: "MEMBER" } as any);
+    vi.mocked(getShopperEvidence).mockResolvedValueOnce({ hasProfile: true } as any);
+    vi.mocked(buildShopperEdit).mockReturnValueOnce(MOCK_EDIT as any);
+    vi.mocked(reservePersonalisedTrendSlot).mockResolvedValueOnce({ allowed: false, reason: "quota_exceeded" } as any);
+
+    const result = await loader({
+      request: new Request("http://localhost/trends/my-edits/spring-2026-soft-structure"),
+      params: { slug: "spring-2026-soft-structure" },
+      context: {},
+    });
+
+    expect(result.edit).toBeNull();
+    expect(result.generationFailed).toBe(true);
+  });
+
+  it("action ('generate-new') — a successful reservation persists via reservePersonalisedTrendSlot", async () => {
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({ id: "cust-1", membershipStatus: "MEMBER" } as any);
+    vi.mocked(getTrendEditUsageState).mockResolvedValueOnce({ status: "none" } as any);
+    vi.mocked(getShopperEvidence).mockResolvedValueOnce({ hasProfile: true } as any);
+    vi.mocked(buildShopperEdit).mockReturnValueOnce(MOCK_EDIT as any);
+    vi.mocked(reservePersonalisedTrendSlot).mockResolvedValueOnce({ allowed: true, record: { id: "usage-1" } } as any);
+
+    const formData = new FormData();
+    formData.set("intent", "generate-new");
+    await action({
+      request: new Request("http://localhost/trends/my-edits/spring-2026-soft-structure", { method: "POST", body: formData }),
+      params: { slug: "spring-2026-soft-structure" },
+      context: {},
+    });
+
+    expect(reservePersonalisedTrendSlot).toHaveBeenCalled();
+    expect(recordPersonalisedTrendEditUsage).not.toHaveBeenCalled();
+  });
+
+  it("action ('generate-new') — losing the quota race writes nothing and reports no new edit, rather than a silently-unbanked generation", async () => {
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({ id: "cust-1", membershipStatus: "MEMBER" } as any);
+    vi.mocked(getTrendEditUsageState).mockResolvedValueOnce({ status: "none" } as any);
+    vi.mocked(getShopperEvidence).mockResolvedValueOnce({ hasProfile: true } as any);
+    vi.mocked(buildShopperEdit).mockReturnValueOnce(MOCK_EDIT as any);
+    vi.mocked(reservePersonalisedTrendSlot).mockResolvedValueOnce({ allowed: false, reason: "quota_exceeded" } as any);
+
+    const formData = new FormData();
+    formData.set("intent", "generate-new");
+    const response = await action({
+      request: new Request("http://localhost/trends/my-edits/spring-2026-soft-structure", { method: "POST", body: formData }),
+      params: { slug: "spring-2026-soft-structure" },
+      context: {},
+    });
+
+    expect(recordPersonalisedTrendEditUsage).not.toHaveBeenCalled();
+    expect((response as Response).status).toBe(302); // still redirects — the reload resolves to the honest server-side state
   });
 });
 

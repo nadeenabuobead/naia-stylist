@@ -122,6 +122,19 @@ describe("startIdentityLink", () => {
     expect(upsertArgs.create.codeHash).not.toBe(FIXED_CODE);
     expect(JSON.stringify(upsertArgs)).not.toContain(FIXED_CODE);
   });
+
+  it("the email provider throwing (rate-limited, misconfigured, Resend down) reports email-send-failed — never propagates as a raw, uncaught exception", async () => {
+    mockFindCustomer().mockResolvedValue({ id: "cust-legacy-1", email: "legacy@example.com", clerkUserId: null });
+    mockUpsertRequest().mockResolvedValue({ id: "link-req-1" });
+    const sendEmail = vi.fn().mockRejectedValue(new Error("Resend rate limit exceeded"));
+
+    const result = await startIdentityLink(
+      { clerkUserId: "clerk_claimant_1", email: "legacy@example.com" },
+      { _now: () => NOW, _generateCode: () => FIXED_CODE, _sendVerificationEmail: sendEmail },
+    );
+
+    expect(result).toEqual({ status: "email-send-failed" });
+  });
 });
 
 describe("confirmIdentityLink", () => {
@@ -301,6 +314,20 @@ describe("resolveCustomerForClerkSignUp", () => {
       { _now: () => NOW },
     );
     expect(result).toEqual({ status: "locked" });
+    expect(mockCreateCustomer()).not.toHaveBeenCalled();
+  });
+
+  it("the verification email fails to send — propagates email-send-failed, creates nothing", async () => {
+    mockFindCustomer()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: "cust-legacy-1", email: "legacy@example.com", clerkUserId: null });
+    mockUpsertRequest().mockResolvedValue({ id: "link-req-1" });
+
+    const result = await resolveCustomerForClerkSignUp(
+      { clerkUserId: "clerk_claimant_1", email: "legacy@example.com" },
+      { _sendVerificationEmail: vi.fn().mockRejectedValue(new Error("delivery failed")) },
+    );
+    expect(result).toEqual({ status: "email-send-failed" });
     expect(mockCreateCustomer()).not.toHaveBeenCalled();
   });
 });

@@ -44,6 +44,7 @@ import type { MembershipStatus, Prisma, SubscriptionStatus } from "@prisma/clien
 import prisma from "~/db.server";
 import { getMembershipAllowances, getEffectiveVtoLimit, getEffectiveStyleMeLimit } from "./plan-limits.server";
 import { getUsageWindow, formatResetDate, type SubscriptionWindowInput, type UsageWindow } from "./usage-window.server";
+import { recordPersonalisedTrendEditUsage, type TrendEditSnapshot } from "./personalised-trend-edit-usage.server";
 
 // ── VTO stale threshold ────────────────────────────────────────────────────────
 const VTO_IN_FLIGHT_STALE_MS = 10 * 60 * 1000; // 10 minutes
@@ -639,12 +640,12 @@ export async function checkEntitlement(
 // (already required to exist for duplicate submissions) runs unchanged.
 
 export type RunReservationFn = <T>(
-  fn: (tx: Pick<typeof prisma, "stylingSession" | "buyOrSkipAnalysis" | "closetItem">) => Promise<T>,
+  fn: (tx: Pick<typeof prisma, "stylingSession" | "buyOrSkipAnalysis" | "closetItem" | "personalisedTrendEditUsage">) => Promise<T>,
 ) => Promise<T>;
 
 const _runReservationTransaction: RunReservationFn = (fn) =>
   prisma.$transaction(
-    (tx: Pick<typeof prisma, "stylingSession" | "buyOrSkipAnalysis" | "closetItem">) => fn(tx),
+    (tx: Pick<typeof prisma, "stylingSession" | "buyOrSkipAnalysis" | "closetItem" | "personalisedTrendEditUsage">) => fn(tx),
     { isolationLevel: "Serializable" },
   );
 
@@ -690,6 +691,60 @@ export async function reserveStyleMeSlot(
   }
   // Unreachable — loop always returns or throws.
   throw new Error("Unexpected exit from reserveStyleMeSlot retry loop");
+}
+
+// Closes a real, found-not-hypothetical race (2026-11-04 review): the
+// monthly Personalised Trend Edit allowance is ONE, ACCOUNT-WIDE ACROSS
+// EVERY REPORT (checkEntitlement's own "personalisedTrend" count has no
+// reportSlug filter — see trends.my-edits.$slug.tsx's own comment on why).
+// PersonalisedTrendEditUsage's @@unique([customerId, reportSlug, periodKey])
+// constraint only ever protected a DIFFERENT race — a duplicate submission
+// for the SAME report — and recordPersonalisedTrendEditUsage's own doc
+// comment said exactly that constraint was "the final authority," which is
+// true for that race and not this one. Two concurrent generations for TWO
+// DIFFERENT reports in the same period both pass checkEntitlement's
+// non-atomic count check and both write successfully — the unique
+// constraint never conflicts between them, so nothing stops a second edit
+// this function wasn't entitled to.
+export async function reservePersonalisedTrendSlot(
+  customerId: string,
+  membershipStatus: MembershipStatus,
+  reportSlug: string,
+  snapshot?: TrendEditSnapshot,
+  _runTransaction: RunReservationFn = _runReservationTransaction,
+  _contextDeps: EffectiveContextDeps = {},
+): Promise<ReserveResult<Awaited<ReturnType<typeof recordPersonalisedTrendEditUsage>>>> {
+  const { window, countingEnd, allowances } = await resolveEffectiveContext(customerId, membershipStatus, _contextDeps);
+  if (allowances.personalisedTrendPerMonth <= 0) return { allowed: false, reason: "quota_exceeded" };
+
+  for (let attempt = 0; attempt <= MAX_TX_RETRIES; attempt++) {
+    try {
+      return await _runTransaction(async (tx) => {
+        // Account-wide — no reportSlug filter — matching checkEntitlement's
+        // own count exactly, not the narrower per-report uniqueness
+        // recordPersonalisedTrendEditUsage's own constraint protects.
+        const used = await tx.personalisedTrendEditUsage.count({
+          where: { customerId, createdAt: { gte: window.start, lt: countingEnd } },
+        });
+        if (used >= allowances.personalisedTrendPerMonth) {
+          return { allowed: false, reason: "quota_exceeded" };
+        }
+        // Delegates the actual write to the one canonical writer, passing
+        // this transaction's own client — a genuinely concurrent duplicate
+        // for THIS exact report+period still resolves through its upsert
+        // to the existing row, not a thrown P2002 or a second row. Same
+        // idempotency contract as before, now inside the same transaction
+        // that also closes the account-wide quota race.
+        const record = await recordPersonalisedTrendEditUsage(customerId, reportSlug, snapshot, tx);
+        return { allowed: true, record };
+      });
+    } catch (e) {
+      if (isSerializationError(e) && attempt < MAX_TX_RETRIES) continue;
+      throw e;
+    }
+  }
+  // Unreachable — loop always returns or throws.
+  throw new Error("Unexpected exit from reservePersonalisedTrendSlot retry loop");
 }
 
 export async function reserveBuySkipSlot(

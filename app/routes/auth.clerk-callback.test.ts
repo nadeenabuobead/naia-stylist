@@ -139,4 +139,13 @@ describe("auth.clerk-callback loader", () => {
     const res: any = await loader(args("?return_to=%2Fcloset"));
     expect(res.headers.get("Location")).toBe("/my-naia");
   });
+
+  it("verification email failed to send — bounces to sign-in with a retryable error, not the link-identity code-entry page (there's no code to enter)", async () => {
+    getAuthMock.mockResolvedValue({ userId: "clerk_claimant_3" });
+    getUserMock.mockResolvedValue({ primaryEmailAddress: { emailAddress: "legacy3@example.com" }, emailAddresses: [] });
+    resolveMock.mockResolvedValue({ status: "email-send-failed" });
+
+    const res: any = await loader(args());
+    expect(res.headers.get("Location")).toBe("/sign-in?error=verification_email_failed");
+  });
 });

@@ -25,7 +25,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Prisma } from "@prisma/client";
-import { reserveStyleMeSlot, reserveBuySkipSlot, reserveClosetSlot, type RunReservationFn, type EffectiveContextDeps } from "./entitlement.server";
+import { reserveStyleMeSlot, reserveBuySkipSlot, reserveClosetSlot, reservePersonalisedTrendSlot, type RunReservationFn, type EffectiveContextDeps } from "./entitlement.server";
 
 const CUSTOMER_ID = "cust-reservation-test";
 
@@ -397,5 +397,131 @@ describe("reserveClosetSlot", () => {
     await reserveClosetSlot(CUSTOMER_ID, "MEMBER", itemData, mockTx, NO_SUBSCRIPTION);
 
     assert.deepEqual(capturedWhere, { customerId: CUSTOMER_ID }, "no createdAt window — unlike the monthly features, every existing row counts");
+  });
+});
+
+// ── reservePersonalisedTrendSlot ─────────────────────────────────────────────
+// Closes a real race (2026-11-04 review): the monthly allowance is ONE,
+// ACCOUNT-WIDE ACROSS EVERY REPORT, but PersonalisedTrendEditUsage's own
+// @@unique([customerId, reportSlug, periodKey]) constraint only ever
+// protected a duplicate submission for the SAME report — two concurrent
+// generations for two DIFFERENT reports never conflict on it. RSV.21 below
+// is the test that actually proves this fix's reason for existing.
+
+describe("reservePersonalisedTrendSlot", () => {
+  const SNAPSHOT = {
+    schemaVersion: "trend-edit-snapshot-v1" as const,
+    reportSlug: "spring-2026-soft-structure",
+    reportTitle: "Spring 2026 Soft Structure",
+    generatedAt: "2026-11-04T00:00:00.000Z",
+    edit: { subTitle: "x", yourVersion: "y" } as any,
+    nadineRecommendation: null,
+  };
+
+  it("RSV.20 — allowed when under quota: the account-wide count-check and the upsert both happen inside the same transaction call", async () => {
+    let countCalledBeforeUpsert = false;
+    const mockTx: RunReservationFn = async (fn) =>
+      fn({
+        personalisedTrendEditUsage: {
+          count: async () => { countCalledBeforeUpsert = true; return 0; },
+          upsert: async ({ create }: any) => {
+            assert.equal(countCalledBeforeUpsert, true, "upsert must happen after the count check, inside the same transaction");
+            return { id: "usage-1", ...create };
+          },
+        },
+      } as any);
+
+    const result = await reservePersonalisedTrendSlot(CUSTOMER_ID, "MEMBER", "spring-2026-soft-structure", SNAPSHOT, mockTx, NO_SUBSCRIPTION);
+    assert.equal(result.allowed, true);
+    if (!result.allowed) throw new Error("unreachable");
+    assert.equal(result.record.id, "usage-1");
+  });
+
+  it("RSV.21 — THE FIX: at the account-wide 1/month limit, blocked regardless of which report is being requested — the race the per-report unique constraint never caught", async () => {
+    const mockTx: RunReservationFn = async (fn) =>
+      fn({
+        personalisedTrendEditUsage: {
+          // Already has 1 usage row THIS PERIOD FOR A DIFFERENT REPORT —
+          // the count has no reportSlug filter, matching checkEntitlement's
+          // own count exactly, so this must block regardless.
+          count: async ({ where }: any) => {
+            assert.ok(!("reportSlug" in where), "the quota count must be account-wide — no reportSlug filter");
+            return 1;
+          },
+          upsert: async () => { throw new Error("upsert must not be called when the account-wide quota is exhausted"); },
+        },
+      } as any);
+
+    const result = await reservePersonalisedTrendSlot(CUSTOMER_ID, "MEMBER", "a-totally-different-report", SNAPSHOT, mockTx, NO_SUBSCRIPTION);
+    assert.equal(result.allowed, false);
+    if (result.allowed) throw new Error("unreachable");
+    assert.equal(result.reason, "quota_exceeded");
+  });
+
+  it("RSV.22 — a guest (membershipStatus NONE) is blocked on the very first attempt — zero allowance, short-circuited before any transaction even opens", async () => {
+    let txOpened = false;
+    const mockTx: RunReservationFn = async (fn) => {
+      txOpened = true;
+      return fn({ personalisedTrendEditUsage: { count: async () => 0, upsert: async () => ({}) } } as any);
+    };
+
+    const result = await reservePersonalisedTrendSlot(CUSTOMER_ID, "NONE", "spring-2026-soft-structure", SNAPSHOT, mockTx, NO_SUBSCRIPTION);
+    assert.equal(result.allowed, false);
+    if (result.allowed) throw new Error("unreachable");
+    assert.equal(result.reason, "quota_exceeded");
+    assert.equal(txOpened, false, "NONE's zero allowance is checked before ever opening a transaction");
+  });
+
+  it("RSV.23 — a concurrent duplicate for THIS EXACT report+period resolves through the upsert's own update branch, not a thrown P2002 or a second row", async () => {
+    let upsertCalls = 0;
+    const mockTx: RunReservationFn = async (fn) =>
+      fn({
+        personalisedTrendEditUsage: {
+          count: async () => 0,
+          upsert: async ({ create, update }: any) => {
+            upsertCalls++;
+            // Models the DB resolving the composite-unique conflict server-side —
+            // the application code's job is just to issue the upsert correctly.
+            assert.ok(create);
+            assert.deepEqual(update, {});
+            return { id: "usage-existing" };
+          },
+        },
+      } as any);
+
+    const result = await reservePersonalisedTrendSlot(CUSTOMER_ID, "MEMBER", "spring-2026-soft-structure", SNAPSHOT, mockTx, NO_SUBSCRIPTION);
+    assert.equal(result.allowed, true);
+    assert.equal(upsertCalls, 1);
+  });
+
+  it("RSV.24 — retries once on a P2034 serialization conflict, then succeeds", async () => {
+    let txCalls = 0;
+    const mockTx: RunReservationFn = async (fn) => {
+      txCalls++;
+      if (txCalls === 1) throw p2034();
+      return fn({
+        personalisedTrendEditUsage: {
+          count: async () => 0,
+          upsert: async ({ create }: any) => ({ id: "usage-after-retry", ...create }),
+        },
+      } as any);
+    };
+
+    const result = await reservePersonalisedTrendSlot(CUSTOMER_ID, "MEMBER", "spring-2026-soft-structure", SNAPSHOT, mockTx, NO_SUBSCRIPTION);
+    assert.equal(result.allowed, true);
+    assert.equal(txCalls, 2, "must retry exactly once on P2034");
+  });
+
+  it("RSV.25 — a non-serialization error is never retried, it propagates immediately", async () => {
+    let txCalls = 0;
+    const mockTx: RunReservationFn = async (_fn) => {
+      txCalls++;
+      throw Object.assign(new Error("connection terminated"), { code: "P1017" });
+    };
+    await assert.rejects(
+      () => reservePersonalisedTrendSlot(CUSTOMER_ID, "MEMBER", "spring-2026-soft-structure", SNAPSHOT, mockTx, NO_SUBSCRIPTION),
+      (e: any) => e.code === "P1017",
+    );
+    assert.equal(txCalls, 1, "a non-conflict error must not trigger the retry loop");
   });
 });

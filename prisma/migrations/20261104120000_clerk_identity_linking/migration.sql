@@ -50,3 +50,24 @@ CREATE INDEX "IdentityLinkRequest_customerId_idx" ON "IdentityLinkRequest"("cust
 
 ALTER TABLE "IdentityLinkRequest" ADD CONSTRAINT "IdentityLinkRequest_customerId_fkey"
     FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- 4. CreateTable: PendingClerkCleanup
+-- Durable, operator-visible record of a Clerk user deletion that failed
+-- after this account's own nAia data was already erased — see settings.tsx's
+-- delete-account action and admin.maintenance.tsx's retry surface. No FK to
+-- Customer: that row is already gone by the time this one is created.
+CREATE TABLE "PendingClerkCleanup" (
+    "id"            TEXT NOT NULL,
+    "clerkUserId"   TEXT NOT NULL,
+    "customerId"    TEXT NOT NULL,
+    "lastError"     TEXT NOT NULL,
+    "attemptCount"  INTEGER NOT NULL DEFAULT 1,
+    "createdAt"     TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "lastAttemptAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "resolvedAt"    TIMESTAMP(3),
+
+    CONSTRAINT "PendingClerkCleanup_pkey" PRIMARY KEY ("id")
+);
+
+CREATE UNIQUE INDEX "PendingClerkCleanup_clerkUserId_key" ON "PendingClerkCleanup"("clerkUserId");
+CREATE INDEX "PendingClerkCleanup_resolvedAt_idx" ON "PendingClerkCleanup"("resolvedAt");

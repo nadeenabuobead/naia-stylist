@@ -467,6 +467,16 @@ describe("N — data export and account deletion are real, authenticated actions
     assert.ok(src.includes('redirect("/auth/signed-out"'),     "redirects to signed-out after deletion");
   });
 
+  it("a failed Clerk user deletion is durably recorded (not just logged) so it can't go unnoticed", () => {
+    // 2026-11-04: a bare console.error here was real but not durable (lost
+    // to log rotation) and not actionable (no list anywhere to check). See
+    // clerk-cleanup.server.ts + admin.maintenance.tsx's retry surface.
+    const deleteIdx = src.indexOf("clerkClient(args).users.deleteUser(customer.clerkUserId)");
+    const catchBlock = src.slice(deleteIdx, deleteIdx + 300);
+    assert.ok(catchBlock.includes("recordPendingClerkCleanup"), "the failure handler calls recordPendingClerkCleanup, not just console.error");
+    assert.ok(!catchBlock.includes("console.error"), "console.error alone is no longer the failure handler — it was replaced, not supplemented silently");
+  });
+
   it("deletion warning copy explicitly distinguishes account deletion from subscription cancellation", () => {
     const confirmBlock = src.slice(src.indexOf('"delete-account": {'), src.indexOf('"delete-account": {') + 600);
     assert.ok(/cancel|subscription|membership/i.test(confirmBlock), "warning copy addresses the cancellation-vs-deletion distinction");

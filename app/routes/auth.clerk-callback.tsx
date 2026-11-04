@@ -68,5 +68,13 @@ export async function loader(args: LoaderFunctionArgs) {
       // flow never reveals "this specific email is locked" as a distinct,
       // more specific signal than "a request was made."
       return redirect("/account/link-identity?error=locked");
+    case "email-send-failed":
+      // The collision was real and the DB row is written, but the
+      // customer was never actually sent a code to confirm with — sending
+      // them to account/link-identity to "enter the code" would be
+      // actively wrong (there's nothing to enter yet). Back to sign-in
+      // with an honest, retryable error instead; signing up again re-runs
+      // the same upsert and attempts to send a fresh code.
+      return redirect("/sign-in?error=verification_email_failed");
   }
 }

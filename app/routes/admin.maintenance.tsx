@@ -29,6 +29,7 @@ import { useActionData, useLoaderData } from "react-router";
 import { requireAdminSession } from "~/lib/internal-auth.server";
 import { purgeExpiredJourneyEvents, purgeExpiredNaiaSessions, purgeUnconfirmedSelfiePhotos } from "~/lib/data-retention.server";
 import { recordAdminAction, listRecentAdminActions } from "~/lib/admin-audit-log.server";
+import { listPendingClerkCleanups, retryPendingClerkCleanup } from "~/lib/clerk-cleanup.server";
 
 async function requireOwner(request: Request) {
   const session = await requireAdminSession(request);
@@ -40,8 +41,11 @@ async function requireOwner(request: Request) {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requireOwner(request);
-  const recentActions = await listRecentAdminActions(20);
-  return { recentActions };
+  const [recentActions, pendingClerkCleanups] = await Promise.all([
+    listRecentAdminActions(20),
+    listPendingClerkCleanups(),
+  ]);
+  return { recentActions, pendingClerkCleanups };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -74,6 +78,19 @@ export async function action({ request }: ActionFunctionArgs) {
     };
   }
 
+  if (intent === "retry-clerk-cleanup") {
+    const id = String(form.get("id") ?? "");
+    const result = await retryPendingClerkCleanup(id);
+    await recordAdminAction(identity.email, "retry-clerk-cleanup", { id, result: result.status });
+    if (result.status === "resolved") {
+      return { ok: true as const, intent, message: "Clerk user deleted — cleanup resolved." };
+    }
+    if (result.status === "failed-again") {
+      return { ok: false as const, error: `Retry failed again: ${result.error}` };
+    }
+    return { ok: false as const, error: result.status === "not-found" ? "Record not found." : "Already resolved." };
+  }
+
   return { ok: false as const, error: "Invalid request." };
 }
 
@@ -85,7 +102,7 @@ function confirmPurge(e: FormEvent<HTMLFormElement>, label: string) {
 
 export default function AdminMaintenance() {
   const actionData = useActionData<typeof action>();
-  const { recentActions } = useLoaderData<typeof loader>();
+  const { recentActions, pendingClerkCleanups } = useLoaderData<typeof loader>();
 
   return (
     <div className="adm-page">
@@ -134,6 +151,52 @@ export default function AdminMaintenance() {
         )}
         {actionData && "error" in actionData && (
           <p style={{ fontSize: "13px", color: "#b3261e" }}>{actionData.error}</p>
+        )}
+      </div>
+
+      <h2 className="adm-page-heading" style={{ fontSize: "16px", marginTop: "2rem" }}>
+        Pending Clerk account cleanups
+      </h2>
+      <p className="adm-page-sub" style={{ marginBottom: "0.75rem" }}>
+        A customer's own nAia data was successfully deleted, but deleting their Clerk login
+        afterward failed — the row below is the only trace of that until it's retried successfully.
+      </p>
+      <div className="adm-card" style={{ padding: "0" }}>
+        {pendingClerkCleanups.length === 0 ? (
+          <p style={{ fontSize: "13px", color: "#6b7280", padding: "1rem 1.5rem" }}>
+            No pending Clerk cleanups — nothing needs attention.
+          </p>
+        ) : (
+          <table style={{ width: "100%", fontSize: "13px", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ textAlign: "left", borderBottom: "1px solid #dde1e7" }}>
+                <th style={{ padding: "0.6rem 1rem" }}>First failed</th>
+                <th style={{ padding: "0.6rem 1rem" }}>Former customer</th>
+                <th style={{ padding: "0.6rem 1rem" }}>Clerk user</th>
+                <th style={{ padding: "0.6rem 1rem" }}>Attempts</th>
+                <th style={{ padding: "0.6rem 1rem" }}>Last error</th>
+                <th style={{ padding: "0.6rem 1rem" }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {pendingClerkCleanups.map(entry => (
+                <tr key={entry.id} style={{ borderBottom: "1px solid #f0f1f3" }}>
+                  <td style={{ padding: "0.6rem 1rem", color: "#6b7280" }}>{new Date(entry.createdAt).toLocaleString()}</td>
+                  <td style={{ padding: "0.6rem 1rem" }}>{entry.customerId}</td>
+                  <td style={{ padding: "0.6rem 1rem" }}>{entry.clerkUserId}</td>
+                  <td style={{ padding: "0.6rem 1rem" }}>{entry.attemptCount}</td>
+                  <td style={{ padding: "0.6rem 1rem", color: "#b3261e" }}>{entry.lastError}</td>
+                  <td style={{ padding: "0.6rem 1rem" }}>
+                    <form method="post">
+                      <input type="hidden" name="intent" value="retry-clerk-cleanup" />
+                      <input type="hidden" name="id" value={entry.id} />
+                      <button type="submit" style={maintenanceButtonStyle}>Retry</button>
+                    </form>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
       </div>
 

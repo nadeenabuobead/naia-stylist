@@ -32,9 +32,15 @@ vi.mock("~/lib/admin-audit-log.server", () => ({
   listRecentAdminActions: vi.fn().mockResolvedValue([]),
 }));
 
+vi.mock("~/lib/clerk-cleanup.server", () => ({
+  listPendingClerkCleanups: vi.fn().mockResolvedValue([]),
+  retryPendingClerkCleanup: vi.fn(),
+}));
+
 import { requireAdminSession } from "~/lib/internal-auth.server";
 import { purgeExpiredJourneyEvents, purgeExpiredNaiaSessions, purgeUnconfirmedSelfiePhotos } from "~/lib/data-retention.server";
 import { recordAdminAction, listRecentAdminActions } from "~/lib/admin-audit-log.server";
+import { listPendingClerkCleanups, retryPendingClerkCleanup } from "~/lib/clerk-cleanup.server";
 
 const mockRequireAdmin = () => requireAdminSession as ReturnType<typeof vi.fn>;
 const mockPurgeJourney = () => purgeExpiredJourneyEvents as ReturnType<typeof vi.fn>;
@@ -42,6 +48,8 @@ const mockPurgeSessions = () => purgeExpiredNaiaSessions as ReturnType<typeof vi
 const mockPurgeSelfies = () => purgeUnconfirmedSelfiePhotos as ReturnType<typeof vi.fn>;
 const mockRecordAction = () => recordAdminAction as ReturnType<typeof vi.fn>;
 const mockListActions = () => listRecentAdminActions as ReturnType<typeof vi.fn>;
+const mockListPendingCleanups = () => listPendingClerkCleanups as ReturnType<typeof vi.fn>;
+const mockRetryCleanup = () => retryPendingClerkCleanup as ReturnType<typeof vi.fn>;
 
 function actionRequest(intent: string) {
   const body = new URLSearchParams({ intent });
@@ -60,7 +68,8 @@ describe("admin.maintenance — session and role requirements", () => {
     const result = await loader({ request: new Request("http://localhost/admin/maintenance") } as any);
     expect(mockRequireAdmin()).toHaveBeenCalled();
     expect(mockListActions()).toHaveBeenCalledWith(20);
-    expect(result).toEqual({ recentActions: [] });
+    expect(mockListPendingCleanups()).toHaveBeenCalled();
+    expect(result).toEqual({ recentActions: [], pendingClerkCleanups: [] });
   });
 
   it("action rejects before running any purge when the session check rejects", async () => {
@@ -144,5 +153,54 @@ describe("admin.maintenance — purge actions and auditability", () => {
     expect(mockPurgeSessions()).not.toHaveBeenCalled();
     expect(mockPurgeSelfies()).not.toHaveBeenCalled();
     expect(mockRecordAction()).not.toHaveBeenCalled();
+  });
+});
+
+function retryActionRequest(id: string) {
+  const body = new URLSearchParams({ intent: "retry-clerk-cleanup", id });
+  return new Request("http://localhost/admin/maintenance", {
+    method: "POST", body, headers: { "Content-Type": "application/x-www-form-urlencoded" },
+  });
+}
+
+describe("admin.maintenance — retry-clerk-cleanup action", () => {
+  it("a successful retry reports resolved and records the audit entry with the row id", async () => {
+    mockRetryCleanup().mockResolvedValueOnce({ status: "resolved" });
+    const { action } = await import("./admin.maintenance.tsx");
+
+    const result = await action({ request: retryActionRequest("cleanup-1") } as any);
+
+    expect(mockRetryCleanup()).toHaveBeenCalledWith("cleanup-1");
+    expect((result as any).ok).toBe(true);
+    expect((result as any).message).toMatch(/resolved/i);
+    expect(mockRecordAction()).toHaveBeenCalledWith(
+      "owner@naiabynadine.com", "retry-clerk-cleanup", { id: "cleanup-1", result: "resolved" },
+    );
+  });
+
+  it("a retry that fails again surfaces the error rather than silently succeeding", async () => {
+    mockRetryCleanup().mockResolvedValueOnce({ status: "failed-again", error: "still misconfigured" });
+    const { action } = await import("./admin.maintenance.tsx");
+
+    const result = await action({ request: retryActionRequest("cleanup-1") } as any);
+
+    expect((result as any).ok).toBe(false);
+    expect((result as any).error).toMatch(/still misconfigured/);
+  });
+
+  it("retrying a not-found id reports an error, never a silent success", async () => {
+    mockRetryCleanup().mockResolvedValueOnce({ status: "not-found" });
+    const { action } = await import("./admin.maintenance.tsx");
+
+    const result = await action({ request: retryActionRequest("does-not-exist") } as any);
+    expect((result as any).ok).toBe(false);
+  });
+
+  it("retrying an already-resolved id reports an error, not a duplicate success message", async () => {
+    mockRetryCleanup().mockResolvedValueOnce({ status: "already-resolved" });
+    const { action } = await import("./admin.maintenance.tsx");
+
+    const result = await action({ request: retryActionRequest("cleanup-1") } as any);
+    expect((result as any).ok).toBe(false);
   });
 });

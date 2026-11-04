@@ -36,6 +36,7 @@ import { data, redirect } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { clerkClient } from "@clerk/react-router/server";
 import { compileCustomerExport, eraseCustomerData } from "~/lib/customer-privacy.server";
+import { recordPendingClerkCleanup } from "~/lib/clerk-cleanup.server";
 import prisma from "~/db.server";
 import { conciseFamilyName } from "~/lib/customer-name-display";
 import {
@@ -202,26 +203,25 @@ export async function action(args: ActionFunctionArgs) {
       // Deleting the Clerk user outright (not just revoking one session) is
       // what "delete my account" should mean — it also ends every session
       // for this identity, not just the one making this request, and there
-      // is no Clerk-hosted email/password left over once nAia's own PII is
-      // gone, which revoking a session alone would not address.
+      // is no Clerk-hosted login credential left over once nAia's own PII
+      // is gone, which revoking a session alone would not address.
       if (customer.clerkUserId) {
         // Never silently swallowed — nAia's own data is already gone at
         // this point, so a failure here is the ONE thing that can still
-        // leave something behind (a Clerk-hosted email/password with no
-        // linked nAia data). Logged with the exact clerkUserId so it can be
-        // deleted directly from the Clerk dashboard — the recoverable path,
-        // not a stuck or silently-incomplete deletion. The customer still
-        // sees a successful deletion either way: their own data (the
+        // leave something behind (a Clerk-hosted login credential with no
+        // linked nAia data). Durably recorded (not just logged) via
+        // recordPendingClerkCleanup — console output alone can be lost to
+        // log rotation with nothing left to act on; the PendingClerkCleanup
+        // row survives that and is listed + retryable on
+        // /admin/maintenance, so this is a recoverable, operator-visible
+        // failure rather than a silently-incomplete deletion. The customer
+        // still sees a successful deletion either way: their own data (the
         // actual privacy obligation) is already erased, and this orphaned
-        // credential has no nAia data left to expose even if cleanup is
-        // delayed.
-        await clerkClient(args).users.deleteUser(customer.clerkUserId).catch((err: unknown) => {
-          console.error(
-            `settings.delete-account: nAia data erased for customer ${customer.id}, ` +
-            `but Clerk user deletion failed for clerkUserId ${customer.clerkUserId} — needs manual cleanup in the Clerk dashboard.`,
-            err,
-          );
-        });
+        // credential has no nAia data left to expose even while cleanup is
+        // pending.
+        await clerkClient(args).users.deleteUser(customer.clerkUserId).catch((err: unknown) =>
+          recordPendingClerkCleanup(customer.clerkUserId!, customer.id, err),
+        );
       }
       return redirect("/auth/signed-out");
     }

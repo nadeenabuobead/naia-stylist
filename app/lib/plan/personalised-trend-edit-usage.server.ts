@@ -32,32 +32,43 @@ export interface TrendEditSnapshot {
  * Trend Edit. customerId must come from the authenticated session only —
  * never a route param, query string, or request body.
  *
- * Race-safety: the composite unique constraint on
- * (customerId, reportSlug, periodKey) is the final authority. This upsert is
- * safe under concurrent/duplicate calls for the same customer+report+period —
- * it is not a check-then-create, and callers must not rely on a thrown P2002
- * as the normal refresh path (there is none; a repeat call is a plain no-op
- * update of the same row).
+ * Race-safety, two DIFFERENT races, two DIFFERENT guards:
+ *  - A duplicate submission for the SAME customer+report+period (a
+ *    double-click, a retried request) is closed by the composite unique
+ *    constraint on (customerId, reportSlug, periodKey) — this upsert is
+ *    safe under that race, not a check-then-create, and callers must not
+ *    rely on a thrown P2002 as the normal refresh path.
+ *  - The account-wide monthly allowance (ONE edit per customer per period,
+ *    across every report — checkEntitlement's own count has no reportSlug
+ *    filter) is a SEPARATE invariant the unique constraint above does
+ *    nothing to protect: two concurrent generations for two DIFFERENT
+ *    reports never conflict on that constraint. That race is closed by
+ *    entitlement.server.ts's reservePersonalisedTrendSlot, which re-checks
+ *    the account-wide count and calls this function with its own
+ *    transaction client via _tx — the real production call path is
+ *    through that function, not this one directly (see this file's own
+ *    writer-count test for why only one caller exists in production).
  *
  * snapshot is written ONLY on the row's first creation this period — the
  * update branch never touches it. This is deliberate, not an oversight: the
- * caller (trends.my-edits.$slug.tsx) only calls this function for a genuine
- * NEW generation, i.e. when getTrendEditUsageState returned "none". It must
- * never be called for a "legacy_no_snapshot" row — but update: {} is kept as
- * a second, structural line of defence: even if some future caller did call
- * this on an existing row, the update branch still could not write a
- * snapshot onto it. A row, once it exists, can only ever get its snapshot
- * from the create branch — i.e. exactly once, at genuine first-generation
- * time. The schema's own doc comment on PersonalisedTrendEditUsage.snapshot
- * already states this must never happen ("never backfilled/reconstructed").
+ * caller only reaches this function for a genuine NEW generation, i.e. when
+ * getTrendEditUsageState returned "none". It must never be called for a
+ * "legacy_no_snapshot" row — but update: {} is kept as a second, structural
+ * line of defence: even if some future caller did call this on an existing
+ * row, the update branch still could not write a snapshot onto it. A row,
+ * once it exists, can only ever get its snapshot from the create branch —
+ * i.e. exactly once, at genuine first-generation time. The schema's own doc
+ * comment on PersonalisedTrendEditUsage.snapshot already states this must
+ * never happen ("never backfilled/reconstructed").
  */
 export async function recordPersonalisedTrendEditUsage(
   customerId: string,
   reportSlug: string,
   snapshot?: TrendEditSnapshot,
-): Promise<void> {
+  _tx: Pick<typeof prisma, "personalisedTrendEditUsage"> = prisma,
+): Promise<ReturnType<typeof prisma.personalisedTrendEditUsage.upsert>> {
   const { periodKey } = getUsageWindow();
-  await prisma.personalisedTrendEditUsage.upsert({
+  return _tx.personalisedTrendEditUsage.upsert({
     where: { customerId_reportSlug_periodKey: { customerId, reportSlug, periodKey } },
     create: { customerId, reportSlug, periodKey, snapshot: snapshot ?? undefined },
     update: {},
