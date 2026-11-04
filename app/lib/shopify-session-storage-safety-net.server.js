@@ -20,45 +20,95 @@
 // the rejecting promise lives on a module-singleton instance, created at
 // import time, outside every request's own await chain.
 //
-// Fix: attach our own `.catch()` to this EXACT `.ready` promise instance
-// right after construction (see shopify.server.js's call site). This
-// changes nothing about `.ready`'s resolved/rejected VALUE or timing for
-// any other consumer — storeSession / loadSession / ensureReady / isReady
-// still see the real outcome and behave exactly as before (a genuinely,
-// persistently unavailable DB still fails real Shopify auth operations via
-// ensureReady()'s own MissingSessionStorageError, inside that request's own
-// promise chain, same as today). The only change: Node now sees a handler
-// attached, so a transient blip is logged instead of crashing the process.
+// PART 1 — crash prevention: attach our own `.catch()` to this EXACT
+// `.ready` promise instance right after construction. This changes
+// nothing about `.ready`'s resolved/rejected VALUE or timing for any other
+// consumer. The only change: Node now sees a handler attached, so a
+// transient blip is logged instead of crashing the process.
 //
-// KNOWN LIMITATION (confirmed 2026-11-04, not fixed here — this safety net
-// only prevents the crash, it does NOT restore Shopify auth availability):
-// `this.ready` is assigned exactly ONCE, inside PrismaSessionStorage's
-// constructor, from a one-time ~10s poll window (2 retries, 5s apart). It
-// never changes again on its own. If the DB is still down when that window
-// expires, `.ready` is a PERMANENTLY rejected promise for the rest of that
-// warm process instance's life — every subsequent storeSession/loadSession/
-// OAuth call on that SAME instance keeps failing even after the database is
-// fully healthy again. The only reset mechanism the package exposes is
-// `isReady()` (which re-polls and reassigns `this.ready`) — confirmed via
-// grep across @shopify/shopify-app-react-router and @shopify/shopify-api
-// that NOTHING in the framework ever calls it automatically. Recovery on an
-// already-affected instance therefore depends entirely on the hosting
-// platform naturally recycling that instance (new deployment, scale event,
-// idle-instance churn) — not on anything this app or this fix controls.
-// Wiring in an on-demand isReady() retry would be a separate, deliberate
-// piece of work, not bundled into this fix.
+// PART 2 — authentication recovery (2026-11-04): crash prevention alone
+// left a confirmed gap — `this.ready` is assigned exactly ONCE, in the
+// constructor, from a one-time ~10s poll window. It never changes again
+// on its own. If the DB is still down when that window expires, `.ready`
+// stays permanently rejected for the rest of that warm instance's life —
+// every subsequent storeSession/loadSession/OAuth call keeps failing even
+// after the database is fully healthy again, because nothing in the
+// framework ever calls the package's own `isReady()` reset method.
+//
+// `isReady()` (see prisma.js) is a safe building block for recovery: it
+// NEVER throws itself — it internally try/catches its own re-poll and
+// always resolves, reassigning `this.ready` to `Promise.resolve(true)` or
+// `Promise.resolve(false)` as its one side effect. We wrap `ensureReady()`
+// (the single method storeSession/loadSession/deleteSession/
+// deleteSessions/findSessionsByShop all route through) so that when it's
+// about to fail, it first gives the storage ONE chance to re-check
+// readiness — bounded and coalesced:
+//   - Bounded: at most one recovery attempt per `recoveryCooldownMs`
+//     (default 15s) — a persistent outage cannot cause faster or more
+//     frequent retries than that, however many requests arrive.
+//   - Coalesced: if N requests hit this concurrently while a recovery
+//     attempt is already in flight, all N await the SAME single
+//     `isReady()` call — never N separate DB probes. This relies on
+//     Node's single-threaded microtask execution: the synchronous
+//     check-and-set of `inFlightRecovery` between concurrent callers'
+//     continuations can never interleave, so there is no race window
+//     where two callers both see `inFlightRecovery` unset and each start
+//     their own probe.
+//   - Never duplicates a session/auth operation: this wrapper touches
+//     ONLY `ensureReady()`'s readiness decision — it never calls
+//     storeSession/loadSession/etc. itself, so the caller's own single,
+//     already-in-progress operation either proceeds or fails closed,
+//     exactly once, same as the unwrapped method would decide (just with
+//     a chance to notice the DB has recovered first).
+//   - Fail-closed preserved: a genuinely persistent outage still makes
+//     `isReady()` resolve `false` (after its own internal retries), so
+//     `ensureReady()` still throws `MissingSessionStorageError` exactly
+//     as the unwrapped package does today — this wrapper only ever makes
+//     recovery POSSIBLE, it never weakens the failure path.
 //
 // Deliberately its own tiny, side-effect-free module (not inlined in
 // shopify.server.js) so it can be unit-tested without triggering
 // shopify.server.js's own module-load-time side effects (constructing a
 // real PrismaSessionStorage against the real Prisma client, calling
 // shopifyApp() with real env vars).
-export function attachSessionStorageReadinessSafetyNet(storage) {
+export function attachSessionStorageReadinessSafetyNet(storage, { recoveryCooldownMs = 15000 } = {}) {
   if (!storage || typeof storage.ready?.catch !== "function") return;
+
   storage.ready.catch((err) => {
     console.error(
       "[shopify-session-storage] background readiness check failed (non-fatal, logged to avoid an unhandled-rejection process crash):",
       err,
     );
   });
+
+  // Defensive: if a future package version changes shape, skip the
+  // recovery wrapper entirely rather than guessing at an incompatible API.
+  // Crash prevention above still applies regardless.
+  if (typeof storage.ensureReady !== "function" || typeof storage.isReady !== "function") return;
+
+  const originalEnsureReady = storage.ensureReady.bind(storage);
+  let lastAttemptAt = 0;
+  let inFlightRecovery = null;
+
+  storage.ensureReady = async function ensureReadyWithRecovery() {
+    try {
+      // Fast path: when `.ready` is currently fulfilled-true, this
+      // resolves immediately — recovery logic is never on the happy
+      // path's critical path, and nothing below ever runs.
+      return await originalEnsureReady();
+    } catch (err) {
+      const now = Date.now();
+      if (!inFlightRecovery && now - lastAttemptAt >= recoveryCooldownMs) {
+        lastAttemptAt = now;
+        inFlightRecovery = storage.isReady().finally(() => {
+          inFlightRecovery = null;
+        });
+      }
+      if (inFlightRecovery) await inFlightRecovery;
+      // Re-check readiness the NORMAL way, exactly once more — if the
+      // DB is still down, this throws the same way the unwrapped method
+      // always has (fail-closed, unchanged).
+      return await originalEnsureReady();
+    }
+  };
 }

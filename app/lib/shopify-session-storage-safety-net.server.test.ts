@@ -95,3 +95,123 @@ describe("attachSessionStorageReadinessSafetyNet", () => {
     expect(() => attachSessionStorageReadinessSafetyNet({ ready: "not-a-promise" })).not.toThrow();
   });
 });
+
+// ── Authentication recovery ──────────────────────────────────────────────────
+//
+// Mirrors the REAL package's isReady()/ensureReady() contract exactly (see
+// node_modules/@shopify/shopify-app-session-storage-prisma/dist/cjs/prisma.js):
+//   - isReady() NEVER throws — it internally try/catches its own re-poll and
+//     always resolves, reassigning `this.ready` as its one side effect.
+//   - ensureReady() awaits `.ready` and throws if it's falsy (covers BOTH a
+//     rejected `.ready` promise and a resolved-false one).
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+class FakeSessionStorageWithRecovery {
+  ready: Promise<boolean>;
+  dbHealthy: boolean;
+  isReadyCallCount = 0;
+
+  constructor(initiallyHealthy: boolean) {
+    this.dbHealthy = initiallyHealthy;
+    this.ready = (initiallyHealthy ? Promise.resolve() : Promise.reject(new Error("initial table check failed")))
+      .then(() => true)
+      .catch((cause) => {
+        throw new Error(`Prisma session table does not exist: ${cause}`);
+      });
+  }
+
+  async isReady(): Promise<boolean> {
+    this.isReadyCallCount++;
+    try {
+      if (!this.dbHealthy) throw new Error("db still down");
+      this.ready = Promise.resolve(true);
+    } catch {
+      this.ready = Promise.resolve(false);
+    }
+    return this.ready;
+  }
+
+  async ensureReady(): Promise<void> {
+    if (!(await this.ready)) throw new Error("MissingSessionStorageError: not ready");
+  }
+}
+
+describe("attachSessionStorageReadinessSafetyNet — authentication recovery", () => {
+  it("RT.6 — initial DB failure: ensureReady() fails closed when .ready starts rejected", async () => {
+    const storage = new FakeSessionStorageWithRecovery(false);
+    attachSessionStorageReadinessSafetyNet(storage, { recoveryCooldownMs: 10_000 });
+    await expect(storage.ensureReady()).rejects.toThrow();
+  });
+
+  it("RT.7 — subsequent recovery: once the DB is healthy again and the cooldown has elapsed, ensureReady() recovers automatically", async () => {
+    const storage = new FakeSessionStorageWithRecovery(false);
+    attachSessionStorageReadinessSafetyNet(storage, { recoveryCooldownMs: 20 });
+
+    await expect(storage.ensureReady()).rejects.toThrow(); // still down — triggers the first bounded recovery attempt
+    storage.dbHealthy = true; // DB comes back
+    await sleep(30); // past the 20ms cooldown
+
+    await expect(storage.ensureReady()).resolves.toBeUndefined(); // recovers automatically
+    expect(storage.isReadyCallCount).toBe(2); // exactly one attempt per failing call, bounded by cooldown
+  });
+
+  it("RT.8 — bounded retries: a second ensureReady() call within the cooldown window does NOT trigger another isReady() probe", async () => {
+    const storage = new FakeSessionStorageWithRecovery(false);
+    attachSessionStorageReadinessSafetyNet(storage, { recoveryCooldownMs: 10_000 }); // long cooldown
+
+    await expect(storage.ensureReady()).rejects.toThrow();
+    const countAfterFirst = storage.isReadyCallCount;
+    await expect(storage.ensureReady()).rejects.toThrow(); // still within cooldown
+    expect(storage.isReadyCallCount).toBe(countAfterFirst); // no new probe — fails fast instead
+  });
+
+  it("RT.9 — persistent outage: ensureReady() keeps failing closed across multiple cooldown windows if the DB never recovers", async () => {
+    const storage = new FakeSessionStorageWithRecovery(false);
+    attachSessionStorageReadinessSafetyNet(storage, { recoveryCooldownMs: 15 });
+
+    await expect(storage.ensureReady()).rejects.toThrow();
+    await sleep(20);
+    await expect(storage.ensureReady()).rejects.toThrow(); // retried, still down
+    await sleep(20);
+    await expect(storage.ensureReady()).rejects.toThrow(); // retried again, still down
+    expect(storage.isReadyCallCount).toBe(3); // exactly one bounded probe per window — never swallowed into a false success
+  });
+
+  it("RT.10 — concurrent requests: many simultaneous ensureReady() calls during one recovery window trigger exactly ONE isReady() probe", async () => {
+    const storage = new FakeSessionStorageWithRecovery(false);
+    attachSessionStorageReadinessSafetyNet(storage, { recoveryCooldownMs: 10_000 });
+
+    const results = await Promise.allSettled([
+      storage.ensureReady(),
+      storage.ensureReady(),
+      storage.ensureReady(),
+      storage.ensureReady(),
+      storage.ensureReady(),
+    ]);
+    expect(results.every((r) => r.status === "rejected")).toBe(true);
+    expect(storage.isReadyCallCount).toBe(1); // coalesced into a single DB probe, never a retry storm
+  });
+
+  it("RT.11 — never duplicates the caller's own operation: a recovery attempt running inline still results in exactly one logical write", async () => {
+    const storage = new FakeSessionStorageWithRecovery(false);
+    attachSessionStorageReadinessSafetyNet(storage, { recoveryCooldownMs: 10_000 });
+    let writeCount = 0;
+    async function simulateStoreSession() {
+      await storage.ensureReady(); // stands in for the real package's own internal call
+      writeCount++; // stands in for the real package's single upsert() call
+    }
+    storage.dbHealthy = true; // DB already healthy by the time this one call happens
+    await simulateStoreSession();
+    expect(writeCount).toBe(1);
+    expect(storage.isReadyCallCount).toBe(1);
+  });
+
+  it("RT.12 — happy path (DB already healthy at construction) never touches isReady() at all", async () => {
+    const storage = new FakeSessionStorageWithRecovery(true);
+    attachSessionStorageReadinessSafetyNet(storage, { recoveryCooldownMs: 10_000 });
+    await expect(storage.ensureReady()).resolves.toBeUndefined();
+    expect(storage.isReadyCallCount).toBe(0);
+  });
+});
