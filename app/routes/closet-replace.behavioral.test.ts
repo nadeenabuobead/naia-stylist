@@ -49,9 +49,20 @@ vi.mock("~/lib/cloudinary-admin.server", async () => {
   };
 });
 
-vi.mock("~/lib/plan/entitlement.server", () => ({
-  checkEntitlement: vi.fn().mockResolvedValue({ allowed: true }),
-}));
+vi.mock("~/lib/plan/entitlement.server", async () => {
+  // reserveClosetSlot (06209cf, atomic Closet-quota reservation) replaced the
+  // direct closetItem.create() call this file's happy-path/history/capacity
+  // tests exercise — delegate to the already-mocked db.server create so this
+  // file's existing mockCreateItem() assertions keep testing the same thing.
+  const { default: db } = await import("~/db.server");
+  return {
+    checkEntitlement: vi.fn().mockResolvedValue({ allowed: true }),
+    reserveClosetSlot: vi.fn(async (_customerId: string, _membershipStatus: string, itemData: any) => {
+      const record = await (db as any).closetItem.create({ data: itemData });
+      return { allowed: true, record };
+    }),
+  };
+});
 
 vi.mock("~/lib/closet-item-deletion.server", () => ({
   deleteClosetItemWithImage: vi.fn(),

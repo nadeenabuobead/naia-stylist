@@ -393,12 +393,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
       resolvedCustomerId = guest.id;
     }
 
-    // The old non-atomic guard here (checkEntitlement, gated on `naiaCustomer`
-    // truthy) is superseded below by reserveStyleMeSlot — same quota rule,
-    // but atomic AND guest-inclusive (see that block's own comment for why
-    // the old `isEnforced && naiaCustomer` gate let a guest through
-    // unlimited). Removed rather than kept alongside, to avoid two
-    // independent StyleMe-quota code paths disagreeing with each other.
+    // A prior non-atomic quota-check helper, gated on the customer object
+    // being present, used to run here — superseded below by
+    // reserveStyleMeSlot, which is both atomic and runs for every caller
+    // including an anonymous guest (see that block's own comment for why
+    // the old authenticated-only gate let a guest through with no limit at
+    // all). Removed rather than kept alongside, to avoid two independent
+    // StyleMe-quota code paths disagreeing with each other.
 
     // If this session was started via Adjust Vibe, the source session ID was stored
     // in the cookie by the adjust-vibe action. We link it here so the new session

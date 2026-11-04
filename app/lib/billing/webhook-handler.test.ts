@@ -117,6 +117,7 @@ describe("processStripeWebhookEvent — idempotency", () => {
       createSubscription: async (input) => ({ ...baseSubscription(), ...input, id: "new-sub" }),
       createBillingTransaction: async () => {},
       recordProcessedEvent: async (input) => { recordCalls++; recordedEventId = input.providerEventId; },
+      updateCustomerMembershipStatus: async () => {},
     };
     const event = makeEvent({
       id: "evt_new",
@@ -140,6 +141,7 @@ describe("processStripeWebhookEvent — checkout.session.completed (synchronous 
       createSubscription: async (input) => { created = input; return { ...baseSubscription(), ...input, id: "sub-new" }; },
       createBillingTransaction: async (input) => { transaction = input; },
       recordProcessedEvent: async () => {},
+      updateCustomerMembershipStatus: async () => {},
     };
     const event = makeEvent({
       data: {
@@ -174,6 +176,7 @@ describe("processStripeWebhookEvent — checkout.session.completed (synchronous 
       createSubscription: async (input) => ({ ...baseSubscription(), ...input, id: "sub-new" }),
       createBillingTransaction: async (input) => { transaction = input; },
       recordProcessedEvent: async () => {},
+      updateCustomerMembershipStatus: async () => {},
     };
     const event = makeEvent({
       id: "evt_whatever",
@@ -216,6 +219,7 @@ describe("processStripeWebhookEvent — checkout.session.completed (synchronous 
         throw err;
       },
       recordProcessedEvent: async () => {},
+      updateCustomerMembershipStatus: async () => {},
     };
     const event = makeEvent({
       id: "evt_whatever_2",
@@ -258,6 +262,7 @@ describe("processStripeWebhookEvent — checkout.session.completed (synchronous 
         throw err;
       },
       recordProcessedEvent: async () => {},
+      updateCustomerMembershipStatus: async () => {},
     };
     const sameSessionObject = {
       id: "cs_same_session", // the SAME underlying Checkout Session both events describe
@@ -281,6 +286,10 @@ describe("processStripeWebhookEvent — checkout.session.completed (synchronous 
     const deps: WebhookHandlerDeps = {
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => null,
+      // This test's event carries no obj.subscription, so
+      // activateFromCheckoutSession falls through to the by-customerId
+      // lookup instead — must be mocked too, not just the by-provider-id one.
+      findSubscriptionByCustomerId: async () => null,
       createSubscription: async (input) => ({ ...baseSubscription(), ...input, id: "sub-new" }),
       createBillingTransaction: async () => {},
       recordProcessedEvent: async () => {},
@@ -364,6 +373,7 @@ describe("processStripeWebhookEvent — asynchronous payment confirmation", () =
       updateSubscriptionById: async (id, input) => { updateId = id; updateInput = input; },
       createBillingTransaction: async (input) => { transaction = input; },
       recordProcessedEvent: async () => {},
+      updateCustomerMembershipStatus: async () => {},
     };
     const event = makeEvent({
       type: "checkout.session.async_payment_succeeded",
@@ -396,6 +406,7 @@ describe("processStripeWebhookEvent — asynchronous payment confirmation", () =
       updateSubscriptionById: async () => { updateCalls++; },
       createBillingTransaction: async () => { transactionCalls++; },
       recordProcessedEvent: async () => {},
+      updateCustomerMembershipStatus: async () => {},
     };
     const event = makeEvent({
       type: "checkout.session.async_payment_succeeded",
@@ -425,6 +436,7 @@ describe("processStripeWebhookEvent — asynchronous payment confirmation", () =
       updateSubscriptionById: async () => { updateCalls++; },
       createBillingTransaction: async () => { transactionCalls++; },
       recordProcessedEvent: async () => {},
+      updateCustomerMembershipStatus: async () => {},
     };
     const event = makeEvent({
       type: "checkout.session.async_payment_succeeded",
@@ -444,6 +456,7 @@ describe("processStripeWebhookEvent — asynchronous payment confirmation", () =
       findSubscriptionByProviderSubscriptionId: async () => pending,
       updateSubscriptionById: async (_id, input) => { updateInput = input; },
       recordProcessedEvent: async () => {},
+      updateCustomerMembershipStatus: async () => {},
     };
     const event = makeEvent({
       type: "checkout.session.async_payment_failed",
@@ -463,6 +476,7 @@ describe("processStripeWebhookEvent — asynchronous payment confirmation", () =
       findSubscriptionByProviderSubscriptionId: async () => active,
       updateSubscriptionById: async () => { updateCalls++; },
       recordProcessedEvent: async () => {},
+      updateCustomerMembershipStatus: async () => {},
     };
     const event = makeEvent({
       type: "checkout.session.async_payment_failed",
@@ -486,6 +500,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
       findSubscriptionByProviderSubscriptionId: async () => existing,
       updateSubscriptionById: async (id, input) => { updateId = id; updateInput = input; },
       recordProcessedEvent: async () => {},
+      updateCustomerMembershipStatus: async () => {},
       retrieveAuthoritativeSubscription: async () => authoritativeSnapshot({
         status: "active",
         current_period_start: 1_700_100_000,
@@ -538,6 +553,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
       findSubscriptionByProviderSubscriptionId: async () => existing,
       updateSubscriptionById: async (_id, input) => { updateInput = input; },
       recordProcessedEvent: async () => {},
+      updateCustomerMembershipStatus: async () => {},
       // The webhook body claims active + no cancellation...
       retrieveAuthoritativeSubscription: async () => ({
         // ...but the authoritative, freshly-fetched object says otherwise —
@@ -569,6 +585,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
       findSubscriptionByProviderSubscriptionId: async () => existing,
       updateSubscriptionById: async (_id, input) => { updateInput = input; },
       recordProcessedEvent: async () => {},
+      updateCustomerMembershipStatus: async () => {},
       retrieveAuthoritativeSubscription: async () => authoritativeSnapshot({
         status: "active",
         ...withInterval("year"),
@@ -591,6 +608,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
       findSubscriptionByProviderSubscriptionId: async () => existing,
       updateSubscriptionById: async (_id, input) => { updateInput = input; },
       recordProcessedEvent: async () => {},
+      updateCustomerMembershipStatus: async () => {},
       // No `items` field at all — simulates an authoritative response that
       // genuinely doesn't carry price/interval info.
       retrieveAuthoritativeSubscription: async () => authoritativeSnapshot({ status: "active" }),
@@ -612,6 +630,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
       findSubscriptionByProviderSubscriptionId: async () => existing,
       updateSubscriptionById: async () => { updateCalls++; },
       recordProcessedEvent: async () => {},
+      updateCustomerMembershipStatus: async () => {},
       retrieveAuthoritativeSubscription: async () => authoritativeSnapshot({ status: "past_due" }),
     };
     // event.created is well before providerSyncedAt — a delayed/out-of-order redelivery
@@ -634,6 +653,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
       findSubscriptionByCustomerId: async (customerId) => { lookupCustomerId = customerId; return existing; },
       updateSubscriptionById: async () => {},
       recordProcessedEvent: async () => {},
+      updateCustomerMembershipStatus: async () => {},
       retrieveAuthoritativeSubscription: async () => authoritativeSnapshot({ status: "active" }),
     };
     const event = makeEvent({
@@ -656,6 +676,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
       createSubscription: async (input) => { created = input; return { ...baseSubscription(), ...input, id: "sub-from-sync" }; },
       updateSubscriptionById: async (_id, input) => { updateInput = input; },
       recordProcessedEvent: async () => {},
+      updateCustomerMembershipStatus: async () => {},
       retrieveAuthoritativeSubscription: async () => authoritativeSnapshot({
         id: "sub_stripe_new",
         status: "active",
@@ -687,6 +708,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
       createSubscription: async (input) => { created = input; return { ...baseSubscription(), ...input, id: "sub-from-sync" }; },
       updateSubscriptionById: async () => {},
       recordProcessedEvent: async () => {},
+      updateCustomerMembershipStatus: async () => {},
       retrieveAuthoritativeSubscription: async () => authoritativeSnapshot({
         id: "sub_stripe_new",
         status: "active",
@@ -711,6 +733,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
       findSubscriptionByCustomerId: async () => null,
       createSubscription: async () => { createCalls++; return baseSubscription(); },
       recordProcessedEvent: async () => {},
+      updateCustomerMembershipStatus: async () => {},
       retrieveAuthoritativeSubscription: async () => authoritativeSnapshot({ id: "sub_unknown", status: "active" }),
     };
     const event = makeEvent({
@@ -730,6 +753,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
       findSubscriptionByProviderSubscriptionId: async () => existing,
       updateSubscriptionById: async (_id, input) => { updateInput = input; },
       recordProcessedEvent: async () => {},
+      updateCustomerMembershipStatus: async () => {},
       // Stripe keeps a canceled subscription retrievable (status "canceled")
       // rather than truly deleting it — the authoritative fetch succeeding
       // with status "canceled" is the normal case for a .deleted event.
@@ -799,6 +823,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
       findSubscriptionByProviderSubscriptionId: async () => existing,
       updateSubscriptionById: async (_id, input) => { updateInput = input; },
       recordProcessedEvent: async () => {},
+      updateCustomerMembershipStatus: async () => {},
       retrieveAuthoritativeSubscription: async () => authoritativeSnapshot({ status: "canceled" }),
     };
     const event = makeEvent({
@@ -818,6 +843,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
       findSubscriptionByProviderSubscriptionId: async () => existing,
       updateSubscriptionById: async (_id, input) => { updateInput = input; },
       recordProcessedEvent: async () => {},
+      updateCustomerMembershipStatus: async () => {},
       retrieveAuthoritativeSubscription: async () => authoritativeSnapshot({ status: "canceled" }),
     };
     const event = makeEvent({
@@ -882,6 +908,13 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
         updateSubscriptionById: async (_id, input) => { leavingInput = input; },
         recordProcessedEvent: async () => {},
         retrieveAuthoritativeSubscription: async () => authoritativeSnapshot({ status: "active" }),
+        // This transition (PAST_DUE -> ACTIVE) also satisfies the
+        // membershipStatus "re-activation" branch (mappedStatus === "ACTIVE"
+        // && existing.status !== "ACTIVE") — mock it so this test never
+        // depends on a reachable database for a side effect it isn't
+        // itself asserting on; see WH.9b/WH.9c for the dedicated tests of
+        // that behavior.
+        updateCustomerMembershipStatus: async () => {},
       },
     );
     assert.equal(leavingInput.pastDueSince, null, "leaving PAST_DUE must clear pastDueSince");
@@ -893,6 +926,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
       findSubscriptionByProviderSubscriptionId: async () => null,
       findSubscriptionByCustomerId: async () => null,
       recordProcessedEvent: async () => {},
+      updateCustomerMembershipStatus: async () => {},
       retrieveAuthoritativeSubscription: async () => authoritativeSnapshot({ id: "sub_unknown", status: "active" }),
     };
     const event = makeEvent({
@@ -987,6 +1021,7 @@ describe("processStripeWebhookEvent — invoice.payment_failed", () => {
       createBillingTransaction: async (input) => { transaction = input; },
       updateSubscriptionById: async () => { updateCalls++; },
       recordProcessedEvent: async () => {},
+      updateCustomerMembershipStatus: async () => {},
     };
     const event = makeEvent({
       type: "invoice.payment_failed",

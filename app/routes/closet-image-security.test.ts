@@ -232,13 +232,13 @@ describe("T11: ownership validated before any AI call", () => {
 
 describe("T12: new records set imageUrl to null", () => {
   it("imageUrl: null is written alongside imagePublicId in the create call", () => {
-    // Anchored on the create call itself, not the first "imagePublicId:" in the
-    // file — other, earlier reads/writes of imagePublicId (e.g. the replace
-    // idempotency check added 2026-10-23) would otherwise shift this window
-    // away from the actual create() and silently stop testing anything real.
-    const createIdx = closet.indexOf("prisma.closetItem.create(");
-    assert.ok(createIdx !== -1, "closetItem.create call must exist");
-    const nearby = closet.slice(createIdx, createIdx + 400);
+    // Anchored on reserveClosetSlot, not prisma.closetItem.create — the
+    // atomic-reservation commit (06209cf) replaced the direct create() call
+    // with reserveClosetSlot's own Serializable-transaction create, carrying
+    // the same data object (including these two fields) through.
+    const createIdx = closet.indexOf("reserveClosetSlot(");
+    assert.ok(createIdx !== -1, "reserveClosetSlot call must exist");
+    const nearby = closet.slice(createIdx, createIdx + 600);
     assert.ok(
       nearby.includes("imagePublicId:") && nearby.includes("imageUrl: null"),
       "imageUrl must be null for new private-upload records",

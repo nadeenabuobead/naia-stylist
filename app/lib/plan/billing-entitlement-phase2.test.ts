@@ -664,7 +664,12 @@ describe("PH2-15 — countingEnd prevents unlimited usage when a stale, unrenewe
   it("every quota-counting call site uses countingEnd, not window.end, in its createdAt filter — getEntitlementSummary, checkEntitlement, reserveStyleMeSlot, reserveBuySkipSlot", () => {
     const entSvc = readFile("app/lib/plan/entitlement.server.ts");
     const occurrences = entSvc.match(/createdAt:\s*\{\s*gte:\s*window\.start,\s*lt:\s*countingEnd\s*\}/g) ?? [];
-    assert.equal(occurrences.length, 8, "all 8 known quota-counting createdAt filters (StyleMe/BuySkip/VTO-completed x2 summary+check, StyleMe/BuySkip reserve) must use countingEnd");
+    // Originally 8 (StyleMe/BuySkip/VTO-completed x2 summary+check, StyleMe/
+    // BuySkip reserve) — raised to 10 on integration merge: personalisedTrend's
+    // own two count sites (getEntitlementSummary, checkEntitlement) were still
+    // reading window.end directly, the exact same staleness gap this whole
+    // test exists to catch, just never enumerated here in the first place.
+    assert.equal(occurrences.length, 10, "all 10 known quota-counting createdAt filters (StyleMe/BuySkip/VTO-completed x2 summary+check, StyleMe/BuySkip reserve, personalisedTrend x2 summary+check) must use countingEnd");
     // And the inverse — window.end must never appear as a createdAt upper bound anymore.
     const staleOccurrences = entSvc.match(/createdAt:\s*\{\s*gte:\s*window\.start,\s*lt:\s*window\.end\s*\}/g) ?? [];
     assert.equal(staleOccurrences.length, 0, "no createdAt filter may use window.end directly as its upper bound — that is exactly the bug this fix closes");

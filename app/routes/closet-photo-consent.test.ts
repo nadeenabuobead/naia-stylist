@@ -56,7 +56,12 @@ describe("closet._index.tsx action — server-side consent enforcement on final 
   });
 
   it("the created ClosetItem is stamped with the consent result via buildConsentStamp", () => {
-    const createIdx = closetIndex.indexOf("prisma.closetItem.create(");
+    // Anchored on reserveClosetSlot, not prisma.closetItem.create — the
+    // atomic-reservation commit (06209cf) replaced the direct create() call
+    // with reserveClosetSlot's own Serializable-transaction create, carrying
+    // the same data object (including this consent spread) through.
+    const createIdx = closetIndex.indexOf("reserveClosetSlot(");
+    assert.ok(createIdx > -1, "reserveClosetSlot call not found");
     const createEndIdx = closetIndex.indexOf("\n    });", createIdx);
     const createBlock = closetIndex.slice(createIdx, createEndIdx);
     assert.ok(createBlock.includes("...buildConsentStamp(consentGiven)"));
