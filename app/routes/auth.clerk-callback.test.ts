@@ -29,8 +29,8 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-function args() {
-  return { request: new Request("https://naia.example/auth/clerk-callback"), params: {}, context: {} } as any;
+function args(search = "") {
+  return { request: new Request(`https://naia.example/auth/clerk-callback${search}`), params: {}, context: {} } as any;
 }
 
 describe("auth.clerk-callback loader", () => {
@@ -89,6 +89,18 @@ describe("auth.clerk-callback loader", () => {
     expect(res.headers.get("Location")).toBe("/account/link-identity");
   });
 
+  it("target customer is cross-account locked — routes to link-identity with the locked flag, not a generic pending state", async () => {
+    getAuthMock.mockResolvedValue({ userId: "clerk_claimant_2" });
+    getUserMock.mockResolvedValue({
+      primaryEmailAddress: { emailAddress: "locked@example.com" },
+      emailAddresses: [],
+    });
+    resolveMock.mockResolvedValue({ status: "locked" });
+
+    const res: any = await loader(args());
+    expect(res.headers.get("Location")).toBe("/account/link-identity?error=locked");
+  });
+
   it("email already linked to a different Clerk identity — bounces back to sign-in with an error flag, never into the app", async () => {
     getAuthMock.mockResolvedValue({ userId: "clerk_new_2" });
     getUserMock.mockResolvedValue({
@@ -99,5 +111,32 @@ describe("auth.clerk-callback loader", () => {
 
     const res: any = await loader(args());
     expect(res.headers.get("Location")).toBe("/sign-in?error=email_in_use");
+  });
+
+  it("returning sign-in with a valid return_to — honors it instead of the /my-naia default", async () => {
+    getAuthMock.mockResolvedValue({ userId: "clerk_returning_1" });
+    getUserMock.mockResolvedValue({ primaryEmailAddress: { emailAddress: "returning@example.com" }, emailAddresses: [] });
+    resolveMock.mockResolvedValue({ status: "already-linked", customerId: "cust-1" });
+
+    const res: any = await loader(args("?return_to=%2Fcloset"));
+    expect(res.headers.get("Location")).toBe("/closet");
+  });
+
+  it("returning sign-in with a malicious return_to (open-redirect attempt) — falls back to /my-naia, never redirects off-site", async () => {
+    getAuthMock.mockResolvedValue({ userId: "clerk_returning_2" });
+    getUserMock.mockResolvedValue({ primaryEmailAddress: { emailAddress: "returning2@example.com" }, emailAddresses: [] });
+    resolveMock.mockResolvedValue({ status: "already-linked", customerId: "cust-2" });
+
+    const res: any = await loader(args("?return_to=https%3A%2F%2Fevil.example.com"));
+    expect(res.headers.get("Location")).toBe("/my-naia");
+  });
+
+  it("brand-new registration with a return_to present — still lands on /my-naia, not the inherited deep link", async () => {
+    getAuthMock.mockResolvedValue({ userId: "clerk_new_3" });
+    getUserMock.mockResolvedValue({ primaryEmailAddress: { emailAddress: "fresh2@example.com" }, emailAddresses: [] });
+    resolveMock.mockResolvedValue({ status: "created", customerId: "cust-new-2" });
+
+    const res: any = await loader(args("?return_to=%2Fcloset"));
+    expect(res.headers.get("Location")).toBe("/my-naia");
   });
 });

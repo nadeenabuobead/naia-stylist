@@ -89,6 +89,15 @@ model Customer {
   // BOTH (a linked legacy account), or (transiently, mid-migration) neither
   // on a pre-Clerk row that hasn't signed in since the cutover yet.
   clerkUserId       String?          @unique
+  // Cumulative, cross-request brute-force guard for the identity-linking
+  // flow — see IdentityLinkRequest and identity-linking.server.ts's own
+  // comment on why a per-request attemptCount alone is insufficient (a
+  // new attacker-controlled clerkUserId resets that counter to 0 on every
+  // disposable Clerk sign-up). Lives on Customer, the actual target, not
+  // on any one (deletable) request row, so it survives across every
+  // distinct clerkUserId that has ever attempted this customer's code.
+  identityLinkFailedAttempts Int       @default(0)
+  identityLinkLockedUntil    DateTime?
   email             String?          @unique
   firstName         String?
   lastName          String?

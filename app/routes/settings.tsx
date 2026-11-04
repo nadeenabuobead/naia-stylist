@@ -34,7 +34,7 @@ import type { ActionFunctionArgs, LinksFunction, LoaderFunctionArgs } from "reac
 import { useLoaderData, useFetcher, useRevalidator, Link } from "react-router";
 import { data, redirect } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
-import { getAuth, clerkClient } from "@clerk/react-router/server";
+import { clerkClient } from "@clerk/react-router/server";
 import { compileCustomerExport, eraseCustomerData } from "~/lib/customer-privacy.server";
 import prisma from "~/db.server";
 import { conciseFamilyName } from "~/lib/customer-name-display";
@@ -190,15 +190,22 @@ export async function action(args: ActionFunctionArgs) {
       // redirects, the same pattern /auth/logout already uses, rather than
       // returning to a page for a customer who no longer has an account.
       await eraseCustomerData(customer.id);
-      // Clerk (2026-11-04) — deleting the Customer row already makes
-      // getCurrentNaiaCustomer return null for this clerkUserId (no data
-      // leakage either way), but the Clerk session itself is a separate
-      // lifecycle Clerk owns — it does not end just because our own row is
-      // gone. Revoke it explicitly so "delete my account" actually signs
-      // the person out, not just out of nAia's own data.
-      const { sessionId } = await getAuth(args);
-      if (sessionId) {
-        await clerkClient(args).sessions.revokeSession(sessionId).catch(() => {});
+      // Clerk (2026-11-04) — erase nAia's own data FIRST, Clerk cleanup
+      // second: if the Clerk call below ever fails, the actual PII-bearing
+      // erasure has already succeeded (the real compliance obligation) and
+      // a stale, now-unlinked Clerk login is a minor, recoverable leftover
+      // (worst case: signing back in just creates a fresh, empty account —
+      // not a privacy problem). The reverse order would risk the opposite:
+      // Clerk account gone, nAia row silently orphaned with no login path
+      // left to ever erase it through this same flow again.
+      //
+      // Deleting the Clerk user outright (not just revoking one session) is
+      // what "delete my account" should mean — it also ends every session
+      // for this identity, not just the one making this request, and there
+      // is no Clerk-hosted email/password left over once nAia's own PII is
+      // gone, which revoking a session alone would not address.
+      if (customer.clerkUserId) {
+        await clerkClient(args).users.deleteUser(customer.clerkUserId).catch(() => {});
       }
       return redirect("/auth/signed-out");
     }

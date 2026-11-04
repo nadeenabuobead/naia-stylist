@@ -46,6 +46,18 @@ describe("account.link-identity loader", () => {
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toBe("/sign-in");
   });
+
+  it("?error=locked — reports locked so the page shows the cooldown message without an action ever running", async () => {
+    getAuthMock.mockResolvedValue({ userId: "clerk_claimant_1" });
+    const result = await loader({ request: new Request("https://naia.example/account/link-identity?error=locked"), params: {}, context: {} } as any);
+    expect(result).toEqual({ locked: true });
+  });
+
+  it("no error param — not locked", async () => {
+    getAuthMock.mockResolvedValue({ userId: "clerk_claimant_1" });
+    const result = await loader({ request: new Request("https://naia.example/account/link-identity"), params: {}, context: {} } as any);
+    expect(result).toEqual({ locked: false });
+  });
 });
 
 describe("account.link-identity action", () => {
@@ -65,6 +77,14 @@ describe("account.link-identity action", () => {
 
     const result = await action(postArgs({ code: "000000" }));
     expect(result).toEqual({ error: "incorrect-code" });
+  });
+
+  it("a wrong guess that trips the cross-account lock — returns the locked error, not a generic incorrect-code message", async () => {
+    getAuthMock.mockResolvedValue({ userId: "clerk_claimant_1" });
+    confirmMock.mockResolvedValue({ status: "locked" });
+
+    const result = await action(postArgs({ code: "000000" }));
+    expect(result).toEqual({ error: "locked" });
   });
 
   it("expired request — returns the error status, not a silent success", async () => {

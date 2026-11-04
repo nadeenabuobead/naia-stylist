@@ -28,10 +28,13 @@ import {
   resolveCustomerForClerkSignUp,
   LINK_REQUEST_TTL_MS,
   MAX_LINK_ATTEMPTS,
+  MAX_CUSTOMER_FAILED_ATTEMPTS,
+  CUSTOMER_LOCKOUT_MS,
 } from "./identity-linking.server";
 
 const mockFindCustomer = () => (prisma as any).customer.findUnique as ReturnType<typeof vi.fn>;
 const mockCreateCustomer = () => (prisma as any).customer.create as ReturnType<typeof vi.fn>;
+const mockUpdateCustomer = () => (prisma as any).customer.update as ReturnType<typeof vi.fn>;
 const mockFindRequest = () => (prisma as any).identityLinkRequest.findUnique as ReturnType<typeof vi.fn>;
 const mockUpsertRequest = () => (prisma as any).identityLinkRequest.upsert as ReturnType<typeof vi.fn>;
 const mockUpdateRequest = () => (prisma as any).identityLinkRequest.update as ReturnType<typeof vi.fn>;
@@ -70,6 +73,34 @@ describe("startIdentityLink", () => {
     expect(sendEmail).not.toHaveBeenCalled();
   });
 
+  it("an existing, unlinked Customer that's currently locked out — reports locked, never issues a fresh code", async () => {
+    mockFindCustomer().mockResolvedValue({
+      id: "cust-legacy-1", email: "legacy@example.com", clerkUserId: null,
+      identityLinkLockedUntil: new Date(NOW.getTime() + 60_000),
+    });
+    const sendEmail = vi.fn();
+    const result = await startIdentityLink(
+      { clerkUserId: "clerk_claimant_1", email: "legacy@example.com" },
+      { _now: () => NOW, _sendVerificationEmail: sendEmail },
+    );
+    expect(result).toEqual({ status: "locked" });
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(mockUpsertRequest()).not.toHaveBeenCalled();
+  });
+
+  it("an existing, unlinked Customer whose lock has already expired — issues a fresh code normally", async () => {
+    mockFindCustomer().mockResolvedValue({
+      id: "cust-legacy-1", email: "legacy@example.com", clerkUserId: null,
+      identityLinkLockedUntil: new Date(NOW.getTime() - 1),
+    });
+    mockUpsertRequest().mockResolvedValue({ id: "link-req-1" });
+    const result = await startIdentityLink(
+      { clerkUserId: "clerk_claimant_1", email: "legacy@example.com" },
+      { _now: () => NOW, _generateCode: () => FIXED_CODE, _sendVerificationEmail: vi.fn().mockResolvedValue(undefined) },
+    );
+    expect(result).toEqual({ status: "pending", identityLinkRequestId: "link-req-1" });
+  });
+
   it("an existing, unlinked Customer with this email — opens a pending link request and emails the code to that address, never auto-attaches", async () => {
     mockFindCustomer().mockResolvedValue({ id: "cust-legacy-1", email: "legacy@example.com", clerkUserId: null });
     mockUpsertRequest().mockResolvedValue({ id: "link-req-1" });
@@ -103,6 +134,7 @@ describe("confirmIdentityLink", () => {
       attemptCount: 0,
       expiresAt: new Date(NOW.getTime() + LINK_REQUEST_TTL_MS),
       confirmedAt: null,
+      customer: { identityLinkFailedAttempts: 0, identityLinkLockedUntil: null },
       ...overrides,
     };
   }
@@ -126,22 +158,59 @@ describe("confirmIdentityLink", () => {
     expect(mockDeleteRequest()).toHaveBeenCalledWith({ where: { id: "link-req-1" } });
   });
 
-  it("too many prior incorrect attempts — locked out, row deleted, correct code no longer accepted", async () => {
+  it("too many prior incorrect attempts (per-request cap) — locked out, row deleted, correct code no longer accepted", async () => {
     mockFindRequest().mockResolvedValue(pendingRequest({ attemptCount: MAX_LINK_ATTEMPTS }));
     const result = await confirmIdentityLink({ clerkUserId: "clerk_claimant_1", code: "482913" }, { _now: () => NOW });
     expect(result).toEqual({ status: "too-many-attempts" });
     expect(mockDeleteRequest()).toHaveBeenCalled();
   });
 
-  it("incorrect code — increments attemptCount, does not delete or confirm", async () => {
-    mockFindRequest().mockResolvedValue(pendingRequest());
+  it("the TARGET customer is already cross-account-locked when this request was checked — reports locked, not incorrect-code, even before a wrong guess", async () => {
+    mockFindRequest().mockResolvedValue(
+      pendingRequest({ customer: { identityLinkFailedAttempts: 9, identityLinkLockedUntil: new Date(NOW.getTime() + 60_000) } }),
+    );
+    const result = await confirmIdentityLink({ clerkUserId: "clerk_claimant_1", code: "482913" }, { _now: () => NOW });
+    expect(result).toEqual({ status: "locked" });
+    // The correct code was presented — this must not be treated as a confirm.
+    expect(mockTransaction()).not.toHaveBeenCalled();
+  });
+
+  it("a lock that has already expired no longer blocks — falls through to the normal code check", async () => {
+    mockFindRequest().mockResolvedValue(
+      pendingRequest({ customer: { identityLinkFailedAttempts: 10, identityLinkLockedUntil: new Date(NOW.getTime() - 1) } }),
+    );
+    const result = await confirmIdentityLink({ clerkUserId: "clerk_claimant_1", code: "482913" }, { _now: () => NOW });
+    expect(result).toEqual({ status: "confirmed", customerId: "cust-legacy-1" });
+  });
+
+  it("incorrect code — increments both the per-request attemptCount and the cumulative customer counter, does not delete or confirm", async () => {
+    mockFindRequest().mockResolvedValue(pendingRequest({ customer: { identityLinkFailedAttempts: 3, identityLinkLockedUntil: null } }));
     const result = await confirmIdentityLink({ clerkUserId: "clerk_claimant_1", code: "000000" }, { _now: () => NOW });
     expect(result).toEqual({ status: "incorrect-code" });
+    expect(mockTransaction()).toHaveBeenCalledTimes(1);
+    const ops = mockTransaction().mock.calls[0][0];
+    expect(ops).toHaveLength(2);
     expect(mockUpdateRequest()).toHaveBeenCalledWith({
       where: { id: "link-req-1" },
       data: { attemptCount: { increment: 1 } },
     });
+    expect(mockUpdateCustomer()).toHaveBeenCalledWith({
+      where: { id: "cust-legacy-1" },
+      data: { identityLinkFailedAttempts: 4, identityLinkLockedUntil: undefined },
+    });
     expect(mockDeleteRequest()).not.toHaveBeenCalled();
+  });
+
+  it("CROSS-ACCOUNT BRUTE FORCE — a wrong guess that pushes the cumulative counter over the threshold locks the customer, not just this one request", async () => {
+    mockFindRequest().mockResolvedValue(pendingRequest({ customer: { identityLinkFailedAttempts: MAX_CUSTOMER_FAILED_ATTEMPTS - 1, identityLinkLockedUntil: null } }));
+    const result = await confirmIdentityLink({ clerkUserId: "clerk_claimant_1", code: "000000" }, { _now: () => NOW });
+    expect(result).toEqual({ status: "locked" });
+    const ops = mockTransaction().mock.calls[0][0];
+    expect(ops).toHaveLength(2);
+    expect(mockUpdateCustomer()).toHaveBeenCalledWith({
+      where: { id: "cust-legacy-1" },
+      data: { identityLinkFailedAttempts: 0, identityLinkLockedUntil: new Date(NOW.getTime() + CUSTOMER_LOCKOUT_MS) },
+    });
   });
 
   it("correct, unexpired code — links the Customer row and deletes the request atomically, never reports success without both", async () => {
@@ -216,6 +285,22 @@ describe("resolveCustomerForClerkSignUp", () => {
 
     const result = await resolveCustomerForClerkSignUp({ clerkUserId: "clerk_new_3", email: "weird@example.com" });
     expect(result).toEqual({ status: "email-conflict" });
+    expect(mockCreateCustomer()).not.toHaveBeenCalled();
+  });
+
+  it("collision with a currently-locked-out legacy row — reports locked, creates nothing", async () => {
+    mockFindCustomer()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: "cust-legacy-1", email: "legacy@example.com", clerkUserId: null,
+        identityLinkLockedUntil: new Date(NOW.getTime() + 60_000),
+      });
+
+    const result = await resolveCustomerForClerkSignUp(
+      { clerkUserId: "clerk_claimant_1", email: "legacy@example.com" },
+      { _now: () => NOW },
+    );
+    expect(result).toEqual({ status: "locked" });
     expect(mockCreateCustomer()).not.toHaveBeenCalled();
   });
 });

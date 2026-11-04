@@ -335,7 +335,14 @@ describe("auth.shopify.handoff.tsx — the success path, replay, and browser-bin
 // finds the SAME existing session again, and repeats forever. Reproduced
 // below using only a mocked DB layer — no real Shopify credentials, no
 // customer data, and no network calls of any kind.
-describe("auth.shopify.login.tsx — the 'already has a session' cross-domain case", () => {
+// SUPERSEDED (2026-11-04): auth.shopify.login.tsx's loader was replaced
+// wholesale by a redirect to /sign-in (Clerk is now primary) — the
+// "already has a session, cross-domain handoff" branch this block exercises
+// no longer exists in that file. promoteHandoffSession/the nonce guard/
+// auth.shopify.handoff.tsx itself (everything ABOVE this block) are
+// untouched and still real — only this one branch, specific to login.tsx's
+// removed loader body, is gone. Skipped, not deleted.
+describe.skip("auth.shopify.login.tsx — the 'already has a session' cross-domain case (SUPERSEDED by the Clerk redirect)", () => {
   const STOREFRONT_HOST = "naia-stylist-staging.vercel.app";
   const ORIGIN_HOST = "naia-stylist-staging-r6gp0w3zs-nadeenabuobeads-projects.vercel.app";
   const savedStorefrontHost = process.env.STOREFRONT_HOST;

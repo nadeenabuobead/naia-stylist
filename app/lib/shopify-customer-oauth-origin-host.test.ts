@@ -228,7 +228,14 @@ describe("buildProviderLogoutUrl()", () => {
 
 // ── requireCurrentNaiaCustomer — capture + gate + forward ──────────────────
 
-describe("requireCurrentNaiaCustomer source wiring", () => {
+// SUPERSEDED (2026-11-04): requireCurrentNaiaCustomer moved to
+// clerk-session.server.ts and no longer threads origin_host/cross-domain
+// handoff logic at all — Clerk's hosted sign-in lives on nAia's own domain,
+// so the "ephemeral preview can't be a registered redirect_uri" problem
+// this whole file exists for doesn't apply to it. sessionSrc (naia-
+// session.server.ts) no longer contains any of this. Skipped, not deleted —
+// see app/lib/clerk-session.test.ts for the live path's own coverage.
+describe.skip("requireCurrentNaiaCustomer source wiring (SUPERSEDED by Clerk)", () => {
   it("captures url.hostname and validates it through validateOriginHost before ever using it", () => {
     assert.match(sessionSrc, /validateOriginHost\(url\.hostname\)/);
   });
@@ -252,7 +259,8 @@ describe("requireCurrentNaiaCustomer source wiring", () => {
 // short-circuits), so this is a genuine functional test, not a structural
 // proxy, with no DB mocking required.
 
-describe("requireCurrentNaiaCustomer() — functional redirect construction", () => {
+// SUPERSEDED (2026-11-04) — same reason as the block above.
+describe.skip("requireCurrentNaiaCustomer() — functional redirect construction (SUPERSEDED by Clerk)", () => {
   const savedEnv = {
     STOREFRONT_HOST: process.env.STOREFRONT_HOST,
     SHOPIFY_APP_URL: process.env.SHOPIFY_APP_URL,
@@ -329,7 +337,12 @@ describe("requireCurrentNaiaCustomer() — functional redirect construction", ()
 
 // ── auth.shopify.login.tsx — read, validate, store, forward ────────────────
 
-describe("auth.shopify.login.tsx source wiring", () => {
+// SUPERSEDED (2026-11-04): auth.shopify.login.tsx's loader was replaced
+// wholesale by a redirect to /sign-in — none of the PKCE/origin-host/nonce
+// logic loginSrc checked for is in that file any more. See auth.shopify.
+// login.tsx's own header comment: the real implementation isn't deleted,
+// it's just no longer wired into this entry point.
+describe.skip("auth.shopify.login.tsx source wiring (SUPERSEDED by the Clerk redirect)", () => {
   it("reads origin_host from the query string and validates it", () => {
     assert.match(loginSrc, /validateOriginHost\(url\.searchParams\.get\("origin_host"\)\)/);
   });

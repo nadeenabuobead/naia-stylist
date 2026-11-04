@@ -129,7 +129,15 @@ describe("auth.logout loader (GET — direct navigation to /auth/logout, and Sho
 // that already arrives ON STOREFRONT_HOST is covered separately below: the
 // self-bounce guard means it must NOT take this branch at all.
 
-describe("auth.shopify.login loader — default return_to", () => {
+// SUPERSEDED (2026-11-04): auth.shopify.login.tsx no longer initiates the
+// Shopify storefront-bounce/PKCE flow this block exercises — Clerk is now
+// nAia's primary customer-auth provider, and the loader just redirects to
+// /sign-in (preserving return_to) unconditionally. Skipped, not deleted —
+// the behavior this once verified is real history, see auth.shopify.
+// callback.tsx/handoff.tsx for where the actual implementation still lives,
+// untouched and paused. app/lib/clerk-session.test.ts covers the live
+// redirect-to-/sign-in path this was replaced by.
+describe.skip("auth.shopify.login loader — default return_to (SUPERSEDED by the Clerk redirect)", () => {
   const saved = { STOREFRONT_HOST: process.env.STOREFRONT_HOST };
   afterEach(() => {
     if (saved.STOREFRONT_HOST !== undefined) process.env.STOREFRONT_HOST = saved.STOREFRONT_HOST;
@@ -195,7 +203,8 @@ describe("auth.shopify.login loader — default return_to", () => {
 // returned a 302 Response and never reached that line at all. Rejecting
 // with that specific error is the signal that no bounce happened.
 
-describe("auth.shopify.login loader — self-bounce guard", () => {
+// SUPERSEDED (2026-11-04) — same reason as the block above.
+describe.skip("auth.shopify.login loader — self-bounce guard (SUPERSEDED by the Clerk redirect)", () => {
   const saved = { STOREFRONT_HOST: process.env.STOREFRONT_HOST, SHOPIFY_STORE_DOMAIN: process.env.SHOPIFY_STORE_DOMAIN };
   afterEach(() => {
     for (const [k, v] of Object.entries(saved)) {
@@ -269,7 +278,10 @@ describe("logout -> signed-out (regression — no auto-restarted OAuth)", () => 
     assert.notEqual(logoutLocation, "/auth/shopify/login");
   });
 
-  it("the explicit Sign In click (not logout) is what reaches /auth/shopify/login, and that still stays on the canonical host — even with a stale STOREFRONT_HOST configured", async () => {
+  // SUPERSEDED (2026-11-04) — /auth/shopify/login no longer bounces between
+  // hosts at all; it redirects straight to /sign-in. See this file's own
+  // banner above the now-skipped "self-bounce guard" describe.
+  it.skip("the explicit Sign In click (not logout) is what reaches /auth/shopify/login, and that still stays on the canonical host — even with a stale STOREFRONT_HOST configured", async () => {
     process.env.STOREFRONT_HOST = "nadine-storefront.vercel.app"; // the stale value observed live
     delete process.env.SHOPIFY_STORE_DOMAIN;
 
@@ -287,7 +299,8 @@ describe("logout -> signed-out (regression — no auto-restarted OAuth)", () => 
     assert.equal(new URL(loginResponse.headers.get("Location") ?? "").hostname, "nadine-storefront.vercel.app");
   });
 
-  it("with the corrected STOREFRONT_HOST (pointing at the canonical host itself), the explicit Sign In click never leaves it", async () => {
+  // SUPERSEDED (2026-11-04) — same reason as above.
+  it.skip("with the corrected STOREFRONT_HOST (pointing at the canonical host itself), the explicit Sign In click never leaves it", async () => {
     process.env.STOREFRONT_HOST = CANONICAL;
     delete process.env.SHOPIFY_STORE_DOMAIN;
 
@@ -326,14 +339,24 @@ describe("root route (/) redirect", () => {
     // my-naia._index.tsx's loader calls this same helper first, before any
     // profile/DB lookup; its redirect target is built from the pathname of
     // the request actually being served (/my-naia), never a hardcoded "/".
-    // No __naia_tok cookie — resolves to no session without touching the DB.
-    delete process.env.STOREFRONT_HOST; // force the plain relative-redirect branch
+    // No Clerk session — resolves to no session without touching the DB.
+    //
+    // Destination updated 2026-11-04: requireCurrentNaiaCustomer
+    // (clerk-session.server.ts) now redirects to /sign-in, not
+    // /auth/shopify/login — the property this test actually protects
+    // (never back to the legacy "/" dashboard) still holds unchanged.
+    const noSessionClerkClient = {
+      authenticateRequest: async () => ({ toAuth: () => ({ isAuthenticated: false, userId: null }) }),
+    };
     await assert.rejects(
-      () => requireCurrentNaiaCustomer(new Request("https://naia-stylist-staging.vercel.app/my-naia")),
+      () => requireCurrentNaiaCustomer(
+        new Request("https://naia-stylist-staging.vercel.app/my-naia"),
+        { _clerkClient: noSessionClerkClient as any },
+      ),
       (thrown: unknown) => {
         assert.ok(thrown instanceof Response);
         const location = (thrown as Response).headers.get("Location") ?? "";
-        assert.ok(location.startsWith("/auth/shopify/login"));
+        assert.ok(location.startsWith("/sign-in"));
         assert.equal(new URL(location, "https://naia-stylist-staging.vercel.app").searchParams.get("return_to"), "/my-naia");
         assert.notEqual(location, "/");
         return true;

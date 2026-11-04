@@ -17,10 +17,17 @@ import { redirect } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
 import { getAuth, clerkClient } from "@clerk/react-router/server";
 import { resolveCustomerForClerkSignUp } from "~/lib/identity-linking.server";
+// Reused, not reimplemented — same "/", not "//", length-capped check the
+// legacy Shopify flow already applies to its own return_to. sign-in.tsx/
+// sign-up.tsx forward this value unvalidated; this is the one place it's
+// ever actually used in a redirect, so this is where it's checked.
+import { validateReturnTo } from "~/lib/shopify-customer-oauth.server";
 
 export async function loader(args: LoaderFunctionArgs) {
   const { userId } = await getAuth(args);
   if (!userId) return redirect("/sign-in");
+
+  const returnTo = validateReturnTo(new URL(args.request.url).searchParams.get("return_to"));
 
   const user = await clerkClient(args).users.getUser(userId);
   const email = user.primaryEmailAddress?.emailAddress ?? user.emailAddresses[0]?.emailAddress;
@@ -41,16 +48,25 @@ export async function loader(args: LoaderFunctionArgs) {
 
   switch (result.status) {
     case "created":
-    case "already-linked":
-      // my-naia._index.tsx's own loader computes passportState ("start" /
-      // "continue" / "view") from this customer's onboardingProfile — a
-      // brand-new customer and a fully-set-up returning one land on the
-      // exact same route and each see the state that's actually true for
-      // them. No separate "new customer" destination needed.
+      // A brand-new customer has no data anywhere yet — an inherited
+      // return_to (e.g. a deep link to /closet from before they had an
+      // account) wouldn't make sense to honor. my-naia._index.tsx's own
+      // passportState ("start"/"continue"/"view") logic is what correctly
+      // renders this customer's actual (empty) state.
       return redirect("/my-naia");
+    case "already-linked":
+      // A returning customer — send them back to wherever they were
+      // actually trying to go, same as the legacy Shopify flow did.
+      return redirect(returnTo);
     case "link-pending":
       return redirect("/account/link-identity");
     case "email-conflict":
       return redirect("/sign-in?error=email_in_use");
+    case "locked":
+      // Deliberately the same destination as "link-pending" — not a
+      // different error page. See startIdentityLink's own comment: this
+      // flow never reveals "this specific email is locked" as a distinct,
+      // more specific signal than "a request was made."
+      return redirect("/account/link-identity?error=locked");
   }
 }

@@ -19,6 +19,14 @@ ALTER TABLE "Customer" ALTER COLUMN "shopifyCustomerId" DROP NOT NULL;
 ALTER TABLE "Customer" ADD COLUMN "clerkUserId" TEXT;
 CREATE UNIQUE INDEX "Customer_clerkUserId_key" ON "Customer"("clerkUserId");
 
+-- 2b. Cumulative brute-force guard for the identity-linking flow — lives on
+--     the target Customer, not any one (deletable) request row, so it
+--     survives across every distinct attacker-controlled clerkUserId that
+--     has ever attempted this customer's code. Zero/null on every existing
+--     row; both default to their "never locked" state.
+ALTER TABLE "Customer" ADD COLUMN "identityLinkFailedAttempts" INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE "Customer" ADD COLUMN "identityLinkLockedUntil" TIMESTAMP(3);
+
 -- 3. CreateTable: IdentityLinkRequest
 -- Pending, unconfirmed claim from a new Clerk identity against an existing
 -- Customer row matched by email — see the model's own comment in

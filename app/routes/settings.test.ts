@@ -456,13 +456,14 @@ describe("N — data export and account deletion are real, authenticated actions
     assert.ok(src.includes('"delete-account": {'),            "delete-account has its own CONFIRM entry with real warning copy");
   });
 
-  it("account deletion revokes the Clerk session and redirects — it does not leave the deleted customer's session active", () => {
-    // Clerk migration (2026-11-04): the session Clerk owns is revoked
-    // directly, superseding the old __naia_tok cookie clear — that cookie
-    // is no longer what any route reads to decide "signed in" (see
-    // clerk-session.server.ts), so clearing it alone would no longer
-    // actually sign the customer out.
-    assert.ok(src.includes("clerkClient(args).sessions.revokeSession(sessionId)"), "revokes the Clerk session on deletion");
+  it("account deletion deletes the Clerk user entirely and redirects — it does not leave a stale, unlinked Clerk login or an active session behind", () => {
+    // Clerk migration (2026-11-04): deleting the whole Clerk user (not just
+    // revoking one session) is what "delete my account" should mean — it
+    // ends every session for this identity and leaves no Clerk-hosted
+    // email/password behind once nAia's own PII is erased. Superseding the
+    // old __naia_tok cookie clear, which is no longer what any route reads
+    // to decide "signed in" (see clerk-session.server.ts).
+    assert.ok(src.includes("clerkClient(args).users.deleteUser(customer.clerkUserId)"), "deletes the Clerk user on account deletion");
     assert.ok(src.includes('redirect("/auth/signed-out"'),     "redirects to signed-out after deletion");
   });
 

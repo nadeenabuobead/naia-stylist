@@ -27,6 +27,16 @@
 //      itself. They need a different email to sign up separately, or (if
 //      it genuinely is their old account) to actually complete step 2.
 //
+// Brute-force note: MAX_LINK_ATTEMPTS alone is NOT the real guard — it
+// resets to 0 every time a fresh IdentityLinkRequest is opened, and
+// startIdentityLink opens one per new clerkUserId, which an attacker fully
+// controls (every disposable Clerk sign-up is a new attacker-controlled
+// clerkUserId with its own fresh 5 attempts against the same 6-digit code
+// space). The real guard is Customer.identityLinkFailedAttempts/
+// identityLinkLockedUntil — cumulative across every distinct clerkUserId
+// that has ever attempted THIS customer's code, so spinning up more
+// disposable attacker accounts does not multiply the attempt budget.
+//
 // No transactional email provider is wired yet — _sendVerificationEmail
 // defaults to a stub that throws, so a misconfigured deploy fails loudly
 // instead of silently losing codes. See the integration report for why:
@@ -38,6 +48,8 @@ import prisma from "~/db.server";
 
 export const LINK_REQUEST_TTL_MS = 15 * 60 * 1000; // 15 minutes
 export const MAX_LINK_ATTEMPTS = 5;
+export const MAX_CUSTOMER_FAILED_ATTEMPTS = 10;
+export const CUSTOMER_LOCKOUT_MS = 60 * 60 * 1000; // 1 hour
 
 function generateVerificationCode(): string {
   // 6 digits, zero-padded — randomInt's upper bound is exclusive.
@@ -65,6 +77,7 @@ export interface IdentityLinkingDeps {
 export type StartIdentityLinkResult =
   | { status: "no-collision" }
   | { status: "email-already-linked" }
+  | { status: "locked" }
   | { status: "pending"; identityLinkRequestId: string };
 
 export async function startIdentityLink(
@@ -83,6 +96,15 @@ export async function startIdentityLink(
     // the sign-up attempt rather than open a link request against a row
     // that isn't actually unclaimed.
     return { status: "email-already-linked" };
+  }
+
+  // Cumulative, cross-attacker-account lockout — checked BEFORE issuing a
+  // new code, not just on confirm. Deliberately does not distinguish this
+  // from "pending" in the response the caller shows: revealing "this email
+  // exists and is specifically locked" is itself a signal the flow
+  // shouldn't leak any more than "a request was made."
+  if (existing.identityLinkLockedUntil && existing.identityLinkLockedUntil > now()) {
+    return { status: "locked" };
   }
 
   const code = generateCode();
@@ -114,6 +136,7 @@ export type ConfirmIdentityLinkResult =
   | { status: "not-found" }
   | { status: "expired" }
   | { status: "too-many-attempts" }
+  | { status: "locked" }
   | { status: "incorrect-code" }
   | { status: "confirmed"; customerId: string };
 
@@ -123,12 +146,23 @@ export async function confirmIdentityLink(
 ): Promise<ConfirmIdentityLinkResult> {
   const now = deps._now ?? (() => new Date());
 
-  const request = await prisma.identityLinkRequest.findUnique({ where: { clerkUserId: input.clerkUserId } });
+  const request = await prisma.identityLinkRequest.findUnique({
+    where: { clerkUserId: input.clerkUserId },
+    include: { customer: true },
+  });
   if (!request || request.confirmedAt) return { status: "not-found" };
 
   if (request.expiresAt < now()) {
     await prisma.identityLinkRequest.delete({ where: { id: request.id } });
     return { status: "expired" };
+  }
+
+  // Cumulative, cross-attacker-account lock — see startIdentityLink's own
+  // comment. Checked here too: a DIFFERENT clerkUserId's attempts against
+  // the same target customer may have tripped the lock after this
+  // particular request was already issued.
+  if (request.customer.identityLinkLockedUntil && request.customer.identityLinkLockedUntil > now()) {
+    return { status: "locked" };
   }
 
   if (request.attemptCount >= MAX_LINK_ATTEMPTS) {
@@ -137,19 +171,34 @@ export async function confirmIdentityLink(
   }
 
   if (hashCode(input.code) !== request.codeHash) {
-    await prisma.identityLinkRequest.update({
-      where: { id: request.id },
-      data: { attemptCount: { increment: 1 } },
-    });
-    return { status: "incorrect-code" };
+    const newFailedTotal = request.customer.identityLinkFailedAttempts + 1;
+    const locking = newFailedTotal >= MAX_CUSTOMER_FAILED_ATTEMPTS;
+    await prisma.$transaction([
+      prisma.identityLinkRequest.update({
+        where: { id: request.id },
+        data: { attemptCount: { increment: 1 } },
+      }),
+      prisma.customer.update({
+        where: { id: request.customerId },
+        data: {
+          identityLinkFailedAttempts: locking ? 0 : newFailedTotal,
+          identityLinkLockedUntil: locking ? new Date(now().getTime() + CUSTOMER_LOCKOUT_MS) : undefined,
+        },
+      }),
+    ]);
+    return locking ? { status: "locked" } : { status: "incorrect-code" };
   }
 
-  // Single transaction: the link and the request's removal happen together,
-  // so a crash between the two can never leave a confirmed-but-still-open
-  // request lying around for a second confirm attempt to act on again.
+  // Single transaction: the link, the request's removal, and resetting the
+  // failed-attempt counter happen together, so a crash between any of them
+  // can never leave a confirmed-but-still-open request (or a stale counter)
+  // lying around for a second confirm attempt to act on again.
   const customerId = request.customerId;
   await prisma.$transaction([
-    prisma.customer.update({ where: { id: customerId }, data: { clerkUserId: input.clerkUserId } }),
+    prisma.customer.update({
+      where: { id: customerId },
+      data: { clerkUserId: input.clerkUserId, identityLinkFailedAttempts: 0, identityLinkLockedUntil: null },
+    }),
     prisma.identityLinkRequest.delete({ where: { id: request.id } }),
   ]);
 
@@ -171,7 +220,8 @@ export type ResolveCustomerForClerkSignUpResult =
   | { status: "created"; customerId: string }
   | { status: "already-linked"; customerId: string }
   | { status: "link-pending" }
-  | { status: "email-conflict" };
+  | { status: "email-conflict" }
+  | { status: "locked" };
 
 export async function resolveCustomerForClerkSignUp(
   input: { clerkUserId: string; email: string; firstName?: string | null; lastName?: string | null },
@@ -183,6 +233,7 @@ export async function resolveCustomerForClerkSignUp(
   const linkResult = await startIdentityLink(input, deps);
   if (linkResult.status === "pending") return { status: "link-pending" };
   if (linkResult.status === "email-already-linked") return { status: "email-conflict" };
+  if (linkResult.status === "locked") return { status: "locked" };
 
   // "no-collision" — a genuinely new person. Created with ONLY clerkUserId
   // set; shopifyCustomerId stays null, exactly as the schema comment on
