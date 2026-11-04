@@ -229,7 +229,11 @@ describe("T9: analysis ownership resolves from authenticated session", () => {
   });
 
   it("customerId in DB write comes from naiaCustomer.id, not body", () => {
-    const createIdx   = api.indexOf("prisma.buyOrSkipAnalysis.create");
+    // Anchored on the analysisData declaration, not the create() call site —
+    // the billing-integration merge extracted the data object into a shared
+    // analysisData variable so reserveBuySkipSlot and the plain create() call
+    // (see T11 below) both pass the exact same fields, rather than drifting.
+    const createIdx   = api.indexOf("const analysisData = {");
     const createBlock = api.slice(createIdx, createIdx + 300);
     assert.ok(
       createBlock.includes("customerId: naiaCustomer.id"),
@@ -254,8 +258,9 @@ describe("T10: customerId cannot be injected from browser", () => {
 
 // ── T11: new analysis stores imagePublicId, not a public URL ─────────────────
 describe("T11: new BOS analysis stores private asset reference", () => {
+  // Anchored on the analysisData declaration — see the T9 comment above for why.
   it("imagePublicId stored in DB create", () => {
-    const createIdx = api.indexOf("prisma.buyOrSkipAnalysis.create");
+    const createIdx = api.indexOf("const analysisData = {");
     const createBlock = api.slice(createIdx, createIdx + 1200);
     assert.ok(
       createBlock.includes("imagePublicId: publicId"),
@@ -264,7 +269,7 @@ describe("T11: new BOS analysis stores private asset reference", () => {
   });
 
   it("imageFormat stored in DB create", () => {
-    const createIdx = api.indexOf("prisma.buyOrSkipAnalysis.create");
+    const createIdx = api.indexOf("const analysisData = {");
     const createBlock = api.slice(createIdx, createIdx + 1200);
     assert.ok(
       createBlock.includes("imageFormat: serverFormat"),
@@ -273,7 +278,7 @@ describe("T11: new BOS analysis stores private asset reference", () => {
   });
 
   it("imageUrl is null for new records", () => {
-    const createIdx = api.indexOf("prisma.buyOrSkipAnalysis.create");
+    const createIdx = api.indexOf("const analysisData = {");
     const createBlock = api.slice(createIdx, createIdx + 1200);
     assert.ok(
       createBlock.includes("imageUrl: null"),

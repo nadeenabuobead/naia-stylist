@@ -1921,7 +1921,10 @@ describe("S — Main Overview: loader no longer fans out Promise.all over the po
   it("getEntitlementSummary no longer fans out its 6 count queries via Promise.all", () => {
     const fnIdx = entitlementSrc.indexOf("export async function getEntitlementSummary");
     assert.ok(fnIdx !== -1, "getEntitlementSummary present");
-    const fnBody = entitlementSrc.slice(fnIdx, fnIdx + 3200);
+    // Window widened 2026-11 (billing-oauth integration merge): the countingEnd
+    // and isTest/MOCK_VTO explanatory comments added above several of this
+    // function's queries pushed monthlyPersonalisedTrendUsed further down.
+    const fnBody = entitlementSrc.slice(fnIdx, fnIdx + 4500);
     assert.ok(!fnBody.includes("Promise.all("), "no Promise.all inside getEntitlementSummary");
     assert.ok(fnBody.includes("const monthlyQualifyingCount = await prisma.stylingSession.count"), "sequential await present");
     assert.ok(fnBody.includes("const monthlyPersonalisedTrendUsed = await prisma.personalisedTrendEditUsage.count"), "last query still present and sequential");
@@ -1929,7 +1932,7 @@ describe("S — Main Overview: loader no longer fans out Promise.all over the po
 
   it("getEntitlementSummary's return value shape is unchanged — same six fields read into the same result object", () => {
     const fnIdx = entitlementSrc.indexOf("export async function getEntitlementSummary");
-    const fnBody = entitlementSrc.slice(fnIdx, fnIdx + 3000);
+    const fnBody = entitlementSrc.slice(fnIdx, fnIdx + 4500);
     for (const field of [
       "monthlyQualifyingCount",
       "monthlyBuySkipUsed",

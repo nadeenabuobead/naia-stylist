@@ -142,7 +142,7 @@ export async function action({ request }) {
 
           // See the "add" action above — client-supplied image data is never
           // trusted on this unmoderated legacy path, hence imageUrl: null
-          // unconditionally (not i.image ?? null).
+          // unconditionally rather than reading any per-item upload field.
           const toCreate = items
             .filter(i => {
               if (!i.name?.trim()) return false;
