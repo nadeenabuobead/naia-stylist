@@ -205,7 +205,23 @@ export async function action(args: ActionFunctionArgs) {
       // is no Clerk-hosted email/password left over once nAia's own PII is
       // gone, which revoking a session alone would not address.
       if (customer.clerkUserId) {
-        await clerkClient(args).users.deleteUser(customer.clerkUserId).catch(() => {});
+        // Never silently swallowed — nAia's own data is already gone at
+        // this point, so a failure here is the ONE thing that can still
+        // leave something behind (a Clerk-hosted email/password with no
+        // linked nAia data). Logged with the exact clerkUserId so it can be
+        // deleted directly from the Clerk dashboard — the recoverable path,
+        // not a stuck or silently-incomplete deletion. The customer still
+        // sees a successful deletion either way: their own data (the
+        // actual privacy obligation) is already erased, and this orphaned
+        // credential has no nAia data left to expose even if cleanup is
+        // delayed.
+        await clerkClient(args).users.deleteUser(customer.clerkUserId).catch((err: unknown) => {
+          console.error(
+            `settings.delete-account: nAia data erased for customer ${customer.id}, ` +
+            `but Clerk user deletion failed for clerkUserId ${customer.clerkUserId} — needs manual cleanup in the Clerk dashboard.`,
+            err,
+          );
+        });
       }
       return redirect("/auth/signed-out");
     }
