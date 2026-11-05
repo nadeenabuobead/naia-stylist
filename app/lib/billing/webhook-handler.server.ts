@@ -368,6 +368,36 @@ export function derivePlanTypeFromAuthoritative(
   return null;
 }
 
+// ── Authoritative billing-period derivation (Endive-era shape) ─────────────
+//
+// As of Stripe API 2025-03-31.basil, current_period_start/current_period_end
+// no longer exist on the top-level Subscription object — they live on the
+// subscription item (items.data[].current_period_start/_end). This app only
+// ever creates single-item subscriptions (see createCheckoutSession's single
+// line_items entry), so items.data[0] is the correct — and only — place to
+// read them from, matching Stripe's own documented migration path.
+//
+// Returns null (never a guess, never a thrown error) when the field is
+// absent OR present but not a finite number — Stripe's own `items` array
+// could genuinely be missing (an authoritative object that doesn't carry
+// usable item data, e.g. an edge case in a future API shape) or malformed
+// (a validation gap, a provider bug, a shape this code doesn't anticipate).
+// Either way, an entitlement-affecting write (Subscription.currentPeriodStart/
+// End) must never silently become `new Date(NaN)` — an Invalid Date that
+// would persist without ever raising an error, corrupting the usage-window
+// calculation that reads these fields (see usage-window.server.ts) with no
+// visible symptom until a customer's billing period looks wrong. Returning
+// null here lets each call site apply its own explicit fallback (existing
+// stored value on sync, or null on first creation) instead.
+export function derivePeriodTimestampFromAuthoritative(
+  authoritative: Pick<StripeSubscriptionSnapshot, "items">,
+  field: "current_period_start" | "current_period_end",
+): Date | null {
+  const raw = authoritative.items?.data?.[0]?.[field];
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return null;
+  return new Date(raw * 1000);
+}
+
 export interface StripeEventLike {
   id: string;
   type: string;
@@ -593,8 +623,8 @@ export async function processStripeWebhookEvent(
           providerSubscriptionId,
         });
         await _updateSubscriptionById(created.id, {
-          currentPeriodStart: authoritative.current_period_start ? new Date(authoritative.current_period_start * 1000) : null,
-          currentPeriodEnd: authoritative.current_period_end ? new Date(authoritative.current_period_end * 1000) : null,
+          currentPeriodStart: derivePeriodTimestampFromAuthoritative(authoritative, "current_period_start"),
+          currentPeriodEnd: derivePeriodTimestampFromAuthoritative(authoritative, "current_period_end"),
           cancelAtPeriodEnd: Boolean(authoritative.cancel_at_period_end),
           pastDueSince: mapStripeSubscriptionStatus(authoritative.status, null) === "PAST_DUE" ? eventCreatedAt : null,
           providerSyncedAt: eventCreatedAt,
@@ -636,8 +666,8 @@ export async function processStripeWebhookEvent(
         planType,
         providerSubscriptionId,
         providerCustomerId: typeof authoritative.customer === "string" ? authoritative.customer : existing.providerCustomerId,
-        currentPeriodStart: authoritative.current_period_start ? new Date(authoritative.current_period_start * 1000) : existing.currentPeriodStart,
-        currentPeriodEnd: authoritative.current_period_end ? new Date(authoritative.current_period_end * 1000) : existing.currentPeriodEnd,
+        currentPeriodStart: derivePeriodTimestampFromAuthoritative(authoritative, "current_period_start") ?? existing.currentPeriodStart,
+        currentPeriodEnd: derivePeriodTimestampFromAuthoritative(authoritative, "current_period_end") ?? existing.currentPeriodEnd,
         cancelAtPeriodEnd: Boolean(authoritative.cancel_at_period_end),
         ...(enteringPastDue ? { pastDueSince: eventCreatedAt } : {}),
         ...(leavingPastDue ? { pastDueSince: null } : {}),

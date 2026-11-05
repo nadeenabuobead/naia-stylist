@@ -18,20 +18,24 @@ const STRIPE_API_BASE = "https://api.stripe.com/v1";
 // Pinned deliberately — without an explicit Stripe-Version header, Stripe
 // uses the connected account's DASHBOARD-CONFIGURED default version, which
 // is unpinned, environment-dependent, and can change without this code
-// changing. This matters concretely for the fields this integration reads:
-// Stripe has moved billing-cycle fields (current_period_start/end) off the
-// top-level Subscription object and onto its subscription items in newer
-// API versions. "2024-06-20" is a version where those fields still exist
-// at the top level, matching every `obj.current_period_start`/`_end` read
-// in webhook-handler.server.ts. Do not bump this without re-auditing that
-// field location first — see the Phase 3 review notes.
+// changing.
+//
+// "2026-10-28.endive" (the account's current version) is post-Basil:
+// current_period_start/current_period_end no longer exist on the top-level
+// Subscription object — they moved onto each subscription item
+// (items.data[].current_period_start/_end). Every read of those fields in
+// webhook-handler.server.ts goes through derivePeriodTimestampFromAuthoritative,
+// which reads from items.data[0] for exactly this reason. Do not bump this
+// version without re-checking Stripe's changelog for every field this
+// integration actually touches (Checkout Session, Invoice,
+// Subscription/SubscriptionItem) across every major release in between.
 //
 // NOTE: this header only pins OUR outgoing REST calls (Checkout Session,
 // Billing Portal, subscription retrieval). It does NOT control what API
 // version shape Stripe uses for INCOMING webhook payloads — that is a
 // separate, Dashboard-side webhook-endpoint setting that must be pinned to
-// a matching version independently (flagged in the Phase 3 review report).
-const STRIPE_API_VERSION = "2024-06-20";
+// the SAME version independently.
+const STRIPE_API_VERSION = "2026-10-28.endive";
 
 export type FetchFn = typeof fetch;
 export type GetSecretKeyFn = () => string | undefined;
@@ -246,15 +250,27 @@ export interface StripeSubscriptionSnapshot {
   id: string;
   status: string;
   customer: string;
-  current_period_start: number | null;
-  current_period_end: number | null;
   cancel_at_period_end: boolean;
   // Present on the real Stripe response (stripeRequest returns the raw,
   // unfiltered JSON — this interface is a type narrowing, not a runtime
-  // filter), used to derive planType authoritatively on sync rather than
-  // trusting the embedded event body's metadata. Only the one field this
-  // app actually needs is declared.
-  items?: { data: Array<{ price?: { recurring?: { interval?: string } } }> };
+  // filter). current_period_start/current_period_end live on the
+  // subscription item (not the subscription itself) as of API version
+  // 2025-03-31.basil and later — see STRIPE_API_VERSION's comment above.
+  // Declared as `unknown` here, not `number`, because this is the one place
+  // in the type system a malformed/unexpected Stripe response would
+  // otherwise be silently trusted; derivePeriodTimestampFromAuthoritative
+  // in webhook-handler.server.ts is what actually validates the runtime
+  // type before ever constructing a Date from it. price.recurring.interval
+  // is used to derive planType authoritatively on sync rather than trusting
+  // the embedded event body's metadata. Only the fields this app actually
+  // needs are declared.
+  items?: {
+    data: Array<{
+      price?: { recurring?: { interval?: string } };
+      current_period_start?: unknown;
+      current_period_end?: unknown;
+    }>;
+  };
 }
 
 export async function retrieveSubscription(

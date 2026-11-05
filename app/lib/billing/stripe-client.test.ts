@@ -142,11 +142,20 @@ describe("Stripe API version pin", () => {
     );
     const headers = calls[0].init.headers as Record<string, string>;
     assert.ok(headers["Stripe-Version"], "Stripe-Version header must be set explicitly");
-    assert.match(headers["Stripe-Version"], /^\d{4}-\d{2}-\d{2}$/, "must be a pinned date-shaped API version, not a dynamic/unset value");
+    // Date-shaped, optionally followed by a major-release codename
+    // (e.g. "2026-10-28.endive") — Stripe's post-Acacia version identifiers
+    // carry a dot-suffixed name, not just the bare date.
+    assert.match(headers["Stripe-Version"], /^\d{4}-\d{2}-\d{2}(\.[a-z]+)?$/, "must be a pinned date-shaped API version, not a dynamic/unset value");
   });
 
   it("SC.12 — the SAME pinned version is sent on a GET request (subscription retrieval), not just POST", async () => {
-    const { fn, calls } = fakeFetch({ id: "sub_1", status: "active", customer: "cus_1", current_period_start: 1700000000, current_period_end: 1702600000, cancel_at_period_end: false });
+    const { fn, calls } = fakeFetch({
+      id: "sub_1",
+      status: "active",
+      customer: "cus_1",
+      items: { data: [{ current_period_start: 1700000000, current_period_end: 1702600000 }] },
+      cancel_at_period_end: false,
+    });
     await retrieveSubscription("sub_1", { _fetch: fn, _getSecretKey: () => "sk_test_abc" });
     const headers = calls[0].init.headers as Record<string, string>;
     assert.ok(headers["Stripe-Version"]);
@@ -159,8 +168,7 @@ describe("retrieveSubscription — authoritative state fetch", () => {
       id: "sub_1",
       status: "past_due",
       customer: "cus_1",
-      current_period_start: 1700000000,
-      current_period_end: 1702600000,
+      items: { data: [{ current_period_start: 1700000000, current_period_end: 1702600000 }] },
       cancel_at_period_end: true,
     });
     const snapshot = await retrieveSubscription("sub_1", { _fetch: fn, _getSecretKey: () => "sk_test_abc" });
@@ -168,6 +176,20 @@ describe("retrieveSubscription — authoritative state fetch", () => {
     assert.equal(snapshot.cancel_at_period_end, true);
     assert.match(calls[0].url, /\/v1\/subscriptions\/sub_1$/);
     assert.equal(calls[0].init.method, "GET");
+  });
+
+  it("SC.23 — the raw response's Endive-shape billing-period fields (items.data[0]) pass through untouched — this client is a thin wrapper, not a field-mapping layer", async () => {
+    const { fn } = fakeFetch({
+      id: "sub_1",
+      status: "active",
+      customer: "cus_1",
+      items: { data: [{ current_period_start: 1700000000, current_period_end: 1702600000, price: { recurring: { interval: "month" } } }] },
+      cancel_at_period_end: false,
+    });
+    const snapshot = await retrieveSubscription("sub_1", { _fetch: fn, _getSecretKey: () => "sk_test_abc" });
+    assert.equal(snapshot.items?.data?.[0]?.current_period_start, 1700000000);
+    assert.equal(snapshot.items?.data?.[0]?.current_period_end, 1702600000);
+    assert.equal((snapshot as any).current_period_start, undefined, "the Basil-era top-level field must not be assumed present");
   });
 
   it("SC.14 — also refuses a live key — the test-mode guard applies uniformly to every call, not just Checkout/Portal", async () => {

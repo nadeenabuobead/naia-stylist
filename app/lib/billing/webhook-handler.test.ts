@@ -20,6 +20,7 @@ import { describe, it } from "node:test";
 import {
   processStripeWebhookEvent,
   mapStripeSubscriptionStatus,
+  derivePeriodTimestampFromAuthoritative,
   isUniqueConstraintViolation,
   type WebhookHandlerDeps,
   type SubscriptionRecord,
@@ -41,29 +42,56 @@ const BASE_TS = 1_700_000_000;
 
 // A successful authoritative fetch result — the ONLY data source
 // customer.subscription.updated/.deleted may act on. Shape matches
-// StripeSubscriptionSnapshot.
+// StripeSubscriptionSnapshot — Endive-era: current_period_start/end live on
+// items.data[0], not the top level (see derivePeriodTimestampFromAuthoritative's
+// own comment for why). current_period_start/current_period_end are still
+// accepted as top-level override keys here purely for call-site readability;
+// this helper is what actually relocates them onto items.data[0] to match
+// the real Stripe response shape every test in this file is implicitly
+// proving the production code reads correctly.
 function authoritativeSnapshot(overrides: Partial<{
   id: string;
   status: string;
   customer: string;
-  current_period_start: number | null;
-  current_period_end: number | null;
+  current_period_start: unknown;
+  current_period_end: unknown;
   cancel_at_period_end: boolean;
   items: { data: Array<{ price?: { recurring?: { interval?: string } } }> };
 }> = {}) {
+  const {
+    current_period_start = BASE_TS - 2_592_000,
+    current_period_end = BASE_TS,
+    items,
+    ...rest
+  } = overrides;
   return {
     id: "sub_stripe_1",
     status: "active",
     customer: "cus_stripe_1",
-    current_period_start: BASE_TS - 2_592_000,
-    current_period_end: BASE_TS,
     cancel_at_period_end: false,
-    ...overrides,
+    items: {
+      data: [
+        {
+          ...(items?.data?.[0] ?? {}),
+          current_period_start,
+          current_period_end,
+        },
+      ],
+    },
+    ...rest,
   };
 }
 
 function withInterval(interval: "month" | "year") {
   return { items: { data: [{ price: { recurring: { interval } } }] } };
+}
+
+// A subscription item present but genuinely carrying no price/interval info
+// (e.g. a malformed or edge-case provider response) — distinct from
+// withInterval, used where a test specifically wants derivePlanTypeFromAuthoritative
+// to fall back rather than resolve a real interval.
+function withNoInterval() {
+  return { items: { data: [{}] } };
 }
 
 function baseSubscription(overrides: Partial<SubscriptionRecord> = {}): SubscriptionRecord {
@@ -561,8 +589,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
         id: "sub_stripe_1",
         status: "past_due",
         customer: "cus_stripe_1",
-        current_period_start: 1_700_050_000,
-        current_period_end: 1_702_650_000,
+        items: { data: [{ current_period_start: 1_700_050_000, current_period_end: 1_702_650_000 }] },
         cancel_at_period_end: true,
       }),
     };
@@ -609,9 +636,11 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
       updateSubscriptionById: async (_id, input) => { updateInput = input; },
       recordProcessedEvent: async () => {},
       updateCustomerMembershipStatus: async () => {},
-      // No `items` field at all — simulates an authoritative response that
-      // genuinely doesn't carry price/interval info.
-      retrieveAuthoritativeSubscription: async () => authoritativeSnapshot({ status: "active" }),
+      // The item is present (as every real subscription's authoritative
+      // object would be) but carries no price/interval info — simulates an
+      // authoritative response that genuinely doesn't carry usable interval
+      // data, not a top-level absence of items.
+      retrieveAuthoritativeSubscription: async () => authoritativeSnapshot({ status: "active", ...withNoInterval() }),
     };
     const event = makeEvent({
       type: "customer.subscription.updated",
@@ -935,6 +964,132 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
     });
     const result = await processStripeWebhookEvent(event, deps);
     assert.deepEqual(result, { ok: true, deduped: false, action: "ignored" });
+  });
+});
+
+// ── derivePeriodTimestampFromAuthoritative — Endive-shape billing-period
+// extraction, and the Stripe-endive-compat fix's core regression coverage:
+// billing-period dates must round-trip correctly from items.data[0], and
+// missing/malformed data must produce null, never a silently-corrupt
+// Invalid Date written to the Subscription row. ──────────────────────────────
+
+describe("derivePeriodTimestampFromAuthoritative", () => {
+  it("PERIOD.1 — reads current_period_start/end from items.data[0], the real Endive-era location", () => {
+    const snapshot = authoritativeSnapshot({
+      current_period_start: 1_700_000_000,
+      current_period_end: 1_702_600_000,
+    });
+    assert.deepEqual(
+      derivePeriodTimestampFromAuthoritative(snapshot, "current_period_start"),
+      new Date(1_700_000_000 * 1000),
+    );
+    assert.deepEqual(
+      derivePeriodTimestampFromAuthoritative(snapshot, "current_period_end"),
+      new Date(1_702_600_000 * 1000),
+    );
+  });
+
+  it("PERIOD.2 — a response with no items at all returns null, never throws", () => {
+    const snapshot = { id: "sub_1", status: "active", customer: "cus_1", cancel_at_period_end: false };
+    assert.equal(derivePeriodTimestampFromAuthoritative(snapshot, "current_period_start"), null);
+  });
+
+  it("PERIOD.3 — an item present but missing the period field returns null, never Invalid Date", () => {
+    // Constructed directly (not via authoritativeSnapshot, which always
+    // supplies a default timestamp) — this is specifically the case where
+    // the item itself carries no period data at all.
+    const snapshot = {
+      id: "sub_1",
+      status: "active",
+      customer: "cus_1",
+      cancel_at_period_end: false,
+      items: { data: [{}] },
+    };
+    const result = derivePeriodTimestampFromAuthoritative(snapshot, "current_period_start");
+    assert.equal(result, null);
+  });
+
+  it("PERIOD.4 — a malformed (non-numeric) period value returns null rather than constructing an Invalid Date", () => {
+    const malformed = {
+      id: "sub_1",
+      status: "active",
+      customer: "cus_1",
+      cancel_at_period_end: false,
+      items: { data: [{ current_period_start: "not-a-number" as any, current_period_end: 1_700_000_000 }] },
+    };
+    const start = derivePeriodTimestampFromAuthoritative(malformed, "current_period_start");
+    assert.equal(start, null, "a non-numeric value must never silently become `new Date(NaN)`");
+    const end = derivePeriodTimestampFromAuthoritative(malformed, "current_period_end");
+    assert.deepEqual(end, new Date(1_700_000_000 * 1000), "a genuinely valid sibling field is unaffected by the other field's malformed value");
+  });
+
+  it("PERIOD.5 — NaN itself (e.g. a prior bad coercion somewhere upstream) is also rejected, not treated as a valid timestamp", () => {
+    const malformed = {
+      id: "sub_1",
+      status: "active",
+      customer: "cus_1",
+      cancel_at_period_end: false,
+      items: { data: [{ current_period_start: Number.NaN as any }] },
+    };
+    assert.equal(derivePeriodTimestampFromAuthoritative(malformed, "current_period_start"), null);
+  });
+});
+
+describe("processStripeWebhookEvent — missing/malformed billing-period data cannot corrupt a Subscription row", () => {
+  it("PERIOD.6 — out-of-order CREATE: a missing items array writes currentPeriodStart/End as null, not Invalid Date", async () => {
+    let updateInput: any = null;
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findSubscriptionByProviderSubscriptionId: async () => null,
+      findSubscriptionByCustomerId: async () => null,
+      createSubscription: async (input) => ({ ...baseSubscription(), ...input, id: "sub-from-sync" }),
+      updateSubscriptionById: async (_id, input) => { updateInput = input; },
+      recordProcessedEvent: async () => {},
+      updateCustomerMembershipStatus: async () => {},
+      // No `items` field at all on the authoritative response.
+      retrieveAuthoritativeSubscription: async () => ({
+        id: "sub_stripe_new2",
+        status: "active",
+        customer: "cus_new2",
+        cancel_at_period_end: false,
+      }),
+    };
+    const event = makeEvent({
+      type: "customer.subscription.updated",
+      created: 1_700_200_000,
+      data: { object: { id: "sub_stripe_new2", metadata: { customerId: CUSTOMER_ID, planType: "MONTHLY" } } },
+    });
+    const result = await processStripeWebhookEvent(event, deps);
+    assert.equal(updateInput.currentPeriodStart, null);
+    assert.equal(updateInput.currentPeriodEnd, null);
+    assert.equal(result.ok, true);
+  });
+
+  it("PERIOD.7 — ongoing SYNC: a malformed period value preserves the EXISTING stored date rather than overwriting it with garbage", async () => {
+    let updateInput: any = null;
+    const existing = baseSubscription(); // has real currentPeriodStart/End already
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findSubscriptionByProviderSubscriptionId: async () => existing,
+      updateSubscriptionById: async (_id, input) => { updateInput = input; },
+      recordProcessedEvent: async () => {},
+      updateCustomerMembershipStatus: async () => {},
+      retrieveAuthoritativeSubscription: async () => ({
+        id: "sub_stripe_1",
+        status: "active",
+        customer: "cus_stripe_1",
+        cancel_at_period_end: false,
+        items: { data: [{ current_period_start: "garbage" as any, current_period_end: null as any }] },
+      }),
+    };
+    const event = makeEvent({
+      type: "customer.subscription.updated",
+      created: 1_700_100_000,
+      data: { object: { id: "sub_stripe_1" } },
+    });
+    await processStripeWebhookEvent(event, deps);
+    assert.deepEqual(updateInput.currentPeriodStart, existing.currentPeriodStart, "malformed incoming data must preserve the last known-good period, never overwrite it");
+    assert.deepEqual(updateInput.currentPeriodEnd, existing.currentPeriodEnd);
   });
 });
 
