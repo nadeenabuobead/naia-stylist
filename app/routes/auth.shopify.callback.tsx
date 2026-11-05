@@ -1,5 +1,6 @@
 import { redirect }               from "react-router";
 import type { LoaderFunctionArgs }   from "react-router";
+import { timingSafeEqual }           from "crypto";
 import {
   getOidcConfig,
   exchangeCodeForTokens,
@@ -7,9 +8,6 @@ import {
   fetchCustomerProfile,
   validateReturnTo,
   validateOriginHost,
-  decodeOAuthState,
-  verifyBindingToken,
-  OAUTH_BINDING_COOKIE_NAME,
 } from "~/lib/shopify-customer-oauth.server";
 import {
   usableName,
@@ -26,78 +24,89 @@ import {
 import prisma from "~/db.server";
 import { Prisma } from "@prisma/client";
 
-// Expires the binding cookie immediately — used on every exit path from
-// this loader (success or failure) so it never lingers past one use.
-const CLEAR_BINDING_COOKIE = `${OAUTH_BINDING_COOKIE_NAME}=; Path=/auth/shopify; Max-Age=0; HttpOnly; Secure; SameSite=Lax`;
-
 export async function loader({ request }: LoaderFunctionArgs) {
-  const url = new URL(request.url);
+  const url     = new URL(request.url);
+  const session = await getSession(request.headers.get("Cookie"));
 
-  // Helper: fail cleanly — always clears the binding cookie
-  const fail = (status: number, message: string) =>
-    new Response(message, { status, headers: { "Set-Cookie": CLEAR_BINDING_COOKIE } });
-
-  // ── OAuth error from Shopify (user denied, etc.) ──
-  const oauthError = url.searchParams.get("error");
-  if (oauthError) {
-    return redirect(`/auth/shopify/login`, { headers: { "Set-Cookie": CLEAR_BINDING_COOKIE } });
-  }
-
-  const code  = url.searchParams.get("code");
-  const state = url.searchParams.get("state");
-
-  // ── state carries the PKCE verifier/nonce/return_to/origin_host/
-  // origin_nonce_hash — see encodeOAuthState's comment for why this
-  // replaced a handshake cookie. Decoding doubles as the CSRF check: a
-  // missing, expired, or tampered/forged state value fails here, by
-  // construction.
-  const decodedState = state ? decodeOAuthState(state) : null;
-
-  if (!code || !state || !decodedState) {
-    const diag = {
-      hasCode: !!code,
-      hasState: !!state,
-      stateDecoded: !!decodedState,
-      requestHost: url.hostname,
-    };
-    return new Response(`Missing or invalid OAuth parameters\n\n${JSON.stringify(diag, null, 2)}`, {
-      status: 400,
-      headers: { "Set-Cookie": CLEAR_BINDING_COOKIE },
-    });
-  }
-
-  // ── Browser binding check ──────────────────────────────────────────────
-  // state alone proves the request is a genuine, unforged, unexpired
-  // Shopify callback — it does NOT prove it's being presented by the SAME
-  // browser that started the flow (state is a URL param, visible to anyone
-  // who later obtains this exact callback URL). This cookie check closes
-  // that gap: without the exact cookie /auth/shopify/login set, the
-  // request is refused outright, before any token exchange happens.
-  if (!verifyBindingToken(request.headers.get("Cookie"), decodedState.bindingHash)) {
-    return fail(400, "Session binding mismatch");
-  }
-
-  const { verifier: storedVerifier, nonce: storedNonce } = decodedState;
-  const returnTo = validateReturnTo(decodedState.returnTo);
+  // ── Read and immediately clear all PKCE fields from the handshake session ──
+  const storedState    = session.get("pkce_state")    as string | undefined;
+  const storedVerifier = session.get("pkce_verifier") as string | undefined;
+  const storedNonce    = session.get("pkce_nonce")    as string | undefined;
+  const returnTo       = validateReturnTo(session.get("return_to") as string | null);
   // Re-validated here too (defense in depth), even though it already passed
-  // through this same check on the way into the encrypted state in
+  // through this same check on the way into the signed session in
   // auth.shopify.login — see validateOriginHost for why this can only ever
   // be this app's own preview host, the storefront host, or the canonical
   // app host, never an arbitrary external one.
-  const originHost = validateOriginHost(decodedState.originHost ?? null);
+  const originHost     = validateOriginHost(session.get("origin_host") as string | null);
   // The browser-binding nonce hash captured in auth.shopify.login — carried
   // through so the handoff can demand the matching raw cookie be presented
   // by whoever redeems it. See naia-session.server.ts's
   // buildHandoffNonceCookie/verifyHandoffNonce for what this protects
-  // against. Unrelated to the OAuth binding cookie above — this one
-  // protects the SEPARATE cross-domain session-handoff step below, not the
-  // PKCE round trip itself.
-  const originNonceHash = decodedState.originNonceHash;
+  // against.
+  const originNonceHash = session.get("origin_nonce_hash") as string | undefined;
   // The final redirect target: back to the preview that actually started
   // this flow when one was captured, otherwise the existing relative-path
   // behavior (stays on whichever host serves this callback — unchanged for
   // production and for flows that started on the storefront host itself).
   const finalReturnTarget = originHost ? `https://${originHost}${returnTo}` : returnTo;
+
+  session.unset("pkce_state");
+  session.unset("pkce_verifier");
+  session.unset("pkce_nonce");
+  session.unset("return_to");
+  session.unset("origin_host");
+  session.unset("origin_nonce_hash");
+
+  const clearedSessionCookie = await commitSession(session);
+
+  // Helper: fail cleanly — always clears PKCE state
+  const fail = (status: number, message: string) =>
+    new Response(message, {
+      status,
+      headers: { "Set-Cookie": clearedSessionCookie },
+    });
+
+  // ── OAuth error from Shopify (user denied, etc.) ──
+  const oauthError = url.searchParams.get("error");
+  if (oauthError) {
+    return redirect(`/auth/shopify/login`, {
+      headers: { "Set-Cookie": clearedSessionCookie },
+    });
+  }
+
+  const code  = url.searchParams.get("code");
+  const state = url.searchParams.get("state");
+
+  // ── Validate all required parameters present ──
+  if (!code || !state || !storedState || !storedVerifier || !storedNonce) {
+    // TEMP DIAGNOSTIC — visible in browser, remove after root-cause confirmed
+    const diag = {
+      hasCode: !!code,
+      hasState: !!state,
+      hasStoredState: !!storedState,
+      hasStoredVerifier: !!storedVerifier,
+      hasStoredNonce: !!storedNonce,
+      hasCookieHeader: !!request.headers.get("Cookie"),
+      cookieHeaderLen: request.headers.get("Cookie")?.length ?? 0,
+      requestHost: url.hostname,
+    };
+    return new Response(
+      `Missing OAuth parameters\n\n${JSON.stringify(diag, null, 2)}`,
+      { status: 400, headers: { "Set-Cookie": clearedSessionCookie } }
+    );
+  }
+
+  // ── 1: state — timing-safe comparison ──
+  let stateMatch = false;
+  try {
+    stateMatch =
+      state.length === storedState.length &&
+      timingSafeEqual(Buffer.from(state, "utf8"), Buffer.from(storedState, "utf8"));
+  } catch {
+    stateMatch = false;
+  }
+  if (!stateMatch) return fail(400, "State mismatch");
 
   // ── Fetch OIDC configuration ──
   let oidcConfig;
@@ -130,6 +139,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       redirectUri,
       codePresent: !!code,
       codeVerifierPresent: !!storedVerifier,
+      storedStatePresent: !!storedState,
       storedNoncePresent: !!storedNonce,
     }));
     return fail(502, "Token exchange failed");
@@ -249,7 +259,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   const headers = new Headers();
-  headers.append("Set-Cookie", CLEAR_BINDING_COOKIE);
+  headers.append("Set-Cookie", clearedSessionCookie);
 
   // Cross-domain handoff (2026-10-20): a cookie set in this response is
   // scoped to THIS domain (the storefront host) — it is never sent to

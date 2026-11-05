@@ -7,11 +7,6 @@ import {
   validateReturnTo,
   validateOriginHost,
   shouldBounceToStorefront,
-  encodeOAuthState,
-  generateBindingToken,
-  hashBindingToken,
-  OAUTH_BINDING_COOKIE_NAME,
-  OAUTH_BINDING_COOKIE_MAX_AGE_SECONDS,
 } from "~/lib/shopify-customer-oauth.server";
 import { getSession, commitSession } from "~/lib/session.server";
 import { resolveNaiaSession, buildHandoffNonceCookie, createNaiaSession } from "~/lib/naia-session.server";
@@ -134,38 +129,45 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const oidcConfig   = await getOidcConfig();
   const pkce         = generatePkceBundle();
   // All customer-facing auth flows through the storefront Vercel proxy.
-  // redirect_uri must point at the storefront so Shopify sends the browser
-  // there — unchanged from before. The PKCE handshake itself no longer
-  // depends on a cookie surviving that trip at all; see encodeOAuthState's
-  // own comment for why.
+  // The PKCE cookie is set on the storefront domain (via proxy Set-Cookie
+  // forwarding). STOREFRONT_HOST makes redirect_uri point back to the storefront
+  // so Shopify sends the browser there and the cookie arrives with the callback.
   const callbackOrigin = storefrontHost
     ? `https://${storefrontHost}`
     : process.env.SHOPIFY_APP_URL!.replace(/\/$/, "");
   const redirectUri  = `${callbackOrigin}/auth/shopify/callback`;
+  const authUrl      = buildAuthorizationUrl(oidcConfig, pkce, redirectUri);
 
-  // Browser binding: a SameSite=Lax cookie (not None — see
-  // generateBindingToken's comment) set alongside the state-encoded
-  // handshake, purely to prove the callback is being completed by the same
-  // browser that started it.
-  const bindingToken = generateBindingToken();
-  const state = encodeOAuthState({
-    verifier: pkce.codeVerifier,
-    nonce: pkce.nonce,
-    returnTo,
-    bindingHash: hashBindingToken(bindingToken),
-    originHost: originHost ?? undefined,
-    originNonceHash: originNonceHash ?? undefined,
-  });
-  const authUrl = buildAuthorizationUrl(oidcConfig, pkce, redirectUri, state);
+  // Store PKCE values in the HMAC-signed handshake cookie only
+  const session = await getSession(request.headers.get("Cookie"));
+  session.set("pkce_verifier", pkce.codeVerifier);
+  session.set("pkce_state",    pkce.state);
+  session.set("pkce_nonce",    pkce.nonce);
+  session.set("return_to",     returnTo);
+  if (originHost) session.set("origin_host", originHost);
+  if (originHost && originNonceHash) session.set("origin_nonce_hash", originNonceHash);
 
-  const bindingCookie = [
-    `${OAUTH_BINDING_COOKIE_NAME}=${bindingToken}`,
-    "Path=/auth/shopify",
-    `Max-Age=${OAUTH_BINDING_COOKIE_MAX_AGE_SECONDS}`,
-    "HttpOnly",
-    "Secure",
-    "SameSite=Lax",
-  ].join("; ");
-
-  return redirect(authUrl, { status: 302, headers: { "Set-Cookie": bindingCookie } });
+  // Return a 200 page with a JS redirect instead of a 302.
+  // Mobile Safari's bounce-tracking mitigation can drop cookies set in a
+  // 302 response that immediately redirects away; a 200 + script gives the
+  // browser time to commit the cookie before navigating to Shopify.
+  const safeUrl = JSON.stringify(authUrl);
+  return new Response(
+    `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">`
+    + `<meta name="viewport" content="width=device-width,initial-scale=1">`
+    + `<title>Signing in — nAia</title>`
+    + `<style>body{margin:0;display:flex;align-items:center;justify-content:center;`
+    + `min-height:100vh;font-family:-apple-system,sans-serif;background:#F6EFE8;color:#28150C;}`
+    + `p{opacity:.6;font-size:1rem;}a{color:#6B1D26;font-size:.875rem;margin-top:.5rem;display:block;}</style>`
+    + `</head><body><div><p>Signing in…</p><a id="l" href="">Continue →</a></div>`
+    + `<script>var u=${safeUrl};document.getElementById('l').href=u;window.location.replace(u);<\/script>`
+    + `</body></html>`,
+    {
+      status: 200,
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "Set-Cookie": await commitSession(session),
+      },
+    }
+  );
 }
