@@ -30,6 +30,7 @@ import { requireAdminSession } from "~/lib/internal-auth.server";
 import { purgeExpiredJourneyEvents, purgeExpiredNaiaSessions, purgeUnconfirmedSelfiePhotos } from "~/lib/data-retention.server";
 import { recordAdminAction, listRecentAdminActions } from "~/lib/admin-audit-log.server";
 import { listPendingClerkCleanups, retryPendingClerkCleanup } from "~/lib/clerk-cleanup.server";
+import { listPendingCustomerErasureFailures, retryPendingCustomerErasureFailure } from "~/lib/customer-erasure-failures.server";
 
 async function requireOwner(request: Request) {
   const session = await requireAdminSession(request);
@@ -41,11 +42,12 @@ async function requireOwner(request: Request) {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requireOwner(request);
-  const [recentActions, pendingClerkCleanups] = await Promise.all([
+  const [recentActions, pendingClerkCleanups, pendingCustomerErasureFailures] = await Promise.all([
     listRecentAdminActions(20),
     listPendingClerkCleanups(),
+    listPendingCustomerErasureFailures(),
   ]);
-  return { recentActions, pendingClerkCleanups };
+  return { recentActions, pendingClerkCleanups, pendingCustomerErasureFailures };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -91,6 +93,19 @@ export async function action({ request }: ActionFunctionArgs) {
     return { ok: false as const, error: result.status === "not-found" ? "Record not found." : "Already resolved." };
   }
 
+  if (intent === "retry-customer-erasure-failure") {
+    const id = String(form.get("id") ?? "");
+    const result = await retryPendingCustomerErasureFailure(id);
+    await recordAdminAction(identity.email, "retry-customer-erasure-failure", { id, result: result.status });
+    if (result.status === "resolved") {
+      return { ok: true as const, intent, message: "Customer erasure completed — resolved." };
+    }
+    if (result.status === "failed-again") {
+      return { ok: false as const, error: `Retry failed again: ${result.error}` };
+    }
+    return { ok: false as const, error: result.status === "not-found" ? "Record not found." : "Already resolved." };
+  }
+
   return { ok: false as const, error: "Invalid request." };
 }
 
@@ -102,7 +117,7 @@ function confirmPurge(e: FormEvent<HTMLFormElement>, label: string) {
 
 export default function AdminMaintenance() {
   const actionData = useActionData<typeof action>();
-  const { recentActions, pendingClerkCleanups } = useLoaderData<typeof loader>();
+  const { recentActions, pendingClerkCleanups, pendingCustomerErasureFailures } = useLoaderData<typeof loader>();
 
   return (
     <div className="adm-page">
@@ -189,6 +204,53 @@ export default function AdminMaintenance() {
                   <td style={{ padding: "0.6rem 1rem" }}>
                     <form method="post">
                       <input type="hidden" name="intent" value="retry-clerk-cleanup" />
+                      <input type="hidden" name="id" value={entry.id} />
+                      <button type="submit" style={maintenanceButtonStyle}>Retry</button>
+                    </form>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <h2 className="adm-page-heading" style={{ fontSize: "16px", marginTop: "2rem" }}>
+        Pending customer erasure failures
+      </h2>
+      <p className="adm-page-sub" style={{ marginBottom: "0.75rem" }}>
+        A GDPR erasure (self-service deletion, or the shop/redact or customers/redact Shopify webhook) hit a
+        genuinely unexpected failure partway through — not a stuck Cloudinary asset, and not billing history
+        (both are handled automatically). The row below is the only trace of that until it's retried successfully.
+      </p>
+      <div className="adm-card" style={{ padding: "0" }}>
+        {pendingCustomerErasureFailures.length === 0 ? (
+          <p style={{ fontSize: "13px", color: "#6b7280", padding: "1rem 1.5rem" }}>
+            No pending customer erasure failures — nothing needs attention.
+          </p>
+        ) : (
+          <table style={{ width: "100%", fontSize: "13px", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ textAlign: "left", borderBottom: "1px solid #dde1e7" }}>
+                <th style={{ padding: "0.6rem 1rem" }}>First failed</th>
+                <th style={{ padding: "0.6rem 1rem" }}>Customer</th>
+                <th style={{ padding: "0.6rem 1rem" }}>Context</th>
+                <th style={{ padding: "0.6rem 1rem" }}>Attempts</th>
+                <th style={{ padding: "0.6rem 1rem" }}>Last error</th>
+                <th style={{ padding: "0.6rem 1rem" }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {pendingCustomerErasureFailures.map(entry => (
+                <tr key={entry.id} style={{ borderBottom: "1px solid #f0f1f3" }}>
+                  <td style={{ padding: "0.6rem 1rem", color: "#6b7280" }}>{new Date(entry.createdAt).toLocaleString()}</td>
+                  <td style={{ padding: "0.6rem 1rem" }}>{entry.customerId}</td>
+                  <td style={{ padding: "0.6rem 1rem" }}>{entry.context}</td>
+                  <td style={{ padding: "0.6rem 1rem" }}>{entry.attemptCount}</td>
+                  <td style={{ padding: "0.6rem 1rem", color: "#b3261e" }}>{entry.lastError}</td>
+                  <td style={{ padding: "0.6rem 1rem" }}>
+                    <form method="post">
+                      <input type="hidden" name="intent" value="retry-customer-erasure-failure" />
                       <input type="hidden" name="id" value={entry.id} />
                       <button type="submit" style={maintenanceButtonStyle}>Retry</button>
                     </form>

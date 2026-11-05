@@ -37,10 +37,16 @@ vi.mock("~/lib/clerk-cleanup.server", () => ({
   retryPendingClerkCleanup: vi.fn(),
 }));
 
+vi.mock("~/lib/customer-erasure-failures.server", () => ({
+  listPendingCustomerErasureFailures: vi.fn().mockResolvedValue([]),
+  retryPendingCustomerErasureFailure: vi.fn(),
+}));
+
 import { requireAdminSession } from "~/lib/internal-auth.server";
 import { purgeExpiredJourneyEvents, purgeExpiredNaiaSessions, purgeUnconfirmedSelfiePhotos } from "~/lib/data-retention.server";
 import { recordAdminAction, listRecentAdminActions } from "~/lib/admin-audit-log.server";
 import { listPendingClerkCleanups, retryPendingClerkCleanup } from "~/lib/clerk-cleanup.server";
+import { listPendingCustomerErasureFailures, retryPendingCustomerErasureFailure } from "~/lib/customer-erasure-failures.server";
 
 const mockRequireAdmin = () => requireAdminSession as ReturnType<typeof vi.fn>;
 const mockPurgeJourney = () => purgeExpiredJourneyEvents as ReturnType<typeof vi.fn>;
@@ -50,6 +56,8 @@ const mockRecordAction = () => recordAdminAction as ReturnType<typeof vi.fn>;
 const mockListActions = () => listRecentAdminActions as ReturnType<typeof vi.fn>;
 const mockListPendingCleanups = () => listPendingClerkCleanups as ReturnType<typeof vi.fn>;
 const mockRetryCleanup = () => retryPendingClerkCleanup as ReturnType<typeof vi.fn>;
+const mockListPendingErasureFailures = () => listPendingCustomerErasureFailures as ReturnType<typeof vi.fn>;
+const mockRetryErasureFailure = () => retryPendingCustomerErasureFailure as ReturnType<typeof vi.fn>;
 
 function actionRequest(intent: string) {
   const body = new URLSearchParams({ intent });
@@ -69,7 +77,8 @@ describe("admin.maintenance — session and role requirements", () => {
     expect(mockRequireAdmin()).toHaveBeenCalled();
     expect(mockListActions()).toHaveBeenCalledWith(20);
     expect(mockListPendingCleanups()).toHaveBeenCalled();
-    expect(result).toEqual({ recentActions: [], pendingClerkCleanups: [] });
+    expect(mockListPendingErasureFailures()).toHaveBeenCalled();
+    expect(result).toEqual({ recentActions: [], pendingClerkCleanups: [], pendingCustomerErasureFailures: [] });
   });
 
   it("action rejects before running any purge when the session check rejects", async () => {
@@ -201,6 +210,55 @@ describe("admin.maintenance — retry-clerk-cleanup action", () => {
     const { action } = await import("./admin.maintenance.tsx");
 
     const result = await action({ request: retryActionRequest("cleanup-1") } as any);
+    expect((result as any).ok).toBe(false);
+  });
+});
+
+function retryErasureFailureRequest(id: string) {
+  const body = new URLSearchParams({ intent: "retry-customer-erasure-failure", id });
+  return new Request("http://localhost/admin/maintenance", {
+    method: "POST", body, headers: { "Content-Type": "application/x-www-form-urlencoded" },
+  });
+}
+
+describe("admin.maintenance — retry-customer-erasure-failure action", () => {
+  it("a successful retry reports resolved and records the audit entry with the row id", async () => {
+    mockRetryErasureFailure().mockResolvedValueOnce({ status: "resolved" });
+    const { action } = await import("./admin.maintenance.tsx");
+
+    const result = await action({ request: retryErasureFailureRequest("erasure-1") } as any);
+
+    expect(mockRetryErasureFailure()).toHaveBeenCalledWith("erasure-1");
+    expect((result as any).ok).toBe(true);
+    expect((result as any).message).toMatch(/resolved/i);
+    expect(mockRecordAction()).toHaveBeenCalledWith(
+      "owner@naiabynadine.com", "retry-customer-erasure-failure", { id: "erasure-1", result: "resolved" },
+    );
+  });
+
+  it("a retry that fails again surfaces the error rather than silently succeeding", async () => {
+    mockRetryErasureFailure().mockResolvedValueOnce({ status: "failed-again", error: "still broken" });
+    const { action } = await import("./admin.maintenance.tsx");
+
+    const result = await action({ request: retryErasureFailureRequest("erasure-1") } as any);
+
+    expect((result as any).ok).toBe(false);
+    expect((result as any).error).toMatch(/still broken/);
+  });
+
+  it("retrying a not-found id reports an error, never a silent success", async () => {
+    mockRetryErasureFailure().mockResolvedValueOnce({ status: "not-found" });
+    const { action } = await import("./admin.maintenance.tsx");
+
+    const result = await action({ request: retryErasureFailureRequest("does-not-exist") } as any);
+    expect((result as any).ok).toBe(false);
+  });
+
+  it("retrying an already-resolved id reports an error, not a duplicate success message", async () => {
+    mockRetryErasureFailure().mockResolvedValueOnce({ status: "already-resolved" });
+    const { action } = await import("./admin.maintenance.tsx");
+
+    const result = await action({ request: retryErasureFailureRequest("erasure-1") } as any);
     expect((result as any).ok).toBe(false);
   });
 });

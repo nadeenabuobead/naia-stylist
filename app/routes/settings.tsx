@@ -182,14 +182,18 @@ export async function action(args: ActionFunctionArgs) {
       return data({ ok: true as const, intent: "request-data-export" as const, exportData });
     }
     case "delete-account": {
-      // Entirely independent of any subscription/billing state — there is
-      // no Stripe integration yet, and this must never be conflated with a
-      // cancellation flow even once one exists. eraseCustomerData deletes
-      // this exact Customer row (and, via cascade, everything referencing
-      // it), which also invalidates the NaiaSession this very request is
-      // authenticated by — so the response clears the session cookie and
-      // redirects, the same pattern /auth/logout already uses, rather than
-      // returning to a page for a customer who no longer has an account.
+      // eraseCustomerData itself decides how to handle any existing
+      // subscription/billing history (anonymize-in-place rather than a hard
+      // delete, to satisfy the Subscription/BillingTransaction Restrict FK
+      // and legal retention requirement — see its own file header); this
+      // action is not where that decision gets made and must never be
+      // conflated with a separate cancellation flow even once one exists.
+      // Either way the Customer row this request is authenticated by stops
+      // being a usable login (deleted outright, or stripped of
+      // shopifyCustomerId/clerkUserId/email), so the response clears the
+      // session cookie and redirects, the same pattern /auth/logout already
+      // uses, rather than returning to a page for a customer who no longer
+      // has an account.
       await eraseCustomerData(customer.id);
       // Clerk (2026-11-04) — erase nAia's own data FIRST, Clerk cleanup
       // second: if the Clerk call below ever fails, the actual PII-bearing

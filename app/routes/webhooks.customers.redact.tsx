@@ -4,6 +4,17 @@
 // erased (typically 10 days after a data-erasure request, or sooner for
 // inactive accounts). Calls the same eraseCustomerData used by the
 // self-service Settings deletion flow — one implementation, two entry points.
+//
+// Individual request vs. shop-level sweep (2026-11-05): unlike
+// webhooks.shop.redact.tsx, this handler does NOT exclude a customer who
+// has since linked Clerk. shop/redact fires on a shop UNINSTALL — a
+// Clerk-linked customer's nAia relationship no longer depends on that
+// install, so a shop uninstall must not erase them. This webhook fires for
+// a specific, named data subject (identified below by shopifyCustomerId
+// from the payload) who themselves requested erasure — whether that same
+// person has also linked Clerk is irrelevant to whether THEIR OWN request
+// should be honored. It is still exactly one row, looked up by the
+// specific id Shopify sent, never a batch — no scoping change needed here.
 
 import { verifyShopifyWebhookRequest } from "../lib/webhook-hmac.server";
 import { verifyShopOwnership } from "../lib/webhook-shop-guard.server";
@@ -54,11 +65,11 @@ export const action = async ({ request }: { request: Request }) => {
     return new Response();
   }
 
-  const result = await eraseCustomerData(customer.id);
+  const result = await eraseCustomerData(customer.id, {}, "customers/redact");
   console.log(
     `customers/redact processed for shop ${shop}: ` +
-    `alreadyErased=${result.alreadyErased} cloudinaryFailures=${result.cloudinaryFailures.length} ` +
-    `journeyEventsPurged=${result.journeyEventsPurged}`,
+    `alreadyErased=${result.alreadyErased} anonymized=${result.anonymized} ` +
+    `cloudinaryFailures=${result.cloudinaryFailures.length} journeyEventsPurged=${result.journeyEventsPurged}`,
   );
 
   return new Response();

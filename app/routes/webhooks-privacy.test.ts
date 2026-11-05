@@ -39,9 +39,14 @@ vi.mock("~/db.server", () => ({
   },
 }));
 
+vi.mock("../lib/customer-erasure-failures.server", () => ({
+  recordPendingCustomerErasureFailure: vi.fn().mockResolvedValue("pf-id"),
+}));
+
 import { verifyShopifyWebhookRequest } from "../lib/webhook-hmac.server";
 import { verifyShopOwnership } from "../lib/webhook-shop-guard.server";
 import { compileCustomerExport, eraseCustomerData } from "../lib/customer-privacy.server";
+import { recordPendingCustomerErasureFailure } from "../lib/customer-erasure-failures.server";
 import prisma from "~/db.server";
 
 const mockVerify = () => verifyShopifyWebhookRequest as ReturnType<typeof vi.fn>;
@@ -50,6 +55,7 @@ const mockCompile = () => compileCustomerExport as ReturnType<typeof vi.fn>;
 const mockErase = () => eraseCustomerData as ReturnType<typeof vi.fn>;
 const mockCustomerFindUnique = () => (prisma as any).customer.findUnique as ReturnType<typeof vi.fn>;
 const mockCustomerFindMany = () => (prisma as any).customer.findMany as ReturnType<typeof vi.fn>;
+const mockRecordPendingFailure = () => recordPendingCustomerErasureFailure as ReturnType<typeof vi.fn>;
 
 const OWNED_SHOP = "test-shop.myshopify.com";
 
@@ -170,12 +176,12 @@ describe("§C — customers/redact: correct dispatch and duplicate-delivery hand
       payload: { customer: { id: "shopify-customer-456" } },
     });
     mockCustomerFindUnique().mockResolvedValueOnce({ id: "internal-customer-id-2" });
-    mockErase().mockResolvedValueOnce({ ok: true, alreadyErased: false, cloudinaryFailures: [], journeyEventsPurged: 2 });
+    mockErase().mockResolvedValueOnce({ ok: true, alreadyErased: false, anonymized: false, cloudinaryFailures: [], journeyEventsPurged: 2 });
 
     const { action } = await import("./webhooks.customers.redact.tsx");
     const res = await action({ request: makeRequest() } as any);
 
-    expect(mockErase()).toHaveBeenCalledWith("internal-customer-id-2");
+    expect(mockErase()).toHaveBeenCalledWith("internal-customer-id-2", {}, "customers/redact");
     expect(res.status).toBe(200);
   });
 
@@ -197,18 +203,18 @@ describe("§C — customers/redact: correct dispatch and duplicate-delivery hand
   });
 });
 
-describe("§D — shop/redact: erases every current customer (documented single-shop limitation)", () => {
-  it("D1 — calls eraseCustomerData once per customer currently in the database", async () => {
+describe("§D — shop/redact: erases only Shopify-only customers (Clerk-linked customers are excluded)", () => {
+  it("D1 — calls eraseCustomerData once per customer the scoped query returns, with the correct context", async () => {
     mockVerify().mockResolvedValueOnce({ ok: true, shop: "test-shop.myshopify.com", topic: "shop/redact", webhookId: "wh-4", payload: {} });
     mockCustomerFindMany().mockResolvedValueOnce([{ id: "synthetic-A" }, { id: "synthetic-B" }]);
-    mockErase().mockResolvedValue({ ok: true, alreadyErased: false, cloudinaryFailures: [], journeyEventsPurged: 0 });
+    mockErase().mockResolvedValue({ ok: true, alreadyErased: false, anonymized: false, cloudinaryFailures: [], journeyEventsPurged: 0 });
 
     const { action } = await import("./webhooks.shop.redact.tsx");
     const res = await action({ request: makeRequest() } as any);
 
     expect(mockErase()).toHaveBeenCalledTimes(2);
-    expect(mockErase()).toHaveBeenCalledWith("synthetic-A");
-    expect(mockErase()).toHaveBeenCalledWith("synthetic-B");
+    expect(mockErase()).toHaveBeenCalledWith("synthetic-A", {}, "shop/redact");
+    expect(mockErase()).toHaveBeenCalledWith("synthetic-B", {}, "shop/redact");
     expect(res.status).toBe(200);
   });
 
@@ -219,6 +225,53 @@ describe("§D — shop/redact: erases every current customer (documented single-
     const res = await action({ request: makeRequest() } as any);
     expect(res.status).toBe(200);
     expect(mockErase()).not.toHaveBeenCalled();
+  });
+
+  it("D3 — scenario: the batch query itself excludes any customer whose Shopify identity has been linked to Clerk — a shop uninstall must not erase an independent nAia account", async () => {
+    mockVerify().mockResolvedValueOnce({ ok: true, shop: "test-shop.myshopify.com", topic: "shop/redact", webhookId: "wh-scope-1", payload: {} });
+    mockCustomerFindMany().mockResolvedValueOnce([]);
+
+    const { action } = await import("./webhooks.shop.redact.tsx");
+    await action({ request: makeRequest() } as any);
+
+    // The exclusion is enforced by the query the real database will run,
+    // not by filtering results after the fact — asserting the exact where
+    // clause is the correct unit-level proof that a customer who has
+    // shopifyCustomerId AND clerkUserId both set (linked) can never be
+    // selected here, and that a Clerk-only customer (shopifyCustomerId
+    // null) can't either.
+    expect(mockCustomerFindMany()).toHaveBeenCalledWith({
+      where: { shopifyCustomerId: { not: null }, clerkUserId: null },
+      select: { id: true },
+    });
+  });
+
+  it("D4 — scenario: one customer's erasure failing during the batch does not stop the rest from being processed", async () => {
+    mockVerify().mockResolvedValueOnce({ ok: true, shop: "test-shop.myshopify.com", topic: "shop/redact", webhookId: "wh-partial-1", payload: {} });
+    mockCustomerFindMany().mockResolvedValueOnce([{ id: "synthetic-fail" }, { id: "synthetic-ok" }]);
+    mockErase()
+      .mockRejectedValueOnce(new Error("unexpected throw escaping eraseCustomerData"))
+      .mockResolvedValueOnce({ ok: true, alreadyErased: false, anonymized: false, cloudinaryFailures: [], journeyEventsPurged: 0 });
+
+    const { action } = await import("./webhooks.shop.redact.tsx");
+    const res = await action({ request: makeRequest() } as any);
+
+    expect(mockErase()).toHaveBeenCalledTimes(2); // both attempted — the first failing did not stop the second
+    expect(mockErase()).toHaveBeenCalledWith("synthetic-ok", {}, "shop/redact");
+    expect(mockRecordPendingFailure()).toHaveBeenCalledWith("synthetic-fail", "shop/redact", expect.any(Error));
+    expect(res.status).toBe(200); // the webhook itself still reports success — Shopify should not redeliver the whole batch
+  });
+
+  it("D5 — scenario: a customer with billing history is reported as anonymized, not erased, without affecting the rest of the batch", async () => {
+    mockVerify().mockResolvedValueOnce({ ok: true, shop: "test-shop.myshopify.com", topic: "shop/redact", webhookId: "wh-billed-1", payload: {} });
+    mockCustomerFindMany().mockResolvedValueOnce([{ id: "synthetic-billed" }]);
+    mockErase().mockResolvedValueOnce({ ok: true, alreadyErased: false, anonymized: true, cloudinaryFailures: [], journeyEventsPurged: 0 });
+
+    const { action } = await import("./webhooks.shop.redact.tsx");
+    const res = await action({ request: makeRequest() } as any);
+
+    expect(mockErase()).toHaveBeenCalledWith("synthetic-billed", {}, "shop/redact");
+    expect(res.status).toBe(200);
   });
 });
 
@@ -338,12 +391,12 @@ describe("§F — shop-ownership guard: Shop A cannot delete Shop B's data", () 
       payload: { customer: { id: "shopify-customer-456" } },
     });
     mockCustomerFindUnique().mockResolvedValueOnce({ id: "internal-customer-id-2" });
-    mockErase().mockResolvedValueOnce({ ok: true, alreadyErased: false, cloudinaryFailures: [], journeyEventsPurged: 2 });
+    mockErase().mockResolvedValueOnce({ ok: true, alreadyErased: false, anonymized: false, cloudinaryFailures: [], journeyEventsPurged: 2 });
 
     const { action } = await import("./webhooks.customers.redact.tsx");
     const res = await action({ request: makeRequest() } as any);
 
-    expect(mockErase()).toHaveBeenCalledWith("internal-customer-id-2");
+    expect(mockErase()).toHaveBeenCalledWith("internal-customer-id-2", {}, "customers/redact");
     expect(res.status).toBe(200);
   });
 });

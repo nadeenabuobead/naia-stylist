@@ -13,21 +13,64 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("~/db.server", () => {
   const customerFindUnique = vi.fn();
   const customerDelete = vi.fn().mockResolvedValue({});
+  const customerUpdate = vi.fn().mockResolvedValue({});
   const journeyEventDeleteMany = vi.fn().mockResolvedValue({ count: 0 });
+  const subscriptionCount = vi.fn().mockResolvedValue(0);
+  const billingTransactionCount = vi.fn().mockResolvedValue(0);
+  // $transaction here is the interactive-callback form (same convention as
+  // entitlement.server.ts's _runReservationTransaction) — just hand the
+  // callback the same mocked client, no real transaction semantics needed.
+  const transaction = vi.fn(async (fn: any) => fn({
+    onboardingProfile: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    closetItem: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    stylingSession: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    buyOrSkipAnalysis: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    wardrobeInsight: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    savedLook: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    postOutfitReview: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    confidenceScore: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    trendReportView: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    stylingEvent: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    naiaSession: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    naiaModel: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    virtualTryOnJob: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    recommendationFeedback: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    selfieAnalysis: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    naiaObservationFeedback: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    styleMeOutcome: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    tasteEvidence: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    styleTendency: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    wardrobeSnapshot: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    personalisedTrendEditUsage: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    identityLinkRequest: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    customer: { update: customerUpdate },
+  }));
   return {
     default: {
-      customer: { findUnique: customerFindUnique, delete: customerDelete },
+      customer: { findUnique: customerFindUnique, delete: customerDelete, update: customerUpdate },
       journeyEvent: { deleteMany: journeyEventDeleteMany },
+      subscription: { count: subscriptionCount },
+      billingTransaction: { count: billingTransactionCount },
+      $transaction: transaction,
     },
   };
 });
 
+vi.mock("./customer-erasure-failures.server", () => ({
+  recordPendingCustomerErasureFailure: vi.fn().mockResolvedValue("pending-failure-id"),
+}));
+
 import prisma from "~/db.server";
 import { eraseCustomerData, compileCustomerExport } from "./customer-privacy.server";
+import { recordPendingCustomerErasureFailure } from "./customer-erasure-failures.server";
 
 const mockFindUnique = () => (prisma as any).customer.findUnique as ReturnType<typeof vi.fn>;
 const mockDelete = () => (prisma as any).customer.delete as ReturnType<typeof vi.fn>;
+const mockCustomerUpdate = () => (prisma as any).customer.update as ReturnType<typeof vi.fn>;
 const mockJourneyDeleteMany = () => (prisma as any).journeyEvent.deleteMany as ReturnType<typeof vi.fn>;
+const mockSubscriptionCount = () => (prisma as any).subscription.count as ReturnType<typeof vi.fn>;
+const mockBillingTransactionCount = () => (prisma as any).billingTransaction.count as ReturnType<typeof vi.fn>;
+const mockRecordPendingFailure = () => recordPendingCustomerErasureFailure as ReturnType<typeof vi.fn>;
 
 const SYNTHETIC_CUSTOMER_ID = "synthetic-privacy-test-customer";
 
@@ -152,6 +195,37 @@ describe("eraseCustomerData — synthetic customer, mocked DB and mocked provide
   });
 });
 
+describe("eraseCustomerData — identity-agnostic: behaves the same regardless of which identity the customer has", () => {
+  // eraseCustomerData keys everything by the internal Customer.id — it never
+  // branches on shopifyCustomerId/clerkUserId. Scoping which customers are
+  // even CANDIDATES for a given caller (e.g. shop/redact excluding
+  // Clerk-linked rows) happens one layer up, in the webhook route's own
+  // query — see webhooks-privacy.test.ts §D. These two scenarios confirm
+  // eraseCustomerData itself erases correctly either way, once called.
+
+  it("13 — scenario: a Clerk-only customer (no Shopify identity at all) is erased the same as any other", async () => {
+    mockFindUnique().mockResolvedValueOnce({ id: SYNTHETIC_CUSTOMER_ID });
+    mockSubscriptionCount().mockResolvedValueOnce(0);
+    mockBillingTransactionCount().mockResolvedValueOnce(0);
+
+    const result = await eraseCustomerData(SYNTHETIC_CUSTOMER_ID, cloudinaryOkDeps(), "customers/redact");
+
+    expect(mockDelete()).toHaveBeenCalledWith({ where: { id: SYNTHETIC_CUSTOMER_ID } });
+    expect(result.ok).toBe(true);
+  });
+
+  it("14 — scenario: an existing Shopify-linked customer (no Clerk identity) is erased the same as any other", async () => {
+    mockFindUnique().mockResolvedValueOnce({ id: SYNTHETIC_CUSTOMER_ID });
+    mockSubscriptionCount().mockResolvedValueOnce(0);
+    mockBillingTransactionCount().mockResolvedValueOnce(0);
+
+    const result = await eraseCustomerData(SYNTHETIC_CUSTOMER_ID, cloudinaryOkDeps(), "shop/redact");
+
+    expect(mockDelete()).toHaveBeenCalledWith({ where: { id: SYNTHETIC_CUSTOMER_ID } });
+    expect(result.ok).toBe(true);
+  });
+});
+
 describe("compileCustomerExport — synthetic customer, mocked DB", () => {
   it("6 — returns null for a customer that does not exist, rather than throwing", async () => {
     mockFindUnique().mockResolvedValueOnce(null);
@@ -197,20 +271,111 @@ describe("compileCustomerExport — synthetic customer, mocked DB", () => {
   });
 });
 
+function cloudinaryOkDeps() {
+  return {
+    deleteAllClosetPhotos: vi.fn(async () => okResult()),
+    deleteCustomerBosImages: vi.fn(async () => okResult()),
+    // DeleteVtoResultsResult has its own shape (skippedCount, not
+    // clearedCount) — distinct from okResult()'s shape, which is only
+    // correct for the closet/BOS helpers.
+    deleteCustomerVtoResults: vi.fn(async () => ({ deletedCount: 1, skippedCount: 0, failedAssets: [] })),
+    withdrawSaveModelConsent: vi.fn(async () => ({ ok: true, deletedAssets: [], failedAssets: [] })),
+    // DeletePhotoResult is a discriminated union on `ok` — `as const`
+    // keeps the literal `true`, not the widened `boolean` a bare object
+    // literal would infer here.
+    deleteSelfieBoth: vi.fn(async () => ({ ok: true as const })),
+  };
+}
+
+describe("eraseCustomerData — scenario: customer with subscription/billing history", () => {
+  it("8 — a customer with a Subscription row is anonymized in place, not deleted — Subscription/BillingTransaction must survive", async () => {
+    mockFindUnique().mockResolvedValueOnce({ id: SYNTHETIC_CUSTOMER_ID });
+    mockSubscriptionCount().mockResolvedValueOnce(1);
+    mockBillingTransactionCount().mockResolvedValueOnce(0);
+
+    const result = await eraseCustomerData(SYNTHETIC_CUSTOMER_ID, cloudinaryOkDeps());
+
+    expect(mockDelete()).not.toHaveBeenCalled(); // never a hard delete — would throw on the Restrict FK
+    expect(mockCustomerUpdate()).toHaveBeenCalledWith({
+      where: { id: SYNTHETIC_CUSTOMER_ID },
+      data: expect.objectContaining({
+        shopifyCustomerId: null,
+        clerkUserId: null,
+        email: null,
+        firstName: null,
+        lastName: null,
+      }),
+    });
+    expect(result.ok).toBe(true);
+    expect(result.anonymized).toBe(true);
+    expect(result.alreadyErased).toBe(false);
+  });
+
+  it("9 — a customer with a BillingTransaction row (but no Subscription) is also anonymized, not deleted", async () => {
+    mockFindUnique().mockResolvedValueOnce({ id: SYNTHETIC_CUSTOMER_ID });
+    mockSubscriptionCount().mockResolvedValueOnce(0);
+    mockBillingTransactionCount().mockResolvedValueOnce(1);
+
+    const result = await eraseCustomerData(SYNTHETIC_CUSTOMER_ID, cloudinaryOkDeps());
+
+    expect(mockDelete()).not.toHaveBeenCalled();
+    expect(result.anonymized).toBe(true);
+  });
+
+  it("10 — a customer with NO billing history still goes through the ordinary hard delete, unchanged", async () => {
+    mockFindUnique().mockResolvedValueOnce({ id: SYNTHETIC_CUSTOMER_ID });
+    mockSubscriptionCount().mockResolvedValueOnce(0);
+    mockBillingTransactionCount().mockResolvedValueOnce(0);
+
+    const result = await eraseCustomerData(SYNTHETIC_CUSTOMER_ID, cloudinaryOkDeps());
+
+    expect(mockDelete()).toHaveBeenCalledWith({ where: { id: SYNTHETIC_CUSTOMER_ID } });
+    expect(mockCustomerUpdate()).not.toHaveBeenCalled();
+    expect(result.anonymized).toBe(false);
+  });
+});
+
+describe("eraseCustomerData — scenario: a genuinely unexpected failure during erasure", () => {
+  it("11 — an unexpected DB error is durably recorded, not thrown — the caller gets a result back, not an exception", async () => {
+    mockFindUnique().mockResolvedValueOnce({ id: SYNTHETIC_CUSTOMER_ID });
+    mockSubscriptionCount().mockResolvedValueOnce(0);
+    mockBillingTransactionCount().mockResolvedValueOnce(0);
+    mockDelete().mockRejectedValueOnce(new Error("connection reset"));
+
+    const result = await eraseCustomerData(SYNTHETIC_CUSTOMER_ID, cloudinaryOkDeps(), "shop/redact");
+
+    expect(mockRecordPendingFailure()).toHaveBeenCalledWith(SYNTHETIC_CUSTOMER_ID, "shop/redact", expect.any(Error));
+    expect(result.ok).toBe(false);
+    expect(result.pendingFailureId).toBe("pending-failure-id");
+  });
+
+  it("12 — the context passed in is forwarded to the durable record so an operator can tell which caller failed", async () => {
+    mockFindUnique().mockResolvedValueOnce({ id: SYNTHETIC_CUSTOMER_ID });
+    mockSubscriptionCount().mockResolvedValueOnce(0);
+    mockBillingTransactionCount().mockResolvedValueOnce(0);
+    mockDelete().mockRejectedValueOnce(new Error("connection reset"));
+
+    await eraseCustomerData(SYNTHETIC_CUSTOMER_ID, cloudinaryOkDeps(), "customers/redact");
+
+    expect(mockRecordPendingFailure()).toHaveBeenCalledWith(SYNTHETIC_CUSTOMER_ID, "customers/redact", expect.any(Error));
+  });
+});
+
 describe("billing safety — tripwire for a currently-nonexistent risk", () => {
-  // There is no live payment processor wired into this app today (Clerk +
-  // Stripe is approved for PLANNING only — see the frozen v4 auth/billing
-  // spec — not implemented). membershipStatus is an internal-only enum
-  // (NONE | MEMBER, prisma/schema.prisma) with no external subscription id,
-  // so deleting the Customer row cannot leave a live subscription billing a
-  // deleted customer: there is nothing external to orphan yet.
-  //
-  // This test is a tripwire, not a feature test: the moment a real billing
-  // integration adds a field like stripeCustomerId/stripeSubscriptionId to
-  // Customer, this test starts failing — which is the intended signal that
-  // eraseCustomerData must be updated to cancel/handle that subscription
-  // BEFORE deleting the row, not an oversight to silently work around.
-  it("Customer has no external billing/subscription identifier for eraseCustomerData to account for yet", async () => {
+  // UPDATE (2026-11-05): the risk this test was written to flag is no
+  // longer hypothetical — Subscription/BillingTransaction now exist in
+  // schema.prisma (Stripe test-mode planning phase) with a deliberate
+  // onDelete: Restrict against Customer, and eraseCustomerData's
+  // billing-aware anonymize path (see hasBillingHistory/
+  // anonymizeBilledCustomer below) is exactly the handling this test's
+  // original comment asked for. What this test still correctly checks is
+  // narrower than that: Customer ITSELF carries no external provider
+  // identifier (stripeCustomerId etc.) directly on its own row — provider
+  // ids live on Subscription/BillingTransaction instead, confirmed by
+  // billing/schema's own comment on why. If that ever changes, THIS test
+  // is the signal that eraseCustomerData/anonymizeBilledCustomer must be
+  // updated to scrub whatever new field was added.
+  it("Customer carries no external billing/subscription identifier directly on its own row", async () => {
     const { readFileSync } = await import("node:fs");
     const { join, dirname } = await import("node:path");
     const { fileURLToPath } = await import("node:url");

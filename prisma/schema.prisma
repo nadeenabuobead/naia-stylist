@@ -249,6 +249,32 @@ model PendingClerkCleanup {
   @@index([resolvedAt])
 }
 
+/// Durable, operator-visible record of a GDPR erasure (eraseCustomerData)
+/// that hit a genuinely unexpected failure partway through — e.g. a DB error
+/// during the anonymize-and-retain-financials path for a billed customer.
+/// Deliberately NOT used for the two already-handled, expected cases: a
+/// stuck Cloudinary asset (reported in EraseResult.cloudinaryFailures, not
+/// here) and a customer with billing history (handled automatically by the
+/// anonymize path, not a failure at all). Only one open row per customer —
+/// a repeat failure updates it rather than stacking a duplicate, same
+/// upsert convention as PendingClerkCleanup above. No FK to Customer: by the
+/// time this runs, the customer's row may already be partially erased.
+model PendingCustomerErasureFailure {
+  id            String    @id @default(cuid())
+  customerId    String    @unique
+  /// Which caller triggered this — "shop/redact", "customers/redact", or
+  /// "settings-self-service" — so an operator can tell a shop-uninstall
+  /// sweep failure from an individual data-subject request failure.
+  context       String
+  lastError     String
+  attemptCount  Int       @default(1)
+  createdAt     DateTime  @default(now())
+  lastAttemptAt DateTime  @default(now())
+  resolvedAt    DateTime?
+
+  @@index([resolvedAt])
+}
+
 /// A point-in-time reading of the wardrobe, so "what changed?" has a before.
 /// Without this there is nothing honest to compare a new piece against.
 model WardrobeSnapshot {
