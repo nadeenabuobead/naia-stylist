@@ -131,7 +131,7 @@ describe("§TREND-EDIT-USAGE — no alternate pre-create path exists anywhere in
     return hits;
   }
 
-  it("exactly one file calls a mutating personalisedTrendEditUsage operation — this one", () => {
+  it("exactly one file calls a row-CREATING personalisedTrendEditUsage operation — this one", () => {
     // Anchored on the client variable's PROPERTY access, not literally
     // "prisma." — entitlement.server.ts's reservePersonalisedTrendSlot
     // (2026-11-04) closes the account-wide quota race by re-checking the
@@ -141,8 +141,28 @@ describe("§TREND-EDIT-USAGE — no alternate pre-create path exists anywhere in
     // calling prisma directly — so the literal write call still lives in
     // exactly this one file, just under whatever parameter name receives
     // the (possibly transactional) client.
-    const writers = grepRepo(/\.personalisedTrendEditUsage\.(create|createMany|update|updateMany|upsert|delete|deleteMany)\s*\(/);
+    //
+    // Scoped to create|createMany|update|updateMany|upsert — the operations
+    // that could actually reproduce the original symptom (a row created
+    // without a snapshot). delete/deleteMany is a DIFFERENT property,
+    // checked separately below: a deletion can never create a malformed
+    // row, so it was never what this guard was protecting against, and
+    // folding it in here would make a legitimate new deletion site (see
+    // below) look like the same historical bug.
+    const writers = grepRepo(/\.personalisedTrendEditUsage\.(create|createMany|update|updateMany|upsert)\s*\(/);
     expect(writers).toEqual(["app/lib/plan/personalised-trend-edit-usage.server.ts"]);
+  });
+
+  it("every file that DELETES personalisedTrendEditUsage rows is on an explicit, reviewed allowlist", () => {
+    // customer-privacy.server.ts's eraseCustomerData (2026-11-05, Clerk
+    // migration's billing-aware erasure) added a deleteMany here —
+    // deliberately reviewed and expected, not a silent new writer: deleting
+    // a customer's usage-tracking rows as part of full account erasure
+    // cannot produce the create-without-snapshot corruption this suite
+    // otherwise guards against. A second, never-reviewed file showing up
+    // here should still fail loudly — this is what keeps that true.
+    const deleters = grepRepo(/\.personalisedTrendEditUsage\.(delete|deleteMany)\s*\(/);
+    expect(deleters.sort()).toEqual(["app/lib/customer-privacy.server.ts"]);
   });
 
   it("exactly two production call sites invoke recordPersonalisedTrendEditUsage — the unenforced direct path and the enforced atomic-reservation path", () => {

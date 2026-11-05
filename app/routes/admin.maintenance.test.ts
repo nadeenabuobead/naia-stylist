@@ -72,7 +72,7 @@ beforeEach(() => vi.clearAllMocks());
 
 describe("admin.maintenance — session and role requirements", () => {
   it("loader calls requireAdminSession and loads recent actions", async () => {
-    const { loader } = await import("./admin.maintenance.tsx");
+    const { loader } = await import("./admin.maintenance");
     const result = await loader({ request: new Request("http://localhost/admin/maintenance") } as any);
     expect(mockRequireAdmin()).toHaveBeenCalled();
     expect(mockListActions()).toHaveBeenCalledWith(20);
@@ -83,7 +83,7 @@ describe("admin.maintenance — session and role requirements", () => {
 
   it("action rejects before running any purge when the session check rejects", async () => {
     mockRequireAdmin().mockRejectedValueOnce(new Response("redirect", { status: 302 }));
-    const { action } = await import("./admin.maintenance.tsx");
+    const { action } = await import("./admin.maintenance");
 
     await expect(action({ request: actionRequest("purge-journey-events") } as any)).rejects.toBeInstanceOf(Response);
     expect(mockPurgeJourney()).not.toHaveBeenCalled();
@@ -92,7 +92,7 @@ describe("admin.maintenance — session and role requirements", () => {
 
   it("a valid session that is NOT role 'owner' is rejected with 403, before any purge", async () => {
     mockRequireAdmin().mockResolvedValueOnce({ authenticated: true, identity: { id: "x", email: "staff@naiabynadine.com", role: "staff" } });
-    const { action } = await import("./admin.maintenance.tsx");
+    const { action } = await import("./admin.maintenance");
 
     await expect(action({ request: actionRequest("purge-journey-events") } as any)).rejects.toMatchObject({ status: 403 });
     expect(mockPurgeJourney()).not.toHaveBeenCalled();
@@ -100,7 +100,7 @@ describe("admin.maintenance — session and role requirements", () => {
 
   it("the loader also enforces the owner role", async () => {
     mockRequireAdmin().mockResolvedValueOnce({ authenticated: true, identity: { id: "x", email: "staff@naiabynadine.com", role: "staff" } });
-    const { loader } = await import("./admin.maintenance.tsx");
+    const { loader } = await import("./admin.maintenance");
 
     await expect(loader({ request: new Request("http://localhost/admin/maintenance") } as any)).rejects.toMatchObject({ status: 403 });
   });
@@ -109,7 +109,7 @@ describe("admin.maintenance — session and role requirements", () => {
 describe("admin.maintenance — purge actions and auditability", () => {
   it("purge-journey-events calls only purgeExpiredJourneyEvents and records the audit entry with the session's email", async () => {
     mockPurgeJourney().mockResolvedValueOnce({ count: 12 });
-    const { action } = await import("./admin.maintenance.tsx");
+    const { action } = await import("./admin.maintenance");
 
     const result = await action({ request: actionRequest("purge-journey-events") } as any);
 
@@ -121,7 +121,7 @@ describe("admin.maintenance — purge actions and auditability", () => {
 
   it("purge-sessions calls only purgeExpiredNaiaSessions and records the audit entry", async () => {
     mockPurgeSessions().mockResolvedValueOnce({ count: 3 });
-    const { action } = await import("./admin.maintenance.tsx");
+    const { action } = await import("./admin.maintenance");
 
     const result = await action({ request: actionRequest("purge-sessions") } as any);
 
@@ -133,7 +133,7 @@ describe("admin.maintenance — purge actions and auditability", () => {
 
   it("purge-unconfirmed-selfies calls only purgeUnconfirmedSelfiePhotos and records the full result as detail", async () => {
     mockPurgeSelfies().mockResolvedValueOnce({ count: 5, attempted: 5 });
-    const { action } = await import("./admin.maintenance.tsx");
+    const { action } = await import("./admin.maintenance");
 
     const result = await action({ request: actionRequest("purge-unconfirmed-selfies") } as any);
 
@@ -146,7 +146,7 @@ describe("admin.maintenance — purge actions and auditability", () => {
 
   it("purge-unconfirmed-selfies surfaces a partial failure in its message rather than hiding it", async () => {
     mockPurgeSelfies().mockResolvedValueOnce({ count: 3, attempted: 5 });
-    const { action } = await import("./admin.maintenance.tsx");
+    const { action } = await import("./admin.maintenance");
 
     const result = await action({ request: actionRequest("purge-unconfirmed-selfies") } as any);
     expect((result as any).message).toMatch(/3 of 5/);
@@ -154,7 +154,7 @@ describe("admin.maintenance — purge actions and auditability", () => {
   });
 
   it("an invalid intent is rejected without calling either purge function or recording anything", async () => {
-    const { action } = await import("./admin.maintenance.tsx");
+    const { action } = await import("./admin.maintenance");
     const result = await action({ request: actionRequest("something-else") } as any);
 
     expect((result as any).ok).toBe(false);
@@ -175,7 +175,7 @@ function retryActionRequest(id: string) {
 describe("admin.maintenance — retry-clerk-cleanup action", () => {
   it("a successful retry reports resolved and records the audit entry with the row id", async () => {
     mockRetryCleanup().mockResolvedValueOnce({ status: "resolved" });
-    const { action } = await import("./admin.maintenance.tsx");
+    const { action } = await import("./admin.maintenance");
 
     const result = await action({ request: retryActionRequest("cleanup-1") } as any);
 
@@ -189,7 +189,7 @@ describe("admin.maintenance — retry-clerk-cleanup action", () => {
 
   it("a retry that fails again surfaces the error rather than silently succeeding", async () => {
     mockRetryCleanup().mockResolvedValueOnce({ status: "failed-again", error: "still misconfigured" });
-    const { action } = await import("./admin.maintenance.tsx");
+    const { action } = await import("./admin.maintenance");
 
     const result = await action({ request: retryActionRequest("cleanup-1") } as any);
 
@@ -199,7 +199,7 @@ describe("admin.maintenance — retry-clerk-cleanup action", () => {
 
   it("retrying a not-found id reports an error, never a silent success", async () => {
     mockRetryCleanup().mockResolvedValueOnce({ status: "not-found" });
-    const { action } = await import("./admin.maintenance.tsx");
+    const { action } = await import("./admin.maintenance");
 
     const result = await action({ request: retryActionRequest("does-not-exist") } as any);
     expect((result as any).ok).toBe(false);
@@ -207,7 +207,7 @@ describe("admin.maintenance — retry-clerk-cleanup action", () => {
 
   it("retrying an already-resolved id reports an error, not a duplicate success message", async () => {
     mockRetryCleanup().mockResolvedValueOnce({ status: "already-resolved" });
-    const { action } = await import("./admin.maintenance.tsx");
+    const { action } = await import("./admin.maintenance");
 
     const result = await action({ request: retryActionRequest("cleanup-1") } as any);
     expect((result as any).ok).toBe(false);
@@ -224,7 +224,7 @@ function retryErasureFailureRequest(id: string) {
 describe("admin.maintenance — retry-customer-erasure-failure action", () => {
   it("a successful retry reports resolved and records the audit entry with the row id", async () => {
     mockRetryErasureFailure().mockResolvedValueOnce({ status: "resolved" });
-    const { action } = await import("./admin.maintenance.tsx");
+    const { action } = await import("./admin.maintenance");
 
     const result = await action({ request: retryErasureFailureRequest("erasure-1") } as any);
 
@@ -238,7 +238,7 @@ describe("admin.maintenance — retry-customer-erasure-failure action", () => {
 
   it("a retry that fails again surfaces the error rather than silently succeeding", async () => {
     mockRetryErasureFailure().mockResolvedValueOnce({ status: "failed-again", error: "still broken" });
-    const { action } = await import("./admin.maintenance.tsx");
+    const { action } = await import("./admin.maintenance");
 
     const result = await action({ request: retryErasureFailureRequest("erasure-1") } as any);
 
@@ -248,7 +248,7 @@ describe("admin.maintenance — retry-customer-erasure-failure action", () => {
 
   it("retrying a not-found id reports an error, never a silent success", async () => {
     mockRetryErasureFailure().mockResolvedValueOnce({ status: "not-found" });
-    const { action } = await import("./admin.maintenance.tsx");
+    const { action } = await import("./admin.maintenance");
 
     const result = await action({ request: retryErasureFailureRequest("does-not-exist") } as any);
     expect((result as any).ok).toBe(false);
@@ -256,7 +256,7 @@ describe("admin.maintenance — retry-customer-erasure-failure action", () => {
 
   it("retrying an already-resolved id reports an error, not a duplicate success message", async () => {
     mockRetryErasureFailure().mockResolvedValueOnce({ status: "already-resolved" });
-    const { action } = await import("./admin.maintenance.tsx");
+    const { action } = await import("./admin.maintenance");
 
     const result = await action({ request: retryErasureFailureRequest("erasure-1") } as any);
     expect((result as any).ok).toBe(false);

@@ -14,16 +14,31 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+// Identity resolution (2026-11-05, Clerk migration): requireCurrentNaiaCustomer
+// is now Clerk-backed (clerk-session.server.ts) — see
+// phase1-synthetic-integration.test.ts's own header comment for the full
+// rationale. Same boundary swap here: @clerk/backend's authenticateRequest
+// and prisma.customer.findUnique replace the old naiaSession mock;
+// clerk-session.server.ts's real logic still runs.
+const TEST_CLERK_USER_HEADER = "X-Test-Clerk-User-Id";
+
+vi.mock("@clerk/backend", () => ({
+  createClerkClient: () => ({
+    authenticateRequest: async (request: Request) => {
+      const clerkUserId = request.headers.get(TEST_CLERK_USER_HEADER);
+      return {
+        toAuth: () => (clerkUserId ? { isAuthenticated: true, userId: clerkUserId } : { isAuthenticated: false, userId: null }),
+      };
+    },
+  }),
+}));
+
 vi.mock("~/db.server", () => {
-  const naiaSessionFindUnique = vi.fn();
+  const customerFindUnique = vi.fn();
   const naiaModelFindUnique = vi.fn().mockResolvedValue(null);
   return {
     default: {
-      naiaSession: {
-        findUnique: naiaSessionFindUnique,
-        update: vi.fn().mockResolvedValue({}),
-        delete: vi.fn().mockResolvedValue({}),
-      },
+      customer: { findUnique: customerFindUnique },
       naiaModel: { findUnique: naiaModelFindUnique },
     },
   };
@@ -32,6 +47,19 @@ vi.mock("~/db.server", () => {
 vi.mock("~/lib/customer-privacy.server", () => ({
   compileCustomerExport: vi.fn(),
   eraseCustomerData: vi.fn(),
+}));
+
+// settings.tsx's delete-account action deletes the Clerk user after nAia's
+// own data is erased (see its own header comment on ordering) — mocked here
+// the same way every other service dependency on this route already is.
+const { clerkDeleteUserMock } = vi.hoisted(() => ({ clerkDeleteUserMock: vi.fn().mockResolvedValue({}) }));
+
+vi.mock("@clerk/react-router/server", () => ({
+  clerkClient: () => ({ users: { deleteUser: clerkDeleteUserMock } }),
+}));
+
+vi.mock("~/lib/clerk-cleanup.server", () => ({
+  recordPendingClerkCleanup: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("~/lib/ai/my-naia-model.server", () => ({
@@ -58,22 +86,18 @@ import prisma from "~/db.server";
 import { compileCustomerExport, eraseCustomerData } from "~/lib/customer-privacy.server";
 import { loader, action } from "./settings";
 
-const mockNaiaFindUnique = () => (prisma as any).naiaSession.findUnique as ReturnType<typeof vi.fn>;
+const mockCustomerFindUnique = () => (prisma as any).customer.findUnique as ReturnType<typeof vi.fn>;
 const mockCompileExport = () => compileCustomerExport as ReturnType<typeof vi.fn>;
 const mockEraseData = () => eraseCustomerData as ReturnType<typeof vi.fn>;
 
 // ── Synthetic customers — never real data ─────────────────────────────────────
 
-const CUSTOMER_A = { id: "synthetic-customer-A", firstName: "A", lastName: "Test", email: "a@example.invalid" };
-const CUSTOMER_B = { id: "synthetic-customer-B", firstName: "B", lastName: "Test", email: "b@example.invalid" };
-
-function sessionFor(customer: typeof CUSTOMER_A) {
-  return { tokenHash: "irrelevant-in-mock", expiresAt: new Date(Date.now() + 10_000_000), customer };
-}
+const CUSTOMER_A = { id: "synthetic-customer-A", clerkUserId: "clerk_synthetic-customer-A", firstName: "A", lastName: "Test", email: "a@example.invalid" };
+const CUSTOMER_B = { id: "synthetic-customer-B", clerkUserId: "clerk_synthetic-customer-B", firstName: "B", lastName: "Test", email: "b@example.invalid" };
 
 function requestAs(customer: typeof CUSTOMER_A, method: string, body?: Record<string, string>) {
-  const headers = new Headers({ Cookie: `__naia_tok=raw-token-for-${customer.id}` });
-  mockNaiaFindUnique().mockResolvedValueOnce(sessionFor(customer));
+  const headers = new Headers({ [TEST_CLERK_USER_HEADER]: customer.clerkUserId });
+  mockCustomerFindUnique().mockResolvedValueOnce(customer);
   const init: RequestInit = { method, headers };
   if (body) {
     const form = new URLSearchParams(body);
@@ -146,12 +170,17 @@ describe("settings.tsx action — account deletion", () => {
     expect(mockEraseData()).not.toHaveBeenCalledWith(CUSTOMER_B.id);
   });
 
-  it("a successful deletion clears the session cookie and redirects, rather than re-rendering settings", async () => {
+  it("a successful deletion redirects to signed-out AND ends every session for that identity via Clerk — not a nAia-issued cookie, since Clerk owns the session now", async () => {
     mockEraseData().mockResolvedValue({ ok: true, alreadyErased: false, cloudinaryFailures: [], journeyEventsPurged: 0 });
     const res: any = await action({ request: requestAs(CUSTOMER_A, "POST", { intent: "delete-account" }), params: {}, context: {} } as any);
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toBe("/auth/signed-out");
-    expect(res.headers.get("Set-Cookie")).toBeTruthy();
+    // The actual "no longer signed in" guarantee in the Clerk era: deleting
+    // the Clerk user ends every session for that identity server-side (see
+    // settings.tsx's own comment on this ordering) — not a Set-Cookie header
+    // nAia's own action issues, which is how the pre-Clerk __naia_tok flow
+    // used to provide this same guarantee.
+    expect(clerkDeleteUserMock).toHaveBeenCalledWith(CUSTOMER_A.clerkUserId);
   });
 
   it("an unauthenticated delete-account request never reaches eraseCustomerData", async () => {

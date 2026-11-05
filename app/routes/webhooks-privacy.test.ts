@@ -73,7 +73,7 @@ function makeRequest() {
 describe("§A — signature verification (shared by all three webhooks)", () => {
   it("A1 — data_request: an invalid signature is rejected before any customer lookup, with a 401", async () => {
     mockVerify().mockResolvedValueOnce({ ok: false, reason: "invalid_signature" });
-    const { action } = await import("./webhooks.customers.data_request.tsx");
+    const { action } = await import("./webhooks.customers.data_request");
 
     const res = await action({ request: makeRequest() } as any);
 
@@ -84,7 +84,7 @@ describe("§A — signature verification (shared by all three webhooks)", () => 
 
   it("A2 — redact: an invalid signature is rejected before any erasure, with a 401", async () => {
     mockVerify().mockResolvedValueOnce({ ok: false, reason: "invalid_signature" });
-    const { action } = await import("./webhooks.customers.redact.tsx");
+    const { action } = await import("./webhooks.customers.redact");
 
     const res = await action({ request: makeRequest() } as any);
 
@@ -94,7 +94,7 @@ describe("§A — signature verification (shared by all three webhooks)", () => 
 
   it("A3 — shop/redact: an invalid signature is rejected before any erasure, with a 401", async () => {
     mockVerify().mockResolvedValueOnce({ ok: false, reason: "invalid_signature" });
-    const { action } = await import("./webhooks.shop.redact.tsx");
+    const { action } = await import("./webhooks.shop.redact");
 
     const res = await action({ request: makeRequest() } as any);
 
@@ -105,9 +105,9 @@ describe("§A — signature verification (shared by all three webhooks)", () => 
 
   it("A4 — missing signature header is rejected the same way as an invalid one, for all three", async () => {
     mockVerify().mockResolvedValue({ ok: false, reason: "missing_signature" });
-    const dataRequest = await import("./webhooks.customers.data_request.tsx");
-    const redact = await import("./webhooks.customers.redact.tsx");
-    const shopRedact = await import("./webhooks.shop.redact.tsx");
+    const dataRequest = await import("./webhooks.customers.data_request");
+    const redact = await import("./webhooks.customers.redact");
+    const shopRedact = await import("./webhooks.shop.redact");
 
     for (const { action } of [dataRequest, redact, shopRedact]) {
       const res = await action({ request: makeRequest() } as any);
@@ -119,7 +119,7 @@ describe("§A — signature verification (shared by all three webhooks)", () => 
 
   it("A5 — a valid signature but malformed body is rejected the same way, never reaching customer lookup", async () => {
     mockVerify().mockResolvedValueOnce({ ok: false, reason: "malformed_body" });
-    const { action } = await import("./webhooks.customers.data_request.tsx");
+    const { action } = await import("./webhooks.customers.data_request");
 
     const res = await action({ request: makeRequest() } as any);
 
@@ -140,7 +140,7 @@ describe("§B — customers/data_request: correct dispatch", () => {
     mockCustomerFindUnique().mockResolvedValueOnce({ id: "internal-customer-id" });
     mockCompile().mockResolvedValueOnce({ exportedAt: "2026-10-19T00:00:00Z" });
 
-    const { action } = await import("./webhooks.customers.data_request.tsx");
+    const { action } = await import("./webhooks.customers.data_request");
     const res = await action({ request: makeRequest() } as any);
 
     expect(mockCustomerFindUnique()).toHaveBeenCalledWith({ where: { shopifyCustomerId: "shopify-customer-123" } });
@@ -158,7 +158,7 @@ describe("§B — customers/data_request: correct dispatch", () => {
     });
     mockCustomerFindUnique().mockResolvedValueOnce(null);
 
-    const { action } = await import("./webhooks.customers.data_request.tsx");
+    const { action } = await import("./webhooks.customers.data_request");
     const res = await action({ request: makeRequest() } as any);
 
     expect(res.status).toBe(200);
@@ -178,7 +178,7 @@ describe("§C — customers/redact: correct dispatch and duplicate-delivery hand
     mockCustomerFindUnique().mockResolvedValueOnce({ id: "internal-customer-id-2" });
     mockErase().mockResolvedValueOnce({ ok: true, alreadyErased: false, anonymized: false, cloudinaryFailures: [], journeyEventsPurged: 2 });
 
-    const { action } = await import("./webhooks.customers.redact.tsx");
+    const { action } = await import("./webhooks.customers.redact");
     const res = await action({ request: makeRequest() } as any);
 
     expect(mockErase()).toHaveBeenCalledWith("internal-customer-id-2", {}, "customers/redact");
@@ -195,7 +195,7 @@ describe("§C — customers/redact: correct dispatch and duplicate-delivery hand
     });
     mockCustomerFindUnique().mockResolvedValueOnce(null); // this webhook's own lookup short-circuits
 
-    const { action } = await import("./webhooks.customers.redact.tsx");
+    const { action } = await import("./webhooks.customers.redact");
     const res = await action({ request: makeRequest() } as any);
 
     expect(res.status).toBe(200);
@@ -209,7 +209,7 @@ describe("§D — shop/redact: erases only Shopify-only customers (Clerk-linked 
     mockCustomerFindMany().mockResolvedValueOnce([{ id: "synthetic-A" }, { id: "synthetic-B" }]);
     mockErase().mockResolvedValue({ ok: true, alreadyErased: false, anonymized: false, cloudinaryFailures: [], journeyEventsPurged: 0 });
 
-    const { action } = await import("./webhooks.shop.redact.tsx");
+    const { action } = await import("./webhooks.shop.redact");
     const res = await action({ request: makeRequest() } as any);
 
     expect(mockErase()).toHaveBeenCalledTimes(2);
@@ -221,7 +221,7 @@ describe("§D — shop/redact: erases only Shopify-only customers (Clerk-linked 
   it("D2 — a repeat shop/redact delivery (all customers already erased) is still a success", async () => {
     mockVerify().mockResolvedValueOnce({ ok: true, shop: "test-shop.myshopify.com", topic: "shop/redact", webhookId: "wh-4-retry", payload: {} });
     mockCustomerFindMany().mockResolvedValueOnce([]); // nothing left to erase
-    const { action } = await import("./webhooks.shop.redact.tsx");
+    const { action } = await import("./webhooks.shop.redact");
     const res = await action({ request: makeRequest() } as any);
     expect(res.status).toBe(200);
     expect(mockErase()).not.toHaveBeenCalled();
@@ -231,7 +231,7 @@ describe("§D — shop/redact: erases only Shopify-only customers (Clerk-linked 
     mockVerify().mockResolvedValueOnce({ ok: true, shop: "test-shop.myshopify.com", topic: "shop/redact", webhookId: "wh-scope-1", payload: {} });
     mockCustomerFindMany().mockResolvedValueOnce([]);
 
-    const { action } = await import("./webhooks.shop.redact.tsx");
+    const { action } = await import("./webhooks.shop.redact");
     await action({ request: makeRequest() } as any);
 
     // The exclusion is enforced by the query the real database will run,
@@ -253,7 +253,7 @@ describe("§D — shop/redact: erases only Shopify-only customers (Clerk-linked 
       .mockRejectedValueOnce(new Error("unexpected throw escaping eraseCustomerData"))
       .mockResolvedValueOnce({ ok: true, alreadyErased: false, anonymized: false, cloudinaryFailures: [], journeyEventsPurged: 0 });
 
-    const { action } = await import("./webhooks.shop.redact.tsx");
+    const { action } = await import("./webhooks.shop.redact");
     const res = await action({ request: makeRequest() } as any);
 
     expect(mockErase()).toHaveBeenCalledTimes(2); // both attempted — the first failing did not stop the second
@@ -267,7 +267,7 @@ describe("§D — shop/redact: erases only Shopify-only customers (Clerk-linked 
     mockCustomerFindMany().mockResolvedValueOnce([{ id: "synthetic-billed" }]);
     mockErase().mockResolvedValueOnce({ ok: true, alreadyErased: false, anonymized: true, cloudinaryFailures: [], journeyEventsPurged: 0 });
 
-    const { action } = await import("./webhooks.shop.redact.tsx");
+    const { action } = await import("./webhooks.shop.redact");
     const res = await action({ request: makeRequest() } as any);
 
     expect(mockErase()).toHaveBeenCalledWith("synthetic-billed", {}, "shop/redact");
@@ -286,7 +286,7 @@ describe("§F — shop-ownership guard: Shop A cannot delete Shop B's data", () 
     });
     mockOwnership().mockReturnValueOnce({ ok: false, reason: "shop_mismatch" });
 
-    const { action } = await import("./webhooks.customers.redact.tsx");
+    const { action } = await import("./webhooks.customers.redact");
     const res = await action({ request: makeRequest() } as any);
 
     expect(res.status).toBe(500);
@@ -304,7 +304,7 @@ describe("§F — shop-ownership guard: Shop A cannot delete Shop B's data", () 
     });
     mockOwnership().mockReturnValueOnce({ ok: false, reason: "shop_mismatch" });
 
-    const { action } = await import("./webhooks.shop.redact.tsx");
+    const { action } = await import("./webhooks.shop.redact");
     const res = await action({ request: makeRequest() } as any);
 
     expect(res.status).toBe(500);
@@ -319,7 +319,7 @@ describe("§F — shop-ownership guard: Shop A cannot delete Shop B's data", () 
     });
     mockOwnership().mockReturnValueOnce({ ok: false, reason: "missing_shop_header" });
 
-    const { action } = await import("./webhooks.customers.redact.tsx");
+    const { action } = await import("./webhooks.customers.redact");
     const res = await action({ request: makeRequest() } as any);
 
     expect(res.status).toBe(500);
@@ -330,7 +330,7 @@ describe("§F — shop-ownership guard: Shop A cannot delete Shop B's data", () 
     mockVerify().mockResolvedValueOnce({ ok: true, shop: "test-shop.myshopify.com", topic: "shop/redact", webhookId: "wh-cross-4", payload: {} });
     mockOwnership().mockReturnValueOnce({ ok: false, reason: "missing_expected_shop_config" });
 
-    const { action } = await import("./webhooks.shop.redact.tsx");
+    const { action } = await import("./webhooks.shop.redact");
     const res = await action({ request: makeRequest() } as any);
 
     expect(res.status).toBe(500);
@@ -348,7 +348,7 @@ describe("§F — shop-ownership guard: Shop A cannot delete Shop B's data", () 
     });
     mockOwnership().mockReturnValueOnce({ ok: false, reason: "shop_mismatch" });
 
-    const { action } = await import("./webhooks.customers.data_request.tsx");
+    const { action } = await import("./webhooks.customers.data_request");
     const res = await action({ request: makeRequest() } as any);
 
     expect(res.status).toBe(500);
@@ -363,7 +363,7 @@ describe("§F — shop-ownership guard: Shop A cannot delete Shop B's data", () 
     });
     mockOwnership().mockReturnValueOnce({ ok: false, reason: "missing_shop_header" });
 
-    const { action } = await import("./webhooks.customers.data_request.tsx");
+    const { action } = await import("./webhooks.customers.data_request");
     const res = await action({ request: makeRequest() } as any);
 
     expect(res.status).toBe(500);
@@ -377,7 +377,7 @@ describe("§F — shop-ownership guard: Shop A cannot delete Shop B's data", () 
     });
     mockOwnership().mockReturnValueOnce({ ok: false, reason: "missing_expected_shop_config" });
 
-    const { action } = await import("./webhooks.customers.data_request.tsx");
+    const { action } = await import("./webhooks.customers.data_request");
     const res = await action({ request: makeRequest() } as any);
 
     expect(res.status).toBe(500);
@@ -393,7 +393,7 @@ describe("§F — shop-ownership guard: Shop A cannot delete Shop B's data", () 
     mockCustomerFindUnique().mockResolvedValueOnce({ id: "internal-customer-id-2" });
     mockErase().mockResolvedValueOnce({ ok: true, alreadyErased: false, anonymized: false, cloudinaryFailures: [], journeyEventsPurged: 2 });
 
-    const { action } = await import("./webhooks.customers.redact.tsx");
+    const { action } = await import("./webhooks.customers.redact");
     const res = await action({ request: makeRequest() } as any);
 
     expect(mockErase()).toHaveBeenCalledWith("internal-customer-id-2", {}, "customers/redact");
@@ -426,7 +426,7 @@ describe("§E — regression: a genuinely signed request succeeds with zero sess
       body,
     });
 
-    const { action } = await import("./webhooks.customers.data_request.tsx");
+    const { action } = await import("./webhooks.customers.data_request");
     const res = await action({ request } as any);
 
     expect(res.status).toBe(200);

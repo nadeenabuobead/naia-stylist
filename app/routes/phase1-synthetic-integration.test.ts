@@ -23,19 +23,40 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ── Mock the database (no live connection) ───────────────────────────────────
+//
+// Identity resolution (2026-11-05, Clerk migration): getCurrentNaiaCustomer
+// is now Clerk-backed (clerk-session.server.ts), not the old __naia_tok
+// cookie / NaiaSession table — see that file's own header comment. The
+// boundary this suite mocks moves with it: @clerk/backend's
+// authenticateRequest (so each synthetic request can declare which Clerk
+// user it is, via a test-only header no production code ever reads) and
+// prisma.customer.findUnique (the Clerk-era identity lookup), replacing the
+// old naiaSession mock. clerk-session.server.ts itself runs for REAL here —
+// only its two actual boundaries (the Clerk SDK call, and the DB) are
+// mocked — preserving the original "real route handler, mocked
+// network/DB" philosophy this file's header describes.
+
+const TEST_CLERK_USER_HEADER = "X-Test-Clerk-User-Id";
+
+vi.mock("@clerk/backend", () => ({
+  createClerkClient: () => ({
+    authenticateRequest: async (request: Request) => {
+      const clerkUserId = request.headers.get(TEST_CLERK_USER_HEADER);
+      return {
+        toAuth: () => (clerkUserId ? { isAuthenticated: true, userId: clerkUserId } : { isAuthenticated: false, userId: null }),
+      };
+    },
+  }),
+}));
 
 vi.mock("~/db.server", () => {
-  const naiaSessionFindUnique = vi.fn();
+  const customerFindUnique = vi.fn();
   const onboardingProfileUpsert = vi.fn().mockResolvedValue({});
   const closetItemFindFirst = vi.fn();
   const closetItemDelete = vi.fn().mockResolvedValue({});
   return {
     default: {
-      naiaSession: {
-        findUnique: naiaSessionFindUnique,
-        update: vi.fn().mockResolvedValue({}),
-        delete: vi.fn().mockResolvedValue({}),
-      },
+      customer: { findUnique: customerFindUnique },
       onboardingProfile: { upsert: onboardingProfileUpsert },
       closetItem: { findFirst: closetItemFindFirst, delete: closetItemDelete },
     },
@@ -50,24 +71,20 @@ import prisma from "~/db.server";
 import { action as bodyscanAction, loader as bodyscanLoader } from "./api.bodyscan.jsx";
 import { deleteClosetItemWithImage } from "../lib/closet-item-deletion.server.js";
 
-const mockNaiaFindUnique = () => (prisma as any).naiaSession.findUnique as ReturnType<typeof vi.fn>;
+const mockCustomerFindUnique = () => (prisma as any).customer.findUnique as ReturnType<typeof vi.fn>;
 const mockUpsert = () => (prisma as any).onboardingProfile.upsert as ReturnType<typeof vi.fn>;
 const mockClosetFindFirst = () => (prisma as any).closetItem.findFirst as ReturnType<typeof vi.fn>;
 const mockClosetDelete = () => (prisma as any).closetItem.delete as ReturnType<typeof vi.fn>;
 
 // ── Synthetic customers — never real data ─────────────────────────────────────
 
-const CUSTOMER_A = { id: "synthetic-customer-A", shopifyCustomerId: "gid://shopify/Customer/test-A", email: null, firstName: null, onboardingProfile: null };
-const CUSTOMER_B = { id: "synthetic-customer-B", shopifyCustomerId: "gid://shopify/Customer/test-B", email: null, firstName: null, onboardingProfile: null };
-
-function sessionFor(customer: typeof CUSTOMER_A) {
-  return { tokenHash: "irrelevant-in-mock", expiresAt: new Date(Date.now() + 10_000_000), customer };
-}
+const CUSTOMER_A = { id: "synthetic-customer-A", clerkUserId: "clerk_synthetic-customer-A", shopifyCustomerId: null, email: null, firstName: null, onboardingProfile: null };
+const CUSTOMER_B = { id: "synthetic-customer-B", clerkUserId: "clerk_synthetic-customer-B", shopifyCustomerId: null, email: null, firstName: null, onboardingProfile: null };
 
 function requestAs(customer: typeof CUSTOMER_A, url: string, init?: RequestInit) {
   const headers = new Headers(init?.headers);
-  headers.set("Cookie", `__naia_tok=raw-token-for-${customer.id}`);
-  mockNaiaFindUnique().mockResolvedValueOnce(sessionFor(customer));
+  headers.set(TEST_CLERK_USER_HEADER, customer.clerkUserId);
+  mockCustomerFindUnique().mockResolvedValueOnce(customer);
   return new Request(url, { ...init, headers });
 }
 
@@ -183,8 +200,11 @@ describe("§1 — Bodygram scan sessionId binding, with two synthetic customers"
     expect(res.status).toBe(401);
     expect(fetchCalls).toHaveLength(0);
     expect(mockUpsert()).not.toHaveBeenCalled();
-    // Confirms auth is checked before even the DB-mocked session lookup fires.
-    expect(mockNaiaFindUnique()).not.toHaveBeenCalled();
+    // Confirms auth is checked before even the DB-mocked identity lookup
+    // fires — resolveClerkUserId returns null for a request with no Clerk
+    // session, and getCurrentNaiaCustomer short-circuits before ever
+    // calling prisma.customer.findUnique.
+    expect(mockCustomerFindUnique()).not.toHaveBeenCalled();
   });
 });
 
