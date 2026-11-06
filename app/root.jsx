@@ -1,12 +1,19 @@
 import { Links, Meta, Outlet, Scripts, ScrollRestoration, useLocation, useRouteError, isRouteErrorResponse, useLoaderData } from "react-router";
 import { useEffect } from "react";
-import { rootAuthLoader } from "@clerk/react-router/server";
+import { rootAuthLoader, clerkMiddleware } from "@clerk/react-router/server";
 import { ClerkProvider } from "@clerk/react-router";
 
 // Clerk (2026-11-04) — makes the signed-in/signed-out state available to
 // every route's own loader via context, and to client components
 // (ClerkProvider below) via loaderData. Every other existing loader in the
 // app is untouched; this wraps the root loader only.
+//
+// rootAuthLoader requires clerkMiddleware() to have populated the request
+// context first (see react-router.config.ts's future.v8_middleware flag,
+// required for route middleware to run at all) — without it, every request
+// throws "Clerk: clerkMiddleware() not detected" here.
+export const middleware = [clerkMiddleware()];
+
 export async function loader(args) {
   return rootAuthLoader(args);
 }
