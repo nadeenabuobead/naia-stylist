@@ -44,12 +44,27 @@ export async function loader({ request }) {
   // Parameters must be sorted alphabetically for the Cloudinary signature.
   // public_id is intentionally excluded so Cloudinary auto-generates it;
   // any browser-supplied public_id would fail signature verification.
-  // Alphabetical order: allowed_formats < folder < timestamp < type < upload_preset
+  // Alphabetical order: allowed_formats < folder < timestamp < transformation < type < upload_preset
+  //
+  // transformation=fl_force_strip is an INCOMING transformation (applied to
+  // the asset as stored, not just at delivery) — confirmed against
+  // Cloudinary's own upload API reference: there is no separate top-level
+  // "flags" upload parameter for this; fl_force_strip is only valid as part
+  // of the `transformation` parameter. Signed here exactly like every other
+  // param, so a client cannot drop or alter it without invalidating the
+  // signature. Note: fl_force_strip clears ALL embedded metadata, which per
+  // Cloudinary's own docs is broader than the gentler fl_strip_profile (ICC
+  // color profile only) — this may also remove the embedded color profile,
+  // not only EXIF/GPS. Flagging this now rather than asserting "zero visual
+  // change"; most phone-camera photos are already plain sRGB, so the
+  // practical effect should be negligible, but it is not nothing.
   const deliveryType = "private";
+  const incomingTransformation = "fl_force_strip";
   const paramsToSign = [
     `allowed_formats=${allowedFormats}`,
     `folder=${assetFolder}`,
     `timestamp=${timestamp}`,
+    `transformation=${incomingTransformation}`,
     `type=${deliveryType}`,
     `upload_preset=${uploadPreset}`,
   ].join("&");
@@ -76,6 +91,7 @@ export async function loader({ request }) {
       uploadPreset,
       allowedFormats,
       deliveryType,
+      transformation: incomingTransformation,
       uploadUrl,
       maxFileSizeBytes: CLIENT_MAX_BYTES,
     },
