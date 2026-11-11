@@ -71,6 +71,20 @@ export interface ClerkAuthDeps {
   _clerkClient?: Pick<ReturnType<typeof createClerkClient>, "authenticateRequest">;
 }
 
+// Every CLI `vercel deploy` on this non-Git-connected project mints a
+// brand-new, unique *.vercel.app hostname that the static
+// CLERK_AUTHORIZED_PARTIES allowlist can never contain ahead of time. Vercel
+// injects that exact hostname as VERCEL_URL — a platform-controlled value,
+// not derived from the inbound request's own Host/Origin header — so it can
+// be trusted as "this exact running deployment's own origin" without
+// widening trust to any other *.vercel.app host. Scoped to Preview only;
+// production's authorizedParties list is completely untouched.
+function resolvePreviewAuthorizedParty(): string | null {
+  if (process.env.VERCEL_ENV !== "preview") return null;
+  if (!process.env.VERCEL_URL) return null;
+  return `https://${process.env.VERCEL_URL}`;
+}
+
 // The one place that turns an inbound Request into "which Clerk user, if
 // any, is this". Returns null for no/invalid session — never throws for
 // that case, since an unauthenticated request is routine traffic, not a
@@ -78,9 +92,11 @@ export interface ClerkAuthDeps {
 // Customer lookup below can raise DatabaseUnavailableError.
 export async function resolveClerkUserId(request: Request, deps: ClerkAuthDeps = {}): Promise<string | null> {
   const client = deps._clerkClient ?? defaultClerkClient();
-  const requestState = await client.authenticateRequest(request, {
-    authorizedParties: (process.env.CLERK_AUTHORIZED_PARTIES ?? "").split(",").filter(Boolean),
-  });
+  const staticParties = (process.env.CLERK_AUTHORIZED_PARTIES ?? "").split(",").filter(Boolean);
+  const previewParty = resolvePreviewAuthorizedParty();
+  const authorizedParties =
+    previewParty && !staticParties.includes(previewParty) ? [...staticParties, previewParty] : staticParties;
+  const requestState = await client.authenticateRequest(request, { authorizedParties });
   const auth = requestState.toAuth();
   if (!auth?.isAuthenticated || !auth.userId) return null;
   return auth.userId;
