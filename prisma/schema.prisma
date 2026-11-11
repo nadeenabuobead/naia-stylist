@@ -1871,3 +1871,32 @@ model AdminAuditLog {
 
   @@index([createdAt])
 }
+
+/// Phase 1 API rate limiting (2026-11-10) — one row per (customer, route,
+/// fixed window), not one row per request. windowStart uses the same
+/// floor(epoch / windowSeconds) bucketing already established in
+/// api.wishlist.jsx's idempotency key, not a new convention.
+///
+/// Incremented via a single atomic `INSERT ... ON CONFLICT ... DO UPDATE SET
+/// count = count + 1` (api-rate-limit.server.ts) — not a Serializable
+/// transaction like entitlement.server.ts's reservations. Those protect a
+/// low-frequency, high-stakes "do they have a slot left" decision; this
+/// protects a high-frequency "are they calling too fast" counter, where
+/// transaction retry overhead would itself be the kind of unnecessary load
+/// this feature exists to avoid causing.
+///
+/// No per-request pruning (that would double the write volume this model
+/// exists to minimize) — old rows are cheap to batch-delete periodically via
+/// the existing admin.maintenance.tsx pattern, not inline here.
+model ApiRateLimitCounter {
+  id          String   @id @default(cuid())
+  customerId  String
+  routeKey    String
+  windowStart DateTime
+  count       Int      @default(1)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([customerId, routeKey, windowStart])
+  @@index([windowStart])
+}

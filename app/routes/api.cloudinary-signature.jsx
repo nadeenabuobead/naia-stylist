@@ -1,15 +1,36 @@
 import { getCurrentNaiaCustomer } from "../lib/naia-session.server";
 import { buildModelUploadUrl } from "../lib/cloudinary-admin.server";
+import { checkRateLimit, rateLimitResponse } from "../lib/api-rate-limit.server";
 import crypto from "node:crypto";
 
 // Max file size enforced by the Cloudinary upload preset (set in the Cloudinary dashboard).
 // This constant is returned to the client as an informational pre-check only.
 const CLIENT_MAX_BYTES = 5 * 1024 * 1024;
 
+// PROVISIONAL — not an approved enforcement threshold. Shadow mode only
+// until real traffic evidence justifies a number (see Phase 1 report).
+// A multi-image Closet upload signs each photo separately, so this must
+// stay generous enough that a legitimate batch upload is never the thing
+// that trips it.
+const CLOUDINARY_SIGNATURE_RATE_LIMIT = {
+  routeKey: "cloudinary-signature",
+  limit: 20,
+  windowSeconds: 60,
+  mode: /** @type {"shadow" | "enforce"} */ ("shadow"),
+};
+
 export async function loader({ request }) {
   const naiaCustomer = await getCurrentNaiaCustomer(request);
   if (!naiaCustomer) {
     return Response.json({ error: "Not authenticated" }, { status: 401 });
+  }
+
+  // Rate limit check runs after auth (so it's keyed by a real customer, not
+  // an anonymous caller) and before any Cloudinary signing work. In shadow
+  // mode this never blocks — it only records what enforcement would do.
+  const rl = await checkRateLimit(naiaCustomer.id, CLOUDINARY_SIGNATURE_RATE_LIMIT);
+  if (!rl.allowed) {
+    return rateLimitResponse(rl);
   }
 
   const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
