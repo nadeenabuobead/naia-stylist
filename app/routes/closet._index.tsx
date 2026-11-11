@@ -617,6 +617,7 @@ export async function action({ request }: ActionFunctionArgs) {
       closetItemId: createdItem.id,
       imagePublicId: publicId,
       category: createdItem.category,
+      imageFormat: serverFormat,
       userPrimaryColor: primaryColor || null,
       userPattern:      pattern || null,
       userOccasions:    occasions.length > 0 ? occasions : [],
@@ -727,6 +728,11 @@ export async function action({ request }: ActionFunctionArgs) {
           closetItemId: itemId,
           imagePublicId: existing.imagePublicId,
           category,
+          // Nullable: a pre-existing item from before imageFormat was tracked
+          // can genuinely have none. runClosetGarmentAnalysis treats null as
+          // a fail-closed skip (status "failed") — it never guesses a format
+          // or falls back to the old non-expiring signed-delivery URL.
+          imageFormat: existing.imageFormat,
           userPrimaryColor: primaryColor || null,
           userPattern:   existing.pattern   || null,
           userOccasions: existing.occasions ?? [],
@@ -992,6 +998,7 @@ export async function action({ request }: ActionFunctionArgs) {
       closetItemId: itemId,
       imagePublicId: newPublicId,
       category,
+      imageFormat: editFormat,
       userPrimaryColor: primaryColor || null,
       userPattern:   editPattern,
       userOccasions: editOccasions,

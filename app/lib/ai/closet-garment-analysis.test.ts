@@ -60,11 +60,11 @@ function makeRejectingAnalyzer(msg: string) {
   };
 }
 
-function makeGetSignedUrl(url = "https://cdn.example.com/item.jpg") {
+function makeGetDownloadUrl(url = "https://cdn.example.com/item.jpg") {
   return () => url;
 }
 
-function makeThrowingGetSignedUrl(msg: string) {
+function makeThrowingGetDownloadUrl(msg: string) {
   return () => { throw new Error(msg); };
 }
 
@@ -262,8 +262,8 @@ describe("GI-04 analysis failure preserves user-supplied fields", () => {
     const { fn, calls } = makePersistFailure();
 
     await runClosetGarmentAnalysis(
-      { closetItemId: "item-1", imagePublicId: "img/abc", category: "TOPS" },
-      { imageAnalyzer: makeRejectingAnalyzer("Claude timeout"), persistSuccess: success.fn, persistFailure: fn, getSignedUrl: makeGetSignedUrl() },
+      { closetItemId: "item-1", imagePublicId: "img/abc", category: "TOPS", imageFormat: "jpg" },
+      { imageAnalyzer: makeRejectingAnalyzer("Claude timeout"), persistSuccess: success.fn, persistFailure: fn, getDownloadUrl: makeGetDownloadUrl() },
     );
 
     assert.equal(calls.length, 1);
@@ -280,8 +280,8 @@ describe("GI-04 analysis failure preserves user-supplied fields", () => {
     const { fn, calls } = makePersistFailure();
 
     await runClosetGarmentAnalysis(
-      { closetItemId: "item-2", imagePublicId: "img/def", category: "DRESSES" },
-      { imageAnalyzer: makeImageAnalyzer("not json at all"), persistSuccess: success.fn, persistFailure: fn, getSignedUrl: makeGetSignedUrl() },
+      { closetItemId: "item-2", imagePublicId: "img/def", category: "DRESSES", imageFormat: "jpg" },
+      { imageAnalyzer: makeImageAnalyzer("not json at all"), persistSuccess: success.fn, persistFailure: fn, getDownloadUrl: makeGetDownloadUrl() },
     );
 
     assert.equal(calls.length, 1);
@@ -293,8 +293,8 @@ describe("GI-04 analysis failure preserves user-supplied fields", () => {
     const { fn, calls } = makePersistFailure();
 
     await runClosetGarmentAnalysis(
-      { closetItemId: "item-3", imagePublicId: "img/ghi", category: "TOPS" },
-      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: success.fn, persistFailure: fn, getSignedUrl: makeThrowingGetSignedUrl("Cloudinary config missing") },
+      { closetItemId: "item-3", imagePublicId: "img/ghi", category: "TOPS", imageFormat: "jpg" },
+      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: success.fn, persistFailure: fn, getDownloadUrl: makeThrowingGetDownloadUrl("Cloudinary config missing") },
     );
 
     assert.equal(calls.length, 1);
@@ -309,8 +309,8 @@ describe("GI-05 user-supplied values never overwritten", () => {
     const { fn, calls } = makePersistSuccess();
 
     await runClosetGarmentAnalysis(
-      { closetItemId: "item-4", imagePublicId: "img/jkl", category: "DRESSES" },
-      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getSignedUrl: makeGetSignedUrl() },
+      { closetItemId: "item-4", imagePublicId: "img/jkl", category: "DRESSES", imageFormat: "jpg" },
+      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getDownloadUrl: makeGetDownloadUrl() },
     );
 
     const [, written] = calls[0];
@@ -328,8 +328,8 @@ describe("GI-05 user-supplied values never overwritten", () => {
     const { fn, calls } = makePersistSuccess();
 
     await runClosetGarmentAnalysis(
-      { closetItemId: "item-5", imagePublicId: "img/mno", category: "DRESSES" },
-      { imageAnalyzer: makeImageAnalyzer(json), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getSignedUrl: makeGetSignedUrl() },
+      { closetItemId: "item-5", imagePublicId: "img/mno", category: "DRESSES", imageFormat: "jpg" },
+      { imageAnalyzer: makeImageAnalyzer(json), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getDownloadUrl: makeGetDownloadUrl() },
     );
 
     const [, written] = calls[0];
@@ -341,8 +341,8 @@ describe("GI-05 user-supplied values never overwritten", () => {
     const { fn, calls } = makePersistSuccess();
 
     await runClosetGarmentAnalysis(
-      { closetItemId: "item-5b", imagePublicId: "img/pq", category: "DRESSES", userPrimaryColor: "navy" },
-      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getSignedUrl: makeGetSignedUrl() },
+      { closetItemId: "item-5b", imagePublicId: "img/pq", category: "DRESSES", imageFormat: "jpg", userPrimaryColor: "navy" },
+      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getDownloadUrl: makeGetDownloadUrl() },
     );
 
     const [, written] = calls[0];
@@ -354,8 +354,8 @@ describe("GI-05 user-supplied values never overwritten", () => {
     const { fn, calls } = makePersistSuccess();
 
     await runClosetGarmentAnalysis(
-      { closetItemId: "item-5c", imagePublicId: "img/rs", category: "DRESSES", userPrimaryColor: null },
-      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getSignedUrl: makeGetSignedUrl() },
+      { closetItemId: "item-5c", imagePublicId: "img/rs", category: "DRESSES", imageFormat: "jpg", userPrimaryColor: null },
+      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getDownloadUrl: makeGetDownloadUrl() },
     );
 
     const [, written] = calls[0];
@@ -368,8 +368,8 @@ describe("GI-05 user-supplied values never overwritten", () => {
     const { fn, calls } = makePersistSuccess();
 
     await runClosetGarmentAnalysis(
-      { closetItemId: "item-5d", imagePublicId: "img/tu", category: "DRESSES", userPattern: "stripes" },
-      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getSignedUrl: makeGetSignedUrl() },
+      { closetItemId: "item-5d", imagePublicId: "img/tu", category: "DRESSES", imageFormat: "jpg", userPattern: "stripes" },
+      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getDownloadUrl: makeGetDownloadUrl() },
     );
 
     const [, written] = calls[0];
@@ -381,8 +381,8 @@ describe("GI-05 user-supplied values never overwritten", () => {
     const { fn, calls } = makePersistSuccess();
 
     await runClosetGarmentAnalysis(
-      { closetItemId: "item-5e", imagePublicId: "img/vw", category: "DRESSES", userPattern: null },
-      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getSignedUrl: makeGetSignedUrl() },
+      { closetItemId: "item-5e", imagePublicId: "img/vw", category: "DRESSES", imageFormat: "jpg", userPattern: null },
+      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getDownloadUrl: makeGetDownloadUrl() },
     );
 
     const [, written] = calls[0];
@@ -393,8 +393,8 @@ describe("GI-05 user-supplied values never overwritten", () => {
     const { fn, calls } = makePersistFailure();
 
     await runClosetGarmentAnalysis(
-      { closetItemId: "item-5f", imagePublicId: "img/xy", category: "TOPS", userPattern: "check" },
-      { imageAnalyzer: makeRejectingAnalyzer("timeout"), persistSuccess: makeNoopSuccess().fn, persistFailure: fn, getSignedUrl: makeGetSignedUrl() },
+      { closetItemId: "item-5f", imagePublicId: "img/xy", category: "TOPS", imageFormat: "jpg", userPattern: "check" },
+      { imageAnalyzer: makeRejectingAnalyzer("timeout"), persistSuccess: makeNoopSuccess().fn, persistFailure: fn, getDownloadUrl: makeGetDownloadUrl() },
     );
 
     const [, written] = calls[0];
@@ -408,8 +408,8 @@ describe("GI-05 user-supplied values never overwritten", () => {
     const { fn, calls } = makePersistSuccess();
 
     await runClosetGarmentAnalysis(
-      { closetItemId: "item-5g", imagePublicId: "img/a1", category: "DRESSES", userOccasions: ["work", "evening"] },
-      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getSignedUrl: makeGetSignedUrl() },
+      { closetItemId: "item-5g", imagePublicId: "img/a1", category: "DRESSES", imageFormat: "jpg", userOccasions: ["work", "evening"] },
+      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getDownloadUrl: makeGetDownloadUrl() },
     );
 
     const [, written] = calls[0];
@@ -420,8 +420,8 @@ describe("GI-05 user-supplied values never overwritten", () => {
     const { fn, calls } = makePersistSuccess();
 
     await runClosetGarmentAnalysis(
-      { closetItemId: "item-5h", imagePublicId: "img/b2", category: "DRESSES", userOccasions: [] },
-      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getSignedUrl: makeGetSignedUrl() },
+      { closetItemId: "item-5h", imagePublicId: "img/b2", category: "DRESSES", imageFormat: "jpg", userOccasions: [] },
+      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getDownloadUrl: makeGetDownloadUrl() },
     );
 
     const [, written] = calls[0];
@@ -434,8 +434,8 @@ describe("GI-05 user-supplied values never overwritten", () => {
     const { fn, calls } = makePersistSuccess();
 
     await runClosetGarmentAnalysis(
-      { closetItemId: "item-5i", imagePublicId: "img/c3", category: "DRESSES", userSeasons: ["fall", "winter"] },
-      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getSignedUrl: makeGetSignedUrl() },
+      { closetItemId: "item-5i", imagePublicId: "img/c3", category: "DRESSES", imageFormat: "jpg", userSeasons: ["fall", "winter"] },
+      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getDownloadUrl: makeGetDownloadUrl() },
     );
 
     const [, written] = calls[0];
@@ -446,8 +446,8 @@ describe("GI-05 user-supplied values never overwritten", () => {
     const { fn, calls } = makePersistSuccess();
 
     await runClosetGarmentAnalysis(
-      { closetItemId: "item-5j", imagePublicId: "img/d4", category: "DRESSES", userSeasons: [] },
-      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getSignedUrl: makeGetSignedUrl() },
+      { closetItemId: "item-5j", imagePublicId: "img/d4", category: "DRESSES", imageFormat: "jpg", userSeasons: [] },
+      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getDownloadUrl: makeGetDownloadUrl() },
     );
 
     const [, written] = calls[0];
@@ -462,8 +462,8 @@ describe("GI-06 analysis status transitions", () => {
     const { fn, calls } = makePersistSuccess();
 
     await runClosetGarmentAnalysis(
-      { closetItemId: "item-6", imagePublicId: "img/pqr", category: "DRESSES" },
-      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getSignedUrl: makeGetSignedUrl() },
+      { closetItemId: "item-6", imagePublicId: "img/pqr", category: "DRESSES", imageFormat: "jpg" },
+      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getDownloadUrl: makeGetDownloadUrl() },
     );
 
     const [, written] = calls[0];
@@ -476,8 +476,8 @@ describe("GI-06 analysis status transitions", () => {
     const { fn, calls } = makePersistFailure();
 
     await runClosetGarmentAnalysis(
-      { closetItemId: "item-7", imagePublicId: "img/stu", category: "TOPS" },
-      { imageAnalyzer: makeRejectingAnalyzer("network"), persistSuccess: makeNoopSuccess().fn, persistFailure: fn, getSignedUrl: makeGetSignedUrl() },
+      { closetItemId: "item-7", imagePublicId: "img/stu", category: "TOPS", imageFormat: "jpg" },
+      { imageAnalyzer: makeRejectingAnalyzer("network"), persistSuccess: makeNoopSuccess().fn, persistFailure: fn, getDownloadUrl: makeGetDownloadUrl() },
     );
 
     const [, written] = calls[0];
@@ -783,17 +783,18 @@ describe("GI-EDIT-7 reanalysis for edit preserves existing user-entered values",
     const persistSuccess = async (_id: string, data: Record<string, unknown>) => {
       capturedParams.push({ occasions: data.occasions as string[], pattern: data.pattern as string });
     };
-    const getSignedUrl = makeGetSignedUrl();
+    const getDownloadUrl = makeGetDownloadUrl();
 
     await runClosetGarmentAnalysis(
       {
         closetItemId: "edit-item-1",
         imagePublicId: "img/new-photo",
         category: "TOPS",
+        imageFormat: "jpg",
         userOccasions: ["work"],      // existing user value
         userPattern: "stripes",       // existing user value
       },
-      { imageAnalyzer, persistSuccess, persistFailure: makeNoopFailure().fn, getSignedUrl },
+      { imageAnalyzer, persistSuccess, persistFailure: makeNoopFailure().fn, getDownloadUrl },
     );
 
     // AI from validExtractionJson would write ["casual","weekend"] and "floral" —
@@ -813,12 +814,13 @@ describe("GI-EDIT-8 reanalysis failure leaves item saved with status failed", ()
         closetItemId: "edit-item-2",
         imagePublicId: "img/new-photo",
         category: "DRESSES",
+        imageFormat: "jpg",
         userPrimaryColor: "red",
         userPattern: "floral",
         userOccasions: ["evening"],
         userSeasons: ["summer"],
       },
-      { imageAnalyzer: makeRejectingAnalyzer("timeout"), persistSuccess: makeNoopSuccess().fn, persistFailure: fn, getSignedUrl: makeGetSignedUrl() },
+      { imageAnalyzer: makeRejectingAnalyzer("timeout"), persistSuccess: makeNoopSuccess().fn, persistFailure: fn, getDownloadUrl: makeGetDownloadUrl() },
     );
 
     assert.equal(calls.length, 1, "exactly one DB write on failure");
@@ -841,8 +843,8 @@ describe("GI-SNAP-1 snapshot is created on successful analysis", () => {
     const { fn, calls } = makePersistSuccess();
 
     await runClosetGarmentAnalysis(
-      { closetItemId: "snap-1", imagePublicId: "img/snap", category: "DRESSES" },
-      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getSignedUrl: makeGetSignedUrl() },
+      { closetItemId: "snap-1", imagePublicId: "img/snap", category: "DRESSES", imageFormat: "jpg" },
+      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getDownloadUrl: makeGetDownloadUrl() },
     );
 
     assert.equal(calls.length, 1);
@@ -868,9 +870,10 @@ describe("GI-SNAP-2 snapshot preserves AI output even when customer value takes 
         closetItemId: "snap-2",
         imagePublicId: "img/snap2",
         category: "DRESSES",
+        imageFormat: "jpg",
         userPrimaryColor: "navy",  // customer supplied — AI value must not go to item
       },
-      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getSignedUrl: makeGetSignedUrl() },
+      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getDownloadUrl: makeGetDownloadUrl() },
     );
 
     const [, itemData, snapshot] = calls[0];
@@ -888,9 +891,10 @@ describe("GI-SNAP-2 snapshot preserves AI output even when customer value takes 
         closetItemId: "snap-3",
         imagePublicId: "img/snap3",
         category: "DRESSES",
+        imageFormat: "jpg",
         userOccasions: ["work", "evening"],  // customer supplied
       },
-      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getSignedUrl: makeGetSignedUrl() },
+      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getDownloadUrl: makeGetDownloadUrl() },
     );
 
     const [, itemData, snapshot] = calls[0];
@@ -905,8 +909,8 @@ describe("GI-SNAP-3 no snapshot on analysis failure", () => {
     const { fn: failFn } = makePersistFailure();
 
     await runClosetGarmentAnalysis(
-      { closetItemId: "snap-fail", imagePublicId: "img/snap-fail", category: "TOPS" },
-      { imageAnalyzer: makeRejectingAnalyzer("timeout"), persistSuccess: success.fn, persistFailure: failFn, getSignedUrl: makeGetSignedUrl() },
+      { closetItemId: "snap-fail", imagePublicId: "img/snap-fail", category: "TOPS", imageFormat: "jpg" },
+      { imageAnalyzer: makeRejectingAnalyzer("timeout"), persistSuccess: success.fn, persistFailure: failFn, getDownloadUrl: makeGetDownloadUrl() },
     );
 
     assert.equal(success.calls.length, 0, "persistSuccess must not be called on failure — no snapshot created");
@@ -918,8 +922,8 @@ describe("GI-SNAP-4 item timestamp and snapshot timestamp are identical", () => 
     const { fn, calls } = makePersistSuccess();
 
     await runClosetGarmentAnalysis(
-      { closetItemId: "snap-ts", imagePublicId: "img/snap-ts", category: "TOPS" },
-      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getSignedUrl: makeGetSignedUrl() },
+      { closetItemId: "snap-ts", imagePublicId: "img/snap-ts", category: "TOPS", imageFormat: "jpg" },
+      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: fn, persistFailure: makeNoopFailure().fn, getDownloadUrl: makeGetDownloadUrl() },
     );
 
     const [, itemData, snapshot] = calls[0];
@@ -943,5 +947,117 @@ describe("GI-EDIT-9 stale ready intelligence not retained after image replacemen
       !updateSection.slice(0, updateSection.indexOf("analyzeClosetGarment")).includes('"ready"'),
       "status must not be set to ready before analysis completes",
     );
+  });
+});
+
+// ── GI-FMT: server-verified imageFormat passed at all three Closet call sites ──
+// Closet Garment Intelligence remediation — buildSignedDeliveryUrl (CDN URL,
+// unfetchable by Claude for private assets, no server-enforced expiry) was
+// replaced with buildPrivateDownloadUrl, which requires a format. Each call
+// site must forward whatever server-verified format it actually has — never
+// a guessed or hardcoded one.
+
+describe("GI-FMT-1 new-upload call site forwards the server-verified format", () => {
+  it("the add-intent analyzeClosetGarment call includes imageFormat: serverFormat", () => {
+    const firstCallIdx = closetRoute.indexOf("analyzeClosetGarment(");
+    assert.ok(firstCallIdx !== -1, "analyzeClosetGarment call must exist");
+    const block = closetRoute.slice(firstCallIdx, firstCallIdx + 400);
+    assert.ok(
+      block.includes("imageFormat: serverFormat"),
+      "new-upload call site must pass the server-verified serverFormat, not a guessed value",
+    );
+  });
+});
+
+describe("GI-FMT-2 category-change reanalysis call site forwards the stored, possibly-null format", () => {
+  it("the category-change analyzeClosetGarment call includes imageFormat: existing.imageFormat", () => {
+    const sectionIdx = closetRoute.indexOf("Category change invalidates AI intelligence");
+    assert.ok(sectionIdx !== -1, "category-change section must exist");
+    const block = closetRoute.slice(sectionIdx, sectionIdx + 1000);
+    assert.ok(
+      block.includes("imageFormat: existing.imageFormat"),
+      "category-change call site must forward the stored imageFormat as-is (including null), never guess or hardcode one",
+    );
+  });
+});
+
+describe("GI-FMT-3 photo-replacement call site forwards the new photo's server-verified format", () => {
+  it("the photo-replacement analyzeClosetGarment call includes imageFormat: editFormat", () => {
+    const sectionIdx = closetRoute.indexOf("// Rerun garment intelligence on the new image");
+    assert.ok(sectionIdx !== -1, "photo-replacement reanalysis section must exist");
+    const block = closetRoute.slice(sectionIdx, sectionIdx + 700);
+    assert.ok(
+      block.includes("imageFormat: editFormat"),
+      "photo-replacement call site must pass the server-verified editFormat for the NEW photo, not the old one's format",
+    );
+  });
+});
+
+describe("GI-FMT-4 closet-garment-analysis.server.ts no longer imports buildSignedDeliveryUrl", () => {
+  it("source does not reference buildSignedDeliveryUrl at all", () => {
+    const src = readFileSync(join(__dirname, "closet-garment-analysis.server.ts"), "utf8");
+    assert.ok(
+      !src.includes("buildSignedDeliveryUrl"),
+      "closet-garment-analysis.server.ts must not use buildSignedDeliveryUrl — CDN does not serve private assets to Claude, and it has no server-enforced expiry",
+    );
+    assert.ok(
+      src.includes("buildPrivateDownloadUrl"),
+      "closet-garment-analysis.server.ts must use buildPrivateDownloadUrl",
+    );
+  });
+});
+
+// ── GI-FMT-5/6: nullable imageFormat at the runClosetGarmentAnalysis level ──
+
+describe("GI-FMT-5 missing imageFormat fails closed without calling getDownloadUrl", () => {
+  it("imageFormat: null skips getDownloadUrl entirely and writes analysisStatus failed", async () => {
+    const { fn, calls } = makePersistFailure();
+    const getDownloadUrl = (() => {
+      throw new Error("must never be called when imageFormat is null");
+    }) as unknown as (publicId: string, imageFormat: string) => string;
+
+    await runClosetGarmentAnalysis(
+      { closetItemId: "fmt-null-1", imagePublicId: "img/no-format", category: "TOPS", imageFormat: null },
+      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: makeNoopSuccess().fn, persistFailure: fn, getDownloadUrl },
+    );
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0][1].analysisStatus, "failed");
+  });
+
+  it("imageFormat: null does not guess a format or silently retry with a default", async () => {
+    // The dependency is deliberately a spy that records whether it was
+    // invoked at all — not just what it returned — to prove the null check
+    // happens strictly before any URL-building attempt.
+    let getDownloadUrlCalled = false;
+    const getDownloadUrl = (publicId: string, imageFormat: string) => {
+      getDownloadUrlCalled = true;
+      return `https://example.com/${publicId}.${imageFormat}`;
+    };
+    const { fn } = makePersistFailure();
+
+    await runClosetGarmentAnalysis(
+      { closetItemId: "fmt-null-2", imagePublicId: "img/no-format-2", category: "TOPS", imageFormat: null },
+      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: makeNoopSuccess().fn, persistFailure: fn, getDownloadUrl },
+    );
+
+    assert.equal(getDownloadUrlCalled, false, "getDownloadUrl must never be called when imageFormat is null");
+  });
+});
+
+describe("GI-FMT-6 a present imageFormat is forwarded to getDownloadUrl unchanged", () => {
+  it("getDownloadUrl receives exactly the publicId and imageFormat passed in", async () => {
+    let received: [string, string] | null = null;
+    const getDownloadUrl = (publicId: string, imageFormat: string) => {
+      received = [publicId, imageFormat];
+      return "https://example.com/signed";
+    };
+
+    await runClosetGarmentAnalysis(
+      { closetItemId: "fmt-present-1", imagePublicId: "img/has-format", category: "TOPS", imageFormat: "webp" },
+      { imageAnalyzer: makeImageAnalyzer(validExtractionJson()), persistSuccess: makeNoopSuccess().fn, persistFailure: makeNoopFailure().fn, getDownloadUrl },
+    );
+
+    assert.deepEqual(received, ["img/has-format", "webp"]);
   });
 });
