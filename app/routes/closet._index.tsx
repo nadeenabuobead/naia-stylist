@@ -1480,6 +1480,7 @@ export default function Closet() {
       form.append("upload_preset", sig.uploadPreset);
       form.append("allowed_formats", sig.allowedFormats);
       form.append("type", sig.deliveryType);         // signed — enforces private delivery
+      form.append("transformation", sig.transformation); // signed — strips metadata at upload time
 
       const cloudRes = await fetch(sig.uploadUrl, { method: "POST", body: form });
       if (!cloudRes.ok) {

@@ -178,7 +178,7 @@ export function buildSelfiePublicId(customerId: string): string {
 // The upload endpoint is the standard /image/upload (delivery type encoded via `type` param).
 //
 // Signature params (alphabetical, excluding api_key and file):
-//   overwrite, public_id, timestamp, type
+//   overwrite, public_id, timestamp, transformation, type
 //
 // Injectable _fetch and _getConfig for tests.
 
@@ -202,11 +202,21 @@ export async function uploadSelfieToCloudinary(
   const timestamp = Math.floor(Date.now() / 1000);
   const deliveryType = "private";
 
-  // Signature: alphabetical params (overwrite < public_id < timestamp < type) + secret
+  // Signature: alphabetical params (overwrite < public_id < timestamp < transformation < type) + secret
+  //
+  // transformation=fl_force_strip is signed exactly like every other param
+  // here — a caller cannot omit or alter it without invalidating the
+  // signature. Independent implementation from api.cloudinary-signature.jsx
+  // (this file never calls that shared endpoint), so this needs the same
+  // fix applied separately — see that file's comment for the full
+  // Cloudinary-documentation rationale (incoming transformation, not a
+  // standalone "flags" param; may also clear the embedded color profile).
+  const incomingTransformation = "fl_force_strip";
   const sigString =
     `overwrite=true` +
     `&public_id=${publicId}` +
     `&timestamp=${timestamp}` +
+    `&transformation=${incomingTransformation}` +
     `&type=${deliveryType}` +
     cfg.apiSecret;
 
@@ -223,6 +233,7 @@ export async function uploadSelfieToCloudinary(
     public_id: publicId,
     signature,
     timestamp: String(timestamp),
+    transformation: incomingTransformation,
     type: deliveryType,
   });
 
