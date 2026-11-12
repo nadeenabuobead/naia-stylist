@@ -273,14 +273,16 @@ describe.skip("requireCurrentNaiaCustomer() — functional redirect construction
     }
   });
 
-  async function captureRedirectLocation(requestUrl) {
+  async function captureRedirectLocation(requestUrl: string): Promise<string> {
     process.env.STOREFRONT_HOST = "naia-stylist-staging.vercel.app";
     try {
       await requireCurrentNaiaCustomer(new Request(requestUrl));
       assert.fail("expected requireCurrentNaiaCustomer to throw a redirect");
     } catch (thrown) {
       assert.ok(thrown instanceof Response, "must throw a Response (redirect)");
-      return thrown.headers.get("Location");
+      const location = thrown.headers.get("Location");
+      assert.ok(location, "redirect must include a Location header");
+      return location;
     }
   }
 
@@ -299,7 +301,7 @@ describe.skip("requireCurrentNaiaCustomer() — functional redirect construction
       "https://naia-stylist-staging-l1e919a8p-nadeenabuobeads-projects.vercel.app/trends/my-edits/spring-2026-colour-direction",
     );
     const url = new URL(location);
-    assert.equal(decodeURIComponent(url.searchParams.get("return_to")), "/trends/my-edits/spring-2026-colour-direction");
+    assert.equal(decodeURIComponent(url.searchParams.get("return_to") ?? ""), "/trends/my-edits/spring-2026-colour-direction");
   });
 
   it("shared staging stays shared staging — a request that already arrives on STOREFRONT_HOST appends no origin_host at all", async () => {
@@ -331,6 +333,7 @@ describe.skip("requireCurrentNaiaCustomer() — functional redirect construction
       await requireCurrentNaiaCustomer(new Request("https://naia-stylist-staging-l1e919a8p-nadeenabuobeads-projects.vercel.app/trends/my-edits/spring-2026-colour-direction"));
       assert.fail("expected a thrown redirect");
     } catch (thrown) {
+      assert.ok(thrown instanceof Response, "must throw a Response (redirect)");
       assert.equal(thrown.headers.get("Location"), "/auth/shopify/login?return_to=%2Ftrends%2Fmy-edits%2Fspring-2026-colour-direction");
     }
   });
@@ -482,7 +485,12 @@ describe("auth.shopify.callback.tsx source wiring", () => {
 describe("auth.shopify.handoff.tsx — behavioral", () => {
   const ORIGIN_HOST = "naia-stylist-staging-i4b0504kk-nadeenabuobeads-projects.vercel.app";
 
-  async function buildHandoffValue(overrides = {}) {
+  async function buildHandoffValue(overrides: {
+    rawToken?: string;
+    originHost?: string;
+    expiresAt?: number;
+    originNonceHash?: string;
+  } = {}) {
     const session = await getSession();
     session.set("handoff_raw_token", overrides.rawToken ?? "synthetic-raw-token-abc123");
     session.set("handoff_origin_host", overrides.originHost ?? ORIGIN_HOST);
@@ -499,7 +507,7 @@ describe("auth.shopify.handoff.tsx — behavioral", () => {
     return cookie.slice(eq + 1, semi === -1 ? undefined : semi);
   }
 
-  function requestTo(hostname, searchParams) {
+  function requestTo(hostname: string, searchParams: Record<string, string>) {
     const url = new URL(`https://${hostname}/auth/shopify/handoff`);
     for (const [k, v] of Object.entries(searchParams)) url.searchParams.set(k, v);
     return new Request(url.toString());
