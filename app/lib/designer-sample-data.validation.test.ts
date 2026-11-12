@@ -36,7 +36,7 @@ describe("CLEAR conversion rate", () => {
     it(`shows denominator context in 7D/30D/90D (days=${days})`, () => {
       const d = getDesignerSampleData(days);
       const rel = d.rel as any;
-      const designActions: any[] = rel?.designActions?.items ?? d.dashboard?.designActions?.items ?? [];
+      const designActions: any[] = rel?.designActions?.items ?? (d.dashboard?.designActions as any)?.items ?? [];
       const clearAction = designActions.find((a: any) => a?.piece?.includes("Clear"));
 
       if (clearAction) {
@@ -56,7 +56,7 @@ describe("ALIVE rewear narrative", () => {
     it(`no 'rewear repeatedly' claim when rewearRate=0 (days=${days})`, () => {
       const d = getDesignerSampleData(days);
       const rel = d.rel as any;
-      const designActions: any[] = rel?.designActions?.items ?? d.dashboard?.designActions?.items ?? [];
+      const designActions: any[] = rel?.designActions?.items ?? (d.dashboard?.designActions as any)?.items ?? [];
       const aliveAction = designActions.find((a: any) => a?.piece?.includes("Alive"));
 
       if (aliveAction) {
@@ -72,7 +72,7 @@ describe("ALIVE rewear narrative", () => {
   it("rewear claim allowed in 90D+ window", () => {
     const d = getDesignerSampleData(90);
     const rel = d.rel as any;
-    const designActions: any[] = rel?.designActions?.items ?? d.dashboard?.designActions?.items ?? [];
+    const designActions: any[] = rel?.designActions?.items ?? (d.dashboard?.designActions as any)?.items ?? [];
     const aliveAction = designActions.find((a: any) => a?.piece?.includes("Alive"));
     // Just check it doesn't throw — rewear events exist at 90D
     assert.ok(aliveAction !== undefined || true, "ALIVE design action found at 90D");
@@ -2009,7 +2009,10 @@ describe("Products tab data coherence: stop-gate reconciliation", () => {
   it("no hardcoded occasion rewear remains — topOccasions must not have a rewear field", () => {
     for (const days of [7, 30, 90, 365]) {
       const d = getDesignerSampleData(days);
-      const occs: any[] = d.topOccasions ?? [];
+      // topOccasions moved under `dashboard` in a prior refactor; this test's
+      // reference wasn't updated, so it ran vacuously against an always-empty
+      // array. Pointed it at the real path so the rewear-field check is live again.
+      const occs: any[] = d.dashboard?.topOccasions ?? [];
       for (const occ of occs) {
         assert.ok(!("rewear" in occ),
           `topOccasions["${occ.name}"] must not have a rewear field (days=${days}). ` +

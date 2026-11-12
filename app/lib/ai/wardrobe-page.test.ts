@@ -1322,8 +1322,8 @@ describe("§WP-22 coverage block discloses unmeasurable preferences", () => {
     const block = attention.blocks.find((b) => b.id === "coverage")!;
     assert.ok(block, "expected a coverage block even with zero blocked pieces");
     const entry = block.entries[0];
-    assert.match(entry.body, /avoid shorts/);
-    assert.match(entry.body, /can't yet check/);
+    assert.match(entry.body!, /avoid shorts/);
+    assert.match(entry.body!, /can't yet check/);
   });
 
   it("renders nothing at all when there is nothing blocked and nothing undisclosed", () => {
