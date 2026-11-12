@@ -77,7 +77,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
   if (intent === "purge-unconfirmed-selfies") {
     const result = await purgeUnconfirmedSelfiePhotos();
-    await recordAdminAction(identity.email, "purge-unconfirmed-selfies", result);
+    await recordAdminAction(identity.email, "purge-unconfirmed-selfies", { ...result });
     return {
       ok: true as const,
       intent,

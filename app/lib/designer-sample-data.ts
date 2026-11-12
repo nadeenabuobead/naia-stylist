@@ -2436,7 +2436,7 @@ export function getDesignerSampleData(dateRangeDays: number = 30) {
         ? pct(allLinkedConversions, allSavedCohortCount) : 0;
 
       // Highest save-to-purchase product (by conversion rate)
-      const highestSvp = [...productSvP].sort((a, b) => b.saveToP - a.saveToP).find(r => r.saves > 0);
+      const highestSvp = [...productSvP].sort((a, b) => (b.saveToP ?? 0) - (a.saveToP ?? 0)).find(r => r.saves > 0);
       // Largest save-without-purchase gap product
       const largestSaveGap = highSaveLowBuy.sort((a, b) => b.saves - a.saves)[0];
 

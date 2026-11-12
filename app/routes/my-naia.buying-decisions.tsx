@@ -57,7 +57,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const naiaCustomer = await requireCurrentNaiaCustomer(request);
   const cloudinaryConfig = getCloudinaryConfig();
 
-  const analyses = await prisma.buyOrSkipAnalysis.findMany({
+  const analyses: Array<{
+    id: string;
+    createdAt: Date;
+    imageUrl: string | null;
+    imagePublicId: string | null;
+    imageFormat: string | null;
+    verdict: string;
+    confidence: number | null;
+    category: string | null;
+    reasoning: string;
+    outcome: { decision: string; postPurchaseOutcome: string | null } | null;
+  }> = await prisma.buyOrSkipAnalysis.findMany({
     where: { customerId: naiaCustomer.id },
     orderBy: { createdAt: "desc" },
     take: 50,

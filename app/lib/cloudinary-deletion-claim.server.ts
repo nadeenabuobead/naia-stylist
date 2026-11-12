@@ -120,7 +120,19 @@ export async function recordClaimFailure(publicId: string, errorMessage: string)
 // retryPendingClerkCleanup (clerk-cleanup.server.ts), so the page's existing
 // pattern extends directly rather than inventing a new one. ─────────────────
 
-export async function listPendingCloudinaryDeletions() {
+export async function listPendingCloudinaryDeletions(): Promise<Array<{
+  id: string;
+  customerId: string;
+  publicId: string;
+  resourceType: string;
+  deliveryType: string;
+  context: string;
+  attemptCount: number;
+  lastAttemptAt: Date | null;
+  lastError: string | null;
+  createdAt: Date;
+  resolvedAt: Date | null;
+}>> {
   return prisma.pendingCloudinaryDeletion.findMany({
     where: { resolvedAt: null },
     orderBy: { createdAt: "asc" },
