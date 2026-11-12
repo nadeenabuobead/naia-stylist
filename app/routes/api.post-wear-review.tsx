@@ -91,7 +91,13 @@ export async function action({ request }: ActionFunctionArgs) {
 
   try {
     const result = await upsertPostWearReview(sessionId, customer.id, answers);
-    if (!result.ok) return data({ error: result.errorCode ?? "failed" }, { status: 500 });
+    if (!result.ok) {
+      // FORBIDDEN (ownership mismatch) is a "not found" from the caller's
+      // perspective, not a server error — matches this route's own delete
+      // branch and the rest of the codebase's not-found-not-403 convention.
+      const status = result.errorCode === "FORBIDDEN" ? 404 : 500;
+      return data({ error: result.errorCode ?? "failed" }, { status });
+    }
 
     // Fire-and-forget — never let event emission block the response
     try {

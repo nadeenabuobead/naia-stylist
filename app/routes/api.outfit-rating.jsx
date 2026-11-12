@@ -44,6 +44,14 @@ export async function action({ request }) {
       where: { sessionId: historyId },
     });
 
+    // Ownership (hotfix 2026-11-12) — an existing review belongs to whoever
+    // created it; a client-supplied historyId must not let a different
+    // authenticated customer overwrite it. "Not found" (not 403) avoids
+    // confirming that a review exists for an ID that isn't the caller's.
+    if (existing && existing.customerId !== customer.id) {
+      return Response.json({ error: "Not found" }, { status: 404, headers: CORS });
+    }
+
     let review;
     if (existing) {
       review = await prisma.postOutfitReview.update({
@@ -63,6 +71,13 @@ export async function action({ request }) {
     } else {
   // Debug: Check the session being linked
   const linkedSession = await prisma.stylingSession.findUnique({ where: { id: historyId }, include: { suggestions: { include: { items: true } } } });
+  // Ownership (hotfix 2026-11-12) — a review must not be created against a
+  // session that belongs to a different customer, even under the caller's
+  // own customerId; that would attach a styling session's feedback to the
+  // wrong account's history.
+  if (linkedSession && linkedSession.customerId !== customer.id) {
+    return Response.json({ error: "Not found" }, { status: 404, headers: CORS });
+  }
   console.log("Review linking to session:", { historyId, bodyPref: linkedSession?.bodyPreference, styleDNA: linkedSession?.styleDNA, pieces: linkedSession?.suggestions?.[0]?.items?.map(i => i.productTitle || `Closet ${i.closetItemId}`) || [] });
   review = await prisma.postOutfitReview.create({
     data: {

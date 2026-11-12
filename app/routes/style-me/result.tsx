@@ -224,6 +224,16 @@ export async function action({ request }: ActionFunctionArgs) {
     if (intent === "generate") {
       const session = await prisma.stylingSession.findUnique({ where: { id: sessionId } });
       if (!session) return data({ error: "Session not found" }, { status: 404 });
+      // Ownership (hotfix 2026-11-12) — StylingSession.customerId is a
+      // required field (every session has a real owner, never anonymous),
+      // so this must always match the authenticated customer. Without this,
+      // a client-supplied sessionId could generate a new OutfitSuggestion
+      // against ANOTHER customer's session. "Not found" (not 403) matches
+      // this route's existing convention so a mismatched ID doesn't confirm
+      // the session exists.
+      if (!naiaCustomer || session.customerId !== naiaCustomer.id) {
+        return data({ error: "Session not found" }, { status: 404 });
+      }
 
       const bodyNeedsRaw = formData.get("bodyNeeds") as string | null;
       const bodyNeeds: string[] = bodyNeedsRaw ? JSON.parse(bodyNeedsRaw) : [];
@@ -354,7 +364,13 @@ export async function action({ request }: ActionFunctionArgs) {
       // Reads all context from the session record so no extra form params are required.
       const session = await prisma.stylingSession.findUnique({ where: { id: sessionId } });
       if (!session) return data({ error: "Session not found" }, { status: 404 });
-      if (naiaCustomer && session.customerId !== naiaCustomer.id) {
+      // Ownership (hotfix 2026-11-12, tightened) — the previous `naiaCustomer
+      // &&` guard skipped this check entirely for an UNAUTHENTICATED request,
+      // since StylingSession.customerId is a required field (no genuine
+      // anonymous session exists) — an unauthenticated caller could
+      // regenerate another customer's session outright. Now requires
+      // naiaCustomer to be present too.
+      if (!naiaCustomer || session.customerId !== naiaCustomer.id) {
         return data({ error: "Not found" }, { status: 404 });
       }
 
@@ -519,6 +535,15 @@ export async function action({ request }: ActionFunctionArgs) {
       });
 
       if (!reviewSession || !reviewSession.suggestions[0]) {
+        return data({ error: "Session not found" }, { status: 404 });
+      }
+      // Ownership (hotfix 2026-11-12) — without this, a client-supplied
+      // sessionId could silently overwrite another customer's existing
+      // PostOutfitReview (the upsert below is keyed only on the unique
+      // sessionId), or create a new review row attributed to the victim's
+      // customerId with attacker-chosen field values. StylingSession.
+      // customerId is always a real owner, never anonymous.
+      if (!naiaCustomer || reviewSession.customerId !== naiaCustomer.id) {
         return data({ error: "Session not found" }, { status: 404 });
       }
 
