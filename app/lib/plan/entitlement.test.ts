@@ -507,9 +507,25 @@ describe("ENT-36 — Closet's atomic reservation stays unconditional, same postu
   it("closet._index.tsx deletes the Cloudinary asset if the atomic reservation is lost to a concurrent upload, so a blocked item never leaves an orphaned asset", () => {
     const reserveIdx = closetRt.indexOf("reserveClosetSlot(");
     const notAllowedIdx = closetRt.indexOf("!reservation.allowed", reserveIdx);
-    const blockEnd = closetRt.indexOf("return data(", notAllowedIdx);
-    const block = closetRt.slice(notAllowedIdx, blockEnd);
+    // "asset_pending_deletion" (the abandoned-upload sweep having already
+    // claimed this publicId) is checked first and deliberately does NOT
+    // delete — the sweep owns that asset's cleanup — so anchor on the
+    // at_capacity branch specifically, not "the first return data(" after
+    // !reservation.allowed, which would now match the wrong branch.
+    const concurrentRaceIdx = closetRt.indexOf("A concurrent upload won the race", notAllowedIdx);
+    const blockEnd = closetRt.indexOf("return data(", concurrentRaceIdx);
+    const block = closetRt.slice(concurrentRaceIdx, blockEnd);
     assert.match(block, /deleteCloudinaryAsset\(publicId,\s*"private"\)/);
+  });
+
+  it("closet._index.tsx does NOT delete the Cloudinary asset when the abandoned-upload sweep has already claimed it — the sweep owns that asset's cleanup, not this route", () => {
+    const reserveIdx = closetRt.indexOf("reserveClosetSlot(");
+    const notAllowedIdx = closetRt.indexOf("!reservation.allowed", reserveIdx);
+    const pendingDeletionIdx = closetRt.indexOf('"asset_pending_deletion"', notAllowedIdx);
+    const concurrentRaceIdx = closetRt.indexOf("A concurrent upload won the race", notAllowedIdx);
+    const block = closetRt.slice(pendingDeletionIdx, concurrentRaceIdx);
+    assert.doesNotMatch(block, /deleteCloudinaryAsset\(/);
+    assert.match(block, /status:\s*409/);
   });
 
   it("api.closet.jsx's add action uses reserveClosetSlot", () => {

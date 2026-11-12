@@ -52,6 +52,7 @@ vi.mock("~/lib/cloudinary-admin.server", async () => {
 
 vi.mock("~/lib/plan/entitlement.server", () => ({
   checkEntitlement: vi.fn(),
+  reserveClosetSlot: vi.fn(),
 }));
 
 vi.mock("~/lib/image-moderation.server", () => ({ moderateImageContent: vi.fn() }));
@@ -71,7 +72,9 @@ vi.mock("~/lib/ai/my-naia-model.server", () => ({
 import prisma from "~/db.server";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { verifyCloudinaryAsset, deleteCloudinaryAsset } from "~/lib/cloudinary-admin.server";
-import { checkEntitlement } from "~/lib/plan/entitlement.server";
+import { checkEntitlement, reserveClosetSlot } from "~/lib/plan/entitlement.server";
+import { moderateImageContent } from "~/lib/image-moderation.server";
+import { screenGarmentSuitability } from "~/lib/image-suitability.server";
 import { action } from "./closet._index";
 
 const mockGetCustomer = () => getCurrentNaiaCustomer as ReturnType<typeof vi.fn>;
@@ -79,6 +82,7 @@ const mockFindCustomer = () => (prisma as any).customer.findUnique as ReturnType
 const mockVerify = () => verifyCloudinaryAsset as ReturnType<typeof vi.fn>;
 const mockDelete = () => deleteCloudinaryAsset as ReturnType<typeof vi.fn>;
 const mockEntitlement = () => checkEntitlement as ReturnType<typeof vi.fn>;
+const mockReserve = () => reserveClosetSlot as ReturnType<typeof vi.fn>;
 
 const CUSTOMER_A = { id: "customer-A", membershipStatus: "NONE" };
 const CUSTOMER_B = { id: "customer-B", membershipStatus: "NONE" };
@@ -199,6 +203,36 @@ describe("closet._index action (add) — failure paths, no real database or imag
     } as any);
     expect(res.init.status).toBe(400);
     expect(res.data.error).toBe("Category required");
+  });
+
+  it("the abandoned-upload sweep having claimed this exact publicId blocks the add and asks for a fresh upload, WITHOUT this route calling deleteCloudinaryAsset itself (the sweep owns that asset's cleanup)", async () => {
+    const ownId = ownPublicId(CUSTOMER_A);
+    mockVerify().mockResolvedValue({
+      ok: true,
+      asset: { type: "private", resourceType: "image", format: "jpg", bytes: 1000, width: 400, height: 400 },
+    });
+    // The magic-byte check fetches buildPrivateDownloadUrl's (mocked)
+    // "https://example.invalid/download" — stub global fetch so this
+    // doesn't attempt a real network call; an ok:false response makes the
+    // route skip its inner byte-signature check entirely (see
+    // closet._index.tsx step 6), which is enough to reach moderation/
+    // suitability/entitlement below.
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
+    (moderateImageContent as ReturnType<typeof vi.fn>).mockResolvedValue({ status: "PASS" });
+    (screenGarmentSuitability as ReturnType<typeof vi.fn>).mockResolvedValue({ status: "PASS" });
+    mockEntitlement().mockResolvedValue({ allowed: true });
+    mockReserve().mockResolvedValue({ allowed: false, reason: "asset_pending_deletion" });
+
+    const res: any = await action({
+      request: addRequestAs(CUSTOMER_A, { publicId: ownId, photoConsentGiven: "true" }),
+      params: {},
+      context: {},
+    } as any);
+
+    expect(res.init.status).toBe(409);
+    expect(res.data.error).toBe("This image could not be saved. Please upload again.");
+    expect(mockDelete()).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
   });
 
   it("a customer record that no longer exists (deleted mid-session) is rejected as unauthenticated, not a crash", async () => {

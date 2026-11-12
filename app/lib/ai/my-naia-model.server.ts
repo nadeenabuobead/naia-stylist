@@ -558,27 +558,84 @@ export async function withdrawPhotoAnalysisConsent(
 //   1. Attempt Cloudinary deletion for face and body assets (both attempted even if one fails).
 //   2. Clear DB photo references and saveModelConsentAt — ALWAYS (disables readiness).
 //   3. Return typed partial-deletion result for retry if needed.
+// A failed deletion's full identity — enough for a retry to target the
+// correct asset without re-guessing its delivery type. deliveryType is
+// either the real, Cloudinary-confirmed type, or the sentinel "unknown"
+// when it could not be established (see resolveModelAssetDeliveryType) —
+// "unknown" is a durable marker for a retry to re-resolve, never a value
+// passed to an actual Cloudinary API call.
+export interface FailedModelAsset {
+  publicId: string;
+  deliveryType: string;
+  errorCode: string;
+}
+
+const MODEL_DELIVERY_TYPE_CANDIDATES = ["private", "authenticated"] as const;
+
+// Establishes an asset's real Cloudinary delivery type via the Admin API's
+// own authoritative response — never guessed, never defaulted to "private".
+// model.deliveryType (stamped at upload time by saveNaiaModelPhoto, from the
+// Admin API's own asset.type) is the normal, zero-extra-call source; this is
+// only reached for a legacy row that predates that field. Tries each
+// candidate type in turn — the first the asset is confirmed to actually
+// exist under is the real type. Returns null if neither resolves (asset
+// genuinely gone, or the provider is unreachable); the caller must not then
+// assume any particular type.
+//
+// NaiaModel.deliveryType is NOT NULL with @default("private") in
+// schema.prisma, so this fallback is not reachable through any ordinary
+// application code path today (every real row always has a value) — it
+// exists as defense in depth against a row this constraint doesn't cover
+// (a raw write, a future schema change), kept deliberately rather than
+// assumed-safe to omit.
+async function resolveModelAssetDeliveryType(
+  publicId: string,
+  _verifyAssetByType: (
+    publicId: string,
+    deliveryType: string,
+  ) => Promise<{ ok: true; asset: { type: string } } | { ok: false; errorCode: string }>,
+): Promise<string | null> {
+  for (const candidate of MODEL_DELIVERY_TYPE_CANDIDATES) {
+    const result = await _verifyAssetByType(publicId, candidate);
+    if (result.ok) return result.asset.type || candidate;
+  }
+  return null;
+}
+
 export async function withdrawSaveModelConsent(
   customerId: string,
   _upsertModelFn: UpsertModelFn = _upsertModel,
   _findModelFn: FindModelFn = _findModel,
   _deleteAsset: DeleteAssetFn = deleteCloudinaryAsset,
-): Promise<{ ok: boolean; deletedAssets: string[]; failedAssets: string[] }> {
+  _verifyAssetByType: (
+    publicId: string,
+    deliveryType: string,
+  ) => Promise<{ ok: true; asset: { type: string } } | { ok: false; errorCode: string }> = verifyCloudinaryAsset,
+): Promise<{ ok: boolean; deletedAssets: string[]; failedAssets: FailedModelAsset[] }> {
   const model = await _findModelFn(customerId);
   const deletedAssets: string[] = [];
-  const failedAssets: string[] = [];
+  const failedAssets: FailedModelAsset[] = [];
+
+  async function attemptDelete(publicId: string): Promise<void> {
+    let deliveryType = model?.deliveryType ?? null;
+    if (!deliveryType) {
+      deliveryType = await resolveModelAssetDeliveryType(publicId, _verifyAssetByType);
+    }
+    if (!deliveryType) {
+      // Delivery type could not be established — do not attempt a delete
+      // against a guessed type. Durable unresolved record (deliveryType:
+      // "unknown"), not a reported success.
+      failedAssets.push({ publicId, deliveryType: "unknown", errorCode: "DELIVERY_TYPE_UNKNOWN" });
+      return;
+    }
+    const r = await _deleteAsset(publicId, deliveryType);
+    if (r.ok) deletedAssets.push(publicId);
+    else failedAssets.push({ publicId, deliveryType, errorCode: r.errorCode ?? "UNKNOWN" });
+  }
 
   // Attempt deletion for each asset independently (privacy-first, both attempted).
-  if (model?.facePublicId) {
-    const r = await _deleteAsset(model.facePublicId, model.deliveryType ?? "private");
-    if (r.ok) deletedAssets.push(model.facePublicId);
-    else failedAssets.push(model.facePublicId);
-  }
-  if (model?.bodyPublicId) {
-    const r = await _deleteAsset(model.bodyPublicId, model.deliveryType ?? "private");
-    if (r.ok) deletedAssets.push(model.bodyPublicId);
-    else failedAssets.push(model.bodyPublicId);
-  }
+  if (model?.facePublicId) await attemptDelete(model.facePublicId);
+  if (model?.bodyPublicId) await attemptDelete(model.bodyPublicId);
 
   // Always clear DB photo references and saveModelConsent — disables readiness regardless.
   await _upsertModelFn(customerId, {

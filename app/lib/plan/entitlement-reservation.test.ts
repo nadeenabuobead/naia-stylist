@@ -279,6 +279,61 @@ describe("reserveBuySkipSlot", () => {
     assert.deepEqual(capturedWhere.verdict, { in: ["BUY", "SKIP", "MAYBE"] });
     assert.ok(!capturedWhere.verdict.in.includes("INCOMPLETE"), "a failed/unrecognized-verdict analysis must not count toward quota");
   });
+
+  it("RSV.26 — an active (unresolved) PendingCloudinaryDeletion claim on this exact publicId blocks the create and is checked AFTER the count, inside the same transaction", async () => {
+    const claimedAnalysisData = { ...analysisData, imagePublicId: "naia-wardrobe/cust/claimed-asset" };
+    let countCheckedFirst = false;
+    const mockTx: RunReservationFn = async (fn) =>
+      fn({
+        buyOrSkipAnalysis: {
+          count: async () => { countCheckedFirst = true; return 0; },
+          create: async () => { throw new Error("create must not be called when the asset is claimed for deletion"); },
+        },
+        pendingCloudinaryDeletion: {
+          findUnique: async ({ where }: any) => {
+            assert.equal(countCheckedFirst, true, "the claim check must run after the count check, not before");
+            assert.equal(where.publicId, "naia-wardrobe/cust/claimed-asset");
+            return { resolvedAt: null };
+          },
+        },
+      } as any);
+
+    const result = await reserveBuySkipSlot(CUSTOMER_ID, "MEMBER", claimedAnalysisData, mockTx, NO_SUBSCRIPTION);
+    assert.equal(result.allowed, false);
+    if (result.allowed) throw new Error("unreachable");
+    assert.equal(result.reason, "asset_pending_deletion");
+  });
+
+  it("RSV.27 — a RESOLVED PendingCloudinaryDeletion row for this publicId does not block the create", async () => {
+    const resolvedAnalysisData = { ...analysisData, imagePublicId: "naia-wardrobe/cust/already-resolved" };
+    const mockTx: RunReservationFn = async (fn) =>
+      fn({
+        buyOrSkipAnalysis: {
+          count: async () => 0,
+          create: async ({ data }: any) => ({ id: "analysis-ok", ...data }),
+        },
+        pendingCloudinaryDeletion: {
+          findUnique: async () => ({ resolvedAt: new Date() }),
+        },
+      } as any);
+
+    const result = await reserveBuySkipSlot(CUSTOMER_ID, "MEMBER", resolvedAnalysisData, mockTx, NO_SUBSCRIPTION);
+    assert.equal(result.allowed, true);
+  });
+
+  it("RSV.28 — no imagePublicId on the analysis data means the claim check never touches pendingCloudinaryDeletion at all", async () => {
+    const mockTx: RunReservationFn = async (fn) =>
+      fn({
+        buyOrSkipAnalysis: {
+          count: async () => 0,
+          create: async ({ data }: any) => ({ id: "x", ...data }),
+        },
+        // Deliberately no pendingCloudinaryDeletion key — accessing it would throw.
+      } as any);
+
+    const result = await reserveBuySkipSlot(CUSTOMER_ID, "MEMBER", analysisData, mockTx, NO_SUBSCRIPTION);
+    assert.equal(result.allowed, true);
+  });
 });
 
 // ── reserveClosetSlot ────────────────────────────────────────────────────────
@@ -397,6 +452,43 @@ describe("reserveClosetSlot", () => {
     await reserveClosetSlot(CUSTOMER_ID, "MEMBER", itemData, mockTx, NO_SUBSCRIPTION);
 
     assert.deepEqual(capturedWhere, { customerId: CUSTOMER_ID }, "no createdAt window — unlike the monthly features, every existing row counts");
+  });
+
+  it("RSV.29 — an active claim on this exact imagePublicId blocks the create, checked after the count, inside the same transaction", async () => {
+    const claimedItemData = { ...itemData, imagePublicId: "naia-wardrobe/cust/claimed-asset" };
+    let countCheckedFirst = false;
+    const mockTx: RunReservationFn = async (fn) =>
+      fn({
+        closetItem: {
+          count: async () => { countCheckedFirst = true; return 0; },
+          create: async () => { throw new Error("create must not be called when the asset is claimed for deletion"); },
+        },
+        pendingCloudinaryDeletion: {
+          findUnique: async ({ where }: any) => {
+            assert.equal(countCheckedFirst, true);
+            assert.equal(where.publicId, "naia-wardrobe/cust/claimed-asset");
+            return { resolvedAt: null };
+          },
+        },
+      } as any);
+
+    const result = await reserveClosetSlot(CUSTOMER_ID, "MEMBER", claimedItemData, mockTx, NO_SUBSCRIPTION);
+    assert.equal(result.allowed, false);
+    if (result.allowed) throw new Error("unreachable");
+    assert.equal(result.reason, "asset_pending_deletion");
+  });
+
+  it("RSV.30 — no imagePublicId on the item data means the claim check never touches pendingCloudinaryDeletion at all", async () => {
+    const mockTx: RunReservationFn = async (fn) =>
+      fn({
+        closetItem: {
+          count: async () => 0,
+          create: async ({ data }: any) => ({ id: "x", ...data }),
+        },
+      } as any);
+
+    const result = await reserveClosetSlot(CUSTOMER_ID, "MEMBER", itemData, mockTx, NO_SUBSCRIPTION);
+    assert.equal(result.allowed, true);
   });
 });
 
