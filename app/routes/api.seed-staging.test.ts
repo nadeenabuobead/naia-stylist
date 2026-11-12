@@ -123,24 +123,28 @@ import { loader, action } from "./api.seed-staging";
 
 const STAGING_SECRET = "test-secret-abc123";
 
+// Not `Parameters<typeof loader>[0]` / `Parameters<typeof action>[0]` — loader/action
+// are imported from a plain .jsx route (api.seed-staging.jsx is untyped), and for this
+// particular module TS resolves that Parameters<> lookup to `never` rather than `any`.
+// loader/action both destructure only `{ request }`, so that's the real, achievable shape.
 function makeLoaderRequest(opts: {
   secret?: string;
   id?: string;
   email?: string;
   to?: string;
-} = {}): Parameters<typeof loader>[0] {
+} = {}): { request: Request } {
   const params = new URLSearchParams();
   if (opts.secret) params.set("secret", opts.secret);
   if (opts.id) params.set("id", opts.id);
   if (opts.email) params.set("email", opts.email);
   if (opts.to) params.set("to", opts.to);
-  return { request: new Request(`https://example.com/api/seed-staging?${params}`) } as any;
+  return { request: new Request(`https://example.com/api/seed-staging?${params}`) };
 }
 
 function makeActionRequest(opts: {
   secret?: string;
   body?: object;
-} = {}): Parameters<typeof action>[0] {
+} = {}): { request: Request } {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (opts.secret) headers["x-seed-secret"] = opts.secret;
   return {
@@ -149,7 +153,7 @@ function makeActionRequest(opts: {
       headers,
       body: JSON.stringify(opts.body ?? { _action: "countRecords", customerId: "test-id" }),
     }),
-  } as any;
+  };
 }
 
 describe("§S2 seed-staging — environment routing", () => {

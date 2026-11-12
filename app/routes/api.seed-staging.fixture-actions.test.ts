@@ -26,18 +26,20 @@ import { action, loader } from "./api.seed-staging";
 
 const STAGING_SECRET = "test-secret-abc123";
 
-function makeLoaderRequest(search: string): Parameters<typeof loader>[0] {
-  return { request: new Request(`https://example.com/api/seed-staging${search}`) } as any;
+// Not Parameters<typeof loader/action>[0] — see api.seed-staging.test.ts's identical
+// helpers for why that resolves to `never` for this particular untyped .jsx module.
+function makeLoaderRequest(search: string): { request: Request } {
+  return { request: new Request(`https://example.com/api/seed-staging${search}`) };
 }
 
-function makeActionRequest(body: object): Parameters<typeof action>[0] {
+function makeActionRequest(body: object): { request: Request } {
   return {
     request: new Request("https://example.com/api/seed-staging", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-seed-secret": STAGING_SECRET },
       body: JSON.stringify(body),
     }),
-  } as any;
+  };
 }
 
 describe("§S4 seed-staging fixture actions — scoped to test-batch1- customers only", () => {
@@ -266,14 +268,14 @@ describe("§S5 seed-staging login tickets", () => {
 
 // ── §S6 WI_QA_LOGIN_SECRET — dedicated, independent of STAGING_SEED_SECRET ───
 
-function makeActionRequestWithSecret(body: object, secretHeader: string): Parameters<typeof action>[0] {
+function makeActionRequestWithSecret(body: object, secretHeader: string): { request: Request } {
   return {
     request: new Request("https://example.com/api/seed-staging", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-seed-secret": secretHeader },
       body: JSON.stringify(body),
     }),
-  } as any;
+  };
 }
 
 describe("§S6 seed-staging — dedicated WI_QA_LOGIN_SECRET", () => {
