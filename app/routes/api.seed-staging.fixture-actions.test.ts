@@ -1,10 +1,7 @@
 // Tests for the QA-fixture-only actions added to api.seed-staging.jsx:
 // setOnboardingProfile and createClosetItemDetailed.
 //
-// Kept separate from api.seed-staging.test.ts (which has pre-existing,
-// unrelated drift — it asserts a VERCEL_ENV gate the code no longer uses,
-// see commit "fix(seed-staging): use NAIA_PROJECT_VARIANT guard instead of
-// VERCEL_ENV" — not touched here).
+// Kept separate from api.seed-staging.test.ts (its own §S1/§S2/§S3 suite).
 //
 // Run: npx vitest run app/routes/api.seed-staging.fixture-actions.test.ts
 
