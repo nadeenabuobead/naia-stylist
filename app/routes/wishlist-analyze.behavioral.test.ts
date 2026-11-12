@@ -41,7 +41,7 @@ vi.mock("../lib/cloudinary-admin.server", async () => {
   };
 });
 
-vi.mock("../lib/plan/entitlement.server", () => ({ checkEntitlement: vi.fn() }));
+vi.mock("../lib/plan/entitlement.server", () => ({ checkEntitlement: vi.fn(), reserveBuySkipSlot: vi.fn() }));
 vi.mock("../lib/image-moderation.server", () => ({ moderateImageContent: vi.fn() }));
 vi.mock("../lib/image-suitability.server", () => ({ screenGarmentSuitability: vi.fn() }));
 vi.mock("../lib/ai/taste-extraction.server", () => ({ extractBuySkipEvidence: vi.fn() }));
@@ -55,6 +55,7 @@ vi.mock("../lib/ai/customer-intelligence-resolver.server", () => ({ resolveCusto
 
 import { getCurrentNaiaCustomer } from "../lib/naia-session.server";
 import { verifyCloudinaryAsset, deleteCloudinaryAsset } from "../lib/cloudinary-admin.server";
+import { checkEntitlement, reserveBuySkipSlot } from "../lib/plan/entitlement.server";
 import { action } from "./api.wishlist.jsx";
 
 const mockGetCustomer = () => getCurrentNaiaCustomer as ReturnType<typeof vi.fn>;
@@ -78,6 +79,13 @@ function analyzeRequestAs(customer: typeof CUSTOMER_A | null, body: Record<strin
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // This file tests consent/ownership behavior, not entitlement enforcement
+  // (covered separately in entitlement.test.ts) — enforcement is
+  // unconditional now (fix/stripe-clerk-phase1-security), so these two need
+  // a passing default or every test would fail at the quota guard before
+  // ever reaching the behavior under test.
+  (checkEntitlement as ReturnType<typeof vi.fn>).mockResolvedValue({ allowed: true });
+  (reserveBuySkipSlot as ReturnType<typeof vi.fn>).mockResolvedValue({ allowed: true, record: { id: "mock-analysis" } });
 });
 
 describe("api.wishlist action=analyze — authentication", () => {

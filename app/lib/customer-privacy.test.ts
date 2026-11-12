@@ -297,6 +297,11 @@ function cloudinaryOkDeps() {
     // keeps the literal `true`, not the widened `boolean` a bare object
     // literal would infer here.
     deleteSelfieBoth: vi.fn(async () => ({ ok: true as const })),
+    // fix/stripe-clerk-phase1-security (2026-11-12): only reached in the
+    // billed branch (hasBillingHistory true) — default to a clean success so
+    // every existing test here keeps exercising the anonymize path
+    // unchanged. The billing-cancellation-specific tests below override this.
+    cancelActiveBillingForErasure: vi.fn(async () => ({ ok: true, canceledCount: 0, failures: [] })),
   };
 }
 
@@ -345,6 +350,126 @@ describe("eraseCustomerData — scenario: customer with subscription/billing his
     expect(mockDelete()).toHaveBeenCalledWith({ where: { id: SYNTHETIC_CUSTOMER_ID } });
     expect(mockCustomerUpdate()).not.toHaveBeenCalled();
     expect(result.anonymized).toBe(false);
+  });
+});
+
+describe("eraseCustomerData — Stripe billing cancellation before anonymization (fix/stripe-clerk-phase1-security)", () => {
+  it("13 — a billed customer's active subscription is cancelled via Stripe BEFORE anonymizeBilledCustomer writes anything", async () => {
+    mockFindUnique().mockResolvedValueOnce({ id: SYNTHETIC_CUSTOMER_ID });
+    mockSubscriptionCount().mockResolvedValueOnce(1);
+    mockBillingTransactionCount().mockResolvedValueOnce(0);
+
+    const callOrder: string[] = [];
+    const deps = {
+      ...cloudinaryOkDeps(),
+      cancelActiveBillingForErasure: vi.fn(async () => {
+        callOrder.push("cancel-billing");
+        return { ok: true, canceledCount: 1, failures: [] };
+      }),
+    };
+
+    const result = await eraseCustomerData(SYNTHETIC_CUSTOMER_ID, deps);
+
+    expect(deps.cancelActiveBillingForErasure).toHaveBeenCalledWith(SYNTHETIC_CUSTOMER_ID);
+    expect(callOrder).toEqual(["cancel-billing"]);
+    // customer.update (the anonymization write) must happen AFTER — proven
+    // by it having actually run (test 8 already proves the call shape);
+    // here the focus is purely on cancellation happening first.
+    expect(mockCustomerUpdate()).toHaveBeenCalled();
+    const cancelOrder = (deps.cancelActiveBillingForErasure as any).mock.invocationCallOrder[0];
+    const updateOrder = mockCustomerUpdate().mock.invocationCallOrder[mockCustomerUpdate().mock.invocationCallOrder.length - 1];
+    expect(cancelOrder).toBeLessThan(updateOrder);
+    expect(result.ok).toBe(true);
+    expect(result.anonymized).toBe(true);
+  });
+
+  it("14 — a billing-cancellation FAILURE blocks anonymization entirely — the Customer row is NOT updated", async () => {
+    mockFindUnique().mockResolvedValueOnce({ id: SYNTHETIC_CUSTOMER_ID });
+    mockSubscriptionCount().mockResolvedValueOnce(1);
+    mockBillingTransactionCount().mockResolvedValueOnce(0);
+
+    const deps = {
+      ...cloudinaryOkDeps(),
+      cancelActiveBillingForErasure: vi.fn(async () => ({
+        ok: false,
+        canceledCount: 0,
+        failures: [{ subscriptionId: "sub-row-1", providerSubscriptionId: "sub_stripe_1", error: "Stripe API error (status 500)" }],
+      })),
+    };
+
+    const result = await eraseCustomerData(SYNTHETIC_CUSTOMER_ID, deps);
+
+    expect(mockCustomerUpdate()).not.toHaveBeenCalled();
+    expect(mockDelete()).not.toHaveBeenCalled();
+    expect(result.ok).toBe(false);
+    expect(result.anonymized).toBe(false);
+  });
+
+  it("15 — a billing-cancellation failure is durably recorded via recordPendingCustomerErasureFailure, same mechanism as any other unexpected erasure failure — this IS the retry path", async () => {
+    mockFindUnique().mockResolvedValueOnce({ id: SYNTHETIC_CUSTOMER_ID });
+    mockSubscriptionCount().mockResolvedValueOnce(1);
+    mockBillingTransactionCount().mockResolvedValueOnce(0);
+
+    const deps = {
+      ...cloudinaryOkDeps(),
+      cancelActiveBillingForErasure: vi.fn(async () => ({
+        ok: false,
+        canceledCount: 0,
+        failures: [{ subscriptionId: "sub-row-1", providerSubscriptionId: "sub_stripe_1", error: "network timeout" }],
+      })),
+    };
+
+    const result = await eraseCustomerData(SYNTHETIC_CUSTOMER_ID, deps, "settings-self-service");
+
+    expect(mockRecordPendingFailure()).toHaveBeenCalledWith(
+      SYNTHETIC_CUSTOMER_ID,
+      "settings-self-service",
+      expect.objectContaining({ message: expect.stringContaining("sub-row-1") }),
+    );
+    expect(result.pendingFailureId).toBe("pending-failure-id");
+    // An operator resolving this via /admin/maintenance re-runs
+    // eraseCustomerData from scratch — the SAME retry mechanism every other
+    // pending erasure failure already uses. A subsequent successful
+    // cancellation then proceeds exactly as test 13 proves.
+  });
+
+  it("16 — a MULTI-subscription failure reports every failed subscription's id, not just the first", async () => {
+    mockFindUnique().mockResolvedValueOnce({ id: SYNTHETIC_CUSTOMER_ID });
+    mockSubscriptionCount().mockResolvedValueOnce(1);
+    mockBillingTransactionCount().mockResolvedValueOnce(0);
+
+    const deps = {
+      ...cloudinaryOkDeps(),
+      cancelActiveBillingForErasure: vi.fn(async () => ({
+        ok: false,
+        canceledCount: 1,
+        failures: [
+          { subscriptionId: "sub-row-A", providerSubscriptionId: "sub_stripe_A", error: "rate limited" },
+          { subscriptionId: "sub-row-B", providerSubscriptionId: "sub_stripe_B", error: "network timeout" },
+        ],
+      })),
+    };
+
+    await eraseCustomerData(SYNTHETIC_CUSTOMER_ID, deps);
+
+    const recordedError = mockRecordPendingFailure().mock.calls[0][2];
+    expect(recordedError.message).toContain("sub-row-A");
+    expect(recordedError.message).toContain("sub-row-B");
+  });
+
+  it("17 — a customer with NO billing history never calls cancelActiveBillingForErasure at all — nothing to cancel", async () => {
+    mockFindUnique().mockResolvedValueOnce({ id: SYNTHETIC_CUSTOMER_ID });
+    mockSubscriptionCount().mockResolvedValueOnce(0);
+    mockBillingTransactionCount().mockResolvedValueOnce(0);
+
+    const deps = {
+      ...cloudinaryOkDeps(),
+      cancelActiveBillingForErasure: vi.fn(async () => ({ ok: true, canceledCount: 0, failures: [] })),
+    };
+
+    await eraseCustomerData(SYNTHETIC_CUSTOMER_ID, deps);
+
+    expect(deps.cancelActiveBillingForErasure).not.toHaveBeenCalled();
   });
 });
 

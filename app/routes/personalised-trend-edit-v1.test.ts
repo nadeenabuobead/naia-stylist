@@ -51,6 +51,12 @@ vi.mock("~/lib/trend-product-recommendation.server", () => ({
 
 vi.mock("~/lib/plan/entitlement.server", () => ({
   checkEntitlement: vi.fn(),
+  // 2026-11-12: the loader/write-path call this unconditionally now (no
+  // ENTITLEMENT_ENFORCEMENT flag gate — see fix/stripe-clerk-phase1-security).
+  // Default implementation wired below, after recordPersonalisedTrendEditUsage
+  // is imported, so every existing assertion on that mock keeps working
+  // without rewriting each one.
+  reservePersonalisedTrendSlot: vi.fn(),
 }));
 
 vi.mock("~/lib/plan/personalised-trend-edit-usage.server", () => ({
@@ -83,10 +89,30 @@ vi.mock("~/components/my-naia/MyNaiaLayout", () => ({
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { getEditorialReportBySlug, getPublishedEditorialReports } from "~/lib/editorial-reports.server";
 import { getShopperEvidence, buildShopperEdit } from "~/lib/trend-evidence.server";
-import { checkEntitlement } from "~/lib/plan/entitlement.server";
+import { checkEntitlement, reservePersonalisedTrendSlot } from "~/lib/plan/entitlement.server";
 import { recordPersonalisedTrendEditUsage, getTrendEditUsageState } from "~/lib/plan/personalised-trend-edit-usage.server";
 import { recordJourneyEventAwaited } from "~/lib/ai/journey-events.server";
 import { loader } from "./trends.my-edits.$slug";
+
+// Default, file-wide implementations — enforcement is unconditional now, so
+// every test needs these unless it explicitly overrides one to test a
+// blocked path. reservePersonalisedTrendSlot proxies to the already-mocked
+// recordPersonalisedTrendEditUsage so every existing assertion on that mock
+// (call count, call args, rejection behavior) keeps working unchanged.
+//
+// Re-applied in a file-wide beforeEach (not just once here) because
+// vi.clearAllMocks() — used throughout this file's per-describe beforeEach
+// hooks — clears call history only, not a prior mockResolvedValue override;
+// without re-applying the default every test, one test overriding
+// checkEntitlement to "blocked" would leak into whichever test runs next.
+function resetEntitlementDefaults() {
+  vi.mocked(checkEntitlement).mockResolvedValue({ allowed: true });
+  vi.mocked(reservePersonalisedTrendSlot).mockImplementation(async (customerId: string, _membershipStatus: unknown, reportSlug: string, snapshot: unknown) => {
+    const record = await recordPersonalisedTrendEditUsage(customerId, reportSlug, snapshot as any);
+    return { allowed: true, record };
+  });
+}
+beforeEach(resetEntitlementDefaults);
 
 const REPORT = {
   slug: "spring-2026-soft-structure",
@@ -116,13 +142,10 @@ describe("§TREND-EDIT-V1 — membership gating", () => {
     vi.clearAllMocks();
     vi.mocked(getEditorialReportBySlug).mockResolvedValue(REPORT as any);
     vi.mocked(getPublishedEditorialReports).mockResolvedValue([REPORT] as any);
-  });
-  afterEach(() => {
-    delete process.env.ENTITLEMENT_ENFORCEMENT;
+    vi.mocked(checkEntitlement).mockResolvedValue({ allowed: true });
   });
 
-  it("1. an authenticated MEMBER sees the personalised edit when enforcement is on and entitled", async () => {
-    process.env.ENTITLEMENT_ENFORCEMENT = "true";
+  it("1. an authenticated MEMBER sees the personalised edit when entitled", async () => {
     vi.mocked(requireCurrentNaiaCustomer).mockResolvedValue(makeCustomer("MEMBER"));
     vi.mocked(checkEntitlement).mockResolvedValue({ allowed: true });
     vi.mocked(getShopperEvidence).mockResolvedValue({ hasProfile: true, closetItems: [] } as any);
@@ -141,8 +164,7 @@ describe("§TREND-EDIT-V1 — membership gating", () => {
     expect(getShopperEvidence).not.toHaveBeenCalled();
   });
 
-  it("2b. an authenticated NONE (non-member) customer cannot access the member-only result when enforcement is on", async () => {
-    process.env.ENTITLEMENT_ENFORCEMENT = "true";
+  it("2b. an authenticated NONE (non-member) customer cannot access the member-only result", async () => {
     vi.mocked(requireCurrentNaiaCustomer).mockResolvedValue(makeCustomer("NONE"));
     vi.mocked(checkEntitlement).mockResolvedValue({ allowed: false, reason: "quota_exceeded" });
 
@@ -159,16 +181,25 @@ describe("§TREND-EDIT-V1 — membership gating", () => {
     expect(getShopperEvidence).not.toHaveBeenCalled();
   });
 
-  it("enforcement flag off (default/production today) preserves exact legacy behavior — no gate at all", async () => {
-    // ENTITLEMENT_ENFORCEMENT intentionally left unset.
+  it("enforcement is unconditional — an unset/stale ENTITLEMENT_ENFORCEMENT env var (the historical flag, no longer read anywhere) does not disable the gate for a NONE customer", async () => {
+    // 2026-11-12 fix (fix/stripe-clerk-phase1-security): this flag used to
+    // gate the entire check — unset meant "no gate at all," which is exactly
+    // the fail-open bug this test now proves is closed. Setting it here
+    // (to a value that would previously have meant "off") must have zero
+    // effect, because the route no longer reads it at all.
+    delete process.env.ENTITLEMENT_ENFORCEMENT;
+    const routeSrc = route("trends.my-edits.$slug.tsx");
+    expect(routeSrc).not.toMatch(/process\.env\.ENTITLEMENT_ENFORCEMENT/);
+
     vi.mocked(requireCurrentNaiaCustomer).mockResolvedValue(makeCustomer("NONE"));
+    vi.mocked(checkEntitlement).mockResolvedValue({ allowed: false, reason: "quota_exceeded" });
     vi.mocked(getShopperEvidence).mockResolvedValue({ hasProfile: true, closetItems: [] } as any);
     vi.mocked(buildShopperEdit).mockReturnValue(MOCK_EDIT as any);
 
     const result: any = await callLoader();
-    expect(checkEntitlement).not.toHaveBeenCalled();
-    expect(result.membershipRequired).toBe(false);
-    expect(result.edit).toEqual(MOCK_EDIT);
+    expect(checkEntitlement).toHaveBeenCalled();
+    expect(result.membershipRequired).toBe(true);
+    expect(result.edit).toBeNull();
   });
 });
 
@@ -194,12 +225,10 @@ describe("§TREND-EDIT-V1 — monthly quota exhausted is a distinct state from m
     vi.mocked(getTrendEditUsageState).mockResolvedValue({ status: "none" });
   });
   afterEach(() => {
-    delete process.env.ENTITLEMENT_ENFORCEMENT;
     vi.mocked(getTrendEditUsageState).mockResolvedValue({ status: "none" });
   });
 
   it("a MEMBER who already used this period's allowance (e.g. on a different report) sees the monthly-allowance state, never the membership upsell", async () => {
-    process.env.ENTITLEMENT_ENFORCEMENT = "true";
     vi.mocked(requireCurrentNaiaCustomer).mockResolvedValue(makeCustomer("MEMBER"));
     // The exact reason a NONE customer also gets — proves the loader cannot
     // be relying on the reason string alone to tell the two cases apart.
@@ -215,7 +244,6 @@ describe("§TREND-EDIT-V1 — monthly quota exhausted is a distinct state from m
   });
 
   it("the quota_exceeded reason is never collapsed into membershipRequired for an entitled MEMBER", async () => {
-    process.env.ENTITLEMENT_ENFORCEMENT = "true";
     vi.mocked(requireCurrentNaiaCustomer).mockResolvedValue(makeCustomer("MEMBER"));
     vi.mocked(checkEntitlement).mockResolvedValue({ allowed: false, reason: "quota_exceeded" });
 
@@ -228,7 +256,6 @@ describe("§TREND-EDIT-V1 — monthly quota exhausted is a distinct state from m
   });
 
   it("an existing saved snapshot still opens normally even after the monthly quota is exhausted — reopening never consults the entitlement check at all", async () => {
-    process.env.ENTITLEMENT_ENFORCEMENT = "true";
     vi.mocked(requireCurrentNaiaCustomer).mockResolvedValue(makeCustomer("MEMBER"));
     const snapshot = {
       schemaVersion: "trend-edit-snapshot-v1" as const,
@@ -388,11 +415,10 @@ describe("§TREND-EDIT-V1 — canonical usage recording (PersonalisedTrendEditUs
   });
 
   it("9. a membership-blocked path records no usage", async () => {
-    process.env.ENTITLEMENT_ENFORCEMENT = "true";
     vi.mocked(checkEntitlement).mockResolvedValue({ allowed: false, reason: "quota_exceeded" });
     await callLoader();
     expect(recordPersonalisedTrendEditUsage).not.toHaveBeenCalled();
-    delete process.env.ENTITLEMENT_ENFORCEMENT;
+    expect(reservePersonalisedTrendSlot).not.toHaveBeenCalled();
   });
 
   it("10. an unpublished/missing report (404) records no usage", async () => {

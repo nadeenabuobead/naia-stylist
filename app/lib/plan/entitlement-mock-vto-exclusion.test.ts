@@ -22,6 +22,15 @@ vi.mock("~/db.server", () => ({
     virtualTryOnJob: { count: vi.fn().mockResolvedValue(0) },
     closetItem: { count: vi.fn().mockResolvedValue(0) },
     personalisedTrendEditUsage: { count: vi.fn().mockResolvedValue(0) },
+    // Phase 2 (billing-cycle-aware windows) added a real subscription lookup
+    // inside resolveEffectiveContext, called by every checkEntitlement/
+    // getEntitlementSummary invocation — without this, every call in this
+    // file throws "Cannot read properties of undefined (reading 'findFirst')"
+    // before ever reaching the VTO-specific logic under test. Fixed
+    // 2026-11-12 alongside the ENTITLEMENT_ENFORCEMENT fail-closed fix (see
+    // fix/stripe-clerk-phase1-security) — this bug pre-dates that work and
+    // was confirmed identical on the unmodified release-candidate baseline.
+    subscription: { findFirst: vi.fn().mockResolvedValue(null), count: vi.fn().mockResolvedValue(0) },
   },
 }));
 
@@ -37,6 +46,8 @@ beforeEach(() => {
   (prisma as any).buyOrSkipAnalysis.count.mockResolvedValue(0);
   (prisma as any).closetItem.count.mockResolvedValue(0);
   (prisma as any).personalisedTrendEditUsage.count.mockResolvedValue(0);
+  (prisma as any).subscription.findFirst.mockResolvedValue(null);
+  (prisma as any).subscription.count.mockResolvedValue(0);
 });
 
 describe("getEntitlementSummary — mock VTO jobs excluded from real usage", () => {
@@ -77,6 +88,46 @@ describe("checkEntitlement('vto') — the real production gate also excludes moc
     // rows are invisible to this query and the real count is 0.
     mockVtoCount().mockResolvedValueOnce(0).mockResolvedValueOnce(0);
     const result = await checkEntitlement("cust-1", "MEMBER", "vto");
+    expect(result.allowed).toBe(true);
+  });
+});
+
+// 2026-11-12 (fix/stripe-clerk-phase1-security): api.trigger-tryon.tsx's
+// quota guard is unconditional now — no ENTITLEMENT_ENFORCEMENT flag gate —
+// so checkEntitlement("vto") is the single real enforcement point for every
+// VTO submission. These prove its actual allow/deny behavior at every
+// relevant boundary, not just that the route calls it.
+describe("checkEntitlement('vto') — unpaid vs. paid access, real boundary behavior", () => {
+  it("a never-subscribed (membershipStatus NONE) customer is denied, even with zero prior usage", async () => {
+    // NONE's vtoPerMonth allowance is 0 — 0 completed + 0 in-flight is still
+    // >= 0, so this must deny on the very first attempt, not just after
+    // some usage. This is the exact fail-open bug the entitlement audit
+    // found: before the fix, this check was skipped entirely unless
+    // ENTITLEMENT_ENFORCEMENT was literally "true" in the environment.
+    mockVtoCount().mockResolvedValueOnce(0).mockResolvedValueOnce(0);
+    const result = await checkEntitlement("cust-none", "NONE", "vto");
+    expect(result.allowed).toBe(false);
+    if (result.allowed) throw new Error("unreachable");
+    expect(result.reason).toBe("quota_exceeded");
+  });
+
+  it("a MEMBER under the 10/month limit is allowed", async () => {
+    mockVtoCount().mockResolvedValueOnce(6).mockResolvedValueOnce(0); // 6 completed, 0 in-flight
+    const result = await checkEntitlement("cust-member", "MEMBER", "vto");
+    expect(result.allowed).toBe(true);
+  });
+
+  it("a MEMBER exactly at the 10/month limit (completed + in-flight) is denied", async () => {
+    mockVtoCount().mockResolvedValueOnce(7).mockResolvedValueOnce(3); // 7 completed + 3 in-flight = 10
+    const result = await checkEntitlement("cust-member", "MEMBER", "vto");
+    expect(result.allowed).toBe(false);
+    if (result.allowed) throw new Error("unreachable");
+    expect(result.reason).toBe("quota_exceeded");
+  });
+
+  it("a MEMBER one under the limit is still allowed — boundary is >=, not >", async () => {
+    mockVtoCount().mockResolvedValueOnce(9).mockResolvedValueOnce(0);
+    const result = await checkEntitlement("cust-member", "MEMBER", "vto");
     expect(result.allowed).toBe(true);
   });
 });

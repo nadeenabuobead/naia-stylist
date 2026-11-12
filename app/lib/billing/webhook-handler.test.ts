@@ -515,6 +515,143 @@ describe("processStripeWebhookEvent — asynchronous payment confirmation", () =
   });
 });
 
+// ── Concurrent-checkout protection (2026-11-12, fix/stripe-clerk-phase1-
+// security) — releaseCheckoutReservation on every terminal outcome,
+// including the new checkout.session.expired event. See checkout-
+// reservation.server.ts's own header for the full lifecycle this is one
+// consumer of. ───────────────────────────────────────────────────────────
+
+describe("processStripeWebhookEvent — releases the CheckoutReservation on every terminal checkout.session.* outcome", () => {
+  it("WH.27 — checkout.session.completed (paid) releases the reservation", async () => {
+    let releasedCustomerId: string | null = null;
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findSubscriptionByProviderSubscriptionId: async () => null,
+      findSubscriptionByCustomerId: async () => null,
+      createSubscription: async (input) => ({ ...baseSubscription(), ...input, id: "new-sub" }),
+      createBillingTransaction: async () => {},
+      recordProcessedEvent: async () => {},
+      updateCustomerMembershipStatus: async () => {},
+      releaseCheckoutReservation: async (customerId) => { releasedCustomerId = customerId; },
+    };
+    const event = makeEvent({
+      data: { object: { client_reference_id: CUSTOMER_ID, payment_status: "paid", amount_total: 3900 } },
+    });
+    await processStripeWebhookEvent(event, deps);
+    assert.equal(releasedCustomerId, CUSTOMER_ID);
+  });
+
+  it("WH.28 — checkout.session.completed (unpaid, async pending) ALSO releases the reservation — the new INCOMPLETE Subscription row is enough to block a second attempt from here", async () => {
+    let released = false;
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findSubscriptionByProviderSubscriptionId: async () => null,
+      findSubscriptionByCustomerId: async () => null,
+      createSubscription: async (input) => ({ ...baseSubscription(), ...input, id: "new-sub" }),
+      recordProcessedEvent: async () => {},
+      releaseCheckoutReservation: async () => { released = true; },
+    };
+    const event = makeEvent({
+      data: { object: { client_reference_id: CUSTOMER_ID, payment_status: "unpaid" } },
+    });
+    await processStripeWebhookEvent(event, deps);
+    assert.equal(released, true);
+  });
+
+  it("WH.29 — checkout.session.async_payment_succeeded releases the reservation", async () => {
+    let released = false;
+    const pending = baseSubscription({ status: "INCOMPLETE" });
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findSubscriptionByProviderSubscriptionId: async () => pending,
+      updateSubscriptionById: async () => {},
+      createBillingTransaction: async () => {},
+      recordProcessedEvent: async () => {},
+      updateCustomerMembershipStatus: async () => {},
+      releaseCheckoutReservation: async () => { released = true; },
+    };
+    const event = makeEvent({
+      type: "checkout.session.async_payment_succeeded",
+      data: { object: { client_reference_id: CUSTOMER_ID, subscription: "sub_stripe_1", amount_total: 3900 } },
+    });
+    await processStripeWebhookEvent(event, deps);
+    assert.equal(released, true);
+  });
+
+  it("WH.30 — checkout.session.async_payment_failed releases the reservation — a definitively failed payment must never leave the customer stuck for the rest of the TTL", async () => {
+    let released = false;
+    const pending = baseSubscription({ status: "INCOMPLETE" });
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findSubscriptionByProviderSubscriptionId: async () => pending,
+      updateSubscriptionById: async () => {},
+      recordProcessedEvent: async () => {},
+      releaseCheckoutReservation: async () => { released = true; },
+    };
+    const event = makeEvent({
+      type: "checkout.session.async_payment_failed",
+      data: { object: { client_reference_id: CUSTOMER_ID, subscription: "sub_stripe_1" } },
+    });
+    await processStripeWebhookEvent(event, deps);
+    assert.equal(released, true);
+  });
+
+  it("WH.31 — checkout.session.expired releases the reservation — the PRIMARY recovery path for an abandoned checkout, since no Subscription row exists to fall back on", async () => {
+    let releasedCustomerId: string | null = null;
+    let subscriptionTouched = false;
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findSubscriptionByProviderSubscriptionId: async () => { subscriptionTouched = true; return null; },
+      findSubscriptionByCustomerId: async () => { subscriptionTouched = true; return null; },
+      createSubscription: async () => { subscriptionTouched = true; throw new Error("must not create a Subscription for an abandoned checkout"); },
+      updateSubscriptionById: async () => { subscriptionTouched = true; },
+      recordProcessedEvent: async () => {},
+      releaseCheckoutReservation: async (customerId) => { releasedCustomerId = customerId; },
+    };
+    const event = makeEvent({
+      type: "checkout.session.expired",
+      data: { object: { client_reference_id: CUSTOMER_ID } },
+    });
+    const result = await processStripeWebhookEvent(event, deps);
+    assert.equal(releasedCustomerId, CUSTOMER_ID);
+    assert.equal(subscriptionTouched, false, "an abandoned checkout must never touch the Subscription table at all");
+    assert.deepEqual(result, { ok: true, deduped: false, action: "checkout_session_expired" });
+  });
+
+  it("WH.32 — checkout.session.expired with no resolvable customerId is a safe no-op — recorded (idempotency), but releases nothing", async () => {
+    let released = false;
+    let recordedEventId: string | null = null;
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      recordProcessedEvent: async (input) => { recordedEventId = input.providerEventId; },
+      releaseCheckoutReservation: async () => { released = true; },
+    };
+    const event = makeEvent({ id: "evt_expired_no_customer", type: "checkout.session.expired", data: { object: {} } });
+    const result = await processStripeWebhookEvent(event, deps);
+    assert.equal(released, false);
+    assert.equal(recordedEventId, "evt_expired_no_customer");
+    assert.equal(result.ok, true);
+  });
+
+  it("WH.33 — a releaseCheckoutReservation failure never blocks the rest of event processing — best-effort, swallowed", async () => {
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findSubscriptionByProviderSubscriptionId: async () => null,
+      findSubscriptionByCustomerId: async () => null,
+      createSubscription: async (input) => ({ ...baseSubscription(), ...input, id: "new-sub" }),
+      createBillingTransaction: async () => {},
+      recordProcessedEvent: async () => {},
+      updateCustomerMembershipStatus: async () => {},
+      releaseCheckoutReservation: async () => { throw new Error("DB unreachable"); },
+    };
+    const event = makeEvent({
+      data: { object: { client_reference_id: CUSTOMER_ID, payment_status: "paid", amount_total: 3900 } },
+    });
+    const result = await processStripeWebhookEvent(event, deps);
+    assert.equal(result.ok, true, "subscription activation must still succeed even if the reservation cleanup itself throws");
+  });
+});
+
 // ── customer.subscription.updated/.deleted — out-of-order protection +
 // authoritative-state re-fetch ──────────────────────────────────────────────
 

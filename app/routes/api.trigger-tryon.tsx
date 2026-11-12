@@ -78,19 +78,19 @@ export async function action({ request }: ActionFunctionArgs) {
   const customer = await getCurrentNaiaCustomer(request);
   if (!customer) return authRequired();
 
-  // ── 1b. VTO quota guard — behind ENTITLEMENT_ENFORCEMENT flag ────────────
+  // ── 1b. VTO quota guard — unconditional, fail-closed ─────────────────────
   // Counts completed + genuinely active in-flight jobs. If an in-flight job later
   // fails/times out, its slot is freed automatically (status leaves ACTIVE set).
   // The existing Serializable transaction in createOrFindTryOnJob already blocks
   // concurrent duplicate active-job creation, making this check race-resistant.
-  if (process.env.ENTITLEMENT_ENFORCEMENT === "true") {
-    const entCheck = await checkEntitlement(customer.id, customer.membershipStatus, "vto");
-    if (!entCheck.allowed) {
-      return data(
-        { ok: false, code: "quota_exceeded", message: "You've used all your Virtual Try-On sessions for this month." },
-        { status: 429 },
-      );
-    }
+  // Previously gated behind ENTITLEMENT_ENFORCEMENT === "true" with no other
+  // branch — fixed 2026-11-12, see fix/stripe-clerk-phase1-security.
+  const entCheck = await checkEntitlement(customer.id, customer.membershipStatus, "vto");
+  if (!entCheck.allowed) {
+    return data(
+      { ok: false, code: "quota_exceeded", message: "You've used all your Virtual Try-On sessions for this month." },
+      { status: 429 },
+    );
   }
 
   // ── 2. Parse and validate request body ───────────────────────────────────

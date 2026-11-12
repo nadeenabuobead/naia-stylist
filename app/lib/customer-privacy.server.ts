@@ -30,6 +30,13 @@
 //         retaining what the law requires", exactly as Subscription's own
 //         comment anticipates. The anonymized row's only remaining purpose
 //         is to be the thing Subscription/BillingTransaction still point to.
+//       * Before that anonymization runs, any live/chargeable subscription
+//         is cancelled immediately via Stripe (see billing/erasure-billing.
+//         server.ts) — anonymizing first would leave a subscription Stripe
+//         keeps billing with no customer left able to reach the Billing
+//         Portal to stop it. A cancellation failure here is treated as the
+//         same kind of genuinely-unexpected failure as a stuck Cloudinary
+//         asset (below) — durably recorded, anonymization does NOT proceed.
 //   - A genuinely unexpected failure (anything other than the two expected,
 //     already-handled cases above: a stuck Cloudinary asset, or billing
 //     history) is durably recorded via recordPendingCustomerErasureFailure
@@ -55,6 +62,7 @@ import { withdrawSaveModelConsent } from "./ai/my-naia-model.server";
 import { deleteBoth as deleteSelfieBoth } from "./ai/selfie-persistence.server";
 import { recordPendingCustomerErasureFailure } from "./customer-erasure-failures.server";
 import { sweepCustomerForErasure } from "./cloudinary-orphan-sweep.server";
+import { cancelActiveBillingForErasure } from "./billing/erasure-billing.server";
 
 // ── Dependency-injection surface (mocked providers in tests) ──────────────────
 
@@ -85,6 +93,11 @@ export interface EraseDependencies {
   deleteSelfieBoth?: typeof deleteSelfieBoth;
   sweepCustomerForErasure?: typeof sweepCustomerForErasure;
   _runErasureTransaction?: RunErasureTransactionFn;
+  // fix/stripe-clerk-phase1-security (2026-11-12): cancels any live,
+  // chargeable Stripe subscription BEFORE anonymizeBilledCustomer runs — see
+  // billing/erasure-billing.server.ts's own header for why this must happen
+  // here, not be left to a webhook.
+  cancelActiveBillingForErasure?: typeof cancelActiveBillingForErasure;
 }
 
 export interface EraseResult {
@@ -196,6 +209,7 @@ export async function eraseCustomerData(
   const _deleteSelfieBoth = deps.deleteSelfieBoth ?? deleteSelfieBoth;
   const _sweepCustomerForErasure = deps.sweepCustomerForErasure ?? sweepCustomerForErasure;
   const _runErasureTransaction = deps._runErasureTransaction ?? _runErasureTransactionDefault;
+  const _cancelActiveBillingForErasure = deps.cancelActiveBillingForErasure ?? cancelActiveBillingForErasure;
 
   // 1. Cloudinary assets first — the Customer-row cascade below has no
   //    mechanism to reach external storage.
@@ -285,6 +299,18 @@ export async function eraseCustomerData(
 
     const billed = await hasBillingHistory(customerId);
     if (billed) {
+      // Cancel any live, chargeable subscription BEFORE anonymizing —
+      // anonymization is about to remove every way this customer could
+      // reach the Billing Portal to cancel it themselves. A failure here
+      // throws (caught below, durably recorded) rather than proceeding to
+      // anonymize while Stripe might still be billing this customer.
+      const billingCancellation = await _cancelActiveBillingForErasure(customerId);
+      if (!billingCancellation.ok) {
+        throw new Error(
+          `cancelActiveBillingForErasure failed for ${billingCancellation.failures.length} subscription(s): ` +
+            billingCancellation.failures.map((f) => `${f.subscriptionId} (${f.error})`).join("; "),
+        );
+      }
       // Subscription/BillingTransaction rows block a real delete (onDelete:
       // Restrict) and must be legally retained — anonymize in place instead.
       await anonymizeBilledCustomer(customerId, _runErasureTransaction);

@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { data as json } from "react-router";
 import { getCurrentNaiaCustomer } from "../lib/naia-session.server";
 import prisma from "../db.server";
-import { assertPublicIdAvailable, AssetPendingDeletionError } from "../lib/cloudinary-deletion-claim.server";
 import { extractBuySkipEvidence } from "../lib/ai/taste-extraction.server";
 import { writeSourceEvidence } from "../lib/ai/taste-reconcile.server";
 import {
@@ -374,10 +373,12 @@ async function analyzeItem(request) {
     return json({ error: "not_authenticated" }, { status: 401 });
   }
 
-  // ── 1b. Quota guard — behind ENTITLEMENT_ENFORCEMENT flag ────────────────
-  // Concurrency note: read-before-write; NOT atomic. Wrap in Serializable
-  // transaction before enabling in public production.
-  if (process.env.ENTITLEMENT_ENFORCEMENT === "true") {
+  // ── 1b. Quota guard — unconditional, fail-closed ─────────────────────────
+  // Cheap early fast-fail only (read-before-write, NOT atomic) — the
+  // authoritative, race-safe check is reserveBuySkipSlot below. Previously
+  // gated behind ENTITLEMENT_ENFORCEMENT === "true" with no other branch —
+  // fixed 2026-11-12, see fix/stripe-clerk-phase1-security.
+  {
     const entCheck = await checkEntitlement(naiaCustomer.id, naiaCustomer.membershipStatus, "buySkip");
     if (!entCheck.allowed) {
       const message = entCheck.reason === "intro_used"
@@ -1162,10 +1163,12 @@ Respond ONLY with valid JSON, no markdown:
         // NOT atomic. This is the actual enforcement point: the count
         // re-check and the create happen inside one Serializable transaction
         // (reserveBuySkipSlot), so two concurrent requests from the same
-        // customer can't both pass the count before either commits. Only
-        // takes this path when ENTITLEMENT_ENFORCEMENT is on; otherwise
-        // behavior is unchanged from before this fix.
-        if (process.env.ENTITLEMENT_ENFORCEMENT === "true") {
+        // customer can't both pass the count before either commits.
+        // Unconditional, fail-closed — previously only took this path when
+        // ENTITLEMENT_ENFORCEMENT was "true", otherwise fell through to an
+        // uncounted create. Fixed 2026-11-12, see
+        // fix/stripe-clerk-phase1-security.
+        {
           const reservation = await reserveBuySkipSlot(naiaCustomer.id, naiaCustomer.membershipStatus, analysisData);
           if (!reservation.allowed) {
             if (reservation.reason === "asset_pending_deletion") {
@@ -1180,32 +1183,6 @@ Respond ONLY with valid JSON, no markdown:
             );
           }
           analysisRecord = reservation.record;
-        } else {
-          // The claim-check must run regardless of ENTITLEMENT_ENFORCEMENT —
-          // it's an orphan-asset safety concern, not a quota concern. When
-          // the flag is off there's no reserveBuySkipSlot transaction to
-          // piggyback on, so this path gets its own minimal one. See
-          // cloudinary-deletion-claim.server.ts.
-          const WISHLIST_MAX_TX_RETRIES = 2;
-          const isWishlistSerializationError = (e) => e?.code === "P2034";
-          for (let attempt = 0; ; attempt++) {
-            try {
-              analysisRecord = await prisma.$transaction(async (tx) => {
-                await assertPublicIdAvailable(tx, analysisData.imagePublicId);
-                return tx.buyOrSkipAnalysis.create({ data: analysisData });
-              }, { isolationLevel: "Serializable" });
-              break;
-            } catch (e) {
-              if (e instanceof AssetPendingDeletionError) {
-                return json(
-                  { error: "asset_unavailable", message: "This image could not be saved. Please upload again." },
-                  { status: 409 },
-                );
-              }
-              if (isWishlistSerializationError(e) && attempt < WISHLIST_MAX_TX_RETRIES) continue;
-              throw e;
-            }
-          }
         }
       } catch (dbErr) {
         if (dbErr?.code === "P2002") {

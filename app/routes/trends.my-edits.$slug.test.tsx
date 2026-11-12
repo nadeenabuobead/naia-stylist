@@ -82,10 +82,9 @@ vi.mock("~/lib/trend-product-recommendation.server", () => ({
 
 vi.mock("~/lib/plan/entitlement.server", () => ({
   checkEntitlement: vi.fn().mockResolvedValue({ allowed: true }),
-  // 2026-11-04 quota-race fix — only ever called when ENTITLEMENT_ENFORCEMENT
-  // is "true"; every existing test in this file runs with that flag unset,
-  // so this default is never exercised outside the dedicated describe block
-  // below that sets it.
+  // 2026-11-12: enforcement is unconditional — every route call goes through
+  // this atomic reservation now, never the plain recordPersonalisedTrendEditUsage
+  // path (see fix/stripe-clerk-phase1-security).
   reservePersonalisedTrendSlot: vi.fn().mockResolvedValue({ allowed: true, record: { id: "usage-mock" } }),
 }));
 
@@ -333,10 +332,11 @@ describe("trends/my-edits/:slug loader", () => {
     expect(getShopperEvidence).not.toHaveBeenCalled();
     expect(buildShopperEdit).not.toHaveBeenCalled();
     expect(recordPersonalisedTrendEditUsage).not.toHaveBeenCalled();
+    expect(reservePersonalisedTrendSlot).not.toHaveBeenCalled();
   });
 
   it("falls through to a genuinely fresh generation when there is no row this period AND no archive at all (first-ever view of this report)", async () => {
-    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({ id: "cust-1" } as any);
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({ id: "cust-1", membershipStatus: "MEMBER" } as any);
     vi.mocked(getTrendEditUsageState).mockResolvedValueOnce({ status: "none" });
     vi.mocked(getMostRecentArchivedSnapshot).mockResolvedValueOnce(null);
     vi.mocked(getShopperEvidence).mockResolvedValueOnce({ hasProfile: true } as any);
@@ -350,11 +350,15 @@ describe("trends/my-edits/:slug loader", () => {
 
     expect(result.edit).toEqual(MOCK_EDIT);
     expect((result as any).archivedPeriodLabel).toBeNull();
-    expect(recordPersonalisedTrendEditUsage).toHaveBeenCalled();
+    // Unconditional, fail-closed enforcement (2026-11-12): the write always
+    // goes through the atomic reservePersonalisedTrendSlot now, never the
+    // plain recordPersonalisedTrendEditUsage path directly.
+    expect(reservePersonalisedTrendSlot).toHaveBeenCalled();
+    expect(recordPersonalisedTrendEditUsage).not.toHaveBeenCalled();
   });
 
   it("'generate-new' action produces and records a fresh generation for the current period", async () => {
-    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({ id: "cust-1" } as any);
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({ id: "cust-1", membershipStatus: "MEMBER" } as any);
     vi.mocked(getTrendEditUsageState).mockResolvedValueOnce({ status: "none" });
     vi.mocked(getShopperEvidence).mockResolvedValueOnce({ hasProfile: true } as any);
     vi.mocked(buildShopperEdit).mockReturnValueOnce(MOCK_EDIT as any);
@@ -367,7 +371,8 @@ describe("trends/my-edits/:slug loader", () => {
       context: {},
     });
 
-    expect(recordPersonalisedTrendEditUsage).toHaveBeenCalled();
+    expect(reservePersonalisedTrendSlot).toHaveBeenCalled();
+    expect(recordPersonalisedTrendEditUsage).not.toHaveBeenCalled();
     expect((response as Response).status).toBe(302);
   });
 
@@ -388,24 +393,15 @@ describe("trends/my-edits/:slug loader", () => {
   });
 });
 
-// ── ENTITLEMENT_ENFORCEMENT=true — the atomic quota-race fix (2026-11-04) ───
-// Every test above runs with the flag unset, exercising the plain
-// recordPersonalisedTrendEditUsage path unchanged. These specifically set
-// the flag to prove the loader/action route through reservePersonalisedTrendSlot
-// instead, and degrade honestly (generationFailed:true, no persisted row)
-// if that atomic reservation reports the account-wide quota was lost to a
-// concurrent request for a different report in the same period.
-describe("trends/my-edits/:slug — ENTITLEMENT_ENFORCEMENT=true quota-race handling", () => {
-  const savedFlag = process.env.ENTITLEMENT_ENFORCEMENT;
-
+// ── Atomic quota-race handling (unconditional since 2026-11-12) ────────────
+// Enforcement has no env-flag gate — these prove the loader/action route
+// through reservePersonalisedTrendSlot, and degrade honestly
+// (generationFailed:true, no persisted row) if that atomic reservation
+// reports the account-wide quota was lost to a concurrent request for a
+// different report in the same period.
+describe("trends/my-edits/:slug — atomic quota-race handling", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env.ENTITLEMENT_ENFORCEMENT = "true";
-  });
-
-  afterEach(() => {
-    if (savedFlag !== undefined) process.env.ENTITLEMENT_ENFORCEMENT = savedFlag;
-    else delete process.env.ENTITLEMENT_ENFORCEMENT;
   });
 
   it("loader — a successful reservation persists via reservePersonalisedTrendSlot, not the plain recordPersonalisedTrendEditUsage path", async () => {
