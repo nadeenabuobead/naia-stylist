@@ -13,10 +13,12 @@ const SOFT_STRUCTURE_REPORT: TrendReportData = {
   title: "Spring 2026 Wardrobe Edit: Soft Structure",
   season: "Spring 2026",
   summary: "Soft structure summary.",
-  naiaVerdict: null,
-  wardrobeNote: null,
+  naiaVerdict: undefined,
+  wardrobeNote: undefined,
   published: true,
   publishedAt: "2026-06-01",
+  editorialIntro: "",
+  sources: [],
   keyTrends: [
     { name: "Wide leg", description: "Proportioned trouser." },
     { name: "Longline layer", description: "Open blazer." },
@@ -25,8 +27,8 @@ const SOFT_STRUCTURE_REPORT: TrendReportData = {
     { feeling: "For everyday", direction: "wide trouser relaxed blazer fluid viscose crepe twill" },
   ],
   fading: [],
-  investmentNotes: null,
-  naiaInterpretation: null,
+  investmentNotes: undefined,
+  naiaInterpretation: undefined,
 };
 
 const MODERN_TAILORING_REPORT: TrendReportData = {
@@ -34,10 +36,12 @@ const MODERN_TAILORING_REPORT: TrendReportData = {
   title: "The New Language of Modern Tailoring",
   season: "Spring 2026",
   summary: "Modern tailoring summary.",
-  naiaVerdict: null,
-  wardrobeNote: null,
+  naiaVerdict: undefined,
+  wardrobeNote: undefined,
   published: true,
   publishedAt: "2026-06-01",
+  editorialIntro: "",
+  sources: [],
   keyTrends: [
     { name: "Tailored separates", description: "One well-cut blazer or trouser." },
     { name: "Proportion contrast", description: "Longline against narrow." },
@@ -46,8 +50,8 @@ const MODERN_TAILORING_REPORT: TrendReportData = {
     { feeling: "For work", direction: "blazer trouser twill wool denim jersey knit" },
   ],
   fading: [],
-  investmentNotes: null,
-  naiaInterpretation: null,
+  investmentNotes: undefined,
+  naiaInterpretation: undefined,
 };
 
 const COLOUR_DIRECTION_REPORT: TrendReportData = {
@@ -55,10 +59,12 @@ const COLOUR_DIRECTION_REPORT: TrendReportData = {
   title: "Colour Direction: The Quiet Base & the Clear Accent",
   season: "Spring 2026",
   summary: "Colour direction summary.",
-  naiaVerdict: null,
-  wardrobeNote: null,
+  naiaVerdict: undefined,
+  wardrobeNote: undefined,
   published: true,
   publishedAt: "2026-06-01",
+  editorialIntro: "",
+  sources: [],
   keyTrends: [
     { name: "Quiet base", description: "cream stone white neutral" },
     { name: "Clear accent", description: "bag shoe scarf accessory colour" },
@@ -67,8 +73,8 @@ const COLOUR_DIRECTION_REPORT: TrendReportData = {
     { feeling: "For everyday", direction: "cream stone neutral bag shoe scarf accessory colour" },
   ],
   fading: [],
-  investmentNotes: null,
-  naiaInterpretation: null,
+  investmentNotes: undefined,
+  naiaInterpretation: undefined,
 };
 
 // Real reports — used for tests that must exercise the production corpus, not a simplified fixture.
@@ -1353,10 +1359,10 @@ describe("QA fixes — no contradictory item roles (Issue #6)", () => {
     const lookCallsAccent = /accent/i.test(lookToTry);
 
     if (roleIsBase && lookCallsAccent && !lookCallsBase) {
-      fail("Item is described as base in roleNote but as accent in aLookToTry — contradictory roles");
+      throw new Error("Item is described as base in roleNote but as accent in aLookToTry — contradictory roles");
     }
     if (roleIsAccent && lookCallsBase && !lookCallsAccent) {
-      fail("Item is described as accent in roleNote but as base in aLookToTry — contradictory roles");
+      throw new Error("Item is described as accent in roleNote but as base in aLookToTry — contradictory roles");
     }
     expect(true).toBe(true); // passes unless above conditions trigger
   });
