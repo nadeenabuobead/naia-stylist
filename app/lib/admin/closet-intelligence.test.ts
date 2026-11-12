@@ -33,6 +33,7 @@
 //   §CI.30 ClosetItemRow.occasions defaults to [] when empty
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { RouterContextProvider } from "react-router";
 import {
   extractOverallConfidence,
   computeOverallStoredConfidence,
@@ -998,7 +999,7 @@ describe("§CI.32 index redirect uses Shopify embedded-safe redirect helper", ()
     const request = new Request(
       "https://example.vercel.app/app/naia-admin?embedded=1&host=abc123&shop=test.myshopify.com",
     );
-    const response = await loader({ request, params: {}, context: {} as any });
+    const response = await loader({ request, params: {}, context: new RouterContextProvider(), unstable_pattern: "" });
     expect((response as Response).status).toBe(302);
     const location = (response as Response).headers.get("Location") ?? "";
     expect(location).toContain("/app/naia-admin/closet");
@@ -1012,7 +1013,7 @@ describe("§CI.32 index redirect uses Shopify embedded-safe redirect helper", ()
     const request = new Request(
       "https://example.vercel.app/app/naia-admin?embedded=1&host=abc123&shop=test.myshopify.com",
     );
-    await loader({ request, params: {}, context: {} as any });
+    await loader({ request, params: {}, context: new RouterContextProvider(), unstable_pattern: "" });
     // authenticate.admin() returns { redirect } — the loader must call it.
     const mockResult = await vi.mocked(authenticate.admin).mock.results.at(-1)?.value;
     expect(vi.isMockFunction(mockResult?.redirect)).toBe(true);
@@ -1034,7 +1035,7 @@ describe("§CI.33 index redirect loader — blocked shop returns 403", () => {
     const { loader } = await import("~/routes/app.naia-admin._index");
     const request = new Request("https://example.vercel.app/app/naia-admin");
     await expect(
-      loader({ request, params: {}, context: {} as any }),
+      loader({ request, params: {}, context: new RouterContextProvider(), unstable_pattern: "" }),
     ).rejects.toMatchObject({ status: 403 });
   });
 });
