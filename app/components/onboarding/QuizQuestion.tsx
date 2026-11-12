@@ -99,7 +99,7 @@ export function MultiSelect({ options, value, onChange, maxSelections }: MultiSe
       <div className="grid grid-cols-2 gap-3">
         {options.map((option) => {
           const isSelected = value.includes(option.id);
-          const isDisabled = !isSelected && maxSelections && value.length >= maxSelections;
+          const isDisabled = !isSelected && !!maxSelections && value.length >= maxSelections;
 
           return (
             <button

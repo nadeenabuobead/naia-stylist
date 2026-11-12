@@ -174,7 +174,13 @@ export async function listCustomerBosImages(customerId: string): Promise<BosPhot
   });
 
   const cloudinaryConfig = getCloudinaryConfig();
-  return analyses.map((analysis) => {
+  return analyses.map((analysis: {
+    id: string;
+    productName: string | null;
+    imageUrl: string | null;
+    imagePublicId: string | null;
+    imageFormat: string | null;
+  }) => {
     // Same resolution order as the Buy or Skip result page (buyskip.$id.tsx):
     // S0 private asset first (ownership re-verified), legacy public URL otherwise.
     let thumbnailUrl: string | null = null;
