@@ -506,7 +506,11 @@ export default function Settings() {
           not duplicated here. See MyNaiaLayout.tsx. */}
 
       {/* ── Server-backed success feedback ───────────────────────────────── */}
-      {actionData?.ok && (
+      {/* actionData.intent !== "request-data-export" is always true here in practice —
+          that intent is submitted through exportFetcher, not the main Form, so it never
+          populates actionData — but the shared action()'s return type still includes it,
+          since it's the same function; the check makes that invariant explicit for TS too. */}
+      {actionData?.ok && actionData.intent !== "request-data-export" && (
         <div className="sp-state-note" style={{ marginTop: "32px" }}>
           {actionData.message}
         </div>

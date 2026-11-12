@@ -1,6 +1,6 @@
 // app/components/ui/Button.tsx
 import { forwardRef } from "react";
-import { Link } from "@remix-run/react";
+import { Link } from "react-router";
 
 type ButtonVariant = "primary" | "secondary" | "ghost" | "gold" | "danger";
 type ButtonSize = "sm" | "md" | "lg";

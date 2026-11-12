@@ -1,6 +1,6 @@
 // app/components/styling/StyleMeComponents.tsx
 import { useState } from "react";
-import { Link } from "@remix-run/react";
+import { Link } from "react-router";
 
 // Mood Selector
 interface MoodOption {

@@ -210,7 +210,7 @@ export function RecommendationFeedbackWidget({
 
   // ── API call helper ───────────────────────────────────────────────────────
 
-  const callApi = (body: Record<string, unknown>, intent: "create" | "update" | "delete") => {
+  const callApi = (body: Record<string, string | number | boolean | null | string[]>, intent: "create" | "update" | "delete") => {
     intentRef.current = intent;
     setApiError(null);
     fetcher.submit(body, {

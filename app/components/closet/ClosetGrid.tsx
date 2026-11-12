@@ -1,6 +1,6 @@
 // app/components/closet/ClosetGrid.tsx
 import { useState } from "react";
-import { Link } from "@remix-run/react";
+import { Link } from "react-router";
 import { Badge, Tag } from "~/components/ui/Badge";
 
 // Closet category types
@@ -141,8 +141,11 @@ export function ItemCard({
     }
   };
 
-  const CardWrapper = selectable ? "button" : Link;
-  const wrapperProps = selectable
+  // Polymorphic wrapper (native <button> vs React Router's <Link>) — React.ElementType
+  // is the standard typing for a tag-or-component variable; the two branches' props
+  // genuinely differ (onClick+type vs to), so wrapperProps is intentionally loose here.
+  const CardWrapper: React.ElementType = selectable ? "button" : Link;
+  const wrapperProps: Record<string, unknown> = selectable
     ? { onClick: handleClick, type: "button" as const }
     : { to: `/closet/item/${item.id}` };
 
