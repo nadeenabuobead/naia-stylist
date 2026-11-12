@@ -3,7 +3,7 @@
 // No real provider calls — all network interactions use DI mocks.
 
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it, beforeEach, afterEach } from "node:test";
 import { readFileSync } from "node:fs";
 import {
   runFashnTryOn,
@@ -13,6 +13,7 @@ import {
   submitTryOnToProvider,
 } from "./fashn-try-on.server.ts";
 import type { VirtualTryOnInput } from "./virtual-try-on.types.ts";
+import { CUSTOMER_ERROR_MESSAGES } from "./virtual-try-on.types.ts";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -702,5 +703,173 @@ describe("submitTryOnToProvider — parameter selection", () => {
     assert.equal(capturedBody.inputs.output_format, "png");
     assert.equal(capturedBody.inputs.num_images, 1);
     assert.equal(capturedBody.inputs.return_base64, true);
+  });
+});
+
+// ── Phase 1 ops: failure logging (safe) ──────────────────────────────────────
+//
+// Every failure path must now log something retrievable (prior behavior:
+// total silence on these paths), and that log must never contain the raw
+// customerId, image data, the API key, or the provider's free-text `error`
+// field — only a hashed customerId, our own classified code, and opaque
+// metadata (predictionId, httpStatus, providerStatus).
+
+describe("Phase 1 ops — FASHN failure logging is present and PII-safe", () => {
+  let originalConsoleError: typeof console.error;
+  let logs: string[] = [];
+
+  beforeEach(() => {
+    logs = [];
+    originalConsoleError = console.error;
+    console.error = (...args: unknown[]) => {
+      logs.push(args.map(String).join(" "));
+    };
+  });
+
+  afterEach(() => {
+    console.error = originalConsoleError;
+  });
+
+  it("LOG.1 — submit network failure now logs exactly one event", async () => {
+    const _fetch = (async () => {
+      throw new Error("ECONNRESET");
+    }) as typeof fetch;
+    await runFashnTryOn(makeInput({ customerId: "cust-sensitive-id-123" }), { _fetch, _sleep: noSleep, _getApiKey: () => "k" });
+    assert.equal(logs.length, 1);
+    assert.match(logs[0], /\[error-capture\]/);
+    assert.match(logs[0], /PROVIDER_FAILED/);
+    assert.ok(!logs[0].includes("cust-sensitive-id-123"), "raw customerId must never appear in logs");
+    assert.ok(!logs[0].includes(VALID_DATA_URL), "image data must never appear in logs");
+    assert.ok(!logs[0].includes("k"), "the API key string must never appear in logs"); // trivial since 'k' is a short test fixture, kept for documentation of intent
+  });
+
+  it("LOG.2 — poll network failure logs with the predictionId included", async () => {
+    let call = 0;
+    const _fetch = (async (url: string | URL | Request) => {
+      call++;
+      if (call === 1) return makeRunResponse("pred-log-2");
+      throw new Error("socket hang up");
+    }) as typeof fetch;
+    await runFashnTryOn(makeInput(), { _fetch, _sleep: noSleep, _getApiKey: () => "k" });
+    assert.equal(logs.length, 1);
+    assert.match(logs[0], /pred-log-2/);
+    assert.match(logs[0], /fashn:poll/);
+  });
+
+  it("LOG.3 — provider-reported failed status logs the providerStatus, never a free-text error field", async () => {
+    let call = 0;
+    const _fetch = (async () => {
+      call++;
+      if (call === 1) return makeRunResponse("pred-log-3");
+      return makeStatusResponse("failed", undefined, "the customer's blazer prompt leaked here hypothetically");
+    }) as typeof fetch;
+    await runFashnTryOn(makeInput(), { _fetch, _sleep: noSleep, _getApiKey: () => "k" });
+    assert.equal(logs.length, 1);
+    assert.match(logs[0], /"providerStatus":"failed"/);
+    assert.ok(
+      !logs[0].includes("the customer's blazer prompt leaked here hypothetically"),
+      "the provider's free-text error field must never be logged",
+    );
+  });
+
+  it("LOG.4 — submit PROVIDER_REJECTED (non-ok HTTP) logs the httpStatus", async () => {
+    const _fetch = (async () => new Response("", { status: 503 })) as typeof fetch;
+    await runFashnTryOn(makeInput(), { _fetch, _sleep: noSleep, _getApiKey: () => "k" });
+    assert.equal(logs.length, 1);
+    assert.match(logs[0], /"httpStatus":503/);
+    assert.match(logs[0], /PROVIDER_REJECTED/);
+  });
+
+  it("LOG.5 — exhausting all poll attempts logs exactly one TIMEOUT event", async () => {
+    let call = 0;
+    const _fetch = (async () => {
+      call++;
+      if (call === 1) return makeRunResponse("pred-log-5");
+      return makeStatusResponse("processing");
+    }) as typeof fetch;
+    await runFashnTryOn(makeInput(), { _fetch, _sleep: noSleep, _getApiKey: () => "k" });
+    assert.equal(logs.length, 1);
+    assert.match(logs[0], /TIMEOUT/);
+    assert.match(logs[0], /pred-log-5/);
+  });
+
+  it("LOG.6 — submitTryOnToProvider network failure also logs", async () => {
+    const _fetch = (async () => {
+      throw new Error("ETIMEDOUT");
+    }) as typeof fetch;
+    await submitTryOnToProvider(makeInput({ customerId: "another-sensitive-id" }), { _fetch, _getApiKey: () => "k" });
+    assert.equal(logs.length, 1);
+    assert.ok(!logs[0].includes("another-sensitive-id"));
+  });
+
+  it("LOG.7 — customerId in the log is a fixed-length hex hash, never the raw ID in any form", async () => {
+    // Guards against a future refactor accidentally truncating/encoding the
+    // raw ID instead of hashing it.
+    const _fetch = (async () => {
+      throw new Error("ECONNRESET");
+    }) as typeof fetch;
+    await runFashnTryOn(makeInput({ customerId: "cust-log-7-raw-id" }), { _fetch, _sleep: noSleep, _getApiKey: () => "k" });
+    assert.equal(logs.length, 1);
+    assert.match(logs[0], /"customerIdHash":"[0-9a-f]{12}"/);
+    assert.ok(!logs[0].includes("cust-log-7-raw-id"));
+  });
+});
+
+// ── Phase 1 ops: request timeouts ────────────────────────────────────────────
+//
+// Every fetch call to FASHN must carry an AbortSignal so a hung connection
+// is bounded instead of blocking indefinitely. This does not change what
+// happens on timeout — an aborted fetch rejects, which already lands in the
+// same catch block a network failure would, preserving the existing
+// PROVIDER_FAILED/TIMEOUT error-handling shape (see FA.18/FA.19 above,
+// still passing unchanged).
+
+describe("Phase 1 ops — FASHN requests carry a bounded timeout signal", () => {
+  it("TIMEOUT-WIRE.1 — the submit request (runFashnTryOn) passes an AbortSignal", async () => {
+    let capturedSignal: AbortSignal | undefined;
+    const _fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      capturedSignal = init?.signal as AbortSignal | undefined;
+      return makeRunResponse("pred-timeout-wire-1");
+    }) as typeof fetch;
+    await submitTryOnToProvider(makeInput(), { _fetch, _getApiKey: () => "k" });
+    assert.ok(capturedSignal instanceof AbortSignal, "submit request must carry an AbortSignal");
+    assert.equal(capturedSignal!.aborted, false, "signal must not be pre-aborted for a normal request");
+  });
+
+  it("TIMEOUT-WIRE.2 — the runFashnTryOn submit call also passes an AbortSignal", async () => {
+    let capturedSignal: AbortSignal | undefined;
+    const _fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      capturedSignal = init?.signal as AbortSignal | undefined;
+      return makeRunResponse("pred-timeout-wire-2");
+    }) as typeof fetch;
+    await runFashnTryOn(makeInput(), { _fetch, _sleep: noSleep, _getApiKey: () => "k" });
+    assert.ok(capturedSignal instanceof AbortSignal);
+  });
+
+  it("TIMEOUT-WIRE.3 — the poll status call passes an AbortSignal", async () => {
+    let call = 0;
+    let pollSignal: AbortSignal | undefined;
+    const _fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      call++;
+      if (call === 1) return makeRunResponse("pred-timeout-wire-3");
+      pollSignal = init?.signal as AbortSignal | undefined;
+      return makeStatusResponse("completed", ["data:image/png;base64,AA=="]);
+    }) as typeof fetch;
+    await runFashnTryOn(makeInput(), { _fetch, _sleep: noSleep, _getApiKey: () => "k" });
+    assert.ok(pollSignal instanceof AbortSignal, "poll request must carry an AbortSignal");
+  });
+
+  it("TIMEOUT-WIRE.4 — a fetch that rejects with an AbortError is treated identically to any other network failure (PROVIDER_FAILED), not a new error shape", async () => {
+    const _fetch = (async () => {
+      const e = new Error("The operation was aborted due to timeout");
+      e.name = "TimeoutError";
+      throw e;
+    }) as typeof fetch;
+    const result = await runFashnTryOn(makeInput(), { _fetch, _sleep: noSleep, _getApiKey: () => "k" });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "PROVIDER_FAILED");
+      assert.equal(result.customerMessage, CUSTOMER_ERROR_MESSAGES.PROVIDER_FAILED);
+    }
   });
 });

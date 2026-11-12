@@ -53,3 +53,42 @@ Both `naia-stylist` and `naia-stylist-staging`'s `vercel.json`/`scripts/build-pr
 ## 8. What this manifest is not
 
 Not an approval to deploy. Nothing here has been pushed, merged, or applied to any database. This is a reference for whoever executes the release later.
+
+---
+
+# Addendum (2026-11-12): what has been integrated since §1-8 above
+
+Sections 1-8 above describe the Phase 1+2 security/privacy release as it stood on 2026-10-20, branched from staging's then-live tip `ce41ee88`. Since then, **157 more commits** have landed on this lineage (now `integrate/security-fixes-local@c24fe62`, itself built on `integrate/staging-release-candidate@7c9f450`). This addendum covers what's been added, in the same shape as §1-8, without altering anything above. Prepared read-only, as part of Phase 1 ops work (`fix/ops-phase1-monitoring-reliability`) — no code in this addendum's scope (Clerk, Stripe, rate-limiting, Cloudinary stripping) was touched to write it; it is a description of already-integrated work owned by other workstreams.
+
+## A1. What's been added
+
+| Area | What | Owning workstream |
+|---|---|---|
+| Customer authentication | Clerk is now nAia's primary customer auth provider (`fac33e3`), with identity-linking for pre-existing Shopify-era customers, Clerk-user-deletion logging on account delete (`6814d77`), and Clerk-independent erasure scoping (`d7ab2eb`) | Clerk/auth workstream |
+| Billing | Stripe test-mode Checkout, Billing Portal, and webhook handling — built across Phases 1-3 plus two post-review hardening passes (`dccd56a` through `e73c447`), including a Stripe API version pin (`ea1830a`) and idempotency-key correction (`89f4617`) | Stripe/billing workstream |
+| Rate limiting | Phase 1 shadow-mode rate limiting, one route (`api.cloudinary-signature.jsx`) (`7bf698c`, `a2c9264`) | Security/rate-limiting workstream |
+| Image privacy | EXIF/GPS metadata stripping on uploaded customer photos (`99a5a6f`, `5de615d`) | Cloudinary Privacy workstream |
+| Reliability | DB `connection_limit` raised 1→2 to stop cold-start pool contention (`7c9f450`) | (this Phase 1 ops pass's performance findings build on this, unchanged by this pass) |
+| Test infrastructure | Selfie-analysis-gate regression tests (`becdda4`, `9ec362b`), Clerk-era identity mock stabilization (`8a68c60`) | Security/QA workstream |
+
+## A2. Migrations added since §2's table (all additive — verified, no `DROP COLUMN`/`DROP TABLE`/`DROP TYPE` in any of the 14 below)
+
+`20261103000000_billing_subscription_phase1`, `20261103000002_vto_test_job_isolation`, `20261103000003_subscription_past_due_grace_period`, `20261103000004_sandbox_replay_schema_parity`, `20261103000005_styleme_outcome_updatedat_parity`, `20261104120000_clerk_identity_linking`, `20261105090000_customer_erasure_failures`, `20261110000000_api_rate_limit_counter` — plus two baseline-history migrations (`20240530213852`, `20240530213853`) that predate this lineage's own work and are unrelated to it.
+
+## A3. New environment variables required (beyond §3's "none required" — that statement no longer holds)
+
+- `CLERK_SECRET_KEY`, `CLERK_PUBLISHABLE_KEY`, `CLERK_AUTHORIZED_PARTIES` — Clerk auth.
+- `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` — Stripe billing. Code hard-refuses any key not starting `sk_test_` (`assertTestModeKey`) — going live requires a deliberate, separate decision to lift that guard, not just dropping in a live key.
+- Per the most recent independent audit on this lineage, `CLERK_PUBLISHABLE_KEY` was found shared across Preview AND Production (same key, both environments) — Stripe already has test/live separation enforced in code; Clerk does not have an equivalent code-level guard. Flagged here again as a live-dashboard item to resolve before any production cutover, not something this addendum resolves.
+
+## A4. Known deploy-config blocker (carried forward from the corrected Nov 12 operations audit, not new to this addendum)
+
+This worktree's own `vercel.json` → `scripts/require-preview-env.sh` is an intentional, dated (2026-10-20), one-off "deploy-candidate-only" guard: it unconditionally fails any build where `VERCEL_ENV` is not literally `"preview"`. **As currently committed, this branch cannot build as Production.** Before any real production cutover of this lineage, this file needs a deliberate replacement with a genuine production build path — this is a known, owned decision point, not something fixed by this addendum (out of this Phase 1 ops pass's scope, which does not touch deploy configuration — see its own stated exclusions).
+
+## A5. Rollback considerations for the additions in A1
+
+- **Clerk/Stripe code:** same as §6's existing guidance — a plain revert/redeploy is sufficient, since `ENTITLEMENT_ENFORCEMENT` and Stripe's own test-mode guard are the only feature-flag-shaped gates involved, and both fail closed (disabled/test-mode) by default.
+- **Migrations (A2):** same reasoning as §6 — all additive, so a code rollback does not require a migration rollback.
+- **Rate limiting / EXIF stripping:** both are additive, non-destructive changes (a new DB table for rate-limit counters; stripped metadata is simply absent going forward, not a destructive transform of existing data) — a code rollback here is a normal Vercel rollback with no special migration handling needed.
+- **Not yet covered anywhere, including this addendum:** a full acceptance-test re-run and a go/no-go checklist for this larger, combined scope (§7's "45/45 + 41/41" figures are from the original, narrower Phase 1+2 release only) — flagged as a gap, not filled in here, since re-running the full combined suite and re-certifying it is a larger task than this documentation-only addendum.
+

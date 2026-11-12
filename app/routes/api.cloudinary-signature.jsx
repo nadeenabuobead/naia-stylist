@@ -1,15 +1,36 @@
 import { getCurrentNaiaCustomer } from "../lib/naia-session.server";
 import { buildModelUploadUrl } from "../lib/cloudinary-admin.server";
+import { checkRateLimit, rateLimitResponse } from "../lib/api-rate-limit.server";
 import crypto from "node:crypto";
 
 // Max file size enforced by the Cloudinary upload preset (set in the Cloudinary dashboard).
 // This constant is returned to the client as an informational pre-check only.
 const CLIENT_MAX_BYTES = 5 * 1024 * 1024;
 
+// PROVISIONAL — not an approved enforcement threshold. Shadow mode only
+// until real traffic evidence justifies a number (see Phase 1 report).
+// A multi-image Closet upload signs each photo separately, so this must
+// stay generous enough that a legitimate batch upload is never the thing
+// that trips it.
+const CLOUDINARY_SIGNATURE_RATE_LIMIT = {
+  routeKey: "cloudinary-signature",
+  limit: 20,
+  windowSeconds: 60,
+  mode: /** @type {"shadow" | "enforce"} */ ("shadow"),
+};
+
 export async function loader({ request }) {
   const naiaCustomer = await getCurrentNaiaCustomer(request);
   if (!naiaCustomer) {
     return Response.json({ error: "Not authenticated" }, { status: 401 });
+  }
+
+  // Rate limit check runs after auth (so it's keyed by a real customer, not
+  // an anonymous caller) and before any Cloudinary signing work. In shadow
+  // mode this never blocks — it only records what enforcement would do.
+  const rl = await checkRateLimit(naiaCustomer.id, CLOUDINARY_SIGNATURE_RATE_LIMIT);
+  if (!rl.allowed) {
+    return rateLimitResponse(rl);
   }
 
   const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
@@ -44,12 +65,27 @@ export async function loader({ request }) {
   // Parameters must be sorted alphabetically for the Cloudinary signature.
   // public_id is intentionally excluded so Cloudinary auto-generates it;
   // any browser-supplied public_id would fail signature verification.
-  // Alphabetical order: allowed_formats < folder < timestamp < type < upload_preset
+  // Alphabetical order: allowed_formats < folder < timestamp < transformation < type < upload_preset
+  //
+  // transformation=fl_force_strip is an INCOMING transformation (applied to
+  // the asset as stored, not just at delivery) — confirmed against
+  // Cloudinary's own upload API reference: there is no separate top-level
+  // "flags" upload parameter for this; fl_force_strip is only valid as part
+  // of the `transformation` parameter. Signed here exactly like every other
+  // param, so a client cannot drop or alter it without invalidating the
+  // signature. Note: fl_force_strip clears ALL embedded metadata, which per
+  // Cloudinary's own docs is broader than the gentler fl_strip_profile (ICC
+  // color profile only) — this may also remove the embedded color profile,
+  // not only EXIF/GPS. Flagging this now rather than asserting "zero visual
+  // change"; most phone-camera photos are already plain sRGB, so the
+  // practical effect should be negligible, but it is not nothing.
   const deliveryType = "private";
+  const incomingTransformation = "fl_force_strip";
   const paramsToSign = [
     `allowed_formats=${allowedFormats}`,
     `folder=${assetFolder}`,
     `timestamp=${timestamp}`,
+    `transformation=${incomingTransformation}`,
     `type=${deliveryType}`,
     `upload_preset=${uploadPreset}`,
   ].join("&");
@@ -76,6 +112,7 @@ export async function loader({ request }) {
       uploadPreset,
       allowedFormats,
       deliveryType,
+      transformation: incomingTransformation,
       uploadUrl,
       maxFileSizeBytes: CLIENT_MAX_BYTES,
     },

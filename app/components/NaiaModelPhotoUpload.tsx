@@ -169,6 +169,7 @@ export default function NaiaModelPhotoUpload({
     form.append("folder", sigData.assetFolder);
     form.append("allowed_formats", sigData.allowedFormats);
     form.append("type", sigData.deliveryType);
+    form.append("transformation", sigData.transformation); // signed — strips metadata at upload time
 
     let uploadPublicId: string;
     let uploadVersion: number;

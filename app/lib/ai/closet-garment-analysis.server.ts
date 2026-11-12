@@ -12,7 +12,7 @@
 
 import prisma from "../../db.server.js";
 import { analyzeImage } from "./claude.server.js";
-import { buildSignedDeliveryUrl } from "../cloudinary-admin.server";
+import { buildPrivateDownloadUrl } from "../cloudinary-admin.server";
 import {
   GARMENT_INTELLIGENCE_SCHEMA_VERSION,
   GARMENT_SILHOUETTE_VALUES,
@@ -328,6 +328,14 @@ export interface AnalyzeClosetGarmentParams {
   closetItemId: string;
   imagePublicId: string;
   category: string;
+  /** Server-verified format (jpg/png/webp/heic) from the original upload's
+   *  Admin API verification — required by buildPrivateDownloadUrl's Cloudinary
+   *  download-API call. Explicitly nullable (not optional) so every caller must
+   *  consciously pass what it actually has — a pre-existing ClosetItem row from
+   *  before imageFormat was tracked can genuinely have none. When null, analysis
+   *  is skipped (status: "failed") rather than guessing a format or falling back
+   *  to the old non-expiring signed-delivery URL. */
+  imageFormat: string | null;
   /** User-provided primaryColor from the upload form. When set, AI color extraction
    *  is skipped so the user's explicit choice is never silently overwritten. */
   userPrimaryColor?: string | null;
@@ -348,11 +356,11 @@ export async function runClosetGarmentAnalysis(
     imageAnalyzer: ImageAnalyzerFn;
     persistSuccess: PersistSuccessFn;
     persistFailure: PersistFailureFn;
-    getSignedUrl: (publicId: string) => string;
+    getDownloadUrl: (publicId: string, imageFormat: string) => string;
   },
 ): Promise<void> {
-  const { closetItemId, imagePublicId, category } = params;
-  const { imageAnalyzer, persistSuccess, persistFailure, getSignedUrl } = deps;
+  const { closetItemId, imagePublicId, category, imageFormat } = params;
+  const { imageAnalyzer, persistSuccess, persistFailure, getDownloadUrl } = deps;
 
   const user: UserSupplied = {
     primaryColor: params.userPrimaryColor ?? null,
@@ -361,9 +369,19 @@ export async function runClosetGarmentAnalysis(
     seasons:      params.userSeasons ?? [],
   };
 
+  // No format, no analysis — never guess (e.g. default to "jpg") and never
+  // fall back to the old non-expiring signed-delivery URL just because a
+  // format happens to be missing. Treated identically to a getDownloadUrl
+  // failure: skip analysis, write status "failed", preserve every existing
+  // user-supplied field untouched.
+  if (!imageFormat) {
+    await writePersistFailure(closetItemId, persistFailure).catch(() => {});
+    return;
+  }
+
   let imageUrl: string;
   try {
-    imageUrl = getSignedUrl(imagePublicId);
+    imageUrl = getDownloadUrl(imagePublicId, imageFormat);
   } catch {
     await writePersistFailure(closetItemId, persistFailure).catch(() => {});
     return;
@@ -413,7 +431,11 @@ export async function analyzeClosetGarment(
     imageAnalyzer: analyzeImage,
     persistSuccess: defaultPersistSuccess,
     persistFailure: defaultPersistFailure,
-    getSignedUrl: (publicId) => buildSignedDeliveryUrl(cloudinaryConfig, publicId, null),
+    // buildPrivateDownloadUrl — the previous CDN signed-delivery mechanism
+    // built a res.cloudinary.com URL that Claude's vision API cannot fetch
+    // for private-delivery assets, and had no server-enforced expiry. This
+    // matches the fix already applied to the sibling closet-preview-analysis path.
+    getDownloadUrl: (publicId, imageFormat) => buildPrivateDownloadUrl(cloudinaryConfig, publicId, imageFormat, "private"),
   });
 }
 

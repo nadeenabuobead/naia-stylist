@@ -1,4 +1,6 @@
 // app/lib/ai/claude.server.ts
+import { captureError, captureFailure } from "../error-tracking.server.js";
+
 interface Message {
   role: "user" | "assistant";
   content: string;
@@ -9,7 +11,16 @@ interface CallAIParams {
   system?: string;
   maxTokens?: number;
   temperature?: number;
+  /** Test-only override for the fetch implementation. Defaults to global fetch. */
+  _fetch?: typeof fetch;
 }
+
+// Per-request timeout. Bounds a single Claude API call so a hung
+// connection fails fast instead of holding the serverless function open
+// indefinitely. Existing behavior on timeout is unchanged: an aborted
+// fetch rejects, which the existing try/catch below already turns into a
+// thrown Error — exactly the same path a network failure already took.
+const CLAUDE_REQUEST_TIMEOUT_MS = 30_000;
 
 /**
  * Call Claude API with messages
@@ -18,10 +29,11 @@ export async function callClaude({
   messages,
   system,
   maxTokens = 4096,
-  temperature = 1
+  temperature = 1,
+  _fetch = fetch,
 }: CallAIParams): Promise<string> {
   try {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
+    const response = await _fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -33,19 +45,20 @@ export async function callClaude({
         max_tokens: maxTokens,
         system: system || undefined,
         messages: messages
-      })
+      }),
+      signal: AbortSignal.timeout(CLAUDE_REQUEST_TIMEOUT_MS),
     });
 
     const data = await response.json();
-    
+
     if (!response.ok) {
-      console.error("Claude API Error:", { status: response.status, errorType: data?.error?.type });
+      captureFailure("claude:text", "PROVIDER_REJECTED", { httpStatus: response.status, errorType: data?.error?.type });
       throw new Error(data.error?.message || "Claude API failed");
     }
 
     return data.content[0]?.text || "";
   } catch (error) {
-    console.error("Claude API error:", error);
+    captureError("claude:text", error);
     throw error;
   }
 }
@@ -109,6 +122,7 @@ export async function analyzeImage({
   system,
   model = "claude-opus-4-7",
   signal,
+  _fetch = fetch,
 }: {
   imageUrl?: string;
   imageBase64?: string;
@@ -117,6 +131,8 @@ export async function analyzeImage({
   system?: string;
   model?: string;
   signal?: AbortSignal;
+  /** Test-only override for the fetch implementation. Defaults to global fetch. */
+  _fetch?: typeof fetch;
 }): Promise<string> {
   if (!imageUrl && !imageBase64) {
     throw new Error("analyzeImage requires imageUrl or imageBase64");
@@ -126,7 +142,15 @@ export async function analyzeImage({
     ? { type: "image", source: { type: "url", url: imageUrl } }
     : { type: "image", source: { type: "base64", media_type: mediaType, data: imageBase64! } };
 
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
+  // Combine the caller's own cancellation signal (if any) with a default
+  // request timeout, so neither capability is lost: a caller that passes
+  // its own signal keeps the ability to cancel early, and every call —
+  // signal or not — is still bounded so a hung connection can't block the
+  // request forever.
+  const timeoutSignal = AbortSignal.timeout(CLAUDE_REQUEST_TIMEOUT_MS);
+  const combinedSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+
+  const response = await _fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -145,12 +169,17 @@ export async function analyzeImage({
         ]
       }]
     }),
-    signal,
+    signal: combinedSignal,
   });
 
   const data = await response.json();
   if (!response.ok) {
-    console.error("Claude Vision API Error:", data);
+    // Previously logged the full raw response body here (`data`), which
+    // could include provider-echoed request content. Now logs only the
+    // classified httpStatus/errorType, matching the no-raw-provider-data
+    // logging discipline used elsewhere in this codebase (e.g.
+    // styleme-result.server.ts's categorizeModelError).
+    captureFailure("claude:vision", "PROVIDER_REJECTED", { httpStatus: response.status, errorType: data?.error?.type });
     throw new Error(data.error?.message || "Claude Vision API failed");
   }
   return data.content[0]?.text || "";

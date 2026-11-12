@@ -8,6 +8,10 @@ import { route, index } from "@react-router/dev/routes";
 // not application routes and must not appear in the route manifest.
 export default [
   index("routes/_index.tsx"),
+  // Phase 1 ops — minimal unauthenticated liveness check for external
+  // uptime monitors. See the route file's header for what it deliberately
+  // does not do (no DB/provider check, no env/version/stack exposure).
+  route("api/health", "routes/api.health.tsx"),
   route("onboarding/step/:step", "routes/onboarding/step.$step.tsx"),
   route("onboarding/age-confirm", "routes/onboarding.age-confirm.tsx"),
   route("onboarding/complete", "routes/onboarding/complete.tsx"),
