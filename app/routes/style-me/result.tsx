@@ -446,40 +446,35 @@ export async function loader({ request }: LoaderFunctionArgs) {
       }),
     };
 
-    // Quota guard — behind ENTITLEMENT_ENFORCEMENT flag; disabled in production until
-    // billing and upgrade flow exist. Applies to guests too: an unauthenticated
-    // visitor is treated as membershipStatus NONE (0 allowance), the same tier a
-    // real signed-up non-member gets — previously this guard only ran `&& naiaCustomer`,
-    // so a guest fell straight through to the create below with no limit at all,
-    // the one path in this codebase where the shared guest row was allowed to
-    // consume a paid-feature write unlimited times. Atomic: the count re-check and
-    // the create happen inside one Serializable transaction (reserveStyleMeSlot),
-    // so two concurrent requests from the same customer can't both pass the count
-    // before either commits — mirrors VTO's existing createOrFindTryOnJob.
-    const isEnforced = process.env.ENTITLEMENT_ENFORCEMENT === "true";
-    let stylingSession;
-    if (isEnforced) {
-      const membershipStatusForCheck = naiaCustomer?.membershipStatus ?? "NONE";
-      const reservation = await reserveStyleMeSlot(resolvedCustomerId, membershipStatusForCheck, sessionData);
-      if (!reservation.allowed) {
-        return data(
-          { isLoading: false, isAuthenticated: !!naiaCustomer, naiaModelIsReady, devTryOnEnabled, vtoEnabled,
-            isStagingProject,
-            qaExportEnabled,
-            tryOnFixtureTokens: {} as Record<string, string>, sessionId: null, mood: null,
-            currentMood: null, desiredFeeling: null, occasion: null, suggestion: null,
-            pendingState: null as "needs_passport" | "ready_to_save" | null,
-            existingOutfitFeedback: null, existingOutcome: null,
-            error: naiaCustomer
-              ? "You've used all your StyleMe sessions for this month."
-              : "Sign in or join nAia to start styling." },
-          { status: 429 },
-        );
-      }
-      stylingSession = reservation.record;
-    } else {
-      stylingSession = await prisma.stylingSession.create({ data: sessionData });
+    // Quota guard — unconditional, fail-closed (matches Closet's own
+    // unconditional enforcement; see entitlement.server.ts). Previously this
+    // was gated behind ENTITLEMENT_ENFORCEMENT === "true" with no other
+    // branch, so an unset/false flag silently skipped the check entirely —
+    // fixed 2026-11-12, see fix/stripe-clerk-phase1-security. Applies to
+    // guests too: an unauthenticated visitor is treated as membershipStatus
+    // NONE (0 allowance), the same tier a real signed-up non-member gets.
+    // Atomic: the count re-check and the create happen inside one
+    // Serializable transaction (reserveStyleMeSlot), so two concurrent
+    // requests from the same customer can't both pass the count before
+    // either commits — mirrors VTO's existing createOrFindTryOnJob.
+    const membershipStatusForCheck = naiaCustomer?.membershipStatus ?? "NONE";
+    const reservation = await reserveStyleMeSlot(resolvedCustomerId, membershipStatusForCheck, sessionData);
+    if (!reservation.allowed) {
+      return data(
+        { isLoading: false, isAuthenticated: !!naiaCustomer, naiaModelIsReady, devTryOnEnabled, vtoEnabled,
+          isStagingProject,
+          qaExportEnabled,
+          tryOnFixtureTokens: {} as Record<string, string>, sessionId: null, mood: null,
+          currentMood: null, desiredFeeling: null, occasion: null, suggestion: null,
+          pendingState: null as "needs_passport" | "ready_to_save" | null,
+          existingOutfitFeedback: null, existingOutcome: null,
+          error: naiaCustomer
+            ? "You've used all your StyleMe sessions for this month."
+            : "Sign in or join nAia to start styling." },
+        { status: 429 },
+      );
     }
+    const stylingSession = reservation.record;
 
     return data(
       {

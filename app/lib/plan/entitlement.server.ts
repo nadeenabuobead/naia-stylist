@@ -20,11 +20,14 @@
 // Callers should use checkEntitlement for display/early-exit and the reserve*
 // functions for the actual quota-consuming write.
 //
-// reserveClosetSlot, unlike the other two, is NOT behind ENTITLEMENT_ENFORCEMENT
-// — Closet capacity enforcement is unconditional by existing design (see
-// closet._index.tsx's own "immediate — no flag required" comment; it's a
-// storage cap, not a trial gate), so the atomic version is unconditional too.
-// The other two only take their atomic path once ENTITLEMENT_ENFORCEMENT is on.
+// reserveClosetSlot, reserveStyleMeSlot, reserveBuySkipSlot, and the VTO/
+// Trend-Edit checks are ALL unconditional, fail-closed enforcement — no
+// feature's quota check is gated behind an environment flag. (Until
+// 2026-11-12, four of the five were gated behind
+// ENTITLEMENT_ENFORCEMENT === "true" with no other branch, so an unset/
+// false flag silently skipped the check entirely — see
+// fix/stripe-clerk-phase1-security for the fix and
+// project_stripe_clerk_audit_2026_11_12 for how it was found.)
 //
 // Phase 2 (billing-cycle-aware windows + add-on entitlements): every
 // function below now resolves its window and allowances through
@@ -36,9 +39,9 @@
 // resolves to EXACTLY today's behaviour: the calendar-month window and the
 // bare membership allowance, no add-ons. Nothing here changes behaviour
 // until real or synthetic Subscription/BillingTransaction rows exist.
-// ENTITLEMENT_ENFORCEMENT itself is untouched — this phase only makes the
-// window/allowance CALCULATION billing-aware, it does not change which
-// features are gated behind the flag today.
+// This phase only made the window/allowance CALCULATION billing-aware; it
+// did not touch which features were enforced. See the unconditional-
+// enforcement note above for that separate, later fix.
 
 import type { MembershipStatus, Prisma, SubscriptionStatus } from "@prisma/client";
 import prisma from "~/db.server";
@@ -632,8 +635,8 @@ export async function checkEntitlement(
 // Closes the race checkEntitlement() cannot: re-verifies the monthly count and
 // performs the caller's create inside one Serializable transaction, so two
 // concurrent requests from the same customer cannot both pass the count check
-// before either commits. Only called from a route when ENTITLEMENT_ENFORCEMENT
-// is enabled — when it's off, callers keep creating directly, unchanged.
+// before either commits. Every route calls this unconditionally now — see
+// the fail-closed note at the top of this file.
 //
 // A P2002 (unique constraint — e.g. BuySkip's idempotencyKey) is NOT caught
 // here; it propagates so the caller's own existing idempotent-repeat handling
@@ -791,9 +794,10 @@ export async function reserveClosetSlot(
   _runTransaction: RunReservationFn = _runReservationTransaction,
   _contextDeps: EffectiveContextDeps = {},
 ): Promise<ReserveResult<Awaited<ReturnType<typeof prisma.closetItem.create>>>> {
-  // Closet capacity is unconditional (not behind ENTITLEMENT_ENFORCEMENT),
-  // so this now runs resolveEffectiveContext's extra subscription lookup on
-  // every closet upload — one cheap, indexed findFirst, accepted as the
+  // Closet capacity has always been unconditional (a storage cap, not a
+  // trial gate — see closet._index.tsx), so this runs
+  // resolveEffectiveContext's extra subscription lookup on every closet
+  // upload — one cheap, indexed findFirst, accepted as the
   // cost of correctly layering in cumulative Closet-expansion add-ons here.
   // A lapsed/canceled subscription falls back to the bare base allowance
   // (0 for NONE) via the same branch that drops the add-on boost — the cap
