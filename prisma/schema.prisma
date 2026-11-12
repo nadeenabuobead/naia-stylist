@@ -19,20 +19,19 @@ datasource db {
   url       = env("NAIA_DATABASE_URL")
   directUrl = env("DATABASE_URL")
 }
-
 // ============================================
 // SHOPIFY SESSION (Required for Shopify App)
 // ============================================
 
 model Session {
-  id                  String    @id
-  shop                String
-  state               String
-  isOnline            Boolean   @default(false)
-  scope               String?
-  expires             DateTime?
-  accessToken         String?
-  userId              BigInt?
+  id          String    @id
+  shop        String
+  state       String
+  isOnline    Boolean   @default(false)
+  scope       String?
+  expires     DateTime?
+  accessToken String?
+  userId      BigInt?
   firstName           String?
   lastName            String?
   email               String?
@@ -78,18 +77,18 @@ enum MembershipStatus {
 }
 
 model Customer {
-  id                         String           @id @default(cuid())
+  id                String           @id @default(cuid())
   // Nullable as of the Clerk migration (2026-11-04) — a customer created
   // through Clerk never goes through Shopify OAuth and so never gets one.
   // Every row created before this migration already has a value; nothing
   // backfills this to null retroactively.
-  shopifyCustomerId          String?          @unique
+  shopifyCustomerId String?          @unique
   // Nullable until a Customer either signs up fresh through Clerk or an
   // existing (pre-Clerk) row completes the verified identity-linking flow —
   // see IdentityLinkRequest. A Customer can exist with EITHER id populated,
   // BOTH (a linked legacy account), or (transiently, mid-migration) neither
   // on a pre-Clerk row that hasn't signed in since the cutover yet.
-  clerkUserId                String?          @unique
+  clerkUserId       String?          @unique
   // Cumulative, cross-request brute-force guard for the identity-linking
   // flow — see IdentityLinkRequest and identity-linking.server.ts's own
   // comment on why a per-request attemptCount alone is insufficient (a
@@ -97,44 +96,44 @@ model Customer {
   // disposable Clerk sign-up). Lives on Customer, the actual target, not
   // on any one (deletable) request row, so it survives across every
   // distinct clerkUserId that has ever attempted this customer's code.
-  identityLinkFailedAttempts Int              @default(0)
+  identityLinkFailedAttempts Int       @default(0)
   identityLinkLockedUntil    DateTime?
-  email                      String?          @unique
-  firstName                  String?
-  lastName                   String?
-  createdAt                  DateTime         @default(now())
-  updatedAt                  DateTime         @updatedAt
-  membershipStatus           MembershipStatus @default(NONE)
+  email             String?          @unique
+  firstName         String?
+  lastName          String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  membershipStatus  MembershipStatus @default(NONE)
 
   // Relationships
-  onboardingProfile          OnboardingProfile?
-  closetItems                ClosetItem[]
-  stylingSessions            StylingSession[]
-  buyOrSkipAnalyses          BuyOrSkipAnalysis[]
-  wardrobeInsights           WardrobeInsight[]
-  savedLooks                 SavedLook[]
-  postOutfitReviews          PostOutfitReview[]
-  confidenceScores           ConfidenceScore[]
-  trendReportViews           TrendReportView[]
-  stylingEvents              StylingEvent[]
-  sessions                   NaiaSession[]
-  naiaModel                  NaiaModel?
-  tryOnJobs                  VirtualTryOnJob[]
-  recommendationFeedback     RecommendationFeedback[]
-  selfieAnalysis             SelfieAnalysis?
-  naiaObservationFeedback    NaiaObservationFeedback[]
-  styleMemoryOutcomes        StyleMeOutcome[]
-  tasteEvidence              TasteEvidence[]
-  styleTendencies            StyleTendency[]
-  wardrobeSnapshots          WardrobeSnapshot[]
+  onboardingProfile   OnboardingProfile?
+  closetItems         ClosetItem[]
+  stylingSessions     StylingSession[]
+  buyOrSkipAnalyses   BuyOrSkipAnalysis[]
+  wardrobeInsights    WardrobeInsight[]
+  savedLooks          SavedLook[]
+  postOutfitReviews   PostOutfitReview[]
+  confidenceScores    ConfidenceScore[]
+  trendReportViews    TrendReportView[]
+  stylingEvents       StylingEvent[]
+  sessions               NaiaSession[]
+  naiaModel              NaiaModel?
+  tryOnJobs              VirtualTryOnJob[]
+  recommendationFeedback RecommendationFeedback[]
+  selfieAnalysis         SelfieAnalysis?
+  naiaObservationFeedback NaiaObservationFeedback[]
+  styleMemoryOutcomes     StyleMeOutcome[]
+  tasteEvidence           TasteEvidence[]
+  styleTendencies         StyleTendency[]
+  wardrobeSnapshots       WardrobeSnapshot[]
   personalisedTrendEditUsage PersonalisedTrendEditUsage[]
   // Billing — Phase 1 (schema only, no activation, no payment collection).
   // No new scalar field added to Customer itself: provider customer/
   // subscription identifiers live on Subscription/BillingTransaction, not
   // here. This is deliberate, not an oversight — see Subscription's own
   // comment for why.
-  subscriptions              Subscription[]
-  billingTransactions        BillingTransaction[]
+  subscriptions       Subscription[]
+  billingTransactions BillingTransaction[]
 
   // Clerk migration (2026-11-04) — pending, unconfirmed claims against this
   // row from a NEW Clerk identity whose sign-up email matched. See
@@ -162,7 +161,7 @@ model Customer {
   // check/record functions a UX decision can wire in once placement is
   // decided. Presence of ageConfirmedAt is the "yes" signal; absence is
   // simply "not asked/confirmed yet", same shape as designResearchConsentAt.
-  ageConfirmedAt         DateTime?
+  ageConfirmedAt      DateTime?
   /// Which wording/minimum-age policy was agreed to. A new version requires asking again.
   ageConfirmationVersion String?
 
@@ -197,7 +196,7 @@ enum AccountType {
 // then, the new Clerk identity has no Customer row of its own and cannot
 // read or write any nAia data; it exists only to hold this one pending claim.
 model IdentityLinkRequest {
-  id         String   @id @default(cuid())
+  id         String  @id @default(cuid())
   customerId String
   customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
@@ -319,25 +318,25 @@ model WardrobeSnapshot {
 
 enum SubscriptionStatus {
   INCOMPLETE // Checkout started, no confirmed payment yet. Customer.membershipStatus
-  // MUST stay NONE for a subscription in this state — activation is gated
-  // on a payment-confirmation webhook, never on checkout/session creation.
+             // MUST stay NONE for a subscription in this state — activation is gated
+             // on a payment-confirmation webhook, never on checkout/session creation.
   ACTIVE
-  PAST_DUE // A renewal payment failed; access is retained during the approved
-  // 7-day grace period (coordinated with the provider's own retry
-  // schedule) before falling through to EXPIRED.
-  CANCELED // Customer-initiated. Per product decision, access is retained until
-  // currentPeriodEnd — cancellation sets cancelAtPeriodEnd immediately,
-  // but status only moves to CANCELED once the provider confirms the
-  // subscription has actually ended.
-  EXPIRED // PAST_DUE grace period exhausted with no resolution, or a non-renewed
-  // subscription's period has simply ended.
+  PAST_DUE   // A renewal payment failed; access is retained during the approved
+             // 7-day grace period (coordinated with the provider's own retry
+             // schedule) before falling through to EXPIRED.
+  CANCELED   // Customer-initiated. Per product decision, access is retained until
+             // currentPeriodEnd — cancellation sets cancelAtPeriodEnd immediately,
+             // but status only moves to CANCELED once the provider confirms the
+             // subscription has actually ended.
+  EXPIRED    // PAST_DUE grace period exhausted with no resolution, or a non-renewed
+             // subscription's period has simply ended.
 }
 
 enum BillingPlanType {
   MONTHLY
   ANNUAL // Pays once for 12 months; usage still resets on a monthly cadence
-  // anchored to the subscription's own start date, not the calendar
-  // month and not the full annual period — see usage-window design.
+         // anchored to the subscription's own start date, not the calendar
+         // month and not the full annual period — see usage-window design.
 }
 
 // One row per subscription object's current lifecycle state — mutated in
@@ -360,12 +359,12 @@ model Subscription {
   // retaining what the law requires) rather than silently cascading away
   // financial records or silently blocking erasure for everyone. See the
   // module header above re: the still-separate Phase 2 privacy branch.
-  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
 
   status   SubscriptionStatus
   planType BillingPlanType
 
-  provider               String // "stripe" — named explicitly; not assumed to be the only provider forever.
+  provider               String  // "stripe" — named explicitly; not assumed to be the only provider forever.
   providerCustomerId     String? // Null until the provider-side customer object exists (created at first checkout).
   providerSubscriptionId String? @unique // Null until the provider confirms the subscription object.
 
@@ -443,7 +442,7 @@ model BillingTransaction {
   // record retention law and reconciliation require; it must survive a
   // customer-erasure flow or that flow must be updated to handle it
   // deliberately, never cascade through it silently.
-  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
 
   // Required, not nullable: every transaction type this model records
   // (initial payment, renewal, refund, every add-on kind) happens in the
@@ -461,7 +460,7 @@ model BillingTransaction {
   type   BillingTransactionType
   status BillingTransactionStatus
 
-  amount   Int // Minor currency units (fils) — avoids float rounding on money. AED 39.00 = 3900.
+  amount   Int    // Minor currency units (fils) — avoids float rounding on money. AED 39.00 = 3900.
   currency String @default("AED")
 
   provider              String
@@ -491,6 +490,18 @@ model BillingTransaction {
   @@index([customerId])
   @@index([subscriptionId])
 }
+
+// Idempotency ledger for provider webhook deliveries. Deliberately NOT a
+// Prisma relation to Customer: this is an operational log, not customer
+// data — some events may never resolve to a known customer (malformed or
+// unexpected payloads), and this table must never block, or be affected by,
+// customer erasure. The (provider, providerEventId) unique constraint is
+// what makes processing idempotent: inserting this row and applying the
+// event's side effects in the same transaction means a redelivered event
+// either never gets this far (unique violation) or is a no-op in practice —
+// the same pattern already used for the Shopify privacy-webhook and
+// StyleMe/BuySkip/Closet quota-reservation idempotency elsewhere in this
+// codebase, applied here to billing.
 
 // Closes a genuine concurrency gap the pre-existing "does a non-terminal
 // Subscription row already exist" check (api.billing-checkout.tsx) cannot:
@@ -532,17 +543,6 @@ model CheckoutReservation {
   expiresAt DateTime
 }
 
-// Idempotency ledger for provider webhook deliveries. Deliberately NOT a
-// Prisma relation to Customer: this is an operational log, not customer
-// data — some events may never resolve to a known customer (malformed or
-// unexpected payloads), and this table must never block, or be affected by,
-// customer erasure. The (provider, providerEventId) unique constraint is
-// what makes processing idempotent: inserting this row and applying the
-// event's side effects in the same transaction means a redelivered event
-// either never gets this far (unique violation) or is a no-op in practice —
-// the same pattern already used for the Shopify privacy-webhook and
-// StyleMe/BuySkip/Closet quota-reservation idempotency elsewhere in this
-// codebase, applied here to billing.
 model ProcessedWebhookEvent {
   id              String   @id @default(cuid())
   provider        String
@@ -551,8 +551,8 @@ model ProcessedWebhookEvent {
   // The provider's own event timestamp — distinct from processedAt (our
   // local processing time). Compared against Subscription.providerSyncedAt
   // to reject a stale, out-of-order redelivery rather than apply it blindly.
-  eventCreatedAt  DateTime
-  processedAt     DateTime @default(now())
+  eventCreatedAt DateTime
+  processedAt    DateTime @default(now())
 
   // Loose reference only — see the no-relation rationale above.
   customerId String?
@@ -576,83 +576,83 @@ model OnboardingProfile {
   completed  Boolean  @default(false)
 
   // Style Identity
-  stylePersonalities String[] // e.g., ["classic", "romantic", "edgy"]
-  styleIcons         String[] // People whose style she admires
-  favoriteColors     String[]
-  avoidColors        String[]
+  stylePersonalities  String[]  // e.g., ["classic", "romantic", "edgy"]
+  styleIcons          String[]  // People whose style she admires
+  favoriteColors      String[]
+  avoidColors         String[]
 
   // Lifestyle & Context
-  lifestyle  String[] @default([])
-  dressesFor String[] // e.g., ["work meetings", "date nights", "school runs"]
-  typicalDay String? // Description of her typical day
+  lifestyle           String[]  @default([])
+  dressesFor          String[]  // e.g., ["work meetings", "date nights", "school runs"]
+  typicalDay          String?   // Description of her typical day
 
   // Emotional & Aspirational
-  currentMood        String? // How she feels about her style now
-  desiredFeeling     String? // How she wants to feel when dressed
-  confidenceBlockers String[] // What holds her back
-  styleStruggles     String[] // e.g., ["finding right fit", "mixing patterns", "accessorizing"]
+  currentMood         String?   // How she feels about her style now
+  desiredFeeling      String?   // How she wants to feel when dressed
+  confidenceBlockers  String[]  // What holds her back
+  styleStruggles      String[]  // e.g., ["finding right fit", "mixing patterns", "accessorizing"]
 
   // Preferences
-  comfortLevel   Int? // 1-10 scale for fashion risk
-  budgetRange    String? // e.g., "moderate", "investment pieces", "mix"
-  shoppingHabits String? // How she currently shops
-  helpWantedMost String? // Primary thing she wants help with
+  comfortLevel        Int?      // 1-10 scale for fashion risk
+  budgetRange         String?   // e.g., "moderate", "investment pieces", "mix"
+  shoppingHabits      String?   // How she currently shops
+  helpWantedMost      String?   // Primary thing she wants help with
 
   // Body & Fit (optional, sensitive)
-  bodyFocusAreas String[] // Areas she wants to highlight
-  bodyAvoidAreas String[] // Areas she prefers to minimize
-  fitPreferences String[] // e.g., ["loose tops", "high-waisted", "midi length"]
+  bodyFocusAreas      String[]  // Areas she wants to highlight
+  bodyAvoidAreas      String[]  // Areas she prefers to minimize
+  fitPreferences      String[]  // e.g., ["loose tops", "high-waisted", "midi length"]
 
   // Size Information
-  topSize    String?
-  bottomSize String?
-  dressSize  String?
-  shoeSize   String?
+  topSize             String?
+  bottomSize          String?
+  dressSize           String?
+  shoeSize            String?
 
   // Passport Lite v1 — quiz answers
-  desiredImpression String[] @default([])
-  desiredFeelings   String[] @default([])
-  becoming          String[] @default([])
-  styleSupport      String[] @default([])
-  finalNotes        String?
+  desiredImpression   String[]  @default([])
+  desiredFeelings     String[]  @default([])
+  becoming            String[]  @default([])
+  styleSupport        String[]  @default([])
+  finalNotes          String?
 
   // Passport V2-B1 — shape, colour & shopping context (persist-only in B1)
-  silhouette          String[] @default([])
-  structure           String?
-  coveragePreferences String[] @default([])
-  neutralVsColour     String?
-  colourIntensity     String?
-  printAppetite       String?
-  shoppingPriorities  String[] @default([])
-  trendAppetite       String?
+  silhouette           String[]  @default([])
+  structure            String?
+  coveragePreferences  String[]  @default([])
+  neutralVsColour      String?
+  colourIntensity      String?
+  printAppetite        String?
+  shoppingPriorities   String[]  @default([])
+  trendAppetite        String?
 
   // Passport V2-D — complete sizing, measurements, and body fit
-  sizingSystem      String?
-  shoeSizingSystem  String? // V2-F: independent shoe sizing (uk/us/eu/other)
-  height            String?
-  bodyShape         String?
-  bustMeasurement   String?
-  waistMeasurement  String?
-  hipMeasurement    String?
-  measurementUnit   String?
-  preferredCoverage String?
-  fitConcerns       String[] @default([])
+  sizingSystem         String?
+  shoeSizingSystem     String?   // V2-F: independent shoe sizing (uk/us/eu/other)
+  height               String?
+  bodyShape            String?
+  bustMeasurement      String?
+  waistMeasurement     String?
+  hipMeasurement       String?
+  measurementUnit      String?
+  preferredCoverage    String?
+  fitConcerns          String[]  @default([])
 
   // Passport Rev 6 — new fields (additive; no legacy data removed)
-  currentGoal           String[] @default([]) // mutable context; never scored
-  successfulOutfitGives String[] @default([]) // standing; future Style Memory
-  dressingPreferences   String[] @default([]) // feeds Group 2 hard-exclusion engine
-  fitConcernsNote       String? // free-text "other" from fit screen
-  profileVersion        Int? // null=legacy; 6=Rev 6; 7=Rev 7 confirmed
+  currentGoal           String[]  @default([])   // mutable context; never scored
+  successfulOutfitGives String[]  @default([])   // standing; future Style Memory
+  dressingPreferences   String[]  @default([])   // feeds Group 2 hard-exclusion engine
+  fitConcernsNote       String?                   // free-text "other" from fit screen
+  profileVersion        Int?                      // null=legacy; 6=Rev 6; 7=Rev 7 confirmed
 
   // Passport Rev 7 — new fields (additive; no legacy data removed or rewritten).
   // stylePersonalities above is retained as read-only legacy data: the Rev 7 flow
   // never writes it. styleDirections is the canonical Rev 7 style field.
-  styleExpression          String[] @default([]) // what the user wants clothes to communicate
-  explorationLevel         String? // how far nAia should move beyond familiar
-  styleDirections          String[] @default([]) // visual aesthetics the user is drawn to
-  dressingHabits           String[] @default([]) // behavioural context; never scored
-  dressingRequirementsNote String? // free-text cultural/religious requirement
+  styleExpression          String[]  @default([])  // what the user wants clothes to communicate
+  explorationLevel         String?                  // how far nAia should move beyond familiar
+  styleDirections          String[]  @default([])  // visual aesthetics the user is drawn to
+  dressingHabits           String[]  @default([])  // behavioural context; never scored
+  dressingRequirementsNote String?                  // free-text cultural/religious requirement
 
   // About You — contextual profile information (not used to infer style/recommendations)
   ageRange              String?
@@ -673,71 +673,71 @@ model OnboardingProfile {
 // ============================================
 
 model ClosetItem {
-  id         String   @id @default(cuid())
-  customerId String
-  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id          String   @id @default(cuid())
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   // Basic Info
-  name         String?
-  imageUrl     String? // Nullable — null for new private-upload records; kept for legacy
+  name        String?
+  imageUrl    String?          // Nullable — null for new private-upload records; kept for legacy
   thumbnailUrl String?
 
   // Private Cloudinary asset reference (replaces public imageUrl for new items)
-  imagePublicId String? // naia-wardrobe/{customerId}/...
-  imageFormat   String? // Format for signed URL generation (jpg, png, webp, heic)
+  imagePublicId String?        // naia-wardrobe/{customerId}/...
+  imageFormat   String?        // Format for signed URL generation (jpg, png, webp, heic)
 
   // Categorization
   category    ClosetCategory
-  subcategory String? // e.g., "blouse", "t-shirt", "blazer"
-
+  subcategory String?        // e.g., "blouse", "t-shirt", "blazer"
+  
   // Attributes
-  colors       String[] // Detected/entered colors
-  primaryColor String? // Main color
-  pattern      String? // e.g., "solid", "floral", "stripes", "plaid"
-  material     String? // e.g., "cotton", "silk", "denim", "wool"
-
+  colors      String[]       // Detected/entered colors
+  primaryColor String?       // Main color
+  pattern     String?        // e.g., "solid", "floral", "stripes", "plaid"
+  material    String?        // e.g., "cotton", "silk", "denim", "wool"
+  
   // Style Tags
-  styleTags String[] // e.g., ["casual", "formal", "date night"]
-  seasons   String[] // e.g., ["spring", "summer", "fall", "winter"]
-  occasions String[] // e.g., ["work", "weekend", "evening"]
-
+  styleTags   String[]       // e.g., ["casual", "formal", "date night"]
+  seasons     String[]       // e.g., ["spring", "summer", "fall", "winter"]
+  occasions   String[]       // e.g., ["work", "weekend", "evening"]
+  
   // Metadata
-  brand         String?
-  purchaseDate  DateTime?
+  brand       String?
+  purchaseDate DateTime?
   purchasePrice Float?
-
+  
   // Usage Tracking
-  timesWorn Int       @default(0)
-  lastWorn  DateTime?
-  favorite  Boolean   @default(false)
-
+  timesWorn   Int      @default(0)
+  lastWorn    DateTime?
+  favorite    Boolean  @default(false)
+  
   // AI Analysis (legacy)
-  aiDescription String? // AI-generated description
-  aiStyleNotes  String? // AI notes about styling this piece
+  aiDescription String?      // AI-generated description
+  aiStyleNotes  String?      // AI notes about styling this piece
 
   // Garment Intelligence — Group 3B (migration 20260828000000_closet_garment_intelligence)
   analysisStatus        String    @default("not_analyzed") // not_analyzed | pending | ready | failed
   analyzedAt            DateTime?
   analysisSchemaVersion String?
   // Tier 2 — observable attributes (Group 2 dressing vocab reused for coverage fields)
-  silhouette            String? // GarmentSilhouette token
-  fitProfile            String? // FitProfile token (Group 2 vocab)
-  hemLength             String? // HemLength token (Group 2 vocab); "n/a" for tops
-  topLength             String? // TopLength token (Group 2 vocab); "n/a" for bottoms/dresses
-  sleeveLength          String? // SleeveLength token (Group 2 vocab); "n/a" when not applicable
-  necklineCoverage      String? // NecklineCoverage token (Group 2 vocab); null if not visible
+  silhouette            String?   // GarmentSilhouette token
+  fitProfile            String?   // FitProfile token (Group 2 vocab)
+  hemLength             String?   // HemLength token (Group 2 vocab); "n/a" for tops
+  topLength             String?   // TopLength token (Group 2 vocab); "n/a" for bottoms/dresses
+  sleeveLength          String?   // SleeveLength token (Group 2 vocab); "n/a" when not applicable
+  necklineCoverage      String?   // NecklineCoverage token (Group 2 vocab); null if not visible
   shoulderCoverage      Boolean?
   midriffExposed        Boolean?
-  waistShape            String? // GarmentWaistShape token
+  waistShape            String?   // GarmentWaistShape token
   // Tier 3 — matching signals (all vocabulary-normalized; never raw AI strings)
-  formality             String? // GarmentFormality token
-  stylePersonality      String? // single V3 archetype token or null
-  fieldConfidence       Json? // GarmentFieldConfidence partial record
+  formality             String?   // GarmentFormality token
+  stylePersonality      String?   // single V3 archetype token or null
+  fieldConfidence       Json?     // GarmentFieldConfidence partial record
 
   // Try-On Eligibility (Phase 4A6 — migration 20260717000000)
-  tryOnEligibility  String? // ready-for-try-on | needs-clearer-photo | not-supported | pending-assessment | null
+  tryOnEligibility  String?   // ready-for-try-on | needs-clearer-photo | not-supported | pending-assessment | null
   tryOnAssessedAt   DateTime?
   tryOnCustomerHint String?
   tryOnInternalNote String?
@@ -745,11 +745,11 @@ model ClosetItem {
   // Garment Relationship — First nAia Read group (migration 20260830000000)
   // Customer-stated relationship to this piece (not inferred by AI).
   // Multi-select, max 2. See GARMENT_RELATIONSHIP_IDS in first-naia-read.ts.
-  garmentRelationships String[] @default([])
+  garmentRelationships  String[]  @default([])
 
   // Customer note — optional free-text signal (migration 20260904000000)
   // Anything the customer wants nAia to know: fit quirks, wear context, styling notes.
-  customerNote String?
+  customerNote          String?
 
   // ── Photo consent (2026-10-19) ─────────────────────────────────────────────
   //
@@ -762,7 +762,7 @@ model ClosetItem {
   photoConsentVersion String?
 
   // Relationships
-  outfitItems            OutfitItem[]
+  outfitItems   OutfitItem[]
   savedLookItems         SavedLookItem[]
   recommendationFeedback RecommendationFeedback[]
   analysisSnapshots      ClosetItemAnalysisSnapshot[]
@@ -790,10 +790,10 @@ enum ClosetCategory {
 // ============================================
 
 model StylingSession {
-  id         String   @id @default(cuid())
-  customerId String
-  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  createdAt  DateTime @default(now())
+  id          String   @id @default(cuid())
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
 
   // Continuation lineage — set when this session was started via Adjust Vibe.
   // null = root StyleMe (counts toward quota).
@@ -805,44 +805,44 @@ model StylingSession {
   continuations   StylingSession[] @relation("SessionContinuation")
 
   // Input Context
-  currentMood          String? // How she's feeling now
-  desiredFeeling       String? // How she wants to feel
-  occasion             String? // Where she's going
-  bodyNeeds            String[] @default([]) // Normalized body-need IDs from comfort step
-  formalityConditional String? // Conditional formality answer from occasion step (nullable — not all occasions show it)
-  practicalIds         String[] @default([]) // Practical-today signal IDs from comfort step
-  specificNeeds        String? // Any specific requirements
-  bodyPreference       String? // Body fit preferences
-  styleDNA             String? // Style DNA preferences (JSON array)
+  currentMood     String?   // How she's feeling now
+  desiredFeeling  String?   // How she wants to feel
+  occasion        String?   // Where she's going
+  bodyNeeds       String[]  @default([])  // Normalized body-need IDs from comfort step
+  formalityConditional String?  // Conditional formality answer from occasion step (nullable — not all occasions show it)
+  practicalIds    String[]  @default([])  // Practical-today signal IDs from comfort step
+  specificNeeds   String?   // Any specific requirements
+  bodyPreference  String?   // Body fit preferences
+  styleDNA        String?   // Style DNA preferences (JSON array)
 
   // Rev 3 — Psychology-First StyleMe (Group 5)
-  state      String? // Rev 3 state answer ID (wording context only)
-  intentions String[] @default([]) // Rev 3 intention answer IDs (up to 2)
+  state           String?        // Rev 3 state answer ID (wording context only)
+  intentions      String[]  @default([])  // Rev 3 intention answer IDs (up to 2)
 
   // Source Selection
-  styleFrom        StyleSource       @default(BOTH)
-  closetAnchorId   String? // ClosetItem ID selected for CLOSET/BOTH sources; null for NAIA
-  anchorProvenance AnchorProvenance? // null = historical, treated as MANUAL
+  styleFrom       StyleSource @default(BOTH)
+  closetAnchorId  String?     // ClosetItem ID selected for CLOSET/BOTH sources; null for NAIA
+  anchorProvenance AnchorProvenance?  // null = historical, treated as MANUAL
 
   // Weather/Context
-  weather   String?
-  timeOfDay String? // morning, afternoon, evening
+  weather         String?
+  timeOfDay       String?   // morning, afternoon, evening
 
   // Product context this session was generated in: "naia" (closet-only) or "nadine"
   // (closet + eligible NADINE pieces). Nullable because every row written before this
   // column existed has none — resolveStyleMeMode falls back to the cookie, then to "naia".
   // Persisted because the cookie is a statement about a browser, not about the session:
   // once it expired, a NADINE session silently became an nAia one on reload.
-  styleMeMode String?
+  styleMeMode     String?
 
   // Output
-  suggestions OutfitSuggestion[]
+  suggestions     OutfitSuggestion[]
 
   // Selected Suggestion
   selectedSuggestionId String?
 
   // Follow-up
-  review                 PostOutfitReview?
+  review          PostOutfitReview?
   events                 StylingEvent[]
   recommendationFeedback RecommendationFeedback[]
   adminReview            StylingSessionAdminReview?
@@ -854,9 +854,9 @@ model StylingSession {
 }
 
 enum StyleSource {
-  CLOSET // Only from her wardrobe
-  NAIA // Only from nAia store
-  BOTH // Mix of both
+  CLOSET      // Only from her wardrobe
+  NAIA        // Only from nAia store
+  BOTH        // Mix of both
 }
 
 // Who chose the anchor garment. Decides whether "New Look, Same Vibe" may move the
@@ -864,69 +864,69 @@ enum StyleSource {
 // part of the brief. Nullable — historical rows predate this and are read as MANUAL, the
 // conservative default, because silently replacing a garment she chose is the worse failure.
 enum AnchorProvenance {
-  AUTO // autoSelectClosetAnchor picked it ("nAia chooses")
-  MANUAL // the customer picked it (Style This Piece / manual closet selection)
+  AUTO        // autoSelectClosetAnchor picked it ("nAia chooses")
+  MANUAL      // the customer picked it (Style This Piece / manual closet selection)
 }
 
 model OutfitSuggestion {
-  id        String         @id @default(cuid())
-  sessionId String
-  session   StylingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  createdAt DateTime       @default(now())
-  status    String?        @default("PENDING")
+  id                String         @id @default(cuid())
+  sessionId         String
+  session           StylingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  createdAt         DateTime       @default(now())
+  status            String?        @default("PENDING")
 
   // Input Context
-
+  
   // Outfit Components
-  items OutfitItem[]
-
+  items             OutfitItem[]
+  
   // Complete Look Recommendations
-  perfumeRec     String? // Perfume recommendation
-  perfumeNotes   String? // Why this perfume
-  hairstyleRec   String? // Hairstyle suggestion
-  hairstyleNotes String? // Styling tips
-  makeupVibeRec  String? // Makeup vibe
-  makeupNotes    String? // Application tips
-
+  perfumeRec        String?        // Perfume recommendation
+  perfumeNotes      String?        // Why this perfume
+  hairstyleRec      String?        // Hairstyle suggestion
+  hairstyleNotes    String?        // Styling tips
+  makeupVibeRec     String?        // Makeup vibe
+  makeupNotes       String?        // Application tips
+  
   // Mood Enhancement
-  songRec         String? // Song/playlist recommendation
-  songArtist      String?
-  moodDescription String? // Overall mood/vibe description
-
+  songRec           String?        // Song/playlist recommendation
+  songArtist        String?
+  moodDescription   String?        // Overall mood/vibe description
+  
   // AI Explanation
-  outfitName      String?
-  heroImageUrl    String?
-  whyThisWorks    String? // AI explanation of the outfit
-  confidenceBoost String? // How this will make her feel
-
+  outfitName        String?
+  heroImageUrl      String?
+  whyThisWorks      String?        // AI explanation of the outfit
+  confidenceBoost   String?        // How this will make her feel
+  
   // User Interaction
-  selected               Boolean                  @default(false)
-  savedAsLook            Boolean                  @default(false)
+  selected          Boolean        @default(false)
+  savedAsLook            Boolean        @default(false)
   recommendationFeedback RecommendationFeedback[]
   outcome                StyleMeOutcome?
 }
 
 model OutfitItem {
-  id           String           @id @default(cuid())
-  suggestionId String
-  suggestion   OutfitSuggestion @relation(fields: [suggestionId], references: [id], onDelete: Cascade)
-
+  id              String           @id @default(cuid())
+  suggestionId    String
+  suggestion      OutfitSuggestion @relation(fields: [suggestionId], references: [id], onDelete: Cascade)
+  
   // Item Type
-  itemType OutfitItemType
-
+  itemType        OutfitItemType
+  
   // Source (either closet item OR nAia product)
-  closetItemId String?
-  closetItem   ClosetItem? @relation(fields: [closetItemId], references: [id])
-
+  closetItemId    String?
+  closetItem      ClosetItem?      @relation(fields: [closetItemId], references: [id])
+  
   // If from nAia store
-  shopifyProductId String?
-  productTitle     String?
-  productImageUrl  String?
-  productPrice     Float?
-  productUrl       String?
-
+  shopifyProductId  String?
+  productTitle      String?
+  productImageUrl   String?
+  productPrice      Float?
+  productUrl        String?
+  
   // Styling Notes
-  stylingNotes String? // How to wear this piece
+  stylingNotes    String?          // How to wear this piece
 }
 
 enum OutfitItemType {
@@ -945,15 +945,15 @@ enum OutfitItemType {
 // ============================================
 
 model BuyOrSkipAnalysis {
-  id         String   @id @default(cuid())
-  customerId String
-  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  createdAt  DateTime @default(now())
+  id          String   @id @default(cuid())
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
 
   // Input
-  imageUrl     String? // Uploaded image
-  productUrl   String? // Link to product
-  productName  String?
+  imageUrl    String?          // Uploaded image
+  productUrl  String?          // Link to product
+  productName String?
   productPrice Float?
 
   // Forward-compatible NADINE catalog identity. Nullable, additive — no
@@ -969,28 +969,28 @@ model BuyOrSkipAnalysis {
   catalogHandle String?
 
   // AI Analysis Result
-  verdict   BuySkipVerdict
-  reasoning String // Detailed explanation
-
+  verdict     BuySkipVerdict
+  reasoning   String           // Detailed explanation
+  
   // Compatibility Analysis
-  worksWithWardrobe Boolean?
-  wardrobeMatches   String[] // Items it would go with
-  hasSimilar        Boolean?
-  similarItems      String[] // Similar items she already owns
-
+  worksWithWardrobe   Boolean?
+  wardrobeMatches     String[] // Items it would go with
+  hasSimilar          Boolean?
+  similarItems        String[] // Similar items she already owns
+  
   // Style Fit
-  fitsHerStyle Boolean?
-  styleNotes   String?
-
+  fitsHerStyle        Boolean?
+  styleNotes          String?
+  
   // Recommendations
-  alternatives String? // Alternative suggestions
-  stylingIdeas String? // How she could wear it
-
+  alternatives        String?  // Alternative suggestions
+  stylingIdeas        String?  // How she could wear it
+  
   // User Action
-  userDecision String? // What she ended up doing
+  userDecision        String?  // What she ended up doing
 
   // Batch 1 — event lineage
-  sessionId     String? // Optional link to active StylingSession at time of analysis
+  sessionId     String?  // Optional link to active StylingSession at time of analysis
   source        String   @default("buy-or-skip")
   schemaVersion String   @default("1.0")
   updatedAt     DateTime @updatedAt
@@ -999,26 +999,26 @@ model BuyOrSkipAnalysis {
   idempotencyKey String? @unique
 
   // Batch 3 — rich persistence for dedicated result page
-  confidence   Int? // AI confidence 0–100
-  category     String? // Item category from Step 2
-  colors       String[] // Colors from Step 2
-  forOccasion  String? // Step 2: what are you considering it for
-  whatLike     String? // Step 2: what do you like about it
-  unsureAbout  String? // Step 2: what are you unsure about
-  colorNote    String? // Step 2: which colour
-  itemSize     String? // Step 2: which size
-  fullAnalysis Json? // Complete AI result blob (pairings, occasions, naiaMatch, detailedAnalysis, styleDNAMatch, fillsGap)
+  confidence    Int?     // AI confidence 0–100
+  category      String?  // Item category from Step 2
+  colors        String[] // Colors from Step 2
+  forOccasion   String?  // Step 2: what are you considering it for
+  whatLike      String?  // Step 2: what do you like about it
+  unsureAbout   String?  // Step 2: what are you unsure about
+  colorNote     String?  // Step 2: which colour
+  itemSize      String?  // Step 2: which size
+  fullAnalysis  Json?    // Complete AI result blob (pairings, occasions, naiaMatch, detailedAnalysis, styleDNAMatch, fillsGap)
 
   // S0 — private Cloudinary asset reference (replaces public imageUrl for new analyses)
-  imagePublicId String? // Cloudinary public ID (naia-wardrobe/{customerId}/...)
-  imageFormat   String? // Format stored for signed URL generation (jpg, png, webp, heic)
+  imagePublicId String?  // Cloudinary public ID (naia-wardrobe/{customerId}/...)
+  imageFormat   String?  // Format stored for signed URL generation (jpg, png, webp, heic)
 
   // Photo consent (2026-10-19) — same status as ClosetItem's pair above:
   // fields only, not yet enforced. See photo-consent.server.ts.
   photoConsentAt      DateTime?
   photoConsentVersion String?
 
-  outcome BuySkipOutcome?
+  outcome       BuySkipOutcome?
 }
 
 // Customer-reported outcome for one BuyOrSkipAnalysis.
@@ -1061,39 +1061,39 @@ model WardrobeInsight {
   customerId  String
   customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
   generatedAt DateTime @default(now())
-
+  
   // Overview Stats
   totalItems      Int
-  itemsByCategory Json // { "TOPS": 15, "BOTTOMS": 8, ... }
-
+  itemsByCategory Json     // { "TOPS": 15, "BOTTOMS": 8, ... }
+  
   // Color Analysis
-  colorDistribution Json // { "black": 25, "white": 15, "navy": 10, ... }
-  dominantColors    String[]
-  missingColors     String[]
-  colorPaletteType  String? // e.g., "neutral-heavy", "colorful", "monochromatic"
-
+  colorDistribution   Json     // { "black": 25, "white": 15, "navy": 10, ... }
+  dominantColors      String[]
+  missingColors       String[]
+  colorPaletteType    String?  // e.g., "neutral-heavy", "colorful", "monochromatic"
+  
   // Style Analysis
-  styleDistribution Json // { "casual": 40, "formal": 20, ... }
-  dominantStyles    String[]
-
+  styleDistribution   Json     // { "casual": 40, "formal": 20, ... }
+  dominantStyles      String[]
+  
   // Gap Analysis
-  missingEssentials String[] // Key pieces she's missing
-  overrepresented   String[] // Categories with too many items
-  underrepresented  String[] // Categories needing more
-
+  missingEssentials   String[] // Key pieces she's missing
+  overrepresented     String[] // Categories with too many items
+  underrepresented    String[] // Categories needing more
+  
   // Usage Insights
-  mostWorn      String[] // Item IDs most worn
-  neverWorn     String[] // Items never worn
-  underutilized String[] // Items worn less than expected
-
+  mostWorn            String[] // Item IDs most worn
+  neverWorn           String[] // Items never worn
+  underutilized       String[] // Items worn less than expected
+  
   // Recommendations
-  nextPurchases    Json // Prioritized shopping list
-  outfitPotential  Int? // Number of potential outfits
-  versatilityScore Int? // 1-100 wardrobe versatility
-
+  nextPurchases       Json     // Prioritized shopping list
+  outfitPotential     Int?     // Number of potential outfits
+  versatilityScore    Int?     // 1-100 wardrobe versatility
+  
   // Personalized Notes
-  aiSummary         String? // Overall wardrobe assessment
-  seasonalReadiness Json? // Readiness by season
+  aiSummary           String?  // Overall wardrobe assessment
+  seasonalReadiness   Json?    // Readiness by season
 }
 
 // ============================================
@@ -1101,45 +1101,45 @@ model WardrobeInsight {
 // ============================================
 
 model SavedLook {
-  id         String   @id @default(cuid())
-  customerId String
-  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  createdAt  DateTime @default(now())
-
+  id          String   @id @default(cuid())
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  
   // Look Info
-  name     String?
-  occasion String?
-  notes    String?
-
+  name        String?
+  occasion    String?
+  notes       String?
+  
   // Source
-  fromSuggestionId String? // If saved from a styling session
-
+  fromSuggestionId String?    // If saved from a styling session
+  
   // Items
-  items SavedLookItem[]
-
+  items       SavedLookItem[]
+  
   // Complete Look Details
-  perfumeRec    String?
-  hairstyleRec  String?
-  makeupVibeRec String?
-  songRec       String?
-
+  perfumeRec      String?
+  hairstyleRec    String?
+  makeupVibeRec   String?
+  songRec         String?
+  
   // Usage
-  timesWorn Int       @default(0)
-  lastWorn  DateTime?
+  timesWorn   Int      @default(0)
+  lastWorn    DateTime?
 }
 
 model SavedLookItem {
   id          String    @id @default(cuid())
   savedLookId String
   savedLook   SavedLook @relation(fields: [savedLookId], references: [id], onDelete: Cascade)
-
-  itemType OutfitItemType
-
+  
+  itemType    OutfitItemType
+  
   // Either closet item or nAia product
-  closetItemId     String?
-  closetItem       ClosetItem? @relation(fields: [closetItemId], references: [id])
-  shopifyProductId String?
-  productImageUrl  String?
+  closetItemId      String?
+  closetItem        ClosetItem? @relation(fields: [closetItemId], references: [id])
+  shopifyProductId  String?
+  productImageUrl   String?
 }
 
 // ============================================
@@ -1147,45 +1147,46 @@ model SavedLookItem {
 // ============================================
 
 model PostOutfitReview {
-  id         String         @id @default(cuid())
-  customerId String
-  sessionId  String         @unique
-  session    StylingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  customer   Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  createdAt  DateTime       @default(now())
-
+  id          String   @id @default(cuid())
+  customerId  String
+  sessionId   String   @unique
+  session     StylingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  
   // Core Feedback
-  overallFeeling         Int? // 1-5 scale
-  feltLikeHer            String? // Yes/Somewhat/No
-  desiredFeelingAchieved String? // Yes/Partly/No
-  wouldWearAgain         String? // Definitely/Maybe/Probably not
-  physicallyComfortable  String? // Comfortable/Mostly comfortable/Not comfortable
-
+  overallFeeling           Int?      // 1-5 scale
+  feltLikeHer              String?   // Yes/Somewhat/No
+  desiredFeelingAchieved   String?   // Yes/Partly/No
+  wouldWearAgain           String?   // Definitely/Maybe/Probably not
+  physicallyComfortable    String?   // Comfortable/Mostly comfortable/Not comfortable
+  
   // Tags
-  workedTags    String? // JSON array
-  didntWorkTags String? // JSON array
-
+  workedTags               String?   // JSON array
+  didntWorkTags            String?   // JSON array
+  
   // Notes
-  additionalNotes String?
-  objections      String? @db.Text
+  additionalNotes          String?
+  objections               String?   @db.Text
   // Specific Item Feedback
-  itemFeedback    Json? // { itemId: { liked: true, notes: "..." } }
-
+  itemFeedback        Json?    // { itemId: { liked: true, notes: "..." } }
+  
   // Confidence Impact
-  confidenceBefore Int? // 1-10
-  confidenceAfter  Int? // 1-10
-
+  confidenceBefore    Int?     // 1-10
+  confidenceAfter     Int?     // 1-10
+  
   // Open Feedback
-
+  
+  
   // Photo (optional)
-  woreItPhotoUrl String?
+  woreItPhotoUrl      String?
 
   // Phase 4B1 — post-wear feedback fields
-  didWearIt        String? // yes | not-yet | no
-  feelingAnswer    String? // great | good | okay | not-great
-  fitFeedback      String? // yes | mostly | no
-  coverageFeedback String? // yes | mostly | no
-  colourFeedback   String? // yes | mostly | no
+  didWearIt        String?  // yes | not-yet | no
+  feelingAnswer    String?  // great | good | okay | not-great
+  fitFeedback      String?  // yes | mostly | no
+  coverageFeedback String?  // yes | mostly | no
+  colourFeedback   String?  // yes | mostly | no
 }
 
 // ============================================
@@ -1193,14 +1194,14 @@ model PostOutfitReview {
 // ============================================
 
 model ConfidenceScore {
-  id         String   @id @default(cuid())
-  customerId String
-  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  recordedAt DateTime @default(now())
-
-  score     Int // 1-10
-  context   String? // What triggered this score
-  sessionId String? // If related to a styling session
+  id          String   @id @default(cuid())
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  recordedAt  DateTime @default(now())
+  
+  score       Int      // 1-10
+  context     String?  // What triggered this score
+  sessionId   String?  // If related to a styling session
 }
 
 // ============================================
@@ -1214,19 +1215,19 @@ enum EditorialReportStatus {
 }
 
 model EditorialTrendReport {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id        String                @id @default(cuid())
+  createdAt DateTime              @default(now())
+  updatedAt DateTime              @updatedAt
 
-  slug   String  @unique
-  title  String
-  season String
-  mood   String?
+  slug          String  @unique
+  title         String
+  season        String
+  mood          String?
 
-  status      EditorialReportStatus @default(DRAFT)
-  publishedAt String                @default("")
-  order       Int                   @default(0)
-  featured    Boolean               @default(false)
+  status        EditorialReportStatus @default(DRAFT)
+  publishedAt   String   @default("")
+  order         Int      @default(0)
+  featured      Boolean  @default(false)
 
   summary            String
   editorialIntro     String
@@ -1276,7 +1277,7 @@ model PersonalisedTrendEditUsage {
   /// content (Passport/Closet state at that moment) are not preserved
   /// anywhere. Shape owned by the write path — see TrendEditSnapshot in
   /// personalised-trend-edit-usage.server.ts.
-  snapshot Json?
+  snapshot   Json?
 
   @@unique([customerId, reportSlug, periodKey])
   @@index([customerId, createdAt])
@@ -1286,31 +1287,31 @@ model PersonalisedTrendEditUsage {
 // ============================================
 
 model TrendReport {
-  id          String    @id @default(cuid())
-  createdAt   DateTime  @default(now())
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
   publishedAt DateTime?
-
+  
   // Report Info
-  title      String
-  slug       String  @unique
-  coverImage String?
-  summary    String
-
+  title       String
+  slug        String   @unique
+  coverImage  String?
+  summary     String
+  
   // Content
-  content Json // Rich content structure
-
+  content     Json     // Rich content structure
+  
   // Categorization
-  reportType TrendReportType
-  season     String? // e.g., "Spring 2025"
-  tags       String[]
-
+  reportType  TrendReportType
+  season      String?  // e.g., "Spring 2025"
+  tags        String[]
+  
   // Trend Data
-  trendingColors Json? // Color trends with images
-  trendingStyles Json? // Style trends
-  keyPieces      Json? // Must-have items
-
+  trendingColors    Json?    // Color trends with images
+  trendingStyles    Json?    // Style trends
+  keyPieces         Json?    // Must-have items
+  
   // Engagement
-  views TrendReportView[]
+  views       TrendReportView[]
 }
 
 enum TrendReportType {
@@ -1323,16 +1324,16 @@ enum TrendReportType {
 }
 
 model TrendReportView {
-  id         String      @id @default(cuid())
-  reportId   String
-  report     TrendReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
-  customerId String
-  customer   Customer    @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  viewedAt   DateTime    @default(now())
-
+  id          String      @id @default(cuid())
+  reportId    String
+  report      TrendReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  customerId  String
+  customer    Customer    @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  viewedAt    DateTime    @default(now())
+  
   // Personalization
-  relevanceScore Int?
-  matchingStyles String[]
+  relevanceScore  Int?
+  matchingStyles  String[]
 }
 
 model StylingEvent {
@@ -1356,14 +1357,14 @@ model StylingEvent {
 // ============================================
 
 model NaiaSession {
-  id                 String   @id @default(cuid())
-  tokenHash          String   @unique // SHA-256(rawToken) — raw token never stored
-  customerId         String
-  customer           Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  createdAt          DateTime @default(now())
-  lastSeenAt         DateTime @default(now())
-  expiresAt          DateTime
-  userAgent          String?
+  id          String   @id @default(cuid())
+  tokenHash   String   @unique                // SHA-256(rawToken) — raw token never stored
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+  expiresAt   DateTime
+  userAgent   String?
   // Shopify OIDC id_token from the login that created this session — kept
   // only to pass as id_token_hint to Shopify's end_session_endpoint on
   // logout, so Shopify's own identity-provider session actually ends (not
@@ -1372,7 +1373,7 @@ model NaiaSession {
   // simply have none, and logout must still succeed locally for them —
   // see destroySessionAndGetHint in naia-session.server.ts. @db.Text since
   // a JWT can exceed a default varchar limit.
-  shopifyIdTokenHint String?  @db.Text
+  shopifyIdTokenHint String? @db.Text
 
   @@index([customerId])
   @@index([expiresAt])
@@ -1389,7 +1390,7 @@ model RecommendationFeedback {
 
   // Optional links — feedback may be on a whole suggestion, a single item, or a product
   sessionId    String?
-  session      StylingSession?   @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  session      StylingSession?   @relation(fields: [sessionId],    references: [id], onDelete: SetNull)
   suggestionId String?
   suggestion   OutfitSuggestion? @relation(fields: [suggestionId], references: [id], onDelete: SetNull)
   closetItemId String?
@@ -1397,7 +1398,7 @@ model RecommendationFeedback {
 
   // What was rated: complete-suggestion | closet-item | nadine-product | vto-preview
   target           String
-  shopifyProductId String? // set when target=nadine-product
+  shopifyProductId String?  // set when target=nadine-product
   /// Variant and size, when the flow genuinely knows them. Never inferred:
   /// without these, a complaint cannot be separated into a design objection
   /// versus a fit problem, and it stays unattributed rather than guessed.
@@ -1429,11 +1430,11 @@ model RecommendationFeedback {
 
 model JourneyEvent {
   id             String   @id @default(cuid())
-  type           String // JourneyEventType
+  type           String   // JourneyEventType
   occurredAt     DateTime
-  customerIdHash String // SHA-256 prefix — never raw customerId; no FK to Customer
-  sessionId      String // styling session id or sentinel ("product-page", "unknown")
-  payload        Json // operational fields only — see journey-contract.ts
+  customerIdHash String   // SHA-256 prefix — never raw customerId; no FK to Customer
+  sessionId      String   // styling session id or sentinel ("product-page", "unknown")
+  payload        Json     // operational fields only — see journey-contract.ts
 
   // Batch 2 — deduplication key (null = pre-Batch-2 record, fire-and-forget)
   // Format: "<eventType>:<sourceRecordId>:v1" — unique per logical write
@@ -1555,17 +1556,17 @@ model VirtualTryOnJob {
 // Provenance (type/fields/values/claim) is SERVER-GENERATED from the customer's
 // current OnboardingProfile — never accepted from the browser.
 model NaiaObservationFeedback {
-  id              String   @id @default(cuid())
-  customerId      String
-  customer        Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  observationKey  String // deterministic: "first-read-v1|{type}|{field:value pairs}"
-  response        String // "accurate" | "not-quite"
-  observationType String // server-generated provenance
-  evidenceFields  String[] // server-generated provenance
-  evidenceValues  String[] // server-generated provenance
-  claimText       String // server-generated provenance
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id               String   @id @default(cuid())
+  customerId       String
+  customer         Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  observationKey   String   // deterministic: "first-read-v1|{type}|{field:value pairs}"
+  response         String   // "accurate" | "not-quite"
+  observationType  String   // server-generated provenance
+  evidenceFields   String[] // server-generated provenance
+  evidenceValues   String[] // server-generated provenance
+  claimText        String   // server-generated provenance
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   @@unique([customerId, observationKey])
   @@index([customerId])
@@ -1613,24 +1614,24 @@ model StyleMeOutcome {
   customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
   // Canonical owner — one outcome per suggestion
-  suggestionId String           @unique
-  suggestion   OutfitSuggestion @relation(fields: [suggestionId], references: [id], onDelete: Cascade)
+  suggestionId String            @unique
+  suggestion   OutfitSuggestion  @relation(fields: [suggestionId], references: [id], onDelete: Cascade)
 
   // Denormalized for efficient querying; always server-derived
   sessionId String
 
   // Core outcome — stable IDs only (validated server-side)
-  outcomeStatus     String // wore-it | changed-something | didnt-wear-it
-  changeTypes       String[] @default([]) // max 5; non-empty only when outcomeStatus=changed-something
-  otherChangeNote   String?  @db.Text // max 280 chars; only when "other" in changeTypes
-  goalOutcome       String? // yes | somewhat | no; null when outcomeStatus=didnt-wear-it
-  selectedDirection String? // most-you | fresh | push-me; null when no direction shown or selected
+  outcomeStatus    String    // wore-it | changed-something | didnt-wear-it
+  changeTypes      String[]  @default([])  // max 5; non-empty only when outcomeStatus=changed-something
+  otherChangeNote  String?   @db.Text      // max 280 chars; only when "other" in changeTypes
+  goalOutcome      String?   // yes | somewhat | no; null when outcomeStatus=didnt-wear-it
+  selectedDirection String?  // most-you | fresh | push-me; null when no direction shown or selected
 
   // QA redesign fields — additive, default empty
-  whatWorked       String[] @default([]) // positive reasons; max 3; active when wore-it/changed-something + goalOutcome=yes
-  whatFeltOff      String[] @default([]) // negative reasons; max 3; active when wore-it/changed-something + goalOutcome=somewhat/no
-  didntWearReasons String[] @default([]) // reasons for not wearing; max 3, min 1; active when didnt-wear-it
-  reasonOtherNote  String?  @db.Text // max 280 chars; for "other" in whatWorked/whatFeltOff/didntWearReasons
+  whatWorked       String[]  @default([])  // positive reasons; max 3; active when wore-it/changed-something + goalOutcome=yes
+  whatFeltOff      String[]  @default([])  // negative reasons; max 3; active when wore-it/changed-something + goalOutcome=somewhat/no
+  didntWearReasons String[]  @default([])  // reasons for not wearing; max 3, min 1; active when didnt-wear-it
+  reasonOtherNote  String?   @db.Text      // max 280 chars; for "other" in whatWorked/whatFeltOff/didntWearReasons
 
   submittedAt DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -1649,13 +1650,13 @@ model TasteEvidence {
   customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
   // Source identity — used for delete-and-reinsert on source record update
-  source         String // STYLEME_OUTCOME | POST_OUTFIT_REVIEW | CLOSET_RELATIONSHIP | BUYSKIP_OUTCOME
-  sourceRecordId String // ID of the originating record
+  source         String   // STYLEME_OUTCOME | POST_OUTFIT_REVIEW | CLOSET_RELATIONSHIP | BUYSKIP_OUTCOME
+  sourceRecordId String   // ID of the originating record
 
   // Canonical evidence signal
-  dimension String // self-expression | comfort | formality | fit | garment-category
-  value     String // dimension-specific value (e.g. "self-expression", "too-formal", "DRESSES")
-  polarity  String // positive | negative
+  dimension String   // self-expression | comfort | formality | fit | garment-category
+  value     String   // dimension-specific value (e.g. "self-expression", "too-formal", "DRESSES")
+  polarity  String   // positive | negative
 
   // Weighted strength — clamped to [0.1, 1.0]
   strength Float
@@ -1681,7 +1682,7 @@ model StyleTendency {
   customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
   // Stable identity
-  observationKey String // tendency-v1|{dimension}:{value}
+  observationKey String   // tendency-v1|{dimension}:{value}
   dimension      String
   value          String
 
@@ -1689,9 +1690,9 @@ model StyleTendency {
   generation Int @default(1)
 
   // Computed observation state
-  dominantPolarity  String // positive | negative
-  observationFamily String // WORKS_WELL | FRICTION
-  state             String // CANDIDATE | CONFIRMED | SUPPRESSED | REJECTED
+  dominantPolarity  String   // positive | negative
+  observationFamily String   // WORKS_WELL | FRICTION
+  state             String   // CANDIDATE | CONFIRMED | SUPPRESSED | REJECTED
 
   // Evidence accounting — recomputed on every reconcile
   wSupport         Float @default(0)
@@ -1710,18 +1711,18 @@ model StyleTendency {
   // Server-generated display text
   claimText     String?
   rationaleText String?
-  claimVersion  Int     @default(1)
+  claimVersion  Int @default(1)
 
   // Customer correction — permanently preserved
-  customerFeedback   String? // accurate | not-quite
+  customerFeedback   String?   // accurate | not-quite
   customerFeedbackAt DateTime?
 
   // Optional "not-quite" context — V1 Passport Noticing UX. Additive,
   // nullable; only ever set alongside customerFeedback = "not-quite".
   // Customer feedback context only: never read as structured Taste
   // evidence, never used to rewrite Passport or any recommendation logic.
-  notQuiteReason String? // doesnt-feel-like-me | only-sometimes | depends-on-situation | used-to-be-true | something-else
-  notQuiteNote   String? @db.Text
+  notQuiteReason String?   // doesnt-feel-like-me | only-sometimes | depends-on-situation | used-to-be-true | something-else
+  notQuiteNote   String?   @db.Text
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1749,10 +1750,10 @@ model ClosetItemAnalysisSnapshot {
   // BEFORE customer-precedence logic runs. Shape:
   //   { observables: GarmentObservables, matchingSignals: GarmentMatchingSignals,
   //     fieldConfidence: GarmentFieldConfidence }
-  normalizedAnalysis Json
+  normalizedAnalysis    Json
 
-  analysisModel         String // e.g. "claude-haiku-4-5"
-  analysisSchemaVersion String // e.g. "1.0"
+  analysisModel         String   // e.g. "claude-haiku-4-5"
+  analysisSchemaVersion String   // e.g. "1.0"
   analyzedAt            DateTime // matches ClosetItem.analyzedAt for this run
 
   createdAt DateTime @default(now())
@@ -1788,7 +1789,7 @@ model ClosetItemAdminReview {
   intelligenceOverrides Json?
 
   reviewedAt DateTime?
-  reviewedBy String? // admin email / identifier
+  reviewedBy String?   // admin email / identifier
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1810,41 +1811,41 @@ model GarmentStyleMeProfile {
   profileStatus String @default("unreviewed")
 
   // 1. Exact Slot
-  exactSlot String? // top|bottom|dress|set|outerwear|shoe|bag|accessory|jewelry
+  exactSlot String?  // top|bottom|dress|set|outerwear|shoe|bag|accessory|jewelry
 
   // 2. Outfit Function
-  outfitFunction String? // base|supporting|statement|anchor|layering|finishing
+  outfitFunction String?  // base|supporting|statement|anchor|layering|finishing
 
   // 3. Style Family
-  styleFamilyPrimary   String? // classic|minimal|sporty|architectural|romantic|edgy|feminine|expressive
-  styleFamilySecondary String? // same values + none (optional)
+  styleFamilyPrimary   String?  // classic|minimal|sporty|architectural|romantic|edgy|feminine|expressive
+  styleFamilySecondary String?  // same values + none (optional)
 
   // 4. Dress Register
-  dressRegister String? // athletic|casual|elevated-casual|smart-casual|polished|dressy|evening
+  dressRegister String?  // athletic|casual|elevated-casual|smart-casual|polished|dressy|evening
 
   // 5. Construction
-  construction String? // soft|neutral|structured|tailored|sculptural|N/A
+  construction String?  // soft|neutral|structured|tailored|sculptural|N/A
 
   // 6. Fabric Behaviour (multi-select)
-  fabricBehaviour String[] @default([]) // soft|fluid|crisp|rigid|stretch|sculptural|N/A
+  fabricBehaviour String[] @default([])  // soft|fluid|crisp|rigid|stretch|sculptural|N/A
 
   // 7. Silhouette Character (multi-select)
   silhouetteCharacter String[] @default([])
 
   // 8. Visual Weight
-  visualWeight String? // light|medium|heavy
+  visualWeight String?  // light|medium|heavy
 
   // 9. Styling Effort
-  stylingEffort String? // easy|neutral|deliberate|high-maintenance
+  stylingEffort String?  // easy|neutral|deliberate|high-maintenance
 
   // 10. Layering Behaviour
-  layeringBehaviour String? // standalone|base-under-layer|outer-layer|either|N/A
+  layeringBehaviour String?  // standalone|base-under-layer|outer-layer|either|N/A
 
   // 11. Waist Comfort
-  waistComfort String? // elastic|drawstring|stretch|fixed|restrictive|unknown|N/A
+  waistComfort String?  // elastic|drawstring|stretch|fixed|restrictive|unknown|N/A
 
   // 12. Statement Level
-  statementLevel String? // quiet|moderate|statement
+  statementLevel String?  // quiet|moderate|statement
 
   // Occasion fit ratings — JSON object keyed by occasion ID
   // Keys: everyday|work|dinner|date|event|night-out|family|travel|active
@@ -1889,9 +1890,9 @@ model StylingSessionAdminReview {
   // "unreviewed" | "pass" | "questionable" | "fail"
   qaStatus String @default("unreviewed")
 
-  adminNotes String?   @db.Text
+  adminNotes String? @db.Text
   reviewedAt DateTime?
-  reviewedBy String? // admin email / identifier
+  reviewedBy String?  // admin email / identifier
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
