@@ -142,8 +142,8 @@ export function normalizeObservables(raw: unknown): GarmentObservables {
     necklineCoverage: nullIfInvalid(r.necklineCoverage, NECKLINE_COVERAGE_VALUES),
     shoulderCoverage: typeof r.shoulderCoverage === "boolean" ? r.shoulderCoverage : null,
     midriffExposed: typeof r.midriffExposed === "boolean" ? r.midriffExposed : null,
-    material: nullIfInvalidStr(r.material, GARMENT_MATERIAL_VALUES),
-    pattern: nullIfInvalidStr(r.pattern, GARMENT_PATTERN_VALUES),
+    material: nullIfInvalid(r.material, GARMENT_MATERIAL_VALUES),
+    pattern: nullIfInvalid(r.pattern, GARMENT_PATTERN_VALUES),
     primaryColor,
     secondaryColors,
   };
@@ -154,7 +154,7 @@ export function normalizeMatchingSignals(raw: unknown): GarmentMatchingSignals {
   return {
     occasions: filterToVocab(r.occasions, GARMENT_OCCASION_VALUES),
     seasons: filterToVocab(r.seasons, GARMENT_SEASON_VALUES),
-    formality: nullIfInvalidStr(r.formality, GARMENT_FORMALITY_VALUES),
+    formality: nullIfInvalid(r.formality, GARMENT_FORMALITY_VALUES),
     styleTags: filterToVocab(r.styleTags, GARMENT_STYLE_TAG_VOCAB).slice(0, 3),
     stylePersonality: nullIfInvalidStr(r.stylePersonality, GARMENT_STYLE_PERSONALITY_VALUES),
   };
@@ -391,7 +391,12 @@ export async function analyzeClosetGarment(
   };
 
   const defaultPersistSuccess: PersistSuccessFn = async (id, itemData, snapshot) => {
-    await prisma.$transaction(async (tx) => {
+    // prisma is untyped (see db.server.js) — tx is annotated with just the two
+    // delegate methods this transaction actually calls.
+    await prisma.$transaction(async (tx: {
+      closetItem: { update: (args: unknown) => Promise<unknown> };
+      closetItemAnalysisSnapshot: { create: (args: unknown) => Promise<unknown> };
+    }) => {
       await tx.closetItem.update({ where: { id }, data: itemData });
       await tx.closetItemAnalysisSnapshot.create({
         data: {

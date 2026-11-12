@@ -767,7 +767,10 @@ async function resolveVtoPreviewLabels(
   }
 
   // `id: { in: [] }` is a safe no-op query — no ternary/branch-type gymnastics needed.
-  const [closetItems, buyskipAnalyses] = await Promise.all([
+  const [closetItems, buyskipAnalyses]: [
+    Array<{ id: string; name: string | null }>,
+    Array<{ id: string; productName: string | null }>,
+  ] = await Promise.all([
     prisma.closetItem.findMany({ where: { id: { in: closetIds }, customerId }, select: { id: true, name: true } }),
     prisma.buyOrSkipAnalysis.findMany({ where: { id: { in: buyskipIds }, customerId }, select: { id: true, productName: true } }),
   ]);
@@ -792,7 +795,7 @@ async function resolveVtoPreviewLabels(
 }
 
 export async function listCustomerVtoPreviews(customerId: string): Promise<CustomerVtoPreview[]> {
-  const jobs = await prisma.virtualTryOnJob.findMany({
+  const jobs: Array<{ id: string; productHandle: string; createdAt: Date }> = await prisma.virtualTryOnJob.findMany({
     where: { customerId, status: "COMPLETED" },
     select: { id: true, productHandle: true, createdAt: true },
     orderBy: { createdAt: "desc" },
