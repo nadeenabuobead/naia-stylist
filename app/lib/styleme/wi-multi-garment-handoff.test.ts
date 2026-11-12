@@ -14,12 +14,14 @@
 // unable to preserve it (Candidate C/D with the companion as the only
 // outerwear) — never a silent drop.
 
-// session.server.ts falls back to "default-secret-change-me" if unset; set explicitly
-// so this file is self-contained and does not depend on .env (same as session.server.test.ts).
-// Must run before session.server.ts is imported — ESM hoists imports ahead of this
-// statement if it is placed after them, so it stays first.
-process.env.SESSION_SECRET =
-  process.env.SESSION_SECRET || "test-session-secret-for-unit-tests";
+// Side-effect import, evaluated before the session.server import below — see
+// ensure-session-secret.server.ts. A plain statement here (as this file used
+// to have) does not actually run first under ESM's import hoisting — static
+// imports are evaluated ahead of a module's own top-level statements
+// regardless of source position, not the other way around. That didn't
+// matter while session.server.ts fell back to "default-secret-change-me"
+// when unset; it does now that it fails closed instead.
+import "../ensure-session-secret.server";
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";

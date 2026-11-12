@@ -10,11 +10,12 @@
 //
 // Run: node --test --import tsx/esm app/lib/session.server.test.ts
 
-// Must be set before the module is imported.
-// session.server.ts falls back to "default-secret-change-me" but we use an
-// explicit value so the test is self-contained and does not depend on .env.
-process.env.SESSION_SECRET =
-  process.env.SESSION_SECRET || "test-session-secret-for-unit-tests";
+// Side-effect import, evaluated before the session.server import below — see
+// ensure-session-secret.server.ts. A plain statement here (as this file used
+// to have) does not actually run first under ESM's import hoisting, now that
+// session.server.ts fails closed instead of falling back to
+// "default-secret-change-me" when SESSION_SECRET is unset.
+import "./ensure-session-secret.server";
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";

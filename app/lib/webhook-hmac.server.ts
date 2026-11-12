@@ -24,7 +24,7 @@ import { timingSafeEqual, createHmac } from "crypto";
 
 export type VerifiedWebhook =
   | { ok: true; shop: string | null; topic: string | null; webhookId: string | null; payload: unknown }
-  | { ok: false; reason: "missing_signature" | "invalid_signature" | "malformed_body" };
+  | { ok: false; reason: "missing_signature" | "invalid_signature" | "malformed_body" | "not_configured" };
 
 // Exported separately from verifyShopifyWebhookRequest for direct, isolated
 // testing of the cryptographic check against fixed inputs.
@@ -41,7 +41,12 @@ export function verifyHmac(rawBody: string, hmacHeader: string | null, secret: s
 }
 
 export async function verifyShopifyWebhookRequest(request: Request): Promise<VerifiedWebhook> {
-  const secret = process.env.SHOPIFY_API_SECRET || "";
+  const secret = process.env.SHOPIFY_API_SECRET;
+  // Fail closed (hotfix 2026-11-12) — an unset secret must never fall through
+  // to computing a real HMAC keyed on "", which would accept any request
+  // whose signature is a valid HMAC-SHA256 of the body under that known,
+  // empty key. Refuse before touching the request body at all.
+  if (!secret) return { ok: false, reason: "not_configured" };
   // Read as raw text before any JSON parsing — the HMAC is computed over
   // the exact bytes Shopify sent, not a re-serialized version of them.
   const rawBody = await request.text();

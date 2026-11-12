@@ -1,6 +1,18 @@
 import { createCookieSessionStorage } from "react-router";
 
-const sessionSecret = process.env.SESSION_SECRET || "default-secret-change-me";
+// Fail closed (hotfix 2026-11-12) — this used to fall back to the literal
+// "default-secret-change-me" when SESSION_SECRET was unset. That string is
+// public (visible in this source), so an unset env var silently downgraded
+// the __naia_session cookie's signature to a secret anyone could forge
+// against, instead of failing loudly. Matches the fail-closed getSecret()
+// pattern already used for customer JWT signing in customer-auth.server.js.
+function getSessionSecret(): string {
+  const secret = process.env.SESSION_SECRET;
+  if (!secret) throw new Error("session.server: no SESSION_SECRET configured");
+  return secret;
+}
+
+const sessionSecret = getSessionSecret();
 
 const { getSession, commitSession, destroySession } = createCookieSessionStorage({
   cookie: {

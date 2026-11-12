@@ -100,6 +100,25 @@ test("verifyShopifyWebhookRequest: valid signature but malformed JSON body is re
   if (!result.ok) assert.equal(result.reason, "malformed_body");
 });
 
+test("verifyShopifyWebhookRequest: unset SHOPIFY_API_SECRET fails closed instead of falling back to an empty-string key", async () => {
+  const original = process.env.SHOPIFY_API_SECRET;
+  delete process.env.SHOPIFY_API_SECRET;
+  try {
+    // Before the hotfix, this would compute a real HMAC keyed on "" and
+    // accept a request signed with that known, empty key.
+    const body = '{"customer":{"id":"123"}}';
+    const forgedUnderEmptyKey = createHmac("sha256", "").update(body, "utf8").digest("base64");
+    const req = makeRequest(body, { hmac: forgedUnderEmptyKey });
+
+    const result = await verifyShopifyWebhookRequest(req);
+
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.reason, "not_configured");
+  } finally {
+    if (original !== undefined) process.env.SHOPIFY_API_SECRET = original;
+  }
+});
+
 test("verifyShopifyWebhookRequest: empty body with a valid signature over empty string succeeds with an empty payload object", async () => {
   process.env.SHOPIFY_API_SECRET = SECRET;
   const req = makeRequest("", { hmac: sign("") });
