@@ -216,7 +216,7 @@ describe("my-naia loader — candidateCount / hasCandidates", () => {
     await loader({ request: new Request("http://localhost/my-naia"), params: {}, context: {} } as any);
 
     const candidateCountCall = vi.mocked(prisma.styleTendency.count).mock.calls.find(
-      (call) => (call[0] as any)?.where?.state === "CANDIDATE",
+      (call: any[]) => (call[0] as any)?.where?.state === "CANDIDATE",
     );
     expect(candidateCountCall).toBeDefined();
     const where = (candidateCountCall as any)[0].where;

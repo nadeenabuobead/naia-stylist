@@ -567,7 +567,10 @@ describe("nAia catalog — Phase 3B validation", () => {
         continue;
       }
       for (const k of DRESSING_KEYS) {
-        const val = p.dressingMetadata[k];
+        // Checked as unknown, not the declared vocab-token type: this validates real
+        // catalog data, which a malformed/legacy entry could still populate with an
+        // empty string even though the type says that value is never valid.
+        const val: unknown = p.dressingMetadata[k];
         if (val === undefined || val === null || val === "") {
           missing.push(`${p.handle}.dressingMetadata.${k}: missing`);
         }

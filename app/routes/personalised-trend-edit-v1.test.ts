@@ -603,7 +603,7 @@ describe("§TREND-EDIT-V1 — write verification (diagnosis for the 14 Oct 2026 
         },
       });
     await callLoader();
-    const unverifiedLogs = consoleErrorSpy.mock.calls.filter((c) => String(c[0]).includes("trend_edit_snapshot_write_unverified"));
+    const unverifiedLogs = consoleErrorSpy.mock.calls.filter((c: any[]) => String(c[0]).includes("trend_edit_snapshot_write_unverified"));
     expect(unverifiedLogs).toEqual([]);
   });
 
@@ -611,7 +611,7 @@ describe("§TREND-EDIT-V1 — write verification (diagnosis for the 14 Oct 2026 
     vi.mocked(getTrendEditUsageState).mockResolvedValueOnce({ status: "none" });
     vi.mocked(recordPersonalisedTrendEditUsage).mockRejectedValueOnce(new Error("db unreachable"));
     await callLoader();
-    const failedLogs = consoleErrorSpy.mock.calls.filter((c) => String(c[0]).includes("trend_edit_snapshot_write_failed"));
+    const failedLogs = consoleErrorSpy.mock.calls.filter((c: any[]) => String(c[0]).includes("trend_edit_snapshot_write_failed"));
     expect(failedLogs.length).toBe(1);
     expect(String(failedLogs[0][0])).toContain(REPORT.slug);
   });
@@ -625,7 +625,7 @@ describe("§TREND-EDIT-V1 — write verification (diagnosis for the 14 Oct 2026 
       .mockResolvedValueOnce({ status: "none" })
       .mockResolvedValueOnce({ status: "legacy_no_snapshot" });
     await callLoader();
-    const unverifiedLogs = consoleErrorSpy.mock.calls.filter((c) => String(c[0]).includes("trend_edit_snapshot_write_unverified"));
+    const unverifiedLogs = consoleErrorSpy.mock.calls.filter((c: any[]) => String(c[0]).includes("trend_edit_snapshot_write_unverified"));
     expect(unverifiedLogs.length).toBe(1);
     expect(String(unverifiedLogs[0][0])).toContain(REPORT.slug);
     expect(String(unverifiedLogs[0][0])).toContain("status=legacy_no_snapshot");

@@ -36,7 +36,8 @@ interface SectionDef {
 type Mode =
   | { kind: "overview" }
   | { kind: "picker" }
-  | { kind: "flow"; queue: SectionId[]; index: number; done?: boolean };
+  | { kind: "flow"; queue: SectionId[]; index: number; done?: boolean }
+  | { kind: "refresh"; stepIndex: number; done?: boolean };
 
 // Mirrored from passport.tsx — 7 named sections (sizes is placeholder)
 const SECTIONS: SectionDef[] = [

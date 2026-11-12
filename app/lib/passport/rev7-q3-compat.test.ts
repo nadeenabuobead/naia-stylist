@@ -236,7 +236,7 @@ describe("Q3C.5 — saving new Personality answers replaces the retired values",
 
 describe("Q3C.6 — StyleMe and Buy or Skip use a labelled legacy fallback", () => {
   it("buildProfileSignals carries current answers as styleExpression", () => {
-    const s = buildProfileSignals({ styleExpression: ["calm", "playful"] } as never);
+    const s = buildProfileSignals({ styleExpression: ["calm", "playful"] } as never)!;
     assert.deepEqual(s.styleExpression, ["calm", "playful"]);
     assert.equal((s as { legacyStyleExpression?: string[] }).legacyStyleExpression, undefined,
       "no fallback once a current answer exists");
