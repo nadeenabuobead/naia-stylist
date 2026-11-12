@@ -12,6 +12,7 @@ import {
   createCheckoutSession,
   createBillingPortalSession,
   retrieveSubscription,
+  cancelSubscriptionImmediately,
   toStripeFormBody,
   computeCheckoutIdempotencyKey,
   StripeNotConfiguredError,
@@ -220,6 +221,38 @@ describe("retrieveSubscription — authoritative state fetch", () => {
     await assert.rejects(
       () => retrieveSubscription("sub_1", { _fetch: fn, _getSecretKey: () => "sk_live_x" }),
       StripeLiveModeBlockedError,
+    );
+  });
+});
+
+describe("cancelSubscriptionImmediately — account-erasure billing cancellation (fix/stripe-clerk-phase1-security)", () => {
+  it("SC.29 — sends DELETE /v1/subscriptions/:id, not POST with cancel_at_period_end — immediate, not end-of-period", async () => {
+    const { fn, calls } = fakeFetch({ id: "sub_1", status: "canceled", customer: "cus_1", cancel_at_period_end: false });
+    await cancelSubscriptionImmediately("sub_1", { _fetch: fn, _getSecretKey: () => "sk_test_abc" });
+    assert.equal(calls[0].init.method, "DELETE");
+    assert.match(calls[0].url, /\/v1\/subscriptions\/sub_1$/);
+  });
+
+  it("SC.30 — also carries the pinned Stripe-Version header, same as every other call", async () => {
+    const { fn, calls } = fakeFetch({ id: "sub_1", status: "canceled", customer: "cus_1", cancel_at_period_end: false });
+    await cancelSubscriptionImmediately("sub_1", { _fetch: fn, _getSecretKey: () => "sk_test_abc" });
+    const headers = calls[0].init.headers as Record<string, string>;
+    assert.ok(headers["Stripe-Version"]);
+  });
+
+  it("SC.31 — also refuses a live key — the test-mode guard applies here too", async () => {
+    const { fn } = fakeFetch({});
+    await assert.rejects(
+      () => cancelSubscriptionImmediately("sub_1", { _fetch: fn, _getSecretKey: () => "sk_live_x" }),
+      StripeLiveModeBlockedError,
+    );
+  });
+
+  it("SC.32 — a 404 (already-canceled on Stripe's side) surfaces as StripeApiError with status 404 preserved — the caller (erasure-billing.server.ts) relies on this exact status to distinguish 'already gone' from a genuine failure", async () => {
+    const { fn } = fakeFetch({ error: { code: "resource_missing" } }, 404);
+    await assert.rejects(
+      () => cancelSubscriptionImmediately("sub_1", { _fetch: fn, _getSecretKey: () => "sk_test_abc" }),
+      (err: unknown) => err instanceof StripeApiError && err.status === 404,
     );
   });
 });

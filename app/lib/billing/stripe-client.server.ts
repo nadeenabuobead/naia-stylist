@@ -107,7 +107,7 @@ export interface StripeRequestDeps {
 }
 
 async function stripeRequest(
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "DELETE",
   path: string,
   params: Record<string, unknown> = {},
   { _fetch = fetch, _getSecretKey = () => process.env.STRIPE_SECRET_KEY }: StripeRequestDeps = {},
@@ -288,6 +288,19 @@ export async function retrieveSubscription(
   deps: StripeRequestDeps = {},
 ): Promise<StripeSubscriptionSnapshot> {
   return stripeRequest("GET", `/subscriptions/${encodeURIComponent(providerSubscriptionId)}`, {}, deps);
+}
+
+// Immediate cancellation (Stripe's DELETE verb) — deliberately distinct from
+// the ordinary customer-initiated cancellation flow, which sets
+// cancel_at_period_end via the Billing Portal and retains access until the
+// period ends. Used only by erasure-billing.server.ts's account-erasure
+// path, where there is no longer a customer to retain access FOR. See that
+// file's own header for the full reasoning.
+export async function cancelSubscriptionImmediately(
+  providerSubscriptionId: string,
+  deps: StripeRequestDeps = {},
+): Promise<StripeSubscriptionSnapshot> {
+  return stripeRequest("DELETE", `/subscriptions/${encodeURIComponent(providerSubscriptionId)}`, {}, deps);
 }
 
 // ── Billing Portal (customer billing management: cancel, update payment method) ──
