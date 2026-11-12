@@ -4,8 +4,12 @@
 // All DI points (fetch, sleep, getApiKey) are overridable for testing.
 // FASHN_API_KEY is server-side only — never returned to the client.
 //
-// Logging rules: base64 image data, auth headers, and response images
-// must never appear in logs. Prediction IDs and error codes may be logged.
+// Logging rules: base64 image data, auth headers, response images, and the
+// provider's own free-text `error` field are never logged (that field is
+// provider-controlled and not something we can guarantee is PII-free). Only
+// our own classified error code, the request stage, an HTTP status when
+// available, the predictionId (opaque, not PII), and a one-way SHA-256 hash
+// of customerId may be logged — see logFashnFailure() below.
 
 import type {
   VirtualTryOnInput,
@@ -14,12 +18,39 @@ import type {
   VirtualTryOnConsent,
 } from "./virtual-try-on.types.js";
 import { CUSTOMER_ERROR_MESSAGES } from "./virtual-try-on.types.js";
+import { hashCustomerId } from "./journey-events.server.js";
+import { captureFailure } from "../error-tracking.server.js";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const BASE_URL = "https://api.fashn.ai";
 const POLL_INTERVAL_MS = 2_000;
 const MAX_POLL_ATTEMPTS = 45; // 90s ceiling at 2s interval
+
+// Per-HTTP-call timeout. This bounds a single fetch to FASHN, not the whole
+// 90s poll loop — a submit or status call that's still pending past this
+// many ms indicates a hung connection, not a slow-but-working generation
+// (generation progress is reported via repeated "processing" polls, each a
+// fast request/response). Existing retry/error-handling shape is
+// unchanged: a timeout simply reaches the same catch block that a network
+// failure already did, so it surfaces as the existing PROVIDER_FAILED path.
+const FASHN_REQUEST_TIMEOUT_MS = 15_000;
+
+// Logs only a classified failure — never the provider's raw `error` text,
+// never image data, never auth headers. customerId is one-way hashed.
+function logFashnFailure(
+  stage: "submit" | "poll",
+  code: VirtualTryOnErrorCode,
+  customerId: string,
+  extra?: { predictionId?: string; httpStatus?: number; providerStatus?: string },
+): void {
+  captureFailure(`fashn:${stage}`, code, {
+    customerIdHash: hashCustomerId(customerId),
+    ...(extra?.predictionId ? { predictionId: extra.predictionId } : {}),
+    ...(extra?.httpStatus !== undefined ? { httpStatus: extra.httpStatus } : {}),
+    ...(extra?.providerStatus ? { providerStatus: extra.providerStatus } : {}),
+  });
+}
 
 // ── URL safety ────────────────────────────────────────────────────────────────
 
@@ -172,20 +203,24 @@ export async function runFashnTryOn(
             num_images: 1,
           },
         }),
+        signal: AbortSignal.timeout(FASHN_REQUEST_TIMEOUT_MS),
       });
 
       if (!runRes.ok) {
+        logFashnFailure("submit", "PROVIDER_REJECTED", input.customerId, { httpStatus: runRes.status });
         return err("PROVIDER_REJECTED");
       }
 
       const runBody = (await runRes.json()) as FashnRunResponse;
       if (runBody.error || !runBody.id) {
+        logFashnFailure("submit", "PROVIDER_REJECTED", input.customerId);
         return err("PROVIDER_REJECTED");
       }
       predictionId = runBody.id;
       // Persist the ID before polling so a timeout doesn't lose it.
       onPredictionId?.(predictionId);
     } catch {
+      logFashnFailure("submit", "PROVIDER_FAILED", input.customerId);
       return err("PROVIDER_FAILED");
     }
   }
@@ -198,12 +233,15 @@ export async function runFashnTryOn(
     try {
       const statusRes = await _fetch(`${BASE_URL}/v1/status/${predictionId}`, {
         headers: { Authorization: `Bearer ${apiKey}` },
+        signal: AbortSignal.timeout(FASHN_REQUEST_TIMEOUT_MS),
       });
       if (!statusRes.ok) {
+        logFashnFailure("poll", "PROVIDER_FAILED", input.customerId, { predictionId, httpStatus: statusRes.status });
         return err("PROVIDER_FAILED");
       }
       statusBody = (await statusRes.json()) as FashnStatusResponse;
     } catch {
+      logFashnFailure("poll", "PROVIDER_FAILED", input.customerId, { predictionId });
       return err("PROVIDER_FAILED");
     }
 
@@ -212,6 +250,7 @@ export async function runFashnTryOn(
     if (status === "completed") {
       const outputs = statusBody.output;
       if (!Array.isArray(outputs) || outputs.length === 0 || typeof outputs[0] !== "string") {
+        logFashnFailure("poll", "PROVIDER_FAILED", input.customerId, { predictionId, providerStatus: status });
         return err("PROVIDER_FAILED");
       }
       return {
@@ -224,12 +263,14 @@ export async function runFashnTryOn(
     }
 
     if (status === "failed" || status === "canceled") {
+      logFashnFailure("poll", "PROVIDER_FAILED", input.customerId, { predictionId, providerStatus: status });
       return err("PROVIDER_FAILED");
     }
 
     // starting | in_queue | processing — continue polling
   }
 
+  logFashnFailure("poll", "TIMEOUT", input.customerId, { predictionId });
   return err("TIMEOUT");
 }
 
@@ -284,14 +325,22 @@ export async function submitTryOnToProvider(
           ...(input.prompt ? { prompt: input.prompt } : {}),
         },
       }),
+      signal: AbortSignal.timeout(FASHN_REQUEST_TIMEOUT_MS),
     });
 
-    if (!runRes.ok) return submitErr("PROVIDER_REJECTED");
+    if (!runRes.ok) {
+      logFashnFailure("submit", "PROVIDER_REJECTED", input.customerId, { httpStatus: runRes.status });
+      return submitErr("PROVIDER_REJECTED");
+    }
     const runBody = (await runRes.json()) as FashnRunResponse;
-    if (runBody.error || !runBody.id) return submitErr("PROVIDER_REJECTED");
+    if (runBody.error || !runBody.id) {
+      logFashnFailure("submit", "PROVIDER_REJECTED", input.customerId);
+      return submitErr("PROVIDER_REJECTED");
+    }
 
     return { ok: true, predictionId: runBody.id };
   } catch {
+    logFashnFailure("submit", "PROVIDER_FAILED", input.customerId);
     return submitErr("PROVIDER_FAILED");
   }
 }
