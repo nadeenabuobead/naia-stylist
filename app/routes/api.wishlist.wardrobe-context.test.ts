@@ -38,7 +38,7 @@ function depthFinding(partial: Partial<DepthFinding> & { register: RegisterId })
 function registerReading(partial: Partial<RegisterReading> & { register: RegisterId }): RegisterReading {
   return {
     label: partial.register, depthLabel: "Limited usable depth", depthNote: "x",
-    rawCount: 10, usableCount: 10, blockedCount: 0, blockedPieces: [], unknownCount: 0,
+    rawCount: 10, usableCount: 10, blockedCount: 0, conditionallyUsableCount: 0, confirmedBlockedCount: 0, blockedPieces: [], unknownCount: 0,
     distinctLooks: 2, combinations: 4, needed: true, needSource: "lifestyle", needPhrase: "x",
     ...partial,
   };
