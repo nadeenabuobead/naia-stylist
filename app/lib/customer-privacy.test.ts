@@ -91,6 +91,10 @@ function okResult(failedAssets: string[] = []) {
   return { deletedCount: 1, clearedCount: 1, failedAssets };
 }
 
+function vtoOkResult(failedAssets: string[] = []) {
+  return { deletedCount: 1, skippedCount: 0, failedAssets };
+}
+
 beforeEach(() => vi.clearAllMocks());
 
 describe("eraseCustomerData — synthetic customer, mocked DB and mocked providers", () => {
@@ -102,9 +106,9 @@ describe("eraseCustomerData — synthetic customer, mocked DB and mocked provide
     const deps = {
       deleteAllClosetPhotos: vi.fn(async () => { callOrder.push("closet"); return okResult(); }),
       deleteCustomerBosImages: vi.fn(async () => { callOrder.push("bos"); return okResult(); }),
-      deleteCustomerVtoResults: vi.fn(async () => { callOrder.push("vto"); return okResult(); }),
+      deleteCustomerVtoResults: vi.fn(async () => { callOrder.push("vto"); return vtoOkResult(); }),
       withdrawSaveModelConsent: vi.fn(async () => { callOrder.push("model"); return { ok: true, deletedAssets: [], failedAssets: [] }; }),
-      deleteSelfieBoth: vi.fn(async () => { callOrder.push("selfie"); return { ok: true }; }),
+      deleteSelfieBoth: vi.fn(async () => { callOrder.push("selfie"); return { ok: true as const }; }),
     };
 
     const result = await eraseCustomerData(SYNTHETIC_CUSTOMER_ID, deps);
@@ -135,9 +139,9 @@ describe("eraseCustomerData — synthetic customer, mocked DB and mocked provide
     const deps = {
       deleteAllClosetPhotos: vi.fn(async () => okResult()),
       deleteCustomerBosImages: vi.fn(async () => okResult()),
-      deleteCustomerVtoResults: vi.fn(async () => okResult()),
+      deleteCustomerVtoResults: vi.fn(async () => vtoOkResult()),
       withdrawSaveModelConsent: vi.fn(async () => ({ ok: true, deletedAssets: [], failedAssets: [] })),
-      deleteSelfieBoth: vi.fn(async () => ({ ok: true })),
+      deleteSelfieBoth: vi.fn(async () => ({ ok: true as const })),
     };
 
     await eraseCustomerData(SYNTHETIC_CUSTOMER_ID, deps);
@@ -175,9 +179,9 @@ describe("eraseCustomerData — synthetic customer, mocked DB and mocked provide
     const deps = {
       deleteAllClosetPhotos: vi.fn(async () => okResult(["naia-wardrobe/stuck-asset"])),
       deleteCustomerBosImages: vi.fn(async () => okResult()),
-      deleteCustomerVtoResults: vi.fn(async () => okResult()),
+      deleteCustomerVtoResults: vi.fn(async () => vtoOkResult()),
       withdrawSaveModelConsent: vi.fn(async () => ({ ok: true, deletedAssets: [], failedAssets: [] })),
-      deleteSelfieBoth: vi.fn(async () => ({ ok: true })),
+      deleteSelfieBoth: vi.fn(async () => ({ ok: true as const })),
     };
 
     const result = await eraseCustomerData(SYNTHETIC_CUSTOMER_ID, deps);
@@ -195,9 +199,9 @@ describe("eraseCustomerData — synthetic customer, mocked DB and mocked provide
     const deps = {
       deleteAllClosetPhotos: vi.fn(async () => okResult()),
       deleteCustomerBosImages: vi.fn(async () => okResult()),
-      deleteCustomerVtoResults: vi.fn(async () => okResult()),
+      deleteCustomerVtoResults: vi.fn(async () => vtoOkResult()),
       withdrawSaveModelConsent: vi.fn(async () => ({ ok: true, deletedAssets: [], failedAssets: [] })),
-      deleteSelfieBoth: vi.fn(async () => ({ ok: true })),
+      deleteSelfieBoth: vi.fn(async () => ({ ok: true as const })),
     };
 
     await eraseCustomerData("synthetic-customer-B", deps);
