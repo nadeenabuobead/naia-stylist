@@ -1,26 +1,37 @@
 // app/routes/quick-style/_index.boundaries.test.ts
 //
 // Documents and verifies the three boundaries Five-Persona QA was asked to
-// check for the legacy /quick-style guest funnel, without repointing the
-// route or touching guest access — per explicit instruction. Source-text and
+// check for the public /quick-style guest teaser, updated for the 2026-11-16
+// approved product rewrite (ab06800): /quick-style is no longer a 5-step
+// funnel that hands off into the paid, entitlement-checked StyleMe path. It
+// is now three questions (mood, occasion, feeling) answered entirely in
+// local React state, producing one deterministic insight computed by a pure
+// lookup+template (app/lib/quick-style/insight.ts) — no loader, no action,
+// no Form submission, no database write, no session cookie, no AI provider
+// call, and no "upload from your closet" step at all. Source-text and
 // cross-file assertions only, same convention as this codebase's other
 // route-security tests (e.g. closet-image-security.test.ts) — no DOM, no
 // live database, no network call.
 //
-// A. AUTH — /quick-style's own action never requires (or even reads) an
-//    authenticated session; it writes only to an anonymous cookie and
-//    redirects into a path that is documented to tolerate anonymous access
-//    via a shared "guest" Customer row, not a hard auth wall.
-// B. QUOTA — the funnel's eventual generation step enforces the SAME
-//    fail-closed, atomic quota as every other caller, with guests
-//    explicitly included at the NONE membership tier (0 allowance) — not an
-//    open door, and not a guest-specific unfairness, since a real signed-up
-//    non-member gets the identical 0.
-// C. PRIVACY — the Step 5 "upload from your closet" UI never actually
-//    transmits the selected image/category/color/tags to the server; the
-//    only fields the real POST carries are mood/feeling/occasion/bodyNeeds/
-//    source. The one server-side guest identity used (a single shared
-//    "guest" Customer row) carries no real PII.
+// A. AUTH — the boundary that used to matter (does the route's own action
+//    require/read an authenticated session?) no longer applies: the route
+//    exports no loader and no action at all, so there is nothing server-side
+//    to gate in the first place. Genuinely auth-independent, not silently
+//    gated.
+// B. QUOTA — the old funnel eventually handed off into /style-me/result,
+//    where a true guest always hit the fail-closed NONE-tier (0 allowance)
+//    quota check and got a 429 sign-up prompt. That hand-off is gone: this
+//    route never calls reserveStyleMeSlot, never imports the entitlement
+//    module, and never redirects into /style-me/result, so there is no quota
+//    wall to hit at all — every visitor, guest or not, always gets the free
+//    insight.
+// C. PRIVACY — the old Step 5 "upload from your closet" UI staged a preview
+//    in local state but never actually transmitted it to the server. That
+//    whole step (and its image/category/color/tags state) is now removed
+//    entirely, not merely non-transmitting. The only data this route ever
+//    collects (mood/occasion/feeling) lives in this component's React state
+//    and is discarded on navigation — nothing is written to a cookie,
+//    nothing is sent to the server, nothing is persisted.
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -30,105 +41,79 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const quickStyleSrc = readFileSync(join(__dirname, "_index.tsx"), "utf8");
-const resultSrc = readFileSync(join(__dirname, "..", "style-me", "result.tsx"), "utf8");
-const entitlementSrc = readFileSync(join(__dirname, "..", "..", "lib", "plan", "entitlement.server.ts"), "utf8");
-const planLimitsSrc = readFileSync(join(__dirname, "..", "..", "lib", "plan", "plan-limits.server.ts"), "utf8");
+const insightSrc = readFileSync(join(__dirname, "..", "..", "lib", "quick-style", "insight.ts"), "utf8");
 
-describe("A — /quick-style is genuinely auth-independent, not silently gated", () => {
-  it("the route's action never imports or calls requireCurrentNaiaCustomer / getCurrentNaiaCustomer", () => {
-    assert.ok(!quickStyleSrc.includes("requireCurrentNaiaCustomer"), "no hard auth gate in quick-style's own action");
-    assert.ok(!quickStyleSrc.includes("getCurrentNaiaCustomer"), "no session-identity read in quick-style's own action either");
+// The file's header comment deliberately *names* what it does NOT do (no DB,
+// no AI provider, no upload, no /style-me/result hand-off, no 429) to
+// document the design decision. Strip comment lines before asserting
+// absence, so those explanatory mentions don't self-trigger — same
+// convention as app/routes/quick-style/_index.test.ts.
+const quickStyleCode = quickStyleSrc
+  .split("\n")
+  .filter((line) => !line.trim().startsWith("//"))
+  .join("\n");
+
+describe("A — /quick-style has no server-side surface left to gate", () => {
+  it("exports no loader and no action at all — there is nothing for an auth check to wrap", () => {
+    assert.ok(!quickStyleSrc.includes("export async function action"), "no action export");
+    assert.ok(!quickStyleSrc.includes("export async function loader"), "no loader export");
+    assert.ok(!quickStyleSrc.includes("export const action"), "no action export (const form)");
+    assert.ok(!quickStyleSrc.includes("export const loader"), "no loader export (const form)");
   });
 
-  it("the action only ever touches an anonymous cookie session, never prisma.customer directly", () => {
-    const actionStart = quickStyleSrc.indexOf("export async function action");
-    const actionEnd = quickStyleSrc.indexOf("\nconst moodOpts");
-    const actionSlice = quickStyleSrc.slice(actionStart, actionEnd);
-    assert.ok(actionSlice.includes("getSession") && actionSlice.includes("commitSession"), "writes via the generic cookie session helpers");
-    assert.ok(!actionSlice.includes("prisma."), "does not touch the database at all — purely a session write + redirect");
+  it("never imports or calls requireCurrentNaiaCustomer / getCurrentNaiaCustomer — not even a hidden gate", () => {
+    assert.ok(!quickStyleSrc.includes("requireCurrentNaiaCustomer"), "no hard auth gate anywhere in the route");
+    assert.ok(!quickStyleSrc.includes("getCurrentNaiaCustomer"), "no session-identity read anywhere in the route");
   });
 
-  it("redirects to /style-me/result, which is documented to resolve an anonymous visitor to a shared guest row rather than redirecting to login", () => {
-    assert.ok(quickStyleSrc.includes('redirect("/style-me/result"'), "quick-style hands off to the result route");
-    assert.ok(
-      resultSrc.includes('shopifyCustomerId: "guest"') && resultSrc.includes("unauthenticated visitors fall back to the"),
-      "result.tsx's own comment documents the anonymous-guest fallback this depends on",
-    );
-    assert.ok(!resultSrc.slice(0, resultSrc.indexOf("const cookieSession = await getSession")).includes("throw redirect"),
-      "no redirect-to-login/throwing auth check precedes the cookie-session read result.tsx uses for the quick-style continuation",
-    );
-  });
-});
-
-describe("B — quota is fail-closed and genuinely applies to guests, not an open door", () => {
-  it("result.tsx resolves a NONE membershipStatus for a null naiaCustomer before checking quota", () => {
-    assert.ok(
-      resultSrc.includes('naiaCustomer?.membershipStatus ?? "NONE"'),
-      "an anonymous visitor is explicitly typed as membershipStatus NONE for the quota check, not skipped",
-    );
-  });
-
-  it("the quota reservation (reserveStyleMeSlot) runs unconditionally for every caller, with no guest-specific bypass branch", () => {
-    const reserveCallSite = resultSrc.indexOf("await reserveStyleMeSlot(");
-    assert.ok(reserveCallSite > -1, "reserveStyleMeSlot is actually called on this path");
-    const before = resultSrc.slice(Math.max(0, reserveCallSite - 400), reserveCallSite);
-    assert.ok(!before.includes("if (naiaCustomer)") && !before.includes("if (!naiaCustomer)"),
-      "no conditional branch skips the reservation call based on auth state",
-    );
-  });
-
-  it("reserveStyleMeSlot's own quota check is atomic (Serializable transaction + retry), closing the count-vs-create race for every caller including guests", () => {
-    const fnStart = entitlementSrc.indexOf("export async function reserveStyleMeSlot");
-    const fnSlice = entitlementSrc.slice(fnStart, fnStart + 2000);
-    assert.ok(fnSlice.includes("_runTransaction") && fnSlice.includes("MAX_TX_RETRIES"), "transaction + retry present");
-    assert.ok(fnSlice.includes("used >= effectiveLimit"), "count-then-compare happens inside the same transaction as the create");
-  });
-
-  it("the NONE tier's styleMePerMonth allowance is exactly 0 — identical for a guest and a real signed-up non-member, not a guest-specific penalty", () => {
-    const noneTierMatch = planLimitsSrc.match(/NONE:\s*{[^}]*styleMePerMonth:\s*(\d+)/s);
-    assert.ok(noneTierMatch, "NONE tier entry with styleMePerMonth found");
-    assert.equal(noneTierMatch[1], "0", "NONE tier gets 0 StyleMe sessions/month — same figure applies regardless of guest vs. signed-in-free");
-  });
-
-  it("documents the practical consequence: a true guest completing /quick-style always receives the 429 sign-up prompt, never a generated result", () => {
-    assert.ok(
-      resultSrc.includes('"Sign in or join nAia to start styling."'),
-      "the guest-specific quota-exceeded message exists, confirming this path is reachable and intentional, not dead code",
-    );
-    assert.ok(resultSrc.includes("status: 429"), "quota exhaustion returns a real 429, not a silent 200 or a crash");
+  it("never touches a cookie session or the database — the three answers live only in component state", () => {
+    assert.ok(!quickStyleSrc.includes("getSession(") && !quickStyleSrc.includes("commitSession("), "no cookie-session read/write");
+    assert.ok(!quickStyleSrc.includes("prisma."), "no database access of any kind");
+    assert.ok(quickStyleSrc.includes("useState") && quickStyleSrc.includes("const [mood, setMood]"), "answers are local React state");
   });
 });
 
-describe("C — privacy: the closet-upload UI in Step 5 is never actually transmitted", () => {
-  it("the real POST body (hidden form fields) carries only mood/feeling/occasion/bodyNeeds/source — no image or item-detail field", () => {
-    const formStart = quickStyleSrc.indexOf('<Form method="post"');
-    const formEnd = quickStyleSrc.indexOf("</Form>");
-    const formSlice = quickStyleSrc.slice(formStart, formEnd);
-    const hiddenFieldNames = [...formSlice.matchAll(/name="(\w+)"/g)].map((m) => m[1]);
-    assert.deepEqual(
-      hiddenFieldNames.sort(),
-      ["bodyNeeds", "feeling", "mood", "occasion", "source"].sort(),
-      "exactly these five fields are submitted — no image data, no category/color/tags field",
+describe("B — no quota wall exists on this path; the free insight is unconditional", () => {
+  it("never redirects into /style-me/result, the route that carries the paid-StyleMe quota check", () => {
+    assert.ok(!quickStyleCode.includes("/style-me/result"), "quick-style no longer hands off into the entitlement-checked StyleMe path");
+  });
+
+  it("never imports or calls the entitlement/reservation module that enforces the NONE-tier 0 allowance", () => {
+    assert.ok(!quickStyleSrc.includes("reserveStyleMeSlot"), "no quota-reservation call");
+    assert.ok(!quickStyleSrc.includes("entitlement.server"), "no import of the entitlement module");
+  });
+
+  it("documents the practical consequence: a true guest completing /quick-style always gets the free insight, never a 429", () => {
+    assert.ok(!quickStyleCode.includes("429"), "no quota-exceeded status code appears on this path");
+    assert.ok(
+      quickStyleSrc.includes("no sign-up, no AI call, no cost") || quickStyleSrc.includes("Three quick questions, one free style direction"),
+      "the route's own copy states this is free and unconditional",
     );
   });
 
-  it("uploadedItem (image + category + color + tags) is local React state only, read nowhere inside the Form", () => {
-    assert.ok(quickStyleSrc.includes("const [uploadedItem, setUploadedItem]"), "uploadedItem is component state");
-    const formStart = quickStyleSrc.indexOf('<Form method="post"');
-    const formEnd = quickStyleSrc.indexOf("</Form>");
-    const formSlice = quickStyleSrc.slice(formStart, formEnd);
-    assert.ok(!formSlice.includes("uploadedItem"), "the uploaded item's data never appears inside the submitted form");
+  it("the deterministic insight builder is pure — no quota/session/AI dependency could reintroduce a hidden wall", () => {
+    assert.ok(!insightSrc.includes("prisma"), "insight.ts has no database access");
+    assert.ok(!insightSrc.includes("fetch("), "insight.ts makes no network call");
+    assert.ok(!/anthropic|openai/i.test(insightSrc), "insight.ts has no AI provider reference");
+  });
+});
+
+describe("C — privacy: the old closet-upload step is gone, not merely non-transmitting", () => {
+  it("has no file-upload affordance anywhere — not a hidden one, not a staged-preview one", () => {
+    assert.ok(!quickStyleCode.includes('type="file"'), "no file input");
+    assert.ok(!quickStyleCode.includes("FileReader"), "no client-side image read");
+    assert.ok(!quickStyleCode.includes("uploadedItem"), "no uploaded-item state of any kind");
+    assert.ok(!/\bupload\b/i.test(quickStyleCode), "no upload affordance or reference at all");
   });
 
-  it("the uploaded image never leaves the browser — FileReader reads it to a local data: URL, nothing calls fetch/upload/cloudinary for it", () => {
-    const handlerStart = quickStyleSrc.indexOf("const handleFileSelect");
-    const handlerEnd = quickStyleSrc.indexOf("const toggleTag");
-    const handlerSlice = quickStyleSrc.slice(handlerStart, handlerEnd);
-    assert.ok(handlerSlice.includes("new FileReader()") && handlerSlice.includes("readAsDataURL"), "client-only FileReader path");
-    assert.ok(!handlerSlice.includes("fetch(") && !handlerSlice.includes("cloudinary"), "no network call anywhere in the upload handler");
+  it("collects only mood, occasion, and feeling — no image, category, color, or tags field exists to leak", () => {
+    assert.ok(quickStyleSrc.includes("moodOpts") && quickStyleSrc.includes("occasionOpts") && quickStyleSrc.includes("feelingOpts"));
+    assert.ok(!quickStyleCode.includes("bodyComfortOpts"), "no body-needs step carried over from the old funnel");
+    assert.ok(!quickStyleCode.includes("sourceOpts"), "no source/closet-upload step carried over from the old funnel");
   });
 
-  it("the one server-side guest identity used carries no real PII — a single synthetic row, not per-visitor data", () => {
-    assert.ok(resultSrc.includes('email: "guest@naia.app"'), "the shared guest row's email is a synthetic placeholder, not collected from the visitor");
+  it("the three answers are never sent anywhere — no fetch, no Form submission, no network call in the whole route", () => {
+    assert.ok(!quickStyleCode.includes("<Form"), "no form submission exists to carry the answers off-device");
+    assert.ok(!quickStyleCode.includes("fetch("), "no network call anywhere in the route");
   });
 });
