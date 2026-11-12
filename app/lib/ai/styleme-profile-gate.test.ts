@@ -2335,14 +2335,14 @@ describe("§T4 Candidate-level intention scoring — all pieces contribute", () 
       bodyNeedFitScore: 0.1,   // low body-need fit
       intentionFit: 3.0,       // max intention
       passportAlignment: 0, formalityOvershootAbs: 0,
-      optionalNonMatchCount: 0, discretionaryCount: 0, profiledCount: 0,
+      optionalNonMatchCount: 0, discretionaryPieceCount: 0,
     };
     const keyB: CandidateRankKey = {
       occasionTier: 2, formalityFitPriority: 1, knownViolationCount: 0,
       bodyNeedFitScore: 0.9,   // high body-need fit
       intentionFit: 0.0,       // no intention score
       passportAlignment: 0, formalityOvershootAbs: 0,
-      optionalNonMatchCount: 0, discretionaryCount: 0, profiledCount: 0,
+      optionalNonMatchCount: 0, discretionaryPieceCount: 0,
     };
     const result = compareCandidateRankKeys(keyA, keyB);
     assert.ok(result > 0, `T3b-better candidate B must rank higher than T4-better candidate A — compareCandidateRankKeys returned ${result} (expected > 0)`);
@@ -3149,7 +3149,7 @@ function makeProfiledItem(
     material: null,
     styleTags: [],
     occasions: ["everyday"],
-    imageUrl: null,
+    imageUrl: "",
     fitProfile: null,
     waistShape: null,
     sleeveLength: null,
@@ -3231,7 +3231,7 @@ describe("§RCT5-CORE RC-T5 coreClothingMeetsLooseNeed", () => {
       material: null,
       styleTags: [],
       occasions: [],
-      imageUrl: null,
+      imageUrl: "",
       fitProfile: "relaxed",
       waistShape: null,
       sleeveLength: null,
