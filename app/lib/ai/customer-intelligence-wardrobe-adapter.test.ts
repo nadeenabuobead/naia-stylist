@@ -24,8 +24,8 @@ describe("§CIA-WI-1 signalClass, source, and dimension", () => {
       depthFinding({ register: "everyday", kind: "repetition" }),
     ];
     const registers: RegisterReading[] = [
-      { register: "work", label: "work", depthLabel: "Limited usable work depth", depthNote: "x", rawCount: 11, usableCount: 11, blockedCount: 0, blockedPieces: [], unknownCount: 0, distinctLooks: 2, combinations: 4, needed: true, needSource: "lifestyle", needPhrase: "work" },
-      { register: "everyday", label: "everyday", depthLabel: "Strong everyday depth", depthNote: "x", rawCount: 20, usableCount: 18, blockedCount: 0, blockedPieces: [], unknownCount: 0, distinctLooks: 9, combinations: 18, needed: true, needSource: "lifestyle", needPhrase: "everyday" },
+      { register: "work", label: "work", depthLabel: "Limited usable work depth", depthNote: "x", rawCount: 11, usableCount: 11, blockedCount: 0, conditionallyUsableCount: 0, confirmedBlockedCount: 0, blockedPieces: [], unknownCount: 0, distinctLooks: 2, combinations: 4, needed: true, needSource: "lifestyle", needPhrase: "work" },
+      { register: "everyday", label: "everyday", depthLabel: "Strong everyday depth", depthNote: "x", rawCount: 20, usableCount: 18, blockedCount: 0, conditionallyUsableCount: 0, confirmedBlockedCount: 0, blockedPieces: [], unknownCount: 0, distinctLooks: 9, combinations: 18, needed: true, needSource: "lifestyle", needPhrase: "everyday" },
     ];
     const resolved = adaptWardrobeFindings(findings, registers);
     assert.equal(resolved[0].signalClass, "observed-state");
@@ -37,7 +37,7 @@ describe("§CIA-WI-1 signalClass, source, and dimension", () => {
   it("observed-state is never on PRECEDENCE_ORDER — this adapter's output can never be ranked against a preference/demand finding", () => {
     const resolved = adaptWardrobeFindings(
       [depthFinding({ register: "work" })],
-      [{ register: "work", label: "work", depthLabel: "x", depthNote: "x", rawCount: 1, usableCount: 1, blockedCount: 0, blockedPieces: [], unknownCount: 0, distinctLooks: 1, combinations: 1, needed: true, needSource: "lifestyle", needPhrase: "work" }],
+      [{ register: "work", label: "work", depthLabel: "x", depthNote: "x", rawCount: 1, usableCount: 1, blockedCount: 0, conditionallyUsableCount: 0, confirmedBlockedCount: 0, blockedPieces: [], unknownCount: 0, distinctLooks: 1, combinations: 1, needed: true, needSource: "lifestyle", needPhrase: "work" }],
     );
     assert.equal((PRECEDENCE_ORDER as readonly SignalClass[]).includes(resolved[0].signalClass), false);
   });
@@ -46,7 +46,7 @@ describe("§CIA-WI-1 signalClass, source, and dimension", () => {
 describe("§CIA-WI-2 support reuses the real RegisterReading verbatim — never recomputed", () => {
   it("support.value/label come from the matching register's distinctLooks/depthLabel", () => {
     const findings = [depthFinding({ register: "work" })];
-    const registers: RegisterReading[] = [{ register: "work", label: "work", depthLabel: "Limited usable work depth", depthNote: "x", rawCount: 11, usableCount: 11, blockedCount: 0, blockedPieces: [], unknownCount: 0, distinctLooks: 2, combinations: 4, needed: true, needSource: "lifestyle", needPhrase: "work" }];
+    const registers: RegisterReading[] = [{ register: "work", label: "work", depthLabel: "Limited usable work depth", depthNote: "x", rawCount: 11, usableCount: 11, blockedCount: 0, conditionallyUsableCount: 0, confirmedBlockedCount: 0, blockedPieces: [], unknownCount: 0, distinctLooks: 2, combinations: 4, needed: true, needSource: "lifestyle", needPhrase: "work" }];
     const [finding] = adaptWardrobeFindings(findings, registers);
     assert.deepEqual(finding.support, { kind: "structural", value: 2, label: "Limited usable work depth" });
   });
@@ -94,7 +94,7 @@ describe("§CIA-WI-5 recommendation prose is never adapted", () => {
 describe("§CIA-WI-6 zero effect on the inputs it reads", () => {
   it("calling the adapter does not mutate the DepthFinding[]/RegisterReading[] arrays", () => {
     const findings = [depthFinding({ register: "work", garmentIds: ["g1"] })];
-    const registers = [{ register: "work" as const, label: "work", depthLabel: "x", depthNote: "x", rawCount: 1, usableCount: 1, blockedCount: 0, blockedPieces: [], unknownCount: 0, distinctLooks: 1, combinations: 1, needed: true, needSource: "lifestyle" as const, needPhrase: "work" }];
+    const registers = [{ register: "work" as const, label: "work", depthLabel: "x", depthNote: "x", rawCount: 1, usableCount: 1, blockedCount: 0, conditionallyUsableCount: 0, confirmedBlockedCount: 0, blockedPieces: [], unknownCount: 0, distinctLooks: 1, combinations: 1, needed: true, needSource: "lifestyle" as const, needPhrase: "work" }];
     const before = JSON.stringify({ findings, registers });
     adaptWardrobeFindings(findings, registers);
     assert.equal(JSON.stringify({ findings, registers }), before);
