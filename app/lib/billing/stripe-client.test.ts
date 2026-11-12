@@ -123,6 +123,29 @@ describe("createCheckoutSession — request shape", () => {
     assert.equal(parsed.get("line_items[0][price_data][recurring][interval]"), "month");
   });
 
+  it("SC.27 — expiresAtUnixSeconds is sent through as Stripe's expires_at param (concurrent-checkout protection, fix/stripe-clerk-phase1-security)", async () => {
+    const { fn, calls } = fakeFetch({ id: "cs_test_1", url: "https://checkout.stripe.com/x" });
+    await createCheckoutSession(
+      {
+        customerId: "c", planType: "MONTHLY", amountMinorUnits: 3900, currency: "aed",
+        successUrl: "https://x", cancelUrl: "https://y", expiresAtUnixSeconds: 1_700_001_800,
+      },
+      { _fetch: fn, _getSecretKey: () => "sk_test_abc" },
+    );
+    const parsed = new URLSearchParams((calls[0].init.body as URLSearchParams).toString());
+    assert.equal(parsed.get("expires_at"), "1700001800");
+  });
+
+  it("SC.28 — expires_at is omitted entirely when expiresAtUnixSeconds isn't provided — existing callers keep Stripe's own default (24h)", async () => {
+    const { fn, calls } = fakeFetch({ id: "cs_test_1", url: "https://checkout.stripe.com/x" });
+    await createCheckoutSession(
+      { customerId: "c", planType: "MONTHLY", amountMinorUnits: 3900, currency: "aed", successUrl: "https://x", cancelUrl: "https://y" },
+      { _fetch: fn, _getSecretKey: () => "sk_test_abc" },
+    );
+    const parsed = new URLSearchParams((calls[0].init.body as URLSearchParams).toString());
+    assert.equal(parsed.has("expires_at"), false);
+  });
+
   it("SC.8 — a non-2xx Stripe response surfaces as StripeApiError with the status and body preserved", async () => {
     const { fn } = fakeFetch({ error: { message: "No such price" } }, 400);
     const input2 = { customerId: "c", planType: "MONTHLY" as const, amountMinorUnits: 3900, currency: "aed", successUrl: "https://x", cancelUrl: "https://y" };

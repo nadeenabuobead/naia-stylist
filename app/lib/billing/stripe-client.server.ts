@@ -157,6 +157,15 @@ export interface CreateCheckoutSessionInput {
   // Session — keeps billing/payment history consolidated under one Stripe
   // Customer rather than fragmenting it across resubscriptions.
   existingProviderCustomerId?: string | null;
+  // Unix timestamp (seconds) this Checkout Session itself expires at. Stripe
+  // enforces a 30-minute minimum from creation. Set from
+  // checkout-reservation.server.ts's own TTL so an abandoned session's
+  // Stripe-side expiry and our own reservation row's expiry line up — Stripe's
+  // checkout.session.expired webhook (webhook-handler.server.ts) then fires
+  // right as our own fallback cleanup would otherwise kick in, not meaningfully
+  // before or after. Optional only so existing callers/tests without a
+  // reservation still work — Stripe defaults to 24 hours when omitted.
+  expiresAtUnixSeconds?: number;
 }
 
 export interface StripeCheckoutSession {
@@ -215,6 +224,7 @@ export async function createCheckoutSession(
       customer: input.existingProviderCustomerId ?? undefined,
       success_url: input.successUrl,
       cancel_url: input.cancelUrl,
+      ...(input.expiresAtUnixSeconds ? { expires_at: input.expiresAtUnixSeconds } : {}),
       line_items: [
         {
           quantity: 1,
