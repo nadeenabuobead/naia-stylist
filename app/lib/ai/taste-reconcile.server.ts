@@ -5,6 +5,7 @@
 // reconcileObservations: full reconciliation pass for a customer.
 
 import prisma from "../../db.server.js";
+import type { StyleTendency } from "@prisma/client";
 import {
   type TasteEvidenceInsert,
   type TasteSource,
@@ -122,7 +123,16 @@ function computeState(
 
 export async function reconcileObservations(customerId: string): Promise<void> {
   // Load all evidence for this customer
-  const allEvidence = await prisma.tasteEvidence.findMany({
+  const allEvidence: Array<{
+    id: string;
+    source: string;
+    sourceRecordId: string;
+    dimension: string;
+    value: string;
+    polarity: string;
+    strength: number;
+    occurredAt: Date;
+  }> = await prisma.tasteEvidence.findMany({
     where: { customerId },
     select: {
       id: true,
@@ -137,7 +147,7 @@ export async function reconcileObservations(customerId: string): Promise<void> {
   });
 
   // Load all existing StyleTendency rows for this customer (all generations)
-  const allTendencies = await prisma.styleTendency.findMany({
+  const allTendencies: StyleTendency[] = await prisma.styleTendency.findMany({
     where: { customerId },
   });
 
@@ -464,7 +474,7 @@ export async function loadConfirmedTendencies(customerId: string) {
   // whether a row made this list, so an unreacted-to (null) row is never at
   // risk of the NULL-exclusion bug this file hit once before (Prisma's
   // `{ not: "not-quite" }` on PostgreSQL excludes NULL rows too).
-  const allRows = await prisma.styleTendency.findMany({
+  const allRows: StyleTendency[] = await prisma.styleTendency.findMany({
     where: {
       customerId,
       state: { in: ["CANDIDATE", "CONFIRMED", "REJECTED"] },
