@@ -22,6 +22,18 @@ const TEST_CUSTOMER_PREFIX_FILTER = {
   NOT: { shopifyCustomerId: { startsWith: "test-batch1-" } },
 };
 
+// db.server.js is a plain untyped .js module (see its own header), so prisma's
+// query results have no static type — every inline aggregate/findMany
+// callback below needs an explicit parameter annotation under noImplicitAny.
+// These two cover the repeated `.aggregate({ _count: { id: true }, _max: {...} })`
+// shape used throughout this file; the field name is the only thing that varies.
+type AggCountMaxCreated = { _count: { id: number }; _max: { createdAt: Date | null } };
+type AggCountMaxUpdated = { _count: { id: number }; _max: { updatedAt: Date | null } };
+// The shape every AggCountMax* .then() above resolves to — needed again on the
+// chained .then(async r => ...) because TS does not propagate the inferred
+// type through a second .then() inside a Promise.all() tuple this large.
+type CountMax = { count: number; max: Date | null };
+
 // ── Period helpers ────────────────────────────────────────────────────────────
 
 function dateFrom(days: number): Date {
@@ -103,8 +115,8 @@ export async function getLiveFeatureAdoption(dateRangeDays: number): Promise<Fea
       },
       _count: { id: true },
       _max: { createdAt: true },
-    }).then(r => ({ count: r._count.id, max: r._max.createdAt }))
-      .then(async r => {
+    }).then((r: AggCountMaxCreated) => ({ count: r._count.id, max: r._max.createdAt }))
+      .then(async (r: CountMax) => {
         const unique = await prisma.onboardingProfile.findMany({
           where: { completed: true, customer: TEST_CUSTOMER_PREFIX_FILTER, createdAt: { gte: from } },
           select: { customerId: true },
@@ -123,8 +135,8 @@ export async function getLiveFeatureAdoption(dateRangeDays: number): Promise<Fea
       },
       _count: { id: true },
       _max: { updatedAt: true },
-    }).then(r => ({ count: r._count.id, max: r._max.updatedAt }))
-      .then(async r => {
+    }).then((r: AggCountMaxUpdated) => ({ count: r._count.id, max: r._max.updatedAt }))
+      .then(async (r: CountMax) => {
         const unique = await prisma.onboardingProfile.findMany({
           where: { completed: true, customer: TEST_CUSTOMER_PREFIX_FILTER, updatedAt: { gte: from }, NOT: { createdAt: { gte: from } } },
           select: { customerId: true },
@@ -138,8 +150,8 @@ export async function getLiveFeatureAdoption(dateRangeDays: number): Promise<Fea
       where: { customer: TEST_CUSTOMER_PREFIX_FILTER, createdAt: { gte: from } },
       _count: { id: true },
       _max: { createdAt: true },
-    }).then(r => ({ count: r._count.id, max: r._max.createdAt }))
-      .then(async r => {
+    }).then((r: AggCountMaxCreated) => ({ count: r._count.id, max: r._max.createdAt }))
+      .then(async (r: CountMax) => {
         const unique = await prisma.stylingSession.findMany({
           where: { customer: TEST_CUSTOMER_PREFIX_FILTER, createdAt: { gte: from } },
           select: { customerId: true },
@@ -153,13 +165,13 @@ export async function getLiveFeatureAdoption(dateRangeDays: number): Promise<Fea
       where: { session: { customer: TEST_CUSTOMER_PREFIX_FILTER }, createdAt: { gte: from } },
       _count: { id: true },
       _max: { createdAt: true },
-    }).then(r => ({ count: r._count.id, max: r._max.createdAt }))
-      .then(async r => {
+    }).then((r: AggCountMaxCreated) => ({ count: r._count.id, max: r._max.createdAt }))
+      .then(async (r: CountMax) => {
         const unique = await prisma.outfitSuggestion.findMany({
           where: { session: { customer: TEST_CUSTOMER_PREFIX_FILTER }, createdAt: { gte: from } },
           select: { session: { select: { customerId: true } } },
         });
-        const customerIds = new Set(unique.map(u => u.session.customerId));
+        const customerIds = new Set(unique.map((u: { session: { customerId: string } }) => u.session.customerId));
         return { unique: customerIds.size, count: r.count, max: r.max };
       }),
 
@@ -168,8 +180,8 @@ export async function getLiveFeatureAdoption(dateRangeDays: number): Promise<Fea
       where: { customer: TEST_CUSTOMER_PREFIX_FILTER, createdAt: { gte: from } },
       _count: { id: true },
       _max: { createdAt: true },
-    }).then(r => ({ count: r._count.id, max: r._max.createdAt }))
-      .then(async r => {
+    }).then((r: AggCountMaxCreated) => ({ count: r._count.id, max: r._max.createdAt }))
+      .then(async (r: CountMax) => {
         const unique = await prisma.recommendationFeedback.findMany({
           where: { customer: TEST_CUSTOMER_PREFIX_FILTER, createdAt: { gte: from } },
           select: { customerId: true },
@@ -183,8 +195,8 @@ export async function getLiveFeatureAdoption(dateRangeDays: number): Promise<Fea
       where: { customer: TEST_CUSTOMER_PREFIX_FILTER, createdAt: { gte: from } },
       _count: { id: true },
       _max: { createdAt: true },
-    }).then(r => ({ count: r._count.id, max: r._max.createdAt }))
-      .then(async r => {
+    }).then((r: AggCountMaxCreated) => ({ count: r._count.id, max: r._max.createdAt }))
+      .then(async (r: CountMax) => {
         const unique = await prisma.buyOrSkipAnalysis.findMany({
           where: { customer: TEST_CUSTOMER_PREFIX_FILTER, createdAt: { gte: from } },
           select: { customerId: true },
@@ -198,8 +210,8 @@ export async function getLiveFeatureAdoption(dateRangeDays: number): Promise<Fea
       where: { customer: TEST_CUSTOMER_PREFIX_FILTER, createdAt: { gte: from } },
       _count: { id: true },
       _max: { createdAt: true },
-    }).then(r => ({ count: r._count.id, max: r._max.createdAt }))
-      .then(async r => {
+    }).then((r: AggCountMaxCreated) => ({ count: r._count.id, max: r._max.createdAt }))
+      .then(async (r: CountMax) => {
         const unique = await prisma.closetItem.findMany({
           where: { customer: TEST_CUSTOMER_PREFIX_FILTER, createdAt: { gte: from } },
           select: { customerId: true },
@@ -213,8 +225,8 @@ export async function getLiveFeatureAdoption(dateRangeDays: number): Promise<Fea
       where: { customer: TEST_CUSTOMER_PREFIX_FILTER, createdAt: { gte: from } },
       _count: { id: true },
       _max: { createdAt: true },
-    }).then(r => ({ count: r._count.id, max: r._max.createdAt }))
-      .then(async r => {
+    }).then((r: AggCountMaxCreated) => ({ count: r._count.id, max: r._max.createdAt }))
+      .then(async (r: CountMax) => {
         const unique = await prisma.savedLook.findMany({
           where: { customer: TEST_CUSTOMER_PREFIX_FILTER, createdAt: { gte: from } },
           select: { customerId: true },
@@ -232,8 +244,8 @@ export async function getLiveFeatureAdoption(dateRangeDays: number): Promise<Fea
       },
       _count: { id: true },
       _max: { createdAt: true },
-    }).then(r => ({ count: r._count.id, max: r._max.createdAt }))
-      .then(async r => {
+    }).then((r: AggCountMaxCreated) => ({ count: r._count.id, max: r._max.createdAt }))
+      .then(async (r: CountMax) => {
         const unique = await prisma.postOutfitReview.findMany({
           where: { customer: TEST_CUSTOMER_PREFIX_FILTER, createdAt: { gte: from }, overallFeeling: { not: null } },
           select: { customerId: true },
@@ -251,8 +263,8 @@ export async function getLiveFeatureAdoption(dateRangeDays: number): Promise<Fea
       },
       _count: { id: true },
       _max: { createdAt: true },
-    }).then(r => ({ count: r._count.id, max: r._max.createdAt }))
-      .then(async r => {
+    }).then((r: AggCountMaxCreated) => ({ count: r._count.id, max: r._max.createdAt }))
+      .then(async (r: CountMax) => {
         const unique = await prisma.postOutfitReview.findMany({
           where: { customer: TEST_CUSTOMER_PREFIX_FILTER, createdAt: { gte: from }, didWearIt: { not: null } },
           select: { customerId: true },
@@ -322,7 +334,18 @@ export async function getLivePassportData(dateRangeDays: number): Promise<LivePa
   const from = dateFrom(dateRangeDays);
   const period = periodLabel(dateRangeDays);
 
-  const profiles = await prisma.onboardingProfile.findMany({
+  const profiles: Array<{
+    stylePersonalities: string[];
+    styleDirections: string[];
+    desiredFeelings: string[];
+    lifestyle: string[];
+    dressesFor: string[];
+    fitPreferences: string[];
+    styleStruggles: string[];
+    favoriteColors: string[];
+    updatedAt: Date;
+    createdAt: Date;
+  }> = await prisma.onboardingProfile.findMany({
     where: { completed: true, customer: TEST_CUSTOMER_PREFIX_FILTER },
     select: {
       stylePersonalities: true,
@@ -397,7 +420,14 @@ export async function getLiveStyleMeData(dateRangeDays: number): Promise<LiveSty
   const from = dateFrom(dateRangeDays);
   const period = periodLabel(dateRangeDays);
 
-  const sessions = await prisma.stylingSession.findMany({
+  const sessions: Array<{
+    id: string;
+    customerId: string;
+    occasion: string | null;
+    styleFrom: "CLOSET" | "NAIA" | "BOTH";
+    suggestions: Array<{ id: string }>;
+    review: { id: string; overallFeeling: number | null; didWearIt: string | null } | null;
+  }> = await prisma.stylingSession.findMany({
     where: { customer: TEST_CUSTOMER_PREFIX_FILTER, createdAt: { gte: from } },
     select: {
       id: true,
@@ -409,7 +439,7 @@ export async function getLiveStyleMeData(dateRangeDays: number): Promise<LiveSty
     },
   });
 
-  const savedLookSessions = await prisma.savedLook.findMany({
+  const savedLookSessions: Array<{ fromSuggestionId: string | null }> = await prisma.savedLook.findMany({
     where: { customer: TEST_CUSTOMER_PREFIX_FILTER, createdAt: { gte: from }, fromSuggestionId: { not: null } },
     select: { fromSuggestionId: true },
   });
@@ -418,14 +448,14 @@ export async function getLiveStyleMeData(dateRangeDays: number): Promise<LiveSty
   const suggestionIds = savedLookSessions.map(s => s.fromSuggestionId!);
   let sessionIdsWithSavedLook = new Set<string>();
   if (suggestionIds.length > 0) {
-    const suggestions = await prisma.outfitSuggestion.findMany({
+    const suggestions: Array<{ sessionId: string }> = await prisma.outfitSuggestion.findMany({
       where: { id: { in: suggestionIds } },
       select: { sessionId: true },
     });
     sessionIdsWithSavedLook = new Set(suggestions.map(s => s.sessionId));
   }
 
-  const feedbackSessionIds = await prisma.recommendationFeedback.findMany({
+  const feedbackSessionIds: Array<{ sessionId: string | null }> = await prisma.recommendationFeedback.findMany({
     where: { customer: TEST_CUSTOMER_PREFIX_FILTER, createdAt: { gte: from }, sessionId: { not: null } },
     select: { sessionId: true },
     distinct: ["sessionId"],
@@ -476,7 +506,7 @@ export async function getLiveBuySkipData(dateRangeDays: number): Promise<LiveBuy
   const from = dateFrom(dateRangeDays);
   const period = periodLabel(dateRangeDays);
 
-  const records = await prisma.buyOrSkipAnalysis.findMany({
+  const records: Array<{ customerId: string; verdict: string }> = await prisma.buyOrSkipAnalysis.findMany({
     where: { customer: TEST_CUSTOMER_PREFIX_FILTER, createdAt: { gte: from } },
     select: { customerId: true, verdict: true },
   });
@@ -522,7 +552,12 @@ export async function getLiveSavedLooksData(dateRangeDays: number): Promise<Live
   const from = dateFrom(dateRangeDays);
   const period = periodLabel(dateRangeDays);
 
-  const looks = await prisma.savedLook.findMany({
+  const looks: Array<{
+    customerId: string;
+    fromSuggestionId: string | null;
+    createdAt: Date;
+    items: Array<{ itemType: string }>;
+  }> = await prisma.savedLook.findMany({
     where: { customer: TEST_CUSTOMER_PREFIX_FILTER, createdAt: { gte: from } },
     select: {
       customerId: true,
@@ -537,7 +572,7 @@ export async function getLiveSavedLooksData(dateRangeDays: number): Promise<Live
   const suggestionIds = looks.filter(l => l.fromSuggestionId).map(l => l.fromSuggestionId!);
   let withPostWearLink = 0;
   if (suggestionIds.length > 0) {
-    const suggestions = await prisma.outfitSuggestion.findMany({
+    const suggestions: Array<{ sessionId: string }> = await prisma.outfitSuggestion.findMany({
       where: { id: { in: suggestionIds } },
       select: { sessionId: true },
     });
@@ -584,7 +619,14 @@ export async function getLiveClosetData(dateRangeDays: number): Promise<LiveClos
   const from = dateFrom(dateRangeDays);
   const period = periodLabel(dateRangeDays);
 
-  const items = await prisma.closetItem.findMany({
+  const items: Array<{
+    customerId: string;
+    category: string;
+    colors: string[];
+    primaryColor: string | null;
+    tryOnEligibility: string | null;
+    createdAt: Date;
+  }> = await prisma.closetItem.findMany({
     where: { customer: TEST_CUSTOMER_PREFIX_FILTER, createdAt: { gte: from } },
     select: {
       customerId: true,
@@ -627,7 +669,7 @@ export interface LiveFeedbackData {
   uniqueCustomers: number;
   topReasonCodes: Array<{ value: string; count: number }>;
   vtoFeedbackCount: number;
-  byTarget: Array<{ target: string; count: number }>;
+  byTarget: Array<{ value: string; count: number }>;
   evidenceState: MeasurementState;
   evidence: EvidenceObject;
   period: string;
@@ -637,7 +679,13 @@ export async function getLiveFeedbackData(dateRangeDays: number): Promise<LiveFe
   const from = dateFrom(dateRangeDays);
   const period = periodLabel(dateRangeDays);
 
-  const records = await prisma.recommendationFeedback.findMany({
+  const records: Array<{
+    customerId: string;
+    rating: string;
+    reasonCodes: string[];
+    vtoAspects: string[];
+    target: string;
+  }> = await prisma.recommendationFeedback.findMany({
     where: { customer: TEST_CUSTOMER_PREFIX_FILTER, createdAt: { gte: from } },
     select: { customerId: true, rating: true, reasonCodes: true, vtoAspects: true, target: true },
   });
@@ -688,7 +736,13 @@ export async function getLiveSessionReviewData(dateRangeDays: number): Promise<L
   const from = dateFrom(dateRangeDays);
   const period = periodLabel(dateRangeDays);
 
-  const records = await prisma.postOutfitReview.findMany({
+  const records: Array<{
+    customerId: string;
+    overallFeeling: number | null;
+    feltLikeHer: string | null;
+    desiredFeelingAchieved: string | null;
+    wouldWearAgain: string | null;
+  }> = await prisma.postOutfitReview.findMany({
     where: {
       customer: TEST_CUSTOMER_PREFIX_FILTER,
       createdAt: { gte: from },
@@ -747,7 +801,15 @@ export async function getLivePostWearData(dateRangeDays: number): Promise<LivePo
   const from = dateFrom(dateRangeDays);
   const period = periodLabel(dateRangeDays);
 
-  const records = await prisma.postOutfitReview.findMany({
+  const records: Array<{
+    customerId: string;
+    didWearIt: string | null;
+    feelingAnswer: string | null;
+    fitFeedback: string | null;
+    coverageFeedback: string | null;
+    colourFeedback: string | null;
+    wouldWearAgain: string | null;
+  }> = await prisma.postOutfitReview.findMany({
     where: {
       customer: TEST_CUSTOMER_PREFIX_FILTER,
       createdAt: { gte: from },
@@ -806,13 +868,21 @@ export async function getLiveCustomerJourney(dateRangeDays: number): Promise<Liv
   const period = periodLabel(dateRangeDays);
 
   // Passport completed (all-time customers who ever completed)
-  const passportCustomers = await prisma.onboardingProfile.findMany({
+  const passportCustomers: Array<{ customerId: string }> = await prisma.onboardingProfile.findMany({
     where: { completed: true, customer: TEST_CUSTOMER_PREFIX_FILTER },
     select: { customerId: true },
   });
 
   // All other stages filtered to period
-  const [sessions, recs, feedback, buySkip, looks, sessionReviews, postWear] = await Promise.all([
+  const [sessions, recs, feedback, buySkip, looks, sessionReviews, postWear]: [
+    Array<{ customerId: string }>,
+    Array<{ session: { customerId: string } }>,
+    Array<{ customerId: string }>,
+    Array<{ customerId: string }>,
+    Array<{ customerId: string }>,
+    Array<{ customerId: string }>,
+    Array<{ customerId: string }>,
+  ] = await Promise.all([
     prisma.stylingSession.findMany({
       where: { customer: TEST_CUSTOMER_PREFIX_FILTER, createdAt: { gte: from } },
       select: { customerId: true },
