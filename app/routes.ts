@@ -205,6 +205,8 @@ export default [
   route("api/stripe-webhook", "routes/api.stripe-webhook.tsx"),
   route("api/billing-checkout", "routes/api.billing-checkout.tsx"),
   route("api/billing-portal", "routes/api.billing-portal.tsx"),
+  // Clerk account-sync webhook (fix/stripe-clerk-phase1-security)
+  route("api/clerk-webhook", "routes/api.clerk-webhook.tsx"),
   // VTO M1 — customer-facing virtual try-on trigger
   route("api/trigger-tryon", "routes/api.trigger-tryon.tsx"),
   // Full-look VTO — staging QA prototype only (blocked in production)
