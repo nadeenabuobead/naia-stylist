@@ -45,12 +45,15 @@ vi.mock("~/db.server", () => {
     identityLinkRequest: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
     customer: { update: customerUpdate },
   }));
+  const pendingCloudinaryDeletionUpsert = vi.fn().mockResolvedValue({});
   return {
     default: {
       customer: { findUnique: customerFindUnique, delete: customerDelete, update: customerUpdate },
       journeyEvent: { deleteMany: journeyEventDeleteMany },
       subscription: { count: subscriptionCount },
       billingTransaction: { count: billingTransactionCount },
+      pendingCloudinaryDeletion: { upsert: pendingCloudinaryDeletionUpsert, findUnique: vi.fn().mockResolvedValue(null) },
+      selfieAnalysis: { findUnique: vi.fn().mockResolvedValue(null) },
       $transaction: transaction,
     },
   };
@@ -60,9 +63,19 @@ vi.mock("./customer-erasure-failures.server", () => ({
   recordPendingCustomerErasureFailure: vi.fn().mockResolvedValue("pending-failure-id"),
 }));
 
+// Every existing test below predates the abandoned-upload sweep and was
+// written to test the four pre-existing feature helpers in isolation — this
+// default keeps that scope intact (zero abandoned uploads found, nothing to
+// record) for every test that doesn't override it via deps.sweepCustomerForErasure.
+// The sweep-specific tests further down override it directly.
+vi.mock("./cloudinary-orphan-sweep.server", () => ({
+  sweepCustomerForErasure: vi.fn().mockResolvedValue({ checked: 0, deleted: 0, skippedRecent: 0, skippedReferenced: 0, failedAssets: [], rateLimited: false }),
+}));
+
 import prisma from "~/db.server";
 import { eraseCustomerData, compileCustomerExport } from "./customer-privacy.server";
 import { recordPendingCustomerErasureFailure } from "./customer-erasure-failures.server";
+import { sweepCustomerForErasure } from "./cloudinary-orphan-sweep.server";
 
 const mockFindUnique = () => (prisma as any).customer.findUnique as ReturnType<typeof vi.fn>;
 const mockDelete = () => (prisma as any).customer.delete as ReturnType<typeof vi.fn>;
@@ -284,6 +297,11 @@ function cloudinaryOkDeps() {
     // keeps the literal `true`, not the widened `boolean` a bare object
     // literal would infer here.
     deleteSelfieBoth: vi.fn(async () => ({ ok: true as const })),
+    // fix/stripe-clerk-phase1-security (2026-11-12): only reached in the
+    // billed branch (hasBillingHistory true) — default to a clean success so
+    // every existing test here keeps exercising the anonymize path
+    // unchanged. The billing-cancellation-specific tests below override this.
+    cancelActiveBillingForErasure: vi.fn(async () => ({ ok: true, canceledCount: 0, failures: [] })),
   };
 }
 
@@ -332,6 +350,126 @@ describe("eraseCustomerData — scenario: customer with subscription/billing his
     expect(mockDelete()).toHaveBeenCalledWith({ where: { id: SYNTHETIC_CUSTOMER_ID } });
     expect(mockCustomerUpdate()).not.toHaveBeenCalled();
     expect(result.anonymized).toBe(false);
+  });
+});
+
+describe("eraseCustomerData — Stripe billing cancellation before anonymization (fix/stripe-clerk-phase1-security)", () => {
+  it("13 — a billed customer's active subscription is cancelled via Stripe BEFORE anonymizeBilledCustomer writes anything", async () => {
+    mockFindUnique().mockResolvedValueOnce({ id: SYNTHETIC_CUSTOMER_ID });
+    mockSubscriptionCount().mockResolvedValueOnce(1);
+    mockBillingTransactionCount().mockResolvedValueOnce(0);
+
+    const callOrder: string[] = [];
+    const deps = {
+      ...cloudinaryOkDeps(),
+      cancelActiveBillingForErasure: vi.fn(async () => {
+        callOrder.push("cancel-billing");
+        return { ok: true, canceledCount: 1, failures: [] };
+      }),
+    };
+
+    const result = await eraseCustomerData(SYNTHETIC_CUSTOMER_ID, deps);
+
+    expect(deps.cancelActiveBillingForErasure).toHaveBeenCalledWith(SYNTHETIC_CUSTOMER_ID);
+    expect(callOrder).toEqual(["cancel-billing"]);
+    // customer.update (the anonymization write) must happen AFTER — proven
+    // by it having actually run (test 8 already proves the call shape);
+    // here the focus is purely on cancellation happening first.
+    expect(mockCustomerUpdate()).toHaveBeenCalled();
+    const cancelOrder = (deps.cancelActiveBillingForErasure as any).mock.invocationCallOrder[0];
+    const updateOrder = mockCustomerUpdate().mock.invocationCallOrder[mockCustomerUpdate().mock.invocationCallOrder.length - 1];
+    expect(cancelOrder).toBeLessThan(updateOrder);
+    expect(result.ok).toBe(true);
+    expect(result.anonymized).toBe(true);
+  });
+
+  it("14 — a billing-cancellation FAILURE blocks anonymization entirely — the Customer row is NOT updated", async () => {
+    mockFindUnique().mockResolvedValueOnce({ id: SYNTHETIC_CUSTOMER_ID });
+    mockSubscriptionCount().mockResolvedValueOnce(1);
+    mockBillingTransactionCount().mockResolvedValueOnce(0);
+
+    const deps = {
+      ...cloudinaryOkDeps(),
+      cancelActiveBillingForErasure: vi.fn(async () => ({
+        ok: false,
+        canceledCount: 0,
+        failures: [{ subscriptionId: "sub-row-1", providerSubscriptionId: "sub_stripe_1", error: "Stripe API error (status 500)" }],
+      })),
+    };
+
+    const result = await eraseCustomerData(SYNTHETIC_CUSTOMER_ID, deps);
+
+    expect(mockCustomerUpdate()).not.toHaveBeenCalled();
+    expect(mockDelete()).not.toHaveBeenCalled();
+    expect(result.ok).toBe(false);
+    expect(result.anonymized).toBe(false);
+  });
+
+  it("15 — a billing-cancellation failure is durably recorded via recordPendingCustomerErasureFailure, same mechanism as any other unexpected erasure failure — this IS the retry path", async () => {
+    mockFindUnique().mockResolvedValueOnce({ id: SYNTHETIC_CUSTOMER_ID });
+    mockSubscriptionCount().mockResolvedValueOnce(1);
+    mockBillingTransactionCount().mockResolvedValueOnce(0);
+
+    const deps = {
+      ...cloudinaryOkDeps(),
+      cancelActiveBillingForErasure: vi.fn(async () => ({
+        ok: false,
+        canceledCount: 0,
+        failures: [{ subscriptionId: "sub-row-1", providerSubscriptionId: "sub_stripe_1", error: "network timeout" }],
+      })),
+    };
+
+    const result = await eraseCustomerData(SYNTHETIC_CUSTOMER_ID, deps, "settings-self-service");
+
+    expect(mockRecordPendingFailure()).toHaveBeenCalledWith(
+      SYNTHETIC_CUSTOMER_ID,
+      "settings-self-service",
+      expect.objectContaining({ message: expect.stringContaining("sub-row-1") }),
+    );
+    expect(result.pendingFailureId).toBe("pending-failure-id");
+    // An operator resolving this via /admin/maintenance re-runs
+    // eraseCustomerData from scratch — the SAME retry mechanism every other
+    // pending erasure failure already uses. A subsequent successful
+    // cancellation then proceeds exactly as test 13 proves.
+  });
+
+  it("16 — a MULTI-subscription failure reports every failed subscription's id, not just the first", async () => {
+    mockFindUnique().mockResolvedValueOnce({ id: SYNTHETIC_CUSTOMER_ID });
+    mockSubscriptionCount().mockResolvedValueOnce(1);
+    mockBillingTransactionCount().mockResolvedValueOnce(0);
+
+    const deps = {
+      ...cloudinaryOkDeps(),
+      cancelActiveBillingForErasure: vi.fn(async () => ({
+        ok: false,
+        canceledCount: 1,
+        failures: [
+          { subscriptionId: "sub-row-A", providerSubscriptionId: "sub_stripe_A", error: "rate limited" },
+          { subscriptionId: "sub-row-B", providerSubscriptionId: "sub_stripe_B", error: "network timeout" },
+        ],
+      })),
+    };
+
+    await eraseCustomerData(SYNTHETIC_CUSTOMER_ID, deps);
+
+    const recordedError = mockRecordPendingFailure().mock.calls[0][2];
+    expect(recordedError.message).toContain("sub-row-A");
+    expect(recordedError.message).toContain("sub-row-B");
+  });
+
+  it("17 — a customer with NO billing history never calls cancelActiveBillingForErasure at all — nothing to cancel", async () => {
+    mockFindUnique().mockResolvedValueOnce({ id: SYNTHETIC_CUSTOMER_ID });
+    mockSubscriptionCount().mockResolvedValueOnce(0);
+    mockBillingTransactionCount().mockResolvedValueOnce(0);
+
+    const deps = {
+      ...cloudinaryOkDeps(),
+      cancelActiveBillingForErasure: vi.fn(async () => ({ ok: true, canceledCount: 0, failures: [] })),
+    };
+
+    await eraseCustomerData(SYNTHETIC_CUSTOMER_ID, deps);
+
+    expect(deps.cancelActiveBillingForErasure).not.toHaveBeenCalled();
   });
 });
 
@@ -390,5 +528,180 @@ describe("billing safety — tripwire for a currently-nonexistent risk", () => {
     for (const billingField of ["stripeCustomerId", "stripeSubscriptionId", "paymentMethodId", "billingProviderId"]) {
       expect(customerBlock).not.toContain(billingField);
     }
+  });
+});
+
+describe("eraseCustomerData — abandoned-upload sweep integration", () => {
+  it("calls sweepCustomerForErasure for this exact customer, not scoped to any age threshold the caller controls", async () => {
+    mockFindUnique().mockResolvedValueOnce({ id: SYNTHETIC_CUSTOMER_ID });
+    await eraseCustomerData(SYNTHETIC_CUSTOMER_ID, cloudinaryOkDeps());
+    expect(sweepCustomerForErasure).toHaveBeenCalledWith(SYNTHETIC_CUSTOMER_ID);
+  });
+
+  it("folds the sweep's own failures into cloudinaryFailures and result.ok, without re-recording them (the sweep already recorded its own)", async () => {
+    mockFindUnique().mockResolvedValueOnce({ id: SYNTHETIC_CUSTOMER_ID });
+    (sweepCustomerForErasure as any).mockResolvedValueOnce({
+      checked: 1, deleted: 0, skippedRecent: 0, skippedReferenced: 0,
+      failedAssets: ["naia-wardrobe/synthetic-privacy-test-customer/abandoned-1"],
+      rateLimited: false,
+    });
+
+    const result = await eraseCustomerData(SYNTHETIC_CUSTOMER_ID, cloudinaryOkDeps());
+
+    expect(result.ok).toBe(false);
+    expect(result.cloudinaryFailures).toContain("naia-wardrobe/synthetic-privacy-test-customer/abandoned-1");
+    // The sweep's own failure is tracked by the sweep itself (see
+    // cloudinary-orphan-sweep.server.test.ts) — eraseCustomerData must not
+    // write a second, duplicate PendingCloudinaryDeletion row for it.
+    const upsertCalls = (prisma as any).pendingCloudinaryDeletion.upsert.mock.calls;
+    expect(upsertCalls.some((c: any) => c[0].where.publicId === "naia-wardrobe/synthetic-privacy-test-customer/abandoned-1")).toBe(false);
+  });
+
+  it("durably records a PRE-EXISTING feature helper's Cloudinary failure in PendingCloudinaryDeletion (closing the original silently-dropped-failure gap)", async () => {
+    mockFindUnique().mockResolvedValueOnce({ id: SYNTHETIC_CUSTOMER_ID });
+    const deps = {
+      ...cloudinaryOkDeps(),
+      deleteAllClosetPhotos: vi.fn(async () => okResult(["naia-wardrobe/synthetic-privacy-test-customer/stuck-closet-item"])),
+    };
+
+    await eraseCustomerData(SYNTHETIC_CUSTOMER_ID, deps);
+
+    expect((prisma as any).pendingCloudinaryDeletion.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { publicId: "naia-wardrobe/synthetic-privacy-test-customer/stuck-closet-item" },
+      create: expect.objectContaining({ customerId: SYNTHETIC_CUSTOMER_ID, context: "account-erasure", deliveryType: "private" }),
+    }));
+  });
+
+  it("propagates withdrawSaveModelConsent's REAL verified deliveryType into PendingCloudinaryDeletion — never hardcodes 'private' for a VTO model photo failure", async () => {
+    mockFindUnique().mockResolvedValueOnce({ id: SYNTHETIC_CUSTOMER_ID });
+    const deps = {
+      ...cloudinaryOkDeps(),
+      withdrawSaveModelConsent: vi.fn(async () => ({
+        ok: false,
+        deletedAssets: [],
+        failedAssets: [{ publicId: "naia-wardrobe/synthetic-privacy-test-customer/body", deliveryType: "authenticated", errorCode: "PROVIDER_ERROR" }],
+      })),
+    };
+
+    await eraseCustomerData(SYNTHETIC_CUSTOMER_ID, deps);
+
+    expect((prisma as any).pendingCloudinaryDeletion.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { publicId: "naia-wardrobe/synthetic-privacy-test-customer/body" },
+      create: expect.objectContaining({ deliveryType: "authenticated" }),
+    }));
+  });
+
+  it("a model asset whose deliveryType could not be established (sentinel 'unknown') is recorded with a distinct, honest error — not silently folded into an ordinary failure", async () => {
+    mockFindUnique().mockResolvedValueOnce({ id: SYNTHETIC_CUSTOMER_ID });
+    const deps = {
+      ...cloudinaryOkDeps(),
+      withdrawSaveModelConsent: vi.fn(async () => ({
+        ok: false,
+        deletedAssets: [],
+        failedAssets: [{ publicId: "naia-wardrobe/synthetic-privacy-test-customer/face", deliveryType: "unknown", errorCode: "DELIVERY_TYPE_UNKNOWN" }],
+      })),
+    };
+
+    await eraseCustomerData(SYNTHETIC_CUSTOMER_ID, deps);
+
+    expect((prisma as any).pendingCloudinaryDeletion.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { publicId: "naia-wardrobe/synthetic-privacy-test-customer/face" },
+      create: expect.objectContaining({
+        deliveryType: "unknown",
+        lastError: expect.stringContaining("could not be established"),
+      }),
+    }));
+  });
+
+  it("a failure to PERSIST the pending-deletion record escalates to pendingFailureId/ok:false — never a silently-successful erasure", async () => {
+    mockFindUnique().mockResolvedValueOnce({ id: SYNTHETIC_CUSTOMER_ID });
+    (prisma as any).pendingCloudinaryDeletion.upsert.mockRejectedValueOnce(new Error("DB write failed"));
+    const deps = {
+      ...cloudinaryOkDeps(),
+      deleteAllClosetPhotos: vi.fn(async () => okResult(["naia-wardrobe/synthetic-privacy-test-customer/stuck"])),
+    };
+
+    const result = await eraseCustomerData(SYNTHETIC_CUSTOMER_ID, deps);
+
+    expect(result.ok).toBe(false);
+    expect(result.pendingFailureId).toBe("pending-failure-id");
+    expect(mockRecordPendingFailure()).toHaveBeenCalledWith(SYNTHETIC_CUSTOMER_ID, "unspecified", expect.any(Error));
+    // Critically: the Customer row must NOT have been deleted/anonymized —
+    // recordPendingCustomerErasureFailure fires from inside the same try
+    // block, before hasBillingHistory/anonymize/delete ever run.
+    expect(mockDelete()).not.toHaveBeenCalled();
+    expect(mockCustomerUpdate()).not.toHaveBeenCalled();
+  });
+});
+
+describe("eraseCustomerData — full synthetic end-to-end: a saved Closet image AND an abandoned upload", () => {
+  it("removes both the saved ClosetItem's image and the abandoned upload, and genuinely hard-deletes the Customer row (no billing history)", async () => {
+    mockFindUnique().mockResolvedValueOnce({ id: SYNTHETIC_CUSTOMER_ID });
+    mockSubscriptionCount().mockResolvedValueOnce(0);
+    mockBillingTransactionCount().mockResolvedValueOnce(0);
+
+    const closetDeleteCalls: string[] = [];
+    (sweepCustomerForErasure as any).mockResolvedValueOnce({
+      checked: 1, deleted: 1, skippedRecent: 0, skippedReferenced: 0, failedAssets: [], rateLimited: false,
+    });
+    const deps = {
+      ...cloudinaryOkDeps(),
+      deleteAllClosetPhotos: vi.fn(async () => {
+        closetDeleteCalls.push("naia-wardrobe/synthetic-privacy-test-customer/saved-item");
+        return okResult();
+      }),
+    };
+
+    const result = await eraseCustomerData(SYNTHETIC_CUSTOMER_ID, deps);
+
+    expect(closetDeleteCalls).toEqual(["naia-wardrobe/synthetic-privacy-test-customer/saved-item"]); // the real, saved image
+    expect(sweepCustomerForErasure).toHaveBeenCalledWith(SYNTHETIC_CUSTOMER_ID); // the abandoned upload
+    expect(result.ok).toBe(true);
+    expect(result.cloudinaryFailures).toEqual([]);
+    expect(mockDelete()).toHaveBeenCalledWith({ where: { id: SYNTHETIC_CUSTOMER_ID } }); // real hard delete, not anonymize
+    expect(result.anonymized).toBe(false);
+  });
+});
+
+describe("PendingCloudinaryDeletion — survives customer removal", () => {
+  it("has no Prisma relation to Customer — a hard delete or Cascade cannot structurally reach it, by schema design, not by code discipline alone", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join, dirname } = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const __dirname = dirname(fileURLToPath(import.meta.url));
+    const schema = readFileSync(join(__dirname, "../../prisma/schema.prisma"), "utf8");
+
+    const block = schema.slice(
+      schema.indexOf("\nmodel PendingCloudinaryDeletion {"),
+      schema.indexOf("\n}", schema.indexOf("\nmodel PendingCloudinaryDeletion {")),
+    );
+    expect(block).not.toContain("Customer");
+    expect(block).not.toContain("@relation");
+    expect(block).not.toContain("onDelete");
+  });
+
+  it("eraseCustomerData's own code never calls delete/deleteMany on pendingCloudinaryDeletion — only upsert, matching the schema's no-FK design", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join, dirname } = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const __dirname = dirname(fileURLToPath(import.meta.url));
+    const source = readFileSync(join(__dirname, "customer-privacy.server.ts"), "utf8");
+    expect(source).not.toMatch(/pendingCloudinaryDeletion\.(delete|deleteMany)\(/);
+  });
+
+  it("a pending-deletion row written during erasure is still readable afterward (upsert, never followed by any delete call in this run)", async () => {
+    mockFindUnique().mockResolvedValueOnce({ id: SYNTHETIC_CUSTOMER_ID });
+    const deps = {
+      ...cloudinaryOkDeps(),
+      deleteAllClosetPhotos: vi.fn(async () => okResult(["naia-wardrobe/synthetic-privacy-test-customer/orphan"])),
+    };
+
+    await eraseCustomerData(SYNTHETIC_CUSTOMER_ID, deps);
+
+    expect((prisma as any).pendingCloudinaryDeletion.upsert).toHaveBeenCalled();
+    expect(mockDelete()).toHaveBeenCalled(); // the Customer row IS removed...
+    // ...but nothing about that call is a deleteMany/delete against
+    // pendingCloudinaryDeletion (confirmed structurally in the two tests
+    // above) — the row the upsert above wrote is unaffected by it.
   });
 });

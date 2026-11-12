@@ -20,11 +20,14 @@
 // Callers should use checkEntitlement for display/early-exit and the reserve*
 // functions for the actual quota-consuming write.
 //
-// reserveClosetSlot, unlike the other two, is NOT behind ENTITLEMENT_ENFORCEMENT
-// — Closet capacity enforcement is unconditional by existing design (see
-// closet._index.tsx's own "immediate — no flag required" comment; it's a
-// storage cap, not a trial gate), so the atomic version is unconditional too.
-// The other two only take their atomic path once ENTITLEMENT_ENFORCEMENT is on.
+// reserveClosetSlot, reserveStyleMeSlot, reserveBuySkipSlot, and the VTO/
+// Trend-Edit checks are ALL unconditional, fail-closed enforcement — no
+// feature's quota check is gated behind an environment flag. (Until
+// 2026-11-12, four of the five were gated behind
+// ENTITLEMENT_ENFORCEMENT === "true" with no other branch, so an unset/
+// false flag silently skipped the check entirely — see
+// fix/stripe-clerk-phase1-security for the fix and
+// project_stripe_clerk_audit_2026_11_12 for how it was found.)
 //
 // Phase 2 (billing-cycle-aware windows + add-on entitlements): every
 // function below now resolves its window and allowances through
@@ -36,15 +39,16 @@
 // resolves to EXACTLY today's behaviour: the calendar-month window and the
 // bare membership allowance, no add-ons. Nothing here changes behaviour
 // until real or synthetic Subscription/BillingTransaction rows exist.
-// ENTITLEMENT_ENFORCEMENT itself is untouched — this phase only makes the
-// window/allowance CALCULATION billing-aware, it does not change which
-// features are gated behind the flag today.
+// This phase only made the window/allowance CALCULATION billing-aware; it
+// did not touch which features were enforced. See the unconditional-
+// enforcement note above for that separate, later fix.
 
 import type { MembershipStatus, Prisma, SubscriptionStatus } from "@prisma/client";
 import prisma from "~/db.server";
 import { getMembershipAllowances, getEffectiveVtoLimit, getEffectiveStyleMeLimit } from "./plan-limits.server";
 import { getUsageWindow, formatResetDate, type SubscriptionWindowInput, type UsageWindow } from "./usage-window.server";
 import { recordPersonalisedTrendEditUsage, type TrendEditSnapshot } from "./personalised-trend-edit-usage.server";
+import { assertPublicIdAvailable, AssetPendingDeletionError } from "../cloudinary-deletion-claim.server";
 
 // ── VTO stale threshold ────────────────────────────────────────────────────────
 const VTO_IN_FLIGHT_STALE_MS = 10 * 60 * 1000; // 10 minutes
@@ -632,26 +636,26 @@ export async function checkEntitlement(
 // Closes the race checkEntitlement() cannot: re-verifies the monthly count and
 // performs the caller's create inside one Serializable transaction, so two
 // concurrent requests from the same customer cannot both pass the count check
-// before either commits. Only called from a route when ENTITLEMENT_ENFORCEMENT
-// is enabled — when it's off, callers keep creating directly, unchanged.
+// before either commits. Every route calls this unconditionally now — see
+// the fail-closed note at the top of this file.
 //
 // A P2002 (unique constraint — e.g. BuySkip's idempotencyKey) is NOT caught
 // here; it propagates so the caller's own existing idempotent-repeat handling
 // (already required to exist for duplicate submissions) runs unchanged.
 
 export type RunReservationFn = <T>(
-  fn: (tx: Pick<typeof prisma, "stylingSession" | "buyOrSkipAnalysis" | "closetItem" | "personalisedTrendEditUsage">) => Promise<T>,
+  fn: (tx: Pick<typeof prisma, "stylingSession" | "buyOrSkipAnalysis" | "closetItem" | "personalisedTrendEditUsage" | "pendingCloudinaryDeletion">) => Promise<T>,
 ) => Promise<T>;
 
 const _runReservationTransaction: RunReservationFn = (fn) =>
   prisma.$transaction(
-    (tx: Pick<typeof prisma, "stylingSession" | "buyOrSkipAnalysis" | "closetItem" | "personalisedTrendEditUsage">) => fn(tx),
+    (tx: Pick<typeof prisma, "stylingSession" | "buyOrSkipAnalysis" | "closetItem" | "personalisedTrendEditUsage" | "pendingCloudinaryDeletion">) => fn(tx),
     { isolationLevel: "Serializable" },
   );
 
 export type ReserveResult<T> =
   | { allowed: true; record: T }
-  | { allowed: false; reason: "quota_exceeded" | "at_capacity" };
+  | { allowed: false; reason: "quota_exceeded" | "at_capacity" | "asset_pending_deletion" };
 
 export async function reserveStyleMeSlot(
   customerId: string,
@@ -773,6 +777,15 @@ export async function reserveBuySkipSlot(
         if (used >= allowances.buySkipPerMonth) {
           return { allowed: false, reason: "quota_exceeded" };
         }
+        // Must run LAST, inside this same Serializable transaction — see
+        // cloudinary-deletion-claim.server.ts for why checking this earlier,
+        // or outside the transaction, would reopen the exact race it closes.
+        try {
+          await assertPublicIdAvailable(tx, analysisData.imagePublicId);
+        } catch (e) {
+          if (e instanceof AssetPendingDeletionError) return { allowed: false, reason: "asset_pending_deletion" };
+          throw e;
+        }
         const record = await tx.buyOrSkipAnalysis.create({ data: analysisData });
         return { allowed: true, record };
       });
@@ -791,9 +804,10 @@ export async function reserveClosetSlot(
   _runTransaction: RunReservationFn = _runReservationTransaction,
   _contextDeps: EffectiveContextDeps = {},
 ): Promise<ReserveResult<Awaited<ReturnType<typeof prisma.closetItem.create>>>> {
-  // Closet capacity is unconditional (not behind ENTITLEMENT_ENFORCEMENT),
-  // so this now runs resolveEffectiveContext's extra subscription lookup on
-  // every closet upload — one cheap, indexed findFirst, accepted as the
+  // Closet capacity has always been unconditional (a storage cap, not a
+  // trial gate — see closet._index.tsx), so this runs
+  // resolveEffectiveContext's extra subscription lookup on every closet
+  // upload — one cheap, indexed findFirst, accepted as the
   // cost of correctly layering in cumulative Closet-expansion add-ons here.
   // A lapsed/canceled subscription falls back to the bare base allowance
   // (0 for NONE) via the same branch that drops the add-on boost — the cap
@@ -810,6 +824,14 @@ export async function reserveClosetSlot(
         const used = await tx.closetItem.count({ where: { customerId } });
         if (used >= allowances.closetItems) {
           return { allowed: false, reason: "at_capacity" };
+        }
+        // Must run LAST, inside this same Serializable transaction — see
+        // cloudinary-deletion-claim.server.ts.
+        try {
+          await assertPublicIdAvailable(tx, itemData.imagePublicId as string | undefined);
+        } catch (e) {
+          if (e instanceof AssetPendingDeletionError) return { allowed: false, reason: "asset_pending_deletion" };
+          throw e;
         }
         const record = await tx.closetItem.create({ data: itemData });
         return { allowed: true, record };

@@ -43,6 +43,15 @@
 //     change Subscription.status — customer.subscription.updated is the
 //     single place status transitions happen, avoiding two code paths
 //     fighting over the same field.
+//   - checkout.session.expired (2026-11-12, concurrent-checkout protection):
+//     fires only when the customer abandoned Stripe's hosted checkout page
+//     without paying — no Subscription row was ever created for this
+//     session. Releases the customer's CheckoutReservation row
+//     (checkout-reservation.server.ts) so they can start a new checkout
+//     immediately rather than waiting out the full reservation TTL. This is
+//     the primary recovery path for an abandoned attempt; every other
+//     checkout.session.* case above also releases the same reservation on
+//     ITS OWN terminal outcome, as a secondary path.
 //
 // Subscription activation is strictly payment-confirmed: nothing here ever
 // sets status ACTIVE except in direct response to a payment_status "paid"
@@ -78,6 +87,7 @@
 import type { SubscriptionStatus, BillingPlanType, MembershipStatus } from "@prisma/client";
 import prisma from "~/db.server";
 import { retrieveSubscription as stripeRetrieveSubscription, type StripeSubscriptionSnapshot } from "./stripe-client.server";
+import { releaseCheckoutReservation as defaultReleaseCheckoutReservation } from "./checkout-reservation.server";
 
 export function isUniqueConstraintViolation(err: unknown, field?: string): boolean {
   if (!err || typeof err !== "object" || (err as any).code !== "P2002") return false;
@@ -151,6 +161,12 @@ export interface WebhookHandlerDeps {
   }) => Promise<void>;
   retrieveAuthoritativeSubscription?: (providerSubscriptionId: string) => Promise<StripeSubscriptionSnapshot | null>;
   updateCustomerMembershipStatus?: (customerId: string, status: MembershipStatus) => Promise<void>;
+  // Concurrent-checkout protection (fix/stripe-clerk-phase1-security): once a
+  // checkout attempt reaches any terminal outcome, its CheckoutReservation
+  // row (checkout-reservation.server.ts) is no longer needed — see that
+  // file's own header for the full lifecycle this is one of three cleanup
+  // paths for.
+  releaseCheckoutReservation?: (customerId: string) => Promise<void>;
 }
 
 async function defaultFindProcessedEvent(provider: string, providerEventId: string) {
@@ -425,6 +441,7 @@ export async function processStripeWebhookEvent(
   const _createBillingTransaction = deps.createBillingTransaction ?? defaultCreateBillingTransaction;
   const _retrieveAuthoritativeSubscription = deps.retrieveAuthoritativeSubscription ?? defaultRetrieveAuthoritativeSubscription;
   const _updateCustomerMembershipStatus = deps.updateCustomerMembershipStatus ?? defaultUpdateCustomerMembershipStatus;
+  const _releaseCheckoutReservation = deps.releaseCheckoutReservation ?? defaultReleaseCheckoutReservation;
 
   // ── Idempotency ────────────────────────────────────────────────────────────
   // Same event id redelivered (Stripe retries on anything but a 2xx, and
@@ -446,6 +463,12 @@ export async function processStripeWebhookEvent(
     const customerId: string | undefined = obj.client_reference_id ?? obj.metadata?.customerId;
     if (!customerId) return;
     resolvedCustomerId = customerId;
+    // Payment is confirmed — this attempt reached a terminal, successful
+    // outcome. The Subscription row this function is about to create/update
+    // is now the source of truth for duplicate-checkout prevention; the
+    // reservation's job is done. Best-effort: a failure here must never
+    // block activation itself.
+    await _releaseCheckoutReservation(customerId).catch(() => {});
     const planType: BillingPlanType = obj.metadata?.planType === "ANNUAL" ? "ANNUAL" : "MONTHLY";
 
     let sub = obj.subscription
@@ -543,6 +566,11 @@ export async function processStripeWebhookEvent(
               providerSubscriptionId: obj.subscription ?? null,
             });
           }
+          // An INCOMPLETE Subscription row now exists either way — the
+          // existing non-terminal-Subscription check in api.billing-checkout
+          // already blocks a new attempt from here, so the reservation is
+          // no longer needed.
+          await _releaseCheckoutReservation(customerId).catch(() => {});
           action = "subscription_created_pending_async_payment";
         }
       }
@@ -568,6 +596,25 @@ export async function processStripeWebhookEvent(
           await _updateSubscriptionById(sub.id, { status: "EXPIRED", endedAt: eventCreatedAt });
           action = "async_payment_failed";
         }
+        // Terminal either way — a definitively failed payment must never
+        // leave the customer unable to retry for the rest of the TTL.
+        await _releaseCheckoutReservation(customerId).catch(() => {});
+      }
+      break;
+    }
+
+    case "checkout.session.expired": {
+      // Fires only when NO Subscription row was ever created for this
+      // session — the customer abandoned Stripe's hosted checkout page
+      // without paying (closed the tab, navigated away). This is the
+      // PRIMARY recovery path for an abandoned checkout attempt: unlike
+      // every other case above, nothing else will ever resolve this
+      // customer's reservation if this event is the only one Stripe sends.
+      const customerId: string | undefined = obj.client_reference_id ?? obj.metadata?.customerId;
+      if (customerId) {
+        resolvedCustomerId = customerId;
+        await _releaseCheckoutReservation(customerId).catch(() => {});
+        action = "checkout_session_expired";
       }
       break;
     }

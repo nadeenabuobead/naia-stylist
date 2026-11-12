@@ -25,6 +25,7 @@ vi.mock("../db.server", () => ({
   default: {
     buyOrSkipAnalysis: { create: vi.fn(), findFirst: vi.fn() },
     journeyEvent: { create: vi.fn().mockResolvedValue({}) },
+    customer: { findUnique: vi.fn().mockResolvedValue({ closetItems: [] }) },
   },
 }));
 
@@ -41,7 +42,7 @@ vi.mock("../lib/cloudinary-admin.server", async () => {
   };
 });
 
-vi.mock("../lib/plan/entitlement.server", () => ({ checkEntitlement: vi.fn() }));
+vi.mock("../lib/plan/entitlement.server", () => ({ checkEntitlement: vi.fn(), reserveBuySkipSlot: vi.fn() }));
 vi.mock("../lib/image-moderation.server", () => ({ moderateImageContent: vi.fn() }));
 vi.mock("../lib/image-suitability.server", () => ({ screenGarmentSuitability: vi.fn() }));
 vi.mock("../lib/ai/taste-extraction.server", () => ({ extractBuySkipEvidence: vi.fn() }));
@@ -55,11 +56,16 @@ vi.mock("../lib/ai/customer-intelligence-resolver.server", () => ({ resolveCusto
 
 import { getCurrentNaiaCustomer } from "../lib/naia-session.server";
 import { verifyCloudinaryAsset, deleteCloudinaryAsset } from "../lib/cloudinary-admin.server";
+import { checkEntitlement, reserveBuySkipSlot } from "../lib/plan/entitlement.server";
+import { moderateImageContent } from "../lib/image-moderation.server";
+import { screenGarmentSuitability } from "../lib/image-suitability.server";
 import { action } from "./api.wishlist.jsx";
 
 const mockGetCustomer = () => getCurrentNaiaCustomer as ReturnType<typeof vi.fn>;
 const mockVerify = () => verifyCloudinaryAsset as ReturnType<typeof vi.fn>;
 const mockDelete = () => deleteCloudinaryAsset as ReturnType<typeof vi.fn>;
+const mockModeration = () => moderateImageContent as ReturnType<typeof vi.fn>;
+const mockSuitability = () => screenGarmentSuitability as ReturnType<typeof vi.fn>;
 
 const CUSTOMER_A = { id: "customer-A", shopifyCustomerId: "gid://shopify/Customer/A", membershipStatus: "NONE" };
 const CUSTOMER_B = { id: "customer-B", shopifyCustomerId: "gid://shopify/Customer/B", membershipStatus: "NONE" };
@@ -78,6 +84,13 @@ function analyzeRequestAs(customer: typeof CUSTOMER_A | null, body: Record<strin
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // This file tests consent/ownership behavior, not entitlement enforcement
+  // (covered separately in entitlement.test.ts) — enforcement is
+  // unconditional now (fix/stripe-clerk-phase1-security), so these two need
+  // a passing default or every test would fail at the quota guard before
+  // ever reaching the behavior under test.
+  (checkEntitlement as ReturnType<typeof vi.fn>).mockResolvedValue({ allowed: true });
+  (reserveBuySkipSlot as ReturnType<typeof vi.fn>).mockResolvedValue({ allowed: true, record: { id: "mock-analysis" } });
 });
 
 describe("api.wishlist action=analyze — authentication", () => {
@@ -181,5 +194,77 @@ describe("api.wishlist action=analyze — failure paths, no real database or ima
     });
     const res: any = await action({ request: req, params: {}, context: {} } as any);
     expect(res.init.status).toBe(400);
+  });
+});
+
+// fix/cloudinary-asset-lifecycle + fix/stripe-clerk-phase1-security (merged
+// 2026-11-12): reserveBuySkipSlot's own Serializable transaction now claim-
+// checks the asset via assertPublicIdAvailable before creating the row. A
+// route-level test (not just entitlement.test.ts's unit coverage of
+// reserveBuySkipSlot itself) that this still surfaces as HTTP 409 all the
+// way through the real action — the exact integration-reconciliation point
+// in api.wishlist.jsx this file's merge touched.
+describe("api.wishlist action=analyze — asset-claim conflict (asset_pending_deletion) surfaces as 409", () => {
+  it("reserveBuySkipSlot returning asset_pending_deletion returns 409 asset_unavailable, all the way through the real action", async () => {
+    mockVerify().mockResolvedValue({
+      ok: true,
+      asset: { type: "private", resourceType: "image", format: "jpg", bytes: 100_000, width: 800, height: 800 },
+    });
+    mockModeration().mockResolvedValue({ status: "PASS" });
+    mockSuitability().mockResolvedValue({ status: "PASS" });
+    // "ok: false" makes the magic-byte Range fetch a no-op (route only runs
+    // the byte check when the fetch itself succeeds); the second URL is the
+    // real Anthropic call this route makes with no SDK — see api.wishlist.jsx.
+    vi.stubGlobal("fetch", vi.fn(async (url: any) => {
+      if (typeof url === "string" && url.includes("api.anthropic.com")) {
+        return {
+          ok: true,
+          json: async () => ({
+            content: [{
+              text: JSON.stringify({
+                itemType: "Blouse",
+                detectedColor: "BLUE",
+                verdict: "BUY",
+                confidence: 80,
+                styleDNAMatch: "test",
+                detailedAnalysis: { silhouette: "test", color: "test", versatility: "test", dressingRequirementsCheck: "test" },
+                occasionFit: null,
+                whatLikeEval: null,
+                concernEval: null,
+                closetPairings: [],
+                fillsGap: null,
+                occasions: [],
+                productSnapshot: {
+                  observedSilhouette: null, observedFitProfile: null, observedFormality: null,
+                  observedSleeveLength: null, observedNecklineCoverage: null,
+                  observedShoulderCoverage: null, observedMidriffExposed: null,
+                  observedMaterial: null, observedPattern: null, observationConfidence: "low",
+                },
+                beforeYouBuy: ["a", "b"],
+                buyIf: "x",
+                skipIf: "y",
+                betterDirection: null,
+                finalThought: "z",
+              }),
+            }],
+          }),
+        };
+      }
+      return { ok: false };
+    }));
+    (reserveBuySkipSlot as ReturnType<typeof vi.fn>).mockResolvedValue({ allowed: false, reason: "asset_pending_deletion" });
+
+    const ownId = ownPublicId(CUSTOMER_A);
+    const res: any = await action({
+      // "Accessory" is outside WARDROBE_CONTEXT_ELIGIBLE_CATEGORIES, keeping
+      // this test from also having to mock loadWardrobeIntelligence's shape.
+      request: analyzeRequestAs(CUSTOMER_A, { publicId: ownId, photoConsentGiven: true, category: "Accessory" }),
+      params: {},
+      context: {},
+    } as any);
+
+    expect(res.init.status).toBe(409);
+    expect(res.data.error).toBe("asset_unavailable");
+    expect(mockDelete()).not.toHaveBeenCalled();
   });
 });

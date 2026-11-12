@@ -107,7 +107,7 @@ export interface StripeRequestDeps {
 }
 
 async function stripeRequest(
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "DELETE",
   path: string,
   params: Record<string, unknown> = {},
   { _fetch = fetch, _getSecretKey = () => process.env.STRIPE_SECRET_KEY }: StripeRequestDeps = {},
@@ -157,6 +157,15 @@ export interface CreateCheckoutSessionInput {
   // Session — keeps billing/payment history consolidated under one Stripe
   // Customer rather than fragmenting it across resubscriptions.
   existingProviderCustomerId?: string | null;
+  // Unix timestamp (seconds) this Checkout Session itself expires at. Stripe
+  // enforces a 30-minute minimum from creation. Set from
+  // checkout-reservation.server.ts's own TTL so an abandoned session's
+  // Stripe-side expiry and our own reservation row's expiry line up — Stripe's
+  // checkout.session.expired webhook (webhook-handler.server.ts) then fires
+  // right as our own fallback cleanup would otherwise kick in, not meaningfully
+  // before or after. Optional only so existing callers/tests without a
+  // reservation still work — Stripe defaults to 24 hours when omitted.
+  expiresAtUnixSeconds?: number;
 }
 
 export interface StripeCheckoutSession {
@@ -215,6 +224,7 @@ export async function createCheckoutSession(
       customer: input.existingProviderCustomerId ?? undefined,
       success_url: input.successUrl,
       cancel_url: input.cancelUrl,
+      ...(input.expiresAtUnixSeconds ? { expires_at: input.expiresAtUnixSeconds } : {}),
       line_items: [
         {
           quantity: 1,
@@ -278,6 +288,19 @@ export async function retrieveSubscription(
   deps: StripeRequestDeps = {},
 ): Promise<StripeSubscriptionSnapshot> {
   return stripeRequest("GET", `/subscriptions/${encodeURIComponent(providerSubscriptionId)}`, {}, deps);
+}
+
+// Immediate cancellation (Stripe's DELETE verb) — deliberately distinct from
+// the ordinary customer-initiated cancellation flow, which sets
+// cancel_at_period_end via the Billing Portal and retains access until the
+// period ends. Used only by erasure-billing.server.ts's account-erasure
+// path, where there is no longer a customer to retain access FOR. See that
+// file's own header for the full reasoning.
+export async function cancelSubscriptionImmediately(
+  providerSubscriptionId: string,
+  deps: StripeRequestDeps = {},
+): Promise<StripeSubscriptionSnapshot> {
+  return stripeRequest("DELETE", `/subscriptions/${encodeURIComponent(providerSubscriptionId)}`, {}, deps);
 }
 
 // ── Billing Portal (customer billing management: cancel, update payment method) ──

@@ -275,6 +275,82 @@ model PendingCustomerErasureFailure {
   @@index([resolvedAt])
 }
 
+/// Two jobs in one, both load-bearing:
+///   1. Durable, retryable record of a Cloudinary asset whose deletion
+///      either failed (lastError set) or is being coordinated (see below).
+///      Mirrors PendingClerkCleanup/PendingCustomerErasureFailure above —
+///      same upsert-not-duplicate convention, same no-FK-to-Customer
+///      reasoning (an abandoned upload's owning Customer may be anonymized
+///      or deleted before this resolves; deleting a Cloudinary asset only
+///      ever needs its publicId, never a live Customer row).
+///   2. The reservation half of the abandoned-upload sweep's concurrency
+///      protection: an UNRESOLVED row (resolvedAt: null) for a publicId
+///      means "claimed for deletion — do not persist a new DB reference to
+///      this asset." reserveClosetSlot/reserveBuySkipSlot (and the two
+///      direct-create/-update paths that bypass them) check for an active
+///      claim inside the SAME Serializable transaction that performs their
+///      own count-recheck-then-create, exactly mirroring how those
+///      functions already protect ClosetItem/BuyOrSkipAnalysis capacity
+///      against a concurrent request — see cloudinary-deletion-claim.server.ts.
+///      A plain "recheck then delete" read is not atomic on its own; this
+///      row, read and written inside Serializable transactions on both
+///      sides, is what makes the check-then-act atomic in practice.
+/// resourceType/deliveryType are stored per-row, not assumed — NaiaModel
+/// photos are the one asset type in this app that can legitimately be
+/// either Cloudinary delivery type "private" or "authenticated" (see
+/// my-naia-model.server.ts's PERMITTED_DELIVERY_TYPES), so asset identity
+/// for a destroy/list call must carry its own observed type, never a
+/// hardcoded default.
+model PendingCloudinaryDeletion {
+  id            String    @id @default(cuid())
+  customerId    String
+  publicId      String    @unique
+  resourceType  String    @default("image")
+  deliveryType  String
+  /// "abandoned-upload-sweep" | "account-erasure" — which caller discovered
+  /// this asset needed deleting, for operator triage.
+  context       String
+  attemptCount  Int       @default(0)
+  lastAttemptAt DateTime?
+  lastError     String?
+  createdAt     DateTime  @default(now())
+  /// Set once the Cloudinary destroy call is confirmed to have succeeded
+  /// (or the asset was already gone). While null, the publicId is treated
+  /// as claimed/unavailable by the reservation check above.
+  resolvedAt    DateTime?
+
+  @@index([customerId])
+  @@index([resolvedAt])
+}
+
+/// Audit + overlap-guard record for one run of the bounded, resumable,
+/// multi-customer abandoned-upload sweep (cron or admin-triggered — never
+/// the per-customer immediate sweep that runs inside account erasure, which
+/// is small and synchronous by construction and doesn't need this). A
+/// RUNNING row with a recent startedAt blocks a second concurrent run from
+/// starting; cursorCustomerId lets a run that stopped early (time budget,
+/// Cloudinary rate limit, or a per-run customer cap) resume instead of
+/// restarting from the top, so there is never an uncontrolled all-customer
+/// sweep in one invocation.
+model CloudinarySweepRun {
+  id                      String    @id @default(cuid())
+  status                  String    // RUNNING | COMPLETED | FAILED
+  mode                    String    // SCHEDULED | ADMIN
+  dryRun                  Boolean   @default(true)
+  startedAt               DateTime  @default(now())
+  finishedAt              DateTime?
+  cursorCustomerId        String?
+  customersChecked        Int       @default(0)
+  assetsChecked           Int       @default(0)
+  assetsDeleted           Int       @default(0)
+  assetsSkippedRecent     Int       @default(0)
+  assetsSkippedReferenced Int       @default(0)
+  failures                Int       @default(0)
+  stoppedReason           String?   // TIME_BUDGET | CUSTOMER_CAP | RATE_LIMIT | COMPLETED_ALL | ERROR
+
+  @@index([status, startedAt])
+}
+
 /// A point-in-time reading of the wardrobe, so "what changed?" has a before.
 /// Without this there is nothing honest to compare a new piece against.
 model WardrobeSnapshot {
@@ -502,6 +578,47 @@ model BillingTransaction {
 // the same pattern already used for the Shopify privacy-webhook and
 // StyleMe/BuySkip/Closet quota-reservation idempotency elsewhere in this
 // codebase, applied here to billing.
+
+// Closes a genuine concurrency gap the pre-existing "does a non-terminal
+// Subscription row already exist" check (api.billing-checkout.tsx) cannot:
+// that check only ever sees something once an EARLIER checkout attempt's
+// webhook has landed, which can be minutes away. Two requests racing BEFORE
+// any Subscription row exists — two tabs, a double-click outside the 5-
+// minute idempotency-key bucket, two different plan types — each sailed
+// straight through that check and could mint a separate, independently-
+// billed Stripe subscription. customerId's @@unique constraint is the
+// actual atomicity guarantee: only one reservation row can exist per
+// customer at the database level, so the SECOND of two truly concurrent
+// insert attempts always fails with P2002, not a race-prone read-then-write.
+//
+// One row per customer, not a history — deleted (not soft-closed) the
+// moment its outcome is known, by whichever of three paths resolves first:
+//   1. checkout.session.completed / .async_payment_succeeded /
+//      .async_payment_failed (webhook-handler.server.ts) — the attempt
+//      reached a real outcome; a Subscription row now exists (or definitively
+//      failed to), so the Subscription-based check above takes over.
+//   2. checkout.session.expired (webhook-handler.server.ts) — the customer
+//      abandoned the Stripe-hosted checkout page without paying; Stripe
+//      itself fires this once the session's own expires_at passes. This is
+//      the ONLY path that fires when the OTHER two never will, since no
+//      Subscription row was ever created for an abandoned attempt.
+//   3. expiresAt fallback (checkout-reservation.server.ts, checked on the
+//      NEXT checkout attempt) — defense-in-depth in case Stripe's own
+//      .expired webhook was ever missed; never the primary mechanism.
+// expiresAt is always set to match the Stripe Checkout Session's own
+// expires_at (30 minutes — Stripe's enforced minimum), so both cleanup
+// paths agree on when an attempt counts as abandoned.
+model CheckoutReservation {
+  id         String @id @default(cuid())
+  customerId String @unique
+
+  planType                  BillingPlanType
+  providerCheckoutSessionId String? // Set once Stripe confirms session creation; null for the brief window between reserving and that response.
+
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+}
+
 model ProcessedWebhookEvent {
   id              String   @id @default(cuid())
   provider        String

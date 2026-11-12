@@ -30,6 +30,13 @@
 //         retaining what the law requires", exactly as Subscription's own
 //         comment anticipates. The anonymized row's only remaining purpose
 //         is to be the thing Subscription/BillingTransaction still point to.
+//       * Before that anonymization runs, any live/chargeable subscription
+//         is cancelled immediately via Stripe (see billing/erasure-billing.
+//         server.ts) — anonymizing first would leave a subscription Stripe
+//         keeps billing with no customer left able to reach the Billing
+//         Portal to stop it. A cancellation failure here is treated as the
+//         same kind of genuinely-unexpected failure as a stuck Cloudinary
+//         asset (below) — durably recorded, anonymization does NOT proceed.
 //   - A genuinely unexpected failure (anything other than the two expected,
 //     already-handled cases above: a stuck Cloudinary asset, or billing
 //     history) is durably recorded via recordPendingCustomerErasureFailure
@@ -54,6 +61,8 @@ import { deleteCustomerVtoResults } from "./ai/fashn-tryon-service.server";
 import { withdrawSaveModelConsent } from "./ai/my-naia-model.server";
 import { deleteBoth as deleteSelfieBoth } from "./ai/selfie-persistence.server";
 import { recordPendingCustomerErasureFailure } from "./customer-erasure-failures.server";
+import { sweepCustomerForErasure } from "./cloudinary-orphan-sweep.server";
+import { cancelActiveBillingForErasure } from "./billing/erasure-billing.server";
 
 // ── Dependency-injection surface (mocked providers in tests) ──────────────────
 
@@ -82,7 +91,13 @@ export interface EraseDependencies {
   deleteCustomerVtoResults?: typeof deleteCustomerVtoResults;
   withdrawSaveModelConsent?: typeof withdrawSaveModelConsent;
   deleteSelfieBoth?: typeof deleteSelfieBoth;
+  sweepCustomerForErasure?: typeof sweepCustomerForErasure;
   _runErasureTransaction?: RunErasureTransactionFn;
+  // fix/stripe-clerk-phase1-security (2026-11-12): cancels any live,
+  // chargeable Stripe subscription BEFORE anonymizeBilledCustomer runs — see
+  // billing/erasure-billing.server.ts's own header for why this must happen
+  // here, not be left to a webhook.
+  cancelActiveBillingForErasure?: typeof cancelActiveBillingForErasure;
 }
 
 export interface EraseResult {
@@ -94,6 +109,14 @@ export interface EraseResult {
    * removed) so Subscription/BillingTransaction can still reference it.
    */
   anonymized: boolean;
+  /**
+   * publicIds that failed to delete — from the existing feature helpers
+   * AND the abandoned-upload sweep. Every one of these is durably recorded
+   * in PendingCloudinaryDeletion (retryable via /admin/maintenance), not
+   * just returned here — a caller ignoring this array (as settings.tsx's
+   * delete-account action currently does) no longer means the failure is
+   * lost, only that it isn't surfaced synchronously.
+   */
   cloudinaryFailures: string[];
   journeyEventsPurged: number;
   /**
@@ -184,7 +207,9 @@ export async function eraseCustomerData(
   const _deleteCustomerVtoResults = deps.deleteCustomerVtoResults ?? deleteCustomerVtoResults;
   const _withdrawSaveModelConsent = deps.withdrawSaveModelConsent ?? withdrawSaveModelConsent;
   const _deleteSelfieBoth = deps.deleteSelfieBoth ?? deleteSelfieBoth;
+  const _sweepCustomerForErasure = deps.sweepCustomerForErasure ?? sweepCustomerForErasure;
   const _runErasureTransaction = deps._runErasureTransaction ?? _runErasureTransactionDefault;
+  const _cancelActiveBillingForErasure = deps.cancelActiveBillingForErasure ?? cancelActiveBillingForErasure;
 
   // 1. Cloudinary assets first — the Customer-row cascade below has no
   //    mechanism to reach external storage.
@@ -193,16 +218,39 @@ export async function eraseCustomerData(
   const vto = await _deleteCustomerVtoResults(customerId);
   const model = await _withdrawSaveModelConsent(customerId);
   const selfie = await _deleteSelfieBoth(customerId);
+  // Abandoned uploads — never committed to any of the above, so none of
+  // them would otherwise ever discover or delete these. No age threshold:
+  // the customer is leaving, so everything in their folder goes now, not
+  // after the ordinary 24h grace period. This call durably records its own
+  // failures (see cloudinary-deletion-claim.server.ts's PendingCloudinaryDeletion
+  // upsert) — unlike the four calls above, whose failedAssets are recorded
+  // below, since those existing helpers predate this table and were
+  // deliberately left unchanged.
+  const abandoned = await _sweepCustomerForErasure(customerId);
+
+  const existingHelperFailures: Array<{ publicId: string; deliveryType: string; resourceType: string }> = [
+    ...closet.failedAssets.map((publicId) => ({ publicId, deliveryType: "private", resourceType: "image" })),
+    ...bos.failedAssets.map((publicId) => ({ publicId, deliveryType: "private", resourceType: "image" })),
+    ...vto.failedAssets.map((publicId) => ({ publicId, deliveryType: "private", resourceType: "image" })),
+    // withdrawSaveModelConsent now carries its own verified (or explicitly
+    // "unknown") deliveryType per failure — see FailedModelAsset and
+    // resolveModelAssetDeliveryType in my-naia-model.server.ts. No guess
+    // here; this reads whatever that function already established.
+    ...model.failedAssets.map((f) => ({ publicId: f.publicId, deliveryType: f.deliveryType, resourceType: "image" })),
+  ];
+  if (!selfie.ok && selfie.errorCode === "DELETION_FAILED") {
+    // deleteSelfieBoth doesn't expose the photo's own publicId on failure —
+    // re-read it directly; selfie uploads are always deliveryType "private"
+    // (selfie-upload.server.ts hardcodes it, confirmed).
+    const selfieRow = await prisma.selfieAnalysis.findUnique({ where: { customerId }, select: { photoPublicId: true } });
+    if (selfieRow?.photoPublicId) {
+      existingHelperFailures.push({ publicId: selfieRow.photoPublicId, deliveryType: "private", resourceType: "image" });
+    }
+  }
 
   const cloudinaryFailures = [
-    ...closet.failedAssets,
-    ...bos.failedAssets,
-    ...vto.failedAssets,
-    ...model.failedAssets,
-    // deleteSelfieBoth returns { ok, errorCode? } rather than a failedAssets
-    // list — NOT_FOUND just means there was never a photo, DELETION_FAILED
-    // is the one failure mode worth surfacing here.
-    ...(selfie.ok ? [] : selfie.errorCode === "DELETION_FAILED" ? ["selfie-photo"] : []),
+    ...existingHelperFailures.map((f) => f.publicId),
+    ...abandoned.failedAssets,
   ];
 
   // 2. JourneyEvent — no FK, purged by the same hash derivation
@@ -219,8 +267,50 @@ export async function eraseCustomerData(
   //    recorded instead of thrown, so one customer's failure can never
   //    silently abort whatever batch called this.
   try {
+    // Durably record the pre-existing helpers' Cloudinary failures (the
+    // abandoned-upload sweep already recorded its own). Deliberately
+    // inside this try: if THIS write itself fails, that must escalate to
+    // the same recordPendingCustomerErasureFailure path below, not be
+    // silently dropped — a failure to persist a deletion task must never
+    // read as a successful erasure.
+    for (const f of existingHelperFailures) {
+      const lastError = f.deliveryType === "unknown"
+        ? "delivery type could not be established during account erasure — a retry must re-resolve it before attempting deletion"
+        : "deletion failed during account erasure";
+      await prisma.pendingCloudinaryDeletion.upsert({
+        where: { publicId: f.publicId },
+        create: {
+          customerId,
+          publicId: f.publicId,
+          resourceType: f.resourceType,
+          deliveryType: f.deliveryType,
+          context: "account-erasure",
+          attemptCount: 1,
+          lastAttemptAt: new Date(),
+          lastError,
+        },
+        update: {
+          attemptCount: { increment: 1 },
+          lastAttemptAt: new Date(),
+          lastError: `${lastError} (repeat)`,
+        },
+      });
+    }
+
     const billed = await hasBillingHistory(customerId);
     if (billed) {
+      // Cancel any live, chargeable subscription BEFORE anonymizing —
+      // anonymization is about to remove every way this customer could
+      // reach the Billing Portal to cancel it themselves. A failure here
+      // throws (caught below, durably recorded) rather than proceeding to
+      // anonymize while Stripe might still be billing this customer.
+      const billingCancellation = await _cancelActiveBillingForErasure(customerId);
+      if (!billingCancellation.ok) {
+        throw new Error(
+          `cancelActiveBillingForErasure failed for ${billingCancellation.failures.length} subscription(s): ` +
+            billingCancellation.failures.map((f) => `${f.subscriptionId} (${f.error})`).join("; "),
+        );
+      }
       // Subscription/BillingTransaction rows block a real delete (onDelete:
       // Restrict) and must be legally retained — anonymize in place instead.
       await anonymizeBilledCustomer(customerId, _runErasureTransaction);

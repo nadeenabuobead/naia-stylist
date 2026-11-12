@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Form, Link, useLocation } from "react-router";
+import { useClerk } from "@clerk/react-router";
 import { STOREFRONT_ORIGIN, STOREFRONT_NAV } from "~/lib/storefront-config";
 
 type NavItem = { to: string; label: string; exact?: boolean; logout?: boolean };
@@ -103,6 +104,29 @@ export default function MyNaiaLayout({ children, compact = false }: Props) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [footerOpen, setFooterOpen] = useState<string | null>("customer care");
   const { pathname } = useLocation();
+  const { signOut } = useClerk();
+
+  // 2026-11-12 fix (fix/stripe-clerk-phase1-security): /auth/logout's own
+  // action only ever cleared the legacy NaiaSession/__naia_tok cookie — it
+  // has no way to end a Clerk session, since that's managed through Clerk's
+  // own Frontend API, not a cookie this server can simply clear. Without
+  // this, a customer authenticated via Clerk who clicked "Sign Out" kept
+  // their Clerk session alive in that browser. signOut() here ends it for
+  // real (invalidating it server-side via Clerk, not just a client cookie
+  // wipe) before the existing POST still runs, unchanged, for the legacy
+  // cleanup. form.submit() bypasses React's onSubmit entirely, so this
+  // can't recurse back into itself.
+  async function signOutThenSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    try {
+      await signOut();
+    } catch {
+      // Clerk sign-out failing must never block local sign-out — the
+      // POST below is what actually matters for this app's own session.
+    }
+    form.submit();
+  }
 
   return (
     <main className="mn-page">
@@ -188,7 +212,7 @@ export default function MyNaiaLayout({ children, compact = false }: Props) {
                     if (item.logout) {
                       return (
                         <li key={item.to}>
-                          <Form method="post" action="/auth/logout" reloadDocument style={{ display: "contents" }}>
+                          <Form method="post" action="/auth/logout" reloadDocument onSubmit={signOutThenSubmit} style={{ display: "contents" }}>
                             <button
                               type="submit"
                               onClick={() => setMobileOpen(false)}
@@ -234,7 +258,7 @@ export default function MyNaiaLayout({ children, compact = false }: Props) {
                       if (item.logout) {
                         return (
                           <li key={item.to} className="mn-sidebar-nav-item">
-                            <Form method="post" action="/auth/logout" reloadDocument style={{ display: "contents" }}>
+                            <Form method="post" action="/auth/logout" reloadDocument onSubmit={signOutThenSubmit} style={{ display: "contents" }}>
                               <button type="submit" className="mn-sidebar-nav-link mn-nav-button-reset">
                                 <span className="mn-sidebar-nav-line" aria-hidden="true" />
                                 {item.label}

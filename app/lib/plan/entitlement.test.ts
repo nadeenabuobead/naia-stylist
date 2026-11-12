@@ -22,7 +22,9 @@
 // ENT-14  closet guard checks plan limit from getMembershipAllowances, not a hardcoded number
 // ENT-17  Overview helper buildOverviewPlanCards uses entitlement, not closetCount directly
 // ENT-18  Closet enforcement is immediate (no ENTITLEMENT_ENFORCEMENT flag check)
-// ENT-19  Monthly guards (StyleMe, BuySkip, VTO) check ENTITLEMENT_ENFORCEMENT flag
+// ENT-19  Monthly guards (StyleMe, BuySkip, VTO, Trend Edit) enforce unconditionally —
+//         no feature's quota check reads process.env.ENTITLEMENT_ENFORCEMENT (fixed 2026-11-12,
+//         see fix/stripe-clerk-phase1-security; was previously fail-open when unset/false)
 // ENT-20  migration file exists for membership_status
 // ENT-21  plan-usage route registered in routes.ts
 // ENT-22  adjust-vibe action stores styleMeAdjustVibeSourceId in cookie
@@ -55,6 +57,7 @@ const closetRt   = readFile("app/routes/closet._index.tsx");
 const closetApi  = readFile("app/routes/api.closet.jsx");
 const wishlist   = readFile("app/routes/api.wishlist.jsx");
 const triggerVto = readFile("app/routes/api.trigger-tryon.tsx");
+const trendEdit  = readFile("app/routes/trends.my-edits.$slug.tsx");
 const routes     = readFile("app/routes.ts");
 
 // ── Schema ────────────────────────────────────────────────────────────────────
@@ -228,25 +231,37 @@ describe("ENT-18 — closet enforcement is immediate (no flag)", () => {
 
 // ── Monthly guards behind flag ────────────────────────────────────────────────
 
-describe("ENT-19 — monthly guards check ENTITLEMENT_ENFORCEMENT flag", () => {
-  it("StyleMe guard in result.tsx checks ENTITLEMENT_ENFORCEMENT", () => {
-    assert.ok(resultTsx.includes("ENTITLEMENT_ENFORCEMENT"), "StyleMe guard must check flag");
-    // 2026-11: reserveStyleMeSlot replaced checkEntitlement here — StyleMe has
-    // no expensive external call between the check and the write (unlike
-    // BuySkip's AI analysis step below), so a single atomic reservation is
-    // the complete guard; there's no separate cheap-early-exit check to keep.
-    // See ENT-32/ENT-33 for the guest-bypass and atomicity assertions.
+describe("ENT-19 — monthly guards enforce unconditionally, not behind an env flag", () => {
+  // 2026-11-12 fix (fix/stripe-clerk-phase1-security): all four of these
+  // guards used to read `process.env.ENTITLEMENT_ENFORCEMENT === "true"`
+  // with no other branch — unset/false silently skipped the quota check
+  // entirely, letting an unpaid customer use every paid AI feature without
+  // limit. None of these files may read that env var anymore, in either
+  // direction (`=== "true"` or `!== "true"`).
+  it("StyleMe guard in result.tsx does not read ENTITLEMENT_ENFORCEMENT and always reserves atomically", () => {
+    assert.ok(!resultTsx.includes("process.env.ENTITLEMENT_ENFORCEMENT"),
+              "StyleMe guard must not depend on an env flag");
     assert.ok(resultTsx.includes("reserveStyleMeSlot"), "StyleMe guard must use the atomic reserveStyleMeSlot");
   });
 
-  it("BuySkip guard in api.wishlist.jsx checks ENTITLEMENT_ENFORCEMENT", () => {
-    assert.ok(wishlist.includes("ENTITLEMENT_ENFORCEMENT"), "BuySkip guard must check flag");
+  it("BuySkip guard in api.wishlist.jsx does not read ENTITLEMENT_ENFORCEMENT and always checks + reserves", () => {
+    assert.ok(!wishlist.includes("process.env.ENTITLEMENT_ENFORCEMENT"),
+              "BuySkip guard must not depend on an env flag");
     assert.ok(wishlist.includes("checkEntitlement"), "BuySkip guard must use checkEntitlement");
+    assert.ok(wishlist.includes("reserveBuySkipSlot"), "BuySkip write path must use the atomic reserveBuySkipSlot");
   });
 
-  it("VTO guard in api.trigger-tryon.tsx checks ENTITLEMENT_ENFORCEMENT", () => {
-    assert.ok(triggerVto.includes("ENTITLEMENT_ENFORCEMENT"), "VTO guard must check flag");
+  it("VTO guard in api.trigger-tryon.tsx does not read ENTITLEMENT_ENFORCEMENT and always checks", () => {
+    assert.ok(!triggerVto.includes("process.env.ENTITLEMENT_ENFORCEMENT"),
+              "VTO guard must not depend on an env flag");
     assert.ok(triggerVto.includes("checkEntitlement"), "VTO guard must use checkEntitlement");
+  });
+
+  it("Trend Edit guards in trends.my-edits.$slug.tsx do not read ENTITLEMENT_ENFORCEMENT and always check + reserve", () => {
+    assert.ok(!trendEdit.includes("process.env.ENTITLEMENT_ENFORCEMENT"),
+              "Trend Edit guards must not depend on an env flag, in either direction");
+    assert.ok(trendEdit.includes("checkEntitlement"), "Trend Edit loader guard must use checkEntitlement");
+    assert.ok(trendEdit.includes("reservePersonalisedTrendSlot"), "Trend Edit write path must use the atomic reservePersonalisedTrendSlot");
   });
 });
 
@@ -418,20 +433,18 @@ describe("ENT-37 — StyleMe and BuySkip quota writes are atomic (Serializable t
     assert.match(entSvc, /isolationLevel:\s*"Serializable"/);
   });
 
-  it("result.tsx creates the StylingSession via reserveStyleMeSlot when enforcement is on, not a bare prisma.stylingSession.create inside that branch", () => {
-    const enforcedBlockStart = resultTsx.indexOf("if (isEnforced) {");
-    const enforcedBlockEnd = resultTsx.indexOf("} else {", enforcedBlockStart);
-    const enforcedBlock = resultTsx.slice(enforcedBlockStart, enforcedBlockEnd);
-    assert.match(enforcedBlock, /reserveStyleMeSlot\(/);
-    assert.ok(!enforcedBlock.includes("prisma.stylingSession.create"), "the enforced branch must reserve atomically, not create directly");
+  it("result.tsx creates the StylingSession via reserveStyleMeSlot unconditionally, never a bare prisma.stylingSession.create", () => {
+    // 2026-11-12: the isEnforced/else split was removed entirely — reserveStyleMeSlot
+    // is now the only path, so there is no "bare create" branch left to check.
+    assert.ok(!resultTsx.includes("prisma.stylingSession.create"), "result.tsx must reserve atomically, not create directly");
+    assert.ok(!resultTsx.includes("isEnforced"), "the old enforced/unenforced split must be gone entirely");
   });
 
-  it("api.wishlist.jsx creates the BuyOrSkipAnalysis via reserveBuySkipSlot when enforcement is on", () => {
+  it("api.wishlist.jsx creates the BuyOrSkipAnalysis via reserveBuySkipSlot unconditionally, never a bare prisma.buyOrSkipAnalysis.create", () => {
     assert.match(wishlist, /import\s*\{[^}]*reserveBuySkipSlot[^}]*\}\s*from\s*"\.\.\/lib\/plan\/entitlement\.server"/);
-    const enforcedBlockStart = wishlist.indexOf('if (process.env.ENTITLEMENT_ENFORCEMENT === "true") {', wishlist.indexOf("Persist analysis"));
-    const enforcedBlockEnd = wishlist.indexOf("} else {", enforcedBlockStart);
-    const enforcedBlock = wishlist.slice(enforcedBlockStart, enforcedBlockEnd);
-    assert.match(enforcedBlock, /reserveBuySkipSlot\(/);
+    assert.ok(wishlist.includes("reserveBuySkipSlot("), "the persist step must call reserveBuySkipSlot");
+    assert.ok(!wishlist.includes("prisma.buyOrSkipAnalysis.create("),
+              "must not fall back to a bare create — reserveBuySkipSlot is the only write path now");
   });
 });
 
@@ -507,9 +520,25 @@ describe("ENT-36 — Closet's atomic reservation stays unconditional, same postu
   it("closet._index.tsx deletes the Cloudinary asset if the atomic reservation is lost to a concurrent upload, so a blocked item never leaves an orphaned asset", () => {
     const reserveIdx = closetRt.indexOf("reserveClosetSlot(");
     const notAllowedIdx = closetRt.indexOf("!reservation.allowed", reserveIdx);
-    const blockEnd = closetRt.indexOf("return data(", notAllowedIdx);
-    const block = closetRt.slice(notAllowedIdx, blockEnd);
+    // "asset_pending_deletion" (the abandoned-upload sweep having already
+    // claimed this publicId) is checked first and deliberately does NOT
+    // delete — the sweep owns that asset's cleanup — so anchor on the
+    // at_capacity branch specifically, not "the first return data(" after
+    // !reservation.allowed, which would now match the wrong branch.
+    const concurrentRaceIdx = closetRt.indexOf("A concurrent upload won the race", notAllowedIdx);
+    const blockEnd = closetRt.indexOf("return data(", concurrentRaceIdx);
+    const block = closetRt.slice(concurrentRaceIdx, blockEnd);
     assert.match(block, /deleteCloudinaryAsset\(publicId,\s*"private"\)/);
+  });
+
+  it("closet._index.tsx does NOT delete the Cloudinary asset when the abandoned-upload sweep has already claimed it — the sweep owns that asset's cleanup, not this route", () => {
+    const reserveIdx = closetRt.indexOf("reserveClosetSlot(");
+    const notAllowedIdx = closetRt.indexOf("!reservation.allowed", reserveIdx);
+    const pendingDeletionIdx = closetRt.indexOf('"asset_pending_deletion"', notAllowedIdx);
+    const concurrentRaceIdx = closetRt.indexOf("A concurrent upload won the race", notAllowedIdx);
+    const block = closetRt.slice(pendingDeletionIdx, concurrentRaceIdx);
+    assert.doesNotMatch(block, /deleteCloudinaryAsset\(/);
+    assert.match(block, /status:\s*409/);
   });
 
   it("api.closet.jsx's add action uses reserveClosetSlot", () => {

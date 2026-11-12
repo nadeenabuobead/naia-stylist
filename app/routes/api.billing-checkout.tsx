@@ -14,14 +14,17 @@
 //   - Does not create or mutate any Subscription row itself — that only
 //     ever happens from a confirmed webhook event (see webhook-handler.
 //     server.ts). Creating a Checkout Session grants nothing by itself.
-//   - Duplicate-subscription prevention: refuses to create a second
-//     Checkout Session while the customer already has a Subscription row
-//     that isn't CANCELED/EXPIRED. Without this, a double form submission
-//     (or a customer clicking "subscribe" twice) could produce two
-//     separate Stripe subscriptions for the same customer, each billed
-//     independently — a genuine double-charge risk, not just a data
-//     cleanliness issue. A customer with an existing non-terminal
-//     subscription is pointed at the billing portal instead.
+//   - Duplicate-subscription prevention, two layers:
+//     1. Refuses to create a second Checkout Session while the customer
+//        already has a Subscription row that isn't CANCELED/EXPIRED — the
+//        resolved-outcome case (an earlier attempt's webhook already landed).
+//     2. reserveCheckoutAttempt (checkout-reservation.server.ts) closes the
+//        gap the above cannot: two requests racing BEFORE any Subscription
+//        row exists (two tabs, a double-click outside the 5-minute Stripe
+//        idempotency-key bucket, two different plan types) could otherwise
+//        each mint a separate, independently-billed Stripe subscription.
+//        A database-level unique constraint on customerId, not a read-then-
+//        write check, is what makes this one actually race-safe.
 
 import type { ActionFunctionArgs } from "react-router";
 import { data } from "react-router";
@@ -29,6 +32,7 @@ import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import prisma from "~/db.server";
 import { MEMBERSHIP_PRICING } from "~/lib/plan/plan-limits.server";
 import { createCheckoutSession, StripeNotConfiguredError, StripeLiveModeBlockedError } from "~/lib/billing/stripe-client.server";
+import { reserveCheckoutAttempt, releaseCheckoutReservation, attachCheckoutSessionId } from "~/lib/billing/checkout-reservation.server";
 
 function authRequired() {
   return data({ ok: false, code: "auth_required" }, { status: 401 });
@@ -67,6 +71,15 @@ export async function action({ request }: ActionFunctionArgs) {
     return data({ ok: false, code: "subscription_already_exists" }, { status: 409 });
   }
 
+  // Layer 2 — see the module header above. Must happen BEFORE the Stripe API
+  // call, not after: the whole point is to close the race on the slow,
+  // network-bound step, and a reservation made only after Stripe already
+  // responded would protect nothing.
+  const reservation = await reserveCheckoutAttempt(customer.id, planType);
+  if (!reservation.allowed) {
+    return data({ ok: false, code: "checkout_already_pending" }, { status: 409 });
+  }
+
   const pricing = planType === "MONTHLY" ? MEMBERSHIP_PRICING.monthly : MEMBERSHIP_PRICING.annual;
   const origin = new URL(request.url).origin;
 
@@ -79,9 +92,14 @@ export async function action({ request }: ActionFunctionArgs) {
       successUrl: `${origin}/my-naia/plan-usage?checkout=success`,
       cancelUrl: `${origin}/my-naia/plan-usage?checkout=cancelled`,
       existingProviderCustomerId: existing?.providerCustomerId ?? null,
+      expiresAtUnixSeconds: Math.floor(reservation.expiresAt.getTime() / 1000),
     });
+    await attachCheckoutSessionId(customer.id, session.id);
     return data({ ok: true, url: session.url });
   } catch (err) {
+    // The Stripe call itself failed — nothing was reserved with Stripe, so
+    // don't make the customer wait out the full TTL to try again.
+    await releaseCheckoutReservation(customer.id);
     if (err instanceof StripeNotConfiguredError || err instanceof StripeLiveModeBlockedError) {
       return data({ ok: false, code: "billing_not_configured" }, { status: 503 });
     }

@@ -974,7 +974,9 @@ describe("CS — consent withdrawal", () => {
 
     assert.deepEqual(attemptedIds.sort(), [bodyId, faceId].sort(), "both assets must be attempted");
     assert.equal(result.ok, false, "overall ok=false when one deletion fails");
-    assert.deepEqual(result.failedAssets, [faceId]);
+    // model.deliveryType ("private", from makeModel's default) is used
+    // directly — no extra verify call needed when it's already known.
+    assert.deepEqual(result.failedAssets, [{ publicId: faceId, deliveryType: "private", errorCode: "NETWORK_ERROR" }]);
     assert.deepEqual(result.deletedAssets, [bodyId]);
   });
 
@@ -991,6 +993,110 @@ describe("CS — consent withdrawal", () => {
     );
 
     assert.equal(upsertCalled, true, "DB clear must always be called regardless of Cloudinary failures");
+  });
+
+  it("CS.5 — a known deliveryType of 'authenticated' is used directly for the delete call, never defaulted to 'private'", async () => {
+    const bodyId = `naia-wardrobe/${CUST}/body`;
+    const model = makeModel({ bodyPublicId: bodyId, deliveryType: "authenticated", saveModelConsentAt: new Date() });
+    const calls: Array<{ publicId: string; deliveryType: string }> = [];
+
+    const result = await withdrawSaveModelConsent(
+      CUST,
+      async (_cid, data) => makeModel(data),
+      async () => model,
+      async (pid, dt) => { calls.push({ publicId: pid, deliveryType: dt ?? "" }); return { ok: true }; },
+    );
+
+    assert.deepEqual(calls, [{ publicId: bodyId, deliveryType: "authenticated" }]);
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.deletedAssets, [bodyId]);
+  });
+
+  it("CS.6 — a failed deletion with a known 'authenticated' deliveryType records that exact type in failedAssets, not a guessed 'private'", async () => {
+    const bodyId = `naia-wardrobe/${CUST}/body`;
+    const model = makeModel({ bodyPublicId: bodyId, deliveryType: "authenticated", saveModelConsentAt: new Date() });
+
+    const result = await withdrawSaveModelConsent(
+      CUST,
+      async (_cid, data) => makeModel(data),
+      async () => model,
+      async () => ({ ok: false, errorCode: "PROVIDER_ERROR" }),
+    );
+
+    assert.deepEqual(result.failedAssets, [{ publicId: bodyId, deliveryType: "authenticated", errorCode: "PROVIDER_ERROR" }]);
+  });
+
+  it("CS.7 — unknown deliveryType (legacy row, field never stamped): resolves it via verification before deleting, trying 'private' first", async () => {
+    const faceId = `naia-wardrobe/${CUST}/face`;
+    // deliveryType is NOT NULL @default("private") in schema.prisma — this null
+    // can't occur through ordinary application code today; it only exercises
+    // withdrawSaveModelConsent's defensive fallback (resolveModelAssetDeliveryType),
+    // which the task explicitly asks to keep regardless. `as any` acknowledges this
+    // is deliberately outside NaiaModelRecord's normal (non-nullable) type contract.
+    const model = makeModel({ facePublicId: faceId, deliveryType: null as any, saveModelConsentAt: new Date() });
+    const verifyCalls: string[] = [];
+    const deleteCalls: Array<{ publicId: string; deliveryType: string }> = [];
+
+    const result = await withdrawSaveModelConsent(
+      CUST,
+      async (_cid, data) => makeModel(data),
+      async () => model,
+      async (pid, dt) => { deleteCalls.push({ publicId: pid, deliveryType: dt ?? "" }); return { ok: true }; },
+      async (pid, dt) => {
+        verifyCalls.push(dt);
+        return dt === "private" ? { ok: true, asset: { type: "private" } } : { ok: false, errorCode: "NOT_FOUND" };
+      },
+    );
+
+    assert.deepEqual(verifyCalls, ["private"], "must stop at the first candidate that resolves — no unnecessary second call");
+    assert.deepEqual(deleteCalls, [{ publicId: faceId, deliveryType: "private" }], "deletes using the VERIFIED type, not a default");
+    assert.equal(result.ok, true);
+  });
+
+  it("CS.8 — unknown deliveryType that only resolves as 'authenticated' (private is checked first and correctly rejected, not assumed)", async () => {
+    const faceId = `naia-wardrobe/${CUST}/face`;
+    // deliveryType is NOT NULL @default("private") in schema.prisma — this null
+    // can't occur through ordinary application code today; it only exercises
+    // withdrawSaveModelConsent's defensive fallback (resolveModelAssetDeliveryType),
+    // which the task explicitly asks to keep regardless. `as any` acknowledges this
+    // is deliberately outside NaiaModelRecord's normal (non-nullable) type contract.
+    const model = makeModel({ facePublicId: faceId, deliveryType: null as any, saveModelConsentAt: new Date() });
+    const deleteCalls: Array<{ publicId: string; deliveryType: string }> = [];
+
+    const result = await withdrawSaveModelConsent(
+      CUST,
+      async (_cid, data) => makeModel(data),
+      async () => model,
+      async (pid, dt) => { deleteCalls.push({ publicId: pid, deliveryType: dt ?? "" }); return { ok: true }; },
+      async (_pid, dt) =>
+        dt === "authenticated" ? { ok: true, asset: { type: "authenticated" } } : { ok: false, errorCode: "NOT_FOUND" },
+    );
+
+    assert.deepEqual(deleteCalls, [{ publicId: faceId, deliveryType: "authenticated" }]);
+    assert.equal(result.ok, true);
+  });
+
+  it("CS.9 — delivery type cannot be established (neither candidate verifies): no delete attempted, a durable unresolved record is returned, not a reported success", async () => {
+    const faceId = `naia-wardrobe/${CUST}/face`;
+    // deliveryType is NOT NULL @default("private") in schema.prisma — this null
+    // can't occur through ordinary application code today; it only exercises
+    // withdrawSaveModelConsent's defensive fallback (resolveModelAssetDeliveryType),
+    // which the task explicitly asks to keep regardless. `as any` acknowledges this
+    // is deliberately outside NaiaModelRecord's normal (non-nullable) type contract.
+    const model = makeModel({ facePublicId: faceId, deliveryType: null as any, saveModelConsentAt: new Date() });
+    let deleteCalled = false;
+
+    const result = await withdrawSaveModelConsent(
+      CUST,
+      async (_cid, data) => makeModel(data),
+      async () => model,
+      async () => { deleteCalled = true; return { ok: true }; },
+      async () => ({ ok: false, errorCode: "NOT_FOUND" }), // neither "private" nor "authenticated" resolves
+    );
+
+    assert.equal(deleteCalled, false, "must never call deleteCloudinaryAsset against a guessed type");
+    assert.equal(result.ok, false, "must not report success when the type could not even be established");
+    assert.deepEqual(result.failedAssets, [{ publicId: faceId, deliveryType: "unknown", errorCode: "DELIVERY_TYPE_UNKNOWN" }]);
   });
 });
 

@@ -171,18 +171,19 @@ async function generateAndRecordEdit(
           edit,
           nadineRecommendation,
         };
-        // Behind ENTITLEMENT_ENFORCEMENT (same flag as every other
-        // reserve* path): re-verifies the ACCOUNT-WIDE monthly count and
-        // writes in one Serializable transaction, closing the race where a
-        // concurrent generation for a DIFFERENT report this same period
-        // already consumed the one allowance between this function's own
-        // caller checking checkEntitlement and reaching this write — see
+        // Unconditional, fail-closed: re-verifies the ACCOUNT-WIDE monthly
+        // count and writes in one Serializable transaction, closing the race
+        // where a concurrent generation for a DIFFERENT report this same
+        // period already consumed the one allowance between this function's
+        // own caller checking checkEntitlement and reaching this write — see
         // reservePersonalisedTrendSlot's own comment for why the per-report
         // unique constraint alone never caught that. Losing this race is
         // rare enough, and consuming no quota either way, that failing the
         // response honestly is simpler and safer than rendering generated
-        // content with no persisted row behind it.
-        if (process.env.ENTITLEMENT_ENFORCEMENT === "true") {
+        // content with no persisted row behind it. Previously gated behind
+        // ENTITLEMENT_ENFORCEMENT === "true" with an uncounted-write fallback
+        // — fixed 2026-11-12, see fix/stripe-clerk-phase1-security.
+        {
           const reservation = await reservePersonalisedTrendSlot(customer.id, customer.membershipStatus, report.slug, snapshot);
           if (!reservation.allowed) {
             console.error(
@@ -190,8 +191,6 @@ async function generateAndRecordEdit(
             );
             return { edit: null, nadineRecommendation: null, hasProfile: false, generationFailed: true };
           }
-        } else {
-          await recordPersonalisedTrendEditUsage(customer.id, report.slug, snapshot);
         }
         // Defensive verification, not a retry/self-heal: a genuine first
         // generation must never leave a row with a null snapshot. This
@@ -320,15 +319,16 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // Personalised Trend Edit is a membership feature, AND a MEMBER only gets
   // one NEW generation per month, account-wide across every report (see
   // checkEntitlement's personalisedTrend case — the count has no reportSlug
-  // filter). Behind ENTITLEMENT_ENFORCEMENT (same rollout flag as
-  // StyleMe/BuySkip/VTO — disabled in production until the upgrade flow
-  // exists), a blocked customer sees one of two distinct states —
-  // never-a-member gets the membership upsell, an already-entitled MEMBER
-  // who used this month's allowance (possibly on a different report) gets an
-  // honest monthly-allowance message instead — see resolveTrendEditBlockState.
-  // No Closet/Passport read happens for either blocked state — nothing to
-  // leak, nothing generated, nothing to count.
-  if (process.env.ENTITLEMENT_ENFORCEMENT === "true") {
+  // filter). Unconditional, fail-closed (same as every other reserve*/check
+  // path in this file) — a blocked customer sees one of two distinct
+  // states: never-a-member gets the membership upsell, an already-entitled
+  // MEMBER who used this month's allowance (possibly on a different report)
+  // gets an honest monthly-allowance message instead — see
+  // resolveTrendEditBlockState. No Closet/Passport read happens for either
+  // blocked state — nothing to leak, nothing generated, nothing to count.
+  // Previously gated behind ENTITLEMENT_ENFORCEMENT === "true" — fixed
+  // 2026-11-12, see fix/stripe-clerk-phase1-security.
+  {
     const entitlement = await checkEntitlement(customer.id, customer.membershipStatus, "personalisedTrend");
     if (!entitlement.allowed) {
       const blockState = resolveTrendEditBlockState(customer.membershipStatus, entitlement.reason);
@@ -376,17 +376,16 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return data({ ok: false as const, error: "Invalid request." }, { status: 400 });
   }
 
+  // Unconditional, fail-closed — previously generated unconditionally
+  // whenever ENTITLEMENT_ENFORCEMENT was anything but "true". Fixed
+  // 2026-11-12, see fix/stripe-clerk-phase1-security.
   const usageState = await getTrendEditUsageState(customer.id, report.slug);
   if (usageState.status === "none") {
-    if (process.env.ENTITLEMENT_ENFORCEMENT !== "true") {
+    const entitlement = await checkEntitlement(customer.id, customer.membershipStatus, "personalisedTrend");
+    if (entitlement.allowed) {
       await generateAndRecordEdit(customer, report);
-    } else {
-      const entitlement = await checkEntitlement(customer.id, customer.membershipStatus, "personalisedTrend");
-      if (entitlement.allowed) {
-        await generateAndRecordEdit(customer, report);
-      }
-      // Blocked — reload shows the archive again rather than a new edit.
     }
+    // Blocked — reload shows the archive again rather than a new edit.
   }
 
   return redirect(request.url);

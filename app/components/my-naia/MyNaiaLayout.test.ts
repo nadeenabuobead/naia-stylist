@@ -74,7 +74,82 @@ describe("G — Sign Out performs a real full-document submission, not a client-
   });
 
   it("reloadDocument sits alongside the unchanged method/action — the fix adds a prop, it does not replace the existing submission target", () => {
-    assert.match(SRC, /<Form\s+method="post"\s+action="\/auth\/logout"\s+reloadDocument\s+style=/);
+    // 2026-11-12: onSubmit={signOutThenSubmit} (the Clerk sign-out fix, see
+    // fix/stripe-clerk-phase1-security) now sits between reloadDocument and
+    // style= — allow any attributes there, but reloadDocument must still be
+    // present immediately after action="/auth/logout", unchanged.
+    assert.match(SRC, /<Form\s+method="post"\s+action="\/auth\/logout"\s+reloadDocument\s/);
+  });
+});
+
+describe("H — Sign Out actually ends the Clerk session, not just the legacy cookie (2026-11-12 fix)", () => {
+  // Prior to this fix, /auth/logout's own action only ever cleared the
+  // legacy NaiaSession/__naia_tok cookie and attempted Shopify OIDC
+  // provider logout — there was no call anywhere in the codebase to end a
+  // Clerk session (confirmed by the Stripe & Clerk audit: zero useClerk/
+  // SignOutButton/.signOut( matches anywhere in app/). Since
+  // requireCurrentNaiaCustomer resolves identity from Clerk's own session
+  // cookie (see clerk-session.server.ts), not __naia_tok, a customer could
+  // click "Sign Out" and remain fully logged in via Clerk.
+  //
+  // Composed with clerk-session.test.ts's existing, passing proof that "no
+  // Clerk session" makes requireCurrentNaiaCustomer redirect to /sign-in —
+  // this test (signOut() is actually called) plus that one (no session =
+  // denied) together demonstrate the full claim: Sign Out now makes
+  // previously-protected routes genuinely inaccessible. A true end-to-end
+  // check (call Clerk's real Frontend API, then hit a live protected route)
+  // is out of scope here — no live Clerk credentials exist in this phase.
+
+  it("imports useClerk from @clerk/react-router", () => {
+    assert.match(SRC, /import\s*\{[^}]*\buseClerk\b[^}]*\}\s*from\s*"@clerk\/react-router"/);
+  });
+
+  it("calls useClerk() inside the component to get signOut", () => {
+    assert.match(SRC, /const\s*\{\s*signOut\s*\}\s*=\s*useClerk\(\)/);
+  });
+
+  it("both Sign Out Forms wire onSubmit to the sign-out handler, not a bare submit", () => {
+    const formTags = SRC.match(/<Form\s+method="post"\s+action="\/auth\/logout"[^>]*>/g) ?? [];
+    assert.ok(formTags.length >= 2, "expected both the sidebar and mobile Sign Out Forms");
+    for (const tag of formTags) {
+      assert.ok(/onSubmit=\{signOutThenSubmit\}/.test(tag), `Sign Out Form must wire onSubmit: ${tag}`);
+    }
+  });
+
+  it("the handler awaits signOut() before submitting the form — Clerk ends the session before the legacy POST fires", () => {
+    const fnIdx = SRC.indexOf("function signOutThenSubmit(");
+    assert.ok(fnIdx !== -1, "signOutThenSubmit defined");
+    const fnBody = SRC.slice(fnIdx, SRC.indexOf("\n  }", fnIdx));
+    const signOutIdx = fnBody.indexOf("await signOut()");
+    const submitIdx = fnBody.indexOf("form.submit()");
+    assert.ok(signOutIdx !== -1, "awaits signOut()");
+    assert.ok(submitIdx !== -1, "calls form.submit()");
+    assert.ok(signOutIdx < submitIdx, "signOut() must be awaited before form.submit() — not fired in parallel");
+  });
+
+  it("calls preventDefault before anything else, so the native form submission never races the async signOut", () => {
+    const fnIdx = SRC.indexOf("function signOutThenSubmit(");
+    const fnBody = SRC.slice(fnIdx, SRC.indexOf("\n  }", fnIdx));
+    const preventIdx = fnBody.indexOf("preventDefault()");
+    const signOutIdx = fnBody.indexOf("await signOut()");
+    assert.ok(preventIdx !== -1 && preventIdx < signOutIdx, "preventDefault() runs before the async signOut() call");
+  });
+
+  it("form.submit() is used, not requestSubmit() or a second dispatched submit event — avoids recursing back into onSubmit", () => {
+    const fnIdx = SRC.indexOf("function signOutThenSubmit(");
+    const fnBody = SRC.slice(fnIdx, SRC.indexOf("\n  }", fnIdx));
+    assert.ok(fnBody.includes("form.submit()"), "uses the native, event-bypassing form.submit()");
+    assert.ok(!fnBody.includes("requestSubmit"), "requestSubmit() would re-fire the submit event and recurse");
+  });
+
+  it("a Clerk signOut() failure is caught and never blocks the legacy local sign-out from still running", () => {
+    const fnIdx = SRC.indexOf("function signOutThenSubmit(");
+    const fnBody = SRC.slice(fnIdx, SRC.indexOf("\n  }", fnIdx));
+    const tryIdx = fnBody.indexOf("try {");
+    const catchIdx = fnBody.indexOf("} catch");
+    const submitIdx = fnBody.indexOf("form.submit()");
+    assert.ok(tryIdx !== -1 && catchIdx !== -1 && tryIdx < catchIdx, "signOut() call is wrapped in try/catch");
+    assert.ok(submitIdx > catchIdx, "form.submit() runs after the catch block, regardless of whether signOut() threw");
   });
 });
 

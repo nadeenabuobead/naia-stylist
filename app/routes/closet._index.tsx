@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { useLoaderData, useFetcher, Link } from "react-router";
 import { data, redirect, type LoaderFunctionArgs, type ActionFunctionArgs, type LinksFunction } from "react-router";
 import prisma from "../db.server";
+import type { Prisma } from "@prisma/client";
 import { requireCurrentNaiaCustomer, getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { assessClosetEligibility, CLOSET_ELIGIBILITY_DISPLAY, isVtoCategoryAllowed, type ClosetTryOnEligibility } from "~/lib/ai/closet-eligibility";
 import { emitClosetItemAdded, recordJourneyEventAwaited } from "~/lib/ai/journey-events.server";
@@ -23,6 +24,7 @@ import { loadNaiaModel, computeModelReadinessFromRecord } from "~/lib/ai/my-naia
 import { VtoExperience } from "~/components/VtoExperience";
 import { checkEntitlement, reserveClosetSlot } from "~/lib/plan/entitlement.server";
 import { displayColors } from "~/lib/closet-card-colors";
+import { assertPublicIdAvailable, AssetPendingDeletionError } from "~/lib/cloudinary-deletion-claim.server";
 
 // Option B shell: MyNaiaLayout + naiaStyles (NADINE header, My nAia navigation)
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: naiaStyles }];
@@ -585,6 +587,15 @@ export async function action({ request }: ActionFunctionArgs) {
       analysisStatus: "pending",
     });
     if (!reservation.allowed) {
+      if (reservation.reason === "asset_pending_deletion") {
+        // The abandoned-upload sweep (or account erasure) has already
+        // claimed this exact publicId for deletion — it owns that asset's
+        // cleanup now; do not call deleteCloudinaryAsset here too, to avoid
+        // racing the sweep's own in-flight destroy call. Self-healing: ask
+        // for a fresh upload, same shape as the "could not be verified"
+        // rejection above.
+        return data({ error: "This image could not be saved. Please upload again." }, { status: 409 });
+      }
       // A concurrent upload won the race since the early check above — this
       // asset was already verified/moderated but must not be kept orphaned.
       await deleteCloudinaryAsset(publicId, "private");
@@ -952,36 +963,68 @@ export async function action({ request }: ActionFunctionArgs) {
       ? JSON.parse((editSeasonsRaw as string) || "[]")
       : (existing.seasons ?? []);
 
-    await prisma.closetItem.update({
-      where: { id: itemId },
-      data: {
-        name: name || null,
-        category,
-        colors,
-        primaryColor: primaryColor || null,
-        pattern: editPattern,
-        occasions: editOccasions,
-        seasons: editSeasons,
-        brand,
-        imageUrl: null,
-        imagePublicId: newPublicId,
-        imageFormat: editFormat,
-        tryOnEligibility:  editStageA.eligible,
-        tryOnAssessedAt:   new Date(editStageA.assessedAt),
-        tryOnCustomerHint: editStageA.customerHint,
-        tryOnInternalNote: editStageA.internalNote,
-        garmentRelationships: editGarmentRelationships,
-        customerNote: editCustomerNote,
-        // Image replaced — stale intelligence is no longer current; reanalysis below.
-        analysisStatus: "pending",
-        // Photo consent (2026-10-21) — stamps the NEW photo's own consent,
-        // never carrying the old photo's timestamp/version forward. Reaching
-        // this point already required editConsentGiven to be true (checked
-        // in step 2, above, before any verification/moderation even ran), so
-        // this is always a fresh, explicit affirmative for this exact image.
-        ...buildConsentStamp(editConsentGiven),
-      },
-    });
+    // This direct update (unlike "add") doesn't go through reserveClosetSlot
+    // — there's no capacity to re-check, just a photo being swapped on an
+    // existing row. It still needs the SAME atomic claim-check "add" gets,
+    // since newPublicId has the identical abandoned-upload exposure window.
+    // See cloudinary-deletion-claim.server.ts.
+    // Same Serializable-with-retry convention as reserveClosetSlot/
+    // reserveBuySkipSlot (entitlement.server.ts) — duplicated here rather
+    // than imported, since those helpers aren't exported from that module.
+    const EDIT_MAX_TX_RETRIES = 2;
+    const isEditSerializationError = (e: unknown) => (e as { code?: string })?.code === "P2034";
+    let editAttempt = 0;
+    for (;;) {
+    try {
+      await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        await assertPublicIdAvailable(tx, newPublicId);
+        await tx.closetItem.update({
+          where: { id: itemId },
+          data: {
+            name: name || null,
+            // category is a validated-at-runtime string, not a statically-typed
+            // ClosetCategory — same unchecked cast "add"'s reservation path uses
+            // (reserveClosetSlot's itemData), now surfaced here because tx is
+            // properly typed (it previously went unnoticed under the untyped tx
+            // this block replaced).
+            category: category as any,
+            colors,
+            primaryColor: primaryColor || null,
+            pattern: editPattern,
+            occasions: editOccasions,
+            seasons: editSeasons,
+            brand,
+            imageUrl: null,
+            imagePublicId: newPublicId,
+            imageFormat: editFormat,
+            tryOnEligibility:  editStageA.eligible,
+            tryOnAssessedAt:   new Date(editStageA.assessedAt),
+            tryOnCustomerHint: editStageA.customerHint,
+            tryOnInternalNote: editStageA.internalNote,
+            garmentRelationships: editGarmentRelationships,
+            customerNote: editCustomerNote,
+            // Image replaced — stale intelligence is no longer current; reanalysis below.
+            analysisStatus: "pending",
+            // Photo consent (2026-10-21) — stamps the NEW photo's own consent,
+            // never carrying the old photo's timestamp/version forward. Reaching
+            // this point already required editConsentGiven to be true (checked
+            // in step 2, above, before any verification/moderation even ran), so
+            // this is always a fresh, explicit affirmative for this exact image.
+            ...buildConsentStamp(editConsentGiven),
+          },
+        });
+      }, { isolationLevel: "Serializable" });
+      break;
+    } catch (e) {
+      if (e instanceof AssetPendingDeletionError) {
+        // Same reasoning as "add": the sweep already owns this asset's
+        // cleanup, so no deleteCloudinaryAsset call here.
+        return data({ error: "This image could not be saved. Please upload again." }, { status: 409 });
+      }
+      if (isEditSerializationError(e) && editAttempt < EDIT_MAX_TX_RETRIES) { editAttempt++; continue; }
+      throw e;
+    }
+    }
 
     // Delete old Cloudinary asset ONLY after the DB update succeeds.
     if (oldPublicId && oldPublicId !== newPublicId) {

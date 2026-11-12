@@ -31,6 +31,12 @@ import { purgeExpiredJourneyEvents, purgeExpiredNaiaSessions, purgeUnconfirmedSe
 import { recordAdminAction, listRecentAdminActions } from "~/lib/admin-audit-log.server";
 import { listPendingClerkCleanups, retryPendingClerkCleanup } from "~/lib/clerk-cleanup.server";
 import { listPendingCustomerErasureFailures, retryPendingCustomerErasureFailure } from "~/lib/customer-erasure-failures.server";
+import {
+  listPendingCloudinaryDeletions,
+  retryPendingCloudinaryDeletion,
+  purgeResolvedCloudinaryDeletions,
+} from "~/lib/cloudinary-deletion-claim.server";
+import { runBoundedSweep } from "~/lib/cloudinary-orphan-sweep.server";
 
 async function requireOwner(request: Request) {
   const session = await requireAdminSession(request);
@@ -42,12 +48,13 @@ async function requireOwner(request: Request) {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requireOwner(request);
-  const [recentActions, pendingClerkCleanups, pendingCustomerErasureFailures] = await Promise.all([
+  const [recentActions, pendingClerkCleanups, pendingCustomerErasureFailures, pendingCloudinaryDeletions] = await Promise.all([
     listRecentAdminActions(20),
     listPendingClerkCleanups(),
     listPendingCustomerErasureFailures(),
+    listPendingCloudinaryDeletions(),
   ]);
-  return { recentActions, pendingClerkCleanups, pendingCustomerErasureFailures };
+  return { recentActions, pendingClerkCleanups, pendingCustomerErasureFailures, pendingCloudinaryDeletions };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -106,6 +113,50 @@ export async function action({ request }: ActionFunctionArgs) {
     return { ok: false as const, error: result.status === "not-found" ? "Record not found." : "Already resolved." };
   }
 
+  if (intent === "sweep-cloudinary-dry-run" || intent === "sweep-cloudinary-execute") {
+    // Default is always dry-run — a real execution additionally requires
+    // this exact confirmation value, not just the intent name, so a
+    // mis-wired form or a replayed request can't silently execute.
+    const dryRun = intent === "sweep-cloudinary-dry-run" || form.get("confirmExecute") !== "EXECUTE";
+    const result = await runBoundedSweep({ mode: "ADMIN", dryRun });
+    await recordAdminAction(identity.email, dryRun ? "sweep-cloudinary-dry-run" : "sweep-cloudinary-execute", {
+      runId: result.runId,
+      stoppedReason: result.stoppedReason,
+      customersChecked: result.customersChecked,
+      assetsDeleted: result.assetsDeleted,
+      failures: result.failures,
+    });
+    if (result.stoppedReason === "ALREADY_RUNNING") {
+      return { ok: false as const, error: "A sweep is already running — try again shortly." };
+    }
+    return {
+      ok: true as const,
+      intent,
+      message: `${dryRun ? "[Dry run] " : ""}Checked ${result.customersChecked} customer(s), ${result.assetsChecked} asset(s). ` +
+        `${dryRun ? "Would delete" : "Deleted"} ${result.assetsDeleted}, ${result.assetsSkippedReferenced} still referenced, ` +
+        `${result.assetsSkippedRecent} too recent, ${result.failures} failed. Stopped: ${result.stoppedReason}.`,
+    };
+  }
+
+  if (intent === "retry-cloudinary-deletion") {
+    const id = String(form.get("id") ?? "");
+    const result = await retryPendingCloudinaryDeletion(id);
+    await recordAdminAction(identity.email, "retry-cloudinary-deletion", { id, result: result.status });
+    if (result.status === "resolved") {
+      return { ok: true as const, intent, message: "Cloudinary asset deleted — resolved." };
+    }
+    if (result.status === "failed-again") {
+      return { ok: false as const, error: `Retry failed again: ${result.error}` };
+    }
+    return { ok: false as const, error: result.status === "not-found" ? "Record not found." : "Already resolved." };
+  }
+
+  if (intent === "purge-resolved-cloudinary-deletions") {
+    const result = await purgeResolvedCloudinaryDeletions();
+    await recordAdminAction(identity.email, "purge-resolved-cloudinary-deletions", result);
+    return { ok: true as const, intent, message: `Purged ${result.count} resolved Cloudinary deletion record(s) past retention.` };
+  }
+
   return { ok: false as const, error: "Invalid request." };
 }
 
@@ -117,7 +168,7 @@ function confirmPurge(e: FormEvent<HTMLFormElement>, label: string) {
 
 export default function AdminMaintenance() {
   const actionData = useActionData<typeof action>();
-  const { recentActions, pendingClerkCleanups, pendingCustomerErasureFailures } = useLoaderData<typeof loader>();
+  const { recentActions, pendingClerkCleanups, pendingCustomerErasureFailures, pendingCloudinaryDeletions } = useLoaderData<typeof loader>();
 
   return (
     <div className="adm-page">
@@ -167,6 +218,88 @@ export default function AdminMaintenance() {
         {actionData && "error" in actionData && (
           <p style={{ fontSize: "13px", color: "#b3261e" }}>{actionData.error}</p>
         )}
+      </div>
+
+      <h2 className="adm-page-heading" style={{ fontSize: "16px", marginTop: "2rem" }}>
+        Abandoned Cloudinary uploads
+      </h2>
+      <p className="adm-page-sub" style={{ marginBottom: "0.75rem" }}>
+        Closet/Buy-or-Skip photos uploaded but never saved (the customer closed the tab or
+        navigated away before the final "Add"/"Analyze" click) — bounded, resumable, and always a
+        dry run unless explicitly confirmed below. Never deletes a photo still referenced by a
+        ClosetItem, Buy-or-Skip analysis, Style Passport model, or selfie.
+      </p>
+      <div className="adm-card" style={{ padding: "1.5rem", display: "flex", flexDirection: "column", gap: "1rem" }}>
+        <form method="post" style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
+          <input type="hidden" name="intent" value="sweep-cloudinary-dry-run" />
+          <button type="submit" style={maintenanceButtonStyle}>Run dry run</button>
+          <span style={{ fontSize: "12px", color: "#6b7280" }}>Lists what would be deleted — makes zero Cloudinary calls.</span>
+        </form>
+        <form method="post" style={{ display: "flex", alignItems: "center", gap: "1rem" }}
+          onSubmit={e => { if (!window.confirm("Execute real Cloudinary deletion for abandoned uploads? This cannot be undone.")) e.preventDefault(); }}>
+          <input type="hidden" name="intent" value="sweep-cloudinary-execute" />
+          <input type="hidden" name="confirmExecute" value="EXECUTE" />
+          <button type="submit" style={{ ...maintenanceButtonStyle, background: "#b3261e" }}>Execute real cleanup</button>
+          <span style={{ fontSize: "12px", color: "#6b7280" }}>Only deletes assets older than 24h and unreferenced at the moment of deletion.</span>
+        </form>
+        {actionData && "message" in actionData && (actionData.intent === "sweep-cloudinary-dry-run" || actionData.intent === "sweep-cloudinary-execute") && (
+          <p style={{ fontSize: "13px", color: "#16213e" }}>{actionData.message}</p>
+        )}
+      </div>
+
+      <h2 className="adm-page-heading" style={{ fontSize: "16px", marginTop: "2rem" }}>
+        Pending Cloudinary deletions
+      </h2>
+      <p className="adm-page-sub" style={{ marginBottom: "0.75rem" }}>
+        A Cloudinary asset the app has already decided to delete (abandoned upload, or account
+        erasure) whose delete call failed — retryable individually; never resolved automatically.
+      </p>
+      <div className="adm-card" style={{ padding: "0" }}>
+        {pendingCloudinaryDeletions.length === 0 ? (
+          <p style={{ fontSize: "13px", color: "#6b7280", padding: "1rem 1.5rem" }}>
+            No pending Cloudinary deletions — nothing needs attention.
+          </p>
+        ) : (
+          <table style={{ width: "100%", fontSize: "13px", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ textAlign: "left", borderBottom: "1px solid #dde1e7" }}>
+                <th style={{ padding: "0.6rem 1rem" }}>First failed</th>
+                <th style={{ padding: "0.6rem 1rem" }}>Customer</th>
+                <th style={{ padding: "0.6rem 1rem" }}>Public ID</th>
+                <th style={{ padding: "0.6rem 1rem" }}>Type</th>
+                <th style={{ padding: "0.6rem 1rem" }}>Context</th>
+                <th style={{ padding: "0.6rem 1rem" }}>Attempts</th>
+                <th style={{ padding: "0.6rem 1rem" }}>Last error</th>
+                <th style={{ padding: "0.6rem 1rem" }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {pendingCloudinaryDeletions.map(entry => (
+                <tr key={entry.id} style={{ borderBottom: "1px solid #f0f1f3" }}>
+                  <td style={{ padding: "0.6rem 1rem", color: "#6b7280" }}>{new Date(entry.createdAt).toLocaleString()}</td>
+                  <td style={{ padding: "0.6rem 1rem" }}>{entry.customerId}</td>
+                  <td style={{ padding: "0.6rem 1rem", fontFamily: "monospace", fontSize: "11px" }}>{entry.publicId}</td>
+                  <td style={{ padding: "0.6rem 1rem" }}>{entry.deliveryType}</td>
+                  <td style={{ padding: "0.6rem 1rem" }}>{entry.context}</td>
+                  <td style={{ padding: "0.6rem 1rem" }}>{entry.attemptCount}</td>
+                  <td style={{ padding: "0.6rem 1rem", color: "#b3261e" }}>{entry.lastError ?? "—"}</td>
+                  <td style={{ padding: "0.6rem 1rem" }}>
+                    <form method="post">
+                      <input type="hidden" name="intent" value="retry-cloudinary-deletion" />
+                      <input type="hidden" name="id" value={entry.id} />
+                      <button type="submit" style={maintenanceButtonStyle}>Retry</button>
+                    </form>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <form method="post" style={{ padding: "0.75rem 1rem" }}
+          onSubmit={e => confirmPurge(e, "Purge resolved Cloudinary deletion records older than 90 days")}>
+          <input type="hidden" name="intent" value="purge-resolved-cloudinary-deletions" />
+          <button type="submit" style={maintenanceButtonStyle}>Purge old resolved records</button>
+        </form>
       </div>
 
       <h2 className="adm-page-heading" style={{ fontSize: "16px", marginTop: "2rem" }}>

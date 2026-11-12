@@ -21,9 +21,13 @@ import { describe, it } from "node:test";
 const SRC = readFileSync(resolve(import.meta.dirname, "api.wishlist.jsx"), "utf-8");
 
 function catchBlock() {
-  const createIdx = SRC.indexOf("prisma.buyOrSkipAnalysis.create(");
+  // 2026-11-12 (fix/stripe-clerk-phase1-security): the bare
+  // prisma.buyOrSkipAnalysis.create(...) fallback is gone — enforcement is
+  // unconditional now, so reserveBuySkipSlot(...) is the only write path.
+  // Same catch block, same diagnostic behavior; just a different anchor.
+  const createIdx = SRC.indexOf("reserveBuySkipSlot(");
   const catchIdx = SRC.indexOf("} catch (dbErr)", createIdx);
-  assert.ok(createIdx !== -1 && catchIdx !== -1, "the create call and its catch block are both present");
+  assert.ok(createIdx !== -1 && catchIdx !== -1, "the reservation call and its catch block are both present");
   return SRC.slice(catchIdx, SRC.indexOf("\n      }", catchIdx) + 8);
 }
 
