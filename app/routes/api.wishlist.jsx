@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { data as json } from "react-router";
 import { getCurrentNaiaCustomer } from "../lib/naia-session.server";
 import prisma from "../db.server";
+import { assertPublicIdAvailable, AssetPendingDeletionError } from "../lib/cloudinary-deletion-claim.server";
 import { extractBuySkipEvidence } from "../lib/ai/taste-extraction.server";
 import { writeSourceEvidence } from "../lib/ai/taste-reconcile.server";
 import {
@@ -1167,6 +1168,12 @@ Respond ONLY with valid JSON, no markdown:
         if (process.env.ENTITLEMENT_ENFORCEMENT === "true") {
           const reservation = await reserveBuySkipSlot(naiaCustomer.id, naiaCustomer.membershipStatus, analysisData);
           if (!reservation.allowed) {
+            if (reservation.reason === "asset_pending_deletion") {
+              return json(
+                { error: "asset_unavailable", message: "This image could not be saved. Please upload again." },
+                { status: 409 },
+              );
+            }
             return json(
               { error: "quota_exceeded", message: "You've used all your Buy or Skip checks for this month." },
               { status: 429 },
@@ -1174,7 +1181,31 @@ Respond ONLY with valid JSON, no markdown:
           }
           analysisRecord = reservation.record;
         } else {
-          analysisRecord = await prisma.buyOrSkipAnalysis.create({ data: analysisData });
+          // The claim-check must run regardless of ENTITLEMENT_ENFORCEMENT —
+          // it's an orphan-asset safety concern, not a quota concern. When
+          // the flag is off there's no reserveBuySkipSlot transaction to
+          // piggyback on, so this path gets its own minimal one. See
+          // cloudinary-deletion-claim.server.ts.
+          const WISHLIST_MAX_TX_RETRIES = 2;
+          const isWishlistSerializationError = (e) => e?.code === "P2034";
+          for (let attempt = 0; ; attempt++) {
+            try {
+              analysisRecord = await prisma.$transaction(async (tx) => {
+                await assertPublicIdAvailable(tx, analysisData.imagePublicId);
+                return tx.buyOrSkipAnalysis.create({ data: analysisData });
+              }, { isolationLevel: "Serializable" });
+              break;
+            } catch (e) {
+              if (e instanceof AssetPendingDeletionError) {
+                return json(
+                  { error: "asset_unavailable", message: "This image could not be saved. Please upload again." },
+                  { status: 409 },
+                );
+              }
+              if (isWishlistSerializationError(e) && attempt < WISHLIST_MAX_TX_RETRIES) continue;
+              throw e;
+            }
+          }
         }
       } catch (dbErr) {
         if (dbErr?.code === "P2002") {

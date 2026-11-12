@@ -45,6 +45,7 @@ import prisma from "~/db.server";
 import { getMembershipAllowances, getEffectiveVtoLimit, getEffectiveStyleMeLimit } from "./plan-limits.server";
 import { getUsageWindow, formatResetDate, type SubscriptionWindowInput, type UsageWindow } from "./usage-window.server";
 import { recordPersonalisedTrendEditUsage, type TrendEditSnapshot } from "./personalised-trend-edit-usage.server";
+import { assertPublicIdAvailable, AssetPendingDeletionError } from "../cloudinary-deletion-claim.server";
 
 // ── VTO stale threshold ────────────────────────────────────────────────────────
 const VTO_IN_FLIGHT_STALE_MS = 10 * 60 * 1000; // 10 minutes
@@ -640,18 +641,18 @@ export async function checkEntitlement(
 // (already required to exist for duplicate submissions) runs unchanged.
 
 export type RunReservationFn = <T>(
-  fn: (tx: Pick<typeof prisma, "stylingSession" | "buyOrSkipAnalysis" | "closetItem" | "personalisedTrendEditUsage">) => Promise<T>,
+  fn: (tx: Pick<typeof prisma, "stylingSession" | "buyOrSkipAnalysis" | "closetItem" | "personalisedTrendEditUsage" | "pendingCloudinaryDeletion">) => Promise<T>,
 ) => Promise<T>;
 
 const _runReservationTransaction: RunReservationFn = (fn) =>
   prisma.$transaction(
-    (tx: Pick<typeof prisma, "stylingSession" | "buyOrSkipAnalysis" | "closetItem" | "personalisedTrendEditUsage">) => fn(tx),
+    (tx: Pick<typeof prisma, "stylingSession" | "buyOrSkipAnalysis" | "closetItem" | "personalisedTrendEditUsage" | "pendingCloudinaryDeletion">) => fn(tx),
     { isolationLevel: "Serializable" },
   );
 
 export type ReserveResult<T> =
   | { allowed: true; record: T }
-  | { allowed: false; reason: "quota_exceeded" | "at_capacity" };
+  | { allowed: false; reason: "quota_exceeded" | "at_capacity" | "asset_pending_deletion" };
 
 export async function reserveStyleMeSlot(
   customerId: string,
@@ -773,6 +774,15 @@ export async function reserveBuySkipSlot(
         if (used >= allowances.buySkipPerMonth) {
           return { allowed: false, reason: "quota_exceeded" };
         }
+        // Must run LAST, inside this same Serializable transaction — see
+        // cloudinary-deletion-claim.server.ts for why checking this earlier,
+        // or outside the transaction, would reopen the exact race it closes.
+        try {
+          await assertPublicIdAvailable(tx, analysisData.imagePublicId);
+        } catch (e) {
+          if (e instanceof AssetPendingDeletionError) return { allowed: false, reason: "asset_pending_deletion" };
+          throw e;
+        }
         const record = await tx.buyOrSkipAnalysis.create({ data: analysisData });
         return { allowed: true, record };
       });
@@ -810,6 +820,14 @@ export async function reserveClosetSlot(
         const used = await tx.closetItem.count({ where: { customerId } });
         if (used >= allowances.closetItems) {
           return { allowed: false, reason: "at_capacity" };
+        }
+        // Must run LAST, inside this same Serializable transaction — see
+        // cloudinary-deletion-claim.server.ts.
+        try {
+          await assertPublicIdAvailable(tx, itemData.imagePublicId as string | undefined);
+        } catch (e) {
+          if (e instanceof AssetPendingDeletionError) return { allowed: false, reason: "asset_pending_deletion" };
+          throw e;
         }
         const record = await tx.closetItem.create({ data: itemData });
         return { allowed: true, record };

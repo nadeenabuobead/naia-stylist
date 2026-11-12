@@ -21,7 +21,12 @@ import { describe, it } from "node:test";
 const SRC = readFileSync(resolve(import.meta.dirname, "api.wishlist.jsx"), "utf-8");
 
 function catchBlock() {
-  const createIdx = SRC.indexOf("prisma.buyOrSkipAnalysis.create(");
+  // Was literally "prisma.buyOrSkipAnalysis.create(" — now wrapped in its
+  // own minimal Serializable transaction (the abandoned-upload-sweep claim
+  // check, see cloudinary-deletion-claim.server.ts), so the call site reads
+  // "tx.buyOrSkipAnalysis.create(" instead. Matching on the model+method
+  // alone, without the receiver, keeps this anchor correct either way.
+  const createIdx = SRC.indexOf(".buyOrSkipAnalysis.create(");
   const catchIdx = SRC.indexOf("} catch (dbErr)", createIdx);
   assert.ok(createIdx !== -1 && catchIdx !== -1, "the create call and its catch block are both present");
   return SRC.slice(catchIdx, SRC.indexOf("\n      }", catchIdx) + 8);

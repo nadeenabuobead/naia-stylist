@@ -275,6 +275,82 @@ model PendingCustomerErasureFailure {
   @@index([resolvedAt])
 }
 
+/// Two jobs in one, both load-bearing:
+///   1. Durable, retryable record of a Cloudinary asset whose deletion
+///      either failed (lastError set) or is being coordinated (see below).
+///      Mirrors PendingClerkCleanup/PendingCustomerErasureFailure above —
+///      same upsert-not-duplicate convention, same no-FK-to-Customer
+///      reasoning (an abandoned upload's owning Customer may be anonymized
+///      or deleted before this resolves; deleting a Cloudinary asset only
+///      ever needs its publicId, never a live Customer row).
+///   2. The reservation half of the abandoned-upload sweep's concurrency
+///      protection: an UNRESOLVED row (resolvedAt: null) for a publicId
+///      means "claimed for deletion — do not persist a new DB reference to
+///      this asset." reserveClosetSlot/reserveBuySkipSlot (and the two
+///      direct-create/-update paths that bypass them) check for an active
+///      claim inside the SAME Serializable transaction that performs their
+///      own count-recheck-then-create, exactly mirroring how those
+///      functions already protect ClosetItem/BuyOrSkipAnalysis capacity
+///      against a concurrent request — see cloudinary-deletion-claim.server.ts.
+///      A plain "recheck then delete" read is not atomic on its own; this
+///      row, read and written inside Serializable transactions on both
+///      sides, is what makes the check-then-act atomic in practice.
+/// resourceType/deliveryType are stored per-row, not assumed — NaiaModel
+/// photos are the one asset type in this app that can legitimately be
+/// either Cloudinary delivery type "private" or "authenticated" (see
+/// my-naia-model.server.ts's PERMITTED_DELIVERY_TYPES), so asset identity
+/// for a destroy/list call must carry its own observed type, never a
+/// hardcoded default.
+model PendingCloudinaryDeletion {
+  id            String    @id @default(cuid())
+  customerId    String
+  publicId      String    @unique
+  resourceType  String    @default("image")
+  deliveryType  String
+  /// "abandoned-upload-sweep" | "account-erasure" — which caller discovered
+  /// this asset needed deleting, for operator triage.
+  context       String
+  attemptCount  Int       @default(0)
+  lastAttemptAt DateTime?
+  lastError     String?
+  createdAt     DateTime  @default(now())
+  /// Set once the Cloudinary destroy call is confirmed to have succeeded
+  /// (or the asset was already gone). While null, the publicId is treated
+  /// as claimed/unavailable by the reservation check above.
+  resolvedAt    DateTime?
+
+  @@index([customerId])
+  @@index([resolvedAt])
+}
+
+/// Audit + overlap-guard record for one run of the bounded, resumable,
+/// multi-customer abandoned-upload sweep (cron or admin-triggered — never
+/// the per-customer immediate sweep that runs inside account erasure, which
+/// is small and synchronous by construction and doesn't need this). A
+/// RUNNING row with a recent startedAt blocks a second concurrent run from
+/// starting; cursorCustomerId lets a run that stopped early (time budget,
+/// Cloudinary rate limit, or a per-run customer cap) resume instead of
+/// restarting from the top, so there is never an uncontrolled all-customer
+/// sweep in one invocation.
+model CloudinarySweepRun {
+  id                      String    @id @default(cuid())
+  status                  String    // RUNNING | COMPLETED | FAILED
+  mode                    String    // SCHEDULED | ADMIN
+  dryRun                  Boolean   @default(true)
+  startedAt               DateTime  @default(now())
+  finishedAt              DateTime?
+  cursorCustomerId        String?
+  customersChecked        Int       @default(0)
+  assetsChecked           Int       @default(0)
+  assetsDeleted           Int       @default(0)
+  assetsSkippedRecent     Int       @default(0)
+  assetsSkippedReferenced Int       @default(0)
+  failures                Int       @default(0)
+  stoppedReason           String?   // TIME_BUDGET | CUSTOMER_CAP | RATE_LIMIT | COMPLETED_ALL | ERROR
+
+  @@index([status, startedAt])
+}
+
 /// A point-in-time reading of the wardrobe, so "what changed?" has a before.
 /// Without this there is nothing honest to compare a new piece against.
 model WardrobeSnapshot {

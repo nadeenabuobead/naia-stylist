@@ -21,16 +21,24 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("~/db.server", () => ({
-  default: {
+vi.mock("~/db.server", () => {
+  const db: any = {
     customer: { findUnique: vi.fn() },
     // findFirst defaults to null (not a duplicate submission) — this file's own
     // DIFFERENT PIECE tests submit intent=add and predate the replace/idempotency
     // check; see closet-replace.behavioral.test.ts for that behaviour.
     closetItem: { findUnique: vi.fn(), findFirst: vi.fn().mockResolvedValue(null), update: vi.fn(), create: vi.fn() },
     journeyEvent: { create: vi.fn().mockResolvedValue({}) },
-  },
-}));
+    // The same-piece photo-replacement path now wraps its update in a
+    // Serializable transaction (the abandoned-upload-sweep claim check —
+    // see cloudinary-deletion-claim.server.ts) — the callback gets the SAME
+    // mocked client, so this file's existing closetItem.update assertions
+    // keep testing the same thing.
+    pendingCloudinaryDeletion: { findUnique: vi.fn().mockResolvedValue(null) },
+    $transaction: vi.fn(async (fn: any) => fn(db)),
+  };
+  return { default: db };
+});
 
 vi.mock("~/lib/naia-session.server", () => ({
   getCurrentNaiaCustomer: vi.fn(),

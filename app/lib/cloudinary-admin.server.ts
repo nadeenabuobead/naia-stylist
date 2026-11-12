@@ -178,6 +178,98 @@ export async function verifyCloudinaryAsset(
   }
 }
 
+// ── List resources by prefix (Admin API) ───────────────────────────────────────
+//
+// Used only by the abandoned-upload sweep (cloudinary-orphan-sweep.server.ts)
+// to enumerate what actually exists under a customer's own folder — never
+// used to decide ownership (validatePublicIdOwnership already does that via
+// the string prefix itself) or to decide what's safe to delete (the sweep's
+// own DB reference check does that). This just answers "what's here."
+//
+// IMPORTANT: a customer's folder can hold assets under EITHER delivery type
+// "private" or "authenticated" — NaiaModel photos are the one asset type in
+// this app that can legitimately be either (see my-naia-model.server.ts's
+// PERMITTED_DELIVERY_TYPES). Callers must list both types; this function
+// only ever queries the one type passed in.
+//
+// Endpoint: GET /v1_1/{cloudName}/resources/image/{deliveryType}?prefix=...
+// Auth: HTTP Basic (api_key:api_secret), same as verifyCloudinaryAsset.
+// Rate limit: this IS a rate-limited Admin API call (unlike destroy, which
+// uses the separate, unlimited Upload API) — callers must track
+// rateLimitRemaining and stop early rather than exhausting the account's
+// hourly quota.
+
+export interface CloudinaryListedAsset {
+  publicId: string;
+  resourceType: string;
+  type: string; // delivery type as Cloudinary itself reports it
+  format: string;
+  createdAt: string; // ISO 8601, as reported by Cloudinary — authoritative age source
+}
+
+export interface ListAssetsResult {
+  ok: boolean;
+  assets: CloudinaryListedAsset[];
+  nextCursor: string | null;
+  rateLimitRemaining: number | null;
+  errorCode?: string;
+}
+
+export async function listCloudinaryAssetsByPrefix(
+  prefix: string,
+  deliveryType: "private" | "authenticated",
+  opts: { cursor?: string | null; maxResults?: number } = {},
+  _fetch: typeof fetch = fetch,
+  _getConfig: () => CloudinaryConfig | null = getCloudinaryConfig,
+): Promise<ListAssetsResult> {
+  const cfg = _getConfig();
+  if (!cfg) return { ok: false, assets: [], nextCursor: null, rateLimitRemaining: null, errorCode: "NOT_CONFIGURED" };
+
+  const maxResults = Math.min(opts.maxResults ?? 100, 500);
+  const params = new URLSearchParams({
+    type: deliveryType,
+    prefix,
+    max_results: String(maxResults),
+  });
+  if (opts.cursor) params.set("next_cursor", opts.cursor);
+
+  const url = `https://api.cloudinary.com/v1_1/${cfg.cloudName}/resources/image/${deliveryType}?${params.toString()}`;
+  const credentials = Buffer.from(`${cfg.apiKey}:${cfg.apiSecret}`).toString("base64");
+
+  try {
+    const res = await _fetch(url, { headers: { Authorization: `Basic ${credentials}` } });
+    const rateLimitRemaining = res.headers.has("X-RateLimit-Remaining")
+      ? Number(res.headers.get("X-RateLimit-Remaining"))
+      : null;
+
+    if (res.status === 420) return { ok: false, assets: [], nextCursor: null, rateLimitRemaining, errorCode: "RATE_LIMITED" };
+    if (!res.ok) return { ok: false, assets: [], nextCursor: null, rateLimitRemaining, errorCode: "PROVIDER_ERROR" };
+
+    const json = (await res.json()) as {
+      resources?: Array<{
+        public_id?: string;
+        resource_type?: string;
+        type?: string;
+        format?: string;
+        created_at?: string;
+      }>;
+      next_cursor?: string;
+    };
+
+    const assets: CloudinaryListedAsset[] = (json.resources ?? []).map((r) => ({
+      publicId: r.public_id ?? "",
+      resourceType: r.resource_type ?? "",
+      type: r.type ?? deliveryType,
+      format: r.format ?? "",
+      createdAt: r.created_at ?? "",
+    }));
+
+    return { ok: true, assets, nextCursor: json.next_cursor ?? null, rateLimitRemaining };
+  } catch {
+    return { ok: false, assets: [], nextCursor: null, rateLimitRemaining: null, errorCode: "NETWORK_ERROR" };
+  }
+}
+
 // ── Signed delivery URL (kept for test compatibility) ─────────────────────────
 //
 // Generates an s--sig-- Cloudinary CDN signed URL.
