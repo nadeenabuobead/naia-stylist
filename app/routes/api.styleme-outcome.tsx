@@ -69,7 +69,11 @@ export async function action({ request }: ActionFunctionArgs) {
   // Never trust client-provided sessionId.
   // Verify the suggestion belongs to this authenticated customer via the session chain.
 
-  let suggestion: Awaited<ReturnType<typeof prisma.outfitSuggestion.findUnique>>;
+  // No manual type annotation here — Awaited<ReturnType<typeof prisma.outfitSuggestion.findUnique>>
+  // resolves to the overload with no args (the plain model shape, no `include`), which doesn't
+  // have `session` at all. Letting TS infer from the actual call below (which does
+  // `include: { session: true }`) gives the real, correct shape.
+  let suggestion;
   try {
     suggestion = await prisma.outfitSuggestion.findUnique({
       where: { id: suggestionId },
