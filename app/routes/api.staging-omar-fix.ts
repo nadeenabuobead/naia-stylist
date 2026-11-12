@@ -23,7 +23,13 @@ export async function loader({ request }: { request: Request }) {
   const phase = url.searchParams.get("phase") ?? "diagnose";
 
   // Always run diagnosis so both phases return the same shape
-  const allCustomers = await prisma.customer.findMany({
+  const allCustomers: Array<{
+    id: string;
+    shopifyCustomerId: string;
+    email: string | null;
+    createdAt: Date;
+    _count: { closetItems: number };
+  }> = await prisma.customer.findMany({
     select: {
       id: true,
       shopifyCustomerId: true,
