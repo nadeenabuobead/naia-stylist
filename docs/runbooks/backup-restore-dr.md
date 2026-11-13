@@ -46,3 +46,21 @@ This is the procedure to follow once a restore is actually needed. It has **not*
 - Cloudinary asset backup/retention — owned by the Cloudinary Privacy workstream; out of scope here.
 - Stripe/billing data durability — Stripe is itself the system of record for payment data; `BillingTransaction`/`Subscription` in this app's own Postgres are a local cache/ledger, not the only copy. Coordinate with the Stripe/Clerk workstream if a restore scenario ever needs to reconcile local records against Stripe's own data.
 - Clerk user/session data — Clerk is itself the system of record for authentication identity; a Postgres restore does not restore or affect Clerk's own user records (`clerkUserId` in this schema is a foreign reference, not a copy of Clerk's data).
+
+---
+
+## Addendum (Phase 2, re-verified against `integrate/staging-rc-unified-prep@f7fb57c339ea2edb6b446daa88592092b26cdfa2`)
+
+Everything in §1-5 above was re-checked against this specific commit, not assumed carried-over. No restore was run, no migration was applied — read-only re-verification only.
+
+**§1's migration-safety claim still holds, with one precision added.** All migrations on this branch remain additive-only except the same two pre-existing destructive ones already named in §1 — re-confirmed by grepping every `migration.sql` file for `DROP (COLUMN|TABLE|TYPE)`. One migration, `20261103000004_sandbox_replay_schema_parity`, contains `DROP INDEX` and several `ALTER COLUMN ... DROP DEFAULT/DROP NOT NULL` statements — these loosen constraints/indexes but destroy no data, so they don't contradict §1's specific claim; noted here for precision since a narrower "no DROP X" grep could miss them.
+
+**§1's build-gating claim still holds, byte-for-byte.** `vercel.json` on this branch is still `sh scripts/require-preview-env.sh && sh scripts/build-preview.sh`; `require-preview-env.sh` still hard-fails (exit 1) unless `VERCEL_ENV=="preview"`; `build-preview.sh` still only runs `prisma migrate deploy` when `NAIA_ALLOW_PREVIEW_MIGRATIONS=="true"`. This is the same guard flagged as a Production-build blocker in the Task 8 audit — see `docs/runbooks/production-build-path-design.md` (this phase) for how to handle it going forward. Not changed here.
+
+**Staging/production DB boundary — re-verified, one new note.** `prisma/schema.prisma`'s datasource still resolves `url` from `NAIA_DATABASE_URL` and `directUrl` from `DATABASE_URL`. `app/db.server.js` reads `NAIA_DATABASE_URL` explicitly with `connection_limit=2`. A **second**, independent `PrismaClient` singleton exists at `app/lib/prisma.server.ts` (bare `new PrismaClient()`, no `connection_limit` override) — it still resolves to the same `NAIA_DATABASE_URL` via schema defaults, so it is **not** a staging/prod boundary risk, just a duplicated pool actively used by 7 route files. Flagged for hygiene, not DR. All `NAIA_PROJECT_VARIANT`-gated staging routes re-confirmed still correctly 404 outside staging.
+
+**New finding, not previously covered in §1-5: post-restore privacy-erasure reconciliation.** If a database restore brings the DB back to a point *before* a customer's erasure request completed, nothing in this codebase detects or re-applies that erasure — the customer's PII simply reappears (or, for a billed customer, reverts to un-anonymized) with no code-level signal that anything is wrong. This is real and unaddressed as of this commit. A full design for closing this gap is in `docs/runbooks/post-restore-erasure-reconciliation-design.md` (this phase) — design only, no schema or implementation change made.
+
+**§4's "no restore ever tested" finding — unchanged, re-confirmed.** `grep -rliE "restore-test|disaster-recovery-test|dr-test"` across the whole tree and `git log --all --grep` for restore/DR-test commits both still return nothing on this commit.
+
+**Separately noted, not a DR item:** the `canary/preview-db-direct-connection` branch (an earlier, paused attempt at isolating a canary Preview database) is still not an ancestor of this branch's HEAD and has not progressed since it was paused — three-plus weeks stale relative to `f7fb57c`.
