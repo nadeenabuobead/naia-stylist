@@ -114,6 +114,50 @@ describe("resolveNaiaSession() — no session vs. database unavailable are diffe
   });
 });
 
+describe("resolveNaiaSession() — P2024 classification fix + bounded single retry (2026-11-13 live incident)", () => {
+  function instantSleep() {
+    return vi.fn().mockResolvedValue(undefined);
+  }
+
+  it("MISCLASSIFICATION REGRESSION — P2024 (connection pool timeout, as a real Prisma code) is treated as transient", async () => {
+    const sleep = instantSleep();
+    findUniqueMock.mockRejectedValue(prismaKnownError("P2024", "Timed out fetching a new connection from the connection pool."));
+    await expect(resolveNaiaSession(requestWithCookie(), { _sleep: sleep })).rejects.toBeInstanceOf(DatabaseUnavailableError);
+  });
+
+  it("first attempt transient, retry succeeds — returns the real session, no error surfaced", async () => {
+    const sleep = instantSleep();
+    const customer = { id: "cust-1", onboardingProfile: null };
+    const sessionRow = { customerId: "cust-1", expiresAt: new Date(Date.now() + 1000 * 60 * 60), customer };
+    findUniqueMock
+      .mockRejectedValueOnce(prismaKnownError("P2024", "Timed out fetching a new connection from the connection pool."))
+      .mockResolvedValueOnce(sessionRow);
+
+    const result = await resolveNaiaSession(requestWithCookie(), { _sleep: sleep });
+
+    expect(result).toBe(customer);
+    expect(findUniqueMock).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledTimes(1);
+  });
+
+  it("retry is bounded to exactly one extra attempt — never a third", async () => {
+    const sleep = instantSleep();
+    findUniqueMock.mockRejectedValue(prismaKnownError("P2024", "Timed out fetching a new connection from the connection pool."));
+    await expect(resolveNaiaSession(requestWithCookie(), { _sleep: sleep })).rejects.toBeInstanceOf(DatabaseUnavailableError);
+    expect(findUniqueMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("a non-transient error is thrown immediately — no retry, no delay", async () => {
+    const sleep = instantSleep();
+    const weirdError = new TypeError("something unrelated broke");
+    findUniqueMock.mockRejectedValue(weirdError);
+    await expect(resolveNaiaSession(requestWithCookie(), { _sleep: sleep })).rejects.toBe(weirdError);
+    expect(findUniqueMock).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+});
+
 describe("resolveNaiaSession() — the legacy Shopify-OAuth path's own DB-unavailable guard still holds unchanged", () => {
   // requireCurrentNaiaCustomer itself is no longer reachable from here (see
   // this file's header) — these exercise resolveNaiaSession directly, which

@@ -173,6 +173,14 @@ const TRANSIENT_PRISMA_ERROR_CODES = new Set([
   "P1002", // The database server was reached but timed out
   "P1008", // Operations timed out
   "P1017", // Server has closed the connection
+  // Correction (2026-11-13, live staging incident): connection-pool
+  // exhaustion arrives as a PrismaClientKnownRequestError WITH this stable
+  // code in this Prisma version (6.19.2) — not, as previously assumed
+  // below, only as a codeless PrismaClientInitializationError. Both checks
+  // are kept: this code-based one catches the real shape; the name+regex
+  // fallback below is harmless to leave in case an older/different code
+  // path still produces that shape.
+  "P2024", // Timed out fetching a new connection from the connection pool
 ]);
 
 export class DatabaseUnavailableError extends Error {
@@ -208,21 +216,46 @@ function isTransientDatabaseError(error: unknown): boolean {
 // gets this special treatment.
 // ---------------------------------------------------------------------------
 
-export async function resolveNaiaSession(request: Request) {
+// Same bounded-retry rationale as clerk-session.server.ts's
+// getCurrentNaiaCustomer (2026-11-13 live incident) — one retry, on this
+// read-only lookup alone, never on anything that writes/uploads/charges.
+const TRANSIENT_RETRY_DELAY_MS = 200;
+
+function defaultSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export interface ResolveNaiaSessionDeps {
+  _sleep?: (ms: number) => Promise<void>;
+}
+
+export async function resolveNaiaSession(request: Request, deps: ResolveNaiaSessionDeps = {}) {
   const rawToken = extractRawToken(request);
   if (!rawToken) return null;
 
   const tokenHash = hashToken(rawToken);
+  const sleep = deps._sleep ?? defaultSleep;
 
-  let session;
-  try {
-    session = await prisma.naiaSession.findUnique({
+  const lookup = () =>
+    prisma.naiaSession.findUnique({
       where:   { tokenHash },
       include: { customer: { include: { onboardingProfile: true } } },
     });
-  } catch (error) {
-    if (isTransientDatabaseError(error)) throw new DatabaseUnavailableError(error);
-    throw error;
+
+  let session;
+  try {
+    session = await lookup();
+  } catch (firstError) {
+    if (!isTransientDatabaseError(firstError)) throw firstError;
+
+    await sleep(TRANSIENT_RETRY_DELAY_MS);
+
+    try {
+      session = await lookup();
+    } catch (secondError) {
+      if (isTransientDatabaseError(secondError)) throw new DatabaseUnavailableError(secondError);
+      throw secondError;
+    }
   }
 
   if (!session) return null;
