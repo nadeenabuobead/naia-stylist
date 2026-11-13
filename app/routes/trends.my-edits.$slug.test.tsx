@@ -177,7 +177,7 @@ describe("trends/my-edits/:slug loader", () => {
       loader({
         request: new Request("http://localhost/trends/my-edits/spring-2026-soft-structure"),
         params: { slug: "spring-2026-soft-structure" },
-        context: new RouterContextProvider(), unstable_pattern: "",
+        context: new RouterContextProvider(), pattern: "", url: new URL("http://localhost/trends/my-edits/spring-2026-soft-structure"),
       })
     ).rejects.toBe(redirect);
   });
@@ -189,7 +189,7 @@ describe("trends/my-edits/:slug loader", () => {
       loader({
         request: new Request("http://localhost/trends/my-edits/does-not-exist"),
         params: { slug: "does-not-exist" },
-        context: new RouterContextProvider(), unstable_pattern: "",
+        context: new RouterContextProvider(), pattern: "", url: new URL("http://localhost/trends/my-edits/does-not-exist"),
       })
     ).rejects.toMatchObject({ status: 404 });
   });
@@ -202,7 +202,7 @@ describe("trends/my-edits/:slug loader", () => {
     const result = await loader({
       request: new Request("http://localhost/trends/my-edits/spring-2026-soft-structure"),
       params: { slug: "spring-2026-soft-structure" },
-      context: new RouterContextProvider(), unstable_pattern: "",
+      context: new RouterContextProvider(), pattern: "", url: new URL("http://localhost/trends/my-edits/spring-2026-soft-structure"),
     });
 
     expect(result.hasProfile).toBe(true);
@@ -217,7 +217,7 @@ describe("trends/my-edits/:slug loader", () => {
     const result = await loader({
       request: new Request("http://localhost/trends/my-edits/spring-2026-soft-structure"),
       params: { slug: "spring-2026-soft-structure" },
-      context: new RouterContextProvider(), unstable_pattern: "",
+      context: new RouterContextProvider(), pattern: "", url: new URL("http://localhost/trends/my-edits/spring-2026-soft-structure"),
     });
 
     expect(result.hasProfile).toBe(false);
@@ -241,7 +241,7 @@ describe("trends/my-edits/:slug loader", () => {
     const result = await loader({
       request: new Request("http://localhost/trends/my-edits/spring-2026-soft-structure"),
       params: { slug: "spring-2026-soft-structure" },
-      context: new RouterContextProvider(), unstable_pattern: "",
+      context: new RouterContextProvider(), pattern: "", url: new URL("http://localhost/trends/my-edits/spring-2026-soft-structure"),
     });
 
     expect(result.nadineRecommendation).toEqual(MOCK_REC);
@@ -254,7 +254,7 @@ describe("trends/my-edits/:slug loader", () => {
     const result = await loader({
       request: new Request("http://localhost/trends/my-edits/spring-2026-soft-structure"),
       params: { slug: "spring-2026-soft-structure" },
-      context: new RouterContextProvider(), unstable_pattern: "",
+      context: new RouterContextProvider(), pattern: "", url: new URL("http://localhost/trends/my-edits/spring-2026-soft-structure"),
     });
 
     expect(result.generationFailed).toBe(true);
@@ -276,7 +276,7 @@ describe("trends/my-edits/:slug loader", () => {
     const result = await loader({
       request: new Request("http://localhost/trends/my-edits/spring-2026-soft-structure"),
       params: { slug: "spring-2026-soft-structure" },
-      context: new RouterContextProvider(), unstable_pattern: "",
+      context: new RouterContextProvider(), pattern: "", url: new URL("http://localhost/trends/my-edits/spring-2026-soft-structure"),
     });
 
     expect(hydrateShopperEditImages).toHaveBeenCalledWith(snapshotEdit, "cust-1");
@@ -303,7 +303,7 @@ describe("trends/my-edits/:slug loader", () => {
     const result = await loader({
       request: new Request("http://localhost/trends/my-edits/spring-2026-soft-structure"),
       params: { slug: "spring-2026-soft-structure" },
-      context: new RouterContextProvider(), unstable_pattern: "",
+      context: new RouterContextProvider(), pattern: "", url: new URL("http://localhost/trends/my-edits/spring-2026-soft-structure"),
     });
 
     expect(getMostRecentArchivedSnapshot).toHaveBeenCalledWith("cust-1", "spring-2026-soft-structure");
@@ -326,7 +326,7 @@ describe("trends/my-edits/:slug loader", () => {
     await loader({
       request: new Request("http://localhost/trends/my-edits/spring-2026-soft-structure"),
       params: { slug: "spring-2026-soft-structure" },
-      context: new RouterContextProvider(), unstable_pattern: "",
+      context: new RouterContextProvider(), pattern: "", url: new URL("http://localhost/trends/my-edits/spring-2026-soft-structure"),
     });
 
     expect(getShopperEvidence).not.toHaveBeenCalled();
@@ -345,7 +345,7 @@ describe("trends/my-edits/:slug loader", () => {
     const result = await loader({
       request: new Request("http://localhost/trends/my-edits/spring-2026-soft-structure"),
       params: { slug: "spring-2026-soft-structure" },
-      context: new RouterContextProvider(), unstable_pattern: "",
+      context: new RouterContextProvider(), pattern: "", url: new URL("http://localhost/trends/my-edits/spring-2026-soft-structure"),
     });
 
     expect(result.edit).toEqual(MOCK_EDIT);
@@ -368,7 +368,7 @@ describe("trends/my-edits/:slug loader", () => {
     const response = await action({
       request: new Request("http://localhost/trends/my-edits/spring-2026-soft-structure", { method: "POST", body: formData }),
       params: { slug: "spring-2026-soft-structure" },
-      context: new RouterContextProvider(), unstable_pattern: "",
+      context: new RouterContextProvider(), pattern: "", url: new URL("http://localhost/trends/my-edits/spring-2026-soft-structure"),
     });
 
     expect(reservePersonalisedTrendSlot).toHaveBeenCalled();
@@ -385,7 +385,7 @@ describe("trends/my-edits/:slug loader", () => {
     await action({
       request: new Request("http://localhost/trends/my-edits/spring-2026-soft-structure", { method: "POST", body: formData }),
       params: { slug: "spring-2026-soft-structure" },
-      context: new RouterContextProvider(), unstable_pattern: "",
+      context: new RouterContextProvider(), pattern: "", url: new URL("http://localhost/trends/my-edits/spring-2026-soft-structure"),
     });
 
     expect(getShopperEvidence).not.toHaveBeenCalled();
@@ -413,7 +413,7 @@ describe("trends/my-edits/:slug — atomic quota-race handling", () => {
     const result = await loader({
       request: new Request("http://localhost/trends/my-edits/spring-2026-soft-structure"),
       params: { slug: "spring-2026-soft-structure" },
-      context: new RouterContextProvider(), unstable_pattern: "",
+      context: new RouterContextProvider(), pattern: "", url: new URL("http://localhost/trends/my-edits/spring-2026-soft-structure"),
     });
 
     expect(reservePersonalisedTrendSlot).toHaveBeenCalledWith(
@@ -433,7 +433,7 @@ describe("trends/my-edits/:slug — atomic quota-race handling", () => {
     const result = await loader({
       request: new Request("http://localhost/trends/my-edits/spring-2026-soft-structure"),
       params: { slug: "spring-2026-soft-structure" },
-      context: new RouterContextProvider(), unstable_pattern: "",
+      context: new RouterContextProvider(), pattern: "", url: new URL("http://localhost/trends/my-edits/spring-2026-soft-structure"),
     });
 
     expect(result.edit).toBeNull();
@@ -452,7 +452,7 @@ describe("trends/my-edits/:slug — atomic quota-race handling", () => {
     await action({
       request: new Request("http://localhost/trends/my-edits/spring-2026-soft-structure", { method: "POST", body: formData }),
       params: { slug: "spring-2026-soft-structure" },
-      context: new RouterContextProvider(), unstable_pattern: "",
+      context: new RouterContextProvider(), pattern: "", url: new URL("http://localhost/trends/my-edits/spring-2026-soft-structure"),
     });
 
     expect(reservePersonalisedTrendSlot).toHaveBeenCalled();
@@ -471,7 +471,7 @@ describe("trends/my-edits/:slug — atomic quota-race handling", () => {
     const response = await action({
       request: new Request("http://localhost/trends/my-edits/spring-2026-soft-structure", { method: "POST", body: formData }),
       params: { slug: "spring-2026-soft-structure" },
-      context: new RouterContextProvider(), unstable_pattern: "",
+      context: new RouterContextProvider(), pattern: "", url: new URL("http://localhost/trends/my-edits/spring-2026-soft-structure"),
     });
 
     expect(recordPersonalisedTrendEditUsage).not.toHaveBeenCalled();
