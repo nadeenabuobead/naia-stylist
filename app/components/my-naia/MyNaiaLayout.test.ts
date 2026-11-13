@@ -143,3 +143,50 @@ describe("F — Sign Out button typography matches the surrounding nav links", (
     assert.ok(linkRule.includes("font-size"), ".mn-mobile-nav-link declares font-size directly");
   });
 });
+
+describe("I — footer dead links (2026-11-13 cleanup) render as honest pending text, not silent `#` links", () => {
+  // Root issue: Accessibility, Cookie Preferences, Wishlist, Instagram,
+  // TikTok, and Press all rendered as a clickable-looking <a href="#">
+  // that goes nowhere — exactly the problem Privacy Policy/Terms of
+  // Service were already fixed for (Priority 5, 2026-10-19). This closes
+  // the same gap for the remaining six, reusing the identical mechanism —
+  // no new rendering code, only data.
+
+  const PREVIOUSLY_DEAD = ["Accessibility", "Cookie Preferences", "Wishlist", "Instagram", "TikTok", "Press"];
+  const ALREADY_PENDING = ["Privacy Policy", "Terms of Service"];
+
+  function footerLinkEntry(label: string): string {
+    // FOOTER_COLS entries are one-liners of the form { label: "X", href: "#", ... }
+    const re = new RegExp(`\\{\\s*label:\\s*"${label}"[^}]*\\}`);
+    const match = SRC.match(re);
+    assert.ok(match, `FOOTER_COLS entry found for "${label}"`);
+    return match![0];
+  }
+
+  for (const label of PREVIOUSLY_DEAD) {
+    it(`"${label}" is now marked pending: true`, () => {
+      assert.match(footerLinkEntry(label), /pending:\s*true/, `"${label}" should carry pending: true`);
+    });
+  }
+
+  for (const label of ALREADY_PENDING) {
+    it(`"${label}" is still pending: true — unchanged regression guard`, () => {
+      assert.match(footerLinkEntry(label), /pending:\s*true/, `"${label}" must remain pending: true`);
+    });
+  }
+
+  it("a real, working link (\"My nAia\") is untouched — not accidentally marked pending", () => {
+    assert.doesNotMatch(footerLinkEntry("My nAia"), /pending/, '"My nAia" must stay a plain working link');
+  });
+
+  it("every pending footer entry still carries href=\"#\" — pending marks intent, it doesn't remove the placeholder href", () => {
+    for (const label of [...PREVIOUSLY_DEAD, ...ALREADY_PENDING]) {
+      assert.match(footerLinkEntry(label), /href:\s*"#"/, `"${label}" should still have href: "#"`);
+    }
+  });
+
+  it("the render logic's pending branch is unchanged — no new rendering code was added for this fix", () => {
+    const occurrences = (SRC.match(/"pending" in l && l\.pending/g) || []).length;
+    assert.strictEqual(occurrences, 2, "exactly the existing desktop + mobile pending branches, nothing new added");
+  });
+});

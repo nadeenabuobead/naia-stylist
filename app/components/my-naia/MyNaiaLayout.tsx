@@ -66,24 +66,42 @@ const FOOTER_COLS = [
     title: "account",
     links: [
       { label: "My nAia", href: "/my-naia" },
-      { label: "Wishlist", href: "#" },
+      // Wishlist has no backing data model yet (WishlistItem doesn't exist
+      // in schema) — same "real feature, not built yet" situation as
+      // Privacy/Terms below, so it gets the same honest treatment.
+      { label: "Wishlist", href: "#", pending: true },
     ],
   },
   {
     title: "legal",
     links: [
-      { label: "Privacy Policy", href: "#" },
-      { label: "Terms of Service", href: "#" },
-      { label: "Accessibility", href: "#" },
-      { label: "Cookie Preferences", href: "#" },
+      // Priority 5 (2026-10-19): these two carry real legal/compliance
+      // weight — a customer clicking "Privacy Policy" or "Terms of
+      // Service" and landing nowhere reads as those documents existing
+      // when they don't. Marked pending so they render as plain, honest
+      // text rather than a dead link that looks complete.
+      //
+      // 2026-11-13: Accessibility and Cookie Preferences carry the same
+      // weight — "Accessibility" rendered as a dead link is a particularly
+      // bad look to ship — so they now get the identical treatment rather
+      // than being left as silent `#` links.
+      { label: "Privacy Policy", href: "#", pending: true },
+      { label: "Terms of Service", href: "#", pending: true },
+      { label: "Accessibility", href: "#", pending: true },
+      { label: "Cookie Preferences", href: "#", pending: true },
     ],
   },
   {
     title: "follow",
     links: [
-      { label: "Instagram", href: "#" },
-      { label: "TikTok", href: "#" },
-      { label: "Press", href: "#" },
+      // 2026-11-13: no live social/press links exist yet either. Same
+      // honest non-clickable treatment for consistency — flagged for
+      // explicit sign-off since, unlike the items above, whether these
+      // are genuinely "coming soon" (vs. not planned at all) is a business
+      // fact this change doesn't have visibility into.
+      { label: "Instagram", href: "#", pending: true },
+      { label: "TikTok", href: "#", pending: true },
+      { label: "Press", href: "#", pending: true },
     ],
   },
 ];
