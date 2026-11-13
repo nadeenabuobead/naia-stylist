@@ -733,6 +733,43 @@ enum AccessRevocationReason {
   DISPUTE_LOST
 }
 
+// Durable, queryable manual-review obligation (2026-11-13 correctness
+// review) — replaces relying on captureFailure alone (console.error only,
+// see error-tracking.server.ts's own header) as the SOLE record of "a
+// refund/dispute's funded period could not be established, so access was
+// correctly NOT auto-revoked, but a human needs to look at it." An open
+// (resolvedAt: null) row IS the obligation; nothing else tracks it, so a
+// webhook that returns ok:true for one of these cases (deliberately, since
+// retrying would never fix a permanently-missing historical field) can
+// never let the obligation disappear into log retention.
+//
+// Loose references only (no Restrict relations), same rationale as
+// AccessRevocation.sourceTransactionId/sourceDisputeId above — this table's
+// lifecycle must never coordinate with BillingTransaction/Dispute's own.
+model ManualReviewFlag {
+  id String @id @default(cuid())
+
+  // e.g. "funded_period_unknown" — a short, stable machine key, not a
+  // free-text message (that lives in `detail`).
+  category       String
+  subscriptionId String?
+  transactionId  String?
+  disputeId      String?
+  detail         Json?
+
+  createdAt DateTime @default(now())
+
+  // Null = still open, needs a human. Set when an admin has triaged it —
+  // NOT automatically cleared just because time passed.
+  resolvedAt     DateTime?
+  resolvedBy     String?
+  resolvedNote   String?
+
+  @@index([resolvedAt])
+  @@index([subscriptionId])
+  @@index([transactionId])
+}
+
 // Idempotency ledger for provider webhook deliveries. Deliberately NOT a
 // Prisma relation to Customer: this is an operational log, not customer
 // data — some events may never resolve to a known customer (malformed or

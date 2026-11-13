@@ -89,6 +89,10 @@ import prisma from "~/db.server";
 import { retrieveSubscription as stripeRetrieveSubscription, type StripeSubscriptionSnapshot } from "./stripe-client.server";
 import { releaseCheckoutReservation as defaultReleaseCheckoutReservation } from "./checkout-reservation.server";
 import { captureFailure } from "../error-tracking.server";
+import {
+  recordManualReviewObligation as defaultRecordManualReviewObligation,
+  resolveManualReviewFlagsFor as defaultResolveManualReviewFlagsFor,
+} from "./manual-review.server";
 
 export function isUniqueConstraintViolation(err: unknown, field?: string): boolean {
   if (!err || typeof err !== "object" || (err as any).code !== "P2002") return false;
@@ -187,6 +191,9 @@ export interface WebhookHandlerDeps {
     fundedPeriodStart: Date | null;
     fundedPeriodEnd: Date | null;
   } | null>;
+  // Used only for the "pending"/"failed" Refund.status branches, which
+  // never participate in the cumulative-sum decision below and so need no
+  // special atomicity treatment on their own.
   upsertRefundTransaction?: (input: {
     customerId: string;
     subscriptionId: string;
@@ -197,11 +204,24 @@ export interface WebhookHandlerDeps {
     currency: string;
     occurredAt: Date;
   }) => Promise<void>;
-  // Sum of every SUCCEEDED (REFUNDED-status) refund ledger row pointing at
-  // this ONE original transaction — scoped by refundsTransactionId, never
-  // by subscriptionId alone, so a different original payment's own
-  // refund(s) on the same subscription are never conflated with this one's.
-  sumRefundedAmountForTransaction?: (originalTransactionId: string) => Promise<number>;
+  // Correctness review (2026-11-13) — the SUCCEEDED-refund case specifically
+  // (ledger upsert + cumulative-sum-vs-original-amount decision) runs
+  // atomically, inside one Serializable transaction with retry-on-conflict
+  // (see recordSucceededRefundAndDecideFull's own comment) — two genuinely
+  // concurrent, distinct refunds against the SAME original payment can
+  // never both under-count the sum and both wrongly conclude "still
+  // partial." Replaces the previous separate upsert+sum call pair, which
+  // had no such guarantee.
+  recordSucceededRefundAndDecideFull?: (input: {
+    customerId: string;
+    subscriptionId: string;
+    refundsTransactionId: string;
+    refundId: string;
+    amount: number;
+    currency: string;
+    occurredAt: Date;
+    originalAmount: number;
+  }) => Promise<{ isFullRefund: boolean; cumulativeRefunded: number }>;
   findSubscriptionById?: (id: string) => Promise<SubscriptionRecord | null>;
   findDisputeByProviderDisputeId?: (providerDisputeId: string) => Promise<{
     id: string;
@@ -234,6 +254,35 @@ export interface WebhookHandlerDeps {
   // this is what makes restoration safe when multiple independent
   // revocation reasons coexist (Founder Decision 16).
   resolveAccessRevocationsByDispute?: (disputeId: string, resolvedReason: string) => Promise<void>;
+
+  // ── Funded-period backfill (correctness review, 2026-11-13) ────────────
+  // activateFromCheckoutSession snapshots the subscription's period at
+  // checkout-completion time — if customer.subscription.updated hasn't
+  // synced yet (webhook delivery order is never guaranteed, see this
+  // file's own header), that snapshot freezes as null forever with no
+  // other write path ever revisiting it. See reconcileNullFundedPeriods's
+  // own comment for the verified, never-guessing backfill condition.
+  findNullFundedPeriodTransactions?: (subscriptionId: string) => Promise<
+    Array<{ id: string; type: "SUBSCRIPTION_INITIAL" | "SUBSCRIPTION_RENEWAL"; occurredAt: Date }>
+  >;
+  backfillFundedPeriod?: (transactionId: string, start: Date, end: Date) => Promise<void>;
+  // Durable manual-review obligation (manual-review.server.ts) — the
+  // authoritative replacement for relying on captureFailure's console.error
+  // alone whenever a funded period genuinely cannot be established.
+  recordManualReviewObligation?: (input: {
+    category: string;
+    subscriptionId?: string | null;
+    transactionId?: string | null;
+    disputeId?: string | null;
+    detail?: Record<string, unknown>;
+  }) => Promise<void>;
+  // Auto-clears any open flag for a transaction the backfill above has
+  // since successfully established — a later event fixing what an earlier
+  // one couldn't must not leave a stale obligation for a human to find.
+  resolveManualReviewFlagsFor?: (
+    category: string,
+    refs: { transactionId?: string | null; disputeId?: string | null },
+  ) => Promise<number>;
 }
 
 async function defaultFindProcessedEvent(provider: string, providerEventId: string) {
@@ -433,12 +482,118 @@ async function defaultUpsertRefundTransaction(input: {
   }
 }
 
-async function defaultSumRefundedAmountForTransaction(originalTransactionId: string): Promise<number> {
-  const result = await prisma.billingTransaction.aggregate({
-    where: { refundsTransactionId: originalTransactionId, type: "SUBSCRIPTION_REFUND", status: "REFUNDED" },
-    _sum: { amount: true },
+// ── Atomic, serialized SUCCEEDED-refund processing (correctness review,
+// 2026-11-13) ────────────────────────────────────────────────────────────
+//
+// The previous design did the refund-ledger upsert and the cumulative-sum
+// read as two separate, unsynchronized statements. On a multi-instance
+// deployment (this app's own webhook endpoint, api.stripe-webhook.tsx, has
+// no locking/queueing of its own), two DISTINCT, genuinely concurrent
+// partial refunds against the SAME original payment could each compute the
+// sum before seeing the other's already-committed write — both conclude
+// "still partial" even though combined they total a full refund, and the
+// event is still acknowledged ok:true (Stripe never retries a decision it
+// doesn't know was wrong). Mirrors the exact, already-proven pattern this
+// codebase uses for the identical class of problem elsewhere
+// (entitlement.server.ts's reserveStyleMeSlot/etc. — Serializable isolation
+// + retry on Prisma's P2034 conflict code), rather than inventing a new one.
+const MAX_REFUND_TX_RETRIES = 2;
+
+function isSerializationError(e: unknown): boolean {
+  return (e as any)?.code === "P2034";
+}
+
+export type RunRefundTransactionFn = <T>(fn: (tx: Pick<typeof prisma, "billingTransaction">) => Promise<T>) => Promise<T>;
+
+const _runRefundTransaction: RunRefundTransactionFn = (fn) =>
+  prisma.$transaction((tx: Pick<typeof prisma, "billingTransaction">) => fn(tx), { isolationLevel: "Serializable" });
+
+export async function recordSucceededRefundAndDecideFull(
+  input: {
+    customerId: string;
+    subscriptionId: string;
+    refundsTransactionId: string;
+    refundId: string;
+    amount: number;
+    currency: string;
+    occurredAt: Date;
+    originalAmount: number;
+  },
+  _runTransaction: RunRefundTransactionFn = _runRefundTransaction,
+): Promise<{ isFullRefund: boolean; cumulativeRefunded: number }> {
+  for (let attempt = 0; attempt <= MAX_REFUND_TX_RETRIES; attempt++) {
+    try {
+      return await _runTransaction(async (tx) => {
+        try {
+          await tx.billingTransaction.create({
+            data: {
+              customerId: input.customerId,
+              subscriptionId: input.subscriptionId,
+              type: "SUBSCRIPTION_REFUND",
+              status: "REFUNDED",
+              amount: input.amount,
+              currency: input.currency,
+              provider: "stripe",
+              providerTransactionId: input.refundId,
+              refundsTransactionId: input.refundsTransactionId,
+              occurredAt: input.occurredAt,
+            },
+          });
+        } catch (err) {
+          if (isUniqueConstraintViolation(err, "providerTransactionId")) {
+            // refund.updated for a Refund already recorded by refund.created
+            // (or a retried delivery) — update in place rather than
+            // duplicate, same as before, just now inside the same atomic
+            // section as the sum that decides on it.
+            await tx.billingTransaction.updateMany({
+              where: { providerTransactionId: input.refundId },
+              data: { status: "REFUNDED", amount: input.amount },
+            });
+          } else {
+            throw err;
+          }
+        }
+
+        const result = await tx.billingTransaction.aggregate({
+          where: { refundsTransactionId: input.refundsTransactionId, type: "SUBSCRIPTION_REFUND", status: "REFUNDED" },
+          _sum: { amount: true },
+        });
+        const cumulativeRefunded = result._sum.amount ?? 0;
+        return { isFullRefund: cumulativeRefunded >= input.originalAmount, cumulativeRefunded };
+      });
+    } catch (e) {
+      if (isSerializationError(e) && attempt < MAX_REFUND_TX_RETRIES) continue;
+      throw e;
+    }
+  }
+  // Unreachable — the loop above always returns or throws.
+  throw new Error("Unexpected exit from recordSucceededRefundAndDecideFull retry loop");
+}
+
+// Verified, never-guessing backfill condition (correctness review,
+// 2026-11-13): a null funded-period BillingTransaction is only ever
+// backfilled when the authoritative period actually being synced covers
+// the moment that specific payment occurred. This is never "apply
+// whatever the subscription's CURRENT period happens to be" — a renewal
+// period arriving later for the SAME subscription will not cover an
+// INITIAL transaction's (earlier) occurredAt, and correctly leaves it
+// alone rather than backfilling the wrong period onto it.
+export function periodCoversTransaction(occurredAt: Date, periodStart: Date, periodEnd: Date): boolean {
+  return occurredAt.getTime() >= periodStart.getTime() && occurredAt.getTime() < periodEnd.getTime();
+}
+
+async function defaultFindNullFundedPeriodTransactions(subscriptionId: string) {
+  return prisma.billingTransaction.findMany({
+    where: { subscriptionId, fundedPeriodStart: null, type: { in: ["SUBSCRIPTION_INITIAL", "SUBSCRIPTION_RENEWAL"] } },
+    select: { id: true, type: true, occurredAt: true },
   });
-  return result._sum.amount ?? 0;
+}
+
+async function defaultBackfillFundedPeriod(transactionId: string, start: Date, end: Date): Promise<void> {
+  await prisma.billingTransaction.update({
+    where: { id: transactionId },
+    data: { fundedPeriodStart: start, fundedPeriodEnd: end },
+  });
 }
 
 async function defaultFindSubscriptionById(id: string) {
@@ -736,13 +891,17 @@ export async function processStripeWebhookEvent(
   const _findBillingTransactionByProviderTransactionId =
     deps.findBillingTransactionByProviderTransactionId ?? defaultFindBillingTransactionByProviderTransactionId;
   const _upsertRefundTransaction = deps.upsertRefundTransaction ?? defaultUpsertRefundTransaction;
-  const _sumRefundedAmountForTransaction = deps.sumRefundedAmountForTransaction ?? defaultSumRefundedAmountForTransaction;
+  const _recordSucceededRefundAndDecideFull = deps.recordSucceededRefundAndDecideFull ?? recordSucceededRefundAndDecideFull;
   const _findSubscriptionById = deps.findSubscriptionById ?? defaultFindSubscriptionById;
   const _findDisputeByProviderDisputeId = deps.findDisputeByProviderDisputeId ?? defaultFindDisputeByProviderDisputeId;
   const _upsertDispute = deps.upsertDispute ?? defaultUpsertDispute;
   const _hasActiveRevocation = deps.hasActiveRevocation ?? defaultHasActiveRevocation;
   const _createAccessRevocation = deps.createAccessRevocation ?? defaultCreateAccessRevocation;
   const _resolveAccessRevocationsByDispute = deps.resolveAccessRevocationsByDispute ?? defaultResolveAccessRevocationsByDispute;
+  const _findNullFundedPeriodTransactions = deps.findNullFundedPeriodTransactions ?? defaultFindNullFundedPeriodTransactions;
+  const _backfillFundedPeriod = deps.backfillFundedPeriod ?? defaultBackfillFundedPeriod;
+  const _recordManualReviewObligation = deps.recordManualReviewObligation ?? defaultRecordManualReviewObligation;
+  const _resolveManualReviewFlagsFor = deps.resolveManualReviewFlagsFor ?? defaultResolveManualReviewFlagsFor;
 
   // Applies/lifts an access revocation and keeps Customer.membershipStatus
   // in lockstep — the SAME pattern customer.subscription.updated's own
@@ -762,6 +921,49 @@ export async function processStripeWebhookEvent(
     const sub = await _findSubscriptionById(subscriptionId);
     if (sub && (sub.status === "ACTIVE" || sub.status === "PAST_DUE")) {
       await _updateCustomerMembershipStatus(customerId, "MEMBER");
+    }
+  }
+
+  // Correctness review (2026-11-13) — closes the out-of-order checkout/
+  // subscription-sync gap: activateFromCheckoutSession snapshots the
+  // subscription's period at checkout-completion time, which is null if
+  // customer.subscription.updated hasn't synced yet, and nothing else ever
+  // revisits that row. Called from every customer.subscription.updated/
+  // .deleted sync below, right after the authoritative period is written.
+  //
+  // Never "blindly apply whatever the subscription's current period is" —
+  // each candidate transaction is independently verified via
+  // periodCoversTransaction (its own occurredAt must actually fall inside
+  // the period being synced). This is self-limiting and safe to call on
+  // EVERY sync: once a transaction is backfilled it stops being a null-
+  // period candidate, and a LATER renewal period will correctly fail the
+  // containment check against an EARLIER transaction's occurredAt rather
+  // than overwriting it with the wrong period. Idempotent either way via
+  // recordManualReviewObligation's own dedup.
+  //
+  // Whichever candidates this sync's period does NOT establish become a
+  // durable manual-review obligation instead of vanishing into a transient
+  // log line — see manual-review.server.ts.
+  async function reconcileNullFundedPeriods(
+    subscriptionId: string,
+    periodStart: Date | null,
+    periodEnd: Date | null,
+  ): Promise<void> {
+    const candidates = await _findNullFundedPeriodTransactions(subscriptionId);
+    if (candidates.length === 0) return;
+
+    for (const txn of candidates) {
+      if (periodStart && periodEnd && periodCoversTransaction(txn.occurredAt, periodStart, periodEnd)) {
+        await _backfillFundedPeriod(txn.id, periodStart, periodEnd);
+        await _resolveManualReviewFlagsFor("funded_period_unknown", { transactionId: txn.id }, "system:auto-backfill");
+      } else {
+        await _recordManualReviewObligation({
+          category: "funded_period_unknown",
+          subscriptionId,
+          transactionId: txn.id,
+          detail: { transactionType: txn.type, occurredAt: txn.occurredAt.toISOString() },
+        });
+      }
     }
   }
 
@@ -1000,9 +1202,11 @@ export async function processStripeWebhookEvent(
           providerCustomerId: typeof authoritative.customer === "string" ? authoritative.customer : null,
           providerSubscriptionId,
         });
+        const createdPeriodStart = derivePeriodTimestampFromAuthoritative(authoritative, "current_period_start");
+        const createdPeriodEnd = derivePeriodTimestampFromAuthoritative(authoritative, "current_period_end");
         await _updateSubscriptionById(created.id, {
-          currentPeriodStart: derivePeriodTimestampFromAuthoritative(authoritative, "current_period_start"),
-          currentPeriodEnd: derivePeriodTimestampFromAuthoritative(authoritative, "current_period_end"),
+          currentPeriodStart: createdPeriodStart,
+          currentPeriodEnd: createdPeriodEnd,
           cancelAtPeriodEnd: Boolean(authoritative.cancel_at_period_end),
           pastDueSince: mapStripeSubscriptionStatus(authoritative.status, null) === "PAST_DUE" ? eventCreatedAt : null,
           providerSyncedAt: eventCreatedAt,
@@ -1010,6 +1214,11 @@ export async function processStripeWebhookEvent(
         if (created.status === "ACTIVE" || created.status === "PAST_DUE") {
           await _updateCustomerMembershipStatus(metaCustomerId, "MEMBER");
         }
+        // A brand-new Subscription row has no pre-existing BillingTransaction
+        // rows yet (none could reference an id that didn't exist a moment
+        // ago) — harmless no-op today, kept for symmetry/robustness should
+        // that ever change.
+        await reconcileNullFundedPeriods(created.id, createdPeriodStart, createdPeriodEnd);
         action = "subscription_created_from_sync";
         break;
       }
@@ -1038,14 +1247,19 @@ export async function processStripeWebhookEvent(
       // stored value, never a hardcoded default, when Stripe's object
       // doesn't carry a usable interval.
       const planType = derivePlanTypeFromAuthoritative(authoritative) ?? existing.planType;
+      // Resolved final values (post-fallback) — exactly what gets written
+      // to the Subscription row below, and the SAME values reconcileNull
+      // FundedPeriods verifies any null-funded-period transaction against.
+      const resolvedPeriodStart = derivePeriodTimestampFromAuthoritative(authoritative, "current_period_start") ?? existing.currentPeriodStart;
+      const resolvedPeriodEnd = derivePeriodTimestampFromAuthoritative(authoritative, "current_period_end") ?? existing.currentPeriodEnd;
 
       await _updateSubscriptionById(existing.id, {
         status: mappedStatus,
         planType,
         providerSubscriptionId,
         providerCustomerId: typeof authoritative.customer === "string" ? authoritative.customer : existing.providerCustomerId,
-        currentPeriodStart: derivePeriodTimestampFromAuthoritative(authoritative, "current_period_start") ?? existing.currentPeriodStart,
-        currentPeriodEnd: derivePeriodTimestampFromAuthoritative(authoritative, "current_period_end") ?? existing.currentPeriodEnd,
+        currentPeriodStart: resolvedPeriodStart,
+        currentPeriodEnd: resolvedPeriodEnd,
         cancelAtPeriodEnd: Boolean(authoritative.cancel_at_period_end),
         ...(enteringPastDue ? { pastDueSince: eventCreatedAt } : {}),
         ...(leavingPastDue ? { pastDueSince: null } : {}),
@@ -1071,6 +1285,12 @@ export async function processStripeWebhookEvent(
       } else if (mappedStatus === "ACTIVE" && existing.status !== "ACTIVE") {
         await _updateCustomerMembershipStatus(existing.customerId, "MEMBER");
       }
+      // Closes the out-of-order checkout/subscription-sync gap: if
+      // checkout.session.completed created the SUBSCRIPTION_INITIAL
+      // transaction before this subscription had a synced period, this is
+      // where that gets corrected — but only when the period actually
+      // covers when that payment happened, never guessed.
+      await reconcileNullFundedPeriods(existing.id, resolvedPeriodStart, resolvedPeriodEnd);
       action = "subscription_synced";
       break;
     }
@@ -1199,25 +1419,24 @@ export async function processStripeWebhookEvent(
       }
 
       // "succeeded" — the only remaining documented Refund.status value.
-      await _upsertRefundTransaction({
+      // Ledger upsert + full-vs-partial decision run ATOMICALLY (see
+      // recordSucceededRefundAndDecideFull's own comment) — computed from
+      // OUR OWN ledger (sum of every succeeded refund scoped to this exact
+      // original transaction via refundsTransactionId, never the whole
+      // subscription), compared against that transaction's own recorded
+      // amount — never a live Stripe re-fetch, and never conflated with
+      // any OTHER payment this subscription separately made, and never
+      // under-counted by a genuinely concurrent sibling refund either.
+      const { isFullRefund } = await _recordSucceededRefundAndDecideFull({
         customerId: original.customerId,
         subscriptionId: original.subscriptionId,
         refundsTransactionId: original.id,
         refundId,
-        status: "SUCCEEDED",
         amount: typeof obj.amount === "number" ? obj.amount : 0,
         currency: (obj.currency ?? "aed").toUpperCase(),
         occurredAt: eventCreatedAt,
+        originalAmount: original.amount,
       });
-
-      // Full vs partial, correct across repeated/accumulating refunds:
-      // computed from OUR OWN ledger (sum of every succeeded refund
-      // scoped to this exact original transaction via refundsTransactionId,
-      // never the whole subscription), compared against that transaction's
-      // own recorded amount — never a live Stripe re-fetch, and never
-      // conflated with any OTHER payment this subscription separately made.
-      const cumulativeRefunded = await _sumRefundedAmountForTransaction(original.id);
-      const isFullRefund = cumulativeRefunded >= original.amount;
 
       if (!isFullRefund) {
         // Partial — Founder Decision 16: access is retained. Ledger entry
@@ -1235,6 +1454,16 @@ export async function processStripeWebhookEvent(
         captureFailure("stripe-webhook:refund-period-unknown", "cannot_determine_funded_period", {
           refundId,
           originalTransactionId: original.id,
+        });
+        // The durable, queryable record of this obligation — captureFailure
+        // above is a console.error line only (see its own file header) and
+        // is never, on its own, enough for this to not disappear into log
+        // retention.
+        await _recordManualReviewObligation({
+          category: "funded_period_unknown",
+          subscriptionId: original.subscriptionId,
+          transactionId: original.id,
+          detail: { refundId, triggeredBy: "refund" },
         });
         action = "refund_full_period_unknown_flagged_for_review";
         break;
@@ -1386,6 +1615,14 @@ export async function processStripeWebhookEvent(
         } else {
           captureFailure("stripe-webhook:dispute-period-unknown", "cannot_determine_funded_period", {
             disputeId: providerDisputeId,
+          });
+          // Durable record of the obligation — see the identical note on
+          // the refund-side period-unknown branch above.
+          await _recordManualReviewObligation({
+            category: "funded_period_unknown",
+            subscriptionId,
+            disputeId: disputeRow.id,
+            detail: { providerDisputeId, triggeredBy: "dispute" },
           });
           action = "dispute_lost_period_unknown_flagged_for_review";
         }

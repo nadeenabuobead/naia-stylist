@@ -5,6 +5,12 @@
 // injected via AdminRevocationOverrideDeps, mirroring the WebhookHandlerDeps
 // convention in webhook-handler.test.ts.
 //
+// Correctness review (2026-11-13): the AdminAuditLog write and the
+// AccessRevocation mutation now run inside ONE injected transaction
+// (runOverrideTransaction) — these tests inject a fake tx whose methods
+// are directly inspectable, mirroring how RSV.1-6 in
+// entitlement-reservation.test.ts inject a fake transaction client.
+//
 // Run: node --import tsx/esm --test app/lib/billing/admin-revocation-override.test.ts
 
 import assert from "node:assert/strict";
@@ -13,6 +19,7 @@ import {
   applyAdminRestoreOverride,
   applyAdminRevokeOverride,
   type AdminRevocationOverrideDeps,
+  type RunOverrideTransactionFn,
 } from "./admin-revocation-override.server";
 
 const BASE_INPUT = {
@@ -22,44 +29,65 @@ const BASE_INPUT = {
   reason: "Goodwill restore after dispute review",
 };
 
+// A fake tx whose adminAuditLog.create/accessRevocation.updateMany|create
+// calls are directly inspectable — this is what proves BOTH writes are
+// scoped to the SAME transaction callback (real atomicity — commit or
+// rollback together — is Prisma/Postgres's own guarantee for a thrown
+// callback, which a unit test without a live DB cannot independently
+// observe; what these tests DO prove is that the wiring places both
+// writes where that guarantee applies).
+function fakeTx(overrides: {
+  createAuditLog?: (args: any) => Promise<{ id: string }>;
+  updateManyRevocations?: (args: any) => Promise<{ count: number }>;
+  createRevocation?: (args: any) => Promise<void>;
+} = {}) {
+  return {
+    adminAuditLog: {
+      create: overrides.createAuditLog ?? (async () => ({ id: "audit-1" })),
+    },
+    accessRevocation: {
+      updateMany: overrides.updateManyRevocations ?? (async () => ({ count: 0 })),
+      create: overrides.createRevocation ?? (async () => {}),
+    },
+  } as any;
+}
+
 describe("applyAdminRestoreOverride", () => {
-  it("AO.1 — writes the audit record, resolves every active revocation with it linked, and restores membership for an ACTIVE subscription", async () => {
-    let auditCall: any = null;
-    let resolveCall: any = null;
+  it("AO.1 — writes the audit record and resolves every active revocation inside ONE transaction, linked, and restores membership for an ACTIVE subscription", async () => {
+    let auditCreateArgs: any = null;
+    let updateManyArgs: any = null;
+    let txCalls = 0;
+    const tx = fakeTx({
+      createAuditLog: async (args) => { auditCreateArgs = args; return { id: "audit-123" }; },
+      updateManyRevocations: async (args) => { updateManyArgs = args; return { count: 2 }; },
+    });
+    const runOverrideTransaction: RunOverrideTransactionFn = async (fn) => { txCalls++; return fn(tx); };
     let membershipCall: any = null;
     const deps: AdminRevocationOverrideDeps = {
-      recordAdminAction: async (performedBy, action, detail) => {
-        auditCall = { performedBy, action, detail };
-        return { id: "audit-123" };
-      },
-      resolveActiveRevocationsForSubscription: async (subscriptionId, resolvedReason, overrideAuditLogId) => {
-        resolveCall = { subscriptionId, resolvedReason, overrideAuditLogId };
-        return 2;
-      },
+      runOverrideTransaction,
       findSubscriptionById: async () => ({ id: "sub-1", status: "ACTIVE" as const }),
-      updateCustomerMembershipStatus: async (customerId, status) => {
-        membershipCall = { customerId, status };
-      },
+      updateCustomerMembershipStatus: async (customerId, status) => { membershipCall = { customerId, status }; },
     };
 
     const result = await applyAdminRestoreOverride(BASE_INPUT, deps);
 
     assert.deepEqual(result, { ok: true, overrideAuditLogId: "audit-123", resolvedCount: 2 });
-    assert.equal(auditCall.performedBy, "owner@naiabynadine.com");
-    assert.equal(auditCall.action, "access_revocation_override_restore");
-    assert.deepEqual(auditCall.detail, { subscriptionId: "sub-1", customerId: "cust-1", reason: BASE_INPUT.reason });
-    assert.equal(resolveCall.subscriptionId, "sub-1");
-    assert.match(resolveCall.resolvedReason, /admin_override/);
-    assert.match(resolveCall.resolvedReason, new RegExp(BASE_INPUT.reason));
-    assert.equal(resolveCall.overrideAuditLogId, "audit-123", "the resolve call must use the EXACT id the audit log write returned, not an independently generated one");
+    assert.equal(txCalls, 1, "both writes must happen inside exactly one transaction call");
+    assert.equal(auditCreateArgs.data.performedBy, "owner@naiabynadine.com");
+    assert.equal(auditCreateArgs.data.action, "access_revocation_override_restore");
+    assert.deepEqual(auditCreateArgs.data.detail, { subscriptionId: "sub-1", customerId: "cust-1", reason: BASE_INPUT.reason });
+    assert.equal(updateManyArgs.where.subscriptionId, "sub-1");
+    assert.equal(updateManyArgs.where.resolvedAt, null);
+    assert.match(updateManyArgs.data.resolvedReason, /admin_override/);
+    assert.match(updateManyArgs.data.resolvedReason, new RegExp(BASE_INPUT.reason));
+    assert.equal(updateManyArgs.data.overrideAuditLogId, "audit-123", "the revocation update must use the EXACT id the SAME transaction's audit write produced");
     assert.deepEqual(membershipCall, { customerId: "cust-1", status: "MEMBER" });
   });
 
   it("AO.2 — a CANCELED/EXPIRED subscription's revocations are still resolved (financial-record accuracy) but membership is never resurrected", async () => {
     let membershipCalls = 0;
     const deps: AdminRevocationOverrideDeps = {
-      recordAdminAction: async () => ({ id: "audit-456" }),
-      resolveActiveRevocationsForSubscription: async () => 1,
+      runOverrideTransaction: async (fn) => fn(fakeTx({ updateManyRevocations: async () => ({ count: 1 }) })),
       findSubscriptionById: async () => ({ id: "sub-1", status: "CANCELED" as const }),
       updateCustomerMembershipStatus: async () => { membershipCalls++; },
     };
@@ -71,25 +99,21 @@ describe("applyAdminRestoreOverride", () => {
   });
 
   it("AO.3 — a blank or whitespace-only reason refuses before writing anything — an unexplained override defeats the audit requirement", async () => {
-    let auditCalls = 0;
-    let resolveCalls = 0;
+    let txCalls = 0;
     const deps: AdminRevocationOverrideDeps = {
-      recordAdminAction: async () => { auditCalls++; return { id: "x" }; },
-      resolveActiveRevocationsForSubscription: async () => { resolveCalls++; return 0; },
+      runOverrideTransaction: async (fn) => { txCalls++; return fn(fakeTx()); },
     };
 
     const result = await applyAdminRestoreOverride({ ...BASE_INPUT, reason: "   " }, deps);
 
     assert.deepEqual(result, { ok: false, reason: "override_reason_required" });
-    assert.equal(auditCalls, 0);
-    assert.equal(resolveCalls, 0);
+    assert.equal(txCalls, 0);
   });
 
   it("AO.4 — no Subscription row found at all is a safe no-op for membership (still resolves the revocations and still audits)", async () => {
     let membershipCalls = 0;
     const deps: AdminRevocationOverrideDeps = {
-      recordAdminAction: async () => ({ id: "audit-789" }),
-      resolveActiveRevocationsForSubscription: async () => 1,
+      runOverrideTransaction: async (fn) => fn(fakeTx({ updateManyRevocations: async () => ({ count: 1 }) })),
       findSubscriptionById: async () => null,
       updateCustomerMembershipStatus: async () => { membershipCalls++; },
     };
@@ -97,60 +121,72 @@ describe("applyAdminRestoreOverride", () => {
     assert.equal(result.ok, true);
     assert.equal(membershipCalls, 0);
   });
+
+  it("AO.8 — if the AccessRevocation mutation throws, the whole call rejects rather than silently returning ok:true with a dangling audit record", async () => {
+    const tx = fakeTx({ updateManyRevocations: async () => { throw new Error("DB write failed mid-transaction"); } });
+    const deps: AdminRevocationOverrideDeps = {
+      runOverrideTransaction: async (fn) => fn(tx), // a real prisma.$transaction would roll back BOTH writes on this throw
+    };
+    await assert.rejects(() => applyAdminRestoreOverride(BASE_INPUT, deps), /DB write failed mid-transaction/);
+  });
 });
 
 describe("applyAdminRevokeOverride", () => {
-  it("AO.5 — audits FIRST, then creates an independent AccessRevocation row linked to that exact audit record, then denies access", async () => {
-    const callOrder: string[] = [];
-    let revocationInput: any = null;
+  it("AO.5 — writes the audit record and creates an independent AccessRevocation row inside ONE transaction, linked to that exact record, then denies access", async () => {
+    let auditCreateArgs: any = null;
+    let revocationCreateArgs: any = null;
+    let txCalls = 0;
+    const tx = fakeTx({
+      createAuditLog: async (args) => { auditCreateArgs = args; return { id: "audit-999" }; },
+      createRevocation: async (args) => { revocationCreateArgs = args; },
+    });
+    const runOverrideTransaction: RunOverrideTransactionFn = async (fn) => { txCalls++; return fn(tx); };
     let membershipCall: any = null;
     const deps: AdminRevocationOverrideDeps = {
-      recordAdminAction: async (performedBy, action, detail) => {
-        callOrder.push("audit");
-        return { id: "audit-999" };
-      },
-      createAccessRevocation: async (input) => {
-        callOrder.push("revoke");
-        revocationInput = input;
-      },
-      updateCustomerMembershipStatus: async (customerId, status) => {
-        callOrder.push("membership");
-        membershipCall = { customerId, status };
-      },
+      runOverrideTransaction,
+      updateCustomerMembershipStatus: async (customerId, status) => { membershipCall = { customerId, status }; },
     };
 
     const result = await applyAdminRevokeOverride({ ...BASE_INPUT, reason: "Policy violation — manual revoke", reasonCode: "DISPUTE_LOST" }, deps);
 
     assert.deepEqual(result, { ok: true, overrideAuditLogId: "audit-999", resolvedCount: 0 });
-    assert.deepEqual(callOrder, ["audit", "revoke", "membership"], "the audit record must exist before the AccessRevocation row is created");
-    assert.deepEqual(revocationInput, { subscriptionId: "sub-1", reason: "DISPUTE_LOST", overrideAuditLogId: "audit-999" });
+    assert.equal(txCalls, 1, "both writes must happen inside exactly one transaction call");
+    assert.equal(auditCreateArgs.data.action, "access_revocation_override_revoke");
+    assert.deepEqual(revocationCreateArgs.data, { subscriptionId: "sub-1", reason: "DISPUTE_LOST", overrideAuditLogId: "audit-999" });
     assert.deepEqual(membershipCall, { customerId: "cust-1", status: "NONE" });
   });
 
   it("AO.6 — a blank reason refuses before writing anything", async () => {
-    let auditCalls = 0;
-    let revokeCalls = 0;
+    let txCalls = 0;
     const deps: AdminRevocationOverrideDeps = {
-      recordAdminAction: async () => { auditCalls++; return { id: "x" }; },
-      createAccessRevocation: async () => { revokeCalls++; },
+      runOverrideTransaction: async (fn) => { txCalls++; return fn(fakeTx()); },
     };
     const result = await applyAdminRevokeOverride({ ...BASE_INPUT, reason: "", reasonCode: "REFUND" }, deps);
     assert.deepEqual(result, { ok: false, reason: "override_reason_required" });
-    assert.equal(auditCalls, 0);
-    assert.equal(revokeCalls, 0);
+    assert.equal(txCalls, 0);
   });
 
   it("AO.7 — the audit detail records the subscription/customer references and the reasonCode — Founder Decision 16's 'transaction/customer references' requirement", async () => {
-    let auditDetail: any = null;
+    let auditCreateArgs: any = null;
     const deps: AdminRevocationOverrideDeps = {
-      recordAdminAction: async (_performedBy, _action, detail) => { auditDetail = detail; return { id: "audit-1" }; },
-      createAccessRevocation: async () => {},
+      runOverrideTransaction: async (fn) => fn(fakeTx({ createAuditLog: async (args) => { auditCreateArgs = args; return { id: "audit-1" }; } })),
       updateCustomerMembershipStatus: async () => {},
     };
     await applyAdminRevokeOverride({ ...BASE_INPUT, reasonCode: "REFUND" }, deps);
-    assert.equal(auditDetail.subscriptionId, "sub-1");
-    assert.equal(auditDetail.customerId, "cust-1");
-    assert.equal(auditDetail.reasonCode, "REFUND");
-    assert.equal(auditDetail.reason, BASE_INPUT.reason);
+    assert.equal(auditCreateArgs.data.detail.subscriptionId, "sub-1");
+    assert.equal(auditCreateArgs.data.detail.customerId, "cust-1");
+    assert.equal(auditCreateArgs.data.detail.reasonCode, "REFUND");
+    assert.equal(auditCreateArgs.data.detail.reason, BASE_INPUT.reason);
+  });
+
+  it("AO.9 — if the AccessRevocation create throws, the whole call rejects rather than silently returning ok:true with a dangling audit record", async () => {
+    const tx = fakeTx({ createRevocation: async () => { throw new Error("DB write failed mid-transaction"); } });
+    const deps: AdminRevocationOverrideDeps = {
+      runOverrideTransaction: async (fn) => fn(tx),
+    };
+    await assert.rejects(
+      () => applyAdminRevokeOverride({ ...BASE_INPUT, reasonCode: "REFUND" }, deps),
+      /DB write failed mid-transaction/,
+    );
   });
 });

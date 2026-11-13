@@ -186,6 +186,12 @@ export default [
   route("admin", "routes/admin.tsx", [
     index("routes/admin._index.tsx"),
     route("maintenance", "routes/admin.maintenance.tsx"),
+    // Founder Decision 16 admin overrides + funded-period manual-review
+    // triage (correctness review, 2026-11-13) — the smallest operational
+    // surface to exercise applyAdminRestoreOverride/applyAdminRevokeOverride
+    // (admin-revocation-override.server.ts), which previously had zero
+    // callers anywhere in the app.
+    route("billing-overrides", "routes/admin.billing-overrides.tsx"),
     route("naia", "routes/admin.naia.tsx", [
       index("routes/admin.naia._index.tsx"),
       route("closet", "routes/admin.naia.closet._index.tsx"),

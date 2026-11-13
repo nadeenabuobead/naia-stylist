@@ -22,6 +22,9 @@ import {
   mapStripeSubscriptionStatus,
   derivePeriodTimestampFromAuthoritative,
   isUniqueConstraintViolation,
+  periodCoversTransaction,
+  recordSucceededRefundAndDecideFull,
+  type RunRefundTransactionFn,
   type WebhookHandlerDeps,
   type SubscriptionRecord,
   type StripeEventLike,
@@ -126,6 +129,7 @@ describe("processStripeWebhookEvent — idempotency", () => {
   it("WH.1 — a redelivered event (already recorded) is deduped, never reprocessed", async () => {
     let createCalls = 0;
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => ({ id: "already-processed" }),
       createSubscription: async () => { createCalls++; throw new Error("must not be called"); },
     };
@@ -139,6 +143,7 @@ describe("processStripeWebhookEvent — idempotency", () => {
     let recordCalls = 0;
     let recordedEventId: string | null = null;
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => null,
       findSubscriptionByCustomerId: async () => null,
@@ -164,6 +169,7 @@ describe("processStripeWebhookEvent — checkout.session.completed (synchronous 
     let created: any = null;
     let transaction: any = null;
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => null,
       createSubscription: async (input) => { created = input; return { ...baseSubscription(), ...input, id: "sub-new" }; },
@@ -199,6 +205,7 @@ describe("processStripeWebhookEvent — checkout.session.completed (synchronous 
   it("WH.3c — when payment_intent is absent, providerTransactionId falls back to the Checkout Session's OWN id (obj.id), never a bare event id and never null", async () => {
     let transaction: any = null;
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => null,
       createSubscription: async (input) => ({ ...baseSubscription(), ...input, id: "sub-new" }),
@@ -229,6 +236,7 @@ describe("processStripeWebhookEvent — checkout.session.completed (synchronous 
   it("WH.3d — a RETRY of the exact same event hits the unique-column P2002 (keyed on the Checkout Session id) and is absorbed, not a second duplicate row", async () => {
     let createCalls = 0;
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => null,
       createSubscription: async (input) => ({ ...baseSubscription(), ...input, id: "sub-new" }),
@@ -277,6 +285,7 @@ describe("processStripeWebhookEvent — checkout.session.completed (synchronous 
   it("WH.3e — TWO DIFFERENT event ids describing the SAME underlying Checkout Session must still dedupe — event-id uniqueness alone is not proof of financial-transaction uniqueness", async () => {
     let createCalls = 0;
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null, // neither event id has been seen before — this is NOT the event-ledger dedup path
       findSubscriptionByProviderSubscriptionId: async () => null,
       createSubscription: async (input) => ({ ...baseSubscription(), ...input, id: "sub-new" }),
@@ -312,6 +321,7 @@ describe("processStripeWebhookEvent — checkout.session.completed (synchronous 
     let membershipCustomerId: string | null = null;
     let membershipStatus: string | null = null;
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => null,
       // This test's event carries no obj.subscription, so
@@ -338,6 +348,7 @@ describe("processStripeWebhookEvent — checkout.session.completed (synchronous 
     let created: any = null;
     let transactionCalls = 0;
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => null,
       createSubscription: async (input) => { created = input; return { ...baseSubscription(), ...input, id: "sub-new" }; },
@@ -358,6 +369,7 @@ describe("processStripeWebhookEvent — checkout.session.completed (synchronous 
     let createCalls = 0;
     const existing = baseSubscription({ status: "INCOMPLETE" });
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => existing,
       createSubscription: async () => { createCalls++; throw new Error("must not create a duplicate row"); },
@@ -373,6 +385,7 @@ describe("processStripeWebhookEvent — checkout.session.completed (synchronous 
   it("WH.5 — a session with no resolvable customerId (client_reference_id and metadata both absent) touches nothing", async () => {
     let createCalls = 0;
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       createSubscription: async () => { createCalls++; return baseSubscription(); },
       recordProcessedEvent: async () => {},
@@ -396,6 +409,7 @@ describe("processStripeWebhookEvent — asynchronous payment confirmation", () =
     let transaction: any = null;
     const pending = baseSubscription({ status: "INCOMPLETE" });
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => pending,
       updateSubscriptionById: async (id, input) => { updateId = id; updateInput = input; },
@@ -429,6 +443,7 @@ describe("processStripeWebhookEvent — asynchronous payment confirmation", () =
     let updateCalls = 0;
     const active = baseSubscription({ status: "ACTIVE" });
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => active,
       updateSubscriptionById: async () => { updateCalls++; },
@@ -459,6 +474,7 @@ describe("processStripeWebhookEvent — asynchronous payment confirmation", () =
     let transactionCalls = 0;
     const canceled = baseSubscription({ status: "CANCELED" });
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => canceled,
       updateSubscriptionById: async () => { updateCalls++; },
@@ -480,6 +496,7 @@ describe("processStripeWebhookEvent — asynchronous payment confirmation", () =
     let updateInput: any = null;
     const pending = baseSubscription({ status: "INCOMPLETE" });
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => pending,
       updateSubscriptionById: async (_id, input) => { updateInput = input; },
@@ -500,6 +517,7 @@ describe("processStripeWebhookEvent — asynchronous payment confirmation", () =
     let updateCalls = 0;
     const active = baseSubscription({ status: "ACTIVE" });
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => active,
       updateSubscriptionById: async () => { updateCalls++; },
@@ -525,6 +543,7 @@ describe("processStripeWebhookEvent — releases the CheckoutReservation on ever
   it("WH.27 — checkout.session.completed (paid) releases the reservation", async () => {
     let releasedCustomerId: string | null = null;
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => null,
       findSubscriptionByCustomerId: async () => null,
@@ -544,6 +563,7 @@ describe("processStripeWebhookEvent — releases the CheckoutReservation on ever
   it("WH.28 — checkout.session.completed (unpaid, async pending) ALSO releases the reservation — the new INCOMPLETE Subscription row is enough to block a second attempt from here", async () => {
     let released = false;
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => null,
       findSubscriptionByCustomerId: async () => null,
@@ -562,6 +582,7 @@ describe("processStripeWebhookEvent — releases the CheckoutReservation on ever
     let released = false;
     const pending = baseSubscription({ status: "INCOMPLETE" });
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => pending,
       updateSubscriptionById: async () => {},
@@ -582,6 +603,7 @@ describe("processStripeWebhookEvent — releases the CheckoutReservation on ever
     let released = false;
     const pending = baseSubscription({ status: "INCOMPLETE" });
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => pending,
       updateSubscriptionById: async () => {},
@@ -600,6 +622,7 @@ describe("processStripeWebhookEvent — releases the CheckoutReservation on ever
     let releasedCustomerId: string | null = null;
     let subscriptionTouched = false;
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => { subscriptionTouched = true; return null; },
       findSubscriptionByCustomerId: async () => { subscriptionTouched = true; return null; },
@@ -622,6 +645,7 @@ describe("processStripeWebhookEvent — releases the CheckoutReservation on ever
     let released = false;
     let recordedEventId: string | null = null;
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       recordProcessedEvent: async (input) => { recordedEventId = input.providerEventId; },
       releaseCheckoutReservation: async () => { released = true; },
@@ -635,6 +659,7 @@ describe("processStripeWebhookEvent — releases the CheckoutReservation on ever
 
   it("WH.33 — a releaseCheckoutReservation failure never blocks the rest of event processing — best-effort, swallowed", async () => {
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => null,
       findSubscriptionByCustomerId: async () => null,
@@ -661,6 +686,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
     let updateInput: any = null;
     const existing = baseSubscription();
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => existing,
       updateSubscriptionById: async (id, input) => { updateId = id; updateInput = input; },
@@ -690,6 +716,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
     let recordCalls = 0;
     const existing = baseSubscription();
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => existing,
       updateSubscriptionById: async () => { updateCalls++; },
@@ -714,6 +741,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
     let updateInput: any = null;
     const existing = baseSubscription();
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => existing,
       updateSubscriptionById: async (_id, input) => { updateInput = input; },
@@ -745,6 +773,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
     let updateInput: any = null;
     const existing = baseSubscription({ planType: "MONTHLY" });
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => existing,
       updateSubscriptionById: async (_id, input) => { updateInput = input; },
@@ -768,6 +797,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
     let updateInput: any = null;
     const existing = baseSubscription({ planType: "ANNUAL" });
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => existing,
       updateSubscriptionById: async (_id, input) => { updateInput = input; },
@@ -792,6 +822,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
     let updateCalls = 0;
     const existing = baseSubscription({ providerSyncedAt: new Date("2026-11-15T00:00:00Z") });
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => existing,
       updateSubscriptionById: async () => { updateCalls++; },
@@ -814,6 +845,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
     const existing = baseSubscription({ providerSubscriptionId: null, providerSyncedAt: null });
     let lookupCustomerId: string | null = null;
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => null,
       findSubscriptionByCustomerId: async (customerId) => { lookupCustomerId = customerId; return existing; },
@@ -836,6 +868,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
     let created: any = null;
     let updateInput: any = null;
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => null,
       findSubscriptionByCustomerId: async () => null,
@@ -868,6 +901,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
   it("WH.8d — the authoritative price interval wins over metadata.planType when creating from an out-of-order sync too", async () => {
     let created: any = null;
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => null,
       findSubscriptionByCustomerId: async () => null,
@@ -894,6 +928,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
   it("WH.8c — NO existing row AND no metadata.customerId to key a new row on is still a safe no-op", async () => {
     let createCalls = 0;
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => null,
       findSubscriptionByCustomerId: async () => null,
@@ -915,6 +950,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
     let updateInput: any = null;
     const existing = baseSubscription({ cancelAtPeriodEnd: true });
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => existing,
       updateSubscriptionById: async (_id, input) => { updateInput = input; },
@@ -941,6 +977,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
     let membershipStatus: string | null = null;
     const existing = baseSubscription({ cancelAtPeriodEnd: true });
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => existing,
       updateSubscriptionById: async () => {},
@@ -965,6 +1002,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
     let membershipCalls = 0;
     const existing = baseSubscription({ status: "ACTIVE" });
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => existing,
       updateSubscriptionById: async () => {},
@@ -985,6 +1023,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
     let updateInput: any = null;
     const existing = baseSubscription({ cancelAtPeriodEnd: false, status: "PAST_DUE" });
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => existing,
       updateSubscriptionById: async (_id, input) => { updateInput = input; },
@@ -1005,6 +1044,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
     let updateInput: any = null;
     const existing = baseSubscription({ cancelAtPeriodEnd: false, status: "PAST_DUE" });
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => existing,
       updateSubscriptionById: async (_id, input) => { updateInput = input; },
@@ -1028,6 +1068,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
     let recordCalls = 0;
     const existing = baseSubscription({ status: "PAST_DUE" });
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => existing,
       updateSubscriptionById: async () => { updateCalls++; },
@@ -1056,6 +1097,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
         updateSubscriptionById: async (_id, input) => { enteringInput = input; },
         recordProcessedEvent: async () => {},
         retrieveAuthoritativeSubscription: async () => authoritativeSnapshot({ status: "past_due" }),
+        findNullFundedPeriodTransactions: async () => [],
       },
     );
     assert.ok(enteringInput.pastDueSince, "entering PAST_DUE must stamp pastDueSince");
@@ -1081,6 +1123,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
         // itself asserting on; see WH.9b/WH.9c for the dedicated tests of
         // that behavior.
         updateCustomerMembershipStatus: async () => {},
+        findNullFundedPeriodTransactions: async () => [],
       },
     );
     assert.equal(leavingInput.pastDueSince, null, "leaving PAST_DUE must clear pastDueSince");
@@ -1088,6 +1131,7 @@ describe("processStripeWebhookEvent — subscription sync + out-of-order guard",
 
   it("WH.11 — no matching Subscription row anywhere and no metadata to create from is a safe no-op, not a crash", async () => {
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => null,
       findSubscriptionByCustomerId: async () => null,
@@ -1176,6 +1220,7 @@ describe("processStripeWebhookEvent — missing/malformed billing-period data ca
   it("PERIOD.6 — out-of-order CREATE: a missing items array writes currentPeriodStart/End as null, not Invalid Date", async () => {
     let updateInput: any = null;
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => null,
       findSubscriptionByCustomerId: async () => null,
@@ -1206,6 +1251,7 @@ describe("processStripeWebhookEvent — missing/malformed billing-period data ca
     let updateInput: any = null;
     const existing = baseSubscription(); // has real currentPeriodStart/End already
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => existing,
       updateSubscriptionById: async (_id, input) => { updateInput = input; },
@@ -1237,6 +1283,7 @@ describe("processStripeWebhookEvent — invoice.paid renewals", () => {
     let transaction: any = null;
     const existing = baseSubscription();
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => existing,
       createBillingTransaction: async (input) => { transaction = input; },
@@ -1256,6 +1303,7 @@ describe("processStripeWebhookEvent — invoice.paid renewals", () => {
   it("WH.13 — a non-renewal billing_reason (e.g. the very first invoice) records nothing — checkout.session.completed already recorded the initial charge", async () => {
     let transactionCalls = 0;
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       createBillingTransaction: async () => { transactionCalls++; },
       recordProcessedEvent: async () => {},
@@ -1272,6 +1320,7 @@ describe("processStripeWebhookEvent — invoice.paid renewals", () => {
     let createCalls = 0;
     const existing = baseSubscription();
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null, // neither event id has been seen — not the event-ledger dedup path
       findSubscriptionByProviderSubscriptionId: async () => existing,
       createBillingTransaction: async (input) => {
@@ -1308,6 +1357,7 @@ describe("processStripeWebhookEvent — invoice.payment_failed", () => {
     let updateCalls = 0;
     const existing = baseSubscription();
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => existing,
       createBillingTransaction: async (input) => { transaction = input; },
@@ -1331,6 +1381,7 @@ describe("processStripeWebhookEvent — invoice.payment_failed", () => {
     let createCalls = 0;
     const existing = baseSubscription();
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => existing,
       createBillingTransaction: async (input) => {
@@ -1363,6 +1414,7 @@ describe("processStripeWebhookEvent — invoice.payment_failed", () => {
     const existing = baseSubscription();
     const createdTransactions: any[] = [];
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => existing,
       createBillingTransaction: async (input) => { createdTransactions.push(input); },
@@ -1388,6 +1440,7 @@ describe("processStripeWebhookEvent — invoice.payment_failed", () => {
     let transaction: any = null;
     const existing = baseSubscription({ status: "INCOMPLETE" });
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => existing,
       createBillingTransaction: async (input) => { transaction = input; },
@@ -1405,6 +1458,7 @@ describe("processStripeWebhookEvent — invoice.payment_failed", () => {
   it("WH.24 — no matching Subscription row is a safe no-op", async () => {
     let transactionCalls = 0;
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findSubscriptionByProviderSubscriptionId: async () => null,
       createBillingTransaction: async () => { transactionCalls++; },
@@ -1449,6 +1503,7 @@ describe("processStripeWebhookEvent — refund.created / refund.updated", () => 
   it("WH.30 — a pending refund is acknowledged, with no ledger write and no access change", async () => {
     let upsertCalls = 0;
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findBillingTransactionByProviderTransactionId: async () => originalTransaction(),
       upsertRefundTransaction: async () => { upsertCalls++; },
@@ -1466,6 +1521,7 @@ describe("processStripeWebhookEvent — refund.created / refund.updated", () => 
   it("WH.31 — no payment_intent on the Refund object is a safe no-op — never guess the association", async () => {
     let lookupCalls = 0;
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findBillingTransactionByProviderTransactionId: async () => { lookupCalls++; return null; },
       recordProcessedEvent: async () => {},
@@ -1481,6 +1537,7 @@ describe("processStripeWebhookEvent — refund.created / refund.updated", () => 
 
   it("WH.32 — an unassociated PaymentIntent refuses (ok:false), never silently dropping real money movement", async () => {
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findBillingTransactionByProviderTransactionId: async () => null,
       recordProcessedEvent: async () => { throw new Error("must not record a refused event as processed"); },
@@ -1497,10 +1554,10 @@ describe("processStripeWebhookEvent — refund.created / refund.updated", () => 
     let revocation: any = null;
     let membershipCall: any = null;
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findBillingTransactionByProviderTransactionId: async () => originalTransaction(),
-      upsertRefundTransaction: async () => {},
-      sumRefundedAmountForTransaction: async () => 3900, // full amount, single event
+      recordSucceededRefundAndDecideFull: async () => ({ isFullRefund: true, cumulativeRefunded: 3900 }), // full amount, single event
       findSubscriptionById: async () => baseSubscription(),
       hasActiveRevocation: async () => true,
       createAccessRevocation: async (input) => { revocation = input; },
@@ -1520,10 +1577,10 @@ describe("processStripeWebhookEvent — refund.created / refund.updated", () => 
   it("WH.34 — a partial refund (amount less than the original) retains access — Founder Decision 16", async () => {
     let revocationCalls = 0;
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findBillingTransactionByProviderTransactionId: async () => originalTransaction(),
-      upsertRefundTransaction: async () => {},
-      sumRefundedAmountForTransaction: async () => 1000, // less than original.amount (3900)
+      recordSucceededRefundAndDecideFull: async () => ({ isFullRefund: false, cumulativeRefunded: 1000 }), // less than original.amount (3900)
       createAccessRevocation: async () => { revocationCalls++; },
       recordProcessedEvent: async () => {},
     };
@@ -1539,10 +1596,10 @@ describe("processStripeWebhookEvent — refund.created / refund.updated", () => 
   it("WH.35 — two accumulating partial refunds that together reach the full amount revoke access on the SECOND event, not the first", async () => {
     let revocationCalls = 0;
     const makeDeps = (cumulative: number): WebhookHandlerDeps => ({
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findBillingTransactionByProviderTransactionId: async () => originalTransaction(),
-      upsertRefundTransaction: async () => {},
-      sumRefundedAmountForTransaction: async () => cumulative,
+      recordSucceededRefundAndDecideFull: async () => ({ isFullRefund: cumulative >= 3900, cumulativeRefunded: cumulative }),
       findSubscriptionById: async () => baseSubscription(),
       hasActiveRevocation: async () => true,
       createAccessRevocation: async () => { revocationCalls++; },
@@ -1574,10 +1631,10 @@ describe("processStripeWebhookEvent — refund.created / refund.updated", () => 
       fundedPeriodEnd: new Date((BASE_TS - 2_592_000) * 1000), // an earlier period than the subscription's CURRENT one
     });
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findBillingTransactionByProviderTransactionId: async () => oldPeriodTxn,
-      upsertRefundTransaction: async () => {},
-      sumRefundedAmountForTransaction: async () => oldPeriodTxn.amount,
+      recordSucceededRefundAndDecideFull: async () => ({ isFullRefund: true, cumulativeRefunded: oldPeriodTxn.amount }),
       findSubscriptionById: async () => baseSubscription(), // currentPeriodEnd is BASE_TS, not oldPeriodTxn's
       createAccessRevocation: async () => { revocationCalls++; },
       recordProcessedEvent: async () => {},
@@ -1595,11 +1652,12 @@ describe("processStripeWebhookEvent — refund.created / refund.updated", () => 
     let revocationCalls = 0;
     const historicalTxn = originalTransaction({ fundedPeriodStart: null, fundedPeriodEnd: null });
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findBillingTransactionByProviderTransactionId: async () => historicalTxn,
-      upsertRefundTransaction: async () => {},
-      sumRefundedAmountForTransaction: async () => historicalTxn.amount,
+      recordSucceededRefundAndDecideFull: async () => ({ isFullRefund: true, cumulativeRefunded: historicalTxn.amount }),
       createAccessRevocation: async () => { revocationCalls++; },
+      recordManualReviewObligation: async () => {},
       recordProcessedEvent: async () => {},
     };
     const event = makeEvent({
@@ -1611,10 +1669,33 @@ describe("processStripeWebhookEvent — refund.created / refund.updated", () => 
     assert.deepEqual(result, { ok: true, deduped: false, action: "refund_full_period_unknown_flagged_for_review" });
   });
 
+  it("WH.37b — the period-unknown case durably records a manual-review obligation, not only a transient captureFailure log line", async () => {
+    const historicalTxn = originalTransaction({ fundedPeriodStart: null, fundedPeriodEnd: null });
+    let obligationInput: any = null;
+    const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
+      findProcessedEvent: async () => null,
+      findBillingTransactionByProviderTransactionId: async () => historicalTxn,
+      recordSucceededRefundAndDecideFull: async () => ({ isFullRefund: true, cumulativeRefunded: historicalTxn.amount }),
+      recordManualReviewObligation: async (input) => { obligationInput = input; },
+      recordProcessedEvent: async () => {},
+    };
+    const event = makeEvent({
+      type: "refund.updated",
+      data: { object: { id: "re_8b", payment_intent: "pi_historical", status: "succeeded", amount: historicalTxn.amount, currency: "aed" } },
+    });
+    const result = await processStripeWebhookEvent(event, deps);
+    assert.equal(obligationInput.category, "funded_period_unknown");
+    assert.equal(obligationInput.subscriptionId, "sub-row-1");
+    assert.equal(obligationInput.transactionId, "txn-original-1");
+    assert.deepEqual(result, { ok: true, deduped: false, action: "refund_full_period_unknown_flagged_for_review" });
+  });
+
   it("WH.38 — a failed refund (via refund.updated) records the FAILED ledger entry and never touches access", async () => {
     let upserted: any = null;
     let revocationCalls = 0;
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findBillingTransactionByProviderTransactionId: async () => originalTransaction(),
       upsertRefundTransaction: async (input) => { upserted = input; },
@@ -1638,6 +1719,7 @@ describe("processStripeWebhookEvent — refund.failed (dedicated terminal event)
   it("WH.39 — refund.failed arriving after an earlier refund.created(pending), with no refund.updated in between, still records the failure", async () => {
     let upserted: any = null;
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findBillingTransactionByProviderTransactionId: async () => originalTransaction(),
       upsertRefundTransaction: async (input) => { upserted = input; },
@@ -1654,6 +1736,7 @@ describe("processStripeWebhookEvent — refund.failed (dedicated terminal event)
 
   it("WH.39b — an unassociated refund.failed refuses rather than silently dropping it", async () => {
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findBillingTransactionByProviderTransactionId: async () => null,
       recordProcessedEvent: async () => { throw new Error("must not record a refused event as processed"); },
@@ -1673,6 +1756,7 @@ describe("processStripeWebhookEvent — charge.dispute.created / charge.dispute.
   it("WH.40 — a warning_* pre-dispute status is purely informational: no Dispute row, no access impact", async () => {
     let upsertCalls = 0;
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       upsertDispute: async (input) => { upsertCalls++; return { id: "dispute-1" } as any; },
       recordProcessedEvent: async () => {},
@@ -1690,6 +1774,7 @@ describe("processStripeWebhookEvent — charge.dispute.created / charge.dispute.
     let disputeInput: any = null;
     let revocationCalls = 0;
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findBillingTransactionByProviderTransactionId: async () => originalTransaction(),
       findDisputeByProviderDisputeId: async () => null,
@@ -1711,6 +1796,7 @@ describe("processStripeWebhookEvent — charge.dispute.created / charge.dispute.
     let revocation: any = null;
     let membershipCall: any = null;
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findBillingTransactionByProviderTransactionId: async () => originalTransaction(),
       findDisputeByProviderDisputeId: async () => null,
@@ -1735,6 +1821,7 @@ describe("processStripeWebhookEvent — charge.dispute.created / charge.dispute.
     let revocationCalls = 0;
     const oldPeriodTxn = originalTransaction({ fundedPeriodEnd: new Date((BASE_TS - 2_592_000) * 1000) });
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findBillingTransactionByProviderTransactionId: async () => oldPeriodTxn,
       findDisputeByProviderDisputeId: async () => null,
@@ -1756,11 +1843,13 @@ describe("processStripeWebhookEvent — charge.dispute.created / charge.dispute.
     let revocationCalls = 0;
     const historicalTxn = originalTransaction({ fundedPeriodStart: null, fundedPeriodEnd: null });
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findBillingTransactionByProviderTransactionId: async () => historicalTxn,
       findDisputeByProviderDisputeId: async () => null,
       upsertDispute: async () => ({ id: "dispute-5" }),
       createAccessRevocation: async () => { revocationCalls++; },
+      recordManualReviewObligation: async () => {},
       recordProcessedEvent: async () => {},
     };
     const event = makeEvent({
@@ -1772,10 +1861,34 @@ describe("processStripeWebhookEvent — charge.dispute.created / charge.dispute.
     assert.deepEqual(result, { ok: true, deduped: false, action: "dispute_lost_period_unknown_flagged_for_review" });
   });
 
+  it("WH.44b — the dispute period-unknown case durably records a manual-review obligation keyed by the dispute", async () => {
+    const historicalTxn = originalTransaction({ fundedPeriodStart: null, fundedPeriodEnd: null });
+    let obligationInput: any = null;
+    const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
+      findProcessedEvent: async () => null,
+      findBillingTransactionByProviderTransactionId: async () => historicalTxn,
+      findDisputeByProviderDisputeId: async () => null,
+      upsertDispute: async () => ({ id: "dispute-5b" }),
+      recordManualReviewObligation: async (input) => { obligationInput = input; },
+      recordProcessedEvent: async () => {},
+    };
+    const event = makeEvent({
+      type: "charge.dispute.closed",
+      data: { object: { id: "dp_5b", status: "lost", amount: historicalTxn.amount, payment_intent: "pi_historical" } },
+    });
+    const result = await processStripeWebhookEvent(event, deps);
+    assert.equal(obligationInput.category, "funded_period_unknown");
+    assert.equal(obligationInput.subscriptionId, "sub-row-1");
+    assert.equal(obligationInput.disputeId, "dispute-5b");
+    assert.deepEqual(result, { ok: true, deduped: false, action: "dispute_lost_period_unknown_flagged_for_review" });
+  });
+
   it("WH.45 — a dispute later WON resolves ONLY this dispute's own AccessRevocation rows and restores membership when nothing else is active", async () => {
     let resolveCall: any = null;
     let membershipCall: any = null;
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findDisputeByProviderDisputeId: async () => ({
         id: "dispute-6",
@@ -1805,6 +1918,7 @@ describe("processStripeWebhookEvent — charge.dispute.created / charge.dispute.
   it("WH.46 — a dispute WON does NOT restore membership while an INDEPENDENT revocation reason (e.g. a separate refund) remains active on the same subscription", async () => {
     const membershipCalls: Array<{ customerId: string; status: string }> = [];
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findDisputeByProviderDisputeId: async () => ({
         id: "dispute-7",
@@ -1834,6 +1948,7 @@ describe("processStripeWebhookEvent — charge.dispute.created / charge.dispute.
 
   it("WH.47 — 'prevented' is kept distinct from WON: resolves this dispute's revocations but reports its own action, never formally disputed vs disputed-and-won", async () => {
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findBillingTransactionByProviderTransactionId: async () => originalTransaction(),
       findDisputeByProviderDisputeId: async () => null,
@@ -1855,6 +1970,7 @@ describe("processStripeWebhookEvent — charge.dispute.created / charge.dispute.
   it("WH.48 — an older event for an already-recorded dispute is ignored (out-of-order protection)", async () => {
     let upsertCalls = 0;
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findDisputeByProviderDisputeId: async () => ({
         id: "dispute-9",
@@ -1881,6 +1997,7 @@ describe("processStripeWebhookEvent — charge.dispute.created / charge.dispute.
   it("WH.49 — at the exact SAME instant, a terminal status always wins over a less-final (PENDING) one — one-second Stripe timestamp resolution", async () => {
     let upsertInput: any = null;
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findDisputeByProviderDisputeId: async () => ({
         id: "dispute-10",
@@ -1910,6 +2027,7 @@ describe("processStripeWebhookEvent — charge.dispute.created / charge.dispute.
 
   it("WH.50 — no association at all (no PaymentIntent match, no existing Dispute row) refuses rather than guessing which customer this belongs to", async () => {
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       findBillingTransactionByProviderTransactionId: async () => null,
       findDisputeByProviderDisputeId: async () => null,
@@ -1930,6 +2048,7 @@ describe("processStripeWebhookEvent — unhandled event types", () => {
   it("WH.14 — an event type this integration doesn't act on is recorded (idempotency) but never throws", async () => {
     let recordCalls = 0;
     const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
       findProcessedEvent: async () => null,
       recordProcessedEvent: async () => { recordCalls++; },
     };
@@ -1972,5 +2091,266 @@ describe("isUniqueConstraintViolation", () => {
     assert.equal(isUniqueConstraintViolation({ code: "P2034" }), false);
     assert.equal(isUniqueConstraintViolation(null), false);
     assert.equal(isUniqueConstraintViolation(undefined), false);
+  });
+});
+
+// ── periodCoversTransaction — the never-guessing backfill condition ────────
+
+describe("periodCoversTransaction", () => {
+  it("BF.1 — true when occurredAt falls strictly inside [periodStart, periodEnd)", () => {
+    const start = new Date("2026-11-01T00:00:00Z");
+    const end = new Date("2026-12-01T00:00:00Z");
+    assert.equal(periodCoversTransaction(new Date("2026-11-15T00:00:00Z"), start, end), true);
+  });
+
+  it("BF.2 — true exactly AT periodStart (inclusive)", () => {
+    const start = new Date("2026-11-01T00:00:00Z");
+    const end = new Date("2026-12-01T00:00:00Z");
+    assert.equal(periodCoversTransaction(start, start, end), true);
+  });
+
+  it("BF.3 — false exactly AT periodEnd (exclusive) — a payment at the exact instant a period ends belongs to the NEXT period, not this one", () => {
+    const start = new Date("2026-11-01T00:00:00Z");
+    const end = new Date("2026-12-01T00:00:00Z");
+    assert.equal(periodCoversTransaction(end, start, end), false);
+  });
+
+  it("BF.4 — false when occurredAt is before periodStart (an earlier transaction, e.g. the INITIAL payment, vs a LATER renewal period)", () => {
+    const start = new Date("2026-11-01T00:00:00Z");
+    const end = new Date("2026-12-01T00:00:00Z");
+    assert.equal(periodCoversTransaction(new Date("2026-10-15T00:00:00Z"), start, end), false);
+  });
+
+  it("BF.5 — false when occurredAt is after periodEnd", () => {
+    const start = new Date("2026-11-01T00:00:00Z");
+    const end = new Date("2026-12-01T00:00:00Z");
+    assert.equal(periodCoversTransaction(new Date("2026-12-15T00:00:00Z"), start, end), false);
+  });
+});
+
+// ── reconcileNullFundedPeriods wiring — out-of-order checkout/subscription-
+// sync backfill (correctness review, 2026-11-13) ──────────────────────────
+
+describe("processStripeWebhookEvent — out-of-order funded-period backfill on subscription sync", () => {
+  it("BF.6 — a null-funded-period SUBSCRIPTION_INITIAL transaction whose occurredAt falls inside the newly-synced period IS backfilled, and any open review flag for it is auto-resolved", async () => {
+    const existing = baseSubscription();
+    let backfillCall: any = null;
+    let resolveFlagCall: any = null;
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findSubscriptionByProviderSubscriptionId: async () => existing,
+      retrieveAuthoritativeSubscription: async () => authoritativeSnapshot(),
+      updateSubscriptionById: async () => {},
+      updateCustomerMembershipStatus: async () => {},
+      findNullFundedPeriodTransactions: async () => [
+        { id: "txn-initial-1", type: "SUBSCRIPTION_INITIAL", occurredAt: new Date((BASE_TS - 2_592_000 + 100) * 1000) },
+      ],
+      backfillFundedPeriod: async (id, start, end) => { backfillCall = { id, start, end }; },
+      resolveManualReviewFlagsFor: async (category, refs) => { resolveFlagCall = { category, refs }; return 1; },
+      recordProcessedEvent: async () => {},
+    };
+    const event = makeEvent({
+      type: "customer.subscription.updated",
+      data: { object: { id: "sub_stripe_1" } },
+    });
+    await processStripeWebhookEvent(event, deps);
+    assert.equal(backfillCall.id, "txn-initial-1");
+    assert.deepEqual(backfillCall.start, existing.currentPeriodStart);
+    assert.deepEqual(backfillCall.end, existing.currentPeriodEnd);
+    assert.equal(resolveFlagCall.category, "funded_period_unknown");
+    assert.equal(resolveFlagCall.refs.transactionId, "txn-initial-1");
+  });
+
+  it("BF.7 — a null-funded-period candidate whose occurredAt does NOT fall inside the newly-synced period is NEVER backfilled with it — flagged for manual review instead", async () => {
+    const existing = baseSubscription(); // currentPeriodStart/End = a LATER renewal period
+    let backfillCalls = 0;
+    let obligationInput: any = null;
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findSubscriptionByProviderSubscriptionId: async () => existing,
+      retrieveAuthoritativeSubscription: async () => authoritativeSnapshot(),
+      updateSubscriptionById: async () => {},
+      updateCustomerMembershipStatus: async () => {},
+      findNullFundedPeriodTransactions: async () => [
+        // occurredAt is from LONG before this period even starts — e.g. the
+        // original INITIAL payment, with this sync now reporting a much
+        // later renewal period. Must never be stamped with the wrong period.
+        { id: "txn-initial-old", type: "SUBSCRIPTION_INITIAL", occurredAt: new Date((BASE_TS - 10_000_000) * 1000) },
+      ],
+      recordManualReviewObligation: async (input) => { obligationInput = input; },
+      backfillFundedPeriod: async () => { backfillCalls++; },
+      recordProcessedEvent: async () => {},
+    };
+    const event = makeEvent({
+      type: "customer.subscription.updated",
+      data: { object: { id: "sub_stripe_1" } },
+    });
+    await processStripeWebhookEvent(event, deps);
+    assert.equal(backfillCalls, 0, "never blindly apply the current period to a transaction it doesn't actually cover");
+    assert.equal(obligationInput.category, "funded_period_unknown");
+    assert.equal(obligationInput.transactionId, "txn-initial-old");
+  });
+
+  it("BF.8 — a sync with no usable authoritative period at all (both null) flags every null-funded-period candidate for review rather than guessing", async () => {
+    const existing = baseSubscription({ currentPeriodStart: null, currentPeriodEnd: null });
+    let obligationCalls = 0;
+    let backfillCalls = 0;
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findSubscriptionByProviderSubscriptionId: async () => existing,
+      retrieveAuthoritativeSubscription: async () => authoritativeSnapshot({ current_period_start: null, current_period_end: null }),
+      updateSubscriptionById: async () => {},
+      updateCustomerMembershipStatus: async () => {},
+      findNullFundedPeriodTransactions: async () => [{ id: "txn-x", type: "SUBSCRIPTION_INITIAL", occurredAt: new Date() }],
+      recordManualReviewObligation: async () => { obligationCalls++; },
+      backfillFundedPeriod: async () => { backfillCalls++; },
+      recordProcessedEvent: async () => {},
+    };
+    const event = makeEvent({
+      type: "customer.subscription.updated",
+      data: { object: { id: "sub_stripe_1" } },
+    });
+    await processStripeWebhookEvent(event, deps);
+    assert.equal(backfillCalls, 0);
+    assert.equal(obligationCalls, 1);
+  });
+
+  it("BF.9 — no null-funded-period candidates for this subscription is a true no-op — neither backfill nor manual-review is ever called", async () => {
+    const existing = baseSubscription();
+    let anyCalls = 0;
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findSubscriptionByProviderSubscriptionId: async () => existing,
+      retrieveAuthoritativeSubscription: async () => authoritativeSnapshot(),
+      updateSubscriptionById: async () => {},
+      updateCustomerMembershipStatus: async () => {},
+      findNullFundedPeriodTransactions: async () => [],
+      recordManualReviewObligation: async () => { anyCalls++; },
+      backfillFundedPeriod: async () => { anyCalls++; },
+      recordProcessedEvent: async () => {},
+    };
+    const event = makeEvent({
+      type: "customer.subscription.updated",
+      data: { object: { id: "sub_stripe_1" } },
+    });
+    await processStripeWebhookEvent(event, deps);
+    assert.equal(anyCalls, 0);
+  });
+});
+
+// ── recordSucceededRefundAndDecideFull — atomic, serialized refund
+// processing (correctness review, 2026-11-13) ───────────────────────────────
+//
+// Mirrors entitlement-reservation.test.ts's own RSV.4/RSV.5/RSV.6 pattern
+// for the identical class of problem (Serializable isolation + retry on
+// Prisma's P2034 conflict code) — this is the established, already-proven
+// idiom in this codebase for a read-then-decide race, not a new one. These
+// tests prove the retry/propagation WIRING; they cannot (and nothing in
+// this environment can) empirically prove two real overlapping requests
+// against a live Postgres instance behave this way — that would require a
+// live instance under real concurrent load, the same scoping limit
+// RSV.4-6's own header already states.
+
+function p2034() {
+  return Object.assign(new Error("Serialization failure"), { code: "P2034" });
+}
+
+describe("recordSucceededRefundAndDecideFull", () => {
+  const baseInput = {
+    customerId: CUSTOMER_ID,
+    subscriptionId: "sub-row-1",
+    refundsTransactionId: "txn-original-1",
+    refundId: "re_concurrent",
+    amount: 2000,
+    currency: "AED",
+    occurredAt: new Date(),
+    originalAmount: 3900,
+  };
+
+  it("ATR.1 — the create-then-aggregate sequence runs inside ONE transaction call", async () => {
+    let txCalls = 0;
+    const mockTx: RunRefundTransactionFn = async (fn) => {
+      txCalls++;
+      return fn({
+        billingTransaction: {
+          create: async () => ({}),
+          aggregate: async () => ({ _sum: { amount: 2000 } }),
+        },
+      } as any);
+    };
+    const result = await recordSucceededRefundAndDecideFull(baseInput, mockTx);
+    assert.equal(txCalls, 1);
+    assert.deepEqual(result, { isFullRefund: false, cumulativeRefunded: 2000 });
+  });
+
+  it("ATR.2 — retries once on a P2034 serialization conflict, then succeeds — AND the retry correctly sees the sibling refund's now-committed row, flipping the decision from partial to full", async () => {
+    let txCalls = 0;
+    const mockTx: RunRefundTransactionFn = async (fn) => {
+      txCalls++;
+      if (txCalls === 1) throw p2034(); // simulates Postgres detecting write-skew against a concurrent sibling refund
+      return fn({
+        billingTransaction: {
+          create: async () => ({}),
+          // On retry, the sibling's refund (committed while this attempt was
+          // aborted) is now visible — the sum reflects BOTH refunds, not
+          // just this one. This is the actual mechanism that prevents the
+          // under-counting bug: a conflicting concurrent write never
+          // silently wins with a stale, too-low sum.
+          aggregate: async () => ({ _sum: { amount: 3900 } }),
+        },
+      } as any);
+    };
+    const result = await recordSucceededRefundAndDecideFull(baseInput, mockTx);
+    assert.equal(txCalls, 2, "must retry exactly once on P2034");
+    assert.deepEqual(result, { isFullRefund: true, cumulativeRefunded: 3900 });
+  });
+
+  it("ATR.3 — propagates the error once the retry budget is exhausted", async () => {
+    const mockTx: RunRefundTransactionFn = async (_fn) => { throw p2034(); };
+    await assert.rejects(
+      () => recordSucceededRefundAndDecideFull(baseInput, mockTx),
+      (e: any) => e.code === "P2034",
+    );
+  });
+
+  it("ATR.4 — a non-serialization error is never retried, it propagates immediately", async () => {
+    let txCalls = 0;
+    const mockTx: RunRefundTransactionFn = async (_fn) => {
+      txCalls++;
+      throw new Error("boom — unrelated DB error");
+    };
+    await assert.rejects(() => recordSucceededRefundAndDecideFull(baseInput, mockTx), /boom/);
+    assert.equal(txCalls, 1);
+  });
+
+  it("ATR.5 — a redelivered/duplicate refund id (P2002 inside the transaction) updates in place rather than duplicating, still inside the same atomic section as the sum", async () => {
+    let updateManyInput: any = null;
+    const mockTx: RunRefundTransactionFn = async (fn) =>
+      fn({
+        billingTransaction: {
+          create: async () => {
+            const err: any = new Error("Unique constraint failed");
+            err.code = "P2002";
+            err.meta = { target: ["providerTransactionId"] };
+            throw err;
+          },
+          updateMany: async (args: any) => { updateManyInput = args; return { count: 1 }; },
+          aggregate: async () => ({ _sum: { amount: 2000 } }),
+        },
+      } as any);
+    const result = await recordSucceededRefundAndDecideFull(baseInput, mockTx);
+    assert.equal(updateManyInput.where.providerTransactionId, "re_concurrent");
+    assert.deepEqual(result, { isFullRefund: false, cumulativeRefunded: 2000 });
+  });
+
+  it("ATR.6 — a genuinely different error during the create (not P2002) propagates, never silently absorbed as if it were a redelivery", async () => {
+    const mockTx: RunRefundTransactionFn = async (fn) =>
+      fn({
+        billingTransaction: {
+          create: async () => { throw new Error("connection reset"); },
+          aggregate: async () => ({ _sum: { amount: 0 } }),
+        },
+      } as any);
+    await assert.rejects(() => recordSucceededRefundAndDecideFull(baseInput, mockTx), /connection reset/);
   });
 });
