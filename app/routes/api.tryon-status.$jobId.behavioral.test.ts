@@ -54,6 +54,7 @@ vi.mock("~/lib/ai/fashn-tryon-service.server", async () => {
     // The race-condition guards — fully mocked per test.
     isSourcePhotoStillValid: vi.fn(),
     completeTryOnJobIfSourceStillValid: vi.fn(),
+    customerHasOutstandingVtoSweepObligation: vi.fn().mockResolvedValue(false),
     uploadTryOnResult: vi.fn(),
     buildTryOnResultUrl: vi.fn(),
   };
@@ -72,6 +73,7 @@ import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import {
   isSourcePhotoStillValid,
   completeTryOnJobIfSourceStillValid,
+  customerHasOutstandingVtoSweepObligation,
   uploadTryOnResult,
   buildTryOnResultUrl,
   deriveTryOnResultPublicId,
@@ -122,6 +124,7 @@ beforeEach(() => {
   (getCurrentNaiaCustomer as any).mockResolvedValue({ id: CUSTOMER_ID });
   (buildTryOnResultUrl as any).mockReturnValue("https://example.invalid/signed-result");
   (deleteCloudinaryAsset as any).mockResolvedValue({ ok: true });
+  (customerHasOutstandingVtoSweepObligation as any).mockResolvedValue(false);
   global.fetch = vi.fn();
 });
 
@@ -146,6 +149,30 @@ describe("cross-customer access — blocked before any FASHN call", () => {
     expect(res.data.status).toBe("FORBIDDEN");
     expect(global.fetch).not.toHaveBeenCalled();
     expect(isSourcePhotoStillValid).not.toHaveBeenCalled();
+  });
+});
+
+describe("already-COMPLETED jobs fail closed while a cleanup obligation is outstanding", () => {
+  it("returns FAILED, never a signed URL, when a VTO-sweep obligation is outstanding for this customer", async () => {
+    (prisma.virtualTryOnJob.findUnique as any).mockResolvedValue(mockJob({ status: "COMPLETED" }));
+    (customerHasOutstandingVtoSweepObligation as any).mockResolvedValue(true);
+
+    const res: any = await loader(args());
+
+    expect(customerHasOutstandingVtoSweepObligation).toHaveBeenCalledWith(CUSTOMER_ID);
+    expect(buildTryOnResultUrl).not.toHaveBeenCalled();
+    expect(res.data.status).toBe("FAILED");
+    expect(res.data.resultUrl).toBeUndefined();
+  });
+
+  it("serves the signed URL normally once no obligation is outstanding — unaffected baseline", async () => {
+    (prisma.virtualTryOnJob.findUnique as any).mockResolvedValue(mockJob({ status: "COMPLETED" }));
+    (customerHasOutstandingVtoSweepObligation as any).mockResolvedValue(false);
+
+    const res: any = await loader(args());
+
+    expect(res.data.status).toBe("COMPLETED");
+    expect(res.data.resultUrl).toBe("https://example.invalid/signed-result");
   });
 });
 

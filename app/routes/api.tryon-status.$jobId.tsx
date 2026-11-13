@@ -24,6 +24,7 @@ import {
   checkResultOwnership,
   isSourcePhotoStillValid,
   completeTryOnJobIfSourceStillValid,
+  customerHasOutstandingVtoSweepObligation,
   deriveTryOnResultPublicId,
 } from "~/lib/ai/fashn-tryon-service.server";
 import { advanceTryOnJob } from "~/lib/ai/my-naia-model.server";
@@ -97,6 +98,12 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
 
   // 4. Terminal: already completed — build fresh signed URL (10-min expiry)
   if (job.status === "COMPLETED") {
+    // Fail closed while a body-photo-deletion cleanup obligation is
+    // outstanding for this customer — the underlying Cloudinary asset may
+    // not have been swept yet. Never serve a signed URL in that window.
+    if (await customerHasOutstandingVtoSweepObligation(job.customerId)) {
+      return data({ status: "FAILED" }, { headers: { "Cache-Control": "no-store" } });
+    }
     const resultUrl = buildTryOnResultUrl(customer.id, job.id);
     if (!resultUrl) return data({ status: "FAILED" });
     return data(

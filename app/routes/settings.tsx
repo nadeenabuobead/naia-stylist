@@ -149,11 +149,16 @@ export async function action(args: ActionFunctionArgs) {
       // at the service level rather than here.
       const r = await deleteNaiaModelBodyPhotoAndVtoResults(customer.id);
       if (!r.ok) return data({ ok: false as const, error: "Could not remove your body photo. Please try again." }, { status: 500 });
-      if (r.vtoResultsPendingCleanup.length > 0) {
-        // The photo itself is gone and no longer accessible; some saved
-        // try-on previews could not be removed from Cloudinary on this
-        // attempt and are durably queued for retry (PendingCloudinaryDeletion)
-        // rather than silently dropped. Say so — do not report this as
+      if (r.vtoResultsPendingCleanup.length > 0 || r.vtoResultsSweepFailed) {
+        // The photo itself is gone and no longer accessible (previews fail
+        // closed while this is outstanding — see
+        // customerHasOutstandingVtoSweepObligation). Some saved try-on
+        // previews could not be confirmed removed on this attempt — either
+        // specific assets failed (vtoResultsPendingCleanup, tracked
+        // per-asset) or the sweep itself couldn't even run
+        // (vtoResultsSweepFailed) — either way a durable cleanup obligation
+        // was recorded atomically with the photo deletion and will be
+        // retried automatically. Say so — never report this as
         // unconditionally complete.
         return data({
           ok: true as const,
@@ -168,7 +173,7 @@ export async function action(args: ActionFunctionArgs) {
       // and consent regardless of Cloudinary outcome, and always cascades
       // to any COMPLETED VTO results (body is always cleared by this path).
       const r = await withdrawSaveModelConsentAndVtoResults(customer.id);
-      if (r.vtoResultsPendingCleanup.length > 0) {
+      if (r.vtoResultsPendingCleanup.length > 0 || r.vtoResultsSweepFailed) {
         return data({
           ok: true as const,
           intent: typed,

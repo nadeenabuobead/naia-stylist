@@ -28,6 +28,12 @@ vi.mock("~/db.server", () => ({
     buyOrSkipAnalysis: {
       findMany: vi.fn(),
     },
+    // Backs customerHasOutstandingVtoSweepObligation's fail-closed check
+    // (2026-11 privacy fix) — null by default, so these pre-existing tests
+    // keep their original "no obligation outstanding" behavior unchanged.
+    pendingCloudinaryDeletion: {
+      findUnique: vi.fn().mockResolvedValue(null),
+    },
   },
 }));
 
@@ -140,6 +146,29 @@ describe("listCustomerVtoPreviews() — Try-On Previews gallery read", () => {
     (prisma.virtualTryOnJob.findMany as any).mockResolvedValue([]);
     const result = await listCustomerVtoPreviews("cust-A");
     expect(result).toEqual([]);
+  });
+
+  it("fails closed: returns an empty list, never querying jobs at all, while a VTO-sweep cleanup obligation is outstanding for this customer", async () => {
+    (prisma.pendingCloudinaryDeletion.findUnique as any).mockResolvedValue({ resolvedAt: null });
+    (prisma.virtualTryOnJob.findMany as any).mockResolvedValue([
+      { id: "job-1", productHandle: "collar-shirt", createdAt: new Date() },
+    ]);
+
+    const result = await listCustomerVtoPreviews("cust-A");
+
+    expect(result).toEqual([]);
+    expect(prisma.virtualTryOnJob.findMany).not.toHaveBeenCalled();
+  });
+
+  it("does NOT fail closed once the obligation is resolved", async () => {
+    (prisma.pendingCloudinaryDeletion.findUnique as any).mockResolvedValue({ resolvedAt: new Date() });
+    (prisma.virtualTryOnJob.findMany as any).mockResolvedValue([
+      { id: "job-1", productHandle: "collar-shirt", createdAt: new Date() },
+    ]);
+
+    const result = await listCustomerVtoPreviews("cust-A");
+
+    expect(result.length).toBe(1);
   });
 
   it("resolves a closet-sourced job's label to the Closet item's real name — never the raw 'closet:id' handle", async () => {

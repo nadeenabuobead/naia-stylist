@@ -123,13 +123,17 @@ export async function action({ request }: ActionFunctionArgs) {
       if (!result.ok && !result.staleReference) {
         return data({ ok: false, error: "Could not delete photo. Please try again." }, { status: 500 });
       }
-      if (result.vtoResultsPendingCleanup.length > 0) {
+      if (result.vtoResultsPendingCleanup.length > 0 || result.vtoResultsSweepFailed) {
         // The photo is gone; some saved try-on previews could not be
-        // removed from Cloudinary on this attempt and are durably queued
-        // for retry (PendingCloudinaryDeletion), not silently dropped.
+        // confirmed removed on this attempt — either specific assets
+        // failed (tracked per-asset) or the sweep itself couldn't even
+        // run. Either way a durable cleanup obligation was recorded
+        // atomically with the photo deletion and will be retried
+        // automatically — never silently dropped.
         console.warn("naia:vto-cleanup-pending", {
           customerId: customer.id,
           pending: result.vtoResultsPendingCleanup.length,
+          sweepFailed: result.vtoResultsSweepFailed,
         });
         return data({ ok: true, vtoResultsPendingCleanup: true });
       }
@@ -165,10 +169,11 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!result.ok && result.failedAssets.length > 0) {
       console.warn("naia:partial-withdrawal", { customerId: customer.id, failedAssets: result.failedAssets });
     }
-    if (result.vtoResultsPendingCleanup.length > 0) {
+    if (result.vtoResultsPendingCleanup.length > 0 || result.vtoResultsSweepFailed) {
       console.warn("naia:vto-cleanup-pending", {
         customerId: customer.id,
         pending: result.vtoResultsPendingCleanup.length,
+        sweepFailed: result.vtoResultsSweepFailed,
       });
       return data({ ok: true, vtoResultsPendingCleanup: true });
     }

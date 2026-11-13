@@ -46,7 +46,9 @@ import {
   withdrawSaveModelConsent,
   type CreateJobParams,
   type UpdateJobFn,
+  type UpsertModelFn,
   type FailedModelAsset,
+  type NaiaModelRecord,
 } from "./my-naia-model.server.js";
 import {
   POLICY_VERSION,
@@ -909,16 +911,77 @@ export async function deleteCustomerVtoResults(
 // passport.selfie.tsx, keep calling deleteNaiaModelPhoto directly and are
 // unaffected, since VTO results are never derived from the face photo).
 //
-// Cascade condition is cloudinaryOk, not ok: deleteNaiaModelPhoto can return
-// ok:false with cloudinaryOk:true on a staleReference (the Cloudinary asset
-// WAS deleted; only the DB write that clears bodyPublicId failed) — the
-// source photo is genuinely gone either way, which is what matters here.
+// Durability design (2026-11): an earlier version of this cascade recorded
+// the cleanup obligation only by catching a failed deleteCustomerVtoResults
+// call and writing a retry record — but if the database is unavailable,
+// that write can fail too, for exactly the same reason the original sweep
+// did. Instead, the obligation is now recorded ATOMICALLY, in the SAME
+// transaction as the bodyPublicId write that actually deletes the photo —
+// via a custom UpsertModelFn passed into the existing, unmodified
+// deleteNaiaModelPhoto/withdrawSaveModelConsent (both already accept one as
+// a DI parameter for exactly this kind of override). Whenever the photo
+// deletion durably commits, the obligation durably exists in the same
+// breath — there is no gap where one succeeded and the other didn't. The
+// synchronous deleteCustomerVtoResults call further below is a best-effort
+// immediate attempt, not what the durability guarantee depends on.
 //
 // Never reports "fully complete" when cleanup is still outstanding:
 // vtoResultsPendingCleanup always reflects whatever deleteCustomerVtoResults
-// could not delete (durably recorded there via PendingCloudinaryDeletion,
-// never silently dropped) — callers must surface this, not collapse it into
-// a bare ok:true.
+// could not delete per-asset (durably recorded via PendingCloudinaryDeletion),
+// and vtoResultsSweepFailed is set whenever the sweep couldn't even enumerate
+// jobs this attempt — callers must surface both, never collapse either into
+// a bare ok:true. See customerHasOutstandingVtoSweepObligation below for how
+// previews and signed URLs fail closed while the obligation is outstanding.
+
+function vtoSweepObligationPublicId(customerId: string): string {
+  // Colon-separated, never a real Cloudinary publicId (those are always
+  // "folder/segments" with "/") — cannot collide with an asset row.
+  return `vto-sweep-obligation:${customerId}`;
+}
+
+// Atomic: the NaiaModel write that actually deletes the photo reference AND
+// the durable cleanup obligation commit together or not at all. Passed as
+// deleteNaiaModelPhoto/withdrawSaveModelConsent's existing _upsertModelFn DI
+// parameter — neither of those functions is otherwise modified.
+const _upsertModelAndRecordVtoSweepObligation: UpsertModelFn = (customerId, modelData) =>
+  prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    const updated = await tx.naiaModel.upsert({
+      where: { customerId },
+      create: { customerId, ...modelData },
+      update: modelData,
+    });
+    const publicId = vtoSweepObligationPublicId(customerId);
+    await tx.pendingCloudinaryDeletion.upsert({
+      where: { publicId },
+      create: {
+        customerId,
+        publicId,
+        resourceType: "vto-sweep",
+        deliveryType: "n/a",
+        context: "vto-sweep-obligation",
+        attemptCount: 0,
+      },
+      // Reopen if a PRIOR obligation for this customer had already been
+      // resolved — this is a fresh deletion event, not a continuation.
+      update: { resolvedAt: null },
+    });
+    return updated as unknown as NaiaModelRecord;
+  });
+
+async function resolveVtoSweepObligation(customerId: string): Promise<void> {
+  await prisma.pendingCloudinaryDeletion.updateMany({
+    where: { publicId: vtoSweepObligationPublicId(customerId), resolvedAt: null },
+    data: { resolvedAt: new Date() },
+  });
+}
+
+export async function customerHasOutstandingVtoSweepObligation(customerId: string): Promise<boolean> {
+  const row = await prisma.pendingCloudinaryDeletion.findUnique({
+    where: { publicId: vtoSweepObligationPublicId(customerId) },
+    select: { resolvedAt: true },
+  });
+  return !!row && row.resolvedAt === null;
+}
 
 export interface DeleteBodyPhotoAndVtoResultsResult {
   ok: boolean;
@@ -927,6 +990,7 @@ export interface DeleteBodyPhotoAndVtoResultsResult {
   staleReference: boolean;
   error?: string;
   vtoResultsCleanupAttempted: boolean;
+  vtoResultsSweepFailed: boolean;
   vtoResultsDeletedCount: number;
   vtoResultsPendingCleanup: string[];
 }
@@ -934,29 +998,68 @@ export interface DeleteBodyPhotoAndVtoResultsResult {
 export async function deleteNaiaModelBodyPhotoAndVtoResults(
   customerId: string,
 ): Promise<DeleteBodyPhotoAndVtoResultsResult> {
-  const photoResult = await deleteNaiaModelPhoto(customerId, "body");
-  if (!photoResult.cloudinaryOk) {
-    // Source photo was never actually removed — nothing to cascade yet.
+  const photoResult = await deleteNaiaModelPhoto(
+    customerId,
+    "body",
+    undefined,
+    _upsertModelAndRecordVtoSweepObligation,
+  );
+
+  if (!photoResult.ok) {
+    // Either the Cloudinary delete never happened (cloudinaryOk: false —
+    // nothing to cascade, no obligation needed, nothing was deleted), or
+    // the atomic (bodyPublicId-clear + obligation) transaction itself
+    // failed (staleReference: true). In the staleReference case the
+    // obligation was NOT recorded — attempting the sweep now would rely on
+    // the same unavailable database the atomic write just failed against,
+    // exactly the fragile pattern this design avoids. Report it honestly
+    // and let the existing staleReference retry path (the customer or an
+    // operator retrying the deletion) get a fresh atomic attempt.
     return {
       ...photoResult,
       vtoResultsCleanupAttempted: false,
+      vtoResultsSweepFailed: false,
       vtoResultsDeletedCount: 0,
       vtoResultsPendingCleanup: [],
     };
   }
-  const vtoResult = await deleteCustomerVtoResults(customerId);
-  return {
-    ...photoResult,
-    vtoResultsCleanupAttempted: true,
-    vtoResultsDeletedCount: vtoResult.deletedCount,
-    vtoResultsPendingCleanup: vtoResult.failedAssets,
-  };
+
+  // The obligation is now durably recorded, atomically with the photo
+  // deletion that just committed — everything below is a best-effort
+  // immediate attempt, not load-bearing for durability.
+  try {
+    const vtoResult = await deleteCustomerVtoResults(customerId);
+    if (vtoResult.failedAssets.length === 0) {
+      await resolveVtoSweepObligation(customerId);
+    }
+    return {
+      ...photoResult,
+      vtoResultsCleanupAttempted: true,
+      vtoResultsSweepFailed: false,
+      vtoResultsDeletedCount: vtoResult.deletedCount,
+      vtoResultsPendingCleanup: vtoResult.failedAssets,
+    };
+  } catch {
+    // Could not even enumerate this customer's jobs this attempt (e.g. a
+    // transient DB error) — the durable obligation recorded above already
+    // covers this; the maintenance retry mechanism will find and resolve
+    // it later. Not rethrown: the photo deletion itself genuinely
+    // succeeded, and the obligation it depended on already exists.
+    return {
+      ...photoResult,
+      vtoResultsCleanupAttempted: true,
+      vtoResultsSweepFailed: true,
+      vtoResultsDeletedCount: 0,
+      vtoResultsPendingCleanup: [],
+    };
+  }
 }
 
 export interface WithdrawConsentAndVtoResultsResult {
   ok: boolean;
   deletedAssets: string[];
   failedAssets: FailedModelAsset[];
+  vtoResultsSweepFailed: boolean;
   vtoResultsDeletedCount: number;
   vtoResultsPendingCleanup: string[];
 }
@@ -964,17 +1067,38 @@ export interface WithdrawConsentAndVtoResultsResult {
 export async function withdrawSaveModelConsentAndVtoResults(
   customerId: string,
 ): Promise<WithdrawConsentAndVtoResultsResult> {
-  const consentResult = await withdrawSaveModelConsent(customerId);
   // withdrawSaveModelConsent always clears bodyPublicId regardless of
   // whether the Cloudinary delete itself succeeded (see its own "disables
-  // readiness regardless" comment) — the cascade therefore always runs,
-  // unconditionally, unlike the body-photo-only path above.
-  const vtoResult = await deleteCustomerVtoResults(customerId);
-  return {
-    ...consentResult,
-    vtoResultsDeletedCount: vtoResult.deletedCount,
-    vtoResultsPendingCleanup: vtoResult.failedAssets,
-  };
+  // readiness regardless" comment), via the SAME atomic obligation-recording
+  // upsert passed in here — so the obligation is durably recorded in the
+  // same transaction every time this function's own DB write commits.
+  // withdrawSaveModelConsent itself does not catch a failure of this write
+  // (pre-existing behavior, unchanged) — if it throws, nothing committed,
+  // so there is nothing to clean up and no obligation to have recorded.
+  const consentResult = await withdrawSaveModelConsent(
+    customerId,
+    _upsertModelAndRecordVtoSweepObligation,
+  );
+
+  try {
+    const vtoResult = await deleteCustomerVtoResults(customerId);
+    if (vtoResult.failedAssets.length === 0) {
+      await resolveVtoSweepObligation(customerId);
+    }
+    return {
+      ...consentResult,
+      vtoResultsSweepFailed: false,
+      vtoResultsDeletedCount: vtoResult.deletedCount,
+      vtoResultsPendingCleanup: vtoResult.failedAssets,
+    };
+  } catch {
+    return {
+      ...consentResult,
+      vtoResultsSweepFailed: true,
+      vtoResultsDeletedCount: 0,
+      vtoResultsPendingCleanup: [],
+    };
+  }
 }
 
 // ── VTO result state check for loader ────────────────────────────────────────
@@ -1083,6 +1207,15 @@ async function resolveVtoPreviewLabels(
 }
 
 export async function listCustomerVtoPreviews(customerId: string): Promise<CustomerVtoPreview[]> {
+  // Fail closed while a body-photo-deletion cleanup obligation is
+  // outstanding: the underlying Cloudinary assets may not have been swept
+  // yet, so show nothing rather than risk exposing one. Ordinary photo
+  // replacement and face-only deletion never create this obligation (see
+  // deleteNaiaModelBodyPhotoAndVtoResults/withdrawSaveModelConsentAndVtoResults)
+  // — this only triggers for the deletion paths that are supposed to remove
+  // these results in the first place.
+  if (await customerHasOutstandingVtoSweepObligation(customerId)) return [];
+
   const jobs: Array<{ id: string; productHandle: string; createdAt: Date }> = await prisma.virtualTryOnJob.findMany({
     where: { customerId, status: "COMPLETED" },
     select: { id: true, productHandle: true, createdAt: true },

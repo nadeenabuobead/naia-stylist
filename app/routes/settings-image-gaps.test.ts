@@ -329,7 +329,7 @@ describe("settings.tsx — VTO and BOS wiring", () => {
 
   it("action calls deleteCustomerVtoResults with server-derived customerId only", () => {
     const actionIdx = settingsSrc.indexOf("export async function action(");
-    const actionBody = settingsSrc.slice(actionIdx, actionIdx + 3000);
+    const actionBody = settingsSrc.slice(actionIdx, actionIdx + 4000);
     assert.ok(
       actionBody.includes("deleteCustomerVtoResults(customer.id"),
       "action must call deleteCustomerVtoResults with customer.id (from auth, not formData)",
@@ -343,7 +343,7 @@ describe("settings.tsx — VTO and BOS wiring", () => {
 
   it("action calls deleteCustomerBosImages with server-derived customerId only", () => {
     const actionIdx = settingsSrc.indexOf("export async function action(");
-    const actionBody = settingsSrc.slice(actionIdx, actionIdx + 3000);
+    const actionBody = settingsSrc.slice(actionIdx, actionIdx + 4000);
     assert.ok(
       actionBody.includes("deleteCustomerBosImages(customer.id"),
       "action must call deleteCustomerBosImages with customer.id (from auth, not formData)",

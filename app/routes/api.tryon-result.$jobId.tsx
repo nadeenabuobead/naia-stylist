@@ -10,7 +10,11 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { authenticate } from "~/shopify.server";
 import prisma from "~/db.server";
-import { buildTryOnResultUrl, checkResultOwnership } from "~/lib/ai/fashn-tryon-service.server";
+import {
+  buildTryOnResultUrl,
+  checkResultOwnership,
+  customerHasOutstandingVtoSweepObligation,
+} from "~/lib/ai/fashn-tryon-service.server";
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
   // 1. Validate Shopify app-proxy HMAC — throws on invalid/missing signature
@@ -55,6 +59,13 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
 
   if (!checkResultOwnership(job.customerId, customer.id)) {
     return new Response("Forbidden", { status: 403 });
+  }
+
+  // Fail closed while a body-photo-deletion cleanup obligation is
+  // outstanding for this customer — see
+  // customerHasOutstandingVtoSweepObligation in fashn-tryon-service.server.ts.
+  if (await customerHasOutstandingVtoSweepObligation(job.customerId)) {
+    return new Response("Not Found", { status: 404 });
   }
 
   // 4. Generate short-lived result URL (contains signed credential — must not be logged or cached)
