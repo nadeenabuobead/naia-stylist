@@ -265,3 +265,61 @@ describe("I — footer dead links (2026-11-13 cleanup) render as honest pending 
     assert.strictEqual(occurrences, 2, "exactly the existing desktop + mobile pending branches, nothing new added");
   });
 });
+
+describe("J — follow-up (same day): Instagram/TikTok/Press drop the unverifiable \"coming soon\" claim", () => {
+  // Root issue: reusing the exact "— coming soon" copy for social/press
+  // links asserted something this codebase has no way to verify — that a
+  // live Instagram/TikTok/press presence is actually imminent. This adds
+  // one small, generic mechanism (an optional per-link `suffix`) so the
+  // non-clickable treatment can be kept — same opacity, same cursor, same
+  // "this isn't a working link" signal — without the implied promise.
+  // Privacy Policy/Terms of Service/Accessibility/Cookie Preferences/
+  // Wishlist are all genuinely planned work, confirmed by real code/
+  // compliance need elsewhere, so they keep the default "coming soon".
+
+  function footerLinkEntry(label: string): string {
+    const re = new RegExp(`\\{\\s*label:\\s*"${label}"[^}]*\\}`);
+    const match = SRC.match(re);
+    assert.ok(match, `FOOTER_COLS entry found for "${label}"`);
+    return match![0];
+  }
+
+  for (const label of ["Instagram", "TikTok", "Press"]) {
+    it(`"${label}" opts out of the "coming soon" claim via suffix: ""`, () => {
+      assert.match(footerLinkEntry(label), /suffix:\s*""/, `"${label}" should carry suffix: ""`);
+    });
+  }
+
+  for (const label of ["Privacy Policy", "Terms of Service", "Accessibility", "Cookie Preferences", "Wishlist"]) {
+    it(`"${label}" has no suffix override — still defaults to "coming soon"`, () => {
+      assert.doesNotMatch(footerLinkEntry(label), /suffix:/, `"${label}" should not carry an explicit suffix`);
+    });
+  }
+
+  it("footerPendingSuffix() defaults to the existing \"— coming soon\" copy when no suffix is given", () => {
+    const fnIdx = SRC.indexOf("function footerPendingSuffix(");
+    assert.ok(fnIdx !== -1, "footerPendingSuffix defined");
+    const fnBody = SRC.slice(fnIdx, SRC.indexOf("\n}", fnIdx));
+    assert.match(fnBody, /:\s*"—\s*coming soon"/, "falls back to the original copy, unchanged, for every pre-existing pending item");
+  });
+
+  it("footerPendingSuffix() returns null (no <em>, no claim) for an empty suffix", () => {
+    const fnIdx = SRC.indexOf("function footerPendingSuffix(");
+    const fnBody = SRC.slice(fnIdx, SRC.indexOf("\n}", fnIdx));
+    assert.match(fnBody, /return\s+suffix\s*\?\s*suffix\s*:\s*null/, "an empty string suffix renders nothing, not a fallback promise");
+  });
+
+  it("no hardcoded \"— coming soon\" literal remains in either render block — both now compute it via footerPendingSuffix()", () => {
+    assert.ok(!/\{l\.label\}\s*<em[^>]*>—\s*coming soon<\/em>/.test(SRC), "no leftover hardcoded JSX copy");
+  });
+
+  it("both the desktop grid and the mobile accordion call footerPendingSuffix()", () => {
+    const desktopIdx = SRC.indexOf("mn-footer-grid");
+    const mobileIdx = SRC.indexOf("mn-footer-accordion-list");
+    assert.ok(desktopIdx !== -1 && mobileIdx !== -1, "both footer sections present");
+    const desktopBlock = SRC.slice(desktopIdx, mobileIdx);
+    const mobileBlock = SRC.slice(mobileIdx, mobileIdx + 1200);
+    assert.ok(desktopBlock.includes("footerPendingSuffix("), "desktop grid uses the shared helper");
+    assert.ok(mobileBlock.includes("footerPendingSuffix("), "mobile accordion uses the shared helper");
+  });
+});

@@ -95,17 +95,36 @@ const FOOTER_COLS = [
   {
     title: "follow",
     links: [
-      // 2026-11-13: no live social/press links exist yet either. Same
-      // honest non-clickable treatment for consistency — flagged for
-      // explicit sign-off since, unlike the items above, whether these
-      // are genuinely "coming soon" (vs. not planned at all) is a business
-      // fact this change doesn't have visibility into.
-      { label: "Instagram", href: "#", pending: true },
-      { label: "TikTok", href: "#", pending: true },
-      { label: "Press", href: "#", pending: true },
+      // 2026-11-13, revised same day: unlike Privacy/Terms/Accessibility/
+      // Cookie Preferences/Wishlist above, there's no basis here to claim
+      // these are "coming soon" — that's a business fact outside this
+      // change's visibility, and asserting it would be its own kind of
+      // invented promise. suffix: "" keeps the same non-clickable
+      // treatment (reduced opacity, no cursor) without the claim — just
+      // the label, honestly inert, until there's a real link or a real
+      // decision to remove the item.
+      { label: "Instagram", href: "#", pending: true, suffix: "" },
+      { label: "TikTok", href: "#", pending: true, suffix: "" },
+      { label: "Press", href: "#", pending: true, suffix: "" },
     ],
   },
 ];
+
+// Pending footer links default to "— coming soon" (Privacy Policy, Terms
+// of Service, Accessibility, Cookie Preferences, Wishlist — all real,
+// planned work). An explicit suffix: "" opts out of that claim for items
+// where "coming soon" isn't a fact this codebase can vouch for (see
+// "follow" above) — the item still renders non-clickable, just without
+// asserting a timeline.
+//
+// Inlined at each call site rather than factored into a typed helper:
+// FOOTER_COLS's per-column literal shapes don't unify into one type TS
+// can narrow cleanly across a function-call boundary, and typing that
+// properly isn't worth it for two call sites doing one property read.
+function footerPendingSuffix(link: Record<string, unknown>): string | null {
+  const suffix = "suffix" in link ? (link.suffix as string) : "— coming soon";
+  return suffix ? suffix : null;
+}
 
 interface Props {
   children: React.ReactNode;
@@ -317,7 +336,7 @@ export default function MyNaiaLayout({ children, compact = false }: Props) {
                   <li key={l.label}>
                     {"pending" in l && l.pending ? (
                       <span className="mn-footer-link" style={{ opacity: 0.55, cursor: "default" }}>
-                        {l.label} <em style={{ fontStyle: "normal", fontSize: "0.85em" }}>— coming soon</em>
+                        {l.label}{footerPendingSuffix(l) ? <> <em style={{ fontStyle: "normal", fontSize: "0.85em" }}>{footerPendingSuffix(l)}</em></> : null}
                       </span>
                     ) : (
                       <a href={l.href} className="mn-footer-link">{l.label}</a>
@@ -352,7 +371,7 @@ export default function MyNaiaLayout({ children, compact = false }: Props) {
                     <li key={l.label}>
                       {"pending" in l && l.pending ? (
                         <span className="mn-footer-link" style={{ opacity: 0.55, cursor: "default" }}>
-                          {l.label} <em style={{ fontStyle: "normal", fontSize: "0.85em" }}>— coming soon</em>
+                          {l.label}{footerPendingSuffix(l) ? <> <em style={{ fontStyle: "normal", fontSize: "0.85em" }}>{footerPendingSuffix(l)}</em></> : null}
                         </span>
                       ) : (
                         <a href={l.href} className="mn-footer-link">{l.label}</a>
