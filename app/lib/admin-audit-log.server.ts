@@ -11,9 +11,10 @@ export async function recordAdminAction(
   performedBy: string,
   action: string,
   detail?: Record<string, unknown>,
-): Promise<void> {
-  await prisma.adminAuditLog.create({
+): Promise<{ id: string }> {
+  return prisma.adminAuditLog.create({
     data: { performedBy, action, detail: detail ?? undefined },
+    select: { id: true },
   });
 }
 

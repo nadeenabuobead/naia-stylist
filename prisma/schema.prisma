@@ -134,6 +134,7 @@ model Customer {
   // comment for why.
   subscriptions       Subscription[]
   billingTransactions BillingTransaction[]
+  disputes            Dispute[]
 
   // Clerk migration (2026-11-04) — pending, unconfirmed claims against this
   // row from a NEW Clerk identity whose sign-up email matched. See
@@ -484,6 +485,7 @@ model Subscription {
   updatedAt DateTime @updatedAt
 
   billingTransactions BillingTransaction[]
+  accessRevocations   AccessRevocation[]
 
   @@index([customerId])
   @@index([providerSubscriptionId])
@@ -542,6 +544,17 @@ model BillingTransaction {
   provider              String
   providerTransactionId String? @unique
 
+  // Set only on a SUBSCRIPTION_REFUND row — the id of the ORIGINAL
+  // BillingTransaction this refund refunds (never another refund's own
+  // row). A loose self-reference, not a Prisma relation: a subscription
+  // can have multiple distinct original payments (initial + each
+  // renewal), each separately, independently refundable, so "how much of
+  // THIS specific payment has been refunded so far" must be computed by
+  // summing only the rows pointing at that one payment — never by summing
+  // every refund on the subscription, which would conflate an old,
+  // already-superseded period's refund with the current period's.
+  refundsTransactionId String?
+
   // Add-on fields — null for SUBSCRIPTION_* transaction types.
   // addonQuantityGranted: e.g. 5 for a StyleMe boost, 10 for a VTO boost, 250
   // for a Closet expansion.
@@ -560,11 +573,164 @@ model BillingTransaction {
   addonAppliesToPeriodStart DateTime?
   addonAppliesToPeriodEnd   DateTime?
 
+  // Which subscription period THIS specific payment funded — captured as a
+  // point-in-time snapshot of Subscription.currentPeriodStart/End at the
+  // moment this row is created, deliberately NOT a live re-read of the
+  // Subscription row later. The Subscription's own period fields are
+  // overwritten on every renewal, so by the time a refund/dispute arrives
+  // for an OLD transaction, Subscription.currentPeriodStart/End has already
+  // moved on and no longer answers "what period did THIS payment cover" —
+  // only this frozen snapshot can. This is what lets a refund of an old,
+  // already-superseded invoice be correctly distinguished from a refund of
+  // the customer's PRESENT entitlement (see AccessRevocation below) without
+  // comparing against a moving target.
+  //
+  // Why not Stripe's own Invoice.lines[].period (the more "authoritative"
+  // source one might reach for): verified directly against Stripe's current
+  // API reference that as of API version 2025-03-31.basil (our pinned
+  // version, 2026-10-28.endive, is later than this), PaymentIntent.invoice
+  // and the top-level Invoice.subscription field were BOTH removed (see
+  // https://docs.stripe.com/changelog/basil/2025-03-31/adds-new-parent-field-to-invoicing-objects).
+  // There is no direct "fetch the Invoice for this PaymentIntent" lookup
+  // left in this API version — only an Invoice-side expansion
+  // (invoice.payments.data.payment.payment_intent), which is a list-and-
+  // filter operation, not something this design relies on without first
+  // proving its mechanics live. This snapshot is the verified-safe
+  // alternative: it never drifts, and it needs no additional Stripe API
+  // call at refund-processing time.
+  //
+  // Nullable: rows created before this field existed have no snapshot.
+  // That absence must be treated as "cannot safely determine the funded
+  // period" — fail closed (flag for manual review), never guess.
+  fundedPeriodStart DateTime?
+  fundedPeriodEnd   DateTime?
+
   occurredAt DateTime // The provider's own event time for this transaction — not our local processing time.
   createdAt  DateTime @default(now())
 
   @@index([customerId])
   @@index([subscriptionId])
+  @@index([refundsTransactionId])
+}
+
+// A real Stripe dispute (not a mere "warning" pre-dispute signal — see
+// mapStripeDisputeStatus in webhook-handler.server.ts for how Stripe's full
+// status enum, including the warning_*/appeal_*/prevented values verified
+// live against the current API reference, collapses into this simplified
+// set). One row per Stripe Dispute object, kept in sync across its whole
+// lifecycle (created -> possibly needs_response/under_review/appeal_* ->
+// won/lost/prevented), never deleted once created — it is itself part of
+// the financial/audit record Founder Decision 16 requires.
+model Dispute {
+  id         String @id @default(cuid())
+  customerId String
+  // Same financial-record-retention rationale as Subscription/
+  // BillingTransaction above — a dispute record must survive customer
+  // erasure, not cascade away with it.
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+
+  // Loose reference, not Restrict/Cascade: a dispute can arrive (and does
+  // arrive, per Stripe's own delivery-order guarantees — or lack thereof)
+  // before this app has any BillingTransaction/Subscription row to attach
+  // it to yet. subscriptionId is filled in once/if association succeeds;
+  // left null otherwise rather than blocking the Dispute row's own
+  // creation on an association this file's own code may need to retry.
+  subscriptionId String?
+
+  providerDisputeId String @unique
+
+  status DisputeStatus
+
+  amount   Int
+  currency String @default("AED")
+
+  // The provider's own event time for the MOST RECENTLY APPLIED status
+  // transition — not local processing time. Compared against each new
+  // incoming event's own timestamp (and, for a same-second tie, against
+  // disputeStatusFinalityRank) before applying, so a stale/out-of-order
+  // redelivery can never un-apply a later, more authoritative state. Same
+  // staleness-guard shape as Subscription.providerSyncedAt.
+  lastEventAt           DateTime
+  lastEventFinalityRank Int
+
+  occurredAt DateTime // dispute.created's own event time — when the dispute first existed, never overwritten after.
+  resolvedAt DateTime?
+
+  // Loose reference to the AdminAuditLog row recording an admin override
+  // applied to the AccessRevocation this dispute caused, if any — see
+  // AccessRevocation.overrideAuditLogId below for the actual override
+  // target; carried here too purely for convenient lookup from the dispute
+  // side without a join.
+  overrideAuditLogId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([customerId])
+  @@index([subscriptionId])
+}
+
+enum DisputeStatus {
+  PENDING // needs_response, under_review, appeal_needs_response, appeal_under_review
+  WON
+  LOST
+  PREVENTED // Stripe's "prevented" status (API 2025-08-27.basil+) — the
+            // dispute-prevention network caught it before it became a
+            // formal chargeback; funds never left. Kept distinct from WON
+            // so the audit trail doesn't misrepresent "never formally
+            // disputed" as "disputed and won."
+}
+
+// The correctness source of truth for "is this subscription's access
+// currently revoked, and why" — Founder Decision 16's full/partial-refund
+// and dispute-outcome rules, applied per-reason rather than as a single
+// flat flag, specifically so restoring ONE reason (e.g. a dispute later
+// resolving WON) can never silently clear an INDEPENDENT reason (e.g. a
+// separate refund) that is also still active. Access is revoked for a
+// subscription iff at least one row exists for it with resolvedAt: null —
+// queried directly (an indexed lookup), not cached as a denormalized
+// boolean on Subscription, because safely maintaining such a flag under
+// concurrent webhook deliveries (two independent revocation-causing events
+// landing near-simultaneously) would require its own proven-atomic update
+// path that this implementation does not yet have; the directly-indexed
+// query is correct by construction instead.
+model AccessRevocation {
+  id             String       @id @default(cuid())
+  subscriptionId String
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+
+  reason AccessRevocationReason
+
+  // Exactly one of these is set, matching `reason` — the BillingTransaction
+  // (a refund) that caused this row when reason = REFUND, or the Dispute
+  // that caused it when reason = DISPUTE_LOST. Loose references (not
+  // Restrict-relations) so resolving/deleting either source model's own
+  // lifecycle never needs to coordinate with this table's own constraints.
+  sourceTransactionId String?
+  sourceDisputeId     String?
+
+  createdAt DateTime @default(now())
+
+  // Null = still actively revoking access. Set when this SPECIFIC reason
+  // no longer applies (e.g. this exact dispute resolved WON, or an admin
+  // override was applied to this exact row) — never touches any OTHER
+  // row for the same subscription.
+  resolvedAt     DateTime?
+  resolvedReason String? // e.g. "dispute_won", "dispute_prevented", "admin_override"
+
+  // Set only when resolvedReason = "admin_override" — the AdminAuditLog
+  // row recording who authorized the override, their stated reason, and
+  // when (Founder Decision 16's override-record requirement: authorization
+  // + reason + references + timestamp + audit record). Loose reference,
+  // same rationale as elsewhere in this file.
+  overrideAuditLogId String?
+
+  @@index([subscriptionId, resolvedAt])
+}
+
+enum AccessRevocationReason {
+  REFUND
+  DISPUTE_LOST
 }
 
 // Idempotency ledger for provider webhook deliveries. Deliberately NOT a

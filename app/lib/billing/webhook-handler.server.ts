@@ -88,6 +88,7 @@ import type { SubscriptionStatus, BillingPlanType, MembershipStatus } from "@pri
 import prisma from "~/db.server";
 import { retrieveSubscription as stripeRetrieveSubscription, type StripeSubscriptionSnapshot } from "./stripe-client.server";
 import { releaseCheckoutReservation as defaultReleaseCheckoutReservation } from "./checkout-reservation.server";
+import { captureFailure } from "../error-tracking.server";
 
 export function isUniqueConstraintViolation(err: unknown, field?: string): boolean {
   if (!err || typeof err !== "object" || (err as any).code !== "P2002") return false;
@@ -158,6 +159,11 @@ export interface WebhookHandlerDeps {
     currency: string;
     providerTransactionId: string | null;
     occurredAt: Date;
+    // Only ever set for a SUCCEEDED transaction — see schema comment on
+    // BillingTransaction.fundedPeriodStart/End. A FAILED charge never
+    // funded any period.
+    fundedPeriodStart?: Date | null;
+    fundedPeriodEnd?: Date | null;
   }) => Promise<void>;
   retrieveAuthoritativeSubscription?: (providerSubscriptionId: string) => Promise<StripeSubscriptionSnapshot | null>;
   updateCustomerMembershipStatus?: (customerId: string, status: MembershipStatus) => Promise<void>;
@@ -167,6 +173,67 @@ export interface WebhookHandlerDeps {
   // file's own header for the full lifecycle this is one of three cleanup
   // paths for.
   releaseCheckoutReservation?: (customerId: string) => Promise<void>;
+
+  // ── Refund / Dispute (Founder Decision 16) ──────────────────────────────
+  // Looked up by the ORIGINAL payment's providerTransactionId (a PaymentIntent
+  // id) — this is how a refund/dispute event (which only carries that id,
+  // never our own internal ids) finds the transaction, subscription, and
+  // funded period it actually applies to. Never the refund's own id.
+  findBillingTransactionByProviderTransactionId?: (providerTransactionId: string) => Promise<{
+    id: string;
+    customerId: string;
+    subscriptionId: string;
+    amount: number;
+    fundedPeriodStart: Date | null;
+    fundedPeriodEnd: Date | null;
+  } | null>;
+  upsertRefundTransaction?: (input: {
+    customerId: string;
+    subscriptionId: string;
+    refundsTransactionId: string;
+    refundId: string;
+    status: "SUCCEEDED" | "FAILED";
+    amount: number;
+    currency: string;
+    occurredAt: Date;
+  }) => Promise<void>;
+  // Sum of every SUCCEEDED (REFUNDED-status) refund ledger row pointing at
+  // this ONE original transaction — scoped by refundsTransactionId, never
+  // by subscriptionId alone, so a different original payment's own
+  // refund(s) on the same subscription are never conflated with this one's.
+  sumRefundedAmountForTransaction?: (originalTransactionId: string) => Promise<number>;
+  findSubscriptionById?: (id: string) => Promise<SubscriptionRecord | null>;
+  findDisputeByProviderDisputeId?: (providerDisputeId: string) => Promise<{
+    id: string;
+    customerId: string;
+    subscriptionId: string | null;
+    status: "PENDING" | "WON" | "LOST" | "PREVENTED";
+    lastEventAt: Date;
+    lastEventFinalityRank: number;
+  } | null>;
+  upsertDispute?: (input: {
+    customerId: string;
+    subscriptionId: string | null;
+    providerDisputeId: string;
+    status: "PENDING" | "WON" | "LOST" | "PREVENTED";
+    amount: number;
+    currency: string;
+    occurredAt: Date;
+    lastEventAt: Date;
+    lastEventFinalityRank: number;
+  }) => Promise<{ id: string }>;
+  hasActiveRevocation?: (subscriptionId: string) => Promise<boolean>;
+  createAccessRevocation?: (input: {
+    subscriptionId: string;
+    reason: "REFUND" | "DISPUTE_LOST";
+    sourceTransactionId?: string;
+    sourceDisputeId?: string;
+  }) => Promise<void>;
+  // Resolves every still-unresolved AccessRevocation row sourced from this
+  // exact dispute (never any OTHER subscription's independent reason) —
+  // this is what makes restoration safe when multiple independent
+  // revocation reasons coexist (Founder Decision 16).
+  resolveAccessRevocationsByDispute?: (disputeId: string, resolvedReason: string) => Promise<void>;
 }
 
 async function defaultFindProcessedEvent(provider: string, providerEventId: string) {
@@ -282,6 +349,8 @@ async function defaultCreateBillingTransaction(input: {
   currency: string;
   providerTransactionId: string | null;
   occurredAt: Date;
+  fundedPeriodStart?: Date | null;
+  fundedPeriodEnd?: Date | null;
 }) {
   try {
     await prisma.billingTransaction.create({
@@ -295,6 +364,8 @@ async function defaultCreateBillingTransaction(input: {
         provider: "stripe",
         providerTransactionId: input.providerTransactionId,
         occurredAt: input.occurredAt,
+        fundedPeriodStart: input.fundedPeriodStart ?? null,
+        fundedPeriodEnd: input.fundedPeriodEnd ?? null,
       },
     });
   } catch (err) {
@@ -305,6 +376,149 @@ async function defaultCreateBillingTransaction(input: {
     if (input.providerTransactionId && isUniqueConstraintViolation(err, "providerTransactionId")) return;
     throw err;
   }
+}
+
+async function defaultFindBillingTransactionByProviderTransactionId(providerTransactionId: string) {
+  return prisma.billingTransaction.findUnique({
+    where: { providerTransactionId },
+    select: { id: true, customerId: true, subscriptionId: true, amount: true, fundedPeriodStart: true, fundedPeriodEnd: true },
+  });
+}
+
+async function defaultUpsertRefundTransaction(input: {
+  customerId: string;
+  subscriptionId: string;
+  refundsTransactionId: string;
+  refundId: string;
+  status: "SUCCEEDED" | "FAILED";
+  amount: number;
+  currency: string;
+  occurredAt: Date;
+}) {
+  // Keyed on the Refund's own id, a distinct namespace from the
+  // PaymentIntent ids every other BillingTransaction row uses — see the
+  // WebhookHandlerDeps comment on findRefundTransactionByRefundId. REFUNDED
+  // is the schema's own existing status value for this; SUCCEEDED/FAILED
+  // here describe the Refund object's own lifecycle (refund.created/
+  // .updated/.failed), mapped to REFUNDED/FAILED on the ledger row — a
+  // refund that later fails must read as a failed ledger entry, not a
+  // phantom successful one.
+  const status: "REFUNDED" | "FAILED" = input.status === "SUCCEEDED" ? "REFUNDED" : "FAILED";
+  try {
+    await prisma.billingTransaction.create({
+      data: {
+        customerId: input.customerId,
+        subscriptionId: input.subscriptionId,
+        type: "SUBSCRIPTION_REFUND",
+        status,
+        amount: input.amount,
+        currency: input.currency,
+        provider: "stripe",
+        providerTransactionId: input.refundId,
+        refundsTransactionId: input.refundsTransactionId,
+        occurredAt: input.occurredAt,
+      },
+    });
+  } catch (err) {
+    if (isUniqueConstraintViolation(err, "providerTransactionId")) {
+      // refund.updated for a Refund already recorded by refund.created (or
+      // a retried delivery) — update in place rather than duplicate.
+      await prisma.billingTransaction.updateMany({
+        where: { providerTransactionId: input.refundId },
+        data: { status, amount: input.amount },
+      });
+      return;
+    }
+    throw err;
+  }
+}
+
+async function defaultSumRefundedAmountForTransaction(originalTransactionId: string): Promise<number> {
+  const result = await prisma.billingTransaction.aggregate({
+    where: { refundsTransactionId: originalTransactionId, type: "SUBSCRIPTION_REFUND", status: "REFUNDED" },
+    _sum: { amount: true },
+  });
+  return result._sum.amount ?? 0;
+}
+
+async function defaultFindSubscriptionById(id: string) {
+  return prisma.subscription.findUnique({ where: { id } });
+}
+
+async function defaultFindDisputeByProviderDisputeId(providerDisputeId: string) {
+  return prisma.dispute.findUnique({
+    where: { providerDisputeId },
+    select: { id: true, customerId: true, subscriptionId: true, status: true, lastEventAt: true, lastEventFinalityRank: true },
+  });
+}
+
+async function defaultUpsertDispute(input: {
+  customerId: string;
+  subscriptionId: string | null;
+  providerDisputeId: string;
+  status: "PENDING" | "WON" | "LOST" | "PREVENTED";
+  amount: number;
+  currency: string;
+  occurredAt: Date;
+  lastEventAt: Date;
+  lastEventFinalityRank: number;
+}): Promise<{ id: string }> {
+  return prisma.dispute.upsert({
+    where: { providerDisputeId: input.providerDisputeId },
+    create: {
+      customerId: input.customerId,
+      subscriptionId: input.subscriptionId,
+      providerDisputeId: input.providerDisputeId,
+      status: input.status,
+      amount: input.amount,
+      currency: input.currency,
+      occurredAt: input.occurredAt,
+      lastEventAt: input.lastEventAt,
+      lastEventFinalityRank: input.lastEventFinalityRank,
+      resolvedAt: input.status === "WON" || input.status === "LOST" || input.status === "PREVENTED" ? input.occurredAt : null,
+    },
+    update: {
+      status: input.status,
+      amount: input.amount,
+      lastEventAt: input.lastEventAt,
+      lastEventFinalityRank: input.lastEventFinalityRank,
+      ...(input.status === "WON" || input.status === "LOST" || input.status === "PREVENTED"
+        ? { resolvedAt: input.occurredAt }
+        : {}),
+    },
+    select: { id: true },
+  });
+}
+
+async function defaultHasActiveRevocation(subscriptionId: string): Promise<boolean> {
+  const row = await prisma.accessRevocation.findFirst({
+    where: { subscriptionId, resolvedAt: null },
+    select: { id: true },
+  });
+  return row !== null;
+}
+
+async function defaultCreateAccessRevocation(input: {
+  subscriptionId: string;
+  reason: "REFUND" | "DISPUTE_LOST";
+  sourceTransactionId?: string;
+  sourceDisputeId?: string;
+}) {
+  await prisma.accessRevocation.create({
+    data: {
+      subscriptionId: input.subscriptionId,
+      reason: input.reason,
+      sourceTransactionId: input.sourceTransactionId ?? null,
+      sourceDisputeId: input.sourceDisputeId ?? null,
+    },
+  });
+}
+
+async function defaultResolveAccessRevocationsByDispute(disputeId: string, resolvedReason: string) {
+  await prisma.accessRevocation.updateMany({
+    where: { sourceDisputeId: disputeId, resolvedAt: null },
+    data: { resolvedAt: new Date(), resolvedReason },
+  });
 }
 
 async function defaultRetrieveAuthoritativeSubscription(providerSubscriptionId: string): Promise<StripeSubscriptionSnapshot | null> {
@@ -414,6 +628,83 @@ export function derivePeriodTimestampFromAuthoritative(
   return new Date(raw * 1000);
 }
 
+// Reads the service period directly off an Invoice object's own first line
+// item (Invoice.lines.data[0].period.start/end) — verified live against
+// Stripe's current InvoiceLineItem API reference
+// (https://docs.stripe.com/api/invoices/line_item) as unaffected by the
+// basil "parent field" restructuring that removed PaymentIntent.invoice
+// and the top-level Invoice.subscription field (see BillingTransaction.
+// fundedPeriodStart's schema comment for the full blocker this avoids).
+// This app only ever creates single-line subscription invoices (one price
+// per Checkout Session — see createCheckoutSession), so lines.data[0] is
+// the correct, only line to read. Returns null — never a guess — when the
+// shape isn't as expected.
+function derivePeriodFromInvoiceLine(invoice: any, bound: "start" | "end"): Date | null {
+  const raw = invoice?.lines?.data?.[0]?.period?.[bound];
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return null;
+  return new Date(raw * 1000);
+}
+
+// ── Dispute status mapping (Founder Decision 16) ────────────────────────────
+//
+// Verified live against Stripe's current Dispute object API reference
+// (https://docs.stripe.com/api/disputes/object) for our pinned API version
+// (2026-10-28.endive, confirmed post-basil in stripe-client.server.ts's own
+// comment) — the full documented status enum is: warning_needs_response,
+// warning_under_review, warning_closed, needs_response, under_review,
+// appeal_needs_response, appeal_under_review, won, lost, prevented.
+// "charge_refunded" — present in older integrations — is confirmed REMOVED
+// from the current enum; this app's pinned version postdates its removal,
+// so it is deliberately not handled as a distinct case here.
+//
+// warning_* states are Stripe's own pre-dispute signal — no funds have been
+// withdrawn yet, this is not a real dispute in Founder Decision 16's sense.
+// Returning null (not PENDING) means the caller takes no Dispute-row action
+// at all for these — no human-review gate, no access impact, matching
+// Decision 16's actual scope (it governs disputes, not every fraud signal
+// Stripe surfaces).
+export function mapStripeDisputeStatus(stripeStatus: string): "PENDING" | "WON" | "LOST" | "PREVENTED" | null {
+  switch (stripeStatus) {
+    case "warning_needs_response":
+    case "warning_under_review":
+    case "warning_closed":
+      return null;
+    case "needs_response":
+    case "under_review":
+    case "appeal_needs_response":
+    case "appeal_under_review":
+      return "PENDING";
+    case "won":
+      return "WON";
+    case "lost":
+      return "LOST";
+    case "prevented":
+      return "PREVENTED";
+    default:
+      // An unrecognized status is NOT safe to guess at — see
+      // processStripeWebhookEvent's dispute handling, which treats a null
+      // return the same way regardless of cause: no Dispute-row write, and
+      // (unlike warning_*) flagged via captureFailure for manual review,
+      // since an unrecognized status (as opposed to a known informational
+      // one) could mean Stripe's API has changed in a way this mapping
+      // hasn't been updated for.
+      return null;
+  }
+}
+
+// A terminal dispute status (a real verdict Stripe has already reached)
+// must never be superseded by a non-terminal one arriving at the same
+// Unix-second timestamp — Stripe's own event `created` field has only
+// one-second resolution, so two genuinely different dispute-lifecycle
+// events (e.g. under_review, then lost moments later) can share an
+// identical timestamp. Comparing (timestamp, finality rank) as a tuple,
+// rather than timestamp alone, means a same-second "lost" always wins over
+// a same-second "under_review" regardless of delivery order — a dispute
+// cannot un-close itself an instant later in Stripe's own real lifecycle.
+export function disputeStatusFinalityRank(status: "PENDING" | "WON" | "LOST" | "PREVENTED"): number {
+  return status === "PENDING" ? 0 : 1;
+}
+
 export interface StripeEventLike {
   id: string;
   type: string;
@@ -442,6 +733,37 @@ export async function processStripeWebhookEvent(
   const _retrieveAuthoritativeSubscription = deps.retrieveAuthoritativeSubscription ?? defaultRetrieveAuthoritativeSubscription;
   const _updateCustomerMembershipStatus = deps.updateCustomerMembershipStatus ?? defaultUpdateCustomerMembershipStatus;
   const _releaseCheckoutReservation = deps.releaseCheckoutReservation ?? defaultReleaseCheckoutReservation;
+  const _findBillingTransactionByProviderTransactionId =
+    deps.findBillingTransactionByProviderTransactionId ?? defaultFindBillingTransactionByProviderTransactionId;
+  const _upsertRefundTransaction = deps.upsertRefundTransaction ?? defaultUpsertRefundTransaction;
+  const _sumRefundedAmountForTransaction = deps.sumRefundedAmountForTransaction ?? defaultSumRefundedAmountForTransaction;
+  const _findSubscriptionById = deps.findSubscriptionById ?? defaultFindSubscriptionById;
+  const _findDisputeByProviderDisputeId = deps.findDisputeByProviderDisputeId ?? defaultFindDisputeByProviderDisputeId;
+  const _upsertDispute = deps.upsertDispute ?? defaultUpsertDispute;
+  const _hasActiveRevocation = deps.hasActiveRevocation ?? defaultHasActiveRevocation;
+  const _createAccessRevocation = deps.createAccessRevocation ?? defaultCreateAccessRevocation;
+  const _resolveAccessRevocationsByDispute = deps.resolveAccessRevocationsByDispute ?? defaultResolveAccessRevocationsByDispute;
+
+  // Applies/lifts an access revocation and keeps Customer.membershipStatus
+  // in lockstep — the SAME pattern customer.subscription.updated's own
+  // isTerminal branch already uses, extended to this independent cause.
+  // Restoring access only happens when NO revocation reason remains active
+  // for this subscription (hasActiveRevocation, the correctness source of
+  // truth — see AccessRevocation's own schema comment) AND the
+  // subscription's own status is still ACTIVE/PAST_DUE — a dispute
+  // resolving WON must never resurrect access for a subscription that has
+  // separately, legitimately gone CANCELED/EXPIRED since.
+  async function syncMembershipStatusAfterRevocationChange(subscriptionId: string, customerId: string): Promise<void> {
+    const stillRevoked = await _hasActiveRevocation(subscriptionId);
+    if (stillRevoked) {
+      await _updateCustomerMembershipStatus(customerId, "NONE");
+      return;
+    }
+    const sub = await _findSubscriptionById(subscriptionId);
+    if (sub && (sub.status === "ACTIVE" || sub.status === "PAST_DUE")) {
+      await _updateCustomerMembershipStatus(customerId, "MEMBER");
+    }
+  }
 
   // ── Idempotency ────────────────────────────────────────────────────────────
   // Same event id redelivered (Stripe retries on anything but a 2xx, and
@@ -528,6 +850,15 @@ export async function processStripeWebhookEvent(
         occurredAt: eventCreatedAt,
         amount: obj.amount_total,
         currency: (obj.currency ?? "aed").toUpperCase(),
+        // Snapshot of whatever period is known on `sub` right now — may
+        // still be null here if customer.subscription.updated hasn't
+        // synced yet (that event and checkout.session.completed are not
+        // guaranteed to arrive in a particular order). A null snapshot is
+        // handled explicitly, never guessed at, by the refund/dispute
+        // revocation logic below — see BillingTransaction.fundedPeriodStart's
+        // schema comment.
+        fundedPeriodStart: sub.currentPeriodStart,
+        fundedPeriodEnd: sub.currentPeriodEnd,
       });
     }
     action = wasAlreadyActive ? "already_active_charge_reconciled" : "subscription_activated";
@@ -766,6 +1097,18 @@ export async function processStripeWebhookEvent(
         // redelivery of the same event.
         providerTransactionId: obj.payment_intent ?? obj.id,
         occurredAt: eventCreatedAt,
+        // obj IS the Invoice object here — its own line item's `period`
+        // field (confirmed unaffected by the basil restructuring that
+        // removed PaymentIntent.invoice/Invoice.subscription, per the
+        // schema comment on fundedPeriodStart) gives the authoritative
+        // funded period directly, with no ordering ambiguity relative to
+        // customer.subscription.updated (which may sync the subscription's
+        // live currentPeriodStart/End before or after this event — using
+        // THAT here would risk tagging this renewal with the wrong period
+        // depending on delivery order; the invoice's own line period has
+        // no such dependency).
+        fundedPeriodStart: derivePeriodFromInvoiceLine(obj, "start"),
+        fundedPeriodEnd: derivePeriodFromInvoiceLine(obj, "end"),
       });
       action = "renewal_recorded";
       break;
@@ -802,6 +1145,265 @@ export async function processStripeWebhookEvent(
         occurredAt: eventCreatedAt,
       });
       action = "payment_failure_recorded";
+      break;
+    }
+
+    // ── Refunds (Founder Decision 16) ─────────────────────────────────────
+    // obj IS the Refund object directly for all three of these — trusted
+    // directly (same trust level this file already gives Checkout Session/
+    // Invoice object bodies), since a Refund's own status at the time of
+    // ITS OWN event is Stripe telling us what just happened, not a derived/
+    // ordering-sensitive field like Subscription.status (which DOES get the
+    // authoritative-refetch treatment above). What genuinely needs care
+    // here is PERIOD ASSOCIATION, not the refund's own status — handled via
+    // BillingTransaction.fundedPeriodStart/End, never a live re-fetch (see
+    // that field's schema comment for the verified Stripe-API blocker this
+    // avoids).
+    case "refund.created":
+    case "refund.updated": {
+      const refundId: string = obj.id;
+      const paymentIntentId: string | undefined = obj.payment_intent;
+      if (!paymentIntentId) break; // nothing to associate; never guess
+
+      const original = await _findBillingTransactionByProviderTransactionId(paymentIntentId);
+      if (!original) {
+        // Cannot verify which payment/subscription this refers to. Could be
+        // a genuine ordering issue (our own record of the original payment
+        // hasn't landed yet) — refuse and let Stripe's retry schedule give
+        // that a chance, exactly like authoritative_subscription_fetch_failed
+        // above, rather than silently dropping real money movement.
+        return { ok: false, reason: "refund_association_not_found" };
+      }
+      resolvedCustomerId = original.customerId;
+
+      if (obj.status === "pending") {
+        // Nothing financially final has happened yet — refund.updated
+        // (succeeded/failed) or refund.failed will record the real outcome.
+        action = "refund_pending_acknowledged";
+        break;
+      }
+
+      if (obj.status === "failed") {
+        await _upsertRefundTransaction({
+          customerId: original.customerId,
+          subscriptionId: original.subscriptionId,
+          refundsTransactionId: original.id,
+          refundId,
+          status: "FAILED",
+          amount: typeof obj.amount === "number" ? obj.amount : 0,
+          currency: (obj.currency ?? "aed").toUpperCase(),
+          occurredAt: eventCreatedAt,
+        });
+        action = "refund_failed_recorded";
+        break;
+      }
+
+      // "succeeded" — the only remaining documented Refund.status value.
+      await _upsertRefundTransaction({
+        customerId: original.customerId,
+        subscriptionId: original.subscriptionId,
+        refundsTransactionId: original.id,
+        refundId,
+        status: "SUCCEEDED",
+        amount: typeof obj.amount === "number" ? obj.amount : 0,
+        currency: (obj.currency ?? "aed").toUpperCase(),
+        occurredAt: eventCreatedAt,
+      });
+
+      // Full vs partial, correct across repeated/accumulating refunds:
+      // computed from OUR OWN ledger (sum of every succeeded refund
+      // scoped to this exact original transaction via refundsTransactionId,
+      // never the whole subscription), compared against that transaction's
+      // own recorded amount — never a live Stripe re-fetch, and never
+      // conflated with any OTHER payment this subscription separately made.
+      const cumulativeRefunded = await _sumRefundedAmountForTransaction(original.id);
+      const isFullRefund = cumulativeRefunded >= original.amount;
+
+      if (!isFullRefund) {
+        // Partial — Founder Decision 16: access is retained. Ledger entry
+        // already recorded above; nothing else to do.
+        action = "refund_partial_access_retained";
+        break;
+      }
+
+      if (original.fundedPeriodStart === null || original.fundedPeriodEnd === null) {
+        // This specific transaction predates fundedPeriodStart/End, or the
+        // snapshot genuinely couldn't be taken at creation time (see that
+        // field's schema comment) — cannot safely tell whether this refund
+        // affects the customer's CURRENT entitlement. Fail closed: do not
+        // revoke automatically, but do not silently ignore it either.
+        captureFailure("stripe-webhook:refund-period-unknown", "cannot_determine_funded_period", {
+          refundId,
+          originalTransactionId: original.id,
+        });
+        action = "refund_full_period_unknown_flagged_for_review";
+        break;
+      }
+
+      const sub = await _findSubscriptionById(original.subscriptionId);
+      const fundsCurrentPeriod =
+        sub !== null && sub.currentPeriodEnd !== null && original.fundedPeriodEnd.getTime() === sub.currentPeriodEnd.getTime();
+
+      if (fundsCurrentPeriod) {
+        // This refund is for the period the customer is CURRENTLY in —
+        // Founder Decision 16: full refund revokes access for that period.
+        await _createAccessRevocation({
+          subscriptionId: original.subscriptionId,
+          reason: "REFUND",
+          sourceTransactionId: original.id,
+        });
+        await syncMembershipStatusAfterRevocationChange(original.subscriptionId, original.customerId);
+        action = "refund_full_current_period_access_revoked";
+      } else {
+        // The refunded transaction funded an OLD, already-superseded
+        // period — the customer has since paid again and is in a later
+        // period. Record the financial ledger entry (already done above);
+        // never touch the customer's PRESENT entitlement for a past
+        // period's refund.
+        action = "refund_full_old_period_no_access_change";
+      }
+      break;
+    }
+
+    case "refund.failed": {
+      // Stripe sends this as a dedicated terminal event too, so a failure
+      // is never missed if a separate refund.updated wasn't delivered —
+      // idempotent with the "failed" branch above via providerTransactionId's
+      // @unique constraint either way.
+      const refundId: string = obj.id;
+      const paymentIntentId: string | undefined = obj.payment_intent;
+      if (!paymentIntentId) break;
+      const original = await _findBillingTransactionByProviderTransactionId(paymentIntentId);
+      if (!original) return { ok: false, reason: "refund_association_not_found" };
+      resolvedCustomerId = original.customerId;
+      await _upsertRefundTransaction({
+        customerId: original.customerId,
+        subscriptionId: original.subscriptionId,
+        refundsTransactionId: original.id,
+        refundId,
+        status: "FAILED",
+        amount: typeof obj.amount === "number" ? obj.amount : 0,
+        currency: (obj.currency ?? "aed").toUpperCase(),
+        occurredAt: eventCreatedAt,
+      });
+      action = "refund_failed_recorded";
+      break;
+    }
+
+    // ── Disputes (Founder Decision 16) ────────────────────────────────────
+    // obj IS the Dispute object directly. mapStripeDisputeStatus collapses
+    // Stripe's full documented status enum (verified live against the
+    // current API reference for our pinned version) into this app's
+    // PENDING/WON/LOST/PREVENTED — null for the informational warning_*
+    // pre-dispute states, which get no Dispute row and no access impact.
+    case "charge.dispute.created":
+    case "charge.dispute.closed": {
+      const providerDisputeId: string = obj.id;
+      const mappedStatus = mapStripeDisputeStatus(obj.status);
+
+      if (mappedStatus === null) {
+        const isKnownInformational = ["warning_needs_response", "warning_under_review", "warning_closed"].includes(obj.status);
+        if (!isKnownInformational) {
+          // A status this mapping doesn't recognize at all (as opposed to
+          // a known informational one) could mean Stripe's API has moved
+          // again — flag it rather than silently doing nothing.
+          captureFailure("stripe-webhook:dispute-status-unrecognized", String(obj.status), { disputeId: providerDisputeId });
+        }
+        action = "dispute_informational_ignored";
+        break;
+      }
+
+      const finalityRank = disputeStatusFinalityRank(mappedStatus);
+      const paymentIntentId: string | undefined = obj.payment_intent;
+      const original = paymentIntentId ? await _findBillingTransactionByProviderTransactionId(paymentIntentId) : null;
+      const existingDispute = await _findDisputeByProviderDisputeId(providerDisputeId);
+
+      // Out-of-order / same-second guard — never let an event apply over a
+      // state that is already equal-or-newer and at least as final. See
+      // disputeStatusFinalityRank's own comment for why timestamp alone
+      // (one-second resolution) isn't sufficient.
+      if (existingDispute) {
+        const incomingIsOlder = eventCreatedAt.getTime() < existingDispute.lastEventAt.getTime();
+        const sameInstantLessFinal =
+          eventCreatedAt.getTime() === existingDispute.lastEventAt.getTime() && finalityRank < existingDispute.lastEventFinalityRank;
+        if (incomingIsOlder || sameInstantLessFinal) {
+          action = "dispute_stale_event_ignored";
+          break;
+        }
+        // Two different terminal statuses for the SAME dispute at the
+        // exact same instant is a genuine anomaly, not an expected
+        // ordering case — last-write-wins (apply the incoming one) but
+        // flag it for a human to look at, never silently pick one.
+        if (
+          eventCreatedAt.getTime() === existingDispute.lastEventAt.getTime() &&
+          finalityRank === 1 &&
+          existingDispute.lastEventFinalityRank === 1 &&
+          mappedStatus !== existingDispute.status
+        ) {
+          captureFailure(
+            "stripe-webhook:dispute-same-instant-terminal-conflict",
+            `${existingDispute.status}->${mappedStatus}`,
+            { disputeId: providerDisputeId },
+          );
+        }
+      }
+
+      const customerId = original?.customerId ?? existingDispute?.customerId ?? null;
+      const subscriptionId = original?.subscriptionId ?? existingDispute?.subscriptionId ?? null;
+      if (!customerId) {
+        // Cannot verify which customer this dispute belongs to — Dispute.customerId
+        // is required (financial-record retention, same as Subscription/
+        // BillingTransaction). Refuse and let Stripe retry rather than
+        // guess or drop it.
+        return { ok: false, reason: "dispute_association_not_found" };
+      }
+      resolvedCustomerId = customerId;
+
+      const disputeRow = await _upsertDispute({
+        customerId,
+        subscriptionId,
+        providerDisputeId,
+        status: mappedStatus,
+        amount: typeof obj.amount === "number" ? obj.amount : 0,
+        currency: (obj.currency ?? "aed").toUpperCase(),
+        occurredAt: existingDispute ? existingDispute.lastEventAt : eventCreatedAt,
+        lastEventAt: eventCreatedAt,
+        lastEventFinalityRank: finalityRank,
+      });
+
+      if (mappedStatus === "LOST" && subscriptionId) {
+        if (original && original.fundedPeriodStart !== null && original.fundedPeriodEnd !== null) {
+          const sub = await _findSubscriptionById(subscriptionId);
+          const fundsCurrentPeriod =
+            sub !== null && sub.currentPeriodEnd !== null && original.fundedPeriodEnd.getTime() === sub.currentPeriodEnd.getTime();
+          if (fundsCurrentPeriod) {
+            await _createAccessRevocation({ subscriptionId, reason: "DISPUTE_LOST", sourceDisputeId: disputeRow.id });
+            await syncMembershipStatusAfterRevocationChange(subscriptionId, customerId);
+            action = "dispute_lost_current_period_access_revoked";
+          } else {
+            action = "dispute_lost_old_period_no_access_change";
+          }
+        } else {
+          captureFailure("stripe-webhook:dispute-period-unknown", "cannot_determine_funded_period", {
+            disputeId: providerDisputeId,
+          });
+          action = "dispute_lost_period_unknown_flagged_for_review";
+        }
+      } else if ((mappedStatus === "WON" || mappedStatus === "PREVENTED") && subscriptionId) {
+        // Resolves ONLY the AccessRevocation row(s) sourced from THIS
+        // dispute — an independent reason (e.g. a separate refund) on the
+        // same subscription is never touched, so restoration here can
+        // never accidentally clear it. See AccessRevocation's own schema
+        // comment.
+        await _resolveAccessRevocationsByDispute(disputeRow.id, mappedStatus === "WON" ? "dispute_won" : "dispute_prevented");
+        await syncMembershipStatusAfterRevocationChange(subscriptionId, customerId);
+        action = mappedStatus === "WON" ? "dispute_won_restored" : "dispute_prevented_no_action";
+      } else {
+        // PENDING (needs_response/under_review/appeal_*) — Founder Decision
+        // 16: human review, no automatic revocation. The Dispute row above
+        // is what makes it visible for that review.
+        action = "dispute_pending_recorded";
+      }
       break;
     }
 

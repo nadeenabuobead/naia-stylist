@@ -183,6 +183,27 @@ async function getCurrentSubscription(customerId: string): Promise<EntitledSubsc
     // regardless of what Stripe's own retry schedule is still doing.
     return null;
   }
+  // Founder Decision 16 — a full refund of the customer's CURRENT period,
+  // or a dispute lost against it, revokes access regardless of the
+  // Subscription's own ACTIVE/PAST_DUE status column (webhook-handler.
+  // server.ts's refund/dispute handling writes these independently of the
+  // ordinary subscription-status sync, same relationship pastDueSince has
+  // to this function). AccessRevocation is the correctness source of
+  // truth — queried directly here (an indexed lookup), not via a
+  // denormalized flag on Subscription: safely maintaining such a flag
+  // under concurrent webhook deliveries (two independent revocation-
+  // causing events landing near-simultaneously) would need its own proven-
+  // atomic update path this implementation does not have, so the direct
+  // query is correct by construction instead. Fail-closed by construction
+  // for every paid feature: every entitlement entry point (checkEntitlement,
+  // every reserve*Slot, getEntitlementSummary) calls resolveEffectiveContext,
+  // which calls this function — there is no alternate path that could
+  // bypass this check.
+  const revoked = await prisma.accessRevocation.findFirst({
+    where: { subscriptionId: sub.id, resolvedAt: null },
+    select: { id: true },
+  });
+  if (revoked) return null;
   return sub;
 }
 

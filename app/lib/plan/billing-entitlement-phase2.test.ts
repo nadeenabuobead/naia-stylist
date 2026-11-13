@@ -45,6 +45,8 @@ import {
   getPastDueGraceDaysRemaining,
   reserveStyleMeSlot,
   reserveClosetSlot,
+  reserveBuySkipSlot,
+  reservePersonalisedTrendSlot,
   type EffectiveContextDeps,
   type EntitledSubscription,
   type RunReservationFn,
@@ -734,5 +736,84 @@ describe("PH2-15 — countingEnd prevents unlimited usage when a stale, unrenewe
     );
     const occurrences = fn.match(/addonAppliesToPeriodEnd:\s*window\.end/g) ?? [];
     assert.equal(occurrences.length, 2, "both StyleMe and VTO add-on exact-period matches must still compare against the real window.end");
+  });
+});
+
+// ── 17 — refund/dispute-driven access revocation denies every paid-feature
+// reservation gate, not just the shared allowances object ──────────────────
+//
+// getSubscription: async () => null here simulates exactly what the REAL
+// getCurrentSubscription returns once an unresolved AccessRevocation row
+// exists for a subscription (see entitlement-revocation-gate.test.ts for
+// proof of THAT real wiring, against a mocked prisma) — this file's own
+// "no real Prisma call" convention means the revocation check itself can't
+// be exercised here directly; what belongs here is confirming each
+// feature-specific reservation function correctly acts on the
+// null-subscription/zero-allowance outcome once it occurs, the same way
+// PH2-13 already proves for an EXPIRED/CANCELED/INCOMPLETE subscription.
+// hasAnySubscriptionRecord: true throughout — a revoked subscription is
+// very much a real, TRACKED row (unlike "never subscribed"), so the
+// NONE-equivalent branch, not the pre-Phase-3 fallback, must be the one
+// that applies.
+describe("PH2-17 — AccessRevocation denies every one of the five paid-feature gates", () => {
+  const revokedDeps: EffectiveContextDeps = {
+    getSubscription: async () => null,
+    hasAnySubscriptionRecord: async () => true,
+    getAddonTotals: async () => ({ styleMeBoost: 0, vtoBoost: 0, closetExpansion: 0 }),
+  };
+
+  it("reserveStyleMeSlot denies — the count comparison inside the transaction is satisfied by the zeroed allowance, and create must never be called", async () => {
+    const mockTx: RunReservationFn = async (fn) =>
+      fn({
+        stylingSession: {
+          count: async () => 0,
+          create: async () => {
+            throw new Error("create must not be called — allowance is 0 under revocation");
+          },
+        },
+      } as any);
+    const result = await reserveStyleMeSlot(CUSTOMER_ID, "MEMBER", { customerId: CUSTOMER_ID } as any, mockTx, revokedDeps);
+    assert.equal(result.allowed, false);
+  });
+
+  it("reserveBuySkipSlot denies — the count comparison inside the transaction is satisfied by the zeroed allowance, and create must never be called", async () => {
+    const mockTx: RunReservationFn = async (fn) =>
+      fn({
+        buyOrSkipAnalysis: {
+          count: async () => 0,
+          create: async () => {
+            throw new Error("create must not be called — allowance is 0 under revocation");
+          },
+        },
+      } as any);
+    const result = await reserveBuySkipSlot(CUSTOMER_ID, "MEMBER", { customerId: CUSTOMER_ID } as any, mockTx, revokedDeps);
+    assert.equal(result.allowed, false);
+  });
+
+  it("reserveClosetSlot denies — the count comparison inside the transaction is satisfied by the zeroed allowance, and create must never be called", async () => {
+    const mockTx: RunReservationFn = async (fn) =>
+      fn({
+        closetItem: {
+          count: async () => 0,
+          create: async () => {
+            throw new Error("create must not be called — allowance is 0 under revocation");
+          },
+        },
+      } as any);
+    const result = await reserveClosetSlot(CUSTOMER_ID, "MEMBER", { customerId: CUSTOMER_ID, name: "x", category: "TOPS" } as any, mockTx, revokedDeps);
+    assert.equal(result.allowed, false);
+  });
+
+  it("reservePersonalisedTrendSlot denies, never even entering the reservation transaction", async () => {
+    const mockTx: RunReservationFn = async () => {
+      throw new Error("transaction must not run — allowance is 0 under revocation");
+    };
+    const result = await reservePersonalisedTrendSlot(CUSTOMER_ID, "MEMBER", "some-report-slug", undefined, mockTx, revokedDeps);
+    assert.equal(result.allowed, false);
+  });
+
+  it("resolveEffectiveContext itself reports zero VTO allowance under revocation — the fifth feature, VTO, has no dedicated reserve*Slot function and is gated through checkEntitlement's own prisma.virtualTryOnJob.count comparison instead (see entitlement-revocation-gate.test.ts RG.2 for the real end-to-end proof against a mocked prisma; checkEntitlement's vto branch makes a real DB count this file's own no-real-Prisma convention does not cover)", async () => {
+    const ctx = await resolveEffectiveContext(CUSTOMER_ID, "MEMBER", revokedDeps);
+    assert.equal(ctx.allowances.vtoPerMonth, 0);
   });
 });

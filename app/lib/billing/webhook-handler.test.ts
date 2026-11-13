@@ -1420,6 +1420,510 @@ describe("processStripeWebhookEvent — invoice.payment_failed", () => {
   });
 });
 
+// ── Refunds (Founder Decision 16) ───────────────────────────────────────────
+// Refund ledger identity is the Refund's own id (re_...), never the
+// PaymentIntent id — association to the original payment/subscription is
+// via obj.payment_intent, looked up through
+// findBillingTransactionByProviderTransactionId.
+
+function originalTransaction(overrides: Partial<{
+  id: string;
+  customerId: string;
+  subscriptionId: string;
+  amount: number;
+  fundedPeriodStart: Date | null;
+  fundedPeriodEnd: Date | null;
+}> = {}) {
+  return {
+    id: "txn-original-1",
+    customerId: CUSTOMER_ID,
+    subscriptionId: "sub-row-1",
+    amount: 3900,
+    fundedPeriodStart: new Date((BASE_TS - 2_592_000) * 1000),
+    fundedPeriodEnd: new Date(BASE_TS * 1000),
+    ...overrides,
+  };
+}
+
+describe("processStripeWebhookEvent — refund.created / refund.updated", () => {
+  it("WH.30 — a pending refund is acknowledged, with no ledger write and no access change", async () => {
+    let upsertCalls = 0;
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findBillingTransactionByProviderTransactionId: async () => originalTransaction(),
+      upsertRefundTransaction: async () => { upsertCalls++; },
+      recordProcessedEvent: async () => {},
+    };
+    const event = makeEvent({
+      type: "refund.created",
+      data: { object: { id: "re_1", payment_intent: "pi_1", status: "pending", amount: 3900, currency: "aed" } },
+    });
+    const result = await processStripeWebhookEvent(event, deps);
+    assert.equal(upsertCalls, 0);
+    assert.deepEqual(result, { ok: true, deduped: false, action: "refund_pending_acknowledged" });
+  });
+
+  it("WH.31 — no payment_intent on the Refund object is a safe no-op — never guess the association", async () => {
+    let lookupCalls = 0;
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findBillingTransactionByProviderTransactionId: async () => { lookupCalls++; return null; },
+      recordProcessedEvent: async () => {},
+    };
+    const event = makeEvent({
+      type: "refund.updated",
+      data: { object: { id: "re_2", status: "succeeded", amount: 3900 } },
+    });
+    const result = await processStripeWebhookEvent(event, deps);
+    assert.equal(lookupCalls, 0);
+    assert.deepEqual(result, { ok: true, deduped: false, action: "ignored" });
+  });
+
+  it("WH.32 — an unassociated PaymentIntent refuses (ok:false), never silently dropping real money movement", async () => {
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findBillingTransactionByProviderTransactionId: async () => null,
+      recordProcessedEvent: async () => { throw new Error("must not record a refused event as processed"); },
+    };
+    const event = makeEvent({
+      type: "refund.updated",
+      data: { object: { id: "re_3", payment_intent: "pi_unknown", status: "succeeded", amount: 3900 } },
+    });
+    const result = await processStripeWebhookEvent(event, deps);
+    assert.deepEqual(result, { ok: false, reason: "refund_association_not_found" });
+  });
+
+  it("WH.33 — a single full refund (amount equals the original) against the CURRENT period revokes access", async () => {
+    let revocation: any = null;
+    let membershipCall: any = null;
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findBillingTransactionByProviderTransactionId: async () => originalTransaction(),
+      upsertRefundTransaction: async () => {},
+      sumRefundedAmountForTransaction: async () => 3900, // full amount, single event
+      findSubscriptionById: async () => baseSubscription(),
+      hasActiveRevocation: async () => true,
+      createAccessRevocation: async (input) => { revocation = input; },
+      updateCustomerMembershipStatus: async (customerId, status) => { membershipCall = { customerId, status }; },
+      recordProcessedEvent: async () => {},
+    };
+    const event = makeEvent({
+      type: "refund.updated",
+      data: { object: { id: "re_4", payment_intent: "pi_1", status: "succeeded", amount: 3900, currency: "aed" } },
+    });
+    const result = await processStripeWebhookEvent(event, deps);
+    assert.deepEqual(revocation, { subscriptionId: "sub-row-1", reason: "REFUND", sourceTransactionId: "txn-original-1" });
+    assert.deepEqual(membershipCall, { customerId: CUSTOMER_ID, status: "NONE" });
+    assert.deepEqual(result, { ok: true, deduped: false, action: "refund_full_current_period_access_revoked" });
+  });
+
+  it("WH.34 — a partial refund (amount less than the original) retains access — Founder Decision 16", async () => {
+    let revocationCalls = 0;
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findBillingTransactionByProviderTransactionId: async () => originalTransaction(),
+      upsertRefundTransaction: async () => {},
+      sumRefundedAmountForTransaction: async () => 1000, // less than original.amount (3900)
+      createAccessRevocation: async () => { revocationCalls++; },
+      recordProcessedEvent: async () => {},
+    };
+    const event = makeEvent({
+      type: "refund.updated",
+      data: { object: { id: "re_5", payment_intent: "pi_1", status: "succeeded", amount: 1000, currency: "aed" } },
+    });
+    const result = await processStripeWebhookEvent(event, deps);
+    assert.equal(revocationCalls, 0);
+    assert.deepEqual(result, { ok: true, deduped: false, action: "refund_partial_access_retained" });
+  });
+
+  it("WH.35 — two accumulating partial refunds that together reach the full amount revoke access on the SECOND event, not the first", async () => {
+    let revocationCalls = 0;
+    const makeDeps = (cumulative: number): WebhookHandlerDeps => ({
+      findProcessedEvent: async () => null,
+      findBillingTransactionByProviderTransactionId: async () => originalTransaction(),
+      upsertRefundTransaction: async () => {},
+      sumRefundedAmountForTransaction: async () => cumulative,
+      findSubscriptionById: async () => baseSubscription(),
+      hasActiveRevocation: async () => true,
+      createAccessRevocation: async () => { revocationCalls++; },
+      updateCustomerMembershipStatus: async () => {},
+      recordProcessedEvent: async () => {},
+    });
+    const firstEvent = makeEvent({
+      id: "evt_refund_a",
+      type: "refund.updated",
+      data: { object: { id: "re_6a", payment_intent: "pi_1", status: "succeeded", amount: 2000, currency: "aed" } },
+    });
+    const firstResult = await processStripeWebhookEvent(firstEvent, makeDeps(2000));
+    assert.equal(revocationCalls, 0);
+    assert.deepEqual(firstResult, { ok: true, deduped: false, action: "refund_partial_access_retained" });
+
+    const secondEvent = makeEvent({
+      id: "evt_refund_b",
+      type: "refund.updated",
+      data: { object: { id: "re_6b", payment_intent: "pi_1", status: "succeeded", amount: 1900, currency: "aed" } },
+    });
+    const secondResult = await processStripeWebhookEvent(secondEvent, makeDeps(3900));
+    assert.equal(revocationCalls, 1);
+    assert.deepEqual(secondResult, { ok: true, deduped: false, action: "refund_full_current_period_access_revoked" });
+  });
+
+  it("WH.36 — a full refund of an OLD, superseded period never touches the customer's CURRENT entitlement", async () => {
+    let revocationCalls = 0;
+    const oldPeriodTxn = originalTransaction({
+      fundedPeriodEnd: new Date((BASE_TS - 2_592_000) * 1000), // an earlier period than the subscription's CURRENT one
+    });
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findBillingTransactionByProviderTransactionId: async () => oldPeriodTxn,
+      upsertRefundTransaction: async () => {},
+      sumRefundedAmountForTransaction: async () => oldPeriodTxn.amount,
+      findSubscriptionById: async () => baseSubscription(), // currentPeriodEnd is BASE_TS, not oldPeriodTxn's
+      createAccessRevocation: async () => { revocationCalls++; },
+      recordProcessedEvent: async () => {},
+    };
+    const event = makeEvent({
+      type: "refund.updated",
+      data: { object: { id: "re_7", payment_intent: "pi_old", status: "succeeded", amount: oldPeriodTxn.amount, currency: "aed" } },
+    });
+    const result = await processStripeWebhookEvent(event, deps);
+    assert.equal(revocationCalls, 0);
+    assert.deepEqual(result, { ok: true, deduped: false, action: "refund_full_old_period_no_access_change" });
+  });
+
+  it("WH.37 — a full refund with no recorded fundedPeriodStart/End (a historical pre-feature transaction) fails closed, flagged for review, never auto-revoked", async () => {
+    let revocationCalls = 0;
+    const historicalTxn = originalTransaction({ fundedPeriodStart: null, fundedPeriodEnd: null });
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findBillingTransactionByProviderTransactionId: async () => historicalTxn,
+      upsertRefundTransaction: async () => {},
+      sumRefundedAmountForTransaction: async () => historicalTxn.amount,
+      createAccessRevocation: async () => { revocationCalls++; },
+      recordProcessedEvent: async () => {},
+    };
+    const event = makeEvent({
+      type: "refund.updated",
+      data: { object: { id: "re_8", payment_intent: "pi_historical", status: "succeeded", amount: historicalTxn.amount, currency: "aed" } },
+    });
+    const result = await processStripeWebhookEvent(event, deps);
+    assert.equal(revocationCalls, 0);
+    assert.deepEqual(result, { ok: true, deduped: false, action: "refund_full_period_unknown_flagged_for_review" });
+  });
+
+  it("WH.38 — a failed refund (via refund.updated) records the FAILED ledger entry and never touches access", async () => {
+    let upserted: any = null;
+    let revocationCalls = 0;
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findBillingTransactionByProviderTransactionId: async () => originalTransaction(),
+      upsertRefundTransaction: async (input) => { upserted = input; },
+      createAccessRevocation: async () => { revocationCalls++; },
+      recordProcessedEvent: async () => {},
+    };
+    const event = makeEvent({
+      type: "refund.updated",
+      data: { object: { id: "re_9", payment_intent: "pi_1", status: "failed", amount: 3900, currency: "aed" } },
+    });
+    const result = await processStripeWebhookEvent(event, deps);
+    assert.equal(upserted.status, "FAILED");
+    assert.equal(upserted.refundId, "re_9");
+    assert.equal(upserted.refundsTransactionId, "txn-original-1");
+    assert.equal(revocationCalls, 0);
+    assert.deepEqual(result, { ok: true, deduped: false, action: "refund_failed_recorded" });
+  });
+});
+
+describe("processStripeWebhookEvent — refund.failed (dedicated terminal event)", () => {
+  it("WH.39 — refund.failed arriving after an earlier refund.created(pending), with no refund.updated in between, still records the failure", async () => {
+    let upserted: any = null;
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findBillingTransactionByProviderTransactionId: async () => originalTransaction(),
+      upsertRefundTransaction: async (input) => { upserted = input; },
+      recordProcessedEvent: async () => {},
+    };
+    const event = makeEvent({
+      type: "refund.failed",
+      data: { object: { id: "re_10", payment_intent: "pi_1", amount: 3900, currency: "aed" } },
+    });
+    const result = await processStripeWebhookEvent(event, deps);
+    assert.equal(upserted.status, "FAILED");
+    assert.deepEqual(result, { ok: true, deduped: false, action: "refund_failed_recorded" });
+  });
+
+  it("WH.39b — an unassociated refund.failed refuses rather than silently dropping it", async () => {
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findBillingTransactionByProviderTransactionId: async () => null,
+      recordProcessedEvent: async () => { throw new Error("must not record a refused event as processed"); },
+    };
+    const event = makeEvent({
+      type: "refund.failed",
+      data: { object: { id: "re_11", payment_intent: "pi_unknown", amount: 3900 } },
+    });
+    const result = await processStripeWebhookEvent(event, deps);
+    assert.deepEqual(result, { ok: false, reason: "refund_association_not_found" });
+  });
+});
+
+// ── Disputes (Founder Decision 16) ──────────────────────────────────────────
+
+describe("processStripeWebhookEvent — charge.dispute.created / charge.dispute.closed", () => {
+  it("WH.40 — a warning_* pre-dispute status is purely informational: no Dispute row, no access impact", async () => {
+    let upsertCalls = 0;
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      upsertDispute: async (input) => { upsertCalls++; return { id: "dispute-1" } as any; },
+      recordProcessedEvent: async () => {},
+    };
+    const event = makeEvent({
+      type: "charge.dispute.created",
+      data: { object: { id: "dp_1", status: "warning_needs_response", amount: 3900, payment_intent: "pi_1" } },
+    });
+    const result = await processStripeWebhookEvent(event, deps);
+    assert.equal(upsertCalls, 0);
+    assert.deepEqual(result, { ok: true, deduped: false, action: "dispute_informational_ignored" });
+  });
+
+  it("WH.41 — needs_response maps to PENDING and is recorded for human review, with no automatic revocation", async () => {
+    let disputeInput: any = null;
+    let revocationCalls = 0;
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findBillingTransactionByProviderTransactionId: async () => originalTransaction(),
+      findDisputeByProviderDisputeId: async () => null,
+      upsertDispute: async (input) => { disputeInput = input; return { id: "dispute-2" }; },
+      createAccessRevocation: async () => { revocationCalls++; },
+      recordProcessedEvent: async () => {},
+    };
+    const event = makeEvent({
+      type: "charge.dispute.created",
+      data: { object: { id: "dp_2", status: "needs_response", amount: 3900, currency: "aed", payment_intent: "pi_1" } },
+    });
+    const result = await processStripeWebhookEvent(event, deps);
+    assert.equal(disputeInput.status, "PENDING");
+    assert.equal(revocationCalls, 0);
+    assert.deepEqual(result, { ok: true, deduped: false, action: "dispute_pending_recorded" });
+  });
+
+  it("WH.42 — a lost dispute against the CURRENT period revokes access", async () => {
+    let revocation: any = null;
+    let membershipCall: any = null;
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findBillingTransactionByProviderTransactionId: async () => originalTransaction(),
+      findDisputeByProviderDisputeId: async () => null,
+      upsertDispute: async () => ({ id: "dispute-3" }),
+      findSubscriptionById: async () => baseSubscription(),
+      hasActiveRevocation: async () => true,
+      createAccessRevocation: async (input) => { revocation = input; },
+      updateCustomerMembershipStatus: async (customerId, status) => { membershipCall = { customerId, status }; },
+      recordProcessedEvent: async () => {},
+    };
+    const event = makeEvent({
+      type: "charge.dispute.closed",
+      data: { object: { id: "dp_3", status: "lost", amount: 3900, currency: "aed", payment_intent: "pi_1" } },
+    });
+    const result = await processStripeWebhookEvent(event, deps);
+    assert.deepEqual(revocation, { subscriptionId: "sub-row-1", reason: "DISPUTE_LOST", sourceDisputeId: "dispute-3" });
+    assert.deepEqual(membershipCall, { customerId: CUSTOMER_ID, status: "NONE" });
+    assert.deepEqual(result, { ok: true, deduped: false, action: "dispute_lost_current_period_access_revoked" });
+  });
+
+  it("WH.43 — a lost dispute against an OLD, superseded period never touches current entitlement", async () => {
+    let revocationCalls = 0;
+    const oldPeriodTxn = originalTransaction({ fundedPeriodEnd: new Date((BASE_TS - 2_592_000) * 1000) });
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findBillingTransactionByProviderTransactionId: async () => oldPeriodTxn,
+      findDisputeByProviderDisputeId: async () => null,
+      upsertDispute: async () => ({ id: "dispute-4" }),
+      findSubscriptionById: async () => baseSubscription(),
+      createAccessRevocation: async () => { revocationCalls++; },
+      recordProcessedEvent: async () => {},
+    };
+    const event = makeEvent({
+      type: "charge.dispute.closed",
+      data: { object: { id: "dp_4", status: "lost", amount: oldPeriodTxn.amount, payment_intent: "pi_old" } },
+    });
+    const result = await processStripeWebhookEvent(event, deps);
+    assert.equal(revocationCalls, 0);
+    assert.deepEqual(result, { ok: true, deduped: false, action: "dispute_lost_old_period_no_access_change" });
+  });
+
+  it("WH.44 — a lost dispute with no recorded fundedPeriodStart/End fails closed, flagged for review, never auto-revoked", async () => {
+    let revocationCalls = 0;
+    const historicalTxn = originalTransaction({ fundedPeriodStart: null, fundedPeriodEnd: null });
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findBillingTransactionByProviderTransactionId: async () => historicalTxn,
+      findDisputeByProviderDisputeId: async () => null,
+      upsertDispute: async () => ({ id: "dispute-5" }),
+      createAccessRevocation: async () => { revocationCalls++; },
+      recordProcessedEvent: async () => {},
+    };
+    const event = makeEvent({
+      type: "charge.dispute.closed",
+      data: { object: { id: "dp_5", status: "lost", amount: historicalTxn.amount, payment_intent: "pi_historical" } },
+    });
+    const result = await processStripeWebhookEvent(event, deps);
+    assert.equal(revocationCalls, 0);
+    assert.deepEqual(result, { ok: true, deduped: false, action: "dispute_lost_period_unknown_flagged_for_review" });
+  });
+
+  it("WH.45 — a dispute later WON resolves ONLY this dispute's own AccessRevocation rows and restores membership when nothing else is active", async () => {
+    let resolveCall: any = null;
+    let membershipCall: any = null;
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findDisputeByProviderDisputeId: async () => ({
+        id: "dispute-6",
+        customerId: CUSTOMER_ID,
+        subscriptionId: "sub-row-1",
+        status: "PENDING",
+        lastEventAt: new Date((BASE_TS - 100) * 1000),
+        lastEventFinalityRank: 0,
+      }),
+      upsertDispute: async () => ({ id: "dispute-6" }),
+      hasActiveRevocation: async () => false, // no OTHER independent reason remains active
+      resolveAccessRevocationsByDispute: async (disputeId, resolvedReason) => { resolveCall = { disputeId, resolvedReason }; },
+      findSubscriptionById: async () => baseSubscription(),
+      updateCustomerMembershipStatus: async (customerId, status) => { membershipCall = { customerId, status }; },
+      recordProcessedEvent: async () => {},
+    };
+    const event = makeEvent({
+      type: "charge.dispute.closed",
+      data: { object: { id: "dp_6", status: "won", amount: 3900 } },
+    });
+    const result = await processStripeWebhookEvent(event, deps);
+    assert.deepEqual(resolveCall, { disputeId: "dispute-6", resolvedReason: "dispute_won" });
+    assert.deepEqual(membershipCall, { customerId: CUSTOMER_ID, status: "MEMBER" });
+    assert.deepEqual(result, { ok: true, deduped: false, action: "dispute_won_restored" });
+  });
+
+  it("WH.46 — a dispute WON does NOT restore membership while an INDEPENDENT revocation reason (e.g. a separate refund) remains active on the same subscription", async () => {
+    const membershipCalls: Array<{ customerId: string; status: string }> = [];
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findDisputeByProviderDisputeId: async () => ({
+        id: "dispute-7",
+        customerId: CUSTOMER_ID,
+        subscriptionId: "sub-row-1",
+        status: "PENDING",
+        lastEventAt: new Date((BASE_TS - 100) * 1000),
+        lastEventFinalityRank: 0,
+      }),
+      upsertDispute: async () => ({ id: "dispute-7" }),
+      hasActiveRevocation: async () => true, // an independent REFUND revocation is still active
+      resolveAccessRevocationsByDispute: async () => {},
+      updateCustomerMembershipStatus: async (customerId, status) => { membershipCalls.push({ customerId, status }); },
+      recordProcessedEvent: async () => {},
+    };
+    const event = makeEvent({
+      type: "charge.dispute.closed",
+      data: { object: { id: "dp_7", status: "won", amount: 3900 } },
+    });
+    const result = await processStripeWebhookEvent(event, deps);
+    assert.ok(
+      membershipCalls.every((c) => c.status === "NONE"),
+      "an independent active revocation must never let this unrelated dispute's WON resolution set membership to MEMBER",
+    );
+    assert.deepEqual(result, { ok: true, deduped: false, action: "dispute_won_restored" });
+  });
+
+  it("WH.47 — 'prevented' is kept distinct from WON: resolves this dispute's revocations but reports its own action, never formally disputed vs disputed-and-won", async () => {
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findBillingTransactionByProviderTransactionId: async () => originalTransaction(),
+      findDisputeByProviderDisputeId: async () => null,
+      upsertDispute: async () => ({ id: "dispute-8" }),
+      hasActiveRevocation: async () => false,
+      resolveAccessRevocationsByDispute: async () => {},
+      findSubscriptionById: async () => baseSubscription(),
+      updateCustomerMembershipStatus: async () => {},
+      recordProcessedEvent: async () => {},
+    };
+    const event = makeEvent({
+      type: "charge.dispute.created",
+      data: { object: { id: "dp_8", status: "prevented", amount: 3900, payment_intent: "pi_1" } },
+    });
+    const result = await processStripeWebhookEvent(event, deps);
+    assert.deepEqual(result, { ok: true, deduped: false, action: "dispute_prevented_no_action" });
+  });
+
+  it("WH.48 — an older event for an already-recorded dispute is ignored (out-of-order protection)", async () => {
+    let upsertCalls = 0;
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findDisputeByProviderDisputeId: async () => ({
+        id: "dispute-9",
+        customerId: CUSTOMER_ID,
+        subscriptionId: "sub-row-1",
+        status: "LOST",
+        lastEventAt: new Date(BASE_TS * 1000),
+        lastEventFinalityRank: 1,
+      }),
+      upsertDispute: async () => { upsertCalls++; return { id: "dispute-9" }; },
+      recordProcessedEvent: async () => {},
+    };
+    const event = makeEvent({
+      id: "evt_stale_dispute",
+      created: BASE_TS - 500, // older than the existing dispute's lastEventAt
+      type: "charge.dispute.created",
+      data: { object: { id: "dp_9", status: "needs_response", amount: 3900 } },
+    });
+    const result = await processStripeWebhookEvent(event, deps);
+    assert.equal(upsertCalls, 0);
+    assert.deepEqual(result, { ok: true, deduped: false, action: "dispute_stale_event_ignored" });
+  });
+
+  it("WH.49 — at the exact SAME instant, a terminal status always wins over a less-final (PENDING) one — one-second Stripe timestamp resolution", async () => {
+    let upsertInput: any = null;
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findDisputeByProviderDisputeId: async () => ({
+        id: "dispute-10",
+        customerId: CUSTOMER_ID,
+        subscriptionId: "sub-row-1",
+        status: "PENDING",
+        lastEventAt: new Date(BASE_TS * 1000),
+        lastEventFinalityRank: 0,
+      }),
+      upsertDispute: async (input) => { upsertInput = input; return { id: "dispute-10" }; },
+      hasActiveRevocation: async () => false,
+      resolveAccessRevocationsByDispute: async () => {},
+      findSubscriptionById: async () => baseSubscription(),
+      updateCustomerMembershipStatus: async () => {},
+      recordProcessedEvent: async () => {},
+    };
+    const event = makeEvent({
+      id: "evt_same_instant_terminal",
+      created: BASE_TS, // identical second to the existing dispute's lastEventAt
+      type: "charge.dispute.closed",
+      data: { object: { id: "dp_10", status: "won", amount: 3900 } },
+    });
+    const result = await processStripeWebhookEvent(event, deps);
+    assert.equal(upsertInput.status, "WON", "the terminal status must apply even though its timestamp is not STRICTLY newer");
+    assert.deepEqual(result, { ok: true, deduped: false, action: "dispute_won_restored" });
+  });
+
+  it("WH.50 — no association at all (no PaymentIntent match, no existing Dispute row) refuses rather than guessing which customer this belongs to", async () => {
+    const deps: WebhookHandlerDeps = {
+      findProcessedEvent: async () => null,
+      findBillingTransactionByProviderTransactionId: async () => null,
+      findDisputeByProviderDisputeId: async () => null,
+      recordProcessedEvent: async () => { throw new Error("must not record a refused event as processed"); },
+    };
+    const event = makeEvent({
+      type: "charge.dispute.created",
+      data: { object: { id: "dp_11", status: "needs_response", amount: 3900, payment_intent: "pi_unknown" } },
+    });
+    const result = await processStripeWebhookEvent(event, deps);
+    assert.deepEqual(result, { ok: false, reason: "dispute_association_not_found" });
+  });
+});
+
 // ── Unrecognized events — ignored, not errors ───────────────────────────────
 
 describe("processStripeWebhookEvent — unhandled event types", () => {
