@@ -72,10 +72,42 @@ vi.mock("./cloudinary-orphan-sweep.server", () => ({
   sweepCustomerForErasure: vi.fn().mockResolvedValue({ checked: 0, deleted: 0, skippedRecent: 0, skippedReferenced: 0, failedAssets: [], rateLimited: false }),
 }));
 
+// QA export-completeness fix (2026-11-13): these three are real, pure URL
+// builders already covered by their own dedicated test files
+// (cloudinary-admin.server.test.ts, my-naia-model.server tests,
+// fashn-tryon-service.test.ts) — mocked here purely so
+// compileCustomerExport's PLUMBING into them is deterministic and testable,
+// not to re-verify their own internal signing logic.
+vi.mock("./cloudinary-admin.server", () => ({
+  getCloudinaryConfig: vi.fn(() => ({ cloudName: "synthetic", apiKey: "k", apiSecret: "s" })),
+  buildPrivateDownloadUrl: vi.fn(
+    (_cfg: unknown, publicId: string) => `https://synthetic.cloudinary.test/closet-signed/${publicId}`,
+  ),
+}));
+vi.mock("./ai/my-naia-model.server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./ai/my-naia-model.server")>();
+  return {
+    ...actual,
+    buildModelPreviewUrl: vi.fn((publicId: string) => `https://synthetic.cloudinary.test/model-signed/${publicId}`),
+  };
+});
+vi.mock("./ai/fashn-tryon-service.server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./ai/fashn-tryon-service.server")>();
+  return {
+    ...actual,
+    buildTryOnResultUrl: vi.fn(
+      (customerId: string, jobId: string) => `https://synthetic.cloudinary.test/vto-signed/${customerId}/${jobId}`,
+    ),
+  };
+});
+
 import prisma from "~/db.server";
 import { eraseCustomerData, compileCustomerExport } from "./customer-privacy.server";
 import { recordPendingCustomerErasureFailure } from "./customer-erasure-failures.server";
 import { sweepCustomerForErasure } from "./cloudinary-orphan-sweep.server";
+import { buildPrivateDownloadUrl } from "./cloudinary-admin.server";
+import { buildModelPreviewUrl } from "./ai/my-naia-model.server";
+import { buildTryOnResultUrl } from "./ai/fashn-tryon-service.server";
 
 const mockFindUnique = () => (prisma as any).customer.findUnique as ReturnType<typeof vi.fn>;
 const mockDelete = () => (prisma as any).customer.delete as ReturnType<typeof vi.fn>;
@@ -250,8 +282,8 @@ describe("compileCustomerExport — synthetic customer, mocked DB", () => {
     expect(result).toBeNull();
   });
 
-  it("7 — includes every data category, and separates customer fields from relation data", async () => {
-    mockFindUnique().mockResolvedValueOnce({
+  function baseSyntheticCustomer(overrides: Record<string, unknown> = {}) {
+    return {
       id: SYNTHETIC_CUSTOMER_ID,
       email: "synthetic@test.invalid",
       shopifyCustomerId: "synthetic-shopify-id",
@@ -275,16 +307,192 @@ describe("compileCustomerExport — synthetic customer, mocked DB", () => {
       tasteEvidence: [],
       styleTendencies: [],
       personalisedTrendEditUsage: [],
-    });
+      sessions: [],
+      identityLinkRequests: [],
+      ...overrides,
+    };
+  }
+
+  it("7 — includes every data category, and separates customer fields from relation data", async () => {
+    mockFindUnique().mockResolvedValueOnce(baseSyntheticCustomer());
 
     const result = await compileCustomerExport(SYNTHETIC_CUSTOMER_ID);
 
     expect(result).not.toBeNull();
     expect(result!.customer.email).toBe("synthetic@test.invalid");
     expect((result!.customer as any).closetItems).toBeUndefined(); // relation data moved out, not duplicated
-    expect(result!.closet).toEqual([{ id: "item-1", name: "Synthetic Jacket" }]);
     expect(result!.stylePassport).toEqual({ completed: true });
     expect(result!.note).toMatch(/FASHN|Anthropic|Bodygram/); // honest about what this export does NOT cover
+  });
+
+  describe("QA fix (2026-11-13) — usable image references", () => {
+    it("Closet items get a signed download URL built from their publicId+format, alongside the existing record", async () => {
+      mockFindUnique().mockResolvedValueOnce(
+        baseSyntheticCustomer({
+          closetItems: [{ id: "item-1", name: "Synthetic Jacket", imagePublicId: "naia-wardrobe/cust-1/jacket", imageFormat: "jpg" }],
+        }),
+      );
+
+      const result = await compileCustomerExport(SYNTHETIC_CUSTOMER_ID);
+
+      expect((result!.closet[0] as any).name).toBe("Synthetic Jacket"); // original fields preserved
+      expect((result!.closet[0] as any).downloadUrl).toBe(
+        "https://synthetic.cloudinary.test/closet-signed/naia-wardrobe/cust-1/jacket",
+      );
+      expect(buildPrivateDownloadUrl).toHaveBeenCalledWith(
+        expect.anything(),
+        "naia-wardrobe/cust-1/jacket",
+        "jpg",
+        "private",
+      );
+    });
+
+    it("a Closet item with no imagePublicId gets downloadUrl: null, not a broken call", async () => {
+      mockFindUnique().mockResolvedValueOnce(
+        baseSyntheticCustomer({ closetItems: [{ id: "item-1", name: "No Photo Yet", imagePublicId: null, imageFormat: null }] }),
+      );
+      const result = await compileCustomerExport(SYNTHETIC_CUSTOMER_ID);
+      expect((result!.closet[0] as any).downloadUrl).toBeNull();
+    });
+
+    it("NaiaModel gets a signed download URL for the BODY photo only — facePublicId is left exactly as-is, never signed", async () => {
+      mockFindUnique().mockResolvedValueOnce(
+        baseSyntheticCustomer({
+          naiaModel: {
+            bodyPublicId: "naia-wardrobe/cust-1/body",
+            bodyFormat: "jpg",
+            facePublicId: "naia-wardrobe/cust-1/face",
+            faceFormat: "jpg",
+            deliveryType: "private",
+          },
+        }),
+      );
+
+      const result = await compileCustomerExport(SYNTHETIC_CUSTOMER_ID);
+
+      expect((result!.naiaModel as any).bodyDownloadUrl).toBe(
+        "https://synthetic.cloudinary.test/model-signed/naia-wardrobe/cust-1/body",
+      );
+      // The raw facePublicId is still present (completeness — nothing removed)...
+      expect((result!.naiaModel as any).facePublicId).toBe("naia-wardrobe/cust-1/face");
+      // ...but never passed to a URL-signing function. Only one signing call,
+      // and it's for the body photo.
+      expect(buildModelPreviewUrl).toHaveBeenCalledTimes(1);
+      expect(buildModelPreviewUrl).toHaveBeenCalledWith("naia-wardrobe/cust-1/body", "jpg", "private");
+    });
+
+    it("naiaModel: null (no model saved yet) passes through unchanged, no crash", async () => {
+      mockFindUnique().mockResolvedValueOnce(baseSyntheticCustomer({ naiaModel: null }));
+      const result = await compileCustomerExport(SYNTHETIC_CUSTOMER_ID);
+      expect(result!.naiaModel).toBeNull();
+      expect(buildModelPreviewUrl).not.toHaveBeenCalled();
+    });
+
+    it("a COMPLETED VirtualTryOnJob gets a signed result download URL — the previous version had no image reference at all for these", async () => {
+      mockFindUnique().mockResolvedValueOnce(
+        baseSyntheticCustomer({ tryOnJobs: [{ id: "job-1", status: "COMPLETED", productHandle: "dress-1" }] }),
+      );
+
+      const result = await compileCustomerExport(SYNTHETIC_CUSTOMER_ID);
+
+      expect((result!.virtualTryOnJobs[0] as any).downloadUrl).toBe(
+        `https://synthetic.cloudinary.test/vto-signed/${SYNTHETIC_CUSTOMER_ID}/job-1`,
+      );
+      expect(buildTryOnResultUrl).toHaveBeenCalledWith(SYNTHETIC_CUSTOMER_ID, "job-1");
+    });
+
+    it("a non-COMPLETED job (FAILED/PENDING/etc.) gets downloadUrl: null — there is no real result to link to", async () => {
+      mockFindUnique().mockResolvedValueOnce(
+        baseSyntheticCustomer({ tryOnJobs: [{ id: "job-2", status: "FAILED", productHandle: "dress-2" }] }),
+      );
+      const result = await compileCustomerExport(SYNTHETIC_CUSTOMER_ID);
+      expect((result!.virtualTryOnJobs[0] as any).downloadUrl).toBeNull();
+      expect(buildTryOnResultUrl).not.toHaveBeenCalled();
+    });
+
+    it("SelfieAnalysis is left completely unchanged — no signed URL is ever generated for face photos, matching passport.selfie.tsx's own stricter contract", async () => {
+      mockFindUnique().mockResolvedValueOnce(
+        baseSyntheticCustomer({ selfieAnalysis: { photoPublicId: "naia-wardrobe/cust-1/selfie", photoFormat: "jpg" } }),
+      );
+      const result = await compileCustomerExport(SYNTHETIC_CUSTOMER_ID);
+      expect(result!.selfieAnalysis).toEqual({ photoPublicId: "naia-wardrobe/cust-1/selfie", photoFormat: "jpg" });
+    });
+  });
+
+  describe("QA fix (2026-11-13) — export completeness, scrubbed of security material", () => {
+    it("login sessions are included with only customer-meaningful fields — tokenHash and shopifyIdTokenHint never appear", async () => {
+      mockFindUnique().mockResolvedValueOnce(
+        baseSyntheticCustomer({
+          sessions: [
+            {
+              id: "sess-1",
+              tokenHash: "super-secret-hash-must-never-leak",
+              createdAt: "2026-11-01T00:00:00.000Z",
+              lastSeenAt: "2026-11-10T00:00:00.000Z",
+              expiresAt: "2026-12-01T00:00:00.000Z",
+              userAgent: "Mozilla/5.0 synthetic",
+              shopifyIdTokenHint: "eyJhbGciOiJSUzI1NiJ9.synthetic-raw-jwt-must-never-leak",
+            },
+          ],
+        }),
+      );
+
+      const result = await compileCustomerExport(SYNTHETIC_CUSTOMER_ID);
+      const serialized = JSON.stringify(result);
+
+      expect(result!.loginSessions).toEqual([
+        {
+          id: "sess-1",
+          createdAt: "2026-11-01T00:00:00.000Z",
+          lastSeenAt: "2026-11-10T00:00:00.000Z",
+          expiresAt: "2026-12-01T00:00:00.000Z",
+          userAgent: "Mozilla/5.0 synthetic",
+        },
+      ]);
+      expect(serialized).not.toContain("super-secret-hash-must-never-leak");
+      expect(serialized).not.toContain("synthetic-raw-jwt-must-never-leak");
+    });
+
+    it("identity-link requests are included with only customer-meaningful fields — codeHash never appears", async () => {
+      mockFindUnique().mockResolvedValueOnce(
+        baseSyntheticCustomer({
+          identityLinkRequests: [
+            {
+              id: "link-1",
+              clerkUserId: "clerk-user-abc",
+              email: "collision@test.invalid",
+              codeHash: "super-secret-code-hash-must-never-leak",
+              attemptCount: 1,
+              expiresAt: "2026-11-15T00:00:00.000Z",
+              confirmedAt: null,
+              createdAt: "2026-11-13T00:00:00.000Z",
+            },
+          ],
+        }),
+      );
+
+      const result = await compileCustomerExport(SYNTHETIC_CUSTOMER_ID);
+      const serialized = JSON.stringify(result);
+
+      expect(result!.identityLinkRequests).toEqual([
+        {
+          id: "link-1",
+          email: "collision@test.invalid",
+          attemptCount: 1,
+          expiresAt: "2026-11-15T00:00:00.000Z",
+          confirmedAt: null,
+          createdAt: "2026-11-13T00:00:00.000Z",
+        },
+      ]);
+      expect(serialized).not.toContain("super-secret-code-hash-must-never-leak");
+    });
+
+    it("no login sessions / identity-link requests — both export as empty arrays, not undefined or a crash", async () => {
+      mockFindUnique().mockResolvedValueOnce(baseSyntheticCustomer({ sessions: [], identityLinkRequests: [] }));
+      const result = await compileCustomerExport(SYNTHETIC_CUSTOMER_ID);
+      expect(result!.loginSessions).toEqual([]);
+      expect(result!.identityLinkRequests).toEqual([]);
+    });
   });
 });
 

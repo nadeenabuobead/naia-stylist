@@ -356,6 +356,9 @@ export default function BuyOrSkipResult() {
           {finalThought && (
             <p className="bos-result-summary">{finalThought}</p>
           )}
+          <p className="bos-result-saved-note" data-testid="bos-result-saved-note">
+            This look is saved to your My Decisions.
+          </p>
           {analysis.vtoEnabled && analysis.vtoSupported && (
             <VtoExperience
               source="buyskip"
