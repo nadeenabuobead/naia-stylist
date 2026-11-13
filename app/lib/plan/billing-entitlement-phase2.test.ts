@@ -42,6 +42,7 @@ import {
   resolveEffectiveContext,
   isSubscriptionStatusEntitled,
   isPastDueGraceExpired,
+  getPastDueGraceDaysRemaining,
   reserveStyleMeSlot,
   reserveClosetSlot,
   type EffectiveContextDeps,
@@ -190,6 +191,7 @@ function activeMonthlySubscription(overrides: Partial<EntitledSubscription> = {}
     currentPeriodStart: utc(2026, 11, 1),
     currentPeriodEnd: utc(2026, 12, 1),
     status: "ACTIVE",
+    pastDueSince: null,
     ...overrides,
   };
 }
@@ -573,6 +575,48 @@ describe("PH2-14 — PAST_DUE grace period is time-bounded, independent of the p
   });
 });
 
+// ── 15 — customer-facing PAST_DUE messaging (Plan & Usage) needs a days-
+// remaining figure, computed from the SAME boundary isPastDueGraceExpired
+// already enforces — never a second, independently-defined grace period ──
+describe("PH2-16 — getPastDueGraceDaysRemaining: display-only, never consulted for access", () => {
+  it("returns null when pastDueSince is null — not currently PAST_DUE at all", () => {
+    assert.equal(getPastDueGraceDaysRemaining(null, new Date("2026-11-10T00:00:00Z")), null);
+  });
+
+  it("returns null once the grace period has expired — matches isPastDueGraceExpired exactly, never shows a stale countdown for access already denied", () => {
+    const now = new Date("2026-11-10T00:00:00Z");
+    const enteredPastDue = new Date("2026-11-01T00:00:00Z"); // 9 days ago — expired
+    assert.equal(isPastDueGraceExpired(enteredPastDue, now), true);
+    assert.equal(getPastDueGraceDaysRemaining(enteredPastDue, now), null);
+  });
+
+  it("returns 7 on the day the subscription first goes PAST_DUE (zero elapsed time)", () => {
+    const now = new Date("2026-11-01T00:00:00Z");
+    assert.equal(getPastDueGraceDaysRemaining(now, now), 7);
+  });
+
+  it("returns 2 with 5 days elapsed of the 7-day window", () => {
+    const now = new Date("2026-11-10T00:00:00Z");
+    const enteredPastDue = new Date("2026-11-05T00:00:00Z"); // 5 days ago
+    assert.equal(getPastDueGraceDaysRemaining(enteredPastDue, now), 2);
+  });
+
+  it("rounds a partial day UP, never down — a customer must never be told 0 days left while still genuinely entitled", () => {
+    const enteredPastDue = new Date("2026-11-01T00:00:00Z");
+    // 6 days and 1 hour elapsed — under a day remains, must still show 1, not 0.
+    const now = new Date(enteredPastDue.getTime() + (6 * 24 + 1) * 60 * 60 * 1000);
+    assert.equal(isPastDueGraceExpired(enteredPastDue, now), false, "precondition: still within grace");
+    assert.equal(getPastDueGraceDaysRemaining(enteredPastDue, now), 1);
+  });
+
+  it("never returns a negative number, even called a moment before isPastDueGraceExpired would flip true", () => {
+    const enteredPastDue = new Date("2026-11-01T00:00:00Z");
+    const justUnder = new Date(enteredPastDue.getTime() + 7 * 24 * 60 * 60 * 1000 - 1);
+    const result = getPastDueGraceDaysRemaining(enteredPastDue, justUnder);
+    assert.ok(result !== null && result >= 0, "must be a non-negative number, not null, right up to the boundary");
+  });
+});
+
 // ── 13 — a failed/unpaid renewal must never give UNLIMITED usage during the
 // (otherwise correctly 7-day-bounded) PAST_DUE grace period ────────────────
 //
@@ -608,6 +652,7 @@ describe("PH2-15 — countingEnd prevents unlimited usage when a stale, unrenewe
       currentPeriodStart: futurePeriodStart,
       currentPeriodEnd: futurePeriodEnd,
       status: "ACTIVE",
+      pastDueSince: null,
     };
     const deps: EffectiveContextDeps = {
       getSubscription: async () => sub,
@@ -627,6 +672,7 @@ describe("PH2-15 — countingEnd prevents unlimited usage when a stale, unrenewe
       currentPeriodStart: stalePeriodStart,
       currentPeriodEnd: stalePeriodEnd,
       status: "PAST_DUE",
+      pastDueSince: stalePeriodEnd,
     };
     const deps: EffectiveContextDeps = {
       getSubscription: async () => pastDueSub,
@@ -651,6 +697,7 @@ describe("PH2-15 — countingEnd prevents unlimited usage when a stale, unrenewe
       currentPeriodStart: stalePeriodStart,
       currentPeriodEnd: stalePeriodEnd,
       status: "PAST_DUE",
+      pastDueSince: stalePeriodEnd,
     };
     const deps: EffectiveContextDeps = {
       getSubscription: async () => pastDueSub,
