@@ -40,6 +40,7 @@ import {
   createOrFindTryOnJob,
   advanceTryOnJob,
   checkCustomerCooldown,
+  computeRequestFingerprint,
   type CreateJobParams,
 } from "./my-naia-model.server.js";
 import {
@@ -201,14 +202,16 @@ export function checkResultOwnership(
 // no longer exists for this customer. Call this immediately before
 // persisting any result, and refuse to proceed if it returns false.
 //
-// Known limitation: this confirms SOME current body photo exists for this
-// customer and belongs to them — not that it is byte-identical to the exact
-// photo used at submission. bodyPublicId is never persisted on the
-// VirtualTryOnJob row itself (only one-way hashed into requestFingerprint),
-// so a customer who deletes their photo and uploads a *different* one while
-// a job is in flight will still pass this check. Closing that narrower gap
-// would need a new column recording the exact publicId a job used, which is
-// a separate, not-yet-approved schema change.
+// Exact-identity check: a customer who deletes their photo and uploads a
+// *different* one while the same job is in flight must still fail — the
+// job was submitted against the original photo, not the replacement.
+// requestFingerprint (stored on VirtualTryOnJob at creation, see
+// computeRequestFingerprint) is a deterministic SHA-256 of
+// customerId:productHandle:bodyPublicId. Recomputing it from the CURRENT
+// NaiaModel's bodyPublicId and comparing against the stored value proves
+// exact identity without needing bodyPublicId itself to be persisted on the
+// job row — no schema change required. A missing stored fingerprint is
+// treated as a mismatch (fail closed), not skipped.
 
 export type FindNaiaModelForValidationFn = (
   naiaModelId: string,
@@ -226,13 +229,18 @@ async function _findNaiaModelForValidation(
 export async function isSourcePhotoStillValid(
   naiaModelId: string | null,
   jobCustomerId: string,
+  productHandle: string,
+  requestFingerprint: string | null,
   _findNaiaModel: FindNaiaModelForValidationFn = _findNaiaModelForValidation,
 ): Promise<boolean> {
   if (!naiaModelId) return false;
   const model = await _findNaiaModel(naiaModelId);
   if (!model) return false;
   if (model.customerId !== jobCustomerId) return false;
-  return typeof model.bodyPublicId === "string" && model.bodyPublicId.length > 0;
+  if (typeof model.bodyPublicId !== "string" || model.bodyPublicId.length === 0) return false;
+  if (!requestFingerprint) return false;
+  const currentFingerprint = computeRequestFingerprint(jobCustomerId, productHandle, model.bodyPublicId);
+  return currentFingerprint === requestFingerprint;
 }
 
 // ── submitTryOnJob ────────────────────────────────────────────────────────────

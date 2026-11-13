@@ -25,6 +25,7 @@ import {
   type FindNaiaModelForValidationFn,
 } from "./fashn-tryon-service.server.js";
 import { isValidModelImageDataUrl } from "./fashn-try-on.server.js";
+import { computeRequestFingerprint } from "./my-naia-model.server.js";
 import { VIRTUAL_TRY_ON_ENABLED, NAIA_COMPONENT_MEDIA_MAP } from "./naia-product-media.js";
 import type { VirtualTryOnJobRecord, TryOnJobStatus } from "./virtual-try-on.types.js";
 
@@ -207,9 +208,15 @@ describe("§3 Ownership checks", () => {
   });
 });
 
-// ── §3b Source-photo validity (deletion-during-processing guard) ──────────────
+// ── §3b Source-photo validity (deletion-during-processing + exact-identity guard) ──
 
-describe("§3b isSourcePhotoStillValid — deletion-during-processing guard", () => {
+describe("§3b isSourcePhotoStillValid — deletion-during-processing + exact-identity guard", () => {
+  const CUSTOMER_ID = "cust-001";
+  const PRODUCT_HANDLE = "silk-wrap-dress";
+  const BODY_PUBLIC_ID_A = "naia-wardrobe/cust-001/body-photo-a";
+  const BODY_PUBLIC_ID_B = "naia-wardrobe/cust-001/body-photo-b";
+  const FINGERPRINT_A = computeRequestFingerprint(CUSTOMER_ID, PRODUCT_HANDLE, BODY_PUBLIC_ID_A);
+
   function makeFinder(
     result: { customerId: string; bodyPublicId: string | null } | null,
   ): FindNaiaModelForValidationFn {
@@ -222,7 +229,7 @@ describe("§3b isSourcePhotoStillValid — deletion-during-processing guard", ()
       called = true;
       return null;
     };
-    const ok = await isSourcePhotoStillValid(null, "cust-001", finder);
+    const ok = await isSourcePhotoStillValid(null, CUSTOMER_ID, PRODUCT_HANDLE, FINGERPRINT_A, finder);
     assert.ok(!ok);
     assert.ok(!called, "must not query DB when naiaModelId is null");
   });
@@ -230,7 +237,9 @@ describe("§3b isSourcePhotoStillValid — deletion-during-processing guard", ()
   it("SV02 model not found (deleted) returns false", async () => {
     const ok = await isSourcePhotoStillValid(
       "model-001",
-      "cust-001",
+      CUSTOMER_ID,
+      PRODUCT_HANDLE,
+      FINGERPRINT_A,
       makeFinder(null),
     );
     assert.ok(!ok);
@@ -239,36 +248,43 @@ describe("§3b isSourcePhotoStillValid — deletion-during-processing guard", ()
   it("SV03 model belongs to a different customer returns false", async () => {
     const ok = await isSourcePhotoStillValid(
       "model-001",
-      "cust-001",
-      makeFinder({ customerId: "cust-002", bodyPublicId: "naia/body/abc" }),
+      CUSTOMER_ID,
+      PRODUCT_HANDLE,
+      FINGERPRINT_A,
+      makeFinder({ customerId: "cust-002", bodyPublicId: BODY_PUBLIC_ID_A }),
     );
     assert.ok(!ok, "cross-customer model must never validate");
   });
 
-  it("SV04 model found but bodyPublicId is null (photo removed) returns false", () =>
-    (async () => {
-      const ok = await isSourcePhotoStillValid(
-        "model-001",
-        "cust-001",
-        makeFinder({ customerId: "cust-001", bodyPublicId: null }),
-      );
-      assert.ok(!ok);
-    })());
-
-  it("SV05 model found but bodyPublicId is empty string returns false", async () => {
+  it("SV04 model found but bodyPublicId is null (photo removed) returns false", async () => {
     const ok = await isSourcePhotoStillValid(
       "model-001",
-      "cust-001",
-      makeFinder({ customerId: "cust-001", bodyPublicId: "" }),
+      CUSTOMER_ID,
+      PRODUCT_HANDLE,
+      FINGERPRINT_A,
+      makeFinder({ customerId: CUSTOMER_ID, bodyPublicId: null }),
     );
     assert.ok(!ok);
   });
 
-  it("SV06 matching customer with a non-empty bodyPublicId returns true", async () => {
+  it("SV05 model found but bodyPublicId is empty string returns false", async () => {
     const ok = await isSourcePhotoStillValid(
       "model-001",
-      "cust-001",
-      makeFinder({ customerId: "cust-001", bodyPublicId: "naia/body/abc" }),
+      CUSTOMER_ID,
+      PRODUCT_HANDLE,
+      FINGERPRINT_A,
+      makeFinder({ customerId: CUSTOMER_ID, bodyPublicId: "" }),
+    );
+    assert.ok(!ok);
+  });
+
+  it("SV06 matching customer with the ORIGINAL photo and a matching fingerprint returns true", async () => {
+    const ok = await isSourcePhotoStillValid(
+      "model-001",
+      CUSTOMER_ID,
+      PRODUCT_HANDLE,
+      FINGERPRINT_A,
+      makeFinder({ customerId: CUSTOMER_ID, bodyPublicId: BODY_PUBLIC_ID_A }),
     );
     assert.ok(ok);
   });
@@ -277,8 +293,73 @@ describe("§3b isSourcePhotoStillValid — deletion-during-processing guard", ()
     // Exercises the production default (_findNaiaModelForValidation) via the
     // null short-circuit only — confirms the default param wiring compiles
     // and runs without needing a live DB, since null never reaches prisma.
-    const ok = await isSourcePhotoStillValid(null, "cust-001");
+    const ok = await isSourcePhotoStillValid(null, CUSTOMER_ID, PRODUCT_HANDLE, FINGERPRINT_A);
     assert.equal(ok, false);
+  });
+
+  it("SV08 original photo deleted and replaced with a DIFFERENT photo — same customer, same product, but the fingerprint no longer matches — returns false", async () => {
+    // The replacement is a legitimately-owned, non-empty, current photo —
+    // SV01-06's checks would all pass on it alone. Only the fingerprint
+    // recompute catches that it isn't the photo this job was submitted with.
+    const ok = await isSourcePhotoStillValid(
+      "model-001",
+      CUSTOMER_ID,
+      PRODUCT_HANDLE,
+      FINGERPRINT_A, // fingerprint stored when the job was created against photo A
+      makeFinder({ customerId: CUSTOMER_ID, bodyPublicId: BODY_PUBLIC_ID_B }), // but B is current now
+    );
+    assert.ok(!ok, "a replacement photo must never satisfy a fingerprint recorded against the original");
+  });
+
+  it("SV09 missing stored requestFingerprint (null) fails closed even with a perfectly valid current photo", async () => {
+    const ok = await isSourcePhotoStillValid(
+      "model-001",
+      CUSTOMER_ID,
+      PRODUCT_HANDLE,
+      null,
+      makeFinder({ customerId: CUSTOMER_ID, bodyPublicId: BODY_PUBLIC_ID_A }),
+    );
+    assert.ok(!ok, "a missing fingerprint must be treated as unverifiable, not skipped");
+  });
+
+  it("SV10 missing stored requestFingerprint (empty string) also fails closed", async () => {
+    const ok = await isSourcePhotoStillValid(
+      "model-001",
+      CUSTOMER_ID,
+      PRODUCT_HANDLE,
+      "",
+      makeFinder({ customerId: CUSTOMER_ID, bodyPublicId: BODY_PUBLIC_ID_A }),
+    );
+    assert.ok(!ok);
+  });
+
+  it("SV11 a fingerprint computed for a DIFFERENT productHandle never matches — the hash is bound to the specific job's handle, not just the customer and photo", async () => {
+    const fingerprintForADifferentProduct = computeRequestFingerprint(
+      CUSTOMER_ID,
+      "a-different-product-handle",
+      BODY_PUBLIC_ID_A,
+    );
+    const ok = await isSourcePhotoStillValid(
+      "model-001",
+      CUSTOMER_ID,
+      PRODUCT_HANDLE, // the real job's own handle
+      fingerprintForADifferentProduct, // but the stored fingerprint is for a different one
+      makeFinder({ customerId: CUSTOMER_ID, bodyPublicId: BODY_PUBLIC_ID_A }),
+    );
+    assert.ok(!ok);
+  });
+
+  it("SV12 computeRequestFingerprint is reliably deterministic — same inputs always recompute the identical stored value", () => {
+    // Directly verifies requirement #1 of the fingerprint-validation task: the
+    // canonical function used at job creation (my-naia-model.server.ts) and
+    // the one used here at re-check time are the SAME function and produce
+    // byte-identical output for the same (customerId, productHandle,
+    // bodyPublicId) triple, with no hidden time- or randomness-dependence.
+    const a = computeRequestFingerprint(CUSTOMER_ID, PRODUCT_HANDLE, BODY_PUBLIC_ID_A);
+    const b = computeRequestFingerprint(CUSTOMER_ID, PRODUCT_HANDLE, BODY_PUBLIC_ID_A);
+    assert.equal(a, b);
+    assert.equal(a, FINGERPRINT_A);
+    assert.ok(a.length > 0);
   });
 });
 

@@ -122,7 +122,7 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     // been deleted (Settings, or account erasure) while this job sat at
     // FASHN. Re-check BEFORE persisting anything: if the source is gone,
     // never upload or expose the result at all.
-    if (!(await isSourcePhotoStillValid(job.naiaModelId, job.customerId))) {
+    if (!(await isSourcePhotoStillValid(job.naiaModelId, job.customerId, job.productHandle, job.requestFingerprint))) {
       await advanceTryOnJob(job as unknown as VirtualTryOnJobRecord, "FAILED", {
         errorCode: "SOURCE_DELETED",
       });
@@ -145,7 +145,7 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     // an orphan: delete it, and if that deletion itself fails, durably
     // record it for retry rather than silently losing track of it — same
     // pattern already used for account-erasure Cloudinary failures.
-    if (!(await isSourcePhotoStillValid(job.naiaModelId, job.customerId))) {
+    if (!(await isSourcePhotoStillValid(job.naiaModelId, job.customerId, job.productHandle, job.requestFingerprint))) {
       const orphanPublicId = deriveTryOnResultPublicId(customer.id, job.id);
       const cleanup = await deleteCloudinaryAsset(orphanPublicId, "private");
       if (!cleanup.ok) {

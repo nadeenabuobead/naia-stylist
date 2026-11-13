@@ -10,6 +10,10 @@
 //   - duplicate callbacks/polls (guard re-runs safely every poll, idempotent)
 //   - cleanup failure (orphan asset deletion fails → durable PendingCloudinaryDeletion)
 //   - cross-customer access (ownership check still blocks before any FASHN call)
+//   - correct per-job wiring of productHandle/requestFingerprint into the guard
+//     (the exact-identity fingerprint comparison itself is unit-tested in
+//     fashn-tryon-service.test.ts §3b SV08-SV11, since isSourcePhotoStillValid
+//     is mocked here)
 //
 // checkResultOwnership and deriveTryOnResultPublicId are the REAL, pure
 // implementations. isSourcePhotoStillValid, uploadTryOnResult,
@@ -70,12 +74,16 @@ const CUSTOMER_ID = "cust_001";
 const OTHER_CUSTOMER_ID = "cust_999";
 const JOB_ID = "job_001";
 const MODEL_ID = "model_001";
+const PRODUCT_HANDLE = "silk-wrap-dress";
+const REQUEST_FINGERPRINT = "fp-original-photo-abc123";
 
 function mockJob(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     id: JOB_ID,
     customerId: CUSTOMER_ID,
     naiaModelId: MODEL_ID,
+    productHandle: PRODUCT_HANDLE,
+    requestFingerprint: REQUEST_FINGERPRINT,
     status: "PROCESSING",
     predictionId: "pred_001",
     ...overrides,
@@ -133,7 +141,12 @@ describe("deletion during processing — pre-upload guard", () => {
 
     const res: any = await loader(args());
 
-    expect(isSourcePhotoStillValid).toHaveBeenCalledWith(MODEL_ID, CUSTOMER_ID);
+    expect(isSourcePhotoStillValid).toHaveBeenCalledWith(
+      MODEL_ID,
+      CUSTOMER_ID,
+      PRODUCT_HANDLE,
+      REQUEST_FINGERPRINT,
+    );
     expect(uploadTryOnResult).not.toHaveBeenCalled();
     expect(advanceTryOnJob).toHaveBeenCalledWith(
       expect.objectContaining({ id: JOB_ID }),
@@ -142,6 +155,24 @@ describe("deletion during processing — pre-upload guard", () => {
     );
     expect(res.data.status).toBe("FAILED");
     expect(res.data.resultUrl).toBeUndefined();
+  });
+
+  it("passes the JOB'S OWN productHandle and requestFingerprint through, not another job's — confirms correct per-job wiring, not a hardcoded/shared value", async () => {
+    (prisma.virtualTryOnJob.findUnique as any).mockResolvedValue(
+      mockJob({ productHandle: "a-different-product", requestFingerprint: "fp-different-job-xyz789" }),
+    );
+    mockFashnCompleted();
+    (isSourcePhotoStillValid as any).mockResolvedValue(true);
+    (uploadTryOnResult as any).mockResolvedValue({ ok: true });
+
+    await loader(args());
+
+    expect(isSourcePhotoStillValid).toHaveBeenCalledWith(
+      MODEL_ID,
+      CUSTOMER_ID,
+      "a-different-product",
+      "fp-different-job-xyz789",
+    );
   });
 });
 
