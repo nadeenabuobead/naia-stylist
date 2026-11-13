@@ -30,6 +30,10 @@ database.sqlite
 .react-router/
 .vercel
 .env*
+# Phase 2 ops: .env.example contains variable names/descriptions only,
+# never secrets or real values — it's meant to be committed as a
+# provisioning reference, unlike every other .env* pattern above.
+!.env.example
 
 # Phase 4A5 dev-only call cap state (never commit)
 .dev-tryon-cap.json
