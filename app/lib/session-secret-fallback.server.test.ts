@@ -17,8 +17,17 @@ test("session.server: throws at import time instead of falling back to the publi
   const original = process.env.SESSION_SECRET;
   delete process.env.SESSION_SECRET;
   try {
+    // Not a string literal at the call site — TypeScript only attempts to
+    // statically resolve a dynamic import() to a real module (and therefore
+    // a real type) when its specifier IS a literal; a variable reference is
+    // treated as unresolvable and typed Promise<any>, same as any other
+    // runtime-computed specifier. The cache-busting query string itself is
+    // unchanged: it still forces a fresh module evaluation so this test
+    // re-triggers the top-level throw regardless of whether some other test
+    // in the same process already imported (and cached) session.server.ts.
+    const freshModuleSpecifier: string = "./session.server.ts?unconfigured-secret-test";
     await assert.rejects(
-      () => import("./session.server.ts?unconfigured-secret-test"),
+      () => import(freshModuleSpecifier),
       /SESSION_SECRET/,
     );
   } finally {
