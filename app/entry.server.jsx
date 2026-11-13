@@ -5,6 +5,7 @@ import { createReadableStreamFromReadable } from "@react-router/node";
 import { isbot } from "isbot";
 import { addDocumentResponseHeaders } from "./shopify.server";
 import { captureError } from "./lib/error-tracking.server";
+import { ensureFrameAncestorsDirective } from "./lib/content-security-policy.server";
 
 export const streamTimeout = 5000;
 
@@ -26,16 +27,21 @@ export default async function handleRequest(
   // root.jsx's <head> is spec-defined to be ignored for frame-ancestors
   // (meta-delivered CSP cannot carry it; the framing decision is already
   // made by the time the HTML is parsed), so it was never actually
-  // enforced. This carries the exact same intended value forward as a real
-  // header, only for the requests Shopify's own helper doesn't cover --
-  // never overriding the dynamic, shop-scoped value it sets for embedded
-  // admin routes.
-  if (!responseHeaders.has("Content-Security-Policy")) {
-    responseHeaders.set(
-      "Content-Security-Policy",
-      "frame-ancestors https://admin.shopify.com https://*.myshopify.com;",
-    );
-  }
+  // enforced.
+  //
+  // ensureFrameAncestorsDirective checks for the frame-ancestors
+  // DIRECTIVE specifically, not just whether a Content-Security-Policy
+  // header exists -- a header that set e.g. script-src only, with no
+  // frame-ancestors, must still get one appended rather than being left
+  // as-is. It never touches an existing frame-ancestors directive, so
+  // Shopify's own dynamic, shop-scoped value for embedded-admin routes is
+  // always preserved unchanged. Customer-facing routes, which have no
+  // confirmed legitimate embedding use case anywhere in this app, get the
+  // strictest value: frame-ancestors 'none' -- no site may frame them.
+  responseHeaders.set(
+    "Content-Security-Policy",
+    ensureFrameAncestorsDirective(responseHeaders.get("Content-Security-Policy")),
+  );
   const userAgent = request.headers.get("user-agent");
   const callbackName = isbot(userAgent ?? "") ? "onAllReady" : "onShellReady";
 
