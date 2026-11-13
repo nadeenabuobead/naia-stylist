@@ -27,7 +27,7 @@ function parseArgs(): { customerId: string | null } {
 
 async function getCustomerIds(targetId: string | null): Promise<string[]> {
   if (targetId) return [targetId];
-  const customers = await prisma.customer.findMany({ select: { id: true }, orderBy: { createdAt: "asc" } });
+  const customers: Array<{ id: string }> = await prisma.customer.findMany({ select: { id: true }, orderBy: { createdAt: "asc" } });
   return customers.map(c => c.id);
 }
 

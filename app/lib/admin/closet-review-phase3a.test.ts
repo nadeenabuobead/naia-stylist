@@ -616,7 +616,7 @@ describe("§CR-K — Form parsing contract", () => {
     // Simulate parseOverridesFromForm logic when value_shoulderCoverage="false"
     // The parser uses:  val === "true" ? true : false
     // NOT a truthiness check — "false" must not be treated as falsy
-    const formVal = "false"; // what BoolSelect submits when "No" is selected
+    const formVal: string = "false"; // what BoolSelect submits when "No" is selected
     const parsed = formVal === "" ? null : formVal === "true" ? true : false;
     assert.equal(typeof parsed, "boolean");
     assert.equal(parsed, false);
@@ -692,7 +692,7 @@ describe("§CR-K — Form parsing contract", () => {
 
   it("K.8 shoulderCoverage true→false AND false→true both survive form round-trip", () => {
     // false direction (already in K.4; re-verify here as part of both-directions contract)
-    const falseVal = "false";
+    const falseVal: string = "false";
     const parsedFalse = falseVal === "" ? null : falseVal === "true" ? true : false;
     assert.equal(parsedFalse, false);
     const validatedFalse = validateOverrides({ shoulderCoverage: parsedFalse });
@@ -700,7 +700,7 @@ describe("§CR-K — Form parsing contract", () => {
     assert.equal(validatedFalse.shoulderCoverage, false);
 
     // true direction (existing correction false → user changes to Yes → submit "true")
-    const trueVal = "true";
+    const trueVal: string = "true";
     const parsedTrue = trueVal === "" ? null : trueVal === "true" ? true : false;
     assert.equal(parsedTrue, true);
     const validatedTrue = validateOverrides({ shoulderCoverage: parsedTrue });

@@ -1127,7 +1127,7 @@ describe("derivePeriodTimestampFromAuthoritative", () => {
   });
 
   it("PERIOD.2 — a response with no items at all returns null, never throws", () => {
-    const snapshot = { id: "sub_1", status: "active", customer: "cus_1", cancel_at_period_end: false };
+    const snapshot = { id: "sub_1", status: "active", customer: "cus_1", cancel_at_period_end: false, items: undefined };
     assert.equal(derivePeriodTimestampFromAuthoritative(snapshot, "current_period_start"), null);
   });
 

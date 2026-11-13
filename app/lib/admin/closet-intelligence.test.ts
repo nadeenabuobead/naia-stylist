@@ -33,6 +33,7 @@
 //   §CI.30 ClosetItemRow.occasions defaults to [] when empty
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { RouterContextProvider } from "react-router";
 import {
   extractOverallConfidence,
   computeOverallStoredConfidence,
@@ -925,7 +926,7 @@ describe("§CI.19 route paths are registered under /app/naia-admin/*", () => {
     const mod = await import("~/routes/app.naia-admin");
     // No loader on the parent layout — each child handles its own auth.
     // A parent loader caused double authenticate.admin() calls → redirect loop.
-    expect(mod.loader).toBeUndefined();
+    expect((mod as { loader?: unknown }).loader).toBeUndefined();
     expect(typeof mod.default).toBe("function");
   });
 
@@ -968,7 +969,7 @@ describe("§CI.21 detail loader — requireNaiaAdminAccess called independently"
 describe("§CI.31 parent layout has no auth loader (redirect-loop fix)", () => {
   it("app.naia-admin shell exports no loader", async () => {
     const mod = await import("~/routes/app.naia-admin");
-    expect(mod.loader).toBeUndefined();
+    expect((mod as { loader?: unknown }).loader).toBeUndefined();
   });
 
   it("app.naia-admin shell still exports a default component", async () => {
@@ -998,7 +999,7 @@ describe("§CI.32 index redirect uses Shopify embedded-safe redirect helper", ()
     const request = new Request(
       "https://example.vercel.app/app/naia-admin?embedded=1&host=abc123&shop=test.myshopify.com",
     );
-    const response = await loader({ request, params: {}, context: {} as any });
+    const response = await loader({ request, params: {}, context: new RouterContextProvider(), unstable_pattern: "" });
     expect((response as Response).status).toBe(302);
     const location = (response as Response).headers.get("Location") ?? "";
     expect(location).toContain("/app/naia-admin/closet");
@@ -1012,7 +1013,7 @@ describe("§CI.32 index redirect uses Shopify embedded-safe redirect helper", ()
     const request = new Request(
       "https://example.vercel.app/app/naia-admin?embedded=1&host=abc123&shop=test.myshopify.com",
     );
-    await loader({ request, params: {}, context: {} as any });
+    await loader({ request, params: {}, context: new RouterContextProvider(), unstable_pattern: "" });
     // authenticate.admin() returns { redirect } — the loader must call it.
     const mockResult = await vi.mocked(authenticate.admin).mock.results.at(-1)?.value;
     expect(vi.isMockFunction(mockResult?.redirect)).toBe(true);
@@ -1034,7 +1035,7 @@ describe("§CI.33 index redirect loader — blocked shop returns 403", () => {
     const { loader } = await import("~/routes/app.naia-admin._index");
     const request = new Request("https://example.vercel.app/app/naia-admin");
     await expect(
-      loader({ request, params: {}, context: {} as any }),
+      loader({ request, params: {}, context: new RouterContextProvider(), unstable_pattern: "" }),
     ).rejects.toMatchObject({ status: 403 });
   });
 });
@@ -1064,7 +1065,7 @@ describe("§CI.34 existing Designer Intelligence routes remain unchanged", () =>
 describe("§CI.35 /app layout is bare Outlet with no server loader", () => {
   it("app.jsx does not export a server loader", async () => {
     const mod = await import("~/routes/app");
-    expect(mod.loader).toBeUndefined();
+    expect((mod as { loader?: unknown }).loader).toBeUndefined();
   });
 
   it("app.jsx default export is the layout component", async () => {

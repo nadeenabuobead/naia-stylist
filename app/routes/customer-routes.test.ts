@@ -1914,7 +1914,13 @@ describe("S — Main Overview: loader no longer fans out Promise.all over the po
     const nextExportIdx = src.indexOf("\nexport ", loaderIdx + 1);
     const loaderBody = src.slice(loaderIdx, nextExportIdx === -1 ? loaderIdx + 4000 : nextExportIdx);
     assert.ok(!loaderBody.includes("Promise.all("), "loader body no longer calls Promise.all");
-    assert.ok(loaderBody.includes("const sessions = await prisma.stylingSession.findMany"), "sessions fetched via a direct sequential await");
+    // Not one exact literal — `sessions` carries an explicit result type (prisma is
+    // untyped; see db.server.js), so "const sessions" and "= await prisma..." are no
+    // longer adjacent in the source text. Checking both halves independently keeps
+    // the real intent (a direct, non-batched sequential await) regardless of the
+    // type annotation's presence or length.
+    assert.ok(/\bconst sessions\b/.test(loaderBody), "sessions is declared with const");
+    assert.ok(loaderBody.includes("await prisma.stylingSession.findMany"), "sessions fetched via a direct sequential await");
     assert.ok(loaderBody.includes("const entitlement = await getEntitlementSummary"), "entitlement fetched via a direct sequential await");
   });
 

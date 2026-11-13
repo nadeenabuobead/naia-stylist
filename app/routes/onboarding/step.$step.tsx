@@ -257,6 +257,10 @@ export default function OnboardingStep() {
   const navigate = useNavigate();
 
   const storageKey = `naia_onboarding_v2:${draftScope}`;
+  // Hoisted so its narrowing survives into the colour grid's .map() callback below —
+  // narrowing a property-access chain (question.secondaryQuestion) does not reliably
+  // persist into a nested closure the way narrowing a plain local const does.
+  const secondaryQuestion = question.secondaryQuestion;
 
   const [singleValue,          setSingleValue]          = useState<string | null>(null);
   const [multiValue,           setMultiValue]           = useState<string[]>([]);
@@ -564,17 +568,17 @@ export default function OnboardingStep() {
             </div>
 
             {/* Secondary: avoid-colors — same screen */}
-            {question.secondaryQuestion && (
+            {secondaryQuestion && (
               <>
                 <hr className="ob-section-divider" />
-                <div className="ob-section-label">{question.secondaryQuestion.title}</div>
-                {question.secondaryQuestion.subtitle && (
-                  <p className="ob-subtitle" style={{ marginBottom: "16px" }}>{question.secondaryQuestion.subtitle}</p>
+                <div className="ob-section-label">{secondaryQuestion.title}</div>
+                {secondaryQuestion.subtitle && (
+                  <p className="ob-subtitle" style={{ marginBottom: "16px" }}>{secondaryQuestion.subtitle}</p>
                 )}
                 <div className="ob-color-grid">
-                  {question.secondaryQuestion.colors.map(color => {
+                  {secondaryQuestion.colors.map(color => {
                     const isSelected = secondaryMultiValue.includes(color.id);
-                    const isDisabled = !isSelected && secondaryMultiValue.length >= question.secondaryQuestion!.maxSelections;
+                    const isDisabled = !isSelected && secondaryMultiValue.length >= (secondaryQuestion.maxSelections ?? Infinity);
                     return (
                       <button
                         key={color.id}

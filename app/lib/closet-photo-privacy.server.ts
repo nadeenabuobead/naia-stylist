@@ -80,7 +80,7 @@ export async function deleteAllClosetPhotos(
 
   if (items.length > 0) {
     await prisma.closetItem.updateMany({
-      where: { id: { in: items.map((i) => i.id) } },
+      where: { id: { in: items.map((i: { id: string; imagePublicId: string | null }) => i.id) } },
       data: { imagePublicId: null, imageFormat: null, imageUrl: null, thumbnailUrl: null },
     });
   }
@@ -107,7 +107,13 @@ export async function listCustomerClosetPhotos(customerId: string): Promise<Clos
   });
 
   const cloudinaryConfig = getCloudinaryConfig();
-  return items.map((item) => ({
+  return items.map((item: {
+    id: string;
+    name: string | null;
+    imageUrl: string | null;
+    imagePublicId: string | null;
+    imageFormat: string | null;
+  }) => ({
     id: item.id,
     name: item.name,
     thumbnailUrl: resolveItemImage(

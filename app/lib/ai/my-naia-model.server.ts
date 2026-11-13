@@ -141,7 +141,7 @@ async function _updateJob(
 // Prevents two simultaneous requests from creating two active chargeable jobs.
 const _runJobTransaction: RunTransactionFn = (fn) =>
   prisma.$transaction(
-    (tx) =>
+    (tx: { virtualTryOnJob: { findFirst: (args: unknown) => Promise<unknown>; create: (args: unknown) => Promise<unknown> } }) =>
       fn({
         findActiveJob: (customerId) =>
           tx.virtualTryOnJob.findFirst({

@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { useLoaderData, useFetcher, Link } from "react-router";
 import { data, redirect, type LoaderFunctionArgs, type ActionFunctionArgs, type LinksFunction } from "react-router";
 import prisma from "../db.server";
-import type { Prisma } from "@prisma/client";
+import type { Prisma, Customer, ClosetItem, ClosetItemAdminReview, OnboardingProfile } from "@prisma/client";
 import { requireCurrentNaiaCustomer, getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { assessClosetEligibility, CLOSET_ELIGIBILITY_DISPLAY, isVtoCategoryAllowed, type ClosetTryOnEligibility } from "~/lib/ai/closet-eligibility";
 import { emitClosetItemAdded, recordJourneyEventAwaited } from "~/lib/ai/journey-events.server";
@@ -160,7 +160,10 @@ export function meta() {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const naiaCustomer = await requireCurrentNaiaCustomer(request);
-  const customer = await prisma.customer.findUnique({
+  const customer: (Customer & {
+    closetItems: Array<ClosetItem & { adminReview: ClosetItemAdminReview | null }>;
+    onboardingProfile: OnboardingProfile | null;
+  }) | null = await prisma.customer.findUnique({
     where: { id: naiaCustomer.id },
     include: {
       closetItems: { orderBy: { createdAt: "desc" }, include: { adminReview: true } },
@@ -2364,7 +2367,6 @@ export default function Closet() {
                     type="button"
                     className="cl-submit"
                     style={{ marginTop: "8px", background: "var(--naia-ink, var(--fg, #111))" }}
-                    disabled={addStep === "uploading"}
                     onClick={() => addFileInputRef.current?.click()}
                   >
                     CHOOSE ANOTHER PHOTO

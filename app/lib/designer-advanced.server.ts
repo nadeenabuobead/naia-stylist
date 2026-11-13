@@ -219,7 +219,26 @@ function pct(n: number, total: number): number {
 async function getEmotionalJourney(dateFrom: Date): Promise<EmotionalJourneyKPI> {
   try {
     // Fetch session + review pairs with emotional fields
-    const reviews = await prisma.postOutfitReview.findMany({
+    const reviews: Array<{
+      overallFeeling: number | null;
+      desiredFeelingAchieved: string | null;
+      wouldWearAgain: string | null;
+      confidenceBefore: number | null;
+      confidenceAfter: number | null;
+      didWearIt: string | null;
+      feelingAnswer: string | null;
+      session: {
+        currentMood: string | null;
+        desiredFeeling: string | null;
+        suggestions: Array<{
+          items: Array<{
+            productTitle: string | null;
+            closetItemId: string | null;
+            shopifyProductId: string | null;
+          }>;
+        }>;
+      };
+    }> = await prisma.postOutfitReview.findMany({
       where: { createdAt: { gte: dateFrom } },
       select: {
         overallFeeling: true,
@@ -290,9 +309,9 @@ async function getEmotionalJourney(dateFrom: Date): Promise<EmotionalJourneyKPI>
         ? withConf.reduce((s, r) => s + r.confidenceAfter!, 0) / withConf.length
         : null;
 
-    const postWear = reviews.filter((r) => (r as any).didWearIt != null);
+    const postWear = reviews.filter((r) => r.didWearIt != null);
     const postWearPositive = postWear.filter(
-      (r) => (r as any).feelingAnswer === "great" || (r as any).feelingAnswer === "good",
+      (r) => r.feelingAnswer === "great" || r.feelingAnswer === "good",
     ).length;
 
     // Emotional transformations (mood → desired feeling → achieved rate)
@@ -458,7 +477,12 @@ async function getCollectionEvolution(
     const previousFrom = new Date(dateFrom);
     previousFrom.setDate(previousFrom.getDate() - dateRangeDays);
 
-    const [currSessions, currReviews, prevSessions, prevReviews] = await Promise.all([
+    const [currSessions, currReviews, prevSessions, prevReviews]: [
+      number,
+      Array<{ overallFeeling: number | null; wouldWearAgain: string | null }>,
+      number,
+      Array<{ overallFeeling: number | null; wouldWearAgain: string | null }>,
+    ] = await Promise.all([
       prisma.stylingSession.count({ where: { createdAt: { gte: dateFrom } } }),
       prisma.postOutfitReview.findMany({
         where: { createdAt: { gte: dateFrom } },
@@ -534,7 +558,7 @@ async function getCollectionEvolution(
 // ── F. Trust Metrics ──────────────────────────────────────────────────────────
 async function getTrustMetrics(dateFrom: Date): Promise<TrustMetricsKPI> {
   try {
-    const sessions = await prisma.stylingSession.findMany({
+    const sessions: Array<{ customerId: string; selectedSuggestionId: string | null }> = await prisma.stylingSession.findMany({
       where: { createdAt: { gte: dateFrom } },
       select: { customerId: true, selectedSuggestionId: true },
     });
@@ -603,7 +627,10 @@ async function getPredictive(dateFrom: Date): Promise<PredictiveKPI> {
     // Split date range in half to compare recent vs earlier
     const midpoint = new Date((dateFrom.getTime() + Date.now()) / 2);
 
-    const [recentSessions, earlierSessions] = await Promise.all([
+    const [recentSessions, earlierSessions]: [
+      Array<{ occasion: string | null; currentMood: string | null; desiredFeeling: string | null }>,
+      Array<{ occasion: string | null; currentMood: string | null; desiredFeeling: string | null }>,
+    ] = await Promise.all([
       prisma.stylingSession.findMany({
         where: { createdAt: { gte: midpoint } },
         select: { occasion: true, currentMood: true, desiredFeeling: true },
@@ -857,7 +884,18 @@ async function getOpportunityScores(dateFrom: Date): Promise<ProductOpportunityS
 // ── J. Collection Health Score ────────────────────────────────────────────────
 async function getCollectionHealth(dateFrom: Date): Promise<CollectionHealthScore> {
   try {
-    const [sessions, reviews, profiles] = await Promise.all([
+    const [sessions, reviews, profiles]: [
+      Array<{ occasion: string | null; currentMood: string | null; desiredFeeling: string | null }>,
+      Array<{
+        overallFeeling: number | null;
+        wouldWearAgain: string | null;
+        session: {
+          bodyPreference: string | null;
+          suggestions: Array<{ items: Array<{ shopifyProductId: string | null; closetItemId: string | null }> }>;
+        };
+      }>,
+      Array<{ favoriteColors: string[]; fitPreferences: string[]; dressesFor: string[] }>,
+    ] = await Promise.all([
       prisma.stylingSession.findMany({
         where: { createdAt: { gte: dateFrom } },
         select: { occasion: true, currentMood: true, desiredFeeling: true },
@@ -995,6 +1033,7 @@ async function getCollectionHealth(dateFrom: Date): Promise<CollectionHealthScor
       largestWeakness: null,
       strongestArea: null,
       sampleSizeWarning: true,
+      reviewCount: 0,
     };
   }
 }

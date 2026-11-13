@@ -25,6 +25,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, it, beforeEach, afterEach } from "node:test";
+import { RouterContextProvider } from "react-router";
 import { validateOriginHost, shouldBounceToStorefront, buildProviderLogoutUrl } from "./shopify-customer-oauth.server.ts";
 import { requireCurrentNaiaCustomer } from "./naia-session.server.ts";
 import { getSession, commitSession } from "./session.server.ts";
@@ -272,14 +273,16 @@ describe.skip("requireCurrentNaiaCustomer() — functional redirect construction
     }
   });
 
-  async function captureRedirectLocation(requestUrl) {
+  async function captureRedirectLocation(requestUrl: string): Promise<string> {
     process.env.STOREFRONT_HOST = "naia-stylist-staging.vercel.app";
     try {
       await requireCurrentNaiaCustomer(new Request(requestUrl));
       assert.fail("expected requireCurrentNaiaCustomer to throw a redirect");
     } catch (thrown) {
       assert.ok(thrown instanceof Response, "must throw a Response (redirect)");
-      return thrown.headers.get("Location");
+      const location = thrown.headers.get("Location");
+      assert.ok(location, "redirect must include a Location header");
+      return location;
     }
   }
 
@@ -298,7 +301,7 @@ describe.skip("requireCurrentNaiaCustomer() — functional redirect construction
       "https://naia-stylist-staging-l1e919a8p-nadeenabuobeads-projects.vercel.app/trends/my-edits/spring-2026-colour-direction",
     );
     const url = new URL(location);
-    assert.equal(decodeURIComponent(url.searchParams.get("return_to")), "/trends/my-edits/spring-2026-colour-direction");
+    assert.equal(decodeURIComponent(url.searchParams.get("return_to") ?? ""), "/trends/my-edits/spring-2026-colour-direction");
   });
 
   it("shared staging stays shared staging — a request that already arrives on STOREFRONT_HOST appends no origin_host at all", async () => {
@@ -330,6 +333,7 @@ describe.skip("requireCurrentNaiaCustomer() — functional redirect construction
       await requireCurrentNaiaCustomer(new Request("https://naia-stylist-staging-l1e919a8p-nadeenabuobeads-projects.vercel.app/trends/my-edits/spring-2026-colour-direction"));
       assert.fail("expected a thrown redirect");
     } catch (thrown) {
+      assert.ok(thrown instanceof Response, "must throw a Response (redirect)");
       assert.equal(thrown.headers.get("Location"), "/auth/shopify/login?return_to=%2Ftrends%2Fmy-edits%2Fspring-2026-colour-direction");
     }
   });
@@ -481,7 +485,12 @@ describe("auth.shopify.callback.tsx source wiring", () => {
 describe("auth.shopify.handoff.tsx — behavioral", () => {
   const ORIGIN_HOST = "naia-stylist-staging-i4b0504kk-nadeenabuobeads-projects.vercel.app";
 
-  async function buildHandoffValue(overrides = {}) {
+  async function buildHandoffValue(overrides: {
+    rawToken?: string;
+    originHost?: string;
+    expiresAt?: number;
+    originNonceHash?: string;
+  } = {}) {
     const session = await getSession();
     session.set("handoff_raw_token", overrides.rawToken ?? "synthetic-raw-token-abc123");
     session.set("handoff_origin_host", overrides.originHost ?? ORIGIN_HOST);
@@ -498,7 +507,7 @@ describe("auth.shopify.handoff.tsx — behavioral", () => {
     return cookie.slice(eq + 1, semi === -1 ? undefined : semi);
   }
 
-  function requestTo(hostname, searchParams) {
+  function requestTo(hostname: string, searchParams: Record<string, string>) {
     const url = new URL(`https://${hostname}/auth/shopify/handoff`);
     for (const [k, v] of Object.entries(searchParams)) url.searchParams.set(k, v);
     return new Request(url.toString());
@@ -513,7 +522,7 @@ describe("auth.shopify.handoff.tsx — behavioral", () => {
 
   it("an expired handoff value fails closed — redirects to login, sets no session cookie", async () => {
     const h = await buildHandoffValue({ expiresAt: Date.now() - 1000 });
-    const res = await handoffLoader({ request: requestTo(ORIGIN_HOST, { h, return_to: "/my-naia" }), params: {}, context: {} });
+    const res = await handoffLoader({ request: requestTo(ORIGIN_HOST, { h, return_to: "/my-naia" }), params: {}, context: new RouterContextProvider(), unstable_pattern: "" });
     assert.equal(res.headers.get("Location"), "/auth/shopify/login");
     assert.equal(res.headers.get("Set-Cookie"), null);
   });
@@ -521,19 +530,19 @@ describe("auth.shopify.handoff.tsx — behavioral", () => {
   it("a tampered handoff value fails closed — signature verification rejects it, not a thrown error", async () => {
     const h = await buildHandoffValue({});
     const tampered = h.slice(0, -4) + "9999";
-    const res = await handoffLoader({ request: requestTo(ORIGIN_HOST, { h: tampered, return_to: "/my-naia" }), params: {}, context: {} });
+    const res = await handoffLoader({ request: requestTo(ORIGIN_HOST, { h: tampered, return_to: "/my-naia" }), params: {}, context: new RouterContextProvider(), unstable_pattern: "" });
     assert.equal(res.headers.get("Location"), "/auth/shopify/login");
     assert.equal(res.headers.get("Set-Cookie"), null);
   });
 
   it("a missing handoff value fails closed immediately", async () => {
-    const res = await handoffLoader({ request: requestTo(ORIGIN_HOST, { return_to: "/my-naia" }), params: {}, context: {} });
+    const res = await handoffLoader({ request: requestTo(ORIGIN_HOST, { return_to: "/my-naia" }), params: {}, context: new RouterContextProvider(), unstable_pattern: "" });
     assert.equal(res.headers.get("Location"), "/auth/shopify/login");
   });
 
   it("REPLAY PROTECTION — a handoff value bound to a different origin host is rejected, even if otherwise valid and unexpired", async () => {
     const h = await buildHandoffValue({ originHost: "some-other-preview-host.vercel.app" });
-    const res = await handoffLoader({ request: requestTo(ORIGIN_HOST, { h, return_to: "/my-naia" }), params: {}, context: {} });
+    const res = await handoffLoader({ request: requestTo(ORIGIN_HOST, { h, return_to: "/my-naia" }), params: {}, context: new RouterContextProvider(), unstable_pattern: "" });
     assert.equal(res.headers.get("Location"), "/auth/shopify/login");
     assert.equal(res.headers.get("Set-Cookie"), null);
   });

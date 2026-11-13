@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { RouterContextProvider } from "react-router";
 import { loader } from "./trends.$slug.edit";
 
 // React Router's redirect() returns a Response — it does not throw.
@@ -8,7 +9,7 @@ describe("trends/:slug/edit — backward-compat redirect", () => {
     const response = await loader({
       request: new Request(`http://localhost/trends/${slug}/edit`),
       params: { slug },
-      context: {},
+      context: new RouterContextProvider(), unstable_pattern: "",
     }) as Response;
 
     expect(response.status).toBe(302);
@@ -20,7 +21,7 @@ describe("trends/:slug/edit — backward-compat redirect", () => {
     const response = await loader({
       request: new Request(`http://localhost/trends/${slug}/edit`),
       params: { slug },
-      context: {},
+      context: new RouterContextProvider(), unstable_pattern: "",
     }) as Response;
 
     expect(response.headers.get("Location")).toBe(`/trends/my-edits/${slug}`);

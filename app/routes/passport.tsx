@@ -54,7 +54,7 @@ for (const q of quizQuestions) {
     const sq = q.secondaryQuestion;
     OPTION_LABELS[sq.id] = Object.fromEntries(sq.colors.map(c => [c.id, c.name]));
     for (const c of sq.colors) COLOR_HEX[c.id] = c.hex;
-    MAX_SELECTIONS[sq.id] = sq.maxSelections;
+    if (sq.maxSelections !== undefined) MAX_SELECTIONS[sq.id] = sq.maxSelections;
     QUESTION_BY_ID[sq.id] = {
       id: sq.id, type: "color", title: sq.title, subtitle: sq.subtitle,
       colors: sq.colors, maxSelections: sq.maxSelections,
@@ -888,7 +888,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // my-naia.what-naia-notices.tsx's own loaders).
   const { confirmed, candidateCount } = await loadConfirmedTendencies(customer.id);
   const passportSnapshot = await loadPassportSnapshot(customer.id);
-  const noticingObservations = confirmed.map(t => {
+  const noticingObservations = confirmed.map((t: {
+    id: string;
+    dimension: string;
+    value: string;
+    dominantPolarity: string;
+    observationFamily: string;
+    claimText: string | null;
+    rationaleText: string | null;
+    customerFeedback: string | null;
+  }) => {
     const contradiction = detectPassportContradiction(
       t.dimension,
       t.value,

@@ -30,6 +30,7 @@
 //   - Never returns DATABASE_URL, secrets, tokens, or any other customer's data.
 
 import prisma from "../../db.server.js";
+import type { BuyOrSkipAnalysis } from "@prisma/client";
 import {
   extractStyleMeEvidence,
   extractPostWearEvidence,
@@ -274,11 +275,19 @@ export async function buildTasteEvidenceDiagnosticReport(customerId: string) {
     where: { customerId: cid },
     include: { session: { select: { currentMood: true, occasion: true } } },
   });
-  const closetItems = await prisma.closetItem.findMany({
+  const closetItems: Array<{
+    id: string;
+    customerId: string;
+    category: string;
+    garmentRelationships: string[];
+    updatedAt: Date;
+  }> = await prisma.closetItem.findMany({
     where: { customerId: cid },
     select: { id: true, customerId: true, category: true, garmentRelationships: true, updatedAt: true },
   });
-  const buySkipAnalyses = await prisma.buyOrSkipAnalysis.findMany({
+  const buySkipAnalyses: Array<BuyOrSkipAnalysis & {
+    outcome: { id: string; postPurchaseOutcome: string | null; createdAt: Date } | null;
+  }> = await prisma.buyOrSkipAnalysis.findMany({
     where: { customerId: cid },
     include: { outcome: { select: { id: true, postPurchaseOutcome: true, createdAt: true } } },
   });

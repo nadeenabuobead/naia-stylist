@@ -37,7 +37,7 @@ function makeRegister(overrides: Partial<RegisterReading> = {}): RegisterReading
     label: "everyday and casual",
     depthLabel: "Strong everyday depth",
     depthNote: "You already have plenty of usable combinations here.",
-    rawCount: 12, usableCount: 12, blockedCount: 0, blockedPieces: [], unknownCount: 0,
+    rawCount: 12, usableCount: 12, blockedCount: 0, conditionallyUsableCount: 0, confirmedBlockedCount: 0, blockedPieces: [], unknownCount: 0,
     distinctLooks: 9, combinations: 144,
     needed: true, needSource: "lifestyle", needPhrase: "everyday dressing",
     ...overrides,

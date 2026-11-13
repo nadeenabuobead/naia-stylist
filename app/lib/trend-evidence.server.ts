@@ -76,7 +76,41 @@ const EMPTY_BUNDLE: ShopperEvidenceBundle = {
 // customerId must come from the authenticated session only (requireCurrentNaiaCustomer) —
 // never from a route param, query string, or request body.
 export async function getShopperEvidence(customerId: string): Promise<ShopperEvidenceBundle> {
-  const customer = await prisma.customer.findUnique({
+  const customer: {
+    onboardingProfile: {
+      stylePersonalities: string[];
+      styleDirections: string[];
+      favoriteColors: string[];
+      lifestyle: string[];
+      desiredFeeling: string | null;
+      desiredFeelings: string[];
+      desiredImpression: string[];
+      fitPreferences: string[];
+      becoming: string[];
+      avoidColors: string[];
+      styleSupport: string[];
+      completed: boolean;
+    } | null;
+    closetItems: Array<{
+      id: string;
+      name: string | null;
+      imageUrl: string | null;
+      imagePublicId: string | null;
+      imageFormat: string | null;
+      category: string;
+      subcategory: string | null;
+      primaryColor: string | null;
+      styleTags: string[];
+      occasions: string[];
+      material: string | null;
+      silhouette: string | null;
+      fitProfile: string | null;
+      formality: string | null;
+      pattern: string | null;
+      colors: string[];
+    }>;
+    postOutfitReviews: Array<{ workedTags: string | null; didntWorkTags: string | null }>;
+  } | null = await prisma.customer.findUnique({
     where: { id: customerId },
     select: {
       onboardingProfile: {
@@ -91,6 +125,7 @@ export async function getShopperEvidence(customerId: string): Promise<ShopperEvi
           fitPreferences: true,
           becoming: true,
           avoidColors: true,
+          styleSupport: true,
           completed: true,
         },
       },
@@ -180,6 +215,7 @@ export async function getShopperEvidence(customerId: string): Promise<ShopperEvi
       desiredImpression: profile.desiredImpression ?? [],
       fitPreferences: profile.fitPreferences ?? [],
       becoming: profile.becoming ?? [],
+      styleSupport: profile.styleSupport ?? [],
     } : null,
     closetItems: customer.closetItems.map((item) => ({
       id: item.id,
@@ -2822,7 +2858,7 @@ export async function hydrateShopperEditImages(
   }
   if (ids.size === 0) return edit;
 
-  const rows = await prisma.closetItem.findMany({
+  const rows: Array<{ id: string; imageUrl: string | null; imagePublicId: string | null; imageFormat: string | null }> = await prisma.closetItem.findMany({
     where: { id: { in: [...ids] }, customerId },
     select: { id: true, imageUrl: true, imagePublicId: true, imageFormat: true },
   });

@@ -793,7 +793,12 @@ describe("runStageBAssessment — awaited successful persistence", () => {
 
     assert.equal(outcome, "persisted");
     assert.equal(capturedId, "item-1");
-    assert.ok(capturedFields !== null);
+    // Not `assert.ok(capturedFields !== null)` first — capturedFields is only ever
+    // reassigned inside the dbUpdate closure above, which TS's control-flow analysis
+    // doesn't track for narrowing purposes on this outer `let`; asserting the
+    // condition first makes TS treat it as statically unsatisfiable (never) instead
+    // of narrowing capturedFields to non-null. The bare `!` below has no such issue —
+    // if this were genuinely null, the member access would throw at runtime anyway.
     assert.equal(capturedFields!.tryOnEligibility, "ready-for-try-on");
     assert.equal(capturedFields!.tryOnCustomerHint, null);
     assert.ok(capturedFields!.tryOnInternalNote.length > 0);
@@ -813,7 +818,7 @@ describe("runStageBAssessment — awaited successful persistence", () => {
     );
 
     assert.equal(outcome, "persisted");
-    assert.ok(capturedFields !== null);
+    // See the note on the previous test — no assert.ok(capturedFields !== null) first.
     assert.equal(capturedFields!.tryOnEligibility, "needs-clearer-photo");
   });
 

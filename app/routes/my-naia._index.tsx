@@ -336,7 +336,26 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // pool's 10s connection-wait timeout (the "Application Error" on refresh).
   // Awaiting one at a time means each holds and releases the connection
   // before the next asks for it — identical data, no queuing.
-  const sessions = await prisma.stylingSession.findMany({
+  const sessions: Array<{
+    id: string;
+    createdAt: Date;
+    currentMood: string | null;
+    desiredFeeling: string | null;
+    occasion: string | null;
+    styleFrom: "CLOSET" | "NAIA" | "BOTH";
+    suggestions: Array<{
+      id: string;
+      outfitName: string | null;
+      items: Array<{
+        itemType: string;
+        closetItemId: string | null;
+        productTitle: string | null;
+        productImageUrl: string | null;
+        closetItem: { name: string | null; imageUrl: string | null; imagePublicId: string | null; imageFormat: string | null; category: string } | null;
+      }>;
+    }>;
+    review: { id: string } | null;
+  }> = await prisma.stylingSession.findMany({
     // "Latest StyleMe" means the latest completed looks, not every StylingSession
     // row — a session with no OutfitSuggestion (or a suggestion with no items)
     // never finished generating a look and has nothing to show. This where
@@ -355,7 +374,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
     },
   });
   const editorialReports = await getPublishedEditorialReports();
-  const buyOrSkipRaw = await prisma.buyOrSkipAnalysis.findMany({
+  const buyOrSkipRaw: Array<{
+    id: string;
+    productName: string | null;
+    verdict: string;
+    createdAt: Date;
+    imageUrl: string | null;
+    imagePublicId: string | null;
+    imageFormat: string | null;
+    category: string | null;
+    fullAnalysis: unknown;
+  }> = await prisma.buyOrSkipAnalysis.findMany({
     where: { customerId },
     take: 3,
     orderBy: { createdAt: "desc" },

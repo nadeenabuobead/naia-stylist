@@ -69,7 +69,7 @@ vi.mock("~/components/my-naia/MyNaiaLayout", () => ({
 // ── Imports after mocks ────────────────────────────────────────────────────────
 
 import React from "react";
-import { useLoaderData } from "react-router";
+import { useLoaderData, RouterContextProvider } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { getShopperEvidence, buildShopperEdit } from "~/lib/trend-evidence.server";
 import MyTrendEdits, { loader } from "./trends.my-edits";
@@ -87,7 +87,7 @@ describe("trends/my-edits loader", () => {
     vi.mocked(requireCurrentNaiaCustomer).mockRejectedValueOnce(redirect);
 
     await expect(
-      loader({ request: new Request("http://localhost/trends/my-edits"), params: {}, context: {} })
+      loader({ request: new Request("http://localhost/trends/my-edits"), params: {}, context: new RouterContextProvider(), unstable_pattern: "" })
     ).rejects.toBe(redirect);
   });
 
@@ -98,7 +98,7 @@ describe("trends/my-edits loader", () => {
     await loader({
       request: new Request("http://localhost/trends/my-edits"),
       params: {},
-      context: {},
+      context: new RouterContextProvider(), unstable_pattern: "",
     });
 
     expect(getShopperEvidence).toHaveBeenCalledOnce();
@@ -112,7 +112,7 @@ describe("trends/my-edits loader", () => {
     const result = await loader({
       request: new Request("http://localhost/trends/my-edits"),
       params: {},
-      context: {},
+      context: new RouterContextProvider(), unstable_pattern: "",
     });
 
     expect(result.cards).toHaveLength(2);
@@ -131,7 +131,7 @@ describe("trends/my-edits loader", () => {
     const result = await loader({
       request: new Request("http://localhost/trends/my-edits"),
       params: {},
-      context: {},
+      context: new RouterContextProvider(), unstable_pattern: "",
     });
 
     expect(buildShopperEdit).toHaveBeenCalledTimes(2);
@@ -147,7 +147,7 @@ describe("trends/my-edits loader", () => {
     await loader({
       request: new Request("http://localhost/trends/my-edits"),
       params: {},
-      context: {},
+      context: new RouterContextProvider(), unstable_pattern: "",
     });
 
     expect(buildShopperEdit).not.toHaveBeenCalled();
@@ -163,7 +163,7 @@ describe("trends/my-edits loader", () => {
     const result = await loader({
       request: new Request("http://localhost/trends/my-edits"),
       params: {},
-      context: {},
+      context: new RouterContextProvider(), unstable_pattern: "",
     });
 
     expect(result.cards[0].subTitle).toBeNull();

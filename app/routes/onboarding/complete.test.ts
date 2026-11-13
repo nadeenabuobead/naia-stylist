@@ -228,10 +228,6 @@ describe("CPL-D — 'Style DNA' is not shown on the completion CTA button", () =
     );
   });
   it("'Style DNA' does not appear in completion CTA action-title context", () => {
-    const ctaIdx = complete.indexOf("cp-action-title");
-    while (ctaIdx !== -1) {
-      // Check no cp-action-title block contains "Style DNA"
-    }
     // Simple substring check: Style DNA must not appear in the actions section at all
     const actionsStart = complete.indexOf("cp-action");
     const actionsBlock = actionsStart !== -1 ? complete.slice(actionsStart, actionsStart + 2000) : "";

@@ -38,7 +38,7 @@ function makeFullProfile(overrides: Partial<CustomerAssessmentProfile> = {}): Cu
   return {
     stylePersonalities: ["corporate-chic"],
     desiredFeelings: ["more-elevated"],
-    lifestyle: "professional",
+    lifestyle: ["professional"],
     dressesFor: ["work", "dinner"],
     favoriteColors: ["beige", "cream"],
     avoidColors: [],
@@ -555,7 +555,7 @@ describe("V2-A1 desiredFeelings field contract", () => {
 
   it("V2A1-05 — corrected consumer does not use legacy desiredFeeling (singular) key", () => {
     // Structural check: CustomerAssessmentProfile must not have desiredFeeling property
-    const profile: Record<string, unknown> = makeFullProfile();
+    const profile: Record<string, unknown> = { ...makeFullProfile() };
     assert.ok(!("desiredFeeling" in profile), "profile must not contain legacy desiredFeeling key");
     assert.ok("desiredFeelings" in profile, "profile must contain canonical desiredFeelings key");
   });

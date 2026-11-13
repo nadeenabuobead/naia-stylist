@@ -73,7 +73,28 @@ export async function loader({ request }: LoaderFunctionArgs) {
   let internalCustomerId: string | null = null;
 
   if (shopifyId) {
-    const customer = await prisma.customer.findUnique({
+    const customer: {
+      id: string;
+      onboardingProfile: {
+        stylePersonalities: string[];
+        desiredFeelings: string[];
+        lifestyle: string[];
+        dressesFor: string[];
+        favoriteColors: string[];
+        avoidColors: string[];
+        fitPreferences: string[];
+        comfortLevel: number | null;
+      } | null;
+      closetItems: Array<{
+        id: string;
+        name: string | null;
+        category: string;
+        colors: string[];
+        styleTags: string[];
+        occasions: string[];
+      }>;
+      naiaModel: { id: string } | null;
+    } | null = await prisma.customer.findUnique({
       where: { shopifyCustomerId: shopifyId },
       include: {
         onboardingProfile: true,

@@ -2,6 +2,7 @@ import type { ActionFunctionArgs, LinksFunction, LoaderFunctionArgs } from "reac
 import { redirect, Form, Link, useLoaderData } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import prisma from "~/db.server";
+import type { SavedLook, SavedLookItem } from "@prisma/client";
 import {
   getCloudinaryConfig,
   validatePublicIdOwnership,
@@ -48,7 +49,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const customer = await requireCurrentNaiaCustomer(request);
   const cloudinaryConfig = getCloudinaryConfig();
 
-  const savedLooks = await prisma.savedLook.findMany({
+  const savedLooks: Array<SavedLook & {
+    items: Array<SavedLookItem & {
+      closetItem: { imageUrl: string | null; imagePublicId: string | null; imageFormat: string | null } | null;
+    }>;
+  }> = await prisma.savedLook.findMany({
     where: { customerId: customer.id },
     orderBy: { createdAt: "desc" },
     include: {
@@ -68,7 +73,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const suggestionMap = new Map<string, { sessionId: string; items: SuggItem[] }>();
 
   if (suggestionIds.length > 0) {
-    const suggestions = await prisma.outfitSuggestion.findMany({
+    const suggestions: Array<{ id: string; sessionId: string; items: SuggItem[] }> = await prisma.outfitSuggestion.findMany({
       where: { id: { in: suggestionIds } },
       select: {
         id: true,
@@ -141,7 +146,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
 }
 
-type LoaderData = Awaited<ReturnType<typeof loader>>;
+// loader's first statement is an unconditional redirect() (Response) — the real
+// body below it is unreachable but intentionally preserved for reference, so the
+// loader's inferred return type is a union; exclude Response before indexing .looks.
+type LoaderData = Exclude<Awaited<ReturnType<typeof loader>>, Response>;
 type Look = LoaderData["looks"][number];
 
 export default function SavedLooks() {

@@ -38,6 +38,7 @@ vi.mock("~/db.server", () => ({
   },
 }));
 
+import { RouterContextProvider } from "react-router";
 import prisma from "~/db.server";
 import { promoteHandoffSession, createNaiaSession, buildHandoffNonceCookie, verifyHandoffNonce } from "./naia-session.server";
 import { loader as handoffLoader } from "../routes/auth.shopify.handoff";
@@ -193,7 +194,7 @@ describe("auth.shopify.handoff.tsx — the success path, replay, and browser-bin
     const res: any = await handoffLoader({
       request: requestTo({ h, return_to: "/my-naia" }, nonceCookieHeader),
       params: {},
-      context: {},
+      context: new RouterContextProvider(), unstable_pattern: "",
     });
     expect(res.headers.get("Location")).toBe("/my-naia");
     const setCookie = res.headers.getSetCookie?.() ?? [res.headers.get("Set-Cookie")];
@@ -205,7 +206,7 @@ describe("auth.shopify.handoff.tsx — the success path, replay, and browser-bin
   it("the response clears the nonce cookie and sets no-store caching headers on success", async () => {
     mockUpdateMany().mockResolvedValue({ count: 1 });
     const { h, nonceCookieHeader } = await buildHandoffValue({});
-    const res: any = await handoffLoader({ request: requestTo({ h, return_to: "/my-naia" }, nonceCookieHeader), params: {}, context: {} });
+    const res: any = await handoffLoader({ request: requestTo({ h, return_to: "/my-naia" }, nonceCookieHeader), params: {}, context: new RouterContextProvider(), unstable_pattern: "" });
     const setCookie = res.headers.getSetCookie?.() ?? [res.headers.get("Set-Cookie")];
     expect(setCookie.some((c: string) => c?.includes("__naia_handoff_nonce=;") || c?.includes("__naia_handoff_nonce=\"\";"))).toBe(true);
     expect(res.headers.get("Cache-Control")).toMatch(/no-store/);
@@ -221,7 +222,7 @@ describe("auth.shopify.handoff.tsx — the success path, replay, and browser-bin
   it("sets Referrer-Policy: no-referrer on a SUCCESSFUL handoff response", async () => {
     mockUpdateMany().mockResolvedValue({ count: 1 });
     const { h, nonceCookieHeader } = await buildHandoffValue({});
-    const res: any = await handoffLoader({ request: requestTo({ h, return_to: "/my-naia" }, nonceCookieHeader), params: {}, context: {} });
+    const res: any = await handoffLoader({ request: requestTo({ h, return_to: "/my-naia" }, nonceCookieHeader), params: {}, context: new RouterContextProvider(), unstable_pattern: "" });
     expect(res.headers.get("Referrer-Policy")).toBe("no-referrer");
   });
 
@@ -231,7 +232,7 @@ describe("auth.shopify.handoff.tsx — the success path, replay, and browser-bin
     const res: any = await handoffLoader({
       request: requestTo({ return_to: "/my-naia" }),
       params: {},
-      context: {},
+      context: new RouterContextProvider(), unstable_pattern: "",
     });
     expect(res.headers.get("Location")).toBe("/auth/shopify/login");
     expect(res.headers.get("Referrer-Policy")).toBe("no-referrer");
@@ -241,11 +242,11 @@ describe("auth.shopify.handoff.tsx — the success path, replay, and browser-bin
     const { h, nonceCookieHeader } = await buildHandoffValue({ rawToken: "synthetic-raw-token-abc123" });
 
     mockUpdateMany().mockResolvedValueOnce({ count: 1 }); // first request — succeeds
-    const first: any = await handoffLoader({ request: requestTo({ h, return_to: "/my-naia" }, nonceCookieHeader), params: {}, context: {} });
+    const first: any = await handoffLoader({ request: requestTo({ h, return_to: "/my-naia" }, nonceCookieHeader), params: {}, context: new RouterContextProvider(), unstable_pattern: "" });
     expect(first.headers.get("Location")).toBe("/my-naia");
 
     mockUpdateMany().mockResolvedValueOnce({ count: 0 }); // replay — the real row is already promoted
-    const second: any = await handoffLoader({ request: requestTo({ h, return_to: "/my-naia" }, nonceCookieHeader), params: {}, context: {} });
+    const second: any = await handoffLoader({ request: requestTo({ h, return_to: "/my-naia" }, nonceCookieHeader), params: {}, context: new RouterContextProvider(), unstable_pattern: "" });
     expect(second.headers.get("Location")).toBe("/auth/shopify/login");
   });
 
@@ -256,7 +257,7 @@ describe("auth.shopify.handoff.tsx — the success path, replay, and browser-bin
     const { h } = await buildHandoffValue({ rawToken: "synthetic-raw-token-abc123" });
 
     const attacker = requestTo({ h, return_to: "/my-naia" }); // no Cookie header at all
-    const attackerRes: any = await handoffLoader({ request: attacker, params: {}, context: {} });
+    const attackerRes: any = await handoffLoader({ request: attacker, params: {}, context: new RouterContextProvider(), unstable_pattern: "" });
     expect(attackerRes.headers.get("Location")).toBe("/auth/shopify/login");
     expect(attackerRes.headers.get("Set-Cookie")).toBeFalsy();
     // The decisive assertion: the database was never even asked to promote
@@ -268,7 +269,7 @@ describe("auth.shopify.handoff.tsx — the success path, replay, and browser-bin
     const { h, nonceCookieHeader } = await buildHandoffValue({ rawToken: "synthetic-raw-token-abc123" });
 
     // Attacker tries first, with the captured URL but no nonce cookie.
-    const attackerRes: any = await handoffLoader({ request: requestTo({ h, return_to: "/my-naia" }), params: {}, context: {} });
+    const attackerRes: any = await handoffLoader({ request: requestTo({ h, return_to: "/my-naia" }), params: {}, context: new RouterContextProvider(), unstable_pattern: "" });
     expect(attackerRes.headers.get("Location")).toBe("/auth/shopify/login");
 
     // The legitimate browser, which actually has the nonce cookie, redeems
@@ -277,7 +278,7 @@ describe("auth.shopify.handoff.tsx — the success path, replay, and browser-bin
     const realRes: any = await handoffLoader({
       request: requestTo({ h, return_to: "/my-naia" }, nonceCookieHeader),
       params: {},
-      context: {},
+      context: new RouterContextProvider(), unstable_pattern: "",
     });
     expect(realRes.headers.get("Location")).toBe("/my-naia");
     expect(realRes.headers.get("Set-Cookie")).toBeTruthy();
@@ -288,7 +289,7 @@ describe("auth.shopify.handoff.tsx — the success path, replay, and browser-bin
     const res: any = await handoffLoader({
       request: requestTo({ h, return_to: "/my-naia" }, "__naia_handoff_nonce=a-completely-different-guess"),
       params: {},
-      context: {},
+      context: new RouterContextProvider(), unstable_pattern: "",
     });
     expect(res.headers.get("Location")).toBe("/auth/shopify/login");
     expect(mockUpdateMany()).not.toHaveBeenCalled();
@@ -305,7 +306,7 @@ describe("auth.shopify.handoff.tsx — the success path, replay, and browser-bin
     const semi = cookie.indexOf(";");
     const h = cookie.slice(eq + 1, semi === -1 ? undefined : semi);
 
-    const res: any = await handoffLoader({ request: requestTo({ h, return_to: "/my-naia" }), params: {}, context: {} });
+    const res: any = await handoffLoader({ request: requestTo({ h, return_to: "/my-naia" }), params: {}, context: new RouterContextProvider(), unstable_pattern: "" });
     expect(res.headers.get("Location")).toBe("/auth/shopify/login");
     expect(mockUpdateMany()).not.toHaveBeenCalled();
   });
@@ -316,7 +317,7 @@ describe("auth.shopify.handoff.tsx — the success path, replay, and browser-bin
     const res: any = await handoffLoader({
       request: requestTo({ h, return_to: "https://evil.example.com" }, nonceCookieHeader),
       params: {},
-      context: {},
+      context: new RouterContextProvider(), unstable_pattern: "",
     });
     expect(res.headers.get("Location")).toBe("/my-naia");
   });
@@ -371,7 +372,7 @@ describe.skip("auth.shopify.login.tsx — the 'already has a session' cross-doma
   it("an existing session with a captured origin host now routes through /auth/shopify/handoff instead of redirecting straight there", async () => {
     const nonce = buildHandoffNonceCookie();
     const request = loginRequest({ origin_host: ORIGIN_HOST, origin_nonce_hash: nonce.nonceHash });
-    const res: any = await loginLoader({ request, params: {}, context: {} } as never);
+    const res: any = await loginLoader({ request, params: {}, context: new RouterContextProvider(), unstable_pattern: "" } as never);
     const location = res.headers.get("Location");
     expect(location).toMatch(new RegExp(`^https://${ORIGIN_HOST}/auth/shopify/handoff\\?`));
     const locationUrl = new URL(location);
@@ -387,7 +388,7 @@ describe.skip("auth.shopify.login.tsx — the 'already has a session' cross-doma
     const loginRes: any = await loginLoader({
       request: loginRequest({ origin_host: ORIGIN_HOST, origin_nonce_hash: nonce.nonceHash }),
       params: {},
-      context: {},
+      context: new RouterContextProvider(), unstable_pattern: "",
     } as never);
     const handoffLocation = new URL(loginRes.headers.get("Location"));
     const h = handoffLocation.searchParams.get("h")!;
@@ -399,7 +400,7 @@ describe.skip("auth.shopify.login.tsx — the 'already has a session' cross-doma
         headers: { Cookie: `__naia_handoff_nonce=${rawNonce}` },
       }),
       params: {},
-      context: {},
+      context: new RouterContextProvider(), unstable_pattern: "",
     } as never);
     expect(handoffRes.headers.get("Location")).toBe("/my-naia");
     const setCookie = handoffRes.headers.getSetCookie?.() ?? [handoffRes.headers.get("Set-Cookie")];
@@ -410,7 +411,7 @@ describe.skip("auth.shopify.login.tsx — the 'already has a session' cross-doma
     const res: any = await loginLoader({
       request: loginRequest({ origin_host: ORIGIN_HOST }), // no origin_nonce_hash
       params: {},
-      context: {},
+      context: new RouterContextProvider(), unstable_pattern: "",
     } as never);
     expect(res.status).toBe(400);
     expect(mockCreate()).not.toHaveBeenCalled();
@@ -420,7 +421,7 @@ describe.skip("auth.shopify.login.tsx — the 'already has a session' cross-doma
     const res: any = await loginLoader({
       request: loginRequest({}), // no origin_host at all
       params: {},
-      context: {},
+      context: new RouterContextProvider(), unstable_pattern: "",
     } as never);
     expect(res.headers.get("Location")).toBe("/my-naia");
     expect(mockCreate()).not.toHaveBeenCalled();

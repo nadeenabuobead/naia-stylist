@@ -347,7 +347,7 @@ interface PhotoSectionProps {
   isDeleting: boolean;     // true = delete-photo action in flight
   onUploadClick: () => void;
   onDelete: () => void;
-  inputRef: React.RefObject<HTMLInputElement | null>;
+  inputRef: React.RefObject<HTMLInputElement>;
   onFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   accept: string;
 }

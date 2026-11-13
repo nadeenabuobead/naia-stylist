@@ -176,6 +176,7 @@ describe("analyseSelfie", () => {
       analysisStatus: "completed",
       analysisResult: makeStyleSignals(),
       analysedAt: "2026-07-17T10:05:00.000Z",
+      analysisDeletedAt: null,
       analysisVersion: 1,
     };
 
@@ -243,7 +244,8 @@ describe("checkSelfieQuality", () => {
     assert.equal(result.pass, false);
     assert.ok(result.issues.includes("blurry"));
     assert.ok(result.issues.includes("obstructed"));
-    assert.ok(!result.issues.includes("unknown-code-xyz"), "unknown codes must be stripped");
+    // "unknown-code-xyz" is deliberately not a real SelfiePhotoIssue — that's the point of this check.
+    assert.ok(!result.issues.includes("unknown-code-xyz" as never), "unknown codes must be stripped");
   });
 
 });

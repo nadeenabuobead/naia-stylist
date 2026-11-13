@@ -277,11 +277,11 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function DevTryOn() {
-  const { devModelPublicId, fashnKeyPresent, readyGarments, pendingGarments, gallery, callsThisSession, maxCalls } = useLoaderData<typeof loader>();
+  const { devModelPublicId, fashnKeyPresent, readyGarments, pendingGarments, gallery, newCalls, maxCalls } = useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
 
   const holdActive = !devModelPublicId;
-  const capReached = callsThisSession >= maxCalls;
+  const capReached = newCalls >= maxCalls;
   const formDisabled = holdActive || capReached;
 
   return (
@@ -300,8 +300,8 @@ export default function DevTryOn() {
         />
         <StatusCard
           label="CALLS THIS SESSION"
-          ok={callsThisSession < maxCalls}
-          value={`${callsThisSession} / ${maxCalls}`}
+          ok={newCalls < maxCalls}
+          value={`${newCalls} / ${maxCalls}`}
         />
       </div>
 
@@ -318,7 +318,7 @@ export default function DevTryOn() {
       )}
       {capReached && (
         <div style={s.holdBox}>
-          <strong>CAP REACHED — {callsThisSession}/{maxCalls} new FASHN submissions used this session.</strong>
+          <strong>CAP REACHED — {newCalls}/{maxCalls} new FASHN submissions used this session.</strong>
           <p style={s.holdDetail}>Restart the dev server to reset the counter. Idempotent re-runs (same garment already stored) still work.</p>
         </div>
       )}

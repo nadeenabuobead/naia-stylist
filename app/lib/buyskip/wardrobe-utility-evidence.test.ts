@@ -79,6 +79,7 @@ function needs(overrides: Partial<Pick<WardrobeNeeds, "enough" | "couldUseMore">
     intentions: { state: "available", chosen: [], closetStrengths: [] },
     demand: { state: "available", syntheticExcludedCount: 0, retriesCollapsedCount: 0, registerDemand: [], intentionDemand: [] },
     headlines: [],
+    reconsider: { state: "available", entries: [] },
     ...overrides,
   } as WardrobeNeeds;
 }

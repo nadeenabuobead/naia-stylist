@@ -32,7 +32,7 @@ function makeProfile(overrides: Partial<CustomerAssessmentProfile> = {}): Custom
   return {
     stylePersonalities: ["corporate-chic"],
     desiredFeelings: ["more-elevated"],
-    lifestyle: "professional",
+    lifestyle: ["professional"],
     dressesFor: ["work"],
     favoriteColors: [],
     avoidColors: [],

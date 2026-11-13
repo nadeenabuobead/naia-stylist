@@ -13,7 +13,7 @@ import { requireAdminSession } from "~/lib/internal-auth.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { identity } = await requireAdminSession(request);
-  return Response.json({ identity });
+  return { identity };
 }
 
 export default function AdminLayout() {

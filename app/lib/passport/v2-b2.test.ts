@@ -134,7 +134,7 @@ describe("B2.4 Screen 8 (favourite + avoided colours)", () => {
 
   it("avoid-colors secondary question is not marked required (no required flag)", () => {
     // secondaryQuestion has no required field — it's always optional
-    assert.ok(!(screen8.secondaryQuestion as Record<string, unknown>).required);
+    assert.ok(!(screen8.secondaryQuestion! as unknown as Record<string, unknown>).required);
   });
 
   it("favorite-colors maxSelections is 5", () => {

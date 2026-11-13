@@ -181,7 +181,7 @@ export function OutfitReactionWidget({
   const fetcher = useFetcher<{ ok?: boolean; feedback?: { id: string; rating: string }; error?: string }>();
   const isSubmitting = fetcher.state !== "idle";
 
-  const callApi = (body: Record<string, unknown>, intent: "create" | "update" | "delete") => {
+  const callApi = (body: Record<string, string | number | boolean | null | string[]>, intent: "create" | "update" | "delete") => {
     intentRef.current = intent;
     setApiError(null);
     fetcher.submit(body, { method: "post", action: "/api/recommendation-feedback", encType: "application/json" });

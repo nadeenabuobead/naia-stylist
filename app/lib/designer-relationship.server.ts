@@ -265,7 +265,29 @@ export async function getRelationshipKPIs(dateRangeDays = 30): Promise<Relations
 
   try {
     // Single rich query — sessions + customer profile + suggestions + review
-    const sessions = await prisma.stylingSession.findMany({
+    const sessions: Array<{
+      id: string;
+      currentMood: string | null;
+      desiredFeeling: string | null;
+      occasion: string | null;
+      styleDNA: string | null;
+      styleFrom: "CLOSET" | "NAIA" | "BOTH";
+      selectedSuggestionId: string | null;
+      suggestions: Array<{
+        id: string;
+        items: Array<{ productTitle: string | null; shopifyProductId: string | null; closetItemId: string | null }>;
+      }>;
+      review: {
+        overallFeeling: number | null;
+        wouldWearAgain: string | null;
+        desiredFeelingAchieved: string | null;
+        confidenceBefore: number | null;
+        confidenceAfter: number | null;
+        didntWorkTags: string | null;
+        workedTags: string | null;
+      } | null;
+      customer: { onboardingProfile: { stylePersonalities: string[] } | null } | null;
+    }> = await prisma.stylingSession.findMany({
       where: { createdAt: { gte: dateFrom } },
       select: {
         id: true,

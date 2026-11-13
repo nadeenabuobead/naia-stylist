@@ -154,7 +154,7 @@ function depthFinding(partial: Partial<DepthFinding> & { register: DepthFinding[
   return { id: `need-${partial.register}`, kind: "could-use-more", title: "x", body: "x", garmentIds: [], evidence: [], strength: "moderate", ...partial };
 }
 function registerReading(partial: Partial<RegisterReading> & { register: RegisterReading["register"] }): RegisterReading {
-  return { label: partial.register, depthLabel: "x", depthNote: "x", rawCount: 1, usableCount: 1, blockedCount: 0, blockedPieces: [], unknownCount: 0, distinctLooks: 1, combinations: 1, needed: true, needSource: "lifestyle", needPhrase: "x", ...partial };
+  return { label: partial.register, depthLabel: "x", depthNote: "x", rawCount: 1, usableCount: 1, blockedCount: 0, conditionallyUsableCount: 0, confirmedBlockedCount: 0, blockedPieces: [], unknownCount: 0, distinctLooks: 1, combinations: 1, needed: true, needSource: "lifestyle", needPhrase: "x", ...partial };
 }
 function minimalWardrobeBundle(couldUseMore: DepthFinding[], registers: RegisterReading[]) {
   return {

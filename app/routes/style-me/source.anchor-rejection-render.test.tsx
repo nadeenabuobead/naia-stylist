@@ -144,13 +144,18 @@ describe("AR-R — the refusal reaches the place she is looking", () => {
     state.action = REFUSAL;
     const html = render();
     const setAnchorForm = at(html, 'value="set-anchor"');
-    // The back form is a separate <form> rendered after the picker's.
-    const backForm = at(html, 'value="back"');
+    const setAnchorFormEnd = html.indexOf("</form>", setAnchorForm);
+    // Once rejected, "change-piece" (a separate <form>) replaces the old "back" form
+    // entirely — see abfc38a: Back/Continue become ambiguous once a pick is refused,
+    // so they're replaced by two explicitly-named actions. That form is the next one.
+    const changePieceForm = at(html, 'value="change-piece"');
     const msg = at(html, 'role="alert"');
     expect(setAnchorForm).toBeGreaterThan(-1);
-    expect(backForm).toBeGreaterThan(setAnchorForm);
+    expect(setAnchorFormEnd).toBeGreaterThan(setAnchorForm);
+    expect(changePieceForm).toBeGreaterThan(setAnchorFormEnd);
     expect(msg).toBeGreaterThan(setAnchorForm);
-    expect(msg).toBeLessThan(backForm);
+    // Contained inside the set-anchor form itself, not the one that replaces Back.
+    expect(msg).toBeLessThan(setAnchorFormEnd);
   });
 
   it("AR-R.6 it is focusable, so it can be moved to rather than hoped for", () => {
@@ -162,10 +167,17 @@ describe("AR-R — the refusal reaches the place she is looking", () => {
     expect(tag).toContain('tabindex="-1"');
   });
 
-  it("AR-R.7 CONTINUE is still guarded, so an empty submit stays impossible", () => {
+  it("AR-R.7 the rejected anchor form has no submit control at all, so an empty submit stays impossible", () => {
+    // Pre-abfc38a, an empty submit was prevented by disabling CONTINUE. abfc38a went
+    // further once rejected: CONTINUE is removed from the DOM entirely (replaced by
+    // "Change occasion" / "Choose another piece", asserted elsewhere in this file) —
+    // a stronger guarantee than disabled, since there is no control left to submit.
     state.action = REFUSAL;
     const html = render();
-    expect(html).toContain("disabled");
+    const setAnchorForm = at(html, 'value="set-anchor"');
+    const setAnchorFormEnd = html.indexOf("</form>", setAnchorForm);
+    const formBody = html.slice(setAnchorForm, setAnchorFormEnd);
+    expect(formBody).not.toContain('type="submit"');
   });
 
   it("AR-R.8 every item is still listed and selectable after a refusal", () => {

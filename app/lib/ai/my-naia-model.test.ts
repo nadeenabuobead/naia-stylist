@@ -102,7 +102,7 @@ function makeJob(overrides: Partial<VirtualTryOnJobRecord> = {}): VirtualTryOnJo
 // Happy-path verifyAsset mock: simulates Admin API confirming a valid private image.
 const mockVerifyOk: VerifyAssetFn = async (pid) => ({
   ok: true,
-  asset: { publicId: pid, resourceType: "image", type: "private", version: "1", format: "jpg" },
+  asset: { publicId: pid, resourceType: "image", type: "private", version: "1", format: "jpg", bytes: 800_000, width: 1024, height: 1536 },
 });
 
 // Happy-path moderation/suitability/quality mocks — bypass real Claude calls in tests.
@@ -1232,7 +1232,7 @@ describe("PE — private-download endpoint and delivery enforcement", () => {
       async () => ({ ok: true }),
       async (pid) => ({  // Admin API returns format="webp" (the authoritative value)
         ok: true,
-        asset: { publicId: pid, resourceType: "image", type: "private", version: "9999", format: "webp" },
+        asset: { publicId: pid, resourceType: "image", type: "private", version: "9999", format: "webp", bytes: 800_000, width: 1024, height: 1536 },
       }),
       mockModerationPass,
       mockSuitabilityPass,
@@ -1334,7 +1334,7 @@ describe("SV — server-side Cloudinary asset verification", () => {
       async (pid) => { deletedIds.push(pid); return { ok: true }; },
       async (pid) => ({
         ok: true,
-        asset: { publicId: pid, resourceType: "raw", type: "private", version: "1", format: "pdf" },
+        asset: { publicId: pid, resourceType: "raw", type: "private", version: "1", format: "pdf", bytes: 800_000, width: 1024, height: 1536 },
       }),
     );
     assert.equal(result.ok, false, "non-image resource must be rejected");
@@ -1358,7 +1358,7 @@ describe("SV — server-side Cloudinary asset verification", () => {
       async (pid) => { deletedIds.push(pid); return { ok: true }; },
       async (pid) => ({   // Admin API reveals the asset is actually public
         ok: true,
-        asset: { publicId: pid, resourceType: "image", type: "upload", version: "1", format: "jpg" },
+        asset: { publicId: pid, resourceType: "image", type: "upload", version: "1", format: "jpg", bytes: 800_000, width: 1024, height: 1536 },
       }),
     );
     assert.equal(result.ok, false, "forged public payload must be rejected");
@@ -1384,7 +1384,7 @@ describe("SV — server-side Cloudinary asset verification", () => {
       async () => ({ ok: true }),
       async (pid) => ({   // Admin API says format="heic" (the authoritative value)
         ok: true,
-        asset: { publicId: pid, resourceType: "image", type: "private", version: "5", format: "heic" },
+        asset: { publicId: pid, resourceType: "image", type: "private", version: "5", format: "heic", bytes: 800_000, width: 1024, height: 1536 },
       }),
       mockModerationPass,
       mockSuitabilityPass,
