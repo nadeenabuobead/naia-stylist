@@ -191,6 +191,50 @@ export function checkResultOwnership(
   return jobCustomerId === requestingCustomerId;
 }
 
+// ── Source-photo validity re-check (deletion-during-processing guard) ────────
+//
+// submitTryOnJob downloads the body photo once, at submission, and hands it
+// to FASHN in memory — the source Cloudinary asset is never re-read after
+// that. If the customer deletes their My nAia Model body photo while the job
+// is still in flight, nothing before this stopped the job from completing
+// and writing a brand-new Cloudinary result asset derived from a photo that
+// no longer exists for this customer. Call this immediately before
+// persisting any result, and refuse to proceed if it returns false.
+//
+// Known limitation: this confirms SOME current body photo exists for this
+// customer and belongs to them — not that it is byte-identical to the exact
+// photo used at submission. bodyPublicId is never persisted on the
+// VirtualTryOnJob row itself (only one-way hashed into requestFingerprint),
+// so a customer who deletes their photo and uploads a *different* one while
+// a job is in flight will still pass this check. Closing that narrower gap
+// would need a new column recording the exact publicId a job used, which is
+// a separate, not-yet-approved schema change.
+
+export type FindNaiaModelForValidationFn = (
+  naiaModelId: string,
+) => Promise<{ customerId: string; bodyPublicId: string | null } | null>;
+
+async function _findNaiaModelForValidation(
+  naiaModelId: string,
+): Promise<{ customerId: string; bodyPublicId: string | null } | null> {
+  return prisma.naiaModel.findUnique({
+    where: { id: naiaModelId },
+    select: { customerId: true, bodyPublicId: true },
+  });
+}
+
+export async function isSourcePhotoStillValid(
+  naiaModelId: string | null,
+  jobCustomerId: string,
+  _findNaiaModel: FindNaiaModelForValidationFn = _findNaiaModelForValidation,
+): Promise<boolean> {
+  if (!naiaModelId) return false;
+  const model = await _findNaiaModel(naiaModelId);
+  if (!model) return false;
+  if (model.customerId !== jobCustomerId) return false;
+  return typeof model.bodyPublicId === "string" && model.bodyPublicId.length > 0;
+}
+
 // ── submitTryOnJob ────────────────────────────────────────────────────────────
 //
 // M1 customer-facing orchestration: runs all pre-flight checks, creates the job,
