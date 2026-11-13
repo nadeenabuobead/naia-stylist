@@ -522,7 +522,8 @@ describe("auth.shopify.handoff.tsx — behavioral", () => {
 
   it("an expired handoff value fails closed — redirects to login, sets no session cookie", async () => {
     const h = await buildHandoffValue({ expiresAt: Date.now() - 1000 });
-    const res = await handoffLoader({ request: requestTo(ORIGIN_HOST, { h, return_to: "/my-naia" }), params: {}, context: new RouterContextProvider(), unstable_pattern: "" });
+    const request = requestTo(ORIGIN_HOST, { h, return_to: "/my-naia" });
+    const res = await handoffLoader({ request, params: {}, context: new RouterContextProvider(), pattern: "", url: new URL(request.url) });
     assert.equal(res.headers.get("Location"), "/auth/shopify/login");
     assert.equal(res.headers.get("Set-Cookie"), null);
   });
@@ -530,19 +531,22 @@ describe("auth.shopify.handoff.tsx — behavioral", () => {
   it("a tampered handoff value fails closed — signature verification rejects it, not a thrown error", async () => {
     const h = await buildHandoffValue({});
     const tampered = h.slice(0, -4) + "9999";
-    const res = await handoffLoader({ request: requestTo(ORIGIN_HOST, { h: tampered, return_to: "/my-naia" }), params: {}, context: new RouterContextProvider(), unstable_pattern: "" });
+    const request = requestTo(ORIGIN_HOST, { h: tampered, return_to: "/my-naia" });
+    const res = await handoffLoader({ request, params: {}, context: new RouterContextProvider(), pattern: "", url: new URL(request.url) });
     assert.equal(res.headers.get("Location"), "/auth/shopify/login");
     assert.equal(res.headers.get("Set-Cookie"), null);
   });
 
   it("a missing handoff value fails closed immediately", async () => {
-    const res = await handoffLoader({ request: requestTo(ORIGIN_HOST, { return_to: "/my-naia" }), params: {}, context: new RouterContextProvider(), unstable_pattern: "" });
+    const request = requestTo(ORIGIN_HOST, { return_to: "/my-naia" });
+    const res = await handoffLoader({ request, params: {}, context: new RouterContextProvider(), pattern: "", url: new URL(request.url) });
     assert.equal(res.headers.get("Location"), "/auth/shopify/login");
   });
 
   it("REPLAY PROTECTION — a handoff value bound to a different origin host is rejected, even if otherwise valid and unexpired", async () => {
     const h = await buildHandoffValue({ originHost: "some-other-preview-host.vercel.app" });
-    const res = await handoffLoader({ request: requestTo(ORIGIN_HOST, { h, return_to: "/my-naia" }), params: {}, context: new RouterContextProvider(), unstable_pattern: "" });
+    const request = requestTo(ORIGIN_HOST, { h, return_to: "/my-naia" });
+    const res = await handoffLoader({ request, params: {}, context: new RouterContextProvider(), pattern: "", url: new URL(request.url) });
     assert.equal(res.headers.get("Location"), "/auth/shopify/login");
     assert.equal(res.headers.get("Set-Cookie"), null);
   });

@@ -9,7 +9,7 @@ describe("trends/:slug/edit — backward-compat redirect", () => {
     const response = await loader({
       request: new Request(`http://localhost/trends/${slug}/edit`),
       params: { slug },
-      context: new RouterContextProvider(), unstable_pattern: "",
+      context: new RouterContextProvider(), pattern: "", url: new URL(`http://localhost/trends/${slug}/edit`),
     }) as Response;
 
     expect(response.status).toBe(302);
@@ -21,7 +21,7 @@ describe("trends/:slug/edit — backward-compat redirect", () => {
     const response = await loader({
       request: new Request(`http://localhost/trends/${slug}/edit`),
       params: { slug },
-      context: new RouterContextProvider(), unstable_pattern: "",
+      context: new RouterContextProvider(), pattern: "", url: new URL(`http://localhost/trends/${slug}/edit`),
     }) as Response;
 
     expect(response.headers.get("Location")).toBe(`/trends/my-edits/${slug}`);

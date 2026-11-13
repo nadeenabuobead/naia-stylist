@@ -56,10 +56,10 @@ export function Layout({ children }) {
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width,initial-scale=1" />
-        <meta
-          httpEquiv="Content-Security-Policy"
-          content="frame-ancestors https://admin.shopify.com https://*.myshopify.com;"
-        />
+        {/* frame-ancestors moved to a real Content-Security-Policy response
+            header (app/entry.server.jsx) -- the CSP spec defines
+            frame-ancestors as ignored when delivered via <meta>, so this
+            never actually enforced anything in any spec-compliant browser. */}
         <link rel="preconnect" href="https://cdn.shopify.com/" />
         <link
           rel="stylesheet"
@@ -93,7 +93,12 @@ export function Layout({ children }) {
         `}</style>
         <Meta />
         <Links />
-        <script async src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+        <script
+          async
+          src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/4.2.1/jspdf.umd.min.js"
+          integrity="sha512-plOdviVmws4Y3JAvbnpfKb2hVxKM1lCwsi3vmElYRj+tiDLffZ4FVUj5a8vyKJ9pIgl8JCAHEJ4D1iUKBecswg=="
+          crossOrigin="anonymous"
+        ></script>
       </head>
       <body>
         <script dangerouslySetInnerHTML={{ __html: `(function(){document.cookie='naia_customer_data=; path=/; max-age=0; SameSite=Lax';try{sessionStorage.removeItem('naia_token');}catch(e){}if(window.self!==window.top){document.addEventListener('click',function(e){var a=e.target.closest('a');if(a&&a.href&&a.href.startsWith(window.location.origin)){e.preventDefault();window.location.href=a.href;}});}})();` }} />
