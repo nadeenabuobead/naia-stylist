@@ -28,7 +28,20 @@ import { createClerkClient } from "@clerk/backend";
 import { redirect } from "react-router";
 import prisma from "~/db.server";
 
-const TRANSIENT_PRISMA_ERROR_CODES = new Set(["P1001", "P1002", "P1008", "P1017"]);
+const TRANSIENT_PRISMA_ERROR_CODES = new Set([
+  "P1001", // Can't reach database server
+  "P1002", // The database server was reached but timed out
+  "P1008", // Operations timed out
+  "P1017", // Server has closed the connection
+  // Correction (2026-11-13, live staging incident): connection-pool
+  // exhaustion arrives as a PrismaClientKnownRequestError WITH this stable
+  // code in this Prisma version (6.19.2) — not, as previously assumed
+  // below, only as a codeless PrismaClientInitializationError. Both checks
+  // are kept: this code-based one catches the real shape; the name+regex
+  // fallback below is harmless to leave in case an older/different code
+  // path still produces that shape.
+  "P2024", // Timed out fetching a new connection from the connection pool
+]);
 
 // Same typed-error contract naia-session.server.ts established for exactly
 // this reason: a transient DB failure while resolving the Clerk user's
@@ -102,26 +115,56 @@ export async function resolveClerkUserId(request: Request, deps: ClerkAuthDeps =
   return auth.userId;
 }
 
-export interface GetCurrentNaiaCustomerDeps extends ClerkAuthDeps {}
+// Live staging incident (2026-11-13): a customer's Closet save failed
+// because this lookup hit the connection pool at exactly the wrong moment
+// during a brief upstream outage. One bounded retry, on this read-only
+// lookup alone, gives a just-recovering connection a second chance before
+// the customer sees any failure at all — never retried: the Closet/upload/
+// checkout/payment logic that runs AFTER this resolves, which is where any
+// real side effect would live. A plain SELECT by unique key is naturally
+// idempotent, so retrying it can never create a duplicate write, a second
+// upload, or a second charge.
+const TRANSIENT_RETRY_DELAY_MS = 200;
+
+function defaultSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export interface GetCurrentNaiaCustomerDeps extends ClerkAuthDeps {
+  _sleep?: (ms: number) => Promise<void>;
+}
 
 export async function getCurrentNaiaCustomer(request: Request, deps: GetCurrentNaiaCustomerDeps = {}) {
   const clerkUserId = await resolveClerkUserId(request, deps);
   if (!clerkUserId) return null;
 
-  try {
-    // No linked Customer row is a real, non-error outcome — see this file's
-    // own header comment. Returning null here (rather than throwing) is what
-    // lets a brand-new sign-up or a pending identity-link request fall
-    // through requireCurrentNaiaCustomer's normal "not signed in" branch,
-    // which the sign-up callback route then routes onward correctly instead
-    // of every other route in the app having to special-case it.
-    return await prisma.customer.findUnique({
+  const sleep = deps._sleep ?? defaultSleep;
+
+  // No linked Customer row is a real, non-error outcome — see this file's
+  // own header comment. Returning null here (rather than throwing) is what
+  // lets a brand-new sign-up or a pending identity-link request fall
+  // through requireCurrentNaiaCustomer's normal "not signed in" branch,
+  // which the sign-up callback route then routes onward correctly instead
+  // of every other route in the app having to special-case it.
+  const lookup = () =>
+    prisma.customer.findUnique({
       where: { clerkUserId },
       include: { onboardingProfile: true },
     });
-  } catch (error) {
-    if (isTransientDatabaseError(error)) throw new DatabaseUnavailableError(error);
-    throw error;
+
+  try {
+    return await lookup();
+  } catch (firstError) {
+    if (!isTransientDatabaseError(firstError)) throw firstError;
+
+    await sleep(TRANSIENT_RETRY_DELAY_MS);
+
+    try {
+      return await lookup();
+    } catch (secondError) {
+      if (isTransientDatabaseError(secondError)) throw new DatabaseUnavailableError(secondError);
+      throw secondError;
+    }
   }
 }
 
