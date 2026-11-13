@@ -29,13 +29,25 @@ vi.mock("~/lib/customer-privacy.server", () => ({
   eraseCustomerData: vi.fn(),
 }));
 
-vi.mock("~/lib/ai/my-naia-model.server", () => ({
-  deleteNaiaModelPhoto: vi.fn(),
-  withdrawSaveModelConsent: vi.fn(),
-}));
 vi.mock("~/lib/ai/fashn-tryon-service.server", () => ({
   deleteCustomerVtoResults: vi.fn(),
   customerHasVtoResults: vi.fn(),
+  deleteNaiaModelBodyPhotoAndVtoResults: vi.fn().mockResolvedValue({
+    ok: true,
+    cloudinaryOk: true,
+    dbCleared: true,
+    staleReference: false,
+    vtoResultsCleanupAttempted: true,
+    vtoResultsDeletedCount: 0,
+    vtoResultsPendingCleanup: [],
+  }),
+  withdrawSaveModelConsentAndVtoResults: vi.fn().mockResolvedValue({
+    ok: true,
+    deletedAssets: [],
+    failedAssets: [],
+    vtoResultsDeletedCount: 0,
+    vtoResultsPendingCleanup: [],
+  }),
 }));
 vi.mock("~/lib/buy-or-skip-privacy.server", () => ({
   deleteCustomerBosImages: vi.fn(),

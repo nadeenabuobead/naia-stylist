@@ -23,6 +23,7 @@ import {
   buildTryOnResultUrl,
   checkResultOwnership,
   isSourcePhotoStillValid,
+  completeTryOnJobIfSourceStillValid,
   deriveTryOnResultPublicId,
 } from "~/lib/ai/fashn-tryon-service.server";
 import { advanceTryOnJob } from "~/lib/ai/my-naia-model.server";
@@ -38,6 +39,34 @@ interface FashnStatusBody {
   status: FashnStatus;
   output?: string[];
   error?: string;
+}
+
+// A concurrent account erasure (customer-privacy.server.ts) hard-deletes
+// VirtualTryOnJob rows outright, not just the source photo. If erasure's
+// delete lands between this request's own read of `job` and this specific
+// write, advanceTryOnJob's underlying prisma.virtualTryOnJob.update throws
+// Prisma's "record to update not found" (P2025) — expected and benign here
+// (the job's owning customer is gone; there's nothing left to protect or
+// expose), so it's tolerated ONLY in this one identified context. Any other
+// error code or exception is rethrown unchanged — this must never become a
+// blanket swallow of unrelated database errors.
+function isRecordNotFoundError(err: unknown): boolean {
+  return typeof err === "object" && err !== null && (err as { code?: unknown }).code === "P2025";
+}
+
+async function markFailedTolerantOfErasureRace(
+  job: VirtualTryOnJobRecord,
+  errorCode: string,
+): Promise<void> {
+  try {
+    await advanceTryOnJob(job, "FAILED", { errorCode });
+  } catch (err) {
+    if (!isRecordNotFoundError(err)) throw err;
+    console.info("naia:job-vanished-during-source-deleted-cleanup", {
+      jobId: job.id,
+      errorCode,
+    });
+  }
 }
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
@@ -123,9 +152,7 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     // FASHN. Re-check BEFORE persisting anything: if the source is gone,
     // never upload or expose the result at all.
     if (!(await isSourcePhotoStillValid(job.naiaModelId, job.customerId, job.productHandle, job.requestFingerprint))) {
-      await advanceTryOnJob(job as unknown as VirtualTryOnJobRecord, "FAILED", {
-        errorCode: "SOURCE_DELETED",
-      });
+      await markFailedTolerantOfErasureRace(job as unknown as VirtualTryOnJobRecord, "SOURCE_DELETED");
       return data({ status: "FAILED" });
     }
 
@@ -139,13 +166,27 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
       return data({ status: "FAILED" });
     }
 
-    // Defense in depth — re-check once more immediately after upload, for
-    // the narrow window between the check above and the upload completing.
-    // If the source was deleted in that window, the asset just created is
-    // an orphan: delete it, and if that deletion itself fails, durably
-    // record it for retry rather than silently losing track of it — same
-    // pattern already used for account-erasure Cloudinary failures.
-    if (!(await isSourcePhotoStillValid(job.naiaModelId, job.customerId, job.productHandle, job.requestFingerprint))) {
+    // Locked completion — closes the read-then-write race the two-call
+    // pattern above still left open: re-validates the source photo AND
+    // persists COMPLETED inside one transaction, holding a real Postgres
+    // row lock on the NaiaModel row for the duration, so a concurrent photo
+    // deletion can never land in between the check and the write. See
+    // completeTryOnJobIfSourceStillValid's own header comment for why plain
+    // row locking (not Serializable) is the correct mechanism here, and why
+    // nothing needs to change on the deletion side.
+    const completion = await completeTryOnJobIfSourceStillValid(
+      job as unknown as VirtualTryOnJobRecord,
+      job.naiaModelId,
+      job.productHandle,
+      job.requestFingerprint,
+      predictionId,
+    );
+
+    if (!completion.ok) {
+      // The asset just uploaded is an orphan: delete it, and if that
+      // deletion itself fails, durably record it for retry rather than
+      // silently losing track of it — same pattern already used for
+      // account-erasure Cloudinary failures.
       const orphanPublicId = deriveTryOnResultPublicId(customer.id, job.id);
       const cleanup = await deleteCloudinaryAsset(orphanPublicId, "private");
       if (!cleanup.ok) {
@@ -168,17 +209,12 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
           },
         });
       }
-      await advanceTryOnJob(job as unknown as VirtualTryOnJobRecord, "FAILED", {
-        errorCode: "SOURCE_DELETED",
-      });
+      await markFailedTolerantOfErasureRace(job as unknown as VirtualTryOnJobRecord, "SOURCE_DELETED");
       return data({ status: "FAILED" });
     }
 
-    await advanceTryOnJob(job as unknown as VirtualTryOnJobRecord, "COMPLETED", {
-      predictionId,
-    });
-
-    // Build fresh result URL — never cached
+    // Build fresh result URL — never cached. The job row was already marked
+    // COMPLETED inside completeTryOnJobIfSourceStillValid's own transaction.
     const resultUrl = buildTryOnResultUrl(customer.id, job.id);
     if (!resultUrl) return data({ status: "FAILED" });
 

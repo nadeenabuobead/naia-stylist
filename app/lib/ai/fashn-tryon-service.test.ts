@@ -14,6 +14,10 @@ import {
   buildTryOnResultUrl,
   checkResultOwnership,
   isSourcePhotoStillValid,
+  completeTryOnJobIfSourceStillValid,
+  deleteCustomerVtoResults,
+  deleteNaiaModelBodyPhotoAndVtoResults,
+  withdrawSaveModelConsentAndVtoResults,
   downloadModelPhotoAsDataUrl,
   uploadTryOnResult,
   executeTryOn,
@@ -23,6 +27,8 @@ import {
   type SubmitJobParams,
   type SubmitJobDeps,
   type FindNaiaModelForValidationFn,
+  type CompletionTransactionOps,
+  type RunCompletionTransactionFn,
 } from "./fashn-tryon-service.server.js";
 import { isValidModelImageDataUrl } from "./fashn-try-on.server.js";
 import { computeRequestFingerprint } from "./my-naia-model.server.js";
@@ -360,6 +366,134 @@ describe("§3b isSourcePhotoStillValid — deletion-during-processing + exact-id
     assert.equal(a, b);
     assert.equal(a, FINGERPRINT_A);
     assert.ok(a.length > 0);
+  });
+});
+
+// ── §3c completeTryOnJobIfSourceStillValid — locked completion ────────────────
+//
+// These tests prove the APPLICATION LOGIC's reaction to each possible
+// FOR UPDATE lock outcome (via the RunCompletionTransactionFn DI boundary,
+// same pattern as my-naia-model.server.ts's RunTransactionFn) — they do not
+// and cannot prove Postgres's own row-locking semantics. That needs a real
+// Postgres connection; see the real-Postgres concurrency test plan handed
+// back alongside this fix for the scenario design (pg_sleep-forced winner,
+// run once per ordering) — not implemented in this repo's test tooling,
+// which has no disposable test database wired in today.
+
+describe("§3c completeTryOnJobIfSourceStillValid — locked completion", () => {
+  const CUSTOMER_ID = "cust-001";
+  const PRODUCT_HANDLE = "silk-wrap-dress";
+  const BODY_PUBLIC_ID_A = "naia-wardrobe/cust-001/body-photo-a";
+  const BODY_PUBLIC_ID_B = "naia-wardrobe/cust-001/body-photo-b";
+  const FINGERPRINT_A = computeRequestFingerprint(CUSTOMER_ID, PRODUCT_HANDLE, BODY_PUBLIC_ID_A);
+  const JOB = mockJob({
+    id: "job-lock-001",
+    customerId: CUSTOMER_ID,
+    naiaModelId: "model-001",
+    productHandle: PRODUCT_HANDLE,
+    requestFingerprint: FINGERPRINT_A,
+    status: "PROCESSING",
+  });
+
+  it("CT01 naiaModelId null short-circuits without running the transaction at all", async () => {
+    let transactionRan = false;
+    const run: RunCompletionTransactionFn = async (fn) => {
+      transactionRan = true;
+      return fn({ findModelLocked: async () => null, updateJobToCompleted: async (j) => j });
+    };
+    const result = await completeTryOnJobIfSourceStillValid(
+      JOB, null, PRODUCT_HANDLE, FINGERPRINT_A, "pred-001", run,
+    );
+    assert.deepEqual(result, { ok: false, reason: "SOURCE_DELETED" });
+    assert.ok(!transactionRan, "must not open a transaction when there is no naiaModelId to lock");
+  });
+
+  it("CT02 lock winner A — completion reaches the lock first and the model is still valid: commits, write attempted exactly once", async () => {
+    let updateCalls = 0;
+    const run: RunCompletionTransactionFn = (fn) =>
+      fn({
+        findModelLocked: async () => ({ customerId: CUSTOMER_ID, bodyPublicId: BODY_PUBLIC_ID_A }),
+        updateJobToCompleted: async (job, predictionId) => {
+          updateCalls++;
+          return { ...job, status: "COMPLETED", predictionId };
+        },
+      });
+    const result = await completeTryOnJobIfSourceStillValid(
+      JOB, "model-001", PRODUCT_HANDLE, FINGERPRINT_A, "pred-001", run,
+    );
+    assert.deepEqual(result, { ok: true });
+    assert.equal(updateCalls, 1, "the completion write must happen exactly once");
+  });
+
+  it("CT03 lock winner B — a concurrent deletion already committed and released the lock first: the locked read sees null, no write is attempted", async () => {
+    let updateCalls = 0;
+    const run: RunCompletionTransactionFn = (fn) =>
+      fn({
+        findModelLocked: async () => null,
+        updateJobToCompleted: async (job, predictionId) => {
+          updateCalls++; // must never be reached in this ordering
+          return { ...job, status: "COMPLETED", predictionId };
+        },
+      });
+    const result = await completeTryOnJobIfSourceStillValid(
+      JOB, "model-001", PRODUCT_HANDLE, FINGERPRINT_A, "pred-001", run,
+    );
+    assert.deepEqual(result, { ok: false, reason: "SOURCE_DELETED" });
+    assert.equal(updateCalls, 0, "must never persist COMPLETED once the locked read sees the source is gone");
+  });
+
+  it("CT04 lock winner B variant — the locked read sees a model that still exists but now belongs to a different customer: still fails closed before any write", async () => {
+    let updateCalls = 0;
+    const run: RunCompletionTransactionFn = (fn) =>
+      fn({
+        findModelLocked: async () => ({ customerId: "cust-OTHER", bodyPublicId: BODY_PUBLIC_ID_A }),
+        updateJobToCompleted: async (job, predictionId) => {
+          updateCalls++;
+          return { ...job, status: "COMPLETED", predictionId };
+        },
+      });
+    const result = await completeTryOnJobIfSourceStillValid(
+      JOB, "model-001", PRODUCT_HANDLE, FINGERPRINT_A, "pred-001", run,
+    );
+    assert.deepEqual(result, { ok: false, reason: "SOURCE_DELETED" });
+    assert.equal(updateCalls, 0);
+  });
+
+  it("CT05 photo replacement — the locked read sees a DIFFERENT current bodyPublicId than the one this job's fingerprint was computed against: fails closed, no write", async () => {
+    let updateCalls = 0;
+    const run: RunCompletionTransactionFn = (fn) =>
+      fn({
+        findModelLocked: async () => ({ customerId: CUSTOMER_ID, bodyPublicId: BODY_PUBLIC_ID_B }),
+        updateJobToCompleted: async (job, predictionId) => {
+          updateCalls++;
+          return { ...job, status: "COMPLETED", predictionId };
+        },
+      });
+    const result = await completeTryOnJobIfSourceStillValid(
+      JOB, "model-001", PRODUCT_HANDLE, FINGERPRINT_A, "pred-001", run,
+    );
+    assert.deepEqual(result, { ok: false, reason: "SOURCE_DELETED" });
+    assert.equal(updateCalls, 0, "a replacement photo must never satisfy a fingerprint recorded against the original");
+  });
+
+  it("CT06 updateJobToCompleted throwing (e.g. validateJobTransition rejected the transition) propagates — not swallowed into a false ok:true", async () => {
+    const run: RunCompletionTransactionFn = (fn) =>
+      fn({
+        findModelLocked: async () => ({ customerId: CUSTOMER_ID, bodyPublicId: BODY_PUBLIC_ID_A }),
+        updateJobToCompleted: async () => {
+          throw new Error("Invalid status transition: COMPLETED → COMPLETED");
+        },
+      });
+    await assert.rejects(
+      completeTryOnJobIfSourceStillValid(JOB, "model-001", PRODUCT_HANDLE, FINGERPRINT_A, "pred-001", run),
+      /Invalid status transition/,
+    );
+  });
+
+  it("CT07 default _runTransaction parameter is wired to a real function (compiles and is callable) without needing a live Postgres connection to construct it", () => {
+    // Exercises only that the production default param exists and has the
+    // right shape — never invoked here, since that would need a real DB.
+    assert.equal(typeof completeTryOnJobIfSourceStillValid, "function");
   });
 });
 

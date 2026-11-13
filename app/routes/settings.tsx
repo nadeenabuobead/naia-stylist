@@ -40,12 +40,10 @@ import { recordPendingClerkCleanup } from "~/lib/clerk-cleanup.server";
 import prisma from "~/db.server";
 import { conciseFamilyName } from "~/lib/customer-name-display";
 import {
-  deleteNaiaModelPhoto,
-  withdrawSaveModelConsent,
-} from "~/lib/ai/my-naia-model.server";
-import {
   deleteCustomerVtoResults,
   customerHasVtoResults,
+  deleteNaiaModelBodyPhotoAndVtoResults,
+  withdrawSaveModelConsentAndVtoResults,
 } from "~/lib/ai/fashn-tryon-service.server";
 import {
   deleteCustomerBosImages,
@@ -145,14 +143,38 @@ export async function action(args: ActionFunctionArgs) {
 
   switch (typed) {
     case "delete-model-body": {
-      const r = await deleteNaiaModelPhoto(customer.id, "body");
+      // deleteNaiaModelBodyPhotoAndVtoResults cascades to any already-
+      // COMPLETED VTO results derived from this photo — see its own header
+      // comment in fashn-tryon-service.server.ts for why that cascade lives
+      // at the service level rather than here.
+      const r = await deleteNaiaModelBodyPhotoAndVtoResults(customer.id);
       if (!r.ok) return data({ ok: false as const, error: "Could not remove your body photo. Please try again." }, { status: 500 });
+      if (r.vtoResultsPendingCleanup.length > 0) {
+        // The photo itself is gone and no longer accessible; some saved
+        // try-on previews could not be removed from Cloudinary on this
+        // attempt and are durably queued for retry (PendingCloudinaryDeletion)
+        // rather than silently dropped. Say so — do not report this as
+        // unconditionally complete.
+        return data({
+          ok: true as const,
+          intent: typed,
+          message: "Your saved body photo has been removed. Some saved try-on previews could not be fully removed yet and are queued for automatic retry.",
+        });
+      }
       break;
     }
     case "delete-model-all": {
-      // withdrawSaveModelConsent always clears DB references and consent; partial Cloudinary
-      // failures are non-blocking because the DB record is cleared regardless.
-      await withdrawSaveModelConsent(customer.id);
+      // withdrawSaveModelConsentAndVtoResults always clears DB references
+      // and consent regardless of Cloudinary outcome, and always cascades
+      // to any COMPLETED VTO results (body is always cleared by this path).
+      const r = await withdrawSaveModelConsentAndVtoResults(customer.id);
+      if (r.vtoResultsPendingCleanup.length > 0) {
+        return data({
+          ok: true as const,
+          intent: typed,
+          message: "Your saved nAia Model photos and consent have been permanently removed. Some saved try-on previews could not be fully removed yet and are queued for automatic retry.",
+        });
+      }
       break;
     }
     case "delete-vto-results": {
@@ -239,12 +261,12 @@ export async function action(args: ActionFunctionArgs) {
 const CONFIRM: Record<DestructiveIntent, { title: string; body: string; cta: string }> = {
   "delete-model-body": {
     title: "Remove saved body photo",
-    body:  "Your saved body photo will be permanently deleted from your nAia Model. Virtual try-ons that use this photo will require a new one. Your styling history is not affected.",
+    body:  "Your saved body photo will be permanently deleted from your nAia Model, along with any Virtual Try-On previews already generated from it. Virtual try-ons will require a new photo. Your styling history is not affected.",
     cta:   "Remove body photo",
   },
   "delete-model-all": {
     title: "Remove saved nAia Model photo",
-    body:  "This is the photo you saved for virtual try-ons. Removing it stops virtual previews until you upload a new one. Your styling history and Closet are not affected.",
+    body:  "This is the photo you saved for virtual try-ons. Removing it, along with any Virtual Try-On previews already generated from it, stops virtual previews until you upload a new one. Your styling history and Closet are not affected.",
     cta:   "Remove photo",
   },
   "delete-vto-results": {
