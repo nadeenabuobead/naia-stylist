@@ -2546,6 +2546,11 @@ a.mn-action:focus-visible,
 .bos-verdict-match { font-family: var(--naia-ff-ui); font-size: 10px; letter-spacing: 0.18em; color: var(--naia-muted); text-transform: uppercase; }
 .bos-confidence { font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.2em; color: var(--naia-muted); margin-bottom: 20px; }
 .bos-result-summary { font-size: 16px; line-height: 1.75; color: rgba(40, 21, 12, 0.85); max-width: 680px; margin-bottom: 32px; }
+/* QA fix (2026-11-13): the only visible "Save" button on this page is for
+   the post-purchase outcome — this clarifies the analysis itself is already
+   saved, so a customer doesn't mistake "no Save button here" for "this
+   wasn't kept". Understated by design — not a banner, not a CTA. */
+.bos-result-saved-note { font-family: var(--naia-ff-ui); font-size: 11px; letter-spacing: 0.04em; color: var(--naia-muted); margin: -8px 0 24px; }
 .bos-result-blocks { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
 .bos-result-block { border-top: 1px solid var(--naia-border); padding-top: 20px; padding-bottom: 20px; padding-right: 24px; }
 .bos-result-block-label { font-family: var(--naia-ff-ui); font-size: 9px; letter-spacing: 0.28em; text-transform: uppercase; color: var(--naia-muted); margin-bottom: 12px; }

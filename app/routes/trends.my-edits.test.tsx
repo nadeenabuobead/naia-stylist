@@ -305,6 +305,81 @@ describe("MyTrendEdits component — incomplete profile", () => {
   });
 });
 
+// ── Component tests — QA fix (2026-11-13): current-month featured + archive ──
+
+// Extracts the <a ...> tag whose href matches, regardless of attribute
+// order (React renders href before class), and returns its class value.
+function classOfLinkTo(html: string, href: string): string | null {
+  const escaped = href.replace(/\//g, "\\/");
+  const tagMatch = html.match(new RegExp(`<a [^>]*href="${escaped}"[^>]*>`));
+  if (!tagMatch) return null;
+  return tagMatch[0].match(/class="([^"]*)"/)?.[1] ?? null;
+}
+
+describe("MyTrendEdits component — current-month-featured / previous-editions split", () => {
+  const THREE_CARDS_DATA = {
+    hasProfile: true,
+    // Loader already sorts newest-first — index 0 is "this month".
+    cards: [
+      { slug: "newest-edit", title: "Newest Edit", season: "Winter 2026", subTitle: "Your newest read." },
+      { slug: "mid-edit", title: "Mid Edit", season: "Autumn 2026", subTitle: "Your mid read." },
+      { slug: "oldest-edit", title: "Oldest Edit", season: "Summer 2026", subTitle: "Your oldest read." },
+    ],
+  };
+
+  beforeEach(() => vi.clearAllMocks());
+
+  it("the newest (first) card renders as the featured block — distinct styling from the archive grid", () => {
+    vi.mocked(useLoaderData).mockReturnValueOnce(THREE_CARDS_DATA);
+    const html = renderToString(React.createElement(MyTrendEdits));
+    expect(classOfLinkTo(html, "/trends/my-edits/newest-edit")).toBe("tme-card tme-featured");
+  });
+
+  it("the remaining cards render in the archive grid, not as featured", () => {
+    vi.mocked(useLoaderData).mockReturnValueOnce(THREE_CARDS_DATA);
+    const html = renderToString(React.createElement(MyTrendEdits));
+    expect(classOfLinkTo(html, "/trends/my-edits/mid-edit")).toBe("tme-card");
+    expect(classOfLinkTo(html, "/trends/my-edits/oldest-edit")).toBe("tme-card");
+  });
+
+  it("shows a 'Previous editions' section label when an archive exists", () => {
+    vi.mocked(useLoaderData).mockReturnValueOnce(THREE_CARDS_DATA);
+    const html = renderToString(React.createElement(MyTrendEdits));
+    expect(html).toContain("Previous editions");
+  });
+
+  it("every card's own content (title, subtitle, CTA) is still correct regardless of featured/archive position", () => {
+    vi.mocked(useLoaderData).mockReturnValueOnce(THREE_CARDS_DATA);
+    const html = renderToString(React.createElement(MyTrendEdits));
+    expect(html).toContain("Your newest read.");
+    expect(html).toContain("Your mid read.");
+    expect(html).toContain("Your oldest read.");
+  });
+
+  it("exactly one card — renders featured only, no 'Previous editions' section at all", () => {
+    vi.mocked(useLoaderData).mockReturnValueOnce({
+      hasProfile: true,
+      cards: [{ slug: "only-edit", title: "Only Edit", season: "Winter 2026", subTitle: "Your only read." }],
+    });
+    const html = renderToString(React.createElement(MyTrendEdits));
+    expect(classOfLinkTo(html, "/trends/my-edits/only-edit")).toBe("tme-card tme-featured");
+    expect(html).not.toContain("Previous editions");
+  });
+
+  it("locked (incomplete-profile) state still applies correctly to both the featured card and the archive", () => {
+    vi.mocked(useLoaderData).mockReturnValueOnce({
+      hasProfile: false,
+      cards: [
+        { slug: "newest-edit", title: "Newest Edit", season: "Winter 2026", subTitle: null },
+        { slug: "mid-edit", title: "Mid Edit", season: "Autumn 2026", subTitle: null },
+      ],
+    });
+    const html = renderToString(React.createElement(MyTrendEdits));
+    // Both the featured card and the archive card show the same locked copy.
+    expect(html.match(/Complete your Style Passport to unlock your edit\./g)?.length).toBe(2);
+  });
+});
+
 // ── Component tests — no reports ─────────────────────────────────────────────
 
 describe("MyTrendEdits component — no published reports", () => {

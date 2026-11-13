@@ -57,12 +57,13 @@ import prisma from "../db.server";
 import { hashCustomerId } from "./ai/journey-events.server";
 import { deleteAllClosetPhotos } from "./closet-photo-privacy.server";
 import { deleteCustomerBosImages } from "./buy-or-skip-privacy.server";
-import { deleteCustomerVtoResults } from "./ai/fashn-tryon-service.server";
-import { withdrawSaveModelConsent } from "./ai/my-naia-model.server";
+import { deleteCustomerVtoResults, buildTryOnResultUrl } from "./ai/fashn-tryon-service.server";
+import { withdrawSaveModelConsent, buildModelPreviewUrl } from "./ai/my-naia-model.server";
 import { deleteBoth as deleteSelfieBoth } from "./ai/selfie-persistence.server";
 import { recordPendingCustomerErasureFailure } from "./customer-erasure-failures.server";
 import { sweepCustomerForErasure } from "./cloudinary-orphan-sweep.server";
 import { cancelActiveBillingForErasure } from "./billing/erasure-billing.server";
+import { buildPrivateDownloadUrl, getCloudinaryConfig } from "./cloudinary-admin.server";
 
 // ── Dependency-injection surface (mocked providers in tests) ──────────────────
 
@@ -356,6 +357,15 @@ export interface CustomerExport {
   tasteEvidence: unknown[];
   styleTendencies: unknown[];
   personalisedTrendEditUsage: unknown[];
+  // QA completeness fix (2026-11-13): both have a live customerId FK
+  // (onDelete: Cascade) and are already treated as customer-owned by the
+  // erasure path in this same file — they belong here too. Scrubbed of
+  // security material (session token hash, Shopify id_token, one-time-code
+  // hash) — none of that is "the customer's data" in any sense they'd
+  // recognise, and shopifyIdTokenHint's own schema comment says it must
+  // never be returned to the client.
+  loginSessions: unknown[];
+  identityLinkRequests: unknown[];
   note: string;
 }
 
@@ -383,6 +393,8 @@ export async function compileCustomerExport(customerId: string): Promise<Custome
       tasteEvidence: true,
       styleTendencies: true,
       personalisedTrendEditUsage: true,
+      sessions: true,
+      identityLinkRequests: true,
     },
   });
 
@@ -393,14 +405,72 @@ export async function compileCustomerExport(customerId: string): Promise<Custome
     wardrobeInsights, savedLooks, postOutfitReviews, confidenceScores, trendReportViews,
     stylingEvents, naiaModel, tryOnJobs, recommendationFeedback, selfieAnalysis,
     naiaObservationFeedback, styleMemoryOutcomes, tasteEvidence, styleTendencies,
-    personalisedTrendEditUsage, ...customerFields
+    personalisedTrendEditUsage, sessions, identityLinkRequests, ...customerFields
   } = customer as any;
+
+  // QA fix (2026-11-13): these were previously dumped as raw internal
+  // Cloudinary IDs — unusable by a customer without server-side signing,
+  // and for virtualTryOnJobs there was no image reference at all (the
+  // result publicId only ever existed derived at read-time). Build the
+  // same signed, short-lived download links the app itself already shows
+  // the customer, using the exact helpers those routes use.
+  //
+  // Face/biometric data is deliberately excluded from signing: NaiaModel's
+  // facePublicId and SelfieAnalysis's photoPublicId are left exactly as
+  // they were (raw, inert reference, unchanged) — not hidden, but not
+  // actively made more retrievable either, consistent with
+  // passport.selfie.tsx's own stricter contract ("signedUrl never appears
+  // in any serialised response") for face photos specifically. The V1
+  // customer-facing model photo is body-only (see my-naia-model.tsx's own
+  // comment), so this mirrors what the app already shows the customer.
+  const cloudinaryConfig = getCloudinaryConfig();
+
+  const closetWithDownloadUrls = closetItems.map((item: any) => ({
+    ...item,
+    downloadUrl:
+      item.imagePublicId && item.imageFormat && cloudinaryConfig
+        ? buildPrivateDownloadUrl(cloudinaryConfig, item.imagePublicId, item.imageFormat, "private")
+        : null,
+  }));
+
+  const naiaModelWithDownloadUrl = naiaModel
+    ? {
+        ...naiaModel,
+        bodyDownloadUrl: naiaModel.bodyPublicId
+          ? buildModelPreviewUrl(naiaModel.bodyPublicId, naiaModel.bodyFormat ?? null, naiaModel.deliveryType ?? "private")
+          : null,
+      }
+    : naiaModel;
+
+  const tryOnJobsWithDownloadUrls = tryOnJobs.map((job: any) => ({
+    ...job,
+    downloadUrl: job.status === "COMPLETED" ? buildTryOnResultUrl(customerId, job.id) : null,
+  }));
+
+  // Scrubbed of session/verification security material — see the
+  // loginSessions/identityLinkRequests field comment on CustomerExport.
+  const loginSessions = sessions.map((session: any) => ({
+    id: session.id,
+    createdAt: session.createdAt,
+    lastSeenAt: session.lastSeenAt,
+    expiresAt: session.expiresAt,
+    userAgent: session.userAgent,
+  }));
+
+  const scrubbedIdentityLinkRequests = identityLinkRequests.map((req: any) => ({
+    id: req.id,
+    email: req.email,
+    attemptCount: req.attemptCount,
+    expiresAt: req.expiresAt,
+    confirmedAt: req.confirmedAt,
+    createdAt: req.createdAt,
+  }));
 
   return {
     exportedAt: new Date().toISOString(),
     customer: customerFields,
     stylePassport: onboardingProfile,
-    closet: closetItems,
+    closet: closetWithDownloadUrls,
     wardrobeSnapshots,
     styleMeSessions: stylingSessions,
     buyOrSkipAnalyses,
@@ -410,8 +480,8 @@ export async function compileCustomerExport(customerId: string): Promise<Custome
     confidenceScores,
     trendReportViews,
     stylingEvents,
-    naiaModel,
-    virtualTryOnJobs: tryOnJobs,
+    naiaModel: naiaModelWithDownloadUrl,
+    virtualTryOnJobs: tryOnJobsWithDownloadUrls,
     recommendationFeedback,
     selfieAnalysis,
     naiaObservationFeedback,
@@ -419,10 +489,16 @@ export async function compileCustomerExport(customerId: string): Promise<Custome
     tasteEvidence,
     styleTendencies,
     personalisedTrendEditUsage,
+    loginSessions,
+    identityLinkRequests: scrubbedIdentityLinkRequests,
     note:
       "This export covers every record this application stores about you. " +
-      "Photos are referenced by their storage identifier, not included as image " +
-      "files, in this export. It does not include any copy that FASHN AI, " +
+      "Closet, My nAia Model (body photo only), and Virtual Try-On result " +
+      "photos include a temporary, signed download link that expires shortly " +
+      "after this export is generated — save the images separately if you " +
+      "want to keep them. Your face/selfie photo reference is included as a " +
+      "storage identifier only, consistent with this app's stricter handling " +
+      "of face photos elsewhere. It does not include any copy that FASHN AI, " +
       "Anthropic, or Bodygram may independently retain on their own systems — " +
       "those are governed by each provider's own data retention policy, not by " +
       "this application.",

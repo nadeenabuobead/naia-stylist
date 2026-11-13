@@ -156,7 +156,26 @@ const css = `
     margin-bottom: 20px;
   }
 
-  /* ── Card grid ────────────────────────────────────────────────── */
+  /* ── Featured (current month) ────────────────────────────────────
+     QA fix (2026-11-13): the approved design shows the current month's
+     edit prominently, with previous months below as an archive — the
+     flat equal-weight grid every card used to render in gave no visual
+     distinction between "this month" and "the archive." Reuses every
+     existing .tme-card-* part (num/top/dot/title/subtitle/locked/cta);
+     only the outer sizing differs. */
+  .tme-featured {
+    aspect-ratio: auto;
+    min-height: 320px;
+    padding: 40px;
+    margin-bottom: 44px;
+  }
+  @media (min-width: 1024px) { .tme-featured { min-height: 420px; } }
+  .tme-featured .tme-card-num { font-size: clamp(12rem, 16vw, 18rem); }
+  .tme-featured .tme-card-title { font-size: clamp(2rem, 4vw, 3.25rem); margin-bottom: 20px; }
+  .tme-featured .tme-card-subtitle,
+  .tme-featured .tme-card-locked { font-size: 1.05rem; max-width: 42rem; }
+
+  /* ── Card grid (archive) ──────────────────────────────────────── */
   .tme-grid {
     display: grid;
     gap: 16px;
@@ -305,8 +324,46 @@ const css = `
   .tme-empty-link:hover { background: #1a1109; color: #f5f0e8; }
 `;
 
+function TrendEditCard({ card, index, featured }: { card: CardItem; index: number; featured: boolean }) {
+  const tint = TINTS[index % TINTS.length];
+  const num = String(index + 1).padStart(2, "0");
+
+  return (
+    <Link
+      to={`/trends/my-edits/${card.slug}`}
+      className={featured ? "tme-card tme-featured" : "tme-card"}
+      style={{ background: tint }}
+    >
+      <span className="tme-card-num" aria-hidden="true">{num}</span>
+      <div className="tme-card-top">
+        <span className="tme-card-dot" />
+        {card.season}
+      </div>
+      <div className="tme-card-bottom">
+        <div className="tme-card-title">{card.title}</div>
+
+        {card.subTitle !== null ? (
+          <p className="tme-card-subtitle">{card.subTitle}</p>
+        ) : (
+          <p className="tme-card-locked">
+            Complete your Style Passport to unlock your edit.
+          </p>
+        )}
+
+        <span className="tme-card-cta">
+          {card.subTitle !== null ? "Open My Edit →" : "Start Passport →"}
+        </span>
+      </div>
+    </Link>
+  );
+}
+
 export default function MyTrendEdits() {
   const { cards, hasProfile } = useLoaderData() as LoaderData;
+  // Cards arrive newest-first (loader sorts by publishedAt desc) — the
+  // first card is this month's edit, shown prominently; everything after
+  // it is the archive.
+  const [currentCard, ...archiveCards] = cards;
 
   return (
     <MyNaiaLayout compact>
@@ -343,45 +400,21 @@ export default function MyTrendEdits() {
             )}
 
             <div className="tme-section-eyebrow">
-              {hasProfile ? "Your edits" : "Available edits"}
+              {hasProfile ? "This month's edit" : "Available now"}
             </div>
 
-            <div className="tme-grid">
-              {cards.map((card, i) => {
-                const tint = TINTS[i % TINTS.length];
-                const num = String(i + 1).padStart(2, "0");
+            <TrendEditCard card={currentCard} index={0} featured />
 
-                return (
-                  <Link
-                    key={card.slug}
-                    to={`/trends/my-edits/${card.slug}`}
-                    className="tme-card"
-                    style={{ background: tint }}
-                  >
-                    <span className="tme-card-num" aria-hidden="true">{num}</span>
-                    <div className="tme-card-top">
-                      <span className="tme-card-dot" />
-                      {card.season}
-                    </div>
-                    <div className="tme-card-bottom">
-                      <div className="tme-card-title">{card.title}</div>
-
-                      {card.subTitle !== null ? (
-                        <p className="tme-card-subtitle">{card.subTitle}</p>
-                      ) : (
-                        <p className="tme-card-locked">
-                          Complete your Style Passport to unlock your edit.
-                        </p>
-                      )}
-
-                      <span className="tme-card-cta">
-                        {card.subTitle !== null ? "Open My Edit →" : "Start Passport →"}
-                      </span>
-                    </div>
-                  </Link>
-                );
-              })}
-            </div>
+            {archiveCards.length > 0 && (
+              <>
+                <div className="tme-section-eyebrow">Previous editions</div>
+                <div className="tme-grid">
+                  {archiveCards.map((card, i) => (
+                    <TrendEditCard key={card.slug} card={card} index={i + 1} featured={false} />
+                  ))}
+                </div>
+              </>
+            )}
           </>
         )}
       </div>
