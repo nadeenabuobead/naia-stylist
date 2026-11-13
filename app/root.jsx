@@ -56,10 +56,10 @@ export function Layout({ children }) {
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width,initial-scale=1" />
-        <meta
-          httpEquiv="Content-Security-Policy"
-          content="frame-ancestors https://admin.shopify.com https://*.myshopify.com;"
-        />
+        {/* frame-ancestors moved to a real Content-Security-Policy response
+            header (app/entry.server.jsx) -- the CSP spec defines
+            frame-ancestors as ignored when delivered via <meta>, so this
+            never actually enforced anything in any spec-compliant browser. */}
         <link rel="preconnect" href="https://cdn.shopify.com/" />
         <link
           rel="stylesheet"
