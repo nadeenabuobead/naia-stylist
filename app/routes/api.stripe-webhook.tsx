@@ -21,6 +21,20 @@ import type { ActionFunctionArgs } from "react-router";
 import { data } from "react-router";
 import { verifyStripeSignature } from "~/lib/billing/webhook-verify.server";
 import { processStripeWebhookEvent, type StripeEventLike } from "~/lib/billing/webhook-handler.server";
+import { captureFailure, captureError } from "~/lib/error-tracking.server";
+
+// Logs only Stripe's own structural event metadata (id, type — opaque,
+// non-financial) plus a classified reason/error name — never event.data
+// (the actual Subscription/Invoice/CheckoutSession payload, which carries
+// payment and customer detail), never the raw request body, never the
+// webhook secret. Same contract as fashn-try-on.server.ts's
+// logFashnFailure — the established pattern for this error-capture seam.
+function logStripeWebhookFailure(context: string, reason: string, event: StripeEventLike): void {
+  captureFailure(`stripe-webhook:${context}`, reason, {
+    eventId: event.id,
+    eventType: event.type,
+  });
+}
 
 export async function loader() {
   return data({ error: "method_not_allowed" }, { status: 405 });
@@ -64,10 +78,21 @@ export async function action({ request }: ActionFunctionArgs) {
   try {
     const result = await processStripeWebhookEvent(event);
     if (!result.ok) {
+      logStripeWebhookFailure("classified-failure", result.reason, event);
       return data({ ok: false, code: result.reason }, { status: 500 });
     }
     return data({ ok: true });
-  } catch {
+  } catch (err) {
+    // Unexpected exception, not one of processStripeWebhookEvent's own
+    // classified ProcessResult failures — captureError extracts only
+    // .name/.message (truncated), never the full error object, so nothing
+    // from `event.data` ever reaches it even if it somehow ended up inside
+    // the error (e.g. a stack trace interpolating a value) — only Stripe's
+    // own structural id/type are passed as meta, same as the branch above.
+    captureError("stripe-webhook:unhandled-exception", err, {
+      eventId: event.id,
+      eventType: event.type,
+    });
     return data({ ok: false, code: "processing_error" }, { status: 500 });
   }
 }

@@ -10,7 +10,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("~/db.server", () => ({
   default: {
     adminAuditLog: {
-      create: vi.fn().mockResolvedValue({}),
+      create: vi.fn().mockResolvedValue({ id: "audit-1" }),
       findMany: vi.fn().mockResolvedValue([]),
     },
   },
@@ -29,6 +29,7 @@ describe("recordAdminAction", () => {
     await recordAdminAction("owner@naiabynadine.com", "purge-journey-events", { count: 42 });
     expect(mockCreate()).toHaveBeenCalledWith({
       data: { performedBy: "owner@naiabynadine.com", action: "purge-journey-events", detail: { count: 42 } },
+      select: { id: true },
     });
   });
 
@@ -36,7 +37,13 @@ describe("recordAdminAction", () => {
     await recordAdminAction("owner@naiabynadine.com", "purge-sessions");
     expect(mockCreate()).toHaveBeenCalledWith({
       data: { performedBy: "owner@naiabynadine.com", action: "purge-sessions", detail: undefined },
+      select: { id: true },
     });
+  });
+
+  it("returns the created row's id — callers that need to link an audit record (e.g. AccessRevocation.overrideAuditLogId) can do so", async () => {
+    const result = await recordAdminAction("owner@naiabynadine.com", "purge-sessions");
+    expect(result).toEqual({ id: "audit-1" });
   });
 });
 

@@ -120,6 +120,7 @@ type Summary = {
   closet: { currentCount: number; limit: number; atCapacity: boolean };
   personalisedTrend: { monthlyLimit: number; monthlyUsed: number };
   windowLabel: string;
+  billingAlert?: { status: "PAST_DUE"; graceDaysRemaining: number } | null;
 };
 
 function baseSummary(overrides: Partial<Summary> = {}): Summary {
@@ -131,17 +132,23 @@ function baseSummary(overrides: Partial<Summary> = {}): Summary {
     closet: { currentCount: 47, limit: 250, atCapacity: false },
     personalisedTrend: { monthlyLimit: 1, monthlyUsed: 0 },
     windowLabel: "October 2026",
+    billingAlert: null,
     ...overrides,
   };
 }
 
-function render(summary: Summary, addonCatalog = CUSTOMER_FACING_ADDONS): string {
+function render(
+  summary: Summary,
+  addonCatalog = CUSTOMER_FACING_ADDONS,
+  checkoutOutcome: "success" | "cancelled" | null = null,
+): string {
   // Defaults to the filtered list the real loader actually returns — not the
   // full ADDON_CATALOG — so component tests reflect what customers see.
   vi.mocked(useLoaderData).mockReturnValue({
     summary,
     membershipPricing: MEMBERSHIP_PRICING,
     addonCatalog,
+    checkoutOutcome,
   });
   return renderToString(<PlanUsagePage />);
 }
@@ -445,5 +452,118 @@ describe("plan-usage component — empty closet / fresh membership", () => {
       closet: { currentCount: 0, limit: 250, atCapacity: false },
     }));
     expect(html).toContain("0 of 250 items");
+  });
+});
+
+// ── PAST_DUE grace-period notice ──────────────────────────────────────────────
+
+describe("plan-usage component — PAST_DUE billing alert", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  // React SSR inserts "<!-- -->" hydration markers between adjacent JSX
+  // expression children (e.g. {days} {unit}) — invisible in a real browser,
+  // but present in the raw renderToString() output these tests assert on.
+  const stripHydrationComments = (html: string) => html.replace(/<!--\s*-->/g, "");
+
+  it("shows the grace-period notice with the exact day count from billingAlert, and an update-payment action", () => {
+    const html = stripHydrationComments(render(baseSummary({ billingAlert: { status: "PAST_DUE", graceDaysRemaining: 4 } })));
+    expect(html).toContain("couldn&#x27;t process your last payment");
+    expect(html).toContain("4 days left");
+    expect(html).toContain("Update payment method");
+  });
+
+  it("uses singular 'day' when exactly one day remains", () => {
+    const html = stripHydrationComments(render(baseSummary({ billingAlert: { status: "PAST_DUE", graceDaysRemaining: 1 } })));
+    expect(html).toContain("1 day left");
+    expect(html).not.toContain("1 days left");
+  });
+
+  it("shows nothing when billingAlert is null — a healthy ACTIVE membership gets no warning", () => {
+    const html = render(baseSummary({ billingAlert: null }));
+    expect(html).not.toContain("couldn&#x27;t process your last payment");
+  });
+
+  it("does not change the entitlement figures shown elsewhere on the page — purely an additional notice", () => {
+    const html = render(baseSummary({ billingAlert: { status: "PAST_DUE", graceDaysRemaining: 2 } }));
+    // Same usage figures as the healthy-membership case — the alert never
+    // substitutes for or hides the normal usage display.
+    expect(html).toContain("3 of 8 used");
+    expect(html).toContain("1 of 5 used");
+  });
+});
+
+// ── Checkout outcome messaging ────────────────────────────────────────────────
+// A checkout redirect alone must never be treated as proof of payment — the
+// "success" case still defers entirely to isMember (summary.membershipStatus,
+// written only by the Stripe webhook) for which copy and which page state to
+// show. See parseCheckoutOutcome / the loader test below for the redirect's
+// own two possible values.
+
+describe("plan-usage component — checkout outcome messaging", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("checkout=success with isMember already true shows the confirmed-welcome banner, no 'check again' control", () => {
+    const html = render(baseSummary({ membershipStatus: "MEMBER" }), CUSTOMER_FACING_ADDONS, "success");
+    expect(html).toContain("Payment confirmed");
+    expect(html).toContain("welcome to nAia Membership");
+    expect(html).not.toContain("Check again");
+  });
+
+  it("checkout=success with isMember still false (webhook not yet landed) shows a pending notice with a 'check again' control — never claims membership", () => {
+    const html = render(baseSummary({ membershipStatus: "NONE" }), CUSTOMER_FACING_ADDONS, "success");
+    expect(html).toContain("confirming your membership now");
+    expect(html).toContain("Check again");
+    expect(html).not.toContain("Payment confirmed");
+    expect(html).not.toContain("welcome to nAia Membership");
+  });
+
+  it("checkout=cancelled shows the cancelled notice regardless of membership state, and never implies a charge happened", () => {
+    const html = render(baseSummary({ membershipStatus: "NONE" }), CUSTOMER_FACING_ADDONS, "cancelled");
+    expect(html).toContain("Checkout was cancelled");
+    expect(html).toContain("No payment was made");
+    expect(html).not.toContain("Payment confirmed");
+    expect(html).not.toContain("confirming your membership");
+  });
+
+  it("no checkout outcome at all (ordinary page visit) shows neither banner", () => {
+    const html = render(baseSummary(), CUSTOMER_FACING_ADDONS, null);
+    expect(html).not.toContain("Payment confirmed");
+    expect(html).not.toContain("Checkout was cancelled");
+    expect(html).not.toContain("confirming your membership");
+  });
+});
+
+// ── Loader — checkout query param parsing ─────────────────────────────────────
+
+describe("plan-usage loader — checkout outcome parsing", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  function mockAuthAndSummary() {
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({ id: "c-1", membershipStatus: "MEMBER" } as any);
+    vi.mocked(getEntitlementSummary).mockResolvedValueOnce(baseSummary() as any);
+  }
+
+  it("parses ?checkout=success", async () => {
+    mockAuthAndSummary();
+    const result: any = await loader({ request: new Request("http://localhost/my-naia/plan-usage?checkout=success"), params: {}, context: {} } as any);
+    expect(result.checkoutOutcome).toBe("success");
+  });
+
+  it("parses ?checkout=cancelled", async () => {
+    mockAuthAndSummary();
+    const result: any = await loader({ request: new Request("http://localhost/my-naia/plan-usage?checkout=cancelled"), params: {}, context: {} } as any);
+    expect(result.checkoutOutcome).toBe("cancelled");
+  });
+
+  it("treats a missing checkout param as null, not a crash or a default outcome", async () => {
+    mockAuthAndSummary();
+    const result: any = await loader({ request: new Request("http://localhost/my-naia/plan-usage"), params: {}, context: {} } as any);
+    expect(result.checkoutOutcome).toBeNull();
+  });
+
+  it("treats any value other than the two real ones (e.g. a forged/typo'd query param) as absent, never as success", async () => {
+    mockAuthAndSummary();
+    const result: any = await loader({ request: new Request("http://localhost/my-naia/plan-usage?checkout=paid"), params: {}, context: {} } as any);
+    expect(result.checkoutOutcome).toBeNull();
   });
 });

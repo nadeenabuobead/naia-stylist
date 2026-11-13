@@ -142,12 +142,29 @@ export function isPastDueGraceExpired(pastDueSince: Date | null, now: Date = new
   return now.getTime() - pastDueSince.getTime() > PAST_DUE_GRACE_PERIOD_MS;
 }
 
+// Customer-facing display only — never consulted for an access decision.
+// By the time anything calls this, isPastDueGraceExpired has already run
+// (inside getCurrentSubscription) and denied access if the grace period
+// is over; this only turns the same already-elapsed duration into a
+// "days left" figure for messaging. Returns null when not currently in a
+// PAST_DUE grace period at all (no pastDueSince, or already expired).
+export function getPastDueGraceDaysRemaining(pastDueSince: Date | null, now: Date = new Date()): number | null {
+  if (!pastDueSince || isPastDueGraceExpired(pastDueSince, now)) return null;
+  const remainingMs = PAST_DUE_GRACE_PERIOD_MS - (now.getTime() - pastDueSince.getTime());
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  return Math.max(0, Math.ceil(remainingMs / DAY_MS));
+}
+
 export type EntitledSubscription = {
   id: string;
   planType: "MONTHLY" | "ANNUAL";
   currentPeriodStart: Date | null;
   currentPeriodEnd: Date | null;
   status: SubscriptionStatus;
+  // Display-only (see getPastDueGraceDaysRemaining) — never re-checked here
+  // for an access decision; isPastDueGraceExpired below already made that
+  // call before this object is ever returned.
+  pastDueSince: Date | null;
 };
 
 // Looks up the customer's current entitled subscription, if any. Before
@@ -166,8 +183,28 @@ async function getCurrentSubscription(customerId: string): Promise<EntitledSubsc
     // regardless of what Stripe's own retry schedule is still doing.
     return null;
   }
-  const { pastDueSince, ...rest } = sub;
-  return rest;
+  // Founder Decision 16 — a full refund of the customer's CURRENT period,
+  // or a dispute lost against it, revokes access regardless of the
+  // Subscription's own ACTIVE/PAST_DUE status column (webhook-handler.
+  // server.ts's refund/dispute handling writes these independently of the
+  // ordinary subscription-status sync, same relationship pastDueSince has
+  // to this function). AccessRevocation is the correctness source of
+  // truth — queried directly here (an indexed lookup), not via a
+  // denormalized flag on Subscription: safely maintaining such a flag
+  // under concurrent webhook deliveries (two independent revocation-
+  // causing events landing near-simultaneously) would need its own proven-
+  // atomic update path this implementation does not have, so the direct
+  // query is correct by construction instead. Fail-closed by construction
+  // for every paid feature: every entitlement entry point (checkEntitlement,
+  // every reserve*Slot, getEntitlementSummary) calls resolveEffectiveContext,
+  // which calls this function — there is no alternate path that could
+  // bypass this check.
+  const revoked = await prisma.accessRevocation.findFirst({
+    where: { subscriptionId: sub.id, resolvedAt: null },
+    select: { id: true },
+  });
+  if (revoked) return null;
+  return sub;
 }
 
 // getCurrentSubscription only ever returns an ACTIVE/PAST_DUE row or null —
@@ -408,6 +445,12 @@ export interface EntitlementSummary {
   closet: ClosetEntitlement;
   personalisedTrend: PersonalisedTrendEntitlement;
   windowLabel: string;
+  // Non-null only while a renewal payment has failed and the 7-day grace
+  // period (PAST_DUE_GRACE_PERIOD_MS) hasn't elapsed — purely informational,
+  // for Plan & Usage messaging. Access itself was already decided before
+  // this summary is built (see getCurrentSubscription); this field never
+  // feeds back into any entitlement check.
+  billingAlert: { status: "PAST_DUE"; graceDaysRemaining: number } | null;
 }
 
 // ── Main function ──────────────────────────────────────────────────────────────
@@ -417,7 +460,11 @@ export async function getEntitlementSummary(
   membershipStatus: MembershipStatus,
   _contextDeps: EffectiveContextDeps = {},
 ): Promise<EntitlementSummary> {
-  const { window, countingEnd, allowances } = await resolveEffectiveContext(customerId, membershipStatus, _contextDeps);
+  const { window, countingEnd, allowances, subscription } = await resolveEffectiveContext(customerId, membershipStatus, _contextDeps);
+  const billingAlert: EntitlementSummary["billingAlert"] =
+    subscription?.status === "PAST_DUE"
+      ? { status: "PAST_DUE", graceDaysRemaining: getPastDueGraceDaysRemaining(subscription.pastDueSince) ?? 0 }
+      : null;
   const resetDate = formatResetDate(window);
   const staleThreshold = new Date(Date.now() - VTO_IN_FLIGHT_STALE_MS);
 
@@ -490,6 +537,7 @@ export async function getEntitlementSummary(
   return {
     membershipStatus,
     windowLabel: window.label,
+    billingAlert,
 
     styleMe: {
       monthlyLimit: allowances.styleMePerMonth,

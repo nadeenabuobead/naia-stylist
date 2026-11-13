@@ -14,6 +14,20 @@ import { MEMBERSHIP_PRICING, ADDON_CATALOG } from "~/lib/plan/plan-limits.server
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 
+// The only two values api.billing-checkout.tsx ever puts in this param
+// (successUrl/cancelUrl) — anything else is treated as absent. Arriving
+// here with ?checkout=success is NEVER proof of payment on its own: it
+// only means Stripe Checkout itself completed, not that the subscription
+// webhook has landed. membershipStatus (isMember below) is written
+// exclusively by that webhook, so it alone decides whether the member
+// view renders — this param only selects which one-time banner copy to
+// show alongside whatever isMember already says.
+type CheckoutOutcome = "success" | "cancelled" | null;
+
+function parseCheckoutOutcome(value: string | null): CheckoutOutcome {
+  return value === "success" || value === "cancelled" ? value : null;
+}
+
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: naiaStyles }];
 
 // ── Customer-facing add-on allowlist ──────────────────────────────────────────
@@ -31,7 +45,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const customer = await requireCurrentNaiaCustomer(request);
   const summary = await getEntitlementSummary(customer.id, customer.membershipStatus);
   const addonCatalog = ADDON_CATALOG.filter((addon) => CUSTOMER_FACING_ADDON_LABELS.has(addon.label));
-  return { summary, membershipPricing: MEMBERSHIP_PRICING, addonCatalog };
+  const checkoutOutcome = parseCheckoutOutcome(new URL(request.url).searchParams.get("checkout"));
+  return { summary, membershipPricing: MEMBERSHIP_PRICING, addonCatalog, checkoutOutcome };
 }
 
 // ── Display helpers ────────────────────────────────────────────────────────────
@@ -105,10 +120,11 @@ function usageLabel(used: number, limit: number, unit: string): string {
 // ── Page component ─────────────────────────────────────────────────────────────
 
 export default function PlanUsagePage() {
-  const { summary, membershipPricing, addonCatalog } = useLoaderData<typeof loader>();
-  const { membershipStatus, styleMe, buySkip, vto, closet, personalisedTrend } = summary;
+  const { summary, membershipPricing, addonCatalog, checkoutOutcome } = useLoaderData<typeof loader>();
+  const { membershipStatus, styleMe, buySkip, vto, closet, personalisedTrend, billingAlert } = summary;
   const isMember = membershipStatus === "MEMBER";
   const pricing = `AED ${membershipPricing.monthly.amount}/month · AED ${membershipPricing.annual.amount}/year`;
+  const [checkingAgain, setCheckingAgain] = useState(false);
 
   const [subscribing, setSubscribing] = useState<"MONTHLY" | "ANNUAL" | null>(null);
   const [subscribeError, setSubscribeError] = useState<string | null>(null);
@@ -213,6 +229,54 @@ export default function PlanUsagePage() {
       </div>
 
       <div className="mn-content">
+
+        {/* ── Checkout outcome (one-time, from the Stripe redirect) ──── */}
+        {/* checkoutOutcome alone never implies membership — isMember (from
+            summary.membershipStatus, written only by the Stripe webhook)
+            still decides which copy applies for "success". */}
+        {checkoutOutcome === "success" && isMember && (
+          <div style={{ padding: "0.9rem 1.1rem", marginBottom: "1rem", borderRadius: "4px", background: "var(--c-success-bg, #e8f5e9)", color: "var(--c-success, #1f7a4d)", fontSize: "0.78rem", letterSpacing: "0.03em" }}>
+            Payment confirmed — welcome to nAia Membership.
+          </div>
+        )}
+        {checkoutOutcome === "success" && !isMember && (
+          <div style={{ padding: "0.9rem 1.1rem", marginBottom: "1rem", borderRadius: "4px", background: "var(--fg-05, #f0f0f0)", color: "var(--fg)", fontSize: "0.78rem", letterSpacing: "0.03em" }}>
+            Payment received. We&apos;re confirming your membership now — this can take a few moments.
+            {" "}
+            <button
+              type="button"
+              onClick={() => { setCheckingAgain(true); window.location.reload(); }}
+              disabled={checkingAgain}
+              style={{ marginLeft: "0.4rem", padding: "0.2rem 0.6rem", fontSize: "0.72rem", letterSpacing: "0.05em", background: "transparent", color: "var(--fg)", border: "1px solid var(--fg-40, var(--fg-55))", borderRadius: "2px", cursor: checkingAgain ? "default" : "pointer" }}
+            >
+              {checkingAgain ? "Checking…" : "Check again"}
+            </button>
+          </div>
+        )}
+        {checkoutOutcome === "cancelled" && (
+          <div style={{ padding: "0.9rem 1.1rem", marginBottom: "1rem", borderRadius: "4px", background: "var(--fg-05, #f0f0f0)", color: "var(--fg)", fontSize: "0.78rem", letterSpacing: "0.03em" }}>
+            Checkout was cancelled. No payment was made — you can try again anytime.
+          </div>
+        )}
+
+        {/* ── PAST_DUE grace-period notice ─────────────────────────────── */}
+        {/* Purely a reflection of summary.billingAlert — never recomputes or
+            widens the 7-day grace period itself (that happened server-side,
+            in entitlement.server.ts, before this page ever ran). */}
+        {billingAlert && (
+          <div style={{ padding: "0.9rem 1.1rem", marginBottom: "1rem", borderRadius: "4px", background: "var(--sev-high-bg, #fdefe2)", color: "var(--sev-high, #b5560f)", fontSize: "0.78rem", letterSpacing: "0.03em" }}>
+            We couldn&apos;t process your last payment. You have {billingAlert.graceDaysRemaining} {billingAlert.graceDaysRemaining === 1 ? "day" : "days"} left to update your payment method before access pauses.
+            {" "}
+            <button
+              type="button"
+              onClick={handleManageMembership}
+              disabled={openingPortal}
+              style={{ marginLeft: "0.4rem", padding: "0.2rem 0.6rem", fontSize: "0.72rem", letterSpacing: "0.05em", background: "transparent", color: "inherit", border: "1px solid currentColor", borderRadius: "2px", cursor: openingPortal ? "default" : "pointer" }}
+            >
+              {openingPortal ? "Opening…" : "Update payment method"}
+            </button>
+          </div>
+        )}
 
         {/* ── Membership header ─────────────────────────────────────── */}
         <section className="mn-section">

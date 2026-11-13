@@ -42,8 +42,11 @@ import {
   resolveEffectiveContext,
   isSubscriptionStatusEntitled,
   isPastDueGraceExpired,
+  getPastDueGraceDaysRemaining,
   reserveStyleMeSlot,
   reserveClosetSlot,
+  reserveBuySkipSlot,
+  reservePersonalisedTrendSlot,
   type EffectiveContextDeps,
   type EntitledSubscription,
   type RunReservationFn,
@@ -190,6 +193,7 @@ function activeMonthlySubscription(overrides: Partial<EntitledSubscription> = {}
     currentPeriodStart: utc(2026, 11, 1),
     currentPeriodEnd: utc(2026, 12, 1),
     status: "ACTIVE",
+    pastDueSince: null,
     ...overrides,
   };
 }
@@ -573,6 +577,48 @@ describe("PH2-14 — PAST_DUE grace period is time-bounded, independent of the p
   });
 });
 
+// ── 15 — customer-facing PAST_DUE messaging (Plan & Usage) needs a days-
+// remaining figure, computed from the SAME boundary isPastDueGraceExpired
+// already enforces — never a second, independently-defined grace period ──
+describe("PH2-16 — getPastDueGraceDaysRemaining: display-only, never consulted for access", () => {
+  it("returns null when pastDueSince is null — not currently PAST_DUE at all", () => {
+    assert.equal(getPastDueGraceDaysRemaining(null, new Date("2026-11-10T00:00:00Z")), null);
+  });
+
+  it("returns null once the grace period has expired — matches isPastDueGraceExpired exactly, never shows a stale countdown for access already denied", () => {
+    const now = new Date("2026-11-10T00:00:00Z");
+    const enteredPastDue = new Date("2026-11-01T00:00:00Z"); // 9 days ago — expired
+    assert.equal(isPastDueGraceExpired(enteredPastDue, now), true);
+    assert.equal(getPastDueGraceDaysRemaining(enteredPastDue, now), null);
+  });
+
+  it("returns 7 on the day the subscription first goes PAST_DUE (zero elapsed time)", () => {
+    const now = new Date("2026-11-01T00:00:00Z");
+    assert.equal(getPastDueGraceDaysRemaining(now, now), 7);
+  });
+
+  it("returns 2 with 5 days elapsed of the 7-day window", () => {
+    const now = new Date("2026-11-10T00:00:00Z");
+    const enteredPastDue = new Date("2026-11-05T00:00:00Z"); // 5 days ago
+    assert.equal(getPastDueGraceDaysRemaining(enteredPastDue, now), 2);
+  });
+
+  it("rounds a partial day UP, never down — a customer must never be told 0 days left while still genuinely entitled", () => {
+    const enteredPastDue = new Date("2026-11-01T00:00:00Z");
+    // 6 days and 1 hour elapsed — under a day remains, must still show 1, not 0.
+    const now = new Date(enteredPastDue.getTime() + (6 * 24 + 1) * 60 * 60 * 1000);
+    assert.equal(isPastDueGraceExpired(enteredPastDue, now), false, "precondition: still within grace");
+    assert.equal(getPastDueGraceDaysRemaining(enteredPastDue, now), 1);
+  });
+
+  it("never returns a negative number, even called a moment before isPastDueGraceExpired would flip true", () => {
+    const enteredPastDue = new Date("2026-11-01T00:00:00Z");
+    const justUnder = new Date(enteredPastDue.getTime() + 7 * 24 * 60 * 60 * 1000 - 1);
+    const result = getPastDueGraceDaysRemaining(enteredPastDue, justUnder);
+    assert.ok(result !== null && result >= 0, "must be a non-negative number, not null, right up to the boundary");
+  });
+});
+
 // ── 13 — a failed/unpaid renewal must never give UNLIMITED usage during the
 // (otherwise correctly 7-day-bounded) PAST_DUE grace period ────────────────
 //
@@ -608,6 +654,7 @@ describe("PH2-15 — countingEnd prevents unlimited usage when a stale, unrenewe
       currentPeriodStart: futurePeriodStart,
       currentPeriodEnd: futurePeriodEnd,
       status: "ACTIVE",
+      pastDueSince: null,
     };
     const deps: EffectiveContextDeps = {
       getSubscription: async () => sub,
@@ -627,6 +674,7 @@ describe("PH2-15 — countingEnd prevents unlimited usage when a stale, unrenewe
       currentPeriodStart: stalePeriodStart,
       currentPeriodEnd: stalePeriodEnd,
       status: "PAST_DUE",
+      pastDueSince: stalePeriodEnd,
     };
     const deps: EffectiveContextDeps = {
       getSubscription: async () => pastDueSub,
@@ -651,6 +699,7 @@ describe("PH2-15 — countingEnd prevents unlimited usage when a stale, unrenewe
       currentPeriodStart: stalePeriodStart,
       currentPeriodEnd: stalePeriodEnd,
       status: "PAST_DUE",
+      pastDueSince: stalePeriodEnd,
     };
     const deps: EffectiveContextDeps = {
       getSubscription: async () => pastDueSub,
@@ -687,5 +736,84 @@ describe("PH2-15 — countingEnd prevents unlimited usage when a stale, unrenewe
     );
     const occurrences = fn.match(/addonAppliesToPeriodEnd:\s*window\.end/g) ?? [];
     assert.equal(occurrences.length, 2, "both StyleMe and VTO add-on exact-period matches must still compare against the real window.end");
+  });
+});
+
+// ── 17 — refund/dispute-driven access revocation denies every paid-feature
+// reservation gate, not just the shared allowances object ──────────────────
+//
+// getSubscription: async () => null here simulates exactly what the REAL
+// getCurrentSubscription returns once an unresolved AccessRevocation row
+// exists for a subscription (see entitlement-revocation-gate.test.ts for
+// proof of THAT real wiring, against a mocked prisma) — this file's own
+// "no real Prisma call" convention means the revocation check itself can't
+// be exercised here directly; what belongs here is confirming each
+// feature-specific reservation function correctly acts on the
+// null-subscription/zero-allowance outcome once it occurs, the same way
+// PH2-13 already proves for an EXPIRED/CANCELED/INCOMPLETE subscription.
+// hasAnySubscriptionRecord: true throughout — a revoked subscription is
+// very much a real, TRACKED row (unlike "never subscribed"), so the
+// NONE-equivalent branch, not the pre-Phase-3 fallback, must be the one
+// that applies.
+describe("PH2-17 — AccessRevocation denies every one of the five paid-feature gates", () => {
+  const revokedDeps: EffectiveContextDeps = {
+    getSubscription: async () => null,
+    hasAnySubscriptionRecord: async () => true,
+    getAddonTotals: async () => ({ styleMeBoost: 0, vtoBoost: 0, closetExpansion: 0 }),
+  };
+
+  it("reserveStyleMeSlot denies — the count comparison inside the transaction is satisfied by the zeroed allowance, and create must never be called", async () => {
+    const mockTx: RunReservationFn = async (fn) =>
+      fn({
+        stylingSession: {
+          count: async () => 0,
+          create: async () => {
+            throw new Error("create must not be called — allowance is 0 under revocation");
+          },
+        },
+      } as any);
+    const result = await reserveStyleMeSlot(CUSTOMER_ID, "MEMBER", { customerId: CUSTOMER_ID } as any, mockTx, revokedDeps);
+    assert.equal(result.allowed, false);
+  });
+
+  it("reserveBuySkipSlot denies — the count comparison inside the transaction is satisfied by the zeroed allowance, and create must never be called", async () => {
+    const mockTx: RunReservationFn = async (fn) =>
+      fn({
+        buyOrSkipAnalysis: {
+          count: async () => 0,
+          create: async () => {
+            throw new Error("create must not be called — allowance is 0 under revocation");
+          },
+        },
+      } as any);
+    const result = await reserveBuySkipSlot(CUSTOMER_ID, "MEMBER", { customerId: CUSTOMER_ID } as any, mockTx, revokedDeps);
+    assert.equal(result.allowed, false);
+  });
+
+  it("reserveClosetSlot denies — the count comparison inside the transaction is satisfied by the zeroed allowance, and create must never be called", async () => {
+    const mockTx: RunReservationFn = async (fn) =>
+      fn({
+        closetItem: {
+          count: async () => 0,
+          create: async () => {
+            throw new Error("create must not be called — allowance is 0 under revocation");
+          },
+        },
+      } as any);
+    const result = await reserveClosetSlot(CUSTOMER_ID, "MEMBER", { customerId: CUSTOMER_ID, name: "x", category: "TOPS" } as any, mockTx, revokedDeps);
+    assert.equal(result.allowed, false);
+  });
+
+  it("reservePersonalisedTrendSlot denies, never even entering the reservation transaction", async () => {
+    const mockTx: RunReservationFn = async () => {
+      throw new Error("transaction must not run — allowance is 0 under revocation");
+    };
+    const result = await reservePersonalisedTrendSlot(CUSTOMER_ID, "MEMBER", "some-report-slug", undefined, mockTx, revokedDeps);
+    assert.equal(result.allowed, false);
+  });
+
+  it("resolveEffectiveContext itself reports zero VTO allowance under revocation — the fifth feature, VTO, has no dedicated reserve*Slot function and is gated through checkEntitlement's own prisma.virtualTryOnJob.count comparison instead (see entitlement-revocation-gate.test.ts RG.2 for the real end-to-end proof against a mocked prisma; checkEntitlement's vto branch makes a real DB count this file's own no-real-Prisma convention does not cover)", async () => {
+    const ctx = await resolveEffectiveContext(CUSTOMER_ID, "MEMBER", revokedDeps);
+    assert.equal(ctx.allowances.vtoPerMonth, 0);
   });
 });

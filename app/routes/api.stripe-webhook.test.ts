@@ -15,9 +15,11 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { verifyStripeSignatureMock, processStripeWebhookEventMock } = vi.hoisted(() => ({
+const { verifyStripeSignatureMock, processStripeWebhookEventMock, captureFailureMock, captureErrorMock } = vi.hoisted(() => ({
   verifyStripeSignatureMock: vi.fn(),
   processStripeWebhookEventMock: vi.fn(),
+  captureFailureMock: vi.fn(),
+  captureErrorMock: vi.fn(),
 }));
 
 vi.mock("~/lib/billing/webhook-verify.server", () => ({
@@ -26,6 +28,11 @@ vi.mock("~/lib/billing/webhook-verify.server", () => ({
 
 vi.mock("~/lib/billing/webhook-handler.server", () => ({
   processStripeWebhookEvent: processStripeWebhookEventMock,
+}));
+
+vi.mock("~/lib/error-tracking.server", () => ({
+  captureFailure: captureFailureMock,
+  captureError: captureErrorMock,
 }));
 
 import { action } from "./api.stripe-webhook";
@@ -101,5 +108,69 @@ describe("POST /api/stripe-webhook", () => {
     const res: any = await action({ request: makeRequest(testEvent) } as any);
     expect(status(res)).toBe(500);
     expect(res.data.code).toBe("authoritative_subscription_fetch_failed");
+  });
+
+  // ── Error capture (Operations Phase 1 seam) ─────────────────────────────────
+  // Logging must never change the HTTP contract SW.1-SW.7 already establish
+  // — same status codes, same retry semantics — and must never pass the
+  // event's own payload (customer/payment detail) to the capture seam, only
+  // Stripe's own opaque structural metadata plus a classified reason.
+
+  it("SW.8 — a classified processing failure is captured via captureFailure with only eventId/eventType/reason, never the event payload", async () => {
+    processStripeWebhookEventMock.mockResolvedValue({ ok: false, reason: "authoritative_subscription_fetch_failed" });
+    const testEvent = JSON.stringify({
+      id: "evt_test_3",
+      type: "customer.subscription.updated",
+      created: 1,
+      livemode: false,
+      data: { object: { customer: "cus_secret123", id: "sub_secret456" } },
+    });
+    const res: any = await action({ request: makeRequest(testEvent) } as any);
+
+    // HTTP contract unchanged — still 500, still the same reason code, so
+    // Stripe's own retry schedule behaves exactly as before this change.
+    expect(status(res)).toBe(500);
+    expect(res.data.code).toBe("authoritative_subscription_fetch_failed");
+
+    expect(captureFailureMock).toHaveBeenCalledTimes(1);
+    expect(captureErrorMock).not.toHaveBeenCalled();
+    const [context, message, meta] = captureFailureMock.mock.calls[0];
+    expect(context).toContain("stripe-webhook");
+    expect(message).toBe("authoritative_subscription_fetch_failed");
+    expect(meta).toEqual({ eventId: "evt_test_3", eventType: "customer.subscription.updated" });
+    // The customer/subscription ids inside event.data must never reach the
+    // capture call, logged or not.
+    expect(JSON.stringify(meta)).not.toContain("cus_secret123");
+    expect(JSON.stringify(meta)).not.toContain("sub_secret456");
+  });
+
+  it("SW.9 — an unhandled exception during processing still returns 500 processing_error (unchanged Stripe retry semantics) and is captured via captureError with only eventId/eventType, never the raw error's own data or the event payload", async () => {
+    processStripeWebhookEventMock.mockRejectedValue(new Error("db unavailable: password=do-not-log-this"));
+    const testEvent = JSON.stringify({
+      id: "evt_test_4",
+      type: "invoice.payment_failed",
+      created: 1,
+      livemode: false,
+      data: { object: { customer_email: "customer@example.com" } },
+    });
+    const res: any = await action({ request: makeRequest(testEvent) } as any);
+
+    expect(status(res)).toBe(500);
+    expect(res.data.code).toBe("processing_error");
+
+    expect(captureErrorMock).toHaveBeenCalledTimes(1);
+    expect(captureFailureMock).not.toHaveBeenCalled();
+    const [context, _err, meta] = captureErrorMock.mock.calls[0];
+    expect(context).toContain("stripe-webhook");
+    expect(meta).toEqual({ eventId: "evt_test_4", eventType: "invoice.payment_failed" });
+    expect(JSON.stringify(meta)).not.toContain("customer@example.com");
+  });
+
+  it("SW.10 — a successful processing result never calls either capture function", async () => {
+    const testEvent = JSON.stringify({ id: "evt_test_5", type: "checkout.session.completed", created: 1, livemode: false, data: { object: {} } });
+    const res: any = await action({ request: makeRequest(testEvent) } as any);
+    expect(status(res)).toBe(200);
+    expect(captureFailureMock).not.toHaveBeenCalled();
+    expect(captureErrorMock).not.toHaveBeenCalled();
   });
 });
