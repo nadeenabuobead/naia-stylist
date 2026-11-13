@@ -15,6 +15,7 @@
 //   - executeTryOn accepts injected functions for all I/O; tests substitute mocks.
 //   - Standalone functions (downloadModelPhotoAsDataUrl, etc.) take _fetch/_getConfig directly.
 
+import type { Prisma } from "@prisma/client";
 import {
   buildPrivateDownloadUrl,
   uploadCloudinaryPrivate,
@@ -40,7 +41,14 @@ import {
   createOrFindTryOnJob,
   advanceTryOnJob,
   checkCustomerCooldown,
+  computeRequestFingerprint,
+  deleteNaiaModelPhoto,
+  withdrawSaveModelConsent,
   type CreateJobParams,
+  type UpdateJobFn,
+  type UpsertModelFn,
+  type FailedModelAsset,
+  type NaiaModelRecord,
 } from "./my-naia-model.server.js";
 import {
   POLICY_VERSION,
@@ -189,6 +197,173 @@ export function checkResultOwnership(
 ): boolean {
   if (!jobCustomerId || !requestingCustomerId) return false;
   return jobCustomerId === requestingCustomerId;
+}
+
+// ── Source-photo validity re-check (deletion-during-processing guard) ────────
+//
+// submitTryOnJob downloads the body photo once, at submission, and hands it
+// to FASHN in memory — the source Cloudinary asset is never re-read after
+// that. If the customer deletes their My nAia Model body photo while the job
+// is still in flight, nothing before this stopped the job from completing
+// and writing a brand-new Cloudinary result asset derived from a photo that
+// no longer exists for this customer. Call this immediately before
+// persisting any result, and refuse to proceed if it returns false.
+//
+// Exact-identity check: a customer who deletes their photo and uploads a
+// *different* one while the same job is in flight must still fail — the
+// job was submitted against the original photo, not the replacement.
+// requestFingerprint (stored on VirtualTryOnJob at creation, see
+// computeRequestFingerprint) is a deterministic SHA-256 of
+// customerId:productHandle:bodyPublicId. Recomputing it from the CURRENT
+// NaiaModel's bodyPublicId and comparing against the stored value proves
+// exact identity without needing bodyPublicId itself to be persisted on the
+// job row — no schema change required. A missing stored fingerprint is
+// treated as a mismatch (fail closed), not skipped.
+
+export type FindNaiaModelForValidationFn = (
+  naiaModelId: string,
+) => Promise<{ customerId: string; bodyPublicId: string | null } | null>;
+
+async function _findNaiaModelForValidation(
+  naiaModelId: string,
+): Promise<{ customerId: string; bodyPublicId: string | null } | null> {
+  return prisma.naiaModel.findUnique({
+    where: { id: naiaModelId },
+    select: { customerId: true, bodyPublicId: true },
+  });
+}
+
+// Pure predicate shared by both the cheap pre-upload check (unlocked, below)
+// and the locked completion check (completeTryOnJobIfSourceStillValid) — the
+// exact-identity logic must never drift between the two call sites.
+function isModelMatchValid(
+  model: { customerId: string; bodyPublicId: string | null } | null,
+  jobCustomerId: string,
+  productHandle: string,
+  requestFingerprint: string | null,
+): boolean {
+  if (!model) return false;
+  if (model.customerId !== jobCustomerId) return false;
+  if (typeof model.bodyPublicId !== "string" || model.bodyPublicId.length === 0) return false;
+  if (!requestFingerprint) return false;
+  const currentFingerprint = computeRequestFingerprint(jobCustomerId, productHandle, model.bodyPublicId);
+  return currentFingerprint === requestFingerprint;
+}
+
+export async function isSourcePhotoStillValid(
+  naiaModelId: string | null,
+  jobCustomerId: string,
+  productHandle: string,
+  requestFingerprint: string | null,
+  _findNaiaModel: FindNaiaModelForValidationFn = _findNaiaModelForValidation,
+): Promise<boolean> {
+  if (!naiaModelId) return false;
+  const model = await _findNaiaModel(naiaModelId);
+  return isModelMatchValid(model, jobCustomerId, productHandle, requestFingerprint);
+}
+
+// ── Locked completion (closes the read-then-write race) ─────────────────────
+//
+// The unlocked check above still leaves a real gap: between its read of
+// NaiaModel and advanceTryOnJob's later, separate write to VirtualTryOnJob,
+// a concurrent photo deletion can commit. This function closes that gap by
+// taking a real Postgres row lock (SELECT ... FOR UPDATE) on the NaiaModel
+// row and performing the validity check AND the completion write inside the
+// SAME transaction — so whichever of "this completion" or "a concurrent
+// photo deletion" reaches that row first, the other is guaranteed to
+// observe its fully-committed effect, never a stale in-between state.
+//
+// Deliberately NOT a Serializable transaction: this isn't the symmetric
+// write-skew pattern Serializable's conflict detection catches (see
+// cloudinary-deletion-claim.server.ts's header comment for that pattern) —
+// deletion never reads anything this transaction writes, so there's no
+// cycle for Postgres's SSI to find. Plain row locking (FOR UPDATE) is the
+// correct, simpler mechanism for this one-sided "read, then act elsewhere"
+// race: deletion's own plain `UPDATE naiaModel SET bodyPublicId = NULL`
+// already takes an implicit lock on the same row for the duration of that
+// one statement, so no change is needed on the deletion side at all.
+//
+// `SET LOCAL lock_timeout` bounds how long this can block on an abnormally
+// slow concurrent deletion — the critical section on both sides is tiny
+// (no external I/O), so real contention should be rare and brief.
+
+export type CompleteTryOnJobResult =
+  | { ok: true }
+  | { ok: false; reason: "SOURCE_DELETED" };
+
+// DI boundary, same shape as my-naia-model.server.ts's RunTransactionFn: the
+// real implementation wraps prisma.$transaction + the raw-SQL row lock
+// behind a narrow ops object, so tests simulate "what the lock saw" and
+// "was the completion write attempted" directly, without a real Postgres
+// connection or any raw-SQL mocking. This proves the application-level
+// reaction to each possible lock outcome; it does not and cannot prove
+// Postgres's own FOR UPDATE semantics — that needs a real-Postgres
+// concurrency test, tracked separately (see fashn-tryon-service.test.ts's
+// §3c header comment).
+export type CompletionTransactionOps = {
+  findModelLocked: (
+    naiaModelId: string,
+  ) => Promise<{ customerId: string; bodyPublicId: string | null } | null>;
+  updateJobToCompleted: (
+    job: VirtualTryOnJobRecord,
+    predictionId: string,
+  ) => Promise<VirtualTryOnJobRecord>;
+};
+
+export type RunCompletionTransactionFn = (
+  fn: (ops: CompletionTransactionOps) => Promise<CompleteTryOnJobResult>,
+) => Promise<CompleteTryOnJobResult>;
+
+const _runCompletionTransaction: RunCompletionTransactionFn = (fn) =>
+  prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    // Bounds how long this can block on an abnormally slow concurrent
+    // deletion — the critical section on both sides is tiny (no external
+    // I/O), so real contention should be rare and brief.
+    await tx.$executeRawUnsafe(`SET LOCAL lock_timeout = '2s'`);
+    return fn({
+      findModelLocked: async (naiaModelId) => {
+        const rows = await tx.$queryRaw<Array<{ customerId: string; bodyPublicId: string | null }>>`
+          SELECT "customerId", "bodyPublicId" FROM "NaiaModel" WHERE id = ${naiaModelId} FOR UPDATE
+        `;
+        return rows[0] ?? null;
+      },
+      updateJobToCompleted: async (job, predictionId) => {
+        const txUpdateJob: UpdateJobFn = async (id, data) =>
+          tx.virtualTryOnJob.update({
+            where: { id },
+            data: { ...data, updatedAt: new Date() },
+          }) as unknown as Promise<VirtualTryOnJobRecord>;
+        const advanced = await advanceTryOnJob(job, "COMPLETED", { predictionId }, txUpdateJob);
+        if (!advanced.ok) {
+          // validateJobTransition rejected the transition (e.g. the job
+          // somehow wasn't in an active state by the time this ran) —
+          // thrown, not returned, so it rolls back the transaction rather
+          // than being mistaken for a successful write.
+          throw new Error(advanced.error);
+        }
+        return advanced.job;
+      },
+    });
+  });
+
+export async function completeTryOnJobIfSourceStillValid(
+  job: VirtualTryOnJobRecord,
+  naiaModelId: string | null,
+  productHandle: string,
+  requestFingerprint: string | null,
+  predictionId: string,
+  _runTransaction: RunCompletionTransactionFn = _runCompletionTransaction,
+): Promise<CompleteTryOnJobResult> {
+  if (!naiaModelId) return { ok: false, reason: "SOURCE_DELETED" };
+
+  return _runTransaction(async (ops) => {
+    const model = await ops.findModelLocked(naiaModelId);
+    if (!isModelMatchValid(model, job.customerId, productHandle, requestFingerprint)) {
+      return { ok: false, reason: "SOURCE_DELETED" };
+    }
+    await ops.updateJobToCompleted(job, predictionId);
+    return { ok: true };
+  });
 }
 
 // ── submitTryOnJob ────────────────────────────────────────────────────────────
@@ -665,7 +840,14 @@ export async function deleteCustomerVtoResults(
   customerId: string,
   _deleteAsset: DeleteAssetFn = deleteCloudinaryAsset,
 ): Promise<DeleteVtoResultsResult> {
-  // Only COMPLETED jobs have uploaded Cloudinary result assets.
+  // Only COMPLETED jobs have uploaded Cloudinary result assets — see this
+  // function's own header comment: FAILED/CANCELED/TIMED_OUT jobs never
+  // reach the upload step without being cleaned up synchronously (the
+  // source-deleted guard in api.tryon-status.$jobId.tsx deletes or durably
+  // records any asset it orphans before marking a job FAILED), and
+  // PROCESSING/CREATED/SUBMITTED jobs have no asset yet. COMPLETED is also
+  // terminal (no outgoing transition clears it back), so this query is the
+  // exhaustive set of "still has a live, accessible Cloudinary asset."
   const completedJobs = await prisma.virtualTryOnJob.findMany({
     where: { customerId, status: "COMPLETED" },
     select: { id: true },
@@ -683,10 +865,240 @@ export async function deleteCustomerVtoResults(
     } else {
       skippedCount++;
       failedAssets.push(publicId);
+      // Durably record the failure rather than letting it evaporate when
+      // this function returns — callers (settings.tsx, my-naia-model.tsx,
+      // and the new deleteNaiaModelBodyPhotoAndVtoResults/
+      // withdrawSaveModelConsentAndVtoResults wrappers) historically
+      // discarded failedAssets entirely. publicId is @unique on
+      // PendingCloudinaryDeletion, so this upsert is dedup-safe: calling
+      // this function twice (e.g. an explicit "delete all previews" click
+      // followed later by a body-photo deletion that also sweeps) never
+      // creates a second row for the same asset.
+      await prisma.pendingCloudinaryDeletion.upsert({
+        where: { publicId },
+        create: {
+          customerId,
+          publicId,
+          resourceType: "image",
+          deliveryType: "private",
+          context: "vto-result-deletion-failed",
+          attemptCount: 1,
+          lastAttemptAt: new Date(),
+          lastError: result.errorCode ?? "VTO result Cloudinary deletion failed",
+        },
+        update: {
+          attemptCount: { increment: 1 },
+          lastAttemptAt: new Date(),
+          lastError: result.errorCode ?? "VTO result Cloudinary deletion failed (repeat)",
+        },
+      });
     }
   }
 
   return { deletedCount, skippedCount, failedAssets };
+}
+
+// ── Shared service-level cascade: body-photo deletion → VTO result cleanup ──
+//
+// Every route that deletes the My nAia Model body photo (settings.tsx,
+// my-naia-model.tsx) must also sweep any already-COMPLETED VTO results
+// derived from it — otherwise a previously-generated try-on image stays
+// fully accessible indefinitely after the customer deletes the photo it
+// came from. Implemented ONCE here, at the service level, rather than at
+// each call site, specifically so no current or future entry point can
+// forget it (deleteNaiaModelPhoto and withdrawSaveModelConsent themselves
+// are left unchanged — callers that only ever delete the FACE photo, e.g.
+// passport.selfie.tsx, keep calling deleteNaiaModelPhoto directly and are
+// unaffected, since VTO results are never derived from the face photo).
+//
+// Durability design (2026-11): an earlier version of this cascade recorded
+// the cleanup obligation only by catching a failed deleteCustomerVtoResults
+// call and writing a retry record — but if the database is unavailable,
+// that write can fail too, for exactly the same reason the original sweep
+// did. Instead, the obligation is now recorded ATOMICALLY, in the SAME
+// transaction as the bodyPublicId write that actually deletes the photo —
+// via a custom UpsertModelFn passed into the existing, unmodified
+// deleteNaiaModelPhoto/withdrawSaveModelConsent (both already accept one as
+// a DI parameter for exactly this kind of override). Whenever the photo
+// deletion durably commits, the obligation durably exists in the same
+// breath — there is no gap where one succeeded and the other didn't. The
+// synchronous deleteCustomerVtoResults call further below is a best-effort
+// immediate attempt, not what the durability guarantee depends on.
+//
+// Never reports "fully complete" when cleanup is still outstanding:
+// vtoResultsPendingCleanup always reflects whatever deleteCustomerVtoResults
+// could not delete per-asset (durably recorded via PendingCloudinaryDeletion),
+// and vtoResultsSweepFailed is set whenever the sweep couldn't even enumerate
+// jobs this attempt — callers must surface both, never collapse either into
+// a bare ok:true. See customerHasOutstandingVtoSweepObligation below for how
+// previews and signed URLs fail closed while the obligation is outstanding.
+
+function vtoSweepObligationPublicId(customerId: string): string {
+  // Colon-separated, never a real Cloudinary publicId (those are always
+  // "folder/segments" with "/") — cannot collide with an asset row.
+  return `vto-sweep-obligation:${customerId}`;
+}
+
+// Atomic: the NaiaModel write that actually deletes the photo reference AND
+// the durable cleanup obligation commit together or not at all. Passed as
+// deleteNaiaModelPhoto/withdrawSaveModelConsent's existing _upsertModelFn DI
+// parameter — neither of those functions is otherwise modified.
+const _upsertModelAndRecordVtoSweepObligation: UpsertModelFn = (customerId, modelData) =>
+  prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    const updated = await tx.naiaModel.upsert({
+      where: { customerId },
+      create: { customerId, ...modelData },
+      update: modelData,
+    });
+    const publicId = vtoSweepObligationPublicId(customerId);
+    await tx.pendingCloudinaryDeletion.upsert({
+      where: { publicId },
+      create: {
+        customerId,
+        publicId,
+        resourceType: "vto-sweep",
+        deliveryType: "n/a",
+        context: "vto-sweep-obligation",
+        attemptCount: 0,
+      },
+      // Reopen if a PRIOR obligation for this customer had already been
+      // resolved — this is a fresh deletion event, not a continuation.
+      update: { resolvedAt: null },
+    });
+    return updated as unknown as NaiaModelRecord;
+  });
+
+async function resolveVtoSweepObligation(customerId: string): Promise<void> {
+  await prisma.pendingCloudinaryDeletion.updateMany({
+    where: { publicId: vtoSweepObligationPublicId(customerId), resolvedAt: null },
+    data: { resolvedAt: new Date() },
+  });
+}
+
+export async function customerHasOutstandingVtoSweepObligation(customerId: string): Promise<boolean> {
+  const row = await prisma.pendingCloudinaryDeletion.findUnique({
+    where: { publicId: vtoSweepObligationPublicId(customerId) },
+    select: { resolvedAt: true },
+  });
+  return !!row && row.resolvedAt === null;
+}
+
+export interface DeleteBodyPhotoAndVtoResultsResult {
+  ok: boolean;
+  cloudinaryOk: boolean;
+  dbCleared: boolean;
+  staleReference: boolean;
+  error?: string;
+  vtoResultsCleanupAttempted: boolean;
+  vtoResultsSweepFailed: boolean;
+  vtoResultsDeletedCount: number;
+  vtoResultsPendingCleanup: string[];
+}
+
+export async function deleteNaiaModelBodyPhotoAndVtoResults(
+  customerId: string,
+): Promise<DeleteBodyPhotoAndVtoResultsResult> {
+  const photoResult = await deleteNaiaModelPhoto(
+    customerId,
+    "body",
+    undefined,
+    _upsertModelAndRecordVtoSweepObligation,
+  );
+
+  if (!photoResult.ok) {
+    // Either the Cloudinary delete never happened (cloudinaryOk: false —
+    // nothing to cascade, no obligation needed, nothing was deleted), or
+    // the atomic (bodyPublicId-clear + obligation) transaction itself
+    // failed (staleReference: true). In the staleReference case the
+    // obligation was NOT recorded — attempting the sweep now would rely on
+    // the same unavailable database the atomic write just failed against,
+    // exactly the fragile pattern this design avoids. Report it honestly
+    // and let the existing staleReference retry path (the customer or an
+    // operator retrying the deletion) get a fresh atomic attempt.
+    return {
+      ...photoResult,
+      vtoResultsCleanupAttempted: false,
+      vtoResultsSweepFailed: false,
+      vtoResultsDeletedCount: 0,
+      vtoResultsPendingCleanup: [],
+    };
+  }
+
+  // The obligation is now durably recorded, atomically with the photo
+  // deletion that just committed — everything below is a best-effort
+  // immediate attempt, not load-bearing for durability.
+  try {
+    const vtoResult = await deleteCustomerVtoResults(customerId);
+    if (vtoResult.failedAssets.length === 0) {
+      await resolveVtoSweepObligation(customerId);
+    }
+    return {
+      ...photoResult,
+      vtoResultsCleanupAttempted: true,
+      vtoResultsSweepFailed: false,
+      vtoResultsDeletedCount: vtoResult.deletedCount,
+      vtoResultsPendingCleanup: vtoResult.failedAssets,
+    };
+  } catch {
+    // Could not even enumerate this customer's jobs this attempt (e.g. a
+    // transient DB error) — the durable obligation recorded above already
+    // covers this; the maintenance retry mechanism will find and resolve
+    // it later. Not rethrown: the photo deletion itself genuinely
+    // succeeded, and the obligation it depended on already exists.
+    return {
+      ...photoResult,
+      vtoResultsCleanupAttempted: true,
+      vtoResultsSweepFailed: true,
+      vtoResultsDeletedCount: 0,
+      vtoResultsPendingCleanup: [],
+    };
+  }
+}
+
+export interface WithdrawConsentAndVtoResultsResult {
+  ok: boolean;
+  deletedAssets: string[];
+  failedAssets: FailedModelAsset[];
+  vtoResultsSweepFailed: boolean;
+  vtoResultsDeletedCount: number;
+  vtoResultsPendingCleanup: string[];
+}
+
+export async function withdrawSaveModelConsentAndVtoResults(
+  customerId: string,
+): Promise<WithdrawConsentAndVtoResultsResult> {
+  // withdrawSaveModelConsent always clears bodyPublicId regardless of
+  // whether the Cloudinary delete itself succeeded (see its own "disables
+  // readiness regardless" comment), via the SAME atomic obligation-recording
+  // upsert passed in here — so the obligation is durably recorded in the
+  // same transaction every time this function's own DB write commits.
+  // withdrawSaveModelConsent itself does not catch a failure of this write
+  // (pre-existing behavior, unchanged) — if it throws, nothing committed,
+  // so there is nothing to clean up and no obligation to have recorded.
+  const consentResult = await withdrawSaveModelConsent(
+    customerId,
+    _upsertModelAndRecordVtoSweepObligation,
+  );
+
+  try {
+    const vtoResult = await deleteCustomerVtoResults(customerId);
+    if (vtoResult.failedAssets.length === 0) {
+      await resolveVtoSweepObligation(customerId);
+    }
+    return {
+      ...consentResult,
+      vtoResultsSweepFailed: false,
+      vtoResultsDeletedCount: vtoResult.deletedCount,
+      vtoResultsPendingCleanup: vtoResult.failedAssets,
+    };
+  } catch {
+    return {
+      ...consentResult,
+      vtoResultsSweepFailed: true,
+      vtoResultsDeletedCount: 0,
+      vtoResultsPendingCleanup: [],
+    };
+  }
 }
 
 // ── VTO result state check for loader ────────────────────────────────────────
@@ -795,6 +1207,15 @@ async function resolveVtoPreviewLabels(
 }
 
 export async function listCustomerVtoPreviews(customerId: string): Promise<CustomerVtoPreview[]> {
+  // Fail closed while a body-photo-deletion cleanup obligation is
+  // outstanding: the underlying Cloudinary assets may not have been swept
+  // yet, so show nothing rather than risk exposing one. Ordinary photo
+  // replacement and face-only deletion never create this obligation (see
+  // deleteNaiaModelBodyPhotoAndVtoResults/withdrawSaveModelConsentAndVtoResults)
+  // — this only triggers for the deletion paths that are supposed to remove
+  // these results in the first place.
+  if (await customerHasOutstandingVtoSweepObligation(customerId)) return [];
+
   const jobs: Array<{ id: string; productHandle: string; createdAt: Date }> = await prisma.virtualTryOnJob.findMany({
     where: { customerId, status: "COMPLETED" },
     select: { id: true, productHandle: true, createdAt: true },

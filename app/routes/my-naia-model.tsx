@@ -18,7 +18,6 @@ import {
   saveNaiaModelPhoto,
   deleteNaiaModelPhoto,
   saveNaiaModelConsent,
-  withdrawSaveModelConsent,
   withdrawPhotoAnalysisConsent,
   computeModelReadinessFromRecord,
   buildModelPreviewUrl,
@@ -28,6 +27,8 @@ import {
   listCustomerVtoPreviews,
   deleteOneVtoResult,
   deleteCustomerVtoResults,
+  deleteNaiaModelBodyPhotoAndVtoResults,
+  withdrawSaveModelConsentAndVtoResults,
 } from "~/lib/ai/fashn-tryon-service.server";
 import NaiaModelPhotoUpload from "~/components/NaiaModelPhotoUpload";
 import naiaStyles from "~/styles/naia-design-system.css?url";
@@ -106,11 +107,42 @@ export async function action({ request }: ActionFunctionArgs) {
       return data({ ok: false, error: "Missing slot." }, { status: 400 });
     }
 
+    if (slot === "body") {
+      // Cascades to any already-COMPLETED VTO results derived from this
+      // photo — see deleteNaiaModelBodyPhotoAndVtoResults's own header
+      // comment in fashn-tryon-service.server.ts. Face-slot deletion below
+      // is unaffected and unchanged: VTO results are never derived from the
+      // face photo.
+      const result = await deleteNaiaModelBodyPhotoAndVtoResults(customer.id);
+      if (result.staleReference) {
+        // Cloudinary asset deleted but DB clear failed. DB still references deleted asset.
+        // Any preview URL generated for it will 404 — no privacy risk.
+        // Log for retry; return ok so the client clears its local state.
+        console.warn("naia:stale-reference", { customerId: customer.id, slot });
+      }
+      if (!result.ok && !result.staleReference) {
+        return data({ ok: false, error: "Could not delete photo. Please try again." }, { status: 500 });
+      }
+      if (result.vtoResultsPendingCleanup.length > 0 || result.vtoResultsSweepFailed) {
+        // The photo is gone; some saved try-on previews could not be
+        // confirmed removed on this attempt — either specific assets
+        // failed (tracked per-asset) or the sweep itself couldn't even
+        // run. Either way a durable cleanup obligation was recorded
+        // atomically with the photo deletion and will be retried
+        // automatically — never silently dropped.
+        console.warn("naia:vto-cleanup-pending", {
+          customerId: customer.id,
+          pending: result.vtoResultsPendingCleanup.length,
+          sweepFailed: result.vtoResultsSweepFailed,
+        });
+        return data({ ok: true, vtoResultsPendingCleanup: true });
+      }
+      return data({ ok: true });
+    }
+
+    // Face slot — unchanged: no VTO cascade, same as before this fix.
     const result = await deleteNaiaModelPhoto(customer.id, slot);
     if (result.staleReference) {
-      // Cloudinary asset deleted but DB clear failed. DB still references deleted asset.
-      // Any preview URL generated for it will 404 — no privacy risk.
-      // Log for retry; return ok so the client clears its local state.
       console.warn("naia:stale-reference", { customerId: customer.id, slot });
     }
     if (!result.ok && !result.staleReference) {
@@ -129,10 +161,21 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   if (intent === "withdraw-consent") {
-    // Withdraws save-model consent: deletes Cloudinary assets, clears DB references.
-    const result = await withdrawSaveModelConsent(customer.id);
+    // Withdraws save-model consent: deletes Cloudinary assets, clears DB
+    // references, and cascades to any COMPLETED VTO results (body is always
+    // cleared by this path regardless of Cloudinary outcome) — see
+    // withdrawSaveModelConsentAndVtoResults's header comment.
+    const result = await withdrawSaveModelConsentAndVtoResults(customer.id);
     if (!result.ok && result.failedAssets.length > 0) {
       console.warn("naia:partial-withdrawal", { customerId: customer.id, failedAssets: result.failedAssets });
+    }
+    if (result.vtoResultsPendingCleanup.length > 0 || result.vtoResultsSweepFailed) {
+      console.warn("naia:vto-cleanup-pending", {
+        customerId: customer.id,
+        pending: result.vtoResultsPendingCleanup.length,
+        sweepFailed: result.vtoResultsSweepFailed,
+      });
+      return data({ ok: true, vtoResultsPendingCleanup: true });
     }
     return data({ ok: true });
   }

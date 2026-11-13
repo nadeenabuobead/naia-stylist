@@ -20,14 +20,20 @@ vi.mock("~/lib/cloudinary-admin.server", () => ({
   verifyCloudinaryAsset: vi.fn(),
 }));
 
+vi.mock("./ai/fashn-tryon-service.server", () => ({
+  deleteCustomerVtoResults: vi.fn(),
+}));
+
 import prisma from "~/db.server";
 import { deleteCloudinaryAsset, verifyCloudinaryAsset } from "~/lib/cloudinary-admin.server";
+import { deleteCustomerVtoResults } from "./ai/fashn-tryon-service.server";
 import { retryPendingCloudinaryDeletion } from "./cloudinary-deletion-claim.server";
 
 const mockFindUnique = () => (prisma as any).pendingCloudinaryDeletion.findUnique as ReturnType<typeof vi.fn>;
 const mockUpdate = () => (prisma as any).pendingCloudinaryDeletion.update as ReturnType<typeof vi.fn>;
 const mockDelete = () => deleteCloudinaryAsset as ReturnType<typeof vi.fn>;
 const mockVerify = () => verifyCloudinaryAsset as ReturnType<typeof vi.fn>;
+const mockSweep = () => deleteCustomerVtoResults as ReturnType<typeof vi.fn>;
 
 beforeEach(() => vi.clearAllMocks());
 
@@ -49,6 +55,77 @@ describe("retryPendingCloudinaryDeletion — known delivery type (the common cas
 
     mockFindUnique().mockResolvedValueOnce({ id: "pcd-2", publicId: "x", deliveryType: "private", resolvedAt: new Date() });
     expect(await retryPendingCloudinaryDeletion("pcd-2")).toEqual({ status: "already-resolved" });
+    expect(mockDelete()).not.toHaveBeenCalled();
+  });
+});
+
+describe("retryPendingCloudinaryDeletion — customer-level VTO-sweep obligations (context: vto-sweep-obligation)", () => {
+  const OBLIGATION_ROW = {
+    id: "pcd-vto-1",
+    customerId: "cust_001",
+    publicId: "vto-sweep-obligation:cust_001",
+    resourceType: "vto-sweep",
+    deliveryType: "n/a",
+    context: "vto-sweep-obligation",
+    resolvedAt: null,
+  };
+
+  it("re-runs deleteCustomerVtoResults (not deleteCloudinaryAsset against the sentinel publicId) and resolves on a clean sweep", async () => {
+    mockFindUnique().mockResolvedValue(OBLIGATION_ROW);
+    mockSweep().mockResolvedValue({ deletedCount: 2, skippedCount: 0, failedAssets: [] });
+
+    const result = await retryPendingCloudinaryDeletion("pcd-vto-1");
+
+    expect(mockSweep()).toHaveBeenCalledWith("cust_001");
+    expect(mockDelete()).not.toHaveBeenCalled(); // never against the fake sentinel publicId
+    expect(mockUpdate()).toHaveBeenCalledWith({ where: { id: "pcd-vto-1" }, data: { resolvedAt: expect.any(Date) } });
+    expect(result).toEqual({ status: "resolved" });
+  });
+
+  it("leaves the obligation UNRESOLVED when some individual assets are still pending — those stay tracked as their OWN separate rows", async () => {
+    mockFindUnique().mockResolvedValue(OBLIGATION_ROW);
+    mockSweep().mockResolvedValue({
+      deletedCount: 1,
+      skippedCount: 1,
+      failedAssets: ["naia-tryon/cust_001/job-2"],
+    });
+
+    const result = await retryPendingCloudinaryDeletion("pcd-vto-1");
+
+    expect(mockUpdate()).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "pcd-vto-1" },
+        data: expect.objectContaining({ attemptCount: { increment: 1 } }),
+      }),
+    );
+    expect(result).toEqual({ status: "failed-again", error: "VTO_RESULTS_PARTIAL" });
+  });
+
+  it("if deleteCustomerVtoResults itself throws (can't even enumerate), reports failed-again instead of crashing the admin retry action", async () => {
+    mockFindUnique().mockResolvedValue(OBLIGATION_ROW);
+    mockSweep().mockRejectedValue(new Error("connection reset"));
+
+    const result = await retryPendingCloudinaryDeletion("pcd-vto-1");
+
+    expect(result).toEqual({ status: "failed-again", error: "VTO_SWEEP_ENUMERATION_FAILED" });
+  });
+
+  it("is idempotent — retrying an already-resolved obligation is a no-op, same as any other row", async () => {
+    mockFindUnique().mockResolvedValue({ ...OBLIGATION_ROW, resolvedAt: new Date() });
+
+    const result = await retryPendingCloudinaryDeletion("pcd-vto-1");
+
+    expect(mockSweep()).not.toHaveBeenCalled();
+    expect(result).toEqual({ status: "already-resolved" });
+  });
+
+  it("never takes the deliveryType-resolution or deleteCloudinaryAsset path for a vto-sweep-obligation row", async () => {
+    mockFindUnique().mockResolvedValue(OBLIGATION_ROW); // deliveryType: "n/a", never "unknown"
+    mockSweep().mockResolvedValue({ deletedCount: 0, skippedCount: 0, failedAssets: [] });
+
+    await retryPendingCloudinaryDeletion("pcd-vto-1");
+
+    expect(mockVerify()).not.toHaveBeenCalled();
     expect(mockDelete()).not.toHaveBeenCalled();
   });
 });

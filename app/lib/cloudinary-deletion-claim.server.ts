@@ -30,6 +30,7 @@
 import type { Prisma } from "@prisma/client";
 import prisma from "../db.server";
 import { deleteCloudinaryAsset, verifyCloudinaryAsset } from "./cloudinary-admin.server";
+import { deleteCustomerVtoResults } from "./ai/fashn-tryon-service.server";
 
 // Narrowed to only the one model these functions touch — matches this
 // codebase's own convention (entitlement.server.ts's RunReservationFn) of
@@ -160,10 +161,57 @@ async function resolveUnknownDeliveryType(publicId: string): Promise<string | nu
   return null;
 }
 
+// A customer-level VTO-result sweep obligation (publicId
+// "vto-sweep-obligation:{customerId}", recorded atomically with the body-
+// photo-deletion DB write that created it — see
+// fashn-tryon-service.server.ts's deleteNaiaModelBodyPhotoAndVtoResults).
+// Not a real Cloudinary asset: retrying it means re-running the per-customer
+// sweep (deleteCustomerVtoResults), not deleteCloudinaryAsset against
+// row.publicId. Individual asset failures that sweep finds are durably
+// recorded as their OWN separate PendingCloudinaryDeletion rows by
+// deleteCustomerVtoResults itself — resolving this sentinel only means "a
+// sweep attempt enumerated everything and found zero failures," never
+// "every historical per-asset failure for this customer is gone."
+async function retryVtoSweepObligation(row: { id: string; customerId: string }): Promise<RetryCloudinaryDeletionResult> {
+  try {
+    const result = await deleteCustomerVtoResults(row.customerId);
+    if (result.failedAssets.length === 0) {
+      await prisma.pendingCloudinaryDeletion.update({ where: { id: row.id }, data: { resolvedAt: new Date() } });
+      return { status: "resolved" };
+    }
+    await prisma.pendingCloudinaryDeletion.update({
+      where: { id: row.id },
+      data: {
+        attemptCount: { increment: 1 },
+        lastAttemptAt: new Date(),
+        lastError: `${result.failedAssets.length} VTO result asset(s) still pending — tracked individually`,
+      },
+    });
+    return { status: "failed-again", error: "VTO_RESULTS_PARTIAL" };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "unknown error";
+    // Best-effort attempt-count bump — if THIS update also fails, the
+    // sentinel row (created atomically with the original deletion) still
+    // exists and is still unresolved, so nothing durable is lost, only
+    // this one attempt's audit detail.
+    await prisma.pendingCloudinaryDeletion
+      .update({
+        where: { id: row.id },
+        data: { attemptCount: { increment: 1 }, lastAttemptAt: new Date(), lastError: message.slice(0, 2000) },
+      })
+      .catch(() => {});
+    return { status: "failed-again", error: "VTO_SWEEP_ENUMERATION_FAILED" };
+  }
+}
+
 export async function retryPendingCloudinaryDeletion(id: string): Promise<RetryCloudinaryDeletionResult> {
   const row = await prisma.pendingCloudinaryDeletion.findUnique({ where: { id } });
   if (!row) return { status: "not-found" };
   if (row.resolvedAt) return { status: "already-resolved" };
+
+  if (row.context === "vto-sweep-obligation") {
+    return retryVtoSweepObligation(row);
+  }
 
   let deliveryType = row.deliveryType;
   if (deliveryType === "unknown") {

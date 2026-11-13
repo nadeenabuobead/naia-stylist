@@ -105,13 +105,24 @@ describe("C — action intents wired to server functions", () => {
     assert.ok(!src.includes("deleteBoth"),           "no deleteBoth import");
   });
 
-  it("imports deleteNaiaModelPhoto from my-naia-model.server", () => {
-    assert.ok(src.includes("deleteNaiaModelPhoto"),   "imports deleteNaiaModelPhoto");
-    assert.ok(src.includes("my-naia-model.server"),   "from my-naia-model.server");
+  it("imports deleteNaiaModelBodyPhotoAndVtoResults from fashn-tryon-service.server", () => {
+    // Body-photo deletion routes through the service-level cascade (not
+    // deleteNaiaModelPhoto directly) so the VTO-result sweep can never be
+    // forgotten here — see fashn-tryon-service.server.ts's own header
+    // comment on deleteNaiaModelBodyPhotoAndVtoResults.
+    assert.ok(src.includes("deleteNaiaModelBodyPhotoAndVtoResults"), "imports deleteNaiaModelBodyPhotoAndVtoResults");
+    assert.ok(src.includes("fashn-tryon-service.server"), "from fashn-tryon-service.server");
   });
 
-  it("imports withdrawSaveModelConsent from my-naia-model.server", () => {
-    assert.ok(src.includes("withdrawSaveModelConsent"), "imports withdrawSaveModelConsent");
+  it("imports withdrawSaveModelConsentAndVtoResults from fashn-tryon-service.server", () => {
+    assert.ok(src.includes("withdrawSaveModelConsentAndVtoResults"), "imports withdrawSaveModelConsentAndVtoResults");
+  });
+
+  it("does not import the raw deleteNaiaModelPhoto/withdrawSaveModelConsent directly — only the VTO-cascading wrappers", () => {
+    // Guards against a future edit silently reverting to the raw
+    // my-naia-model.server functions and reopening the "body photo deleted
+    // but old try-on previews stay accessible" gap.
+    assert.ok(!src.includes('from "~/lib/ai/my-naia-model.server"'), "no direct my-naia-model.server import");
   });
 
   it("action does not handle any delete-selfie-* or delete-model-face intent", () => {
@@ -123,16 +134,24 @@ describe("C — action intents wired to server functions", () => {
     assert.ok(!actionBlock.includes('deleteNaiaModelPhoto(customer.id, "face")'), "never calls deleteNaiaModelPhoto with face slot");
   });
 
-  it("action handles delete-model-body intent calling deleteNaiaModelPhoto with body slot", () => {
+  it("action handles delete-model-body intent calling deleteNaiaModelBodyPhotoAndVtoResults", () => {
     const actionBlock = src.slice(src.indexOf("export async function action"));
     assert.ok(actionBlock.includes('"delete-model-body"'),           "handles delete-model-body");
-    assert.ok(actionBlock.includes('deleteNaiaModelPhoto(customer.id, "body")'), "calls deleteNaiaModelPhoto body slot");
+    assert.ok(actionBlock.includes("deleteNaiaModelBodyPhotoAndVtoResults(customer.id)"), "calls the VTO-cascading wrapper");
   });
 
-  it("action handles delete-model-all intent calling withdrawSaveModelConsent", () => {
+  it("action handles delete-model-all intent calling withdrawSaveModelConsentAndVtoResults", () => {
     const actionBlock = src.slice(src.indexOf("export async function action"));
     assert.ok(actionBlock.includes('"delete-model-all"'),                   "handles delete-model-all");
-    assert.ok(actionBlock.includes("withdrawSaveModelConsent(customer.id)"), "calls withdrawSaveModelConsent with customer.id");
+    assert.ok(actionBlock.includes("withdrawSaveModelConsentAndVtoResults(customer.id)"), "calls the VTO-cascading wrapper");
+  });
+
+  it("neither delete-model-body nor delete-model-all reports success while vtoResultsPendingCleanup is non-empty without surfacing it", () => {
+    const actionBlock = src.slice(src.indexOf("export async function action"));
+    const bodyCase = actionBlock.slice(actionBlock.indexOf('"delete-model-body"'), actionBlock.indexOf('"delete-model-all"'));
+    const allCase  = actionBlock.slice(actionBlock.indexOf('"delete-model-all"'), actionBlock.indexOf('"delete-vto-results"'));
+    assert.ok(bodyCase.includes("vtoResultsPendingCleanup"), "delete-model-body checks vtoResultsPendingCleanup");
+    assert.ok(allCase.includes("vtoResultsPendingCleanup"),  "delete-model-all checks vtoResultsPendingCleanup");
   });
 });
 

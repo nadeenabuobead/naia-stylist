@@ -49,7 +49,10 @@ describe("VTO result deletion helper", () => {
 
   it("queries only COMPLETED jobs", () => {
     const fnIdx = vtoDeletionSrc.indexOf("async function deleteCustomerVtoResults(");
-    const fnBody = vtoDeletionSrc.slice(fnIdx, fnIdx + 600);
+    // 1200, not 600: the function now also durably records Cloudinary
+    // failures via PendingCloudinaryDeletion (privacy fix, 2026-11), which
+    // pushed both assertions below past the old, tighter window.
+    const fnBody = vtoDeletionSrc.slice(fnIdx, fnIdx + 1200);
     assert.ok(
       fnBody.includes('status: "COMPLETED"'),
       "must filter by COMPLETED status — only completed jobs have result assets",
@@ -67,7 +70,10 @@ describe("VTO result deletion helper", () => {
 
   it("calls deriveTryOnResultPublicId to get publicId (not from DB field)", () => {
     const fnIdx = vtoDeletionSrc.indexOf("async function deleteCustomerVtoResults(");
-    const fnBody = vtoDeletionSrc.slice(fnIdx, fnIdx + 600);
+    // 1200, not 600: the function now also durably records Cloudinary
+    // failures via PendingCloudinaryDeletion (privacy fix, 2026-11), which
+    // pushed both assertions below past the old, tighter window.
+    const fnBody = vtoDeletionSrc.slice(fnIdx, fnIdx + 1200);
     assert.ok(
       fnBody.includes("deriveTryOnResultPublicId("),
       "must derive publicId via deriveTryOnResultPublicId, not read a DB column",
@@ -323,7 +329,7 @@ describe("settings.tsx — VTO and BOS wiring", () => {
 
   it("action calls deleteCustomerVtoResults with server-derived customerId only", () => {
     const actionIdx = settingsSrc.indexOf("export async function action(");
-    const actionBody = settingsSrc.slice(actionIdx, actionIdx + 3000);
+    const actionBody = settingsSrc.slice(actionIdx, actionIdx + 4000);
     assert.ok(
       actionBody.includes("deleteCustomerVtoResults(customer.id"),
       "action must call deleteCustomerVtoResults with customer.id (from auth, not formData)",
@@ -337,7 +343,7 @@ describe("settings.tsx — VTO and BOS wiring", () => {
 
   it("action calls deleteCustomerBosImages with server-derived customerId only", () => {
     const actionIdx = settingsSrc.indexOf("export async function action(");
-    const actionBody = settingsSrc.slice(actionIdx, actionIdx + 3000);
+    const actionBody = settingsSrc.slice(actionIdx, actionIdx + 4000);
     assert.ok(
       actionBody.includes("deleteCustomerBosImages(customer.id"),
       "action must call deleteCustomerBosImages with customer.id (from auth, not formData)",
