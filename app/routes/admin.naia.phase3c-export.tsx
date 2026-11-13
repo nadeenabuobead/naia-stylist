@@ -14,43 +14,32 @@
 //
 // URL: /admin/naia/phase3c-export
 
-import type { LoaderFunctionArgs } from "react-router";
 import { useLoaderData } from "react-router";
-import { requireAdminSession } from "~/lib/internal-auth.server";
-import { generatePhase3CQAExport } from "~/lib/admin/phase3c-qa-export.server";
 
 // ── Loader ────────────────────────────────────────────────────────────────────
 // GET /admin/naia/phase3c-export            → page UI
 // GET /admin/naia/phase3c-export?intent=html → download HTML file
 // GET /admin/naia/phase3c-export?intent=json → download JSON file
-
-export async function loader({ request }: LoaderFunctionArgs) {
-  const { identity } = await requireAdminSession(request);
-
-  const url = new URL(request.url);
-  const intent = url.searchParams.get("intent");
-
-  if (intent === "html" || intent === "json") {
-    const { htmlContent, jsonContent } = await generatePhase3CQAExport();
-    if (intent === "json") {
-      return new Response(jsonContent, {
-        headers: {
-          "Content-Type": "application/json; charset=utf-8",
-          "Content-Disposition": 'attachment; filename="phase3c-qa-export.json"',
-          "Cache-Control": "no-store",
-        },
-      });
-    }
-    return new Response(htmlContent, {
-      headers: {
-        "Content-Type": "text/html; charset=utf-8",
-        "Content-Disposition": 'attachment; filename="phase3c-qa-export.html"',
-        "Cache-Control": "no-store",
-      },
-    });
-  }
-
-  return Response.json({ identity });
+//
+// Disabled (2026-11-12) — this route could produce a single response
+// embedding base64 garment photos for every customer's Closet, gated by
+// nothing beyond the one shared admin password (requireAdminSession).
+// Taken offline while real per-person admin authentication is built;
+// revert this commit to re-enable once that lands. Unconditional for
+// every method/intent — no auth check, no DB query, no photo retrieval or
+// export generation ever runs; neither requireAdminSession nor
+// generatePhase3CQAExport is imported any more.
+//
+// Must THROW, not return, the 404 — a *returned* Response from a loader
+// is absorbed as ordinary loader data for a full document render, so the
+// route's own component (Download buttons included) still renders
+// underneath it; only a *thrown* Response skips rendering and reaches the
+// nearest error boundary. Confirmed empirically against a real
+// authenticated admin session before landing this exact pattern
+// originally — this codebase's established pattern elsewhere too (e.g.
+// admin.naia.closet.$itemId.tsx).
+export async function loader() {
+  throw new Response("Not found", { status: 404 });
 }
 
 // ── UI ────────────────────────────────────────────────────────────────────────
