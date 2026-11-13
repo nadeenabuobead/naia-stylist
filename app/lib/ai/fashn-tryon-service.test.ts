@@ -13,6 +13,7 @@ import {
   deriveTryOnResultPublicId,
   buildTryOnResultUrl,
   checkResultOwnership,
+  isSourcePhotoStillValid,
   downloadModelPhotoAsDataUrl,
   uploadTryOnResult,
   executeTryOn,
@@ -21,6 +22,7 @@ import {
   type ExecuteTryOnDeps,
   type SubmitJobParams,
   type SubmitJobDeps,
+  type FindNaiaModelForValidationFn,
 } from "./fashn-tryon-service.server.js";
 import { isValidModelImageDataUrl } from "./fashn-try-on.server.js";
 import { VIRTUAL_TRY_ON_ENABLED, NAIA_COMPONENT_MEDIA_MAP } from "./naia-product-media.js";
@@ -202,6 +204,81 @@ describe("§3 Ownership checks", () => {
 
   it("OW04 empty jobCustomerId returns false", () => {
     assert.ok(!checkResultOwnership("", "cust-001"));
+  });
+});
+
+// ── §3b Source-photo validity (deletion-during-processing guard) ──────────────
+
+describe("§3b isSourcePhotoStillValid — deletion-during-processing guard", () => {
+  function makeFinder(
+    result: { customerId: string; bodyPublicId: string | null } | null,
+  ): FindNaiaModelForValidationFn {
+    return async (_naiaModelId: string) => result;
+  }
+
+  it("SV01 null naiaModelId returns false without querying", async () => {
+    let called = false;
+    const finder: FindNaiaModelForValidationFn = async () => {
+      called = true;
+      return null;
+    };
+    const ok = await isSourcePhotoStillValid(null, "cust-001", finder);
+    assert.ok(!ok);
+    assert.ok(!called, "must not query DB when naiaModelId is null");
+  });
+
+  it("SV02 model not found (deleted) returns false", async () => {
+    const ok = await isSourcePhotoStillValid(
+      "model-001",
+      "cust-001",
+      makeFinder(null),
+    );
+    assert.ok(!ok);
+  });
+
+  it("SV03 model belongs to a different customer returns false", async () => {
+    const ok = await isSourcePhotoStillValid(
+      "model-001",
+      "cust-001",
+      makeFinder({ customerId: "cust-002", bodyPublicId: "naia/body/abc" }),
+    );
+    assert.ok(!ok, "cross-customer model must never validate");
+  });
+
+  it("SV04 model found but bodyPublicId is null (photo removed) returns false", () =>
+    (async () => {
+      const ok = await isSourcePhotoStillValid(
+        "model-001",
+        "cust-001",
+        makeFinder({ customerId: "cust-001", bodyPublicId: null }),
+      );
+      assert.ok(!ok);
+    })());
+
+  it("SV05 model found but bodyPublicId is empty string returns false", async () => {
+    const ok = await isSourcePhotoStillValid(
+      "model-001",
+      "cust-001",
+      makeFinder({ customerId: "cust-001", bodyPublicId: "" }),
+    );
+    assert.ok(!ok);
+  });
+
+  it("SV06 matching customer with a non-empty bodyPublicId returns true", async () => {
+    const ok = await isSourcePhotoStillValid(
+      "model-001",
+      "cust-001",
+      makeFinder({ customerId: "cust-001", bodyPublicId: "naia/body/abc" }),
+    );
+    assert.ok(ok);
+  });
+
+  it("SV07 default DI parameter calls real prisma-backed lookup (does not throw, resolves to a boolean) when naiaModelId is null", async () => {
+    // Exercises the production default (_findNaiaModelForValidation) via the
+    // null short-circuit only — confirms the default param wiring compiles
+    // and runs without needing a live DB, since null never reaches prisma.
+    const ok = await isSourcePhotoStillValid(null, "cust-001");
+    assert.equal(ok, false);
   });
 });
 

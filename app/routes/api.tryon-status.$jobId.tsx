@@ -22,8 +22,11 @@ import {
   uploadTryOnResult,
   buildTryOnResultUrl,
   checkResultOwnership,
+  isSourcePhotoStillValid,
+  deriveTryOnResultPublicId,
 } from "~/lib/ai/fashn-tryon-service.server";
 import { advanceTryOnJob } from "~/lib/ai/my-naia-model.server";
+import { deleteCloudinaryAsset } from "~/lib/cloudinary-admin.server";
 import prisma from "~/db.server";
 import type { VirtualTryOnJobRecord } from "~/lib/ai/virtual-try-on.types";
 
@@ -115,12 +118,58 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
       return data({ status: "FAILED" });
     }
 
+    // Deletion-during-processing guard — the source body photo may have
+    // been deleted (Settings, or account erasure) while this job sat at
+    // FASHN. Re-check BEFORE persisting anything: if the source is gone,
+    // never upload or expose the result at all.
+    if (!(await isSourcePhotoStillValid(job.naiaModelId, job.customerId))) {
+      await advanceTryOnJob(job as unknown as VirtualTryOnJobRecord, "FAILED", {
+        errorCode: "SOURCE_DELETED",
+      });
+      return data({ status: "FAILED" });
+    }
+
     // outputDataUrl is a base64 data URL — never logged
     const outputDataUrl = outputs[0];
     const uploadResult = await uploadTryOnResult(customer.id, job.id, outputDataUrl);
     if (!uploadResult.ok) {
       await advanceTryOnJob(job as unknown as VirtualTryOnJobRecord, "FAILED", {
         errorCode: "UPLOAD_FAILED",
+      });
+      return data({ status: "FAILED" });
+    }
+
+    // Defense in depth — re-check once more immediately after upload, for
+    // the narrow window between the check above and the upload completing.
+    // If the source was deleted in that window, the asset just created is
+    // an orphan: delete it, and if that deletion itself fails, durably
+    // record it for retry rather than silently losing track of it — same
+    // pattern already used for account-erasure Cloudinary failures.
+    if (!(await isSourcePhotoStillValid(job.naiaModelId, job.customerId))) {
+      const orphanPublicId = deriveTryOnResultPublicId(customer.id, job.id);
+      const cleanup = await deleteCloudinaryAsset(orphanPublicId, "private");
+      if (!cleanup.ok) {
+        await prisma.pendingCloudinaryDeletion.upsert({
+          where: { publicId: orphanPublicId },
+          create: {
+            customerId: customer.id,
+            publicId: orphanPublicId,
+            resourceType: "image",
+            deliveryType: "private",
+            context: "vto-race-condition-cleanup",
+            attemptCount: 1,
+            lastAttemptAt: new Date(),
+            lastError: cleanup.errorCode ?? "deletion failed after source photo was deleted mid-job",
+          },
+          update: {
+            attemptCount: { increment: 1 },
+            lastAttemptAt: new Date(),
+            lastError: cleanup.errorCode ?? "deletion failed after source photo was deleted mid-job (repeat)",
+          },
+        });
+      }
+      await advanceTryOnJob(job as unknown as VirtualTryOnJobRecord, "FAILED", {
+        errorCode: "SOURCE_DELETED",
       });
       return data({ status: "FAILED" });
     }
