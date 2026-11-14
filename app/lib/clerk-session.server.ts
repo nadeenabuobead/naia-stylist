@@ -37,14 +37,71 @@ import { DatabaseUnavailableError, withTransientRetry } from "./prisma-transient
 // extension.
 export { DatabaseUnavailableError };
 
+export class ClerkKeyMisconfiguredError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ClerkKeyMisconfiguredError";
+  }
+}
+
+// Mirrors stripe-client.server.ts's assertTestModeKey, but asymmetrically:
+// Stripe's standing constraint is "test mode everywhere, always" — Clerk's
+// is not, since Production genuinely needs a live key pair. What's
+// actually checked here is the Nov 12 Stripe/Clerk audit's own open
+// question, made concrete: CLERK_PUBLISHABLE_KEY is confirmed shared
+// across Preview and Production today (same literal value, by design, not
+// yet a separate-instance decision) — nothing today verifies the two keys
+// even agree with each other, or that a live pair never reaches a
+// deployment where it shouldn't. Checked here:
+//   1. Each key has a recognizable Clerk prefix at all (pk_test_/pk_live_,
+//      sk_test_/sk_live_) — catches a flat typo/placeholder/wrong-provider
+//      value with a clear error, instead of a confusing failure deep
+//      inside the Clerk SDK the first time a real request comes in.
+//   2. The secret and publishable key agree on test-vs-live — a mismatched
+//      pair (e.g. sk_live_ paired with pk_test_) is never a valid
+//      configuration and typically indicates a copy-paste mistake across
+//      environments.
+//   3. A genuinely LIVE key pair is never used on a Preview deployment —
+//      Preview is QA/in-progress traffic and must never be able to reach
+//      real customer data in Clerk's own live instance. Production is
+//      deliberately NOT restricted the other way (a test key pair in
+//      Production would simply not authenticate real customers at all,
+//      which is a functional break, not a security one, and is left to
+//      surface naturally rather than guessed at here).
+// Runs once, lazily, at the point of actual use (this function, same as
+// Stripe's own request-time check) — never at module load, so it reads
+// whatever the CURRENT process env actually is and never breaks a build or
+// test run where these vars happen to be unset entirely.
+export function assertClerkKeysConsistent(secretKey: string, publishableKey: string | undefined): void {
+  if (!publishableKey) return; // missing entirely is createClerkClient's own contract, not this guard's concern
+
+  const secretMode = secretKey.startsWith("sk_live_") ? "live" : secretKey.startsWith("sk_test_") ? "test" : null;
+  const publishableMode = publishableKey.startsWith("pk_live_") ? "live" : publishableKey.startsWith("pk_test_") ? "test" : null;
+
+  if (!secretMode) {
+    throw new ClerkKeyMisconfiguredError("CLERK_SECRET_KEY does not look like a real Clerk secret key (expected an sk_test_ or sk_live_ prefix).");
+  }
+  if (!publishableMode) {
+    throw new ClerkKeyMisconfiguredError("CLERK_PUBLISHABLE_KEY does not look like a real Clerk publishable key (expected a pk_test_ or pk_live_ prefix).");
+  }
+  if (secretMode !== publishableMode) {
+    throw new ClerkKeyMisconfiguredError(
+      `CLERK_SECRET_KEY (${secretMode}) and CLERK_PUBLISHABLE_KEY (${publishableMode}) are from different Clerk modes — this pairing is never valid.`,
+    );
+  }
+  if (process.env.VERCEL_ENV === "preview" && secretMode === "live") {
+    throw new ClerkKeyMisconfiguredError("A live Clerk key pair must never be used on a Preview deployment — Preview traffic must never be able to reach real customer data.");
+  }
+}
+
 let _clerkClient: ReturnType<typeof createClerkClient> | null = null;
 
 function defaultClerkClient() {
   if (!_clerkClient) {
-    _clerkClient = createClerkClient({
-      secretKey: process.env.CLERK_SECRET_KEY,
-      publishableKey: process.env.CLERK_PUBLISHABLE_KEY,
-    });
+    const secretKey = process.env.CLERK_SECRET_KEY;
+    const publishableKey = process.env.CLERK_PUBLISHABLE_KEY;
+    if (secretKey) assertClerkKeysConsistent(secretKey, publishableKey);
+    _clerkClient = createClerkClient({ secretKey, publishableKey });
   }
   return _clerkClient;
 }
