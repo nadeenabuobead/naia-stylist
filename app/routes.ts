@@ -12,6 +12,7 @@ export default [
   // uptime monitors. See the route file's header for what it deliberately
   // does not do (no DB/provider check, no env/version/stack exposure).
   route("api/health", "routes/api.health.tsx"),
+  route("api/export-zip", "routes/api.export-zip.ts"),
   route("onboarding/step/:step", "routes/onboarding/step.$step.tsx"),
   route("onboarding/age-confirm", "routes/onboarding.age-confirm.tsx"),
   route("onboarding/complete", "routes/onboarding/complete.tsx"),

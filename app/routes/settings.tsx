@@ -518,6 +518,14 @@ export default function Settings() {
           >
             {exportFetcher.state !== "idle" ? "Preparing…" : "Download a copy of my data"}
           </button>
+          {/* Full export with actual image files, per Legal review — a real
+              browser navigation (not a fetcher) so the ZIP's
+              Content-Disposition triggers a native save dialog instead of
+              being intercepted as a fetch response. Additive: the JSON-only
+              button above is unchanged and still works on its own. */}
+          <a href="/api/export-zip" className="sp-btn-outline" style={{ textDecoration: "none", textAlign: "center" }}>
+            Download full export (ZIP, with photos)
+          </a>
           <button
             type="button"
             className="sp-btn-outline"
