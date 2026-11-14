@@ -121,8 +121,24 @@ function usageLabel(used: number, limit: number, unit: string): string {
 
 export default function PlanUsagePage() {
   const { summary, membershipPricing, addonCatalog, checkoutOutcome } = useLoaderData<typeof loader>();
-  const { membershipStatus, styleMe, buySkip, vto, closet, personalisedTrend, billingAlert } = summary;
-  const isMember = membershipStatus === "MEMBER";
+  const { effectiveMembershipStatus, hasBillingAccount, styleMe, buySkip, vto, closet, personalisedTrend, billingAlert } = summary;
+  // effectiveMembershipStatus, not the raw cached membershipStatus — see
+  // entitlement.server.ts's EntitlementSummary comment. Governs usage
+  // meters / "what you get" below — entitlement, not billing eligibility.
+  const isMember = effectiveMembershipStatus === "MEMBER";
+  // Subscribe-vs-Manage-Membership is a DIFFERENT question from isMember
+  // above: it's "does this customer have a real Stripe billing account to
+  // manage," not "are they currently entitled." hasBillingAccount is the
+  // exact same check api.billing-portal.tsx itself performs before
+  // opening the portal, so Manage Membership is shown if and only if
+  // clicking it will actually succeed — never the "no billing account
+  // found" dead end a membership-tier-only gate could produce. Still a
+  // strict either/or (same shape as before, just a different gating
+  // field): a lapsed customer who already has a real billing account sees
+  // Manage Membership, not Subscribe — Stripe's own portal is the single
+  // correct entry point once a real account exists, same as today.
+  const showSubscribeButtons = !hasBillingAccount;
+  const showManageMembership = hasBillingAccount;
   const pricing = `AED ${membershipPricing.monthly.amount}/month · AED ${membershipPricing.annual.amount}/year`;
   const [checkingAgain, setCheckingAgain] = useState(false);
 
@@ -232,8 +248,8 @@ export default function PlanUsagePage() {
 
         {/* ── Checkout outcome (one-time, from the Stripe redirect) ──── */}
         {/* checkoutOutcome alone never implies membership — isMember (from
-            summary.membershipStatus, written only by the Stripe webhook)
-            still decides which copy applies for "success". */}
+            summary.effectiveMembershipStatus, authoritative-subscription-
+            corrected) still decides which copy applies for "success". */}
         {checkoutOutcome === "success" && isMember && (
           <div style={{ padding: "0.9rem 1.1rem", marginBottom: "1rem", borderRadius: "4px", background: "var(--c-success-bg, #e8f5e9)", color: "var(--c-success, #1f7a4d)", fontSize: "0.78rem", letterSpacing: "0.03em" }}>
             Payment confirmed — welcome to nAia Membership.
@@ -306,7 +322,7 @@ export default function PlanUsagePage() {
             <div style={{ marginTop: "0.4rem", fontSize: "0.72rem", color: "var(--fg-55)", letterSpacing: "0.08em" }}>
               {pricing}
             </div>
-            {!isMember && (
+            {showSubscribeButtons && (
               <div style={{ marginTop: "1rem", display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
                 <button
                   type="button"
@@ -477,8 +493,9 @@ export default function PlanUsagePage() {
           </Section>
         )}
 
-        {/* ── Manage Membership (MEMBER only) ───────────────────────── */}
-        {isMember && (
+        {/* ── Manage Membership (has a real billing account, any
+            membership tier — see showManageMembership above) ─────────── */}
+        {showManageMembership && (
           <Section title="Membership">
             <button
               type="button"

@@ -58,6 +58,7 @@ describe("RG — getCurrentSubscription's real AccessRevocation wiring (not DI-b
 
     expect(ctx.subscription).not.toBeNull();
     expect(ctx.allowances.styleMePerMonth).toBeGreaterThan(0);
+    expect(ctx.effectiveMembershipStatus).toBe("MEMBER");
     expect(accessRevocationFindFirstMock).toHaveBeenCalledWith({
       where: { subscriptionId: "sub-1", resolvedAt: null },
       select: { id: true },
@@ -76,6 +77,7 @@ describe("RG — getCurrentSubscription's real AccessRevocation wiring (not DI-b
     expect(ctx.allowances.vtoPerMonth).toBe(0);
     expect(ctx.allowances.closetItems).toBe(0);
     expect(ctx.allowances.personalisedTrendPerMonth).toBe(0);
+    expect(ctx.effectiveMembershipStatus).toBe("NONE");
   });
 
   it("RG.3 — the revocation check is scoped to THIS subscription's id, not the customer generally", async () => {
@@ -96,6 +98,7 @@ describe("RG — getCurrentSubscription's real AccessRevocation wiring (not DI-b
 
     expect(ctx.subscription).not.toBeNull();
     expect(ctx.allowances.styleMePerMonth).toBeGreaterThan(0);
+    expect(ctx.effectiveMembershipStatus).toBe("MEMBER");
   });
 
   it("RG.5 — no Subscription row at all never even queries AccessRevocation — nothing to revoke", async () => {

@@ -951,7 +951,7 @@ export default function MyNaiaOverview() {
             <Link to="/my-naia/plan-usage" className="mn-see-link">Full details</Link>
           </div>
           <div className="mn-section-body">
-            {entitlement.membershipStatus === "MEMBER" ? (
+            {entitlement.effectiveMembershipStatus === "MEMBER" ? (
               <div style={{ display: "grid", gap: "1.5rem", gridTemplateColumns: "repeat(auto-fill, minmax(10rem, 1fr))" }}>
                 {buildOverviewPlanCards(entitlement).map((c) => (
                   <div key={c.label}>

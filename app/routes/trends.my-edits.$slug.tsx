@@ -18,7 +18,7 @@ import {
   matchNadineProduct,
   type NadineProductRecommendation,
 } from "~/lib/trend-product-recommendation.server";
-import { checkEntitlement, reservePersonalisedTrendSlot, type EntitlementCheck } from "~/lib/plan/entitlement.server";
+import { checkEntitlement, reservePersonalisedTrendSlot, resolveEffectiveMembershipStatus, type EntitlementCheck } from "~/lib/plan/entitlement.server";
 import {
   getTrendEditUsageState,
   getMostRecentArchivedSnapshot,
@@ -333,7 +333,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   {
     const entitlement = await checkEntitlement(customer.id, customer.membershipStatus, "personalisedTrend");
     if (!entitlement.allowed) {
-      const blockState = resolveTrendEditBlockState(customer.membershipStatus, entitlement.reason);
+      // The enforcement decision above already comes from the corrected
+      // allowance (checkEntitlement -> resolveEffectiveContext), so a stale
+      // cached MEMBER with no real subscription is already blocked
+      // correctly — this just makes sure the MESSAGE shown matches that
+      // same corrected reality instead of the raw cache.
+      const effectiveMembershipStatus = await resolveEffectiveMembershipStatus(customer.id, customer.membershipStatus);
+      const blockState = resolveTrendEditBlockState(effectiveMembershipStatus, entitlement.reason);
       return {
         report,
         edit: null,

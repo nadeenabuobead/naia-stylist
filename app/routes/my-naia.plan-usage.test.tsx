@@ -114,6 +114,19 @@ describe("plan-usage loader — authentication and ownership", () => {
 
 type Summary = {
   membershipStatus: "NONE" | "MEMBER";
+  // Defaults to mirroring membershipStatus below — every existing test in
+  // this file that only overrides membershipStatus is unaffected. Override
+  // this independently to construct the stale-cached-MEMBER-with-no-real-
+  // subscription scenario the "effective membership status" tests below
+  // specifically exercise.
+  effectiveMembershipStatus: "NONE" | "MEMBER";
+  // Defaults to mirroring membershipStatus === "MEMBER" below — every
+  // existing test that only overrides membershipStatus is unaffected.
+  // Override this independently from effectiveMembershipStatus/
+  // membershipStatus to exercise Subscribe-vs-Manage-Membership, which is
+  // now decided from THIS field alone — see my-naia.plan-usage.tsx's
+  // showSubscribeButtons/showManageMembership.
+  hasBillingAccount: boolean;
   styleMe: { monthlyLimit: number; monthlyUsed: number; resetDate: string };
   buySkip: { monthlyLimit: number; monthlyUsed: number; resetDate: string };
   vto: { monthlyLimit: number; monthlyCompleted: number; monthlyInFlight: number; resetDate: string };
@@ -124,8 +137,11 @@ type Summary = {
 };
 
 function baseSummary(overrides: Partial<Summary> = {}): Summary {
+  const membershipStatus = overrides.membershipStatus ?? "MEMBER";
   return {
-    membershipStatus: "MEMBER",
+    membershipStatus,
+    effectiveMembershipStatus: membershipStatus,
+    hasBillingAccount: membershipStatus === "MEMBER",
     styleMe: { monthlyLimit: 8, monthlyUsed: 3, resetDate: "1 October" },
     buySkip: { monthlyLimit: 5, monthlyUsed: 1, resetDate: "1 October" },
     vto: { monthlyLimit: 10, monthlyCompleted: 2, monthlyInFlight: 0, resetDate: "1 October" },
@@ -335,6 +351,56 @@ describe("plan-usage component — Manage Membership (billing portal)", () => {
   it("a NONE customer does not see the Manage Membership button — nothing to manage yet", () => {
     const html = render(baseSummary({ membershipStatus: "NONE" }));
     expect(html).not.toContain("Manage Membership");
+  });
+});
+
+describe("plan-usage component — stale cached membershipStatus vs. effectiveMembershipStatus", () => {
+  // Reproduces the exact customer-facing bug this fix closes: a cached
+  // Customer.membershipStatus of MEMBER with no real, currently-entitled
+  // Subscription row behind it (see entitlement.server.ts's
+  // effectiveMembershipStatus). Before this fix, isMember read the raw
+  // membershipStatus field directly, so this exact summary shape rendered
+  // only "Manage Membership" — which then 404'd with no_billing_account,
+  // since there was never a real subscription for the portal to open.
+  beforeEach(() => vi.clearAllMocks());
+
+  it("a stale-MEMBER customer with no real subscription sees the Subscribe buttons, not Manage Membership", () => {
+    const html = render(baseSummary({ membershipStatus: "MEMBER", effectiveMembershipStatus: "NONE", hasBillingAccount: false }));
+    expect(html).toContain(`Subscribe Monthly — AED ${MEMBERSHIP_PRICING.monthly.amount}`);
+    expect(html).toContain(`Choose Annual — AED ${MEMBERSHIP_PRICING.annual.amount}`);
+    expect(html).not.toContain("Manage Membership");
+  });
+
+  it("a genuinely active member (membershipStatus and effectiveMembershipStatus both MEMBER, real billing account) is unaffected — regression guard", () => {
+    const html = render(baseSummary({ membershipStatus: "MEMBER", effectiveMembershipStatus: "MEMBER", hasBillingAccount: true }));
+    expect(html).toContain("Manage Membership");
+    expect(html).not.toContain("Subscribe Monthly");
+    expect(html).not.toContain("Choose Annual");
+  });
+});
+
+describe("plan-usage component — Subscribe/Manage decided by hasBillingAccount, independent of membership tier", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("a stale-MEMBER customer with zero Subscription rows ever (the other possible real-world cause of the same bug) also sees Subscribe, not Manage — this fix resolves BOTH underlying DB states, not just one", () => {
+    // Same observable bug as the describe block above, but modeling the
+    // OTHER possible root cause api.billing-portal.tsx's no_billing_account
+    // can mean (zero Subscription rows ever, rather than a tracked-but-
+    // dead one) — resolveEffectiveContext's own pre-Phase-3 fallback would
+    // leave effectiveMembershipStatus as MEMBER in exactly this case (see
+    // billing-entitlement-phase2.test.ts), which is precisely why
+    // Subscribe-vs-Manage can no longer be decided from membership tier at
+    // all. hasBillingAccount is false in both underlying states, so the
+    // UI is correct either way.
+    const html = render(baseSummary({ membershipStatus: "MEMBER", effectiveMembershipStatus: "MEMBER", hasBillingAccount: false }));
+    expect(html).toContain(`Subscribe Monthly — AED ${MEMBERSHIP_PRICING.monthly.amount}`);
+    expect(html).not.toContain("Manage Membership");
+  });
+
+  it("a lapsed member (not currently entitled) who still has a real billing account sees Manage Membership, not Subscribe — the billing portal is the single correct entry point when a real account already exists", () => {
+    const html = render(baseSummary({ membershipStatus: "NONE", effectiveMembershipStatus: "NONE", hasBillingAccount: true }));
+    expect(html).toContain("Manage Membership");
+    expect(html).not.toContain("Subscribe Monthly");
   });
 });
 
