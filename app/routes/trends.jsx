@@ -1,6 +1,7 @@
 import { Link, useLoaderData } from "react-router";
 import { STOREFRONT_ORIGIN, STOREFRONT_NAV } from "../lib/storefront-config";
 import { getPublishedEditorialReports } from "../lib/editorial-reports.server";
+import { getEffectiveEditionPeriod, formatEditionMonthLabel } from "../lib/editorial-report-edition";
 import { reportVisual } from "../lib/report-visual";
 
 export async function loader() {
@@ -8,8 +9,10 @@ export async function loader() {
   const sorted = reports
     .slice()
     .sort((a, b) => {
-      if (a.publishedAt > b.publishedAt) return -1;
-      if (a.publishedAt < b.publishedAt) return 1;
+      const pa = getEffectiveEditionPeriod(a) ?? "";
+      const pb = getEffectiveEditionPeriod(b) ?? "";
+      if (pa > pb) return -1;
+      if (pa < pb) return 1;
       return (a.order ?? 99) - (b.order ?? 99);
     });
   const [featured, ...rest] = sorted;
@@ -686,7 +689,7 @@ export default function TrendReports() {
                 </div>
                 <div className="pub-featured-meta">
                   <span>{featured.season}</span>
-                  <span>{new Date(featured.publishedAt).toLocaleDateString("en-GB", { month: "long", year: "numeric" })}</span>
+                  <span>{formatEditionMonthLabel(getEffectiveEditionPeriod(featured))}</span>
                 </div>
               </div>
               <div className="pub-featured-img">
@@ -732,7 +735,7 @@ export default function TrendReports() {
                     <div className="pub-card-title">{report.title}</div>
                     <p className="pub-card-excerpt">{report.summary}</p>
                     <div className="pub-card-footer">
-                      <span>{new Date(report.publishedAt).toLocaleDateString("en-GB", { month: "long", year: "numeric" })}</span>
+                      <span>{formatEditionMonthLabel(getEffectiveEditionPeriod(report))}</span>
                       <span className="pub-card-arrow">↗</span>
                     </div>
                   </div>

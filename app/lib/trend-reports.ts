@@ -53,6 +53,14 @@ export type TrendReportData = {
   title: string;
   season: string;
   publishedAt: string;
+  // The editorial edition ("YYYY-MM") a customer sees this report grouped
+  // under on My Trend Edits / the public report pages — deliberately
+  // separate from publishedAt (the real record of when the content went
+  // live) and from `season` (what fashion season the content is ABOUT,
+  // never a stand-in for either date). Optional: a report without one
+  // falls back to publishedAt's own month (see getEffectiveEditionPeriod
+  // in editorial-reports.server.ts).
+  editionMonth?: string;
   mood?: string;
   summary: string;
   editorialIntro: string;
@@ -81,6 +89,7 @@ export const trendReports: TrendReportData[] = [
     title: "Spring 2026 Wardrobe Edit: Soft Structure",
     season: "Spring 2026",
     publishedAt: "2026-06-30",
+    editionMonth: "2026-04",
     mood: "Quiet Presence",
     summary:
       "A nAia edit on softened tailoring, controlled shape, and clothes that create presence without stiffness.",
@@ -212,6 +221,7 @@ export const trendReports: TrendReportData[] = [
     title: "The New Language of Modern Tailoring",
     season: "Spring 2026",
     publishedAt: "2026-06-30",
+    editionMonth: "2026-05",
     mood: "Composed, Not Corporate",
     summary:
       "Tailoring becomes more fluid, personal, and wearable when it is treated as an anchor rather than a uniform.",
@@ -335,6 +345,7 @@ export const trendReports: TrendReportData[] = [
     title: "Colour Direction: The Quiet Base & the Clear Accent",
     season: "Spring 2026",
     publishedAt: "2026-06-30",
+    editionMonth: "2026-06",
     mood: "One Accent, Everything Changes",
     summary:
       "An nAia method for using a calm wardrobe foundation with one expressive colour note.",

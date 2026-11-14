@@ -3,6 +3,7 @@ import { Link, useLoaderData, type LoaderFunctionArgs } from "react-router";
 import { STOREFRONT_ORIGIN, STOREFRONT_NAV } from "../lib/storefront-config";
 import type { TrendReportData } from "../lib/trend-reports";
 import { getEditorialReportBySlug } from "../lib/editorial-reports.server";
+import { getEffectiveEditionPeriod, formatEditionMonthLabel } from "../lib/editorial-report-edition";
 import {
   PROFESSIONAL_LENS_CONTENT,
   LENS_LABELS,
@@ -1108,9 +1109,9 @@ export default function TrendLens() {
           <p className="psl-hero-lede">{report.editorialIntro || report.summary}</p>
           <div className="psl-hero-meta">
             <span>{report.season}</span>
-            {report.publishedAt && (
+            {getEffectiveEditionPeriod(report) && (
               <span>
-                {new Date(report.publishedAt).toLocaleDateString("en-GB", { month: "long", year: "numeric" })}
+                {formatEditionMonthLabel(getEffectiveEditionPeriod(report))}
               </span>
             )}
           </div>

@@ -1505,6 +1505,17 @@ model EditorialTrendReport {
 
   status        EditorialReportStatus @default(DRAFT)
   publishedAt   String   @default("")
+  // 2026-11-14 — the editorial edition a customer sees this report grouped
+  // under ("YYYY-MM"), deliberately separate from publishedAt (the real,
+  // accurate record of when the content was authored/went live). A report
+  // can legitimately be edited/republished on a date that has nothing to do
+  // with which month's "one genuinely new topic" it represents — season
+  // names in the title are a third, unrelated axis (what the trend content
+  // is ABOUT), never a stand-in for either date. Nullable: a row written
+  // before this field existed falls back to publishedAt's own month
+  // (getEffectiveEditionPeriod in editorial-reports.server.ts) rather than
+  // breaking or showing "Undated".
+  editionMonth  String?
   order         Int      @default(0)
   featured      Boolean  @default(false)
 
