@@ -37,7 +37,7 @@ vi.mock("~/components/my-naia/MyNaiaLayout", () => ({
 import { useLoaderData } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { getEntitlementSummary } from "~/lib/plan/entitlement.server";
-import PlanUsagePage, { loader, CUSTOMER_FACING_ADDON_LABELS } from "./my-naia.plan-usage";
+import PlanUsagePage, { loader, CUSTOMER_FACING_ADDON_LABELS, stripCheckoutParamFromUrl } from "./my-naia.plan-usage";
 import { MEMBERSHIP_PRICING, ADDON_CATALOG } from "~/lib/plan/plan-limits.server";
 
 const CUSTOMER_FACING_ADDONS = ADDON_CATALOG.filter((a) => CUSTOMER_FACING_ADDON_LABELS.has(a.label));
@@ -660,5 +660,35 @@ describe("plan-usage loader — checkout outcome parsing", () => {
     mockAuthAndSummary();
     const result: any = await loader({ request: new Request("http://localhost/my-naia/plan-usage?checkout=paid"), params: {}, context: {} } as any);
     expect(result.checkoutOutcome).toBeNull();
+  });
+});
+
+describe("stripCheckoutParamFromUrl — removes only the checkout param after it's been shown once", () => {
+  it("strips ?checkout=success entirely when it's the only query param", () => {
+    expect(stripCheckoutParamFromUrl("http://localhost/my-naia/plan-usage?checkout=success")).toBe("/my-naia/plan-usage");
+  });
+
+  it("strips ?checkout=cancelled the same way — the lingering-banner bug is general, not success-only", () => {
+    expect(stripCheckoutParamFromUrl("http://localhost/my-naia/plan-usage?checkout=cancelled")).toBe("/my-naia/plan-usage");
+  });
+
+  it("preserves other query params, removing only checkout", () => {
+    expect(stripCheckoutParamFromUrl("http://localhost/my-naia/plan-usage?checkout=success&foo=bar")).toBe("/my-naia/plan-usage?foo=bar");
+  });
+
+  it("preserves other query params regardless of their position relative to checkout", () => {
+    expect(stripCheckoutParamFromUrl("http://localhost/my-naia/plan-usage?foo=bar&checkout=success&baz=qux")).toBe(
+      "/my-naia/plan-usage?foo=bar&baz=qux",
+    );
+  });
+
+  it("preserves a hash fragment", () => {
+    expect(stripCheckoutParamFromUrl("http://localhost/my-naia/plan-usage?checkout=success#membership")).toBe(
+      "/my-naia/plan-usage#membership",
+    );
+  });
+
+  it("is a safe no-op when there is no checkout param to remove", () => {
+    expect(stripCheckoutParamFromUrl("http://localhost/my-naia/plan-usage?foo=bar")).toBe("/my-naia/plan-usage?foo=bar");
   });
 });

@@ -5,7 +5,7 @@
 // below) — only the membership subscribe flow is wired, to the Phase 3 Stripe
 // checkout implementation (POST /api/billing-checkout).
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLoaderData, Link } from "react-router";
 import type { LoaderFunctionArgs, LinksFunction } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
@@ -29,6 +29,20 @@ function parseCheckoutOutcome(value: string | null): CheckoutOutcome {
 }
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: naiaStyles }];
+
+// Pure string transform, exported so it can be verified directly — this
+// file's own component tests use renderToString (no DOM, no commit phase),
+// so a useEffect calling window.history.replaceState can never actually
+// run under them. Keeping the one meaningful piece of logic (which param
+// to drop, which to keep) in a plain function means it's genuinely tested,
+// rather than only "obviously correct" by inspection of an untestable
+// effect. Removes ONLY the "checkout" param; every other query param and
+// any hash fragment pass through unchanged.
+export function stripCheckoutParamFromUrl(href: string): string {
+  const url = new URL(href);
+  url.searchParams.delete("checkout");
+  return `${url.pathname}${url.search}${url.hash}`;
+}
 
 // ── Customer-facing add-on allowlist ──────────────────────────────────────────
 // ADDON_CATALOG in plan-limits.server.ts is the full historical/internal add-on
@@ -121,6 +135,21 @@ function usageLabel(used: number, limit: number, unit: string): string {
 
 export default function PlanUsagePage() {
   const { summary, membershipPricing, addonCatalog, checkoutOutcome } = useLoaderData<typeof loader>();
+  // checkoutOutcome came from a ?checkout=success|cancelled query param on
+  // THIS page load, read once by the loader and never re-read afterward —
+  // so leaving it in the URL has no further effect on this render, but it
+  // means an ordinary page refresh re-sends that same param, the loader
+  // parses it again, and the one-time banner below reappears every time,
+  // indefinitely. Strip the param from the visible URL (history.
+  // replaceState, no navigation, no loader re-run) right after this
+  // render has already used it for its one intended showing — a refresh
+  // from this point on carries no checkout param, so the banner correctly
+  // does not return. See stripCheckoutParamFromUrl's own comment for why
+  // the actual param-handling logic lives there, not inline here.
+  useEffect(() => {
+    if (checkoutOutcome === null) return;
+    window.history.replaceState(null, "", stripCheckoutParamFromUrl(window.location.href));
+  }, [checkoutOutcome]);
   const { effectiveMembershipStatus, hasBillingAccount, styleMe, buySkip, vto, closet, personalisedTrend, billingAlert } = summary;
   // effectiveMembershipStatus, not the raw cached membershipStatus — see
   // entitlement.server.ts's EntitlementSummary comment. Governs usage
