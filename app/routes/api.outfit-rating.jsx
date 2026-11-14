@@ -32,8 +32,9 @@ export async function action({ request }) {
     return Response.json({ error: "Not authenticated" }, { status: 401, headers: CORS });
   }
   const body = await request.json();
-  console.log("Review data received:", { workedTags: body.workedTags, didntWorkTags: body.didntWorkTags });
-  console.log("Review data received:", { workedTags: body.workedTags, didntWorkTags: body.didntWorkTags });
+  // 2026-11-14 security hotfix: this was a literally duplicated log line
+  // previously printing the full tag arrays; counts only now.
+  console.log("Review data received:", { workedTagCount: body.workedTags?.length ?? 0, didntWorkTagCount: body.didntWorkTags?.length ?? 0 });
   const { historyId, overallReaction, feltLikeMe, desiredFeelingAchieved, wouldWearAgain, physicalComfort, workedTags, didntWorkTags, objections, additionalNotes, mood, feeling, event, styleWords } = body;
   if (!historyId || overallReaction === undefined) {
     return Response.json({ error: "historyId and confidence required" }, { status: 400, headers: CORS });
@@ -78,7 +79,10 @@ export async function action({ request }) {
   if (linkedSession && linkedSession.customerId !== customer.id) {
     return Response.json({ error: "Not found" }, { status: 404, headers: CORS });
   }
-  console.log("Review linking to session:", { historyId, bodyPref: linkedSession?.bodyPreference, styleDNA: linkedSession?.styleDNA, pieces: linkedSession?.suggestions?.[0]?.items?.map(i => i.productTitle || `Closet ${i.closetItemId}`) || [] });
+  // 2026-11-14 security hotfix: previously logged bodyPreference, styleDNA, and
+  // product titles — body-related and style-preference data with no debugging
+  // need for the actual content, only whether the link resolved.
+  console.log("Review linking to session:", { historyId, sessionFound: !!linkedSession, pieceCount: linkedSession?.suggestions?.[0]?.items?.length ?? 0 });
   review = await prisma.postOutfitReview.create({
     data: {
       customerId: customer.id,
