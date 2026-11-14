@@ -470,6 +470,15 @@ describe("N — data export and account deletion are real, authenticated actions
     );
   });
 
+  it("a second, additive full-export-with-photos link points at the real download route, alongside the original JSON-only button", () => {
+    assert.ok(src.includes('href="/api/export-zip"'), "links to the new ZIP download route");
+    // Additive, not a replacement — the original JSON export button must still be present verbatim.
+    assert.ok(
+      src.includes('exportFetcher.submit({ intent: "request-data-export" }'),
+      "original JSON-only export button is unchanged",
+    );
+  });
+
   it("deletion goes through the same confirm-modal flow as every other destructive action, not a bare click", () => {
     assert.ok(src.includes('openConfirm("delete-account")'), "deletion opens the confirm modal first");
     assert.ok(src.includes('"delete-account": {'),            "delete-account has its own CONFIRM entry with real warning copy");
