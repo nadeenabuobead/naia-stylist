@@ -1134,6 +1134,28 @@ a.mn-action:focus-visible,
 .sm-vto-body-note { font-family: var(--naia-ff-body); font-size: 13px; font-style: italic; color: var(--naia-muted); margin: 0; }
 .sm-vto-cta { align-self: flex-start; }
 .sm-vto-image { width: 100%; max-width: 480px; height: auto; display: block; }
+
+/* Animated loading indicator for the Full-Look generation heading —
+   replaces a static "…" with 3 dots that actually pulse, so a genuinely
+   long-running generation doesn't read as a frozen page. */
+.sm-vto-loading-dots { display: inline-flex; gap: 3px; margin-left: 6px; vertical-align: baseline; }
+.sm-vto-loading-dots span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.25;
+  animation: sm-vto-dot-pulse 1.2s ease-in-out infinite;
+}
+.sm-vto-loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+.sm-vto-loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes sm-vto-dot-pulse {
+  0%, 80%, 100% { opacity: 0.25; }
+  40% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sm-vto-loading-dots span { animation: none; opacity: 0.6; }
+}
 .sm-result-actions {
   display: flex; gap: 12px; justify-content: center;
   margin-top: 40px; padding-top: 28px; border-top: 1px solid var(--naia-border); flex-wrap: wrap;

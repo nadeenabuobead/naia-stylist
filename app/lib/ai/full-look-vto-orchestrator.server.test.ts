@@ -172,7 +172,7 @@ describe("startFullLookOutfit / pollFullLookOutfit — auto-advance past the hum
     const result = await startFullLookOutfit(BASE_CTX);
 
     expect(continueToFinalStep).toHaveBeenCalledOnce();
-    expect(result).toEqual({ status: "PROCESSING" });
+    expect(result).toEqual({ status: "PROCESSING", stepIndex: 2, totalSteps: 3 });
   });
 
   it("a continueToFinalStep failure surfaces as ERROR, not silently swallowed", async () => {
@@ -256,8 +256,8 @@ describe("startFullLookOutfit / pollFullLookOutfit — auto-advance past the hum
       startFullLookOutfit(BASE_CTX),
     ]);
 
-    expect(a).toEqual({ status: "PROCESSING" });
-    expect(b).toEqual({ status: "PROCESSING" });
+    expect(a).toEqual({ status: "PROCESSING", stepIndex: 0, totalSteps: 3 });
+    expect(b).toEqual({ status: "PROCESSING", stepIndex: 0, totalSteps: 3 });
     const scopes = vi.mocked(startOrResumeFullLookChain).mock.calls.map((c) => c[0].reservationScope);
     expect(scopes).toEqual(["sugg-1:a0", "sugg-1:a0"]); // both requests converge on the same attempt, never two
   });

@@ -1393,9 +1393,13 @@ export default function StyleMeResult() {
   // prototype it replaces — that gate is a separate, not-yet-made decision
   // about rolling this out beyond staging, not something this change makes
   // on its own.
+  // stepIndex/totalSteps (2026-11-15) — genuine generation-stage progress
+  // from the server's own real chain position, never a simulated/fake
+  // progress indicator. Optional: absent for the brief moment between
+  // triggering/resuming and the first response that actually carries one.
   type FullLookQAState =
     | { status: "idle" }
-    | { status: "loading" }
+    | { status: "loading"; stepIndex?: number; totalSteps?: number }
     | { status: "done"; resultUrl: string }
     | { status: "error"; message: string };
   const [fullLookQA, setFullLookQA] = useState<FullLookQAState>({ status: "idle" });
@@ -1419,8 +1423,10 @@ export default function StyleMeResult() {
       } else if (json.status === "FAILED") {
         stopFullLookPolling();
         setFullLookQA({ status: "error", message: json.errorCode ?? "unknown" });
+      } else if (json.status === "PROCESSING") {
+        setFullLookQA({ status: "loading", stepIndex: json.stepIndex, totalSteps: json.totalSteps });
       }
-      // PROCESSING / NOT_STARTED — keep polling (or stay idle for NOT_STARTED).
+      // NOT_STARTED — keep polling, stay idle.
     } catch {
       // One poll failing is not fatal — the interval tries again shortly.
     }
@@ -1448,7 +1454,7 @@ export default function StyleMeResult() {
         if (json.status === "COMPLETED") {
           setFullLookQA({ status: "done", resultUrl: json.resultUrl });
         } else if (json.status === "PROCESSING") {
-          setFullLookQA({ status: "loading" });
+          setFullLookQA({ status: "loading", stepIndex: json.stepIndex, totalSteps: json.totalSteps });
           startFullLookPolling(suggestionId);
         }
       } catch {
@@ -1490,6 +1496,7 @@ export default function StyleMeResult() {
         // Founder decision: automatically progress through all garment
         // steps — the client only ever sees PROCESSING until COMPLETED/
         // FAILED, never an intermediate-step state to manage.
+        setFullLookQA({ status: "loading", stepIndex: json.stepIndex, totalSteps: json.totalSteps });
         startFullLookPolling(suggestionId);
       }
     } catch {
@@ -2123,8 +2130,19 @@ export default function StyleMeResult() {
 
             {fullLookQA.status === "loading" && (
               <>
-                <h2 className="sm-vto-heading">Creating your try-on…</h2>
-                <p className="sm-vto-body">Your outfit is coming together. This may take a moment.</p>
+                <h2 className="sm-vto-heading">
+                  Creating your try-on
+                  <span className="sm-vto-loading-dots" aria-hidden="true">
+                    <span />
+                    <span />
+                    <span />
+                  </span>
+                </h2>
+                <p className="sm-vto-body">
+                  {typeof fullLookQA.stepIndex === "number" && typeof fullLookQA.totalSteps === "number"
+                    ? `Step ${fullLookQA.stepIndex + 1} of ${fullLookQA.totalSteps} — your outfit is coming together.`
+                    : "Your outfit is coming together. This may take a moment."}
+                </p>
               </>
             )}
 

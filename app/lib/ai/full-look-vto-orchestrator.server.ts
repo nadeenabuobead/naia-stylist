@@ -144,8 +144,13 @@ export async function startNewAttemptScope(customerId: string, outfitSuggestionI
 
 // ── Auto-advance ──────────────────────────────────────────────────────────────
 
+// stepIndex/totalSteps (2026-11-15) — genuine generation-stage progress for
+// the loading UI, not a simulated/fake progress bar. stepIndex is 0-based
+// (matching advanceFullLookChain's own convention); totalSteps is always
+// MAX_CHAIN_LENGTH, included so the client never needs its own copy of
+// that constant.
 export type OrchestratorStatus =
-  | { status: "PROCESSING" }
+  | { status: "PROCESSING"; stepIndex: number; totalSteps: number }
   | { status: "COMPLETED"; resultUrl: string }
   | { status: "FAILED"; errorCode?: string }
   | { status: "NOT_STARTED" }
@@ -168,7 +173,7 @@ async function advanceAutomatically(ctx: FullLookChainContext): Promise<Orchestr
       if (!cont.ok) return { status: "ERROR", reason: cont.reason };
       // Final step is now submitted (not completed) — PROCESSING is
       // accurate; the next poll will observe its real status.
-      return { status: "PROCESSING" };
+      return { status: "PROCESSING", stepIndex: MAX_CHAIN_LENGTH - 1, totalSteps: MAX_CHAIN_LENGTH };
     }
     case "COMPLETED":
       return { status: "COMPLETED", resultUrl: result.resultUrl };
@@ -177,7 +182,7 @@ async function advanceAutomatically(ctx: FullLookChainContext): Promise<Orchestr
     case "NOT_STARTED":
       return { status: "NOT_STARTED" };
     case "PROCESSING":
-      return { status: "PROCESSING" };
+      return { status: "PROCESSING", stepIndex: result.stepIndex, totalSteps: MAX_CHAIN_LENGTH };
     case "SUBMIT_ERROR":
       return { status: "ERROR", reason: result.reason };
     case "EXPIRED":
