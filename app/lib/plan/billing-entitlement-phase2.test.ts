@@ -401,20 +401,37 @@ describe("PH2-12 — requirement 8b: WI's productHandle mock-exclusion namespace
     assert.match(entSvc, /const MOCK_VTO_PRODUCT_HANDLE_PREFIX\s*=\s*"fulllook-poc:"/);
   });
 
-  it("checkEntitlement's VTO case filters out the mock productHandle prefix on both counts, alongside isTest", () => {
+  // 2026-11-14 — the inline `NOT: { productHandle: { startsWith:
+  // MOCK_VTO_PRODUCT_HANDLE_PREFIX } }` this test used to match at each call
+  // site was factored out into excludingMockAndIntermediateFullLookHandles()
+  // (full-look-vto-persistence branch) so the SAME exclusion list also
+  // covers Full-Look's intermediate-step handles, not just WI's mock
+  // namespace. The constant itself is unchanged and still referenced —
+  // once, inside the shared helper — so these tests now assert the call
+  // site uses the helper, and separately that the helper's own body still
+  // contains WI's mock-namespace filter.
+  it("checkEntitlement's VTO case excludes the mock+intermediate handle set on both counts, alongside isTest", () => {
     const vtoCase = entSvc.slice(entSvc.indexOf('case "vto"'), entSvc.indexOf('default:'));
     const isTestOccurrences = vtoCase.match(/isTest:\s*false/g) ?? [];
-    const prefixOccurrences = vtoCase.match(/NOT:\s*\{\s*productHandle:\s*\{\s*startsWith:\s*MOCK_VTO_PRODUCT_HANDLE_PREFIX/g) ?? [];
+    const exclusionCallOccurrences = vtoCase.match(/NOT:\s*excludingMockAndIntermediateFullLookHandles\(\)/g) ?? [];
     assert.equal(isTestOccurrences.length, 2);
-    assert.equal(prefixOccurrences.length, 2, "both the completed-jobs count and the in-flight count must also exclude WI's mock productHandle namespace");
+    assert.equal(exclusionCallOccurrences.length, 2, "both the completed-jobs count and the in-flight count must also exclude WI's mock productHandle namespace");
   });
 
-  it("getEntitlementSummary's VTO counts filter out the mock productHandle prefix on both counts, alongside isTest", () => {
+  it("getEntitlementSummary's VTO counts exclude the mock+intermediate handle set on both counts, alongside isTest", () => {
     const summaryFn = entSvc.slice(entSvc.indexOf("export async function getEntitlementSummary"), entSvc.indexOf("export type EntitlementFeature"));
     const isTestOccurrences = summaryFn.match(/isTest:\s*false/g) ?? [];
-    const prefixOccurrences = summaryFn.match(/NOT:\s*\{\s*productHandle:\s*\{\s*startsWith:\s*MOCK_VTO_PRODUCT_HANDLE_PREFIX/g) ?? [];
+    const exclusionCallOccurrences = summaryFn.match(/NOT:\s*excludingMockAndIntermediateFullLookHandles\(\)/g) ?? [];
     assert.equal(isTestOccurrences.length, 2);
-    assert.equal(prefixOccurrences.length, 2);
+    assert.equal(exclusionCallOccurrences.length, 2);
+  });
+
+  it("the shared exclusion helper itself still filters WI's mock productHandle namespace", () => {
+    const helperFn = entSvc.slice(
+      entSvc.indexOf("function excludingMockAndIntermediateFullLookHandles"),
+      entSvc.indexOf("}", entSvc.indexOf("function excludingMockAndIntermediateFullLookHandles")) + 1,
+    );
+    assert.match(helperFn, /productHandle:\s*\{\s*startsWith:\s*MOCK_VTO_PRODUCT_HANDLE_PREFIX/);
   });
 
   it("the mock namespace cannot collide with a real Shopify product handle — a colon is not a valid handle character", () => {
