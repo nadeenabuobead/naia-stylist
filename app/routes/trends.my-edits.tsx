@@ -2,12 +2,37 @@ import type { LinksFunction, LoaderFunctionArgs } from "react-router";
 import { Link, useLoaderData } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { getPublishedEditorialReports } from "~/lib/editorial-reports.server";
+import { getUsageWindow } from "~/lib/plan/usage-window.server";
 import {
   getShopperEvidence,
   buildShopperEdit,
 } from "~/lib/trend-evidence.server";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import naiaStyles from "~/styles/naia-design-system.css?url";
+
+// "2026-06-30" -> "June 2026". Same parsing pattern as
+// personalised-trend-edit-usage.server.ts's formatPeriodKeyLabel —
+// duplicated rather than imported, per that file's own established
+// convention (this module never depends on the plan layer for display
+// formatting). Falls back to the raw string rather than throwing, since a
+// malformed or missing publishedAt must never break this page.
+function formatReportMonthLabel(publishedAt: string): string {
+  const match = /^(\d{4})-(\d{2})-\d{2}$/.exec(publishedAt);
+  if (!match) return publishedAt || "Undated";
+  const [, yearStr, monthStr] = match;
+  const asDate = new Date(Date.UTC(Number(yearStr), Number(monthStr) - 1, 1));
+  return asDate.toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
+}
+
+// A report only counts as "this month's edit" when its own publication
+// month matches the server's actual current month — never assumed. A
+// report published in an earlier month (e.g. the editorial cadence hasn't
+// caught up yet) must never be labelled "this month's edit"; see the
+// featured-eyebrow logic below for the honest fallback.
+function reportPeriodKey(publishedAt: string): string | null {
+  const match = /^(\d{4}-\d{2})-\d{2}$/.exec(publishedAt);
+  return match ? match[1] : null;
+}
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: naiaStyles },
@@ -26,6 +51,8 @@ type CardItem = {
   title: string;
   season: string;
   subTitle: string | null; // null = Passport incomplete
+  monthLabel: string; // derived from the report's own publishedAt — never relabelled
+  isCurrentPeriod: boolean; // true only when publishedAt falls in the server's actual current month
 };
 
 type LoaderData = {
@@ -42,6 +69,7 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
 
   // Single DB round-trip for all personalisation signals.
   const evidence = await getShopperEvidence(customer.id);
+  const { periodKey: currentPeriodKey } = getUsageWindow();
 
   const cards: CardItem[] = reports.map((report) => {
     let subTitle: string | null = null;
@@ -53,7 +81,14 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
         // buildShopperEdit failed for this report; leave locked
       }
     }
-    return { slug: report.slug, title: report.title, season: report.season, subTitle };
+    return {
+      slug: report.slug,
+      title: report.title,
+      season: report.season,
+      subTitle,
+      monthLabel: formatReportMonthLabel(report.publishedAt),
+      isCurrentPeriod: reportPeriodKey(report.publishedAt) === currentPeriodKey,
+    };
   });
 
   return { cards, hasProfile: evidence.hasProfile };
@@ -165,15 +200,15 @@ const css = `
      only the outer sizing differs. */
   .tme-featured {
     aspect-ratio: auto;
-    min-height: 320px;
-    padding: 40px;
-    margin-bottom: 44px;
+    min-height: 220px;
+    padding: 32px;
+    margin-bottom: 36px;
   }
-  @media (min-width: 1024px) { .tme-featured { min-height: 420px; } }
-  .tme-featured .tme-card-num { font-size: clamp(12rem, 16vw, 18rem); }
-  .tme-featured .tme-card-title { font-size: clamp(2rem, 4vw, 3.25rem); margin-bottom: 20px; }
+  @media (min-width: 1024px) { .tme-featured { min-height: 260px; } }
+  .tme-featured .tme-card-num { font-size: clamp(9rem, 12vw, 12rem); }
+  .tme-featured .tme-card-title { font-size: clamp(1.75rem, 3vw, 2.5rem); margin-bottom: 16px; }
   .tme-featured .tme-card-subtitle,
-  .tme-featured .tme-card-locked { font-size: 1.05rem; max-width: 42rem; }
+  .tme-featured .tme-card-locked { font-size: 1rem; max-width: 40rem; }
 
   /* ── Card grid (archive) ──────────────────────────────────────── */
   .tme-grid {
@@ -337,7 +372,7 @@ function TrendEditCard({ card, index, featured }: { card: CardItem; index: numbe
       <span className="tme-card-num" aria-hidden="true">{num}</span>
       <div className="tme-card-top">
         <span className="tme-card-dot" />
-        {card.season}
+        {card.monthLabel}
       </div>
       <div className="tme-card-bottom">
         <div className="tme-card-title">{card.title}</div>
@@ -361,8 +396,9 @@ function TrendEditCard({ card, index, featured }: { card: CardItem; index: numbe
 export default function MyTrendEdits() {
   const { cards, hasProfile } = useLoaderData() as LoaderData;
   // Cards arrive newest-first (loader sorts by publishedAt desc) — the
-  // first card is this month's edit, shown prominently; everything after
-  // it is the archive.
+  // first card is the latest edit, shown prominently; everything after it
+  // is the archive. Only labelled "this month's edit" when its own
+  // publishedAt genuinely falls in the current calendar month (isCurrentPeriod).
   const [currentCard, ...archiveCards] = cards;
 
   return (
@@ -400,7 +436,9 @@ export default function MyTrendEdits() {
             )}
 
             <div className="tme-section-eyebrow">
-              {hasProfile ? "This month's edit" : "Available now"}
+              {currentCard.isCurrentPeriod
+                ? (hasProfile ? `This month's edit — ${currentCard.monthLabel}` : `Available now — ${currentCard.monthLabel}`)
+                : `Latest edit — ${currentCard.monthLabel}`}
             </div>
 
             <TrendEditCard card={currentCard} index={0} featured />
