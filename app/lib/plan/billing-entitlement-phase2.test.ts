@@ -489,8 +489,25 @@ describe("PH2-13 — a tracked but non-entitled Subscription row forces the NONE
       assert.equal(ctx.allowances.buySkipPerMonth, 0, `${deadStatus} + stale MEMBER cache must not grant the Buy/Skip allowance`);
       assert.equal(ctx.allowances.closetItems, 0, `${deadStatus} + stale MEMBER cache must not grant Closet capacity`);
       assert.equal(ctx.subscription, null);
+      assert.equal(ctx.effectiveMembershipStatus, "NONE", `${deadStatus} + stale MEMBER cache must report effectiveMembershipStatus NONE, matching the allowance it's given — this is the exact fix for the Plan & Usage Subscribe-button/Manage-Membership bug`);
     });
   }
+
+  // Models the state getCurrentSubscription itself would already produce
+  // once a PAST_DUE row's grace period has expired (see PH2-14's own
+  // isPastDueGraceExpired coverage for the boundary logic itself) — the
+  // real function returns null past that boundary, same observable shape
+  // as a tracked-but-not-entitled EXPIRED/CANCELED/INCOMPLETE row above.
+  it("a PAST_DUE subscription past its grace period + stale cached membershipStatus: MEMBER reports effectiveMembershipStatus NONE", async () => {
+    const deps: EffectiveContextDeps = {
+      getSubscription: async () => null, // getCurrentSubscription would return null once isPastDueGraceExpired is true
+      hasAnySubscriptionRecord: async () => true,
+      getAddonTotals: async () => { throw new Error("getAddonTotals must never be called when there is no entitled subscription"); },
+    };
+    const ctx = await resolveEffectiveContext(CUSTOMER_ID, "MEMBER", deps);
+    assert.equal(ctx.effectiveMembershipStatus, "NONE");
+    assert.equal(ctx.allowances.styleMePerMonth, 0);
+  });
 
   it("a customer with NO Subscription row at all and cached membershipStatus: MEMBER still gets the full MEMBER allowance — requirement 10's fallback is unaffected by this fix", async () => {
     const deps: EffectiveContextDeps = {
@@ -502,6 +519,36 @@ describe("PH2-13 — a tracked but non-entitled Subscription row forces the NONE
     assert.equal(ctx.allowances.vtoPerMonth, 10);
     assert.equal(ctx.allowances.buySkipPerMonth, 5);
     assert.equal(ctx.allowances.closetItems, 250);
+    // Deliberately unchanged by this fix — a customer who has NEVER had a
+    // tracked Subscription row keeps the pre-Phase-3 fallback of trusting
+    // the cache as-is (see resolveEffectiveContext's own comment). If the
+    // real account behind the reported Plan & Usage bug turns out to be in
+    // THIS exact state (membershipStatus: MEMBER, zero Subscription rows
+    // ever — one of the two states "no_billing_account" can mean, and the
+    // one this session could not confirm against the live DB), this fix
+    // alone will NOT change what they see; only a tracked-but-not-entitled
+    // row (the cases above) is corrected.
+    assert.equal(ctx.effectiveMembershipStatus, "MEMBER");
+  });
+
+  it("a customer with NO Subscription row at all and cached membershipStatus: NONE reports effectiveMembershipStatus NONE — the trivial, never-ambiguous case", async () => {
+    const deps: EffectiveContextDeps = {
+      getSubscription: async () => null,
+      hasAnySubscriptionRecord: async () => false,
+    };
+    const ctx = await resolveEffectiveContext(CUSTOMER_ID, "NONE", deps);
+    assert.equal(ctx.effectiveMembershipStatus, "NONE");
+  });
+
+  it("the opposite direction: cached membershipStatus NONE with a real, currently entitled ACTIVE subscription reports effectiveMembershipStatus MEMBER — a lagging cache write must never under-grant a real payer", async () => {
+    const deps: EffectiveContextDeps = {
+      getSubscription: async () => activeMonthlySubscription(),
+      getAddonTotals: async () => ({ styleMeBoost: 0, vtoBoost: 0, closetExpansion: 0 }),
+      hasAnySubscriptionRecord: async () => { throw new Error("must not be called when an entitled subscription was already found"); },
+    };
+    const ctx = await resolveEffectiveContext(CUSTOMER_ID, "NONE", deps);
+    assert.equal(ctx.effectiveMembershipStatus, "MEMBER");
+    assert.equal(ctx.allowances.styleMePerMonth, 8, "allowances were already correct in this direction before this fix — effectiveMembershipStatus now just reports consistently with them");
   });
 
   it("hasAnySubscriptionRecord is never consulted when an entitled (ACTIVE/PAST_DUE) subscription is found — only the no-entitled-subscription branch needs it", async () => {

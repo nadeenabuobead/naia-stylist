@@ -605,6 +605,46 @@ describe("my-naia component — static structure", () => {
     expect(html).toContain("12 of 100 items");
   });
 
+  it("a stale-MEMBER customer with no real subscription sees the 'explore membership' prompt, not the usage-card grid", () => {
+    // membershipStatus: MEMBER (raw cache) but effectiveMembershipStatus:
+    // NONE (no real entitled subscription behind it) — see
+    // entitlement.server.ts. Before this fix, the section keyed off the
+    // raw field and would have rendered the usage-card grid built from
+    // allowances that were ALREADY correctly zeroed, producing a confusing
+    // "0 remaining" display instead of this prompt.
+    const html = render({
+      entitlement: {
+        membershipStatus: "MEMBER",
+        effectiveMembershipStatus: "NONE",
+        plan: "FREE",
+        styleMe: { monthlyLimit: 0, monthlyUsed: 0, welcomeAvailable: false },
+        buySkip: { introAvailable: true, monthlyLimit: null, monthlyUsed: null },
+        vto: { monthlyLimit: 0, monthlyCompleted: 0, monthlyInFlight: 0 },
+        closet: { limit: 0, currentCount: 0 },
+        personalisedTrend: { monthlyLimit: 0, monthlyUsed: 0 },
+      },
+    });
+    expect(html).toContain("unlock monthly allowances");
+    expect(html).not.toContain("remaining");
+  });
+
+  it("a genuinely active member (membershipStatus and effectiveMembershipStatus both MEMBER) sees the usage-card grid — regression guard", () => {
+    const html = render({
+      entitlement: {
+        membershipStatus: "MEMBER",
+        effectiveMembershipStatus: "MEMBER",
+        plan: "FREE",
+        styleMe: { monthlyLimit: 8, monthlyUsed: 3, welcomeAvailable: false },
+        buySkip: { introAvailable: true, monthlyLimit: 5, monthlyUsed: 1 },
+        vto: { monthlyLimit: 10, monthlyCompleted: 2, monthlyInFlight: 0 },
+        closet: { limit: 250, currentCount: 47 },
+        personalisedTrend: { monthlyLimit: 1, monthlyUsed: 0 },
+      },
+    });
+    expect(html).toContain("47 of 250 items");
+    expect(html).not.toContain("unlock monthly allowances");
+  });
+
   it("trend teaser 'Open My Trend Edit' links to /trends/my-edits/:slug", () => {
     const html = render({
       trendReport: {

@@ -114,6 +114,12 @@ describe("plan-usage loader — authentication and ownership", () => {
 
 type Summary = {
   membershipStatus: "NONE" | "MEMBER";
+  // Defaults to mirroring membershipStatus below — every existing test in
+  // this file that only overrides membershipStatus is unaffected. Override
+  // this independently to construct the stale-cached-MEMBER-with-no-real-
+  // subscription scenario the "effective membership status" tests below
+  // specifically exercise.
+  effectiveMembershipStatus: "NONE" | "MEMBER";
   styleMe: { monthlyLimit: number; monthlyUsed: number; resetDate: string };
   buySkip: { monthlyLimit: number; monthlyUsed: number; resetDate: string };
   vto: { monthlyLimit: number; monthlyCompleted: number; monthlyInFlight: number; resetDate: string };
@@ -124,8 +130,10 @@ type Summary = {
 };
 
 function baseSummary(overrides: Partial<Summary> = {}): Summary {
+  const membershipStatus = overrides.membershipStatus ?? "MEMBER";
   return {
-    membershipStatus: "MEMBER",
+    membershipStatus,
+    effectiveMembershipStatus: membershipStatus,
     styleMe: { monthlyLimit: 8, monthlyUsed: 3, resetDate: "1 October" },
     buySkip: { monthlyLimit: 5, monthlyUsed: 1, resetDate: "1 October" },
     vto: { monthlyLimit: 10, monthlyCompleted: 2, monthlyInFlight: 0, resetDate: "1 October" },
@@ -335,6 +343,31 @@ describe("plan-usage component — Manage Membership (billing portal)", () => {
   it("a NONE customer does not see the Manage Membership button — nothing to manage yet", () => {
     const html = render(baseSummary({ membershipStatus: "NONE" }));
     expect(html).not.toContain("Manage Membership");
+  });
+});
+
+describe("plan-usage component — stale cached membershipStatus vs. effectiveMembershipStatus", () => {
+  // Reproduces the exact customer-facing bug this fix closes: a cached
+  // Customer.membershipStatus of MEMBER with no real, currently-entitled
+  // Subscription row behind it (see entitlement.server.ts's
+  // effectiveMembershipStatus). Before this fix, isMember read the raw
+  // membershipStatus field directly, so this exact summary shape rendered
+  // only "Manage Membership" — which then 404'd with no_billing_account,
+  // since there was never a real subscription for the portal to open.
+  beforeEach(() => vi.clearAllMocks());
+
+  it("a stale-MEMBER customer with no real subscription sees the Subscribe buttons, not Manage Membership", () => {
+    const html = render(baseSummary({ membershipStatus: "MEMBER", effectiveMembershipStatus: "NONE" }));
+    expect(html).toContain(`Subscribe Monthly — AED ${MEMBERSHIP_PRICING.monthly.amount}`);
+    expect(html).toContain(`Choose Annual — AED ${MEMBERSHIP_PRICING.annual.amount}`);
+    expect(html).not.toContain("Manage Membership");
+  });
+
+  it("a genuinely active member (membershipStatus and effectiveMembershipStatus both MEMBER) is unaffected — regression guard", () => {
+    const html = render(baseSummary({ membershipStatus: "MEMBER", effectiveMembershipStatus: "MEMBER" }));
+    expect(html).toContain("Manage Membership");
+    expect(html).not.toContain("Subscribe Monthly");
+    expect(html).not.toContain("Choose Annual");
   });
 });
 

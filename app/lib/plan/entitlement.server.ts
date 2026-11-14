@@ -322,6 +322,18 @@ export interface EffectiveEntitlementContext {
   countingEnd: Date;
   allowances: EffectiveAllowances;
   subscription: EntitledSubscription | null;
+  // The membership status actually backed by a real, currently-entitled
+  // Subscription row (or its absence) — same correction already applied to
+  // `allowances` above, just no longer discarded after computing them. See
+  // the two branches below for exactly when this diverges from the raw
+  // `membershipStatus` parameter callers pass in: never when a real
+  // ACTIVE/PAST_DUE subscription exists (this forces MEMBER even if the
+  // cache says NONE, so a lagging cache can never under-grant a real
+  // payer), and only trusts the raw cache as-is when there has NEVER been
+  // any tracked Subscription row for this customer — a genuinely stale
+  // cached MEMBER with a tracked-but-not-entitled row (INCOMPLETE/CANCELED/
+  // EXPIRED) is always corrected to NONE here, exactly like `allowances`.
+  effectiveMembershipStatus: MembershipStatus;
 }
 
 // DI surface for resolveEffectiveContext and everything that calls it —
@@ -378,18 +390,25 @@ export async function resolveEffectiveContext(
         vtoPerMonth: getEffectiveVtoLimit(fallbackStatus),
         personalisedTrendPerMonth: fallbackBase.personalisedTrendPerMonth,
       },
+      effectiveMembershipStatus: fallbackStatus,
     };
   }
 
-  // Reached only when getCurrentSubscription found an ACTIVE/PAST_DUE row,
-  // so membershipStatus needs no override here — the real Subscription row
-  // already proves entitlement, regardless of what the cache says.
-  const base = getMembershipAllowances(membershipStatus);
+  // Reached only when getCurrentSubscription found an ACTIVE/PAST_DUE row —
+  // the real Subscription row already proves entitlement, regardless of
+  // what the cache says. Correctness fix: the allowance lookups below now
+  // actually honor that stated intent by using "MEMBER" directly rather
+  // than the raw `membershipStatus` parameter — a lagging cache write
+  // (e.g. membershipStatus still reads NONE immediately after a webhook
+  // created the Subscription row but hasn't yet synced Customer) must
+  // never under-grant a real payer their allowance, matching
+  // effectiveMembershipStatus below exactly.
+  const base = getMembershipAllowances("MEMBER");
   // Staging-only overrides (VTO_MONTHLY_LIMIT_OVERRIDE / STYLEME_MONTHLY_LIMIT_OVERRIDE)
   // apply to the base figure regardless of billing — they are a QA tool, not
   // a billing concept, and add-ons layer on top of whichever base is active.
-  const effectiveStyleMeBase = getEffectiveStyleMeLimit(membershipStatus);
-  const effectiveVtoBase = getEffectiveVtoLimit(membershipStatus);
+  const effectiveStyleMeBase = getEffectiveStyleMeLimit("MEMBER");
+  const effectiveVtoBase = getEffectiveVtoLimit("MEMBER");
   const addons = await _getAddonTotals(customerId, window);
   return {
     window,
@@ -402,7 +421,29 @@ export async function resolveEffectiveContext(
       vtoPerMonth: effectiveVtoBase + addons.vtoBoost,
       personalisedTrendPerMonth: base.personalisedTrendPerMonth,
     },
+    // A real ACTIVE/PAST_DUE (within grace, not revoked — see
+    // getCurrentSubscription) subscription was just found, so this customer
+    // IS effectively a member regardless of what the cached column says —
+    // never under-grant a real payer because of a lagging cache write.
+    effectiveMembershipStatus: "MEMBER",
   };
+}
+
+// A customer's true membership state, corrected for a stale cached
+// Customer.membershipStatus the same way `allowances`/`getEntitlementSummary`
+// already are — exposed standalone, without the DB-logging/window-counting
+// work full resolveEffectiveContext also does, for call sites that need only
+// this one value (e.g. trends.my-edits.$slug.tsx picking which "blocked"
+// message to show). Reuses resolveEffectiveContext's own single
+// getCurrentSubscription/hasAnySubscriptionRecord lookup shape — no new
+// query pattern.
+export async function resolveEffectiveMembershipStatus(
+  customerId: string,
+  membershipStatus: MembershipStatus,
+  deps: EffectiveContextDeps = {},
+): Promise<MembershipStatus> {
+  const { effectiveMembershipStatus } = await resolveEffectiveContext(customerId, membershipStatus, deps);
+  return effectiveMembershipStatus;
 }
 
 // ── Entitlement summary types ──────────────────────────────────────────────────
@@ -439,6 +480,12 @@ export interface PersonalisedTrendEntitlement {
 
 export interface EntitlementSummary {
   membershipStatus: MembershipStatus;
+  // See EffectiveEntitlementContext.effectiveMembershipStatus — this is
+  // that same corrected value, surfaced here so membership-gated UI can
+  // stop reading the raw, potentially-stale `membershipStatus` field above
+  // directly. `membershipStatus` itself is left unchanged/still returned
+  // for any caller that genuinely wants the raw cached column.
+  effectiveMembershipStatus: MembershipStatus;
   styleMe: StyleMeEntitlement;
   buySkip: BuySkipEntitlement;
   vto: VTOEntitlement;
@@ -465,7 +512,7 @@ export async function getEntitlementSummary(
   membershipStatus: MembershipStatus,
   _contextDeps: EffectiveContextDeps = {},
 ): Promise<EntitlementSummary> {
-  const { window, countingEnd, allowances, subscription } = await resolveEffectiveContext(customerId, membershipStatus, _contextDeps);
+  const { window, countingEnd, allowances, subscription, effectiveMembershipStatus } = await resolveEffectiveContext(customerId, membershipStatus, _contextDeps);
   // getCurrentSubscription (inside resolveEffectiveContext) only ever
   // returns an ACTIVE/PAST_DUE row — an INCOMPLETE one (a Checkout attempt
   // via an asynchronous payment method still waiting to clear) is
@@ -558,6 +605,7 @@ export async function getEntitlementSummary(
 
   return {
     membershipStatus,
+    effectiveMembershipStatus,
     windowLabel: window.label,
     billingAlert,
 

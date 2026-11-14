@@ -86,6 +86,10 @@ vi.mock("~/lib/plan/entitlement.server", () => ({
   // this atomic reservation now, never the plain recordPersonalisedTrendEditUsage
   // path (see fix/stripe-clerk-phase1-security).
   reservePersonalisedTrendSlot: vi.fn().mockResolvedValue({ allowed: true, record: { id: "usage-mock" } }),
+  // Defaults to mirroring whatever membershipStatus the test's customer
+  // mock carries — only the two block-state tests below override this
+  // independently to construct the stale-cached-MEMBER scenario.
+  resolveEffectiveMembershipStatus: vi.fn(async (_customerId: string, membershipStatus: string) => membershipStatus),
 }));
 
 vi.mock("~/lib/plan/personalised-trend-edit-usage.server", () => ({
@@ -130,7 +134,7 @@ import {
   recordPersonalisedTrendEditUsage,
 } from "~/lib/plan/personalised-trend-edit-usage.server";
 import { matchNadineProduct } from "~/lib/trend-product-recommendation.server";
-import { reservePersonalisedTrendSlot } from "~/lib/plan/entitlement.server";
+import { checkEntitlement, reservePersonalisedTrendSlot, resolveEffectiveMembershipStatus } from "~/lib/plan/entitlement.server";
 import MyTrendEditDetail, { loader, action } from "./trends.my-edits.$slug";
 
 const MOCK_REPORT = {
@@ -285,6 +289,43 @@ describe("trends/my-edits/:slug loader", () => {
     expect(result.edit?.yourVersion).toBe(MOCK_EDIT.yourVersion);
     // A repeat view never re-generates or re-counts usage.
     expect(getShopperEvidence).not.toHaveBeenCalled();
+  });
+
+  it("a stale-MEMBER customer with no real subscription blocked from generating sees membershipRequired, not monthlyQuotaExhausted", async () => {
+    // checkEntitlement's own quota decision already comes from the
+    // corrected allowance (resolveEffectiveContext) so this customer is
+    // correctly blocked either way — this test is about which MESSAGE the
+    // loader selects. Before this fix, resolveTrendEditBlockState read the
+    // raw customer.membershipStatus directly and would have shown the
+    // "quota exhausted" copy instead.
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({ id: "cust-1", membershipStatus: "MEMBER" } as any);
+    vi.mocked(checkEntitlement).mockResolvedValueOnce({ allowed: false, reason: "quota_exceeded" } as any);
+    vi.mocked(resolveEffectiveMembershipStatus).mockResolvedValueOnce("NONE");
+
+    const result = await loader({
+      request: new Request("http://localhost/trends/my-edits/spring-2026-soft-structure"),
+      params: { slug: "spring-2026-soft-structure" },
+      context: new RouterContextProvider(), pattern: "", url: new URL("http://localhost/trends/my-edits/spring-2026-soft-structure"),
+    });
+
+    expect(resolveEffectiveMembershipStatus).toHaveBeenCalledWith("cust-1", "MEMBER");
+    expect((result as any).membershipRequired).toBe(true);
+    expect((result as any).monthlyQuotaExhausted).toBe(false);
+  });
+
+  it("a genuinely active member blocked by their real monthly quota still sees monthlyQuotaExhausted — regression guard", async () => {
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({ id: "cust-1", membershipStatus: "MEMBER" } as any);
+    vi.mocked(checkEntitlement).mockResolvedValueOnce({ allowed: false, reason: "quota_exceeded" } as any);
+    vi.mocked(resolveEffectiveMembershipStatus).mockResolvedValueOnce("MEMBER");
+
+    const result = await loader({
+      request: new Request("http://localhost/trends/my-edits/spring-2026-soft-structure"),
+      params: { slug: "spring-2026-soft-structure" },
+      context: new RouterContextProvider(), pattern: "", url: new URL("http://localhost/trends/my-edits/spring-2026-soft-structure"),
+    });
+
+    expect((result as any).membershipRequired).toBe(false);
+    expect((result as any).monthlyQuotaExhausted).toBe(true);
   });
 
   // ── Archive access (My Trend Edits as a real, period-independent archive) ──

@@ -121,8 +121,12 @@ function usageLabel(used: number, limit: number, unit: string): string {
 
 export default function PlanUsagePage() {
   const { summary, membershipPricing, addonCatalog, checkoutOutcome } = useLoaderData<typeof loader>();
-  const { membershipStatus, styleMe, buySkip, vto, closet, personalisedTrend, billingAlert } = summary;
-  const isMember = membershipStatus === "MEMBER";
+  const { effectiveMembershipStatus, styleMe, buySkip, vto, closet, personalisedTrend, billingAlert } = summary;
+  // effectiveMembershipStatus, not the raw cached membershipStatus — see
+  // entitlement.server.ts's EntitlementSummary comment. A customer whose
+  // cached status is a stale MEMBER with no real backing subscription must
+  // see the Subscribe buttons below, not "Manage Membership".
+  const isMember = effectiveMembershipStatus === "MEMBER";
   const pricing = `AED ${membershipPricing.monthly.amount}/month · AED ${membershipPricing.annual.amount}/year`;
   const [checkingAgain, setCheckingAgain] = useState(false);
 
@@ -232,8 +236,8 @@ export default function PlanUsagePage() {
 
         {/* ── Checkout outcome (one-time, from the Stripe redirect) ──── */}
         {/* checkoutOutcome alone never implies membership — isMember (from
-            summary.membershipStatus, written only by the Stripe webhook)
-            still decides which copy applies for "success". */}
+            summary.effectiveMembershipStatus, authoritative-subscription-
+            corrected) still decides which copy applies for "success". */}
         {checkoutOutcome === "success" && isMember && (
           <div style={{ padding: "0.9rem 1.1rem", marginBottom: "1rem", borderRadius: "4px", background: "var(--c-success-bg, #e8f5e9)", color: "var(--c-success, #1f7a4d)", fontSize: "0.78rem", letterSpacing: "0.03em" }}>
             Payment confirmed — welcome to nAia Membership.
