@@ -192,4 +192,36 @@ describe("buildCustomerExportZip", () => {
     expect(entries.some((e) => e.startsWith("images/"))).toBe(false);
     expect(_fetch).not.toHaveBeenCalled();
   });
+
+  it("an unexpected build failure (not a per-image fetch failure) destroys the stream cleanly — never a silently truncated or hanging archive", async () => {
+    // A BigInt anywhere in the export breaks JSON.stringify — this is
+    // deliberately NOT a per-image fetch error (those are already caught
+    // and recorded); it simulates anything else going wrong while
+    // assembling data.json, which must surface as a stream error, not an
+    // unhandled rejection or a response that never ends.
+    vi.mocked(compileCustomerExport).mockResolvedValueOnce(
+      baseExport({ customer: { id: "cust-1", corruptedField: 10n } as any }) as any,
+    );
+    const _fetch = vi.fn();
+
+    const result = await buildCustomerExportZip("cust-1", { _fetch });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected ok result");
+
+    await expect(streamToBuffer(result.stream)).rejects.toThrow();
+  });
+
+  it("cross-customer isolation: the exact customerId passed in is the only one ever queried — never widened, never a second customer's id", async () => {
+    vi.mocked(compileCustomerExport).mockResolvedValueOnce(baseExport() as any);
+    await buildCustomerExportZip("cust-A", { _fetch: vi.fn() });
+
+    expect(compileCustomerExport).toHaveBeenCalledTimes(1);
+    expect(compileCustomerExport).toHaveBeenCalledWith("cust-A");
+    // Never called with anything else — e.g. no accidental second lookup,
+    // no customerId derived from elsewhere. compileCustomerExport's own
+    // test suite (customer-privacy.test.ts) separately proves its Prisma
+    // query is scoped by this exact id — this test proves the ZIP builder
+    // never substitutes, widens, or duplicates that id.
+    expect(vi.mocked(compileCustomerExport).mock.calls).toEqual([["cust-A"]]);
+  });
 });

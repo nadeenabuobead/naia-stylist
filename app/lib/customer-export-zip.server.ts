@@ -150,7 +150,15 @@ export async function buildCustomerExportZip(
   // appended, so the caller must start consuming `stream` immediately —
   // awaiting appendAll() here before returning would buffer the entire
   // archive in memory first and defeat streaming entirely.
-  void appendAll();
+  //
+  // Per-image failures are already caught and recorded inside appendAll —
+  // this .catch is for anything else going wrong (e.g. archive.append or
+  // archive.finalize itself throwing). Without it, an uncaught rejection
+  // here would leave the HTTP response hanging indefinitely rather than
+  // ending — destroying the stream with the error instead makes it fail
+  // visibly and immediately, so a customer can never be served a
+  // truncated ZIP that looks complete but silently isn't.
+  appendAll().catch((err) => archive.destroy(err instanceof Error ? err : new Error(String(err))));
 
   const dateStamp = new Date().toISOString().slice(0, 10);
   return { ok: true, stream: archive, filename: `naia-data-export-${dateStamp}.zip` };
