@@ -120,7 +120,7 @@ type Summary = {
   closet: { currentCount: number; limit: number; atCapacity: boolean };
   personalisedTrend: { monthlyLimit: number; monthlyUsed: number };
   windowLabel: string;
-  billingAlert?: { status: "PAST_DUE"; graceDaysRemaining: number } | null;
+  billingAlert?: { status: "PAST_DUE"; graceDaysRemaining: number } | { status: "PAYMENT_PENDING" } | null;
 };
 
 function baseSummary(overrides: Partial<Summary> = {}): Summary {
@@ -489,6 +489,35 @@ describe("plan-usage component — PAST_DUE billing alert", () => {
     // substitutes for or hides the normal usage display.
     expect(html).toContain("3 of 8 used");
     expect(html).toContain("1 of 5 used");
+  });
+});
+
+describe("plan-usage component — PAYMENT_PENDING billing alert (returning visit, async payment method)", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("shows the pending-payment notice on a returning visit (no checkout= param)", () => {
+    const html = render(baseSummary({ membershipStatus: "NONE", billingAlert: { status: "PAYMENT_PENDING" } }), undefined, null);
+    expect(html).toContain("still processing");
+    expect(html).toContain("bank transfers");
+  });
+
+  it("is suppressed when the one-time checkout=success redirect banner is already showing — never says it twice", () => {
+    const html = render(baseSummary({ membershipStatus: "NONE", billingAlert: { status: "PAYMENT_PENDING" } }), undefined, "success");
+    expect(html).not.toContain("still processing");
+    // The one-time redirect banner's own "confirming your membership" copy
+    // is what shows instead, per the existing PAST_DUE-adjacent describe
+    // block above — not re-asserted here to avoid duplicating that coverage.
+  });
+
+  it("shows nothing when billingAlert is null, regardless of checkoutOutcome", () => {
+    const html = render(baseSummary({ membershipStatus: "NONE", billingAlert: null }), undefined, null);
+    expect(html).not.toContain("still processing");
+  });
+
+  it("is mutually exclusive with the PAST_DUE notice — a MEMBER's billingAlert can only ever be one or the other", () => {
+    const html = render(baseSummary({ billingAlert: { status: "PAST_DUE", graceDaysRemaining: 3 } }), undefined, null);
+    expect(html).not.toContain("still processing");
+    expect(html).toContain("couldn&#x27;t process your last payment");
   });
 });
 

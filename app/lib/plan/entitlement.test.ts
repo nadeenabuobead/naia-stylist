@@ -556,3 +556,41 @@ describe("ENT-36 — Closet's atomic reservation stays unconditional, same postu
     assert.match(syncBlock, /\.slice\(0,\s*remaining\)/, "the batch must be capped to remaining capacity, not created in full");
   });
 });
+
+// ── ENT-40 — PAYMENT_PENDING billingAlert for a returning visit with a
+// still-pending asynchronous Checkout payment (2026-11-14) ─────────────────
+
+describe("ENT-40 — getEntitlementSummary surfaces a PAYMENT_PENDING billingAlert for an INCOMPLETE subscription on a returning visit", () => {
+  function summaryFnBody(): string {
+    return entSvc.slice(entSvc.indexOf("export async function getEntitlementSummary"), entSvc.indexOf("export type EntitlementFeature"));
+  }
+
+  it("queries for an INCOMPLETE subscription, scoped to this customer, most-recent first", () => {
+    const body = summaryFnBody();
+    const lookupIdx = body.indexOf('status: "INCOMPLETE"');
+    assert.ok(lookupIdx > -1, "must query for an INCOMPLETE Subscription row");
+    const callStart = body.lastIndexOf("prisma.subscription.findFirst", lookupIdx);
+    const callEnd = body.indexOf(");", lookupIdx);
+    const call = body.slice(callStart, callEnd);
+    assert.match(call, /customerId/, "must scope to this exact customer, never query across customers");
+    assert.match(call, /orderBy:\s*\{\s*createdAt:\s*"desc"\s*\}/, "must take the most recent attempt if more than one INCOMPLETE row somehow exists");
+  });
+
+  it("skips the INCOMPLETE lookup entirely when an entitled (ACTIVE/PAST_DUE) subscription already exists — zero extra query in the common case", () => {
+    const body = summaryFnBody();
+    const lookupIdx = body.indexOf('status: "INCOMPLETE"');
+    const guardStart = body.lastIndexOf("const pendingAsyncPayment", lookupIdx);
+    const guard = body.slice(guardStart, lookupIdx);
+    assert.match(guard, /subscription\s*\?\s*null\s*:/, "must be guarded on the already-resolved `subscription` being falsy");
+  });
+
+  it("billingAlert falls through to PAYMENT_PENDING only when PAST_DUE doesn't already apply", () => {
+    const body = summaryFnBody();
+    const alertStart = body.indexOf("const billingAlert: EntitlementSummary");
+    const alertEnd = body.indexOf(";", body.indexOf("pendingAsyncPayment", alertStart));
+    const alertExpr = body.slice(alertStart, alertEnd);
+    assert.match(alertExpr, /status === "PAST_DUE"/);
+    assert.match(alertExpr, /pendingAsyncPayment/);
+    assert.match(alertExpr, /"PAYMENT_PENDING"/);
+  });
+});

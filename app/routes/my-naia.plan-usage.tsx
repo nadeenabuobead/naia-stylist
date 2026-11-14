@@ -263,7 +263,7 @@ export default function PlanUsagePage() {
         {/* Purely a reflection of summary.billingAlert — never recomputes or
             widens the 7-day grace period itself (that happened server-side,
             in entitlement.server.ts, before this page ever ran). */}
-        {billingAlert && (
+        {billingAlert?.status === "PAST_DUE" && (
           <div style={{ padding: "0.9rem 1.1rem", marginBottom: "1rem", borderRadius: "4px", background: "var(--sev-high-bg, #fdefe2)", color: "var(--sev-high, #b5560f)", fontSize: "0.78rem", letterSpacing: "0.03em" }}>
             We couldn&apos;t process your last payment. You have {billingAlert.graceDaysRemaining} {billingAlert.graceDaysRemaining === 1 ? "day" : "days"} left to update your payment method before access pauses.
             {" "}
@@ -275,6 +275,25 @@ export default function PlanUsagePage() {
             >
               {openingPortal ? "Opening…" : "Update payment method"}
             </button>
+          </div>
+        )}
+
+        {/* ── Pending asynchronous-payment notice (RETURNING visit) ────── */}
+        {/* Distinct from the one-time checkoutOutcome=="success" banner
+            above: that one covers the moment right after the Stripe
+            redirect, while the payment method a customer chose (e.g. a
+            bank debit) can take several business days to actually clear —
+            long after they've left this page. This covers a LATER visit,
+            with no checkout= param at all, while that same attempt is
+            still genuinely pending (Subscription.status === "INCOMPLETE"),
+            so they never wonder whether they need to try again. Suppressed
+            whenever the one-time redirect banner is already showing, to
+            avoid saying the same thing twice in one view. */}
+        {billingAlert?.status === "PAYMENT_PENDING" && checkoutOutcome === null && (
+          <div style={{ padding: "0.9rem 1.1rem", marginBottom: "1rem", borderRadius: "4px", background: "var(--fg-05, #f0f0f0)", color: "var(--fg)", fontSize: "0.78rem", letterSpacing: "0.03em" }}>
+            Your membership payment is still processing — some payment methods (like bank transfers) can take a
+            few business days to clear. We&apos;ll activate your membership automatically the moment it does. If
+            this has been more than a few days, please contact support.
           </div>
         )}
 
