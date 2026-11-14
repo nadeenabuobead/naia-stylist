@@ -43,6 +43,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     mood:              fd(form, "mood") || null,
     status:            (fd(form, "status") || "DRAFT") as "DRAFT" | "PUBLISHED" | "ARCHIVED",
     publishedAt:       fd(form, "publishedAt"),
+    editionMonth:      fd(form, "editionMonth") || null,
     order:             parseInt(fd(form, "order") || "0", 10),
     featured:          form.get("featured") === "on",
     summary:           fd(form, "summary"),
@@ -156,6 +157,9 @@ export default function TrendReportEdit() {
             </Field>
             <Field name="publishedAt" label="Published at (ISO date)" note="e.g. 2026-03-15">
               <TextInput name="publishedAt" value={report?.publishedAt ?? ""} placeholder="2026-03-15" />
+            </Field>
+            <Field name="editionMonth" label="Edition month (YYYY-MM)" note="Which monthly edition this is grouped under on My Trend Edits — separate from Published at. Leave blank to fall back to Published at's own month.">
+              <TextInput name="editionMonth" value={report?.editionMonth ?? ""} placeholder="2026-04" />
             </Field>
             <Field name="order" label="Order" note="Lower = shown first">
               <TextInput name="order" value={String(report?.order ?? 0)} />

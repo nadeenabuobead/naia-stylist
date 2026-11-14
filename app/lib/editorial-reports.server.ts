@@ -18,12 +18,20 @@ type DbRow = Awaited<
   ReturnType<typeof prisma.editorialTrendReport.findFirst>
 > & object;
 
+// getEffectiveEditionPeriod/formatEditionMonthLabel moved to
+// editorial-report-edition.ts (no ".server" suffix) — they're pure and
+// need to be callable from route COMPONENTS (trends.jsx, trends.$slug.tsx,
+// trends.$slug.lens.$lens.tsx render the edition label directly), and
+// React Router's build rejects a .server module reachable from a route's
+// default export, not just its loader/action.
+
 function dbToTrendReportData(r: NonNullable<DbRow>): TrendReportData {
   return {
     slug: r.slug,
     title: r.title,
     season: r.season,
     publishedAt: r.publishedAt,
+    editionMonth: r.editionMonth ?? undefined,
     mood: r.mood ?? undefined,
     summary: r.summary,
     editorialIntro: r.editorialIntro,
@@ -97,6 +105,7 @@ type ReportInput = {
   mood?: string | null;
   status: "DRAFT" | "PUBLISHED" | "ARCHIVED";
   publishedAt: string;
+  editionMonth?: string | null;
   order: number;
   featured: boolean;
   summary: string;
@@ -143,6 +152,7 @@ export async function seedEditorialReportsFromStatic() {
         mood: r.mood ?? null,
         status: r.published ? "PUBLISHED" : "DRAFT",
         publishedAt: r.publishedAt,
+        editionMonth: r.editionMonth ?? null,
         order: r.order ?? 0,
         featured: false,
         summary: r.summary,

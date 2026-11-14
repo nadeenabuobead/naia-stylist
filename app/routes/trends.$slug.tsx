@@ -3,6 +3,7 @@ import { Link, useLoaderData, useRouteError, type LoaderFunctionArgs } from "rea
 import { STOREFRONT_ORIGIN, STOREFRONT_NAV } from "../lib/storefront-config";
 import type { TrendReportData } from "../lib/trend-reports";
 import { getEditorialReportBySlug, getPublishedEditorialReports } from "../lib/editorial-reports.server";
+import { getEffectiveEditionPeriod, formatEditionMonthLabel } from "../lib/editorial-report-edition";
 import { reportVisual } from "../lib/report-visual";
 
 const FONTS =
@@ -982,7 +983,7 @@ export default function TrendReportDetail() {
           <p className="psl-hero-lede">{report.editorialIntro || report.summary}</p>
           <div className="psl-hero-meta">
             <span>{report.season}</span>
-            <span>{new Date(report.publishedAt).toLocaleDateString("en-GB", { month: "long", year: "numeric" })}</span>
+            <span>{formatEditionMonthLabel(getEffectiveEditionPeriod(report))}</span>
           </div>
         </div>
       </section>
@@ -1238,7 +1239,7 @@ export default function TrendReportDetail() {
                   <div className="psl-card-bottom">
                     <div className="psl-card-title">{r.title}</div>
                     <div className="psl-card-footer">
-                      <span>{new Date(r.publishedAt).toLocaleDateString("en-GB", { month: "long", year: "numeric" })}</span>
+                      <span>{formatEditionMonthLabel(getEffectiveEditionPeriod(r))}</span>
                       <span className="psl-card-arrow">↗</span>
                     </div>
                   </div>

@@ -128,6 +128,89 @@ describe("trends/my-edits loader", () => {
     expect(result.groups[0].cards.every((c) => c.subTitle === null)).toBe(true);
   });
 
+  // 2026-11-14 edition-month correction: three reports that would ALL fall
+  // under the same publishedAt month (the authoring-date artifact that
+  // caused the original bug) must still split into three genuinely
+  // different editions once each has its own real editionMonth — proving
+  // the loader groups/sorts by the effective edition period, not the raw
+  // publishedAt date.
+  it("groups three reports with the same publishedAt but different editionMonths into three separate editions, newest edition first", async () => {
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({ id: "cust-1" } as any);
+    vi.mocked(getShopperEvidence).mockResolvedValueOnce({ hasProfile: false } as any);
+    vi.mocked(getPublishedEditorialReports).mockResolvedValueOnce([
+      {
+        slug: "spring-2026-soft-structure", title: "Soft Structure", season: "Spring 2026",
+        publishedAt: "2026-06-30", editionMonth: "2026-04", summary: "s", published: true,
+      },
+      {
+        slug: "modern-tailoring-spring-2026", title: "Modern Tailoring", season: "Spring 2026",
+        publishedAt: "2026-06-30", editionMonth: "2026-05", summary: "s", published: true,
+      },
+      {
+        slug: "spring-2026-colour-direction", title: "Colour Direction", season: "Spring 2026",
+        publishedAt: "2026-06-30", editionMonth: "2026-06", summary: "s", published: true,
+      },
+    ] as any);
+
+    const result = await loader({
+      request: new Request("http://localhost/trends/my-edits"),
+      params: {},
+      context: new RouterContextProvider(), pattern: "", url: new URL("http://localhost/trends/my-edits"),
+    });
+
+    expect(result.groups).toHaveLength(3);
+    expect(result.groups.map((g) => g.periodKey)).toEqual(["2026-06", "2026-05", "2026-04"]);
+    expect(result.groups[0].cards).toEqual([expect.objectContaining({ slug: "spring-2026-colour-direction" })]);
+    expect(result.groups[1].cards).toEqual([expect.objectContaining({ slug: "modern-tailoring-spring-2026" })]);
+    expect(result.groups[2].cards).toEqual([expect.objectContaining({ slug: "spring-2026-soft-structure" })]);
+  });
+
+  it("groups two reports sharing one editionMonth as same-edition siblings, even with different publishedAt values", async () => {
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({ id: "cust-1" } as any);
+    vi.mocked(getShopperEvidence).mockResolvedValueOnce({ hasProfile: false } as any);
+    vi.mocked(getPublishedEditorialReports).mockResolvedValueOnce([
+      {
+        slug: "june-primary", title: "June Primary", season: "Summer 2026",
+        publishedAt: "2026-01-01", editionMonth: "2026-06", summary: "s", published: true,
+      },
+      {
+        slug: "june-supporting", title: "June Supporting", season: "Summer 2026",
+        publishedAt: "2026-09-15", editionMonth: "2026-06", summary: "s", published: true,
+      },
+    ] as any);
+
+    const result = await loader({
+      request: new Request("http://localhost/trends/my-edits"),
+      params: {},
+      context: new RouterContextProvider(), pattern: "", url: new URL("http://localhost/trends/my-edits"),
+    });
+
+    expect(result.groups).toHaveLength(1);
+    expect(result.groups[0].periodKey).toBe("2026-06");
+    expect(result.groups[0].cards.map((c) => c.slug)).toEqual(["june-primary", "june-supporting"]);
+  });
+
+  it("falls back to publishedAt's own month for a report with no editionMonth (a pre-existing DB row)", async () => {
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({ id: "cust-1" } as any);
+    vi.mocked(getShopperEvidence).mockResolvedValueOnce({ hasProfile: false } as any);
+    vi.mocked(getPublishedEditorialReports).mockResolvedValueOnce([
+      {
+        slug: "legacy-row", title: "Legacy Row", season: "Spring 2026",
+        publishedAt: "2026-03-15", summary: "s", published: true,
+      },
+    ] as any);
+
+    const result = await loader({
+      request: new Request("http://localhost/trends/my-edits"),
+      params: {},
+      context: new RouterContextProvider(), pattern: "", url: new URL("http://localhost/trends/my-edits"),
+    });
+
+    expect(result.groups).toHaveLength(1);
+    expect(result.groups[0].periodKey).toBe("2026-03");
+    expect(result.groups[0].monthLabel).toBe("March 2026");
+  });
+
   it("calls buildShopperEdit for each published report when profile is complete", async () => {
     vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({ id: "cust-1" } as any);
     vi.mocked(getShopperEvidence).mockResolvedValueOnce({ hasProfile: true } as any);

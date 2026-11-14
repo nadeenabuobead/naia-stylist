@@ -2,6 +2,7 @@ import type { LinksFunction, LoaderFunctionArgs } from "react-router";
 import { Link, useLoaderData } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { getPublishedEditorialReports } from "~/lib/editorial-reports.server";
+import { getEffectiveEditionPeriod, formatEditionMonthLabel } from "~/lib/editorial-report-edition";
 import { getUsageWindow } from "~/lib/plan/usage-window.server";
 import {
   getShopperEvidence,
@@ -9,30 +10,6 @@ import {
 } from "~/lib/trend-evidence.server";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import naiaStyles from "~/styles/naia-design-system.css?url";
-
-// "2026-06-30" -> "June 2026". Same parsing pattern as
-// personalised-trend-edit-usage.server.ts's formatPeriodKeyLabel —
-// duplicated rather than imported, per that file's own established
-// convention (this module never depends on the plan layer for display
-// formatting). Falls back to the raw string rather than throwing, since a
-// malformed or missing publishedAt must never break this page.
-function formatReportMonthLabel(publishedAt: string): string {
-  const match = /^(\d{4})-(\d{2})-\d{2}$/.exec(publishedAt);
-  if (!match) return publishedAt || "Undated";
-  const [, yearStr, monthStr] = match;
-  const asDate = new Date(Date.UTC(Number(yearStr), Number(monthStr) - 1, 1));
-  return asDate.toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
-}
-
-// A report only counts as "this month's edit" when its own publication
-// month matches the server's actual current month — never assumed. A
-// report published in an earlier month (e.g. the editorial cadence hasn't
-// caught up yet) must never be labelled "this month's edit"; see the
-// featured-eyebrow logic below for the honest fallback.
-function reportPeriodKey(publishedAt: string): string | null {
-  const match = /^(\d{4}-\d{2})-\d{2}$/.exec(publishedAt);
-  return match ? match[1] : null;
-}
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: naiaStyles },
@@ -51,17 +28,19 @@ type CardItem = {
   title: string;
   season: string;
   subTitle: string | null; // null = Passport incomplete
-  monthLabel: string; // derived from the report's own publishedAt — never relabelled
-  isCurrentPeriod: boolean; // true only when publishedAt falls in the server's actual current month
+  monthLabel: string; // derived from the report's effective edition period — never relabelled
+  isCurrentPeriod: boolean; // true only when the effective edition period matches the server's actual current month
 };
 
-// One real calendar month's worth of editorial content. Multiple reports can
-// legitimately share a periodKey (e.g. several reports all dated in the same
-// month, before a genuine monthly cadence existed) — grouping by periodKey,
-// not one-card-per-report, is what stops that from being displayed as if
-// each report were its own separate monthly edition.
+// One real editorial edition's worth of content. Multiple reports can
+// legitimately share an edition period (e.g. several reports supporting one
+// month's story) — grouping by period, not one-card-per-report, is what
+// stops that from being displayed as if each report were its own separate
+// monthly edition. The period itself comes from getEffectiveEditionPeriod
+// (editionMonth when set, else publishedAt's own month) — never the raw
+// publishedAt date directly, and never inferred from title/season.
 type MonthGroup = {
-  periodKey: string | null; // null when the report's publishedAt didn't parse
+  periodKey: string | null; // null when the report had neither a valid editionMonth nor a parseable publishedAt
   monthLabel: string;
   isCurrentPeriod: boolean;
   cards: CardItem[];
@@ -77,7 +56,11 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
 
   const reports = (await getPublishedEditorialReports())
     .slice()
-    .sort((a, b) => (a.publishedAt < b.publishedAt ? 1 : -1));
+    .sort((a, b) => {
+      const pa = getEffectiveEditionPeriod(a) ?? "";
+      const pb = getEffectiveEditionPeriod(b) ?? "";
+      return pa < pb ? 1 : pa > pb ? -1 : 0;
+    });
 
   // Single DB round-trip for all personalisation signals.
   const evidence = await getShopperEvidence(customer.id);
@@ -98,18 +81,18 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
       title: report.title,
       season: report.season,
       subTitle,
-      monthLabel: formatReportMonthLabel(report.publishedAt),
-      isCurrentPeriod: reportPeriodKey(report.publishedAt) === currentPeriodKey,
+      monthLabel: formatEditionMonthLabel(getEffectiveEditionPeriod(report)),
+      isCurrentPeriod: getEffectiveEditionPeriod(report) === currentPeriodKey,
     };
   });
 
-  // Group consecutive cards sharing the same real periodKey. Cards already
-  // arrive newest-first, so each group's own order (and the overall group
-  // order) is preserved — this only merges adjacent same-month cards, it
-  // never reorders or re-labels anything.
+  // Group consecutive cards sharing the same real edition period. Cards
+  // already arrive newest-edition-first, so each group's own order (and the
+  // overall group order) is preserved — this only merges adjacent
+  // same-edition cards, it never reorders or re-labels anything.
   const groups: MonthGroup[] = [];
   for (const report of reports) {
-    const periodKey = reportPeriodKey(report.publishedAt);
+    const periodKey = getEffectiveEditionPeriod(report);
     const card = cards.find((c) => c.slug === report.slug)!;
     const lastGroup = groups[groups.length - 1];
     if (lastGroup && lastGroup.periodKey === periodKey) {
