@@ -1,11 +1,16 @@
 # .github/workflows/full-look-vto-sweep.yml
 #
-# Independent trigger for the Full-Look VTO QA-pause cleanup sweep —
-# app/routes/api.staging-full-look-vto-sweep.ts. Makes the cleanup actually
-# automatic, since Vercel Cron cannot reach this project's staging
-# environment (verified: Vercel Cron always targets a project's PRODUCTION
-# deployment; this project's staging is deliberately Preview-only, aliased
-# to a stable domain, never promoted to Production).
+# Independent trigger for the Full-Look VTO abandoned-chain cleanup sweep —
+# app/routes/api.staging-full-look-vto-sweep.ts, which as of 2026-11-14 runs
+# TWO independent sweeps on every invocation: the original QA-pause cleanup
+# (AWAITING_CONTINUE abandoned without ever continuing) and a newer one for a
+# mid-chain step left in PROCESSING because the customer never polled again
+# (see sweepStaleFullLookSteps's own doc comment in
+# full-look-tryon-real.server.ts). Makes both actually automatic, since
+# Vercel Cron cannot reach this project's staging environment (verified:
+# Vercel Cron always targets a project's PRODUCTION deployment; this
+# project's staging is deliberately Preview-only, aliased to a stable
+# domain, never promoted to Production).
 #
 # NOT ACTIVE YET. GitHub only honors a `schedule` trigger from the copy of
 # this file that exists on the repository's DEFAULT branch (verified
@@ -44,13 +49,15 @@
 # visibility was not checked here (no API access available) — confirm it
 # yourself if this matters to you.
 
-name: Full-Look VTO QA pause sweep
+name: Full-Look VTO abandoned-chain sweep
 
 on:
   schedule:
     # Every 10 minutes — well within GitHub's 5-minute floor for scheduled
-    # workflows, and tight enough that an abandoned pause (30-minute
-    # expiry) is cleaned up within roughly one cycle of becoming eligible,
+    # workflows, tight enough that an abandoned pause (30-minute expiry) is
+    # cleaned up within roughly one cycle of becoming eligible, and matches
+    # sweepStaleFullLookSteps's own STALE_PROCESSING_THRESHOLD_MS (10 min)
+    # so a stuck step is picked up on roughly its first eligible cycle too —
     # not up to a day later the way Vercel's own Hobby-plan cron would be.
     - cron: "*/10 * * * *"
   # Lets a human fire one sweep on demand from the Actions tab, without

@@ -897,3 +897,128 @@ export async function sweepAbandonedFullLookPauses(
 
   return { cleanedChains, skippedActive, skippedAlreadyAdvanced };
 }
+
+// ── Independent cleanup — a mid-chain step the customer never polled again ──
+//
+// Distinct from sweepAbandonedFullLookPauses above, which only reclaims the
+// AWAITING_CONTINUE checkpoint and never mutates a job's status. This sweep
+// targets the OTHER abandonment shape: a step already submitted to FASHN
+// (status PROCESSING) whose customer closed the tab and never returned to
+// poll. Nothing else in this codebase ever resolves that row — see
+// entitlement.server.ts's own "VTO stale-job threshold" comment: quota
+// *counting* already excludes a stale job after 10 minutes, but no process
+// ever transitions the row itself. Left alone, checkCustomerCooldown's
+// ACTIVE_JOB check — which, unlike quota counting, has no staleness
+// exception — blocks that customer from starting ANY future VTO (single-item
+// or Full-Look) permanently, since a stuck PROCESSING row is "active" to it
+// forever.
+//
+// The transition itself must be a conditional (status-guarded) write, not a
+// read-then-blind-write: this sweep's own read of "status is PROCESSING"
+// can go stale if a real poll resolves the SAME job in the gap before this
+// sweep's update executes, and blindly overwriting that outcome back to
+// TIMED_OUT would silently hide a genuinely completed outfit from the
+// customer. createOrFindTryOnJob's Serializable transaction already applies
+// this same atomic check+write principle to this exact table for job
+// creation; this reuses it for the transition path instead of a plain
+// advanceTryOnJob() read-then-write, whose single existing caller never
+// runs concurrently with another writer of the same row the way a sweep
+// does. Scoped to Full-Look jobs only (productHandle prefix) — single-item
+// VTO jobs have the identical underlying exposure but a fix for that cooldown
+// check's own staleness window, if needed, is outside the Full-Look chain
+// this module owns.
+export interface StaleStepSweepResult {
+  timedOut: number;
+  skippedRace: number; // a real poll resolved the job first — conditional update found 0 rows
+}
+
+// Matches entitlement.server.ts's own documented 10-minute VTO stale-job
+// threshold ("exceeds the client polling window (~2 min) and FASHN's
+// expected processing time by a safe margin") — same number, same rationale,
+// applied here to actually resolve the row instead of merely excluding it
+// from a count.
+export const STALE_PROCESSING_THRESHOLD_MS = 10 * 60 * 1000;
+
+async function defaultFindStaleFullLookProcessingJobs(thresholdMs: number): Promise<VirtualTryOnJobRecord[]> {
+  return prisma.virtualTryOnJob.findMany({
+    where: {
+      productHandle: { startsWith: `${REAL_PRODUCT_HANDLE_PREFIX}:` },
+      status: "PROCESSING",
+      lastActivityAt: { lt: new Date(Date.now() - thresholdMs) },
+    },
+  }) as Promise<VirtualTryOnJobRecord[]>;
+}
+
+// Walks the idempotencyKey chain backward from a stale step to every earlier
+// step in the SAME chain — bounded by MAX_CHAIN_LENGTH, no new index or
+// query shape needed. Each earlier step, if it reached COMPLETED, already
+// has an uploaded intermediate image that advanceFullLookChain's own cleanup
+// will now never run (that cleanup only fires from the COMPLETED/FAILED
+// terminal branches, and this chain can no longer reach either on its own).
+async function collectAncestorStepJobIds(
+  job: VirtualTryOnJobRecord,
+  _findById: (id: string) => Promise<VirtualTryOnJobRecord | null>,
+): Promise<string[]> {
+  const ids: string[] = [];
+  let priorId = parsePriorJobIdFromStepKey(job.idempotencyKey);
+  let guard = 0;
+  while (priorId && guard < MAX_CHAIN_LENGTH) {
+    ids.unshift(priorId);
+    const prior = await _findById(priorId);
+    if (!prior) break;
+    priorId = parsePriorJobIdFromStepKey(prior.idempotencyKey);
+    guard++;
+  }
+  return ids;
+}
+
+async function defaultFindJobById(id: string): Promise<VirtualTryOnJobRecord | null> {
+  return prisma.virtualTryOnJob.findUnique({ where: { id } }) as Promise<VirtualTryOnJobRecord | null>;
+}
+
+// Atomic, status-guarded transition: only applies (and only returns true)
+// if the row is STILL "PROCESSING" at write time. A concurrent real poll
+// that already moved it to COMPLETED/FAILED makes this a no-op — see this
+// sweep's own header comment for why a plain read-then-write is unsafe here.
+async function defaultTimeoutStaleJob(jobId: string): Promise<boolean> {
+  const result = await prisma.virtualTryOnJob.updateMany({
+    where: { id: jobId, status: "PROCESSING" },
+    data: {
+      status: "TIMED_OUT",
+      errorCode: "ABANDONED_NO_POLL",
+      completedAt: new Date(),
+      lastActivityAt: new Date(),
+    },
+  });
+  return result.count === 1;
+}
+
+export async function sweepStaleFullLookSteps(
+  thresholdMs: number = STALE_PROCESSING_THRESHOLD_MS,
+  _findStaleJobs: (thresholdMs: number) => Promise<VirtualTryOnJobRecord[]> = defaultFindStaleFullLookProcessingJobs,
+  _findById: (id: string) => Promise<VirtualTryOnJobRecord | null> = defaultFindJobById,
+  _timeoutJob: (jobId: string) => Promise<boolean> = defaultTimeoutStaleJob,
+  _deleteAsset: DeleteAssetFn = deleteCloudinaryAsset,
+): Promise<StaleStepSweepResult> {
+  const staleJobs = await _findStaleJobs(thresholdMs);
+  let timedOut = 0;
+  let skippedRace = 0;
+
+  for (const job of staleJobs) {
+    const applied = await _timeoutJob(job.id);
+    if (!applied) {
+      // A real poll resolved this job between the find and this update —
+      // a genuine race, not an error. Leave it exactly as that poll left it.
+      skippedRace++;
+      continue;
+    }
+    timedOut++;
+
+    const ancestorIds = await collectAncestorStepJobIds(job, _findById);
+    if (ancestorIds.length > 0) {
+      await cleanupIntermediateStepResults(job.customerId, ancestorIds, _deleteAsset);
+    }
+  }
+
+  return { timedOut, skippedRace };
+}

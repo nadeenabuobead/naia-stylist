@@ -51,6 +51,7 @@ import {
   startOrResumeFullLookChain,
   continueToFinalStep,
   sweepAbandonedFullLookPauses,
+  sweepStaleFullLookSteps,
   REAL_PRODUCT_HANDLE_PREFIX,
   type FullLookChainContext,
 } from "./full-look-tryon-real.server.js";
@@ -1087,5 +1088,88 @@ describe("sweepAbandonedFullLookPauses", () => {
     expect(mockAdvance()).not.toHaveBeenCalled();
     expect(mockCreateOrFind()).not.toHaveBeenCalled();
     expect(mockSubmitProvider()).not.toHaveBeenCalled();
+  });
+});
+
+// ── sweepStaleFullLookSteps — a mid-chain step the customer never polled
+// again, left in PROCESSING forever ──────────────────────────────────────────
+
+describe("sweepStaleFullLookSteps", () => {
+  it("SS.1 — a stale PROCESSING job is marked TIMED_OUT via the status-guarded update and counted", async () => {
+    const blazer = fakeJob("blazer-1", { status: "PROCESSING", idempotencyKey: "fulllook-real-step:shirt-1:2" });
+    const _findStaleJobs = vi.fn(async () => [blazer]);
+    const _findById = vi.fn(async () => null);
+    const _timeoutJob = vi.fn(async () => true);
+
+    const result = await sweepStaleFullLookSteps(10 * 60 * 1000, _findStaleJobs, _findById, _timeoutJob);
+
+    expect(result).toEqual({ timedOut: 1, skippedRace: 0 });
+    expect(_timeoutJob).toHaveBeenCalledWith("blazer-1");
+  });
+
+  it("SS.2 — a race (a real poll already resolved the job) is skipped, not counted as timed out, and never touches intermediate images", async () => {
+    const blazer = fakeJob("blazer-1", { status: "PROCESSING", idempotencyKey: "fulllook-real-step:shirt-1:2" });
+    const _findStaleJobs = vi.fn(async () => [blazer]);
+    const _findById = vi.fn(async () => null);
+    const _timeoutJob = vi.fn(async () => false); // conditional update found 0 rows — already resolved
+
+    const result = await sweepStaleFullLookSteps(10 * 60 * 1000, _findStaleJobs, _findById, _timeoutJob);
+
+    expect(result).toEqual({ timedOut: 0, skippedRace: 1 });
+    expect(mockDeleteAsset()).not.toHaveBeenCalled();
+  });
+
+  it("SS.3 — a stale step-0 job (no earlier step exists) is timed out with no intermediate-image cleanup attempted", async () => {
+    // Step 0's own idempotencyKey never starts with the step-chain prefix —
+    // parsePriorJobIdFromStepKey correctly finds nothing to walk back to.
+    const trousers = fakeJob("trousers-1", { status: "PROCESSING", idempotencyKey: "fulllook-real:cust-1" });
+    const _findStaleJobs = vi.fn(async () => [trousers]);
+    const _findById = vi.fn(async () => null);
+    const _timeoutJob = vi.fn(async () => true);
+
+    const result = await sweepStaleFullLookSteps(10 * 60 * 1000, _findStaleJobs, _findById, _timeoutJob);
+
+    expect(result).toEqual({ timedOut: 1, skippedRace: 0 });
+    expect(mockDeleteAsset()).not.toHaveBeenCalled();
+  });
+
+  it("SS.4 — a stale final (blazer) step walks the FULL chain back through both earlier steps and cleans up each one's intermediate image", async () => {
+    const blazer = fakeJob("blazer-1", { customerId: "cust-1", status: "PROCESSING", idempotencyKey: "fulllook-real-step:shirt-1:2" });
+    const shirt = fakeJob("shirt-1", { customerId: "cust-1", status: "COMPLETED", idempotencyKey: "fulllook-real-step:trousers-1:1" });
+    const trousers = fakeJob("trousers-1", { customerId: "cust-1", status: "COMPLETED", idempotencyKey: "fulllook-real:cust-1" });
+    const _findStaleJobs = vi.fn(async () => [blazer]);
+    const _findById = vi.fn(async (id: string) => (id === "shirt-1" ? shirt : id === "trousers-1" ? trousers : null));
+    const _timeoutJob = vi.fn(async () => true);
+
+    const result = await sweepStaleFullLookSteps(10 * 60 * 1000, _findStaleJobs, _findById, _timeoutJob);
+
+    expect(result).toEqual({ timedOut: 1, skippedRace: 0 });
+    expect(mockDeleteAsset()).toHaveBeenCalledTimes(2);
+    expect(mockDeleteAsset()).toHaveBeenCalledWith(expect.stringContaining("trousers-1"), "private");
+    expect(mockDeleteAsset()).toHaveBeenCalledWith(expect.stringContaining("shirt-1"), "private");
+    // Never cleans up the stale job's own image — it never produced one.
+    expect(mockDeleteAsset()).not.toHaveBeenCalledWith(expect.stringContaining("blazer-1"), "private");
+  });
+
+  it("SS.5 — several stale jobs across different chains are each resolved and aggregated independently", async () => {
+    const jobA = fakeJob("job-a", { status: "PROCESSING", idempotencyKey: "fulllook-real:cust-A" });
+    const jobB = fakeJob("job-b", { status: "PROCESSING", idempotencyKey: "fulllook-real:cust-B" });
+    const _findStaleJobs = vi.fn(async () => [jobA, jobB]);
+    const _findById = vi.fn(async () => null);
+    const _timeoutJob = vi.fn(async (id: string) => id === "job-a"); // only job-a wins its race
+
+    const result = await sweepStaleFullLookSteps(10 * 60 * 1000, _findStaleJobs, _findById, _timeoutJob);
+
+    expect(result).toEqual({ timedOut: 1, skippedRace: 1 });
+  });
+
+  it("SS.6 — the configured threshold is forwarded to the job-finder untouched", async () => {
+    const _findStaleJobs = vi.fn(async () => []);
+    const _findById = vi.fn(async () => null);
+    const _timeoutJob = vi.fn(async () => true);
+
+    await sweepStaleFullLookSteps(42, _findStaleJobs, _findById, _timeoutJob);
+
+    expect(_findStaleJobs).toHaveBeenCalledWith(42);
   });
 });
