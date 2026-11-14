@@ -17,6 +17,7 @@ vi.mock("./full-look-tryon-real.server.js", async (importOriginal) => {
     startOrResumeFullLookChain: vi.fn(),
     advanceFullLookChain: vi.fn(),
     continueToFinalStep: vi.fn(),
+    walkFullLookChainJobs: vi.fn(),
   };
 });
 
@@ -41,9 +42,11 @@ import {
   startOrResumeFullLookChain,
   advanceFullLookChain,
   continueToFinalStep,
+  walkFullLookChainJobs,
 } from "./full-look-tryon-real.server.js";
 import {
   selectFullLookGarments,
+  computeGarmentFingerprint,
   resolveCurrentAttemptScope,
   startNewAttemptScope,
   startFullLookOutfit,
@@ -66,6 +69,12 @@ beforeEach(() => {
   vi.mocked(buildTryOnResultUrl).mockReset();
   mockCount().mockReset();
   mockFindFirst().mockReset();
+  // Default: no existing jobs at whatever scope startFullLookOutfit's own
+  // terminal-state check looks up — most tests don't care about this and
+  // just need the normal (no-escalation) path; tests that DO care override
+  // this explicitly.
+  vi.mocked(walkFullLookChainJobs).mockReset();
+  vi.mocked(walkFullLookChainJobs).mockResolvedValue([]);
 });
 
 // ── Garment selection ─────────────────────────────────────────────────────────
@@ -209,29 +218,92 @@ describe("selectFullLookGarments", () => {
 // ── Attempt scope ────────────────────────────────────────────────────────────
 
 describe("resolveCurrentAttemptScope / startNewAttemptScope — retry-safe idempotency", () => {
+  const FP = "fingerprintABC";
+
   it("first-ever attempt: both resolve to attempt 0 when no step1 row exists yet", async () => {
     mockCount().mockResolvedValue(0);
-    expect(await resolveCurrentAttemptScope("cust-1", "sugg-1")).toBe("sugg-1:a0");
-    expect(await startNewAttemptScope("cust-1", "sugg-1")).toBe("sugg-1:a0");
+    expect(await resolveCurrentAttemptScope("cust-1", "sugg-1", FP)).toBe(`sugg-1:a0:${FP}`);
+    expect(await startNewAttemptScope("cust-1", "sugg-1", FP)).toBe(`sugg-1:a0:${FP}`);
   });
 
   it("after one attempt exists: resume reuses it (a0); retry gets a genuinely new one (a1), never colliding", async () => {
     mockCount().mockResolvedValue(1);
-    expect(await resolveCurrentAttemptScope("cust-1", "sugg-1")).toBe("sugg-1:a0");
-    expect(await startNewAttemptScope("cust-1", "sugg-1")).toBe("sugg-1:a1");
+    expect(await resolveCurrentAttemptScope("cust-1", "sugg-1", FP)).toBe(`sugg-1:a0:${FP}`);
+    expect(await startNewAttemptScope("cust-1", "sugg-1", FP)).toBe(`sugg-1:a1:${FP}`);
   });
 
   it("after two attempts exist (first failed, retried once more): resume reuses the latest (a1), a further retry would get a2", async () => {
     mockCount().mockResolvedValue(2);
-    expect(await resolveCurrentAttemptScope("cust-1", "sugg-1")).toBe("sugg-1:a1");
-    expect(await startNewAttemptScope("cust-1", "sugg-1")).toBe("sugg-1:a2");
+    expect(await resolveCurrentAttemptScope("cust-1", "sugg-1", FP)).toBe(`sugg-1:a1:${FP}`);
+    expect(await startNewAttemptScope("cust-1", "sugg-1", FP)).toBe(`sugg-1:a2:${FP}`);
   });
 
   it("counts step1 rows scoped to both this customer and this exact suggestion — never a different customer's or suggestion's attempts", async () => {
-    await resolveCurrentAttemptScope("cust-1", "sugg-1");
+    await resolveCurrentAttemptScope("cust-1", "sugg-1", FP);
     expect(mockCount()).toHaveBeenCalledWith({
       where: { customerId: "cust-1", outfitSuggestionId: "sugg-1", productHandle: { startsWith: "fulllook-real:step1:" } },
     });
+  });
+
+  // 2026-11-15 — the actual QA bug fix: a different garment set (different
+  // fingerprint) must never produce the same scope as an older, now-
+  // incompatible attempt, even at the exact same numeric index.
+  it("the SAME numeric index with a DIFFERENT fingerprint never collides with an older attempt's scope", async () => {
+    mockCount().mockResolvedValue(0);
+    const oldThreeItemScope = await resolveCurrentAttemptScope("cust-1", "sugg-1", "fp-3-items");
+    const newFiveItemScope = await resolveCurrentAttemptScope("cust-1", "sugg-1", "fp-5-items");
+    expect(oldThreeItemScope).not.toBe(newFiveItemScope);
+  });
+
+  it("the SAME fingerprint always produces the SAME scope for the same attempt index — resumption still works", async () => {
+    mockCount().mockResolvedValue(1);
+    const first = await resolveCurrentAttemptScope("cust-1", "sugg-1", FP);
+    const second = await resolveCurrentAttemptScope("cust-1", "sugg-1", FP);
+    expect(first).toBe(second);
+  });
+});
+
+describe("computeGarmentFingerprint", () => {
+  function fpItem(overrides: Partial<SelectableOutfitItem> & { itemType: SelectableOutfitItem["itemType"] }): SelectableOutfitItem {
+    return { productTitle: null, productImageUrl: "https://example.com/x.jpg", ...overrides } as SelectableOutfitItem;
+  }
+
+  it("the same chosen items (by stable closet id) produce the same fingerprint, regardless of label text", () => {
+    const a = [fpItem({ itemType: "TOP", closetItemId: "closet-1", productTitle: "Sweater" })];
+    const b = [fpItem({ itemType: "TOP", closetItemId: "closet-1", productTitle: "A different label entirely" })];
+    expect(computeGarmentFingerprint(a)).toBe(computeGarmentFingerprint(b));
+  });
+
+  it("a different closet item (different stable id) produces a different fingerprint, even with an identical label", () => {
+    const a = [fpItem({ itemType: "TOP", closetItemId: "closet-1", productTitle: "Sweater" })];
+    const b = [fpItem({ itemType: "TOP", closetItemId: "closet-2", productTitle: "Sweater" })];
+    expect(computeGarmentFingerprint(a)).not.toBe(computeGarmentFingerprint(b));
+  });
+
+  it("a 3-item set and the same items plus 2 more (3→5 transition) produce different fingerprints", () => {
+    const three = [
+      fpItem({ itemType: "TOP", closetItemId: "c1" }),
+      fpItem({ itemType: "BOTTOM", closetItemId: "c2" }),
+      fpItem({ itemType: "OUTERWEAR", closetItemId: "c3" }),
+    ];
+    const five = [
+      ...three,
+      fpItem({ itemType: "SHOES", closetItemId: "c4" }),
+      fpItem({ itemType: "ACCESSORY", closetItemId: "c5" }),
+    ];
+    expect(computeGarmentFingerprint(three)).not.toBe(computeGarmentFingerprint(five));
+  });
+
+  it("falls back to the image URL when no closet/catalog id is present — a replaced photo (new URL) changes the fingerprint", () => {
+    const original = [fpItem({ itemType: "TOP", productImageUrl: "https://example.com/v1.jpg" })];
+    const replaced = [fpItem({ itemType: "TOP", productImageUrl: "https://example.com/v2.jpg" })];
+    expect(computeGarmentFingerprint(original)).not.toBe(computeGarmentFingerprint(replaced));
+  });
+
+  it("order matters — selectFullLookGarments always produces a stable priority order, so this is a non-issue in practice, but the fingerprint itself is order-sensitive", () => {
+    const a = [fpItem({ itemType: "TOP", closetItemId: "c1" }), fpItem({ itemType: "BOTTOM", closetItemId: "c2" })];
+    const b = [fpItem({ itemType: "BOTTOM", closetItemId: "c2" }), fpItem({ itemType: "TOP", closetItemId: "c1" })];
+    expect(computeGarmentFingerprint(a)).not.toBe(computeGarmentFingerprint(b));
   });
 });
 
@@ -253,6 +325,8 @@ const BASE_CTX = {
   outfitSuggestionId: "sugg-1",
 } as any;
 
+const BASE_FP = "fp-abc";
+
 describe("startFullLookOutfit / pollFullLookOutfit — auto-advance past the human-review pause", () => {
   beforeEach(() => {
     mockCount().mockResolvedValue(0);
@@ -263,7 +337,7 @@ describe("startFullLookOutfit / pollFullLookOutfit — auto-advance past the hum
     vi.mocked(advanceFullLookChain).mockResolvedValueOnce({ status: "AWAITING_CONTINUE", intermediates: [] } as any);
     vi.mocked(continueToFinalStep).mockResolvedValueOnce({ ok: true });
 
-    const result = await startFullLookOutfit(BASE_CTX);
+    const result = await startFullLookOutfit(BASE_CTX, BASE_FP);
 
     expect(continueToFinalStep).toHaveBeenCalledOnce();
     expect(result).toEqual({ status: "PROCESSING", stepIndex: 2, totalSteps: 3 });
@@ -274,7 +348,7 @@ describe("startFullLookOutfit / pollFullLookOutfit — auto-advance past the hum
     vi.mocked(advanceFullLookChain).mockResolvedValueOnce({ status: "AWAITING_CONTINUE", intermediates: [] } as any);
     vi.mocked(continueToFinalStep).mockResolvedValueOnce({ ok: false, reason: "continue_window_expired" });
 
-    const result = await pollFullLookOutfit(BASE_CTX);
+    const result = await pollFullLookOutfit(BASE_CTX, BASE_FP);
     expect(result).toEqual({ status: "ERROR", reason: "continue_window_expired" });
   });
 
@@ -290,25 +364,25 @@ describe("startFullLookOutfit / pollFullLookOutfit — auto-advance past the hum
       ],
     };
     vi.mocked(advanceFullLookChain).mockResolvedValueOnce({ status: "PROCESSING", stepIndex: 1 } as any);
-    const result = await pollFullLookOutfit(fiveGarmentCtx);
+    const result = await pollFullLookOutfit(fiveGarmentCtx, BASE_FP);
     expect(result).toEqual({ status: "PROCESSING", stepIndex: 1, totalSteps: 5 });
   });
 
   it("COMPLETED passes through with the real resultUrl", async () => {
     vi.mocked(advanceFullLookChain).mockResolvedValueOnce({ status: "COMPLETED", resultUrl: "https://signed/result.png" } as any);
-    const result = await pollFullLookOutfit(BASE_CTX);
+    const result = await pollFullLookOutfit(BASE_CTX, BASE_FP);
     expect(result).toEqual({ status: "COMPLETED", resultUrl: "https://signed/result.png" });
   });
 
   it("FAILED passes through with the errorCode — no credit was charged (proven separately by the entitlement exclusion tests)", async () => {
     vi.mocked(advanceFullLookChain).mockResolvedValueOnce({ status: "FAILED", failedStepIndex: 1, errorCode: "PROVIDER_ERROR" } as any);
-    const result = await pollFullLookOutfit(BASE_CTX);
+    const result = await pollFullLookOutfit(BASE_CTX, BASE_FP);
     expect(result).toEqual({ status: "FAILED", errorCode: "PROVIDER_ERROR" });
   });
 
   it("a failed start (e.g. cooldown) surfaces as ERROR before ever calling advance", async () => {
     vi.mocked(startOrResumeFullLookChain).mockResolvedValueOnce({ ok: false, reason: "cooldown_active" });
-    const result = await startFullLookOutfit(BASE_CTX);
+    const result = await startFullLookOutfit(BASE_CTX, BASE_FP);
     expect(result).toEqual({ status: "ERROR", reason: "cooldown_active" });
     expect(advanceFullLookChain).not.toHaveBeenCalled();
   });
@@ -318,10 +392,103 @@ describe("startFullLookOutfit / pollFullLookOutfit — auto-advance past the hum
     vi.mocked(startOrResumeFullLookChain).mockResolvedValueOnce({ ok: true, stepIndex: 0 });
     vi.mocked(advanceFullLookChain).mockResolvedValueOnce({ status: "PROCESSING", stepIndex: 0 } as any);
 
-    await startFullLookOutfit(BASE_CTX, { forceNewAttempt: true });
+    await startFullLookOutfit(BASE_CTX, BASE_FP, { forceNewAttempt: true });
 
     const ctxPassed = vi.mocked(startOrResumeFullLookChain).mock.calls[0][0];
-    expect(ctxPassed.reservationScope).toBe("sugg-1:a1"); // new attempt, not a0 (the dead one)
+    expect(ctxPassed.reservationScope).toBe(`sugg-1:a1:${BASE_FP}`); // new attempt, not a0 (the dead one)
+  });
+
+  // 2026-11-15 REGRESSION FIX — the actual QA bug: a plain (non-retry)
+  // explicit start used to unconditionally resume whatever the latest
+  // attempt was, even if it had already reached a dead terminal state —
+  // silently replaying an old failure instead of giving this click a real
+  // attempt. These prove the fix at the orchestrator layer directly.
+  describe("a plain (non-retry) start never silently replays an already-dead attempt", () => {
+    it("FAILED last job on the resolved scope: escalates to a fresh attempt automatically, without needing forceNewAttempt", async () => {
+      mockCount().mockResolvedValue(1); // one prior attempt exists (a0)
+      vi.mocked(walkFullLookChainJobs).mockResolvedValueOnce([{ status: "FAILED" } as any]); // a0's own last job
+      vi.mocked(startOrResumeFullLookChain).mockResolvedValueOnce({ ok: true, stepIndex: 0 });
+      vi.mocked(advanceFullLookChain).mockResolvedValueOnce({ status: "PROCESSING", stepIndex: 0 } as any);
+
+      await startFullLookOutfit(BASE_CTX, BASE_FP); // plain start — no retry flag at all
+
+      const ctxPassed = vi.mocked(startOrResumeFullLookChain).mock.calls[0][0];
+      expect(ctxPassed.reservationScope).toBe(`sugg-1:a1:${BASE_FP}`); // escalated past a0, same as an explicit retry would
+    });
+
+    it("CANCELED and TIMED_OUT last jobs are treated the same as FAILED", async () => {
+      for (const deadStatus of ["CANCELED", "TIMED_OUT"]) {
+        vi.mocked(startOrResumeFullLookChain).mockReset();
+        vi.mocked(walkFullLookChainJobs).mockReset();
+        mockCount().mockResolvedValue(1);
+        vi.mocked(walkFullLookChainJobs).mockResolvedValueOnce([{ status: deadStatus } as any]);
+        vi.mocked(startOrResumeFullLookChain).mockResolvedValueOnce({ ok: true, stepIndex: 0 });
+        vi.mocked(advanceFullLookChain).mockResolvedValueOnce({ status: "PROCESSING", stepIndex: 0 } as any);
+
+        await startFullLookOutfit(BASE_CTX, BASE_FP);
+
+        const ctxPassed = vi.mocked(startOrResumeFullLookChain).mock.calls[0][0];
+        expect(ctxPassed.reservationScope).toBe(`sugg-1:a1:${BASE_FP}`);
+      }
+    });
+
+    it("a still-ACTIVE (PROCESSING) last job on the resolved scope resumes normally — no escalation, no second chain", async () => {
+      mockCount().mockResolvedValue(1);
+      vi.mocked(walkFullLookChainJobs).mockResolvedValueOnce([{ status: "PROCESSING" } as any]);
+      vi.mocked(startOrResumeFullLookChain).mockResolvedValueOnce({ ok: true, stepIndex: 0 });
+      vi.mocked(advanceFullLookChain).mockResolvedValueOnce({ status: "PROCESSING", stepIndex: 0 } as any);
+
+      await startFullLookOutfit(BASE_CTX, BASE_FP);
+
+      const ctxPassed = vi.mocked(startOrResumeFullLookChain).mock.calls[0][0];
+      expect(ctxPassed.reservationScope).toBe(`sugg-1:a0:${BASE_FP}`); // resumed a0, not escalated
+    });
+
+    it("a COMPLETED last job is left alone by this check — advanceFullLookChain's own COMPLETED detection handles it, not an escalation", async () => {
+      mockCount().mockResolvedValue(1);
+      vi.mocked(walkFullLookChainJobs).mockResolvedValueOnce([{ status: "COMPLETED" } as any]);
+      vi.mocked(startOrResumeFullLookChain).mockResolvedValueOnce({ ok: true, stepIndex: 0 });
+      vi.mocked(advanceFullLookChain).mockResolvedValueOnce({ status: "COMPLETED", resultUrl: "https://signed/r.png" } as any);
+
+      const result = await startFullLookOutfit(BASE_CTX, BASE_FP);
+
+      const ctxPassed = vi.mocked(startOrResumeFullLookChain).mock.calls[0][0];
+      expect(ctxPassed.reservationScope).toBe(`sugg-1:a0:${BASE_FP}`);
+      expect(result).toEqual({ status: "COMPLETED", resultUrl: "https://signed/r.png" });
+    });
+
+    it("no existing jobs at all (brand-new attempt): the terminal check has nothing to escalate from, proceeds as a normal first start", async () => {
+      mockCount().mockResolvedValue(0);
+      vi.mocked(walkFullLookChainJobs).mockResolvedValueOnce([]); // nothing exists yet
+      vi.mocked(startOrResumeFullLookChain).mockResolvedValueOnce({ ok: true, stepIndex: 0 });
+      vi.mocked(advanceFullLookChain).mockResolvedValueOnce({ status: "PROCESSING", stepIndex: 0 } as any);
+
+      await startFullLookOutfit(BASE_CTX, BASE_FP);
+
+      const ctxPassed = vi.mocked(startOrResumeFullLookChain).mock.calls[0][0];
+      expect(ctxPassed.reservationScope).toBe(`sugg-1:a0:${BASE_FP}`);
+    });
+
+    it("a passive poll (pollFullLookOutfit) NEVER auto-escalates — a dead attempt is still reported as FAILED, not silently retried behind the customer's back", async () => {
+      mockCount().mockResolvedValue(1);
+      vi.mocked(advanceFullLookChain).mockResolvedValueOnce({ status: "FAILED", failedStepIndex: 0, errorCode: "PROVIDER_ERROR" } as any);
+
+      const result = await pollFullLookOutfit(BASE_CTX, BASE_FP);
+
+      expect(result).toEqual({ status: "FAILED", errorCode: "PROVIDER_ERROR" });
+      expect(walkFullLookChainJobs).not.toHaveBeenCalled(); // this check is exclusive to startFullLookOutfit
+      expect(startOrResumeFullLookChain).not.toHaveBeenCalled(); // poll never calls this at all
+    });
+
+    it("forceNewAttempt skips this check entirely — it already computes a genuinely new scope unconditionally", async () => {
+      mockCount().mockResolvedValue(1);
+      vi.mocked(startOrResumeFullLookChain).mockResolvedValueOnce({ ok: true, stepIndex: 0 });
+      vi.mocked(advanceFullLookChain).mockResolvedValueOnce({ status: "PROCESSING", stepIndex: 0 } as any);
+
+      await startFullLookOutfit(BASE_CTX, BASE_FP, { forceNewAttempt: true });
+
+      expect(walkFullLookChainJobs).not.toHaveBeenCalled();
+    });
   });
 
   // 2026-11-15 — concurrency / credit-limit bypass review: a retry request
@@ -339,14 +506,14 @@ describe("startFullLookOutfit / pollFullLookOutfit — auto-advance past the hum
     mockCount().mockResolvedValue(1); // attempt a0 exists and is still PROCESSING — not yet failed
     vi.mocked(startOrResumeFullLookChain).mockResolvedValueOnce({ ok: false, reason: "ACTIVE_JOB" });
 
-    const result = await startFullLookOutfit(BASE_CTX, { forceNewAttempt: true });
+    const result = await startFullLookOutfit(BASE_CTX, BASE_FP, { forceNewAttempt: true });
 
     expect(result).toEqual({ status: "ERROR", reason: "ACTIVE_JOB" });
     expect(advanceFullLookChain).not.toHaveBeenCalled();
     // The new scope was computed (a1), but startOrResumeFullLookChain's own
     // atomic guard — not this layer — is what actually blocked it.
     const ctxPassed = vi.mocked(startOrResumeFullLookChain).mock.calls[0][0];
-    expect(ctxPassed.reservationScope).toBe("sugg-1:a1");
+    expect(ctxPassed.reservationScope).toBe(`sugg-1:a1:${BASE_FP}`);
   });
 
   it("two concurrent calls racing to the SAME computed scope rely on the shared idempotency key, not a lock in this layer — both receive a coherent result, never a duplicate chain", async () => {
@@ -362,14 +529,14 @@ describe("startFullLookOutfit / pollFullLookOutfit — auto-advance past the hum
     vi.mocked(advanceFullLookChain).mockResolvedValue({ status: "PROCESSING", stepIndex: 0 } as any);
 
     const [a, b] = await Promise.all([
-      startFullLookOutfit(BASE_CTX),
-      startFullLookOutfit(BASE_CTX),
+      startFullLookOutfit(BASE_CTX, BASE_FP),
+      startFullLookOutfit(BASE_CTX, BASE_FP),
     ]);
 
     expect(a).toEqual({ status: "PROCESSING", stepIndex: 0, totalSteps: 3 });
     expect(b).toEqual({ status: "PROCESSING", stepIndex: 0, totalSteps: 3 });
     const scopes = vi.mocked(startOrResumeFullLookChain).mock.calls.map((c) => c[0].reservationScope);
-    expect(scopes).toEqual(["sugg-1:a0", "sugg-1:a0"]); // both requests converge on the same attempt, never two
+    expect(scopes).toEqual([`sugg-1:a0:${BASE_FP}`, `sugg-1:a0:${BASE_FP}`]); // both requests converge on the same attempt, never two
   });
 });
 

@@ -246,3 +246,25 @@ describe("FL12 — omitted recommended pieces are disclosed, never silently drop
     assert.ok(occurrences >= 2);
   });
 });
+
+// 2026-11-15 REGRESSION FIX — the garment-selection fingerprint must reach
+// both orchestrator entry points, or a changed outfit (e.g. 3→5 pieces)
+// could still resume an incompatible older attempt via whichever call
+// site was missed.
+describe("FL13 — the garment-selection fingerprint reaches both startFullLookOutfit and pollFullLookOutfit", () => {
+  it("loader destructures fingerprint from the selection and passes it to pollFullLookOutfit", () => {
+    const loaderBody = route.split("export async function loader")[1].split("export async function action")[0];
+    assert.ok(/const \{ garments, omittedLabels, fingerprint \} = selection;/.test(loaderBody));
+    const pollCallIdx = loaderBody.indexOf("pollFullLookOutfit(");
+    const pollCallArgs = loaderBody.slice(pollCallIdx, pollCallIdx + 500);
+    assert.ok(pollCallArgs.includes("fingerprint,"), "pollFullLookOutfit must receive the fingerprint as its second argument");
+  });
+
+  it("action destructures fingerprint from the selection and passes it to startFullLookOutfit", () => {
+    const actionBody = route.split("export async function action")[1];
+    assert.ok(/const \{ garments, omittedLabels, fingerprint \} = selection;/.test(actionBody));
+    const startCallIdx = actionBody.indexOf("startFullLookOutfit(");
+    const startCallArgs = actionBody.slice(startCallIdx, startCallIdx + 600);
+    assert.ok(startCallArgs.includes("fingerprint,"), "startFullLookOutfit must receive the fingerprint as its second argument");
+  });
+});

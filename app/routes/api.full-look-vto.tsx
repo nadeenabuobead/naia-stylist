@@ -109,7 +109,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (!selection) {
     return serverError("This look's try-on–eligible pieces could not be resolved while resuming.");
   }
-  const { garments, omittedLabels } = selection;
+  const { garments, omittedLabels, fingerprint } = selection;
 
   // Never regenerate on revisit — check for an already-completed result
   // before touching the chain at all.
@@ -124,16 +124,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const naiaModel = await loadNaiaModel(customer.id);
   if (!naiaModel) return data({ ok: true, status: "NOT_STARTED" }, { headers: { "Cache-Control": "no-store" } });
 
-  const result = await pollFullLookOutfit({
-    customerId: customer.id,
-    naiaModelId: naiaModel.id,
-    bodyPublicId: naiaModel.bodyPublicId,
-    bodyFormat: naiaModel.bodyFormat,
-    deliveryType: naiaModel.deliveryType,
-    garments,
-    consent: { virtualTryOnConsent: true, policyVersion: "1.0", consentedAt: new Date().toISOString() },
-    outfitSuggestionId: suggestionId,
-  });
+  const result = await pollFullLookOutfit(
+    {
+      customerId: customer.id,
+      naiaModelId: naiaModel.id,
+      bodyPublicId: naiaModel.bodyPublicId,
+      bodyFormat: naiaModel.bodyFormat,
+      deliveryType: naiaModel.deliveryType,
+      garments,
+      consent: { virtualTryOnConsent: true, policyVersion: "1.0", consentedAt: new Date().toISOString() },
+      outfitSuggestionId: suggestionId,
+    },
+    fingerprint,
+  );
 
   return data({ ok: true, ...result, omittedLabels }, { headers: { "Cache-Control": "no-store" } });
 }
@@ -181,7 +184,7 @@ export async function action({ request }: ActionFunctionArgs) {
   if (!selection) {
     return badRequest("not_eligible", "This look doesn't have enough try-on–eligible pieces for a full-look preview.");
   }
-  const { garments, omittedLabels } = selection;
+  const { garments, omittedLabels, fingerprint } = selection;
 
   // A retry is only meaningful after the current attempt actually failed —
   // never a way to bypass "never regenerate" for a result that's already
@@ -218,6 +221,7 @@ export async function action({ request }: ActionFunctionArgs) {
       consent: { virtualTryOnConsent: true, policyVersion: "1.0", consentedAt: consentAt.toISOString() },
       outfitSuggestionId,
     },
+    fingerprint,
     { forceNewAttempt: retry === true },
   );
 
