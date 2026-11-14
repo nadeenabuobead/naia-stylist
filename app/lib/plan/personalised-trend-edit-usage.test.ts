@@ -165,19 +165,23 @@ describe("§TREND-EDIT-USAGE — no alternate pre-create path exists anywhere in
     expect(deleters.sort()).toEqual(["app/lib/customer-privacy.server.ts"]);
   });
 
-  it("exactly two production call sites invoke recordPersonalisedTrendEditUsage — the unenforced direct path and the enforced atomic-reservation path", () => {
-    // Was exactly one (trends.my-edits.$slug.tsx calling it directly) until
-    // the 2026-11-04 quota-race fix: entitlement.server.ts's
-    // reservePersonalisedTrendSlot is now the ENFORCED path's only caller,
-    // used whenever ENTITLEMENT_ENFORCEMENT is "true"; trends.my-edits.
-    // $slug.tsx still calls it directly, unchanged, for the unenforced
-    // fallback — same split every other reserve*Slot function in
-    // entitlement.server.ts already has between its own flag-gated atomic
-    // path and the plain path it replaces.
+  it("exactly one production call site invokes recordPersonalisedTrendEditUsage — the atomic-reservation path, unconditionally", () => {
+    // Was two (trends.my-edits.$slug.tsx calling it directly, PLUS
+    // entitlement.server.ts's reservePersonalisedTrendSlot) between the
+    // 2026-11-04 quota-race fix and 2026-11-12's fail-closed-entitlement
+    // fix (fix/stripe-clerk-clerk-phase1-security, ENT-18/ENT-19): the
+    // ENTITLEMENT_ENFORCEMENT flag that gated the second, "enforced" path
+    // was removed entirely — every feature enforces unconditionally now,
+    // same as Closet always has — so the direct, unenforced call site in
+    // trends.my-edits.$slug.tsx was consolidated away, leaving
+    // reservePersonalisedTrendSlot as the only real caller. (The route
+    // file's own import of recordPersonalisedTrendEditUsage was dead code
+    // left over from that consolidation — removed alongside this update,
+    // not re-litigated here.)
     const callers = grepRepo(/\brecordPersonalisedTrendEditUsage\s*\(/).filter(
       (f) => !f.endsWith("personalised-trend-edit-usage.server.ts"),
     );
-    expect(callers.sort()).toEqual(["app/lib/plan/entitlement.server.ts", "app/routes/trends.my-edits.$slug.tsx"]);
+    expect(callers.sort()).toEqual(["app/lib/plan/entitlement.server.ts"]);
   });
 });
 

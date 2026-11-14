@@ -19,12 +19,30 @@ vi.mock("~/db.server", () => ({
     buyOrSkipAnalysis: { count: vi.fn().mockResolvedValue(0) },
     virtualTryOnJob: { count: vi.fn().mockResolvedValue(0) },
     closetItem: { count: vi.fn().mockResolvedValue(0) },
+    // Phase 2 (billing-cycle-aware windows) added a real subscription
+    // lookup inside getCurrentSubscription, called from every
+    // checkEntitlement/getEntitlementSummary path this file exercises —
+    // null here means "no subscription row," so this file's own direct
+    // membershipStatus argument (not a real Subscription) continues to
+    // decide the outcome, matching its original intent before that lookup
+    // existed. Same fix already applied in the sibling
+    // entitlement-mock-vto-exclusion.test.ts for the identical reason.
+    subscription: { findFirst: vi.fn().mockResolvedValue(null), count: vi.fn().mockResolvedValue(0) },
   },
 }));
 
+// Relative to the real current time, not a hardcoded past literal —
+// resolveEffectiveContext's countingEnd (entitlement.server.ts) extends
+// the counting upper bound to "now" whenever window.end has already
+// elapsed (the PH2-15 stale-window fix), which would otherwise silently
+// break every query-shape assertion below the moment real time passed
+// whatever date was hardcoded here. These tests are about window-scoping
+// itself, not countingEnd's own stale-window behavior (see
+// billing-entitlement-phase2.test.ts's PH2-15 block for that), so keeping
+// window.end safely in the future sidesteps it entirely.
 const WINDOW = {
-  start: new Date("2026-10-01T00:00:00.000Z"),
-  end: new Date("2026-11-01T00:00:00.000Z"),
+  start: new Date(Date.now() - 1000 * 60 * 60 * 24 * 14),
+  end: new Date(Date.now() + 1000 * 60 * 60 * 24 * 14),
   label: "October 2026",
   periodKey: "2026-10",
 };
