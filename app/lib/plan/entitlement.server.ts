@@ -49,6 +49,7 @@ import { getMembershipAllowances, getEffectiveVtoLimit, getEffectiveStyleMeLimit
 import { getUsageWindow, formatResetDate, type SubscriptionWindowInput, type UsageWindow } from "./usage-window.server";
 import { recordPersonalisedTrendEditUsage, type TrendEditSnapshot } from "./personalised-trend-edit-usage.server";
 import { assertPublicIdAvailable, AssetPendingDeletionError } from "../cloudinary-deletion-claim.server";
+import { FULL_LOOK_INTERMEDIATE_HANDLE_PREFIXES } from "../ai/full-look-handle-constants";
 
 // ── VTO stale threshold ────────────────────────────────────────────────────────
 const VTO_IN_FLIGHT_STALE_MS = 10 * 60 * 1000; // 10 minutes
@@ -94,8 +95,12 @@ const MOCK_VTO_PRODUCT_HANDLE_PREFIX = "fulllook-poc:";
 // direction: not toward vtoCompleted (a completed outfit must cost exactly
 // 1, not 3) and not toward vtoInFlight (an in-flight intermediate step
 // must not phantom-block the customer from starting anything else while
-// their own chain is still only partway through).
-export const FULL_LOOK_INTERMEDIATE_HANDLE_PREFIXES = ["fulllook-real:step1:", "fulllook-real:step2:"] as const;
+// their own chain is still only partway through). Imported (not
+// redefined, see the import at the top of this file) from
+// full-look-tryon-real.server.ts, which already owns the step-numbering
+// convention — re-exported here too so existing test imports
+// (`from "./entitlement.server"`) keep working.
+export { FULL_LOOK_INTERMEDIATE_HANDLE_PREFIXES };
 
 function excludingMockAndIntermediateFullLookHandles() {
   return [

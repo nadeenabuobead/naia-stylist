@@ -60,6 +60,7 @@ import {
   type TryOnJobStatus,
 } from "./virtual-try-on.types.js";
 import { isTryOnEligible } from "./tryon-product-eligibility.js";
+import { FULL_LOOK_INTERMEDIATE_HANDLE_PREFIXES } from "./full-look-handle-constants.js";
 
 // ── Garment eligibility ───────────────────────────────────────────────────────
 
@@ -1216,8 +1217,16 @@ export async function listCustomerVtoPreviews(customerId: string): Promise<Custo
   // these results in the first place.
   if (await customerHasOutstandingVtoSweepObligation(customerId)) return [];
 
+  // 2026-11-14 — a completed Full-Look outfit writes one COMPLETED row per
+  // garment step; only the final step is a real, customer-facing try-on
+  // (see full-look-handle-constants.ts's own comment). Without this
+  // exclusion, a single outfit would show as 3 separate preview cards here.
   const jobs: Array<{ id: string; productHandle: string; createdAt: Date }> = await prisma.virtualTryOnJob.findMany({
-    where: { customerId, status: "COMPLETED" },
+    where: {
+      customerId,
+      status: "COMPLETED",
+      NOT: FULL_LOOK_INTERMEDIATE_HANDLE_PREFIXES.map((prefix) => ({ productHandle: { startsWith: prefix } })),
+    },
     select: { id: true, productHandle: true, createdAt: true },
     orderBy: { createdAt: "desc" },
   });

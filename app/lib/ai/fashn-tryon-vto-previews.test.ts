@@ -58,6 +58,7 @@ import {
   listCustomerVtoPreviews,
   deriveTryOnResultPublicId,
 } from "~/lib/ai/fashn-tryon-service.server";
+import { FULL_LOOK_INTERMEDIATE_HANDLE_PREFIXES } from "~/lib/ai/full-look-handle-constants";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -111,13 +112,48 @@ describe("deleteOneVtoResult() — single-preview deletion", () => {
 });
 
 describe("listCustomerVtoPreviews() — Try-On Previews gallery read", () => {
-  it("lists only COMPLETED jobs for this customer, newest first", async () => {
+  it("lists only COMPLETED jobs for this customer, newest first, excluding Full-Look intermediate steps", async () => {
     (prisma.virtualTryOnJob.findMany as any).mockResolvedValue([]);
     await listCustomerVtoPreviews("cust-A");
     expect(prisma.virtualTryOnJob.findMany).toHaveBeenCalledWith({
-      where: { customerId: "cust-A", status: "COMPLETED" },
+      where: {
+        customerId: "cust-A",
+        status: "COMPLETED",
+        NOT: FULL_LOOK_INTERMEDIATE_HANDLE_PREFIXES.map((prefix) => ({ productHandle: { startsWith: prefix } })),
+      },
       select: { id: true, productHandle: true, createdAt: true },
       orderBy: { createdAt: "desc" },
+    });
+  });
+
+  describe("Full-Look VTO intermediate-step exclusion", () => {
+    // 2026-11-14 — a completed outfit writes one COMPLETED row per garment
+    // step (fulllook-real:step1:, :step2:, :step3:...). Only the final step
+    // is a real, customer-facing try-on; the rest must never surface here,
+    // or one outfit would render as N separate preview cards.
+    it("surfaces the final Full-Look step as a normal preview card, same shape as any other result", async () => {
+      const createdAt = new Date("2026-11-14T00:00:00.000Z");
+      (prisma.virtualTryOnJob.findMany as any).mockResolvedValue([
+        { id: "job-final", productHandle: "fulllook-real:step3:suggestion-1", createdAt },
+      ]);
+      const result = await listCustomerVtoPreviews("cust-A");
+      expect(result).toEqual([
+        {
+          jobId: "job-final",
+          label: "Virtual Try-On",
+          createdAt,
+          previewUrl: expect.stringContaining("api.cloudinary.com"),
+        },
+      ]);
+    });
+
+    it("a single-item VTO's plain NADINE/closet/buyskip handle is never matched by the Full-Look prefixes", async () => {
+      (prisma.virtualTryOnJob.findMany as any).mockResolvedValue([
+        { id: "job-1", productHandle: "collar-shirt", createdAt: new Date() },
+        { id: "job-2", productHandle: "closet:item-1", createdAt: new Date() },
+      ]);
+      const result = await listCustomerVtoPreviews("cust-A");
+      expect(result).toHaveLength(2);
     });
   });
 

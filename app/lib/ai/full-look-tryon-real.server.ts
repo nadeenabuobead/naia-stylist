@@ -129,6 +129,7 @@ import {
 import { MAX_CHAIN_LENGTH } from "./poc-sequential-full-look-vto.server.js";
 import type { VirtualTryOnConsent, VirtualTryOnJobRecord } from "./virtual-try-on.types.js";
 import prisma from "../../db.server.js";
+import { REAL_PRODUCT_HANDLE_PREFIX } from "./full-look-handle-constants.js";
 
 // Real DB implementation — the default for every caller except tests, which
 // inject a mock via WalkChainDeps._findJobFn instead.
@@ -144,7 +145,13 @@ async function defaultFindJobByIdempotencyKey(
 
 const REAL_RESERVATION_KEY_PREFIX = "fulllook-real-reservation:";
 const REAL_STEP_KEY_PREFIX = "fulllook-real-step:";
-export const REAL_PRODUCT_HANDLE_PREFIX = "fulllook-real";
+// REAL_PRODUCT_HANDLE_PREFIX / FULL_LOOK_INTERMEDIATE_HANDLE_PREFIXES live in
+// full-look-handle-constants.ts (pure, dependency-free) specifically so
+// fashn-tryon-service.server.ts can import them too without a circular
+// dependency — this file already imports FROM that one for the final-
+// result upload/URL primitives. Re-exported here for every existing
+// caller of this module that imports REAL_PRODUCT_HANDLE_PREFIX from here.
+export { REAL_PRODUCT_HANDLE_PREFIX, FULL_LOOK_INTERMEDIATE_HANDLE_PREFIXES } from "./full-look-handle-constants.js";
 
 export function getFullLookStepIdempotencyKey(
   customerId: string,
