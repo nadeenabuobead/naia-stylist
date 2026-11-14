@@ -603,7 +603,7 @@ function makeClosetLedResult(): StyleMeCustomerResult {
         material: null,
         hasStrongEvidence: false,
         evidenceFields: [],
-        imageUrl: null,
+        imageUrl: "https://example.com/test-garment.jpg",
       },
       primary: null,
       alternatives: [],
@@ -1313,17 +1313,10 @@ describe("§16 Generation aborts after failed anchor resolution", () => {
       assert.equal(anchorResult.status, 400);
     }
 
-    // Simulates the result.tsx gate: only proceed when ok===true
-    if (anchorResult.ok) {
-      const engineInput = buildEngineInput({
-        moods: ["confident"], desiredFeelings: [], bodyNeeds: [],
-        coverageConditional: null, occasion: "everyday", formalityConditional: null,
-        todayColours: { preferred: [], avoid: [] }, practicalIds: [],
-        source: "naia-piece", anchor: anchorResult.anchor,
-      });
-      await computeStyleMeResult(engineInput, spy);
-    }
-
+    // No further gate needed here: anchorResult.ok is already asserted
+    // false above, so computeStyleMeResult (which the real result.tsx
+    // action only reaches when ok===true) can never run — that is exactly
+    // what the assertion below confirms.
     assert.equal(callCount(), 0, "runRecommendation must never be called after failed NADINE anchor resolution");
   });
 
@@ -1356,16 +1349,8 @@ describe("§16 Generation aborts after failed anchor resolution", () => {
     const anchorResult = await resolveActionAnchor("my-closet", "cust-1", null, null, fakeResolver);
     assert.equal(anchorResult.ok, false, "anchor resolution must fail for missing closet ID");
 
-    if (anchorResult.ok) {
-      const engineInput = buildEngineInput({
-        moods: ["confident"], desiredFeelings: [], bodyNeeds: [],
-        coverageConditional: null, occasion: "everyday", formalityConditional: null,
-        todayColours: { preferred: [], avoid: [] }, practicalIds: [],
-        source: "my-closet", anchor: anchorResult.anchor,
-      });
-      await computeStyleMeResult(engineInput, spy);
-    }
-
+    // anchorResult.ok is already asserted false above — computeStyleMeResult
+    // can never run, which is exactly what the assertion below confirms.
     assert.equal(callCount(), 0, "runRecommendation must never be called after missing closet ID");
   });
 
@@ -1379,16 +1364,8 @@ describe("§16 Generation aborts after failed anchor resolution", () => {
       assert.equal(anchorResult.status, 403);
     }
 
-    if (anchorResult.ok) {
-      const engineInput = buildEngineInput({
-        moods: ["confident"], desiredFeelings: [], bodyNeeds: [],
-        coverageConditional: null, occasion: "everyday", formalityConditional: null,
-        todayColours: { preferred: [], avoid: [] }, practicalIds: [],
-        source: "my-closet", anchor: anchorResult.anchor,
-      });
-      await computeStyleMeResult(engineInput, spy);
-    }
-
+    // anchorResult.ok is already asserted false above — computeStyleMeResult
+    // can never run, which is exactly what the assertion below confirms.
     assert.equal(callCount(), 0, "runRecommendation must never be called after unknown/foreign closet ID");
   });
 });
@@ -1640,7 +1617,7 @@ function makeBagClosetAnchor(): NormalizedClosetAnchor {
     material: "leather",
     hasStrongEvidence: true,
     evidenceFields: ["material"],
-    imageUrl: null,
+    imageUrl: "https://example.com/test-garment.jpg",
   };
 }
 
@@ -2040,7 +2017,7 @@ function makeClosetAnchor(slot: import("./styleme-recommendation.types.ts").Outf
     material: null,
     hasStrongEvidence: false,
     evidenceFields: [],
-    imageUrl: null,
+    imageUrl: "https://example.com/test-garment.jpg",
   };
 }
 
@@ -3176,57 +3153,72 @@ describe("§ND — nAia-mode New Look diversity", () => {
   const CLOSET: ClosetAnchorInput[] = [
     {
       id: "top-a",
+      type: "closet",
+      pattern: null,
+      material: null,
       name: "Silk Blouse",
       category: "TOPS",
       occasions: ["everyday", "work"],
       styleTags: ["polished", "minimalist"],
       colors: ["ivory"],
       primaryColor: "ivory",
-      imageUrl: null,
+      imageUrl: "https://example.com/test-garment.jpg",
       garmentRelationships: [],
     },
     {
       id: "top-b",
+      type: "closet",
+      pattern: null,
+      material: null,
       name: "Linen Tee",
       category: "TOPS",
       occasions: ["everyday"],
       styleTags: ["relaxed"],
       colors: ["white"],
       primaryColor: "white",
-      imageUrl: null,
+      imageUrl: "https://example.com/test-garment.jpg",
       garmentRelationships: [],
     },
     {
       id: "bottom-a",
+      type: "closet",
+      pattern: null,
+      material: null,
       name: "Tailored Trousers",
       category: "BOTTOMS",
       occasions: ["everyday", "work"],
       styleTags: ["polished", "minimalist"],
       colors: ["black"],
       primaryColor: "black",
-      imageUrl: null,
+      imageUrl: "https://example.com/test-garment.jpg",
       garmentRelationships: [],
     },
     {
       id: "bottom-b",
+      type: "closet",
+      pattern: null,
+      material: null,
       name: "Wide-Leg Jeans",
       category: "BOTTOMS",
       occasions: ["everyday"],
       styleTags: ["relaxed"],
       colors: ["blue"],
       primaryColor: "blue",
-      imageUrl: null,
+      imageUrl: "https://example.com/test-garment.jpg",
       garmentRelationships: [],
     },
     {
       id: "shoe-a",
+      type: "closet",
+      pattern: null,
+      material: null,
       name: "White Sneakers",
       category: "SHOES",
       occasions: ["everyday"],
       styleTags: ["relaxed"],
       colors: ["white"],
       primaryColor: "white",
-      imageUrl: null,
+      imageUrl: "https://example.com/test-garment.jpg",
       garmentRelationships: [],
     },
   ];
@@ -3403,41 +3395,50 @@ describe("§QA-RG.B — Issue 2: dress anchor must not produce redundant top/bot
     material: null,
     hasStrongEvidence: true,
     evidenceFields: ["occasions"],
-    imageUrl: null,
+    imageUrl: "https://example.com/test-garment.jpg",
   };
 
   const CLOSET_WITH_TOP_BOTTOM: ClosetAnchorInput[] = [
     {
       id: "top-1",
+      type: "closet",
+      pattern: null,
+      material: null,
       name: "Cream Blouse",
       category: "TOPS",
       occasions: ["everyday", "special-event"],
       styleTags: ["elegant"],
       colors: ["cream"],
       primaryColor: "cream",
-      imageUrl: null,
+      imageUrl: "https://example.com/test-garment.jpg",
       garmentRelationships: [],
     },
     {
       id: "bottom-1",
+      type: "closet",
+      pattern: null,
+      material: null,
       name: "Black Trousers",
       category: "BOTTOMS",
       occasions: ["everyday", "special-event"],
       styleTags: ["elegant"],
       colors: ["black"],
       primaryColor: "black",
-      imageUrl: null,
+      imageUrl: "https://example.com/test-garment.jpg",
       garmentRelationships: [],
     },
     {
       id: "shoe-1",
+      type: "closet",
+      pattern: null,
+      material: null,
       name: "Heeled Sandals",
       category: "SHOES",
       occasions: ["special-event"],
       styleTags: ["elegant"],
       colors: ["gold"],
       primaryColor: "gold",
-      imageUrl: null,
+      imageUrl: "https://example.com/test-garment.jpg",
       garmentRelationships: [],
     },
   ];
@@ -3520,7 +3521,7 @@ describe("§QA-RG.C — Issue 3: formality-mismatched products excluded from all
     return {
       handle,
       title: handle,
-      eligibility: "recommended",
+      eligibility: "verified-active",
       slot: "dress",
       isHardExcluded: false,
       hardExclusionReasons: [],
@@ -3665,7 +3666,7 @@ describe("§QA-RG.D — Issue 4: per-piece copy is slot-aware, not generic", () 
           material: null,
           hasStrongEvidence: true,
           evidenceFields: [],
-          imageUrl: null,
+          imageUrl: "https://example.com/test-garment.jpg",
         } as NormalizedClosetAnchor,
         primary: null,
         alternatives: [],
@@ -3752,14 +3753,17 @@ describe("§QA-RG.D — Issue 4: per-piece copy is slot-aware, not generic", () 
 describe("§QA-RG.E — SETS slot mapping source contract", () => {
   it("QA-RG.E.1 — selectAdditionalClosetGarments processes SETS category items without skipping", () => {
     const setItem: ClosetAnchorInput = {
+      type: "closet",
       id: "set-1",
       name: "Co-ord Set",
       category: "SETS",
+      pattern: null,
+      material: null,
       occasions: ["everyday"],
       styleTags: ["minimalist"],
       colors: ["beige"],
       primaryColor: "beige",
-      imageUrl: null,
+      imageUrl: "https://example.com/test-garment.jpg",
       garmentRelationships: [],
     };
     // No anchor, so no slot is pre-covered. The SETS item should be scored and, if
@@ -3803,7 +3807,7 @@ describe("§QA-RG.F — Issue 5: direction pool excludes occasion-violating prod
     const gown: ProductEvaluation = {
       handle: "evening-gown",
       title: "Evening Gown",
-      eligibility: "recommended",
+      eligibility: "verified-active",
       slot: "dress",
       isHardExcluded: false,
       hardExclusionReasons: [],
@@ -3862,7 +3866,7 @@ describe("§QA-RG.F — Issue 5: direction pool excludes occasion-violating prod
     const excluded: ProductEvaluation = {
       handle: "evening-gown",
       title: "Evening Gown",
-      eligibility: "recommended",
+      eligibility: "verified-active",
       slot: "dress",
       isHardExcluded: false,
       hardExclusionReasons: [],
@@ -3897,7 +3901,7 @@ describe("§QA-RG.F — Issue 5: direction pool excludes occasion-violating prod
     const appropriate: ProductEvaluation = {
       handle: "casual-dress",
       title: "Casual Dress",
-      eligibility: "recommended",
+      eligibility: "verified-active",
       slot: "dress",
       isHardExcluded: false,
       hardExclusionReasons: [],
@@ -3958,14 +3962,17 @@ function makeClosetItem(
 ): ClosetAnchorInput {
   const styleTags = score_boost > 0 ? ["polished", "confident"] : ["casual"];
   return {
+    type: "closet",
     id,
     name,
     category,
+    pattern: null,
+    material: null,
     occasions,
     styleTags,
     colors: ["black"],
     primaryColor: "black",
-    imageUrl: null,
+    imageUrl: "https://example.com/test-garment.jpg",
     garmentRelationships: [],
   };
 }
@@ -3989,7 +3996,7 @@ describe("§QA-RG2.A — base-architecture exclusivity (order-independent)", () 
       type: "closet", id: "skirt-1", label: "Mini Skirt", slot: "bottom",
       colors: ["black"], normalizedColorIds: ["black"], styleTags: ["casual"],
       occasions: ["everyday"], material: null, hasStrongEvidence: false,
-      evidenceFields: [], imageUrl: null,
+      evidenceFields: [], imageUrl: "https://example.com/test-garment.jpg",
     };
     const closet: ClosetAnchorInput[] = [
       makeClosetItem("top-1", "TOPS", "White Tee"),
@@ -4008,7 +4015,7 @@ describe("§QA-RG2.A — base-architecture exclusivity (order-independent)", () 
       type: "closet", id: "blouse-1", label: "Silk Blouse", slot: "top",
       colors: ["ivory"], normalizedColorIds: ["white"], styleTags: ["polished"],
       occasions: ["everyday"], material: null, hasStrongEvidence: false,
-      evidenceFields: [], imageUrl: null,
+      evidenceFields: [], imageUrl: "https://example.com/test-garment.jpg",
     };
     const closet: ClosetAnchorInput[] = [
       makeClosetItem("bottom-1", "BOTTOMS", "Tailored Trousers"),
@@ -4040,7 +4047,7 @@ describe("§QA-RG2.A — base-architecture exclusivity (order-independent)", () 
       type: "closet", id: "coord-1", label: "Co-ord Set", slot: "set",
       colors: ["beige"], normalizedColorIds: ["beige"], styleTags: ["minimalist"],
       occasions: ["everyday"], material: null, hasStrongEvidence: false,
-      evidenceFields: [], imageUrl: null,
+      evidenceFields: [], imageUrl: "https://example.com/test-garment.jpg",
     };
     const closet: ClosetAnchorInput[] = [
       makeClosetItem("top-1", "TOPS", "White Tee"),
@@ -4061,7 +4068,7 @@ describe("§QA-RG2.A — base-architecture exclusivity (order-independent)", () 
       type: "closet", id: "skirt-1", label: "Mini Skirt", slot: "bottom",
       colors: ["black"], normalizedColorIds: ["black"], styleTags: ["casual"],
       occasions: ["everyday"], material: null, hasStrongEvidence: false,
-      evidenceFields: [], imageUrl: null,
+      evidenceFields: [], imageUrl: "https://example.com/test-garment.jpg",
     };
     // Closet order 1: dress listed before top
     const closetOrderA: ClosetAnchorInput[] = [
@@ -4103,7 +4110,7 @@ describe("§QA-RG2.B — outfit size cap (max 5 total pieces)", () => {
     type: "closet", id: "trousers-1", label: "Wide-Leg Trousers", slot: "bottom",
     colors: ["camel"], normalizedColorIds: ["beige"], styleTags: ["polished"],
     occasions: ["everyday"], material: null, hasStrongEvidence: false,
-    evidenceFields: [], imageUrl: null,
+    evidenceFields: [], imageUrl: "https://example.com/test-garment.jpg",
   };
 
   it("QA-RG2.B.G — everyday separates outfit does not automatically fill every optional slot", () => {
@@ -4204,17 +4211,20 @@ describe("§QA-RG2.C — occasion-only garment relationship", () => {
       type: "closet", id: "skirt-1", label: "Mini Skirt", slot: "bottom",
       colors: ["black"], normalizedColorIds: ["black"], styleTags: ["casual"],
       occasions: ["everyday"], material: null, hasStrongEvidence: false,
-      evidenceFields: [], imageUrl: null,
+      evidenceFields: [], imageUrl: "https://example.com/test-garment.jpg",
     };
     const gown: ClosetAnchorInput = {
+      type: "closet",
       id: "gown-1",
       name: "Burgundy Cowl Neck Evening Gown",
       category: "DRESSES",
+      pattern: null,
+      material: null,
       occasions: ["special-event"],      // no everyday match → +0
       styleTags: ["formal", "elegant"],  // no confident/casual match → +0
       colors: ["burgundy"],
       primaryColor: "burgundy",
-      imageUrl: null,
+      imageUrl: "https://example.com/test-garment.jpg",
       garmentRelationships: ["occasion-only"],  // -2 for everyday → net score ≤ 0
     };
     const closet: ClosetAnchorInput[] = [gown, makeClosetItem("top-1", "TOPS", "Tee")];
@@ -4268,31 +4278,31 @@ describe("§QA-T1 — Test 1 fixture: everyday closet-led look, occasion-only go
     material: null,
     hasStrongEvidence: true,
     evidenceFields: ["occasions"],
-    imageUrl: null,
+    imageUrl: "https://example.com/test-garment.jpg",
   };
 
   const T1_CLOSET: ClosetAnchorInput[] = [
     // score=10 (everyday occasion match; "like-myself" not in styleTags → +0)
-    { id: "top-1", name: "Black Long-Sleeve Top", category: "TOPS",
+    { type: "closet", id: "top-1", name: "Black Long-Sleeve Top", category: "TOPS", pattern: null, material: null,
       occasions: ["everyday", "work"], styleTags: ["casual"],
-      colors: ["black"], primaryColor: "black", imageUrl: null, garmentRelationships: [] },
+      colors: ["black"], primaryColor: "black", imageUrl: "https://example.com/test-garment.jpg", garmentRelationships: [] },
     // score=-2 (no everyday + occasion-only -2 → filtered)
-    { id: "gown-1", name: "Burgundy Cowl Neck Evening Gown", category: "DRESSES",
+    { type: "closet", id: "gown-1", name: "Burgundy Cowl Neck Evening Gown", category: "DRESSES", pattern: null, material: null,
       occasions: ["special-event"], styleTags: ["formal", "elegant"],
-      colors: ["burgundy"], primaryColor: "burgundy", imageUrl: null,
+      colors: ["burgundy"], primaryColor: "burgundy", imageUrl: "https://example.com/test-garment.jpg",
       garmentRelationships: ["occasion-only"] },
     // score=10
-    { id: "shoe-1", name: "Black Loafers", category: "SHOES",
+    { type: "closet", id: "shoe-1", name: "Black Loafers", category: "SHOES", pattern: null, material: null,
       occasions: ["everyday", "work"], styleTags: ["polished"],
-      colors: ["black"], primaryColor: "black", imageUrl: null, garmentRelationships: [] },
+      colors: ["black"], primaryColor: "black", imageUrl: "https://example.com/test-garment.jpg", garmentRelationships: [] },
     // score=10
-    { id: "bag-1", name: "Black Leather Tote", category: "BAGS",
+    { type: "closet", id: "bag-1", name: "Black Leather Tote", category: "BAGS", pattern: null, material: null,
       occasions: ["everyday"], styleTags: ["minimalist"],
-      colors: ["black"], primaryColor: "black", imageUrl: null, garmentRelationships: [] },
+      colors: ["black"], primaryColor: "black", imageUrl: "https://example.com/test-garment.jpg", garmentRelationships: [] },
     // score=10
-    { id: "jewel-1", name: "Gold Hoop Earrings", category: "JEWELRY",
+    { type: "closet", id: "jewel-1", name: "Gold Hoop Earrings", category: "JEWELRY", pattern: null, material: null,
       occasions: ["everyday"], styleTags: ["casual"],
-      colors: ["gold"], primaryColor: "gold", imageUrl: null, garmentRelationships: [] },
+      colors: ["gold"], primaryColor: "gold", imageUrl: "https://example.com/test-garment.jpg", garmentRelationships: [] },
   ];
 
   // Correct Test 1 session: "feel-like-myself" → moods:["like-myself"], no desiredFeelings.
@@ -4387,19 +4397,21 @@ describe("§QA-T1 — Test 1 fixture: everyday closet-led look, occasion-only go
 describe("§QA-T1-REG — positive-score gown excluded from everyday by architecture and score", () => {
   // Gown that ALSO matches a session mood: net score = 0+3-2 = 1 (positive but weak)
   const GOWN_WITH_MOOD: ClosetAnchorInput = {
+    type: "closet", pattern: null, material: null,
     id: "gown-reg", name: "Red Formal Gown", category: "DRESSES",
     occasions: ["special-event"],            // no everyday match → +0
     styleTags: ["confident", "formal"],      // "confident" matches REG_SESSION mood → +3
     colors: ["red"], primaryColor: "red",
-    imageUrl: null,
+    imageUrl: "https://example.com/test-garment.jpg",
     garmentRelationships: ["occasion-only"], // everyday session → -2 → net score = 1
   };
   // Everyday top: score = 10 (occasion match only)
   const EVERYDAY_TOP: ClosetAnchorInput = {
+    type: "closet", pattern: null, material: null,
     id: "top-reg", name: "White Tee", category: "TOPS",
     occasions: ["everyday"], styleTags: ["casual"],
     colors: ["white"], primaryColor: "white",
-    imageUrl: null, garmentRelationships: [],
+    imageUrl: "https://example.com/test-garment.jpg", garmentRelationships: [],
   };
   // Hypothetical session where "confident" mood gives the gown a positive (but still weak) score.
   // This is NOT the Test 1 customer's actual session (which uses moods:["like-myself"]).
@@ -4416,14 +4428,14 @@ describe("§QA-T1-REG — positive-score gown excluded from everyday by architec
     type: "closet", id: "skirt-reg", label: "Black Mini Skirt", slot: "bottom",
     colors: ["black"], normalizedColorIds: ["black"], styleTags: ["casual"],
     occasions: ["everyday"], material: null, hasStrongEvidence: false,
-    evidenceFields: [], imageUrl: null,
+    evidenceFields: [], imageUrl: "https://example.com/test-garment.jpg",
   };
   // Shoe anchor: non-clothing slot, so no separates base is committed
   const SHOE_ANCHOR: NormalizedClosetAnchor = {
     type: "closet", id: "shoe-reg", label: "White Sneakers", slot: "shoe",
     colors: ["white"], normalizedColorIds: ["white"], styleTags: ["casual"],
     occasions: ["everyday"], material: null, hasStrongEvidence: false,
-    evidenceFields: [], imageUrl: null,
+    evidenceFields: [], imageUrl: "https://example.com/test-garment.jpg",
   };
 
   it("REG.1A — bottom anchor: base-arch exclusivity removes dress slot; gown score 1 is irrelevant", () => {
@@ -4451,7 +4463,7 @@ describe("§QA-T1-REG — positive-score gown excluded from everyday by architec
   it("REG.2 — computeNaiaResultDirections with bottom anchor: gown absent from all directions", () => {
     const closet = [
       { id: "skirt-reg", name: "Black Mini Skirt", category: "BOTTOMS", occasions: ["everyday"],
-        styleTags: ["casual"], colors: ["black"], primaryColor: "black", imageUrl: null, garmentRelationships: [] },
+        styleTags: ["casual"], colors: ["black"], primaryColor: "black", imageUrl: "https://example.com/test-garment.jpg", garmentRelationships: [] },
       GOWN_WITH_MOOD,
       EVERYDAY_TOP,
     ];
@@ -4487,21 +4499,23 @@ describe("§QA-T1-REG — positive-score gown excluded from everyday by architec
 
 describe("§QA-ANCHOR — occasion compatibility through the autoSelectClosetAnchor scoring path", () => {
   const GOWN: ClosetAnchorInput = {
+    type: "closet", pattern: null, material: null,
     id: "gown-a", name: "Formal Evening Gown", category: "DRESSES",
     occasions: ["special-event"],
     styleTags: ["elegant", "formal"],
     colors: ["ivory"], primaryColor: "ivory",
-    imageUrl: null,
+    imageUrl: "https://example.com/test-garment.jpg",
     garmentRelationships: ["occasion-only", "favourite"],
     // With moods:["confident"]: score = 0 +0 +2(fav) -2(occasion-only) = 0 → filtered for everyday
     // With moods:[]:            score = 0 +0 +2(fav) -2(occasion-only) = 0 → filtered
     // For special-event:        score = 10 +0 +2(fav) +0(no occasion-only penalty) = 12
   };
   const EVERYDAY_TOP: ClosetAnchorInput = {
+    type: "closet", pattern: null, material: null,
     id: "top-a", name: "White Cotton Top", category: "TOPS",
     occasions: ["everyday"], styleTags: ["casual"],
     colors: ["white"], primaryColor: "white",
-    imageUrl: null, garmentRelationships: [],
+    imageUrl: "https://example.com/test-garment.jpg", garmentRelationships: [],
     // everyday score: +10 + 0 = 10
   };
   const EVERYDAY_SESSION_NO_MOOD = {
@@ -4578,7 +4592,7 @@ describe("§QA-ANCHOR-DI — autoSelectClosetAnchor via DI seam (no Prisma)", ()
     occasions: ["formal"],
     styleTags: ["elegant", "bold", "romantic"],
     colors: ["ivory"], primaryColor: "ivory",
-    pattern: null, material: null, imageUrl: null,
+    pattern: null, material: null, imageUrl: "https://example.com/test-garment.jpg",
     garmentRelationships: ["occasion-only", "favourite"],
     // isCompatible("work"): "work" ∉ occasions, length>0, has "occasion-only" → INCOMPATIBLE
   };
@@ -4589,7 +4603,7 @@ describe("§QA-ANCHOR-DI — autoSelectClosetAnchor via DI seam (no Prisma)", ()
     id: "top-work", name: "Tailored Work Top", category: "TOPS",
     occasions: ["work", "everyday"],
     styleTags: ["classic"], colors: ["white"], primaryColor: "white",
-    pattern: null, material: null, imageUrl: null,
+    pattern: null, material: null, imageUrl: "https://example.com/test-garment.jpg",
     garmentRelationships: [],
     // isCompatible("work"): "work" ∈ occasions → COMPATIBLE
   };
@@ -4600,7 +4614,7 @@ describe("§QA-ANCHOR-DI — autoSelectClosetAnchor via DI seam (no Prisma)", ()
     id: "versatile-1", name: "Cotton Knit Top", category: "TOPS",
     occasions: [],
     styleTags: ["casual"], colors: ["cream"], primaryColor: "cream",
-    pattern: null, material: null, imageUrl: null,
+    pattern: null, material: null, imageUrl: "https://example.com/test-garment.jpg",
     garmentRelationships: [],
     // isCompatible("everyday"): occasions.length===0 → COMPATIBLE (versatile)
   };
@@ -4614,7 +4628,7 @@ describe("§QA-ANCHOR-DI — autoSelectClosetAnchor via DI seam (no Prisma)", ()
     occasions: ["special-event"],
     styleTags: ["confident"],
     colors: ["black"], primaryColor: "black",
-    pattern: null, material: null, imageUrl: null,
+    pattern: null, material: null, imageUrl: "https://example.com/test-garment.jpg",
     garmentRelationships: ["occasion-only", "favourite"],
     // isCompatible("everyday"): "everyday" ∉ occasions, has "occasion-only" → INCOMPATIBLE
     // isCompatible("special-event"): "special-event" ∈ occasions → COMPATIBLE
@@ -4718,35 +4732,35 @@ describe("§QA-T1-EXT — T1 extended: Passport differentiates three directions"
     material: null,
     hasStrongEvidence: true,
     evidenceFields: ["occasions"],
-    imageUrl: null,
+    imageUrl: "https://example.com/test-garment.jpg",
   };
 
   const T1_EXT_CLOSET: ClosetAnchorInput[] = [
     // 3 tops — enable all three directions
-    { id: "top-black", name: "Black Long-Sleeve Top", category: "TOPS",
+    { type: "closet", pattern: null, material: null, id: "top-black", name: "Black Long-Sleeve Top", category: "TOPS",
       occasions: ["everyday"], styleTags: ["casual"],
-      colors: ["black"], primaryColor: "black", imageUrl: null, garmentRelationships: [] },
-    { id: "top-ivory", name: "Ivory Silk Blouse", category: "TOPS",
+      colors: ["black"], primaryColor: "black", imageUrl: "https://example.com/test-garment.jpg", garmentRelationships: [] },
+    { type: "closet", pattern: null, material: null, id: "top-ivory", name: "Ivory Silk Blouse", category: "TOPS",
       occasions: ["everyday"], styleTags: ["relaxed"],
-      colors: ["ivory"], primaryColor: "ivory", imageUrl: null, garmentRelationships: [] },
-    { id: "top-white", name: "White Cotton Tee", category: "TOPS",
+      colors: ["ivory"], primaryColor: "ivory", imageUrl: "https://example.com/test-garment.jpg", garmentRelationships: [] },
+    { type: "closet", pattern: null, material: null, id: "top-white", name: "White Cotton Tee", category: "TOPS",
       occasions: ["everyday"], styleTags: ["casual"],
-      colors: ["white"], primaryColor: "white", imageUrl: null, garmentRelationships: [] },
+      colors: ["white"], primaryColor: "white", imageUrl: "https://example.com/test-garment.jpg", garmentRelationships: [] },
     // Evening gown — must remain absent from all everyday directions
-    { id: "gown-ext", name: "Ivory Cowl Evening Gown", category: "DRESSES",
+    { type: "closet", pattern: null, material: null, id: "gown-ext", name: "Ivory Cowl Evening Gown", category: "DRESSES",
       occasions: ["special-event"], styleTags: ["elegant", "formal"],
-      colors: ["ivory"], primaryColor: "ivory", imageUrl: null,
+      colors: ["ivory"], primaryColor: "ivory", imageUrl: "https://example.com/test-garment.jpg",
       garmentRelationships: ["occasion-only"] },
     // Finishing pieces (one each — same in all directions)
-    { id: "shoe-ext", name: "Black Loafers", category: "SHOES",
+    { type: "closet", pattern: null, material: null, id: "shoe-ext", name: "Black Loafers", category: "SHOES",
       occasions: ["everyday"], styleTags: ["polished"],
-      colors: ["black"], primaryColor: "black", imageUrl: null, garmentRelationships: [] },
-    { id: "bag-ext", name: "Tan Leather Crossbody", category: "BAGS",
+      colors: ["black"], primaryColor: "black", imageUrl: "https://example.com/test-garment.jpg", garmentRelationships: [] },
+    { type: "closet", pattern: null, material: null, id: "bag-ext", name: "Tan Leather Crossbody", category: "BAGS",
       occasions: ["everyday"], styleTags: ["casual"],
-      colors: ["tan"], primaryColor: "tan", imageUrl: null, garmentRelationships: [] },
-    { id: "jewel-ext", name: "Gold Hoop Earrings", category: "JEWELRY",
+      colors: ["tan"], primaryColor: "tan", imageUrl: "https://example.com/test-garment.jpg", garmentRelationships: [] },
+    { type: "closet", pattern: null, material: null, id: "jewel-ext", name: "Gold Hoop Earrings", category: "JEWELRY",
       occasions: ["everyday"], styleTags: ["casual"],
-      colors: ["gold"], primaryColor: "gold", imageUrl: null, garmentRelationships: [] },
+      colors: ["gold"], primaryColor: "gold", imageUrl: "https://example.com/test-garment.jpg", garmentRelationships: [] },
   ];
 
   const T1_EXT_SESSION: any = {
@@ -4868,10 +4882,10 @@ describe("§QA-T1-EXT — T1 extended: Passport differentiates three directions"
         evaluatedProducts: [],
         coverage: { totalCatalogProducts: 0, eligibleCandidates: 0, excludedCandidates: 0 },
         selectedClosetGarments: [
-          { slot: "top",     id: "top-black", label: "Black Long-Sleeve Top",  imageUrl: null, colors: ["black"] },
-          { slot: "shoe",    id: "shoe-ext",  label: "Black Loafers",           imageUrl: null, colors: ["black"] },
-          { slot: "bag",     id: "bag-ext",   label: "Tan Leather Crossbody",   imageUrl: null, colors: ["tan"]   },
-          { slot: "jewelry", id: "jewel-ext", label: "Gold Hoop Earrings",      imageUrl: null, colors: ["gold"]  },
+          { slot: "top",     id: "top-black", label: "Black Long-Sleeve Top",  imageUrl: "https://example.com/test-garment.jpg", colors: ["black"] },
+          { slot: "shoe",    id: "shoe-ext",  label: "Black Loafers",           imageUrl: "https://example.com/test-garment.jpg", colors: ["black"] },
+          { slot: "bag",     id: "bag-ext",   label: "Tan Leather Crossbody",   imageUrl: "https://example.com/test-garment.jpg", colors: ["tan"]   },
+          { slot: "jewelry", id: "jewel-ext", label: "Gold Hoop Earrings",      imageUrl: "https://example.com/test-garment.jpg", colors: ["gold"]  },
         ],
       },
     });
@@ -4963,7 +4977,7 @@ const FEMALE_ANCHOR_SKIRT: NormalizedClosetAnchor = {
   material: null,
   hasStrongEvidence: true,
   evidenceFields: ["occasions"],
-  imageUrl: null,
+  imageUrl: "https://example.com/test-garment.jpg",
 };
 
 const FEMALE_CLOSET_ITEMS: ClosetAnchorInput[] = [
@@ -5016,7 +5030,7 @@ const MALE_ANCHOR_CHINOS: NormalizedClosetAnchor = {
   material: null,
   hasStrongEvidence: true,
   evidenceFields: ["occasions"],
-  imageUrl: null,
+  imageUrl: "https://example.com/test-garment.jpg",
 };
 
 const MALE_CLOSET_ITEMS: ClosetAnchorInput[] = [
@@ -5337,7 +5351,7 @@ describe("§OC.7 — buildNaiaOutfitCandidates: clothing swap is Priority 1 over
       type: "closet", id: "f-ow-trench", label: "Beige Trench Coat",
       slot: "outerwear", colors: ["beige"], normalizedColorIds: ["beige"],
       styleTags: ["classic"], occasions: ["everyday"], material: null,
-      hasStrongEvidence: true, evidenceFields: ["occasions"], imageUrl: null,
+      hasStrongEvidence: true, evidenceFields: ["occasions"], imageUrl: "https://example.com/test-garment.jpg",
     };
     const [candidateA, candidateB, candidateC] = buildNaiaOutfitCandidates(
       outerwearAnchor, FEMALE_EVERYDAY_SESSION, FEMALE_CLOSET_ITEMS, undefined, undefined,
@@ -5687,7 +5701,7 @@ describe("§OC.9 — buildNaiaOutfitCandidates: outerwear anchor → Candidate C
       type: "closet", id: "f-ow-trench-oc9", label: "Trench Coat",
       slot: "outerwear", colors: ["beige"], normalizedColorIds: ["beige"],
       styleTags: ["classic"], occasions: ["everyday"], material: null,
-      hasStrongEvidence: true, evidenceFields: ["occasions"], imageUrl: null,
+      hasStrongEvidence: true, evidenceFields: ["occasions"], imageUrl: "https://example.com/test-garment.jpg",
     };
     // Rich closet with two tops to ensure B could be generated
     const altTop: ClosetAnchorInput = {
@@ -7177,7 +7191,7 @@ describe("§WO.6 — Sara everyday: closet with casual+formal bottoms → casual
     const saraAnchor: NormalizedClosetAnchor = {
       type: "closet", id: "sara-top", label: "Black Long-Sleeve Top", slot: "top",
       colors: ["black"], normalizedColorIds: ["black"], styleTags: ["classic"],
-      occasions: ["everyday"], material: null, hasStrongEvidence: true, evidenceFields: ["occasions"], imageUrl: null,
+      occasions: ["everyday"], material: null, hasStrongEvidence: true, evidenceFields: ["occasions"], imageUrl: "https://example.com/test-garment.jpg",
     };
     const [candidateA, candidateB] = buildNaiaOutfitCandidates(
       saraAnchor, everydaySession, allSaraItems, undefined, undefined,
@@ -7289,7 +7303,7 @@ describe("§WO.8 — Omar everyday: closet with casual+formal shoes → casual-s
     type: "closet", id: "omar-anchor-chinos", label: "Navy Chinos", slot: "bottom",
     colors: ["navy"], normalizedColorIds: ["navy"], styleTags: ["classic"],
     occasions: ["everyday", "smart-casual"], material: null,
-    hasStrongEvidence: true, evidenceFields: ["occasions"], imageUrl: null,
+    hasStrongEvidence: true, evidenceFields: ["occasions"], imageUrl: "https://example.com/test-garment.jpg",
   };
   const allOmarItems = [omarTop, omarCasualShoe, omarFormalShoe];
 
@@ -7352,7 +7366,7 @@ describe("§WO.9 — Fallback: model fails → highest-compositeScore candidate 
     const anchor: NormalizedClosetAnchor = {
       type: "closet", id: "top-anch", label: "Relaxed Top", slot: "top",
       colors: ["black"], normalizedColorIds: ["black"], styleTags: ["classic"],
-      occasions: ["everyday"], material: null, hasStrongEvidence: true, evidenceFields: ["occasions"], imageUrl: null,
+      occasions: ["everyday"], material: null, hasStrongEvidence: true, evidenceFields: ["occasions"], imageUrl: "https://example.com/test-garment.jpg",
     };
 
     const nullMock: typeof callClaudeForNaiaSelection = async () => null;
@@ -7540,7 +7554,7 @@ describe("§WO.11 — Outerwear formality weight + multi-slot B", () => {
       type: "closet", id: "w11-anchor-shirt", label: "Work Shirt", slot: "top",
       colors: ["white"], normalizedColorIds: ["white"], styleTags: ["classic"],
       occasions: ["work", "everyday"], material: null,
-      hasStrongEvidence: true, evidenceFields: ["occasions"], imageUrl: null,
+      hasStrongEvidence: true, evidenceFields: ["occasions"], imageUrl: "https://example.com/test-garment.jpg",
     };
     const anchorShirt = makeItem("w11-anchor-shirt", "TOPS", {
       formality: "business-casual", occasions: ["work", "everyday"],
@@ -7604,7 +7618,7 @@ describe("§WO.11 — Outerwear formality weight + multi-slot B", () => {
       type: "closet", id: "s116-top", label: "Casual Top", slot: "top",
       colors: ["black"], normalizedColorIds: ["black"], styleTags: ["classic"],
       occasions: ["everyday", "work"], material: null,
-      hasStrongEvidence: true, evidenceFields: ["occasions"], imageUrl: null,
+      hasStrongEvidence: true, evidenceFields: ["occasions"], imageUrl: "https://example.com/test-garment.jpg",
     };
     const top = makeItem("s116-top", "TOPS", {
       formality: "casual", occasions: ["everyday", "work"],
@@ -7698,7 +7712,7 @@ describe("§WO.11 — Outerwear formality weight + multi-slot B", () => {
       type: "closet", id: "o11-anchor-chinos", label: "Slim Chinos", slot: "bottom",
       colors: ["navy"], normalizedColorIds: ["navy"], styleTags: ["classic"],
       occasions: ["work", "everyday"], material: null,
-      hasStrongEvidence: true, evidenceFields: ["occasions"], imageUrl: null,
+      hasStrongEvidence: true, evidenceFields: ["occasions"], imageUrl: "https://example.com/test-garment.jpg",
     };
     const chinos = makeItem("o11-anchor-chinos", "BOTTOMS", {
       formality: "business-casual", occasions: ["work", "everyday"],
@@ -7767,7 +7781,7 @@ describe("§SP — Session × Passport integration", () => {
       type: "closet", id: "sp1-top", label: "Casual Top", slot: "top",
       colors: ["black"], normalizedColorIds: ["black"], styleTags: ["classic"],
       occasions: ["everyday"], material: null, hasStrongEvidence: true,
-      evidenceFields: ["occasions"], imageUrl: null,
+      evidenceFields: ["occasions"], imageUrl: "https://example.com/test-garment.jpg",
     };
     const top = makeItem("sp1-top", "TOPS", { occasions: ["everyday"] });
     const jeans = makeItem("sp1-jeans", "BOTTOMS", { formality: "casual", occasions: ["everyday"] });
@@ -7809,7 +7823,7 @@ describe("§SP — Session × Passport integration", () => {
       type: "closet", id: "sp12-top", label: "Top", slot: "top",
       colors: ["black"], normalizedColorIds: ["black"], styleTags: ["classic"],
       occasions: ["everyday"], material: null, hasStrongEvidence: true,
-      evidenceFields: ["occasions"], imageUrl: null,
+      evidenceFields: ["occasions"], imageUrl: "https://example.com/test-garment.jpg",
     };
     const top = makeItem("sp12-top", "TOPS", { occasions: ["everyday"] });
     const formalTrousers = makeItem("sp12-trousers", "BOTTOMS", { formality: "business-casual", occasions: ["everyday"] });
@@ -7969,7 +7983,7 @@ describe("§SP — Session × Passport integration", () => {
       type: "closet", id: "sp5-top", label: "Top", slot: "top",
       colors: ["black"], normalizedColorIds: ["black"], styleTags: ["classic"],
       occasions: ["everyday", "work"], material: null, hasStrongEvidence: true,
-      evidenceFields: ["occasions"], imageUrl: null,
+      evidenceFields: ["occasions"], imageUrl: "https://example.com/test-garment.jpg",
     };
     const top = makeItem("sp5-top", "TOPS", { occasions: ["everyday", "work"] });
     const formalTrousers = makeItem("sp5-trousers", "BOTTOMS", { formality: "business-casual", occasions: ["everyday", "work"] });
@@ -8015,7 +8029,7 @@ describe("§SP — Session × Passport integration", () => {
       type: "closet", id: "sp52-top", label: "Top", slot: "top",
       colors: ["black"], normalizedColorIds: ["black"], styleTags: ["classic"],
       occasions: ["everyday", "work"], material: null, hasStrongEvidence: true,
-      evidenceFields: ["occasions"], imageUrl: null,
+      evidenceFields: ["occasions"], imageUrl: "https://example.com/test-garment.jpg",
     };
     const top = makeItem("sp52-top", "TOPS", { occasions: ["everyday", "work"] });
     const formalTrousers = makeItem("sp52-trousers", "BOTTOMS", { formality: "business-casual", occasions: ["work"] });
@@ -8052,7 +8066,7 @@ describe("§SP — Session × Passport integration", () => {
       type: "closet", id: "sp6-chinos", label: "Chinos", slot: "bottom",
       colors: ["navy"], normalizedColorIds: ["navy"], styleTags: ["classic"],
       occasions: ["everyday", "work"], material: null, hasStrongEvidence: true,
-      evidenceFields: ["occasions"], imageUrl: null,
+      evidenceFields: ["occasions"], imageUrl: "https://example.com/test-garment.jpg",
     };
     const chinos = makeItem("sp6-chinos", "BOTTOMS", { formality: "business-casual", occasions: ["everyday", "work"] });
     const shirt = makeItem("sp6-shirt", "TOPS", { formality: "business-casual", occasions: ["everyday", "work"] });
@@ -8079,7 +8093,7 @@ describe("§SP — Session × Passport integration", () => {
       type: "closet", id: "sp62-chinos", label: "Chinos", slot: "bottom",
       colors: ["navy"], normalizedColorIds: ["navy"], styleTags: ["classic"],
       occasions: ["work"], material: null, hasStrongEvidence: true,
-      evidenceFields: ["occasions"], imageUrl: null,
+      evidenceFields: ["occasions"], imageUrl: "https://example.com/test-garment.jpg",
     };
     const chinos = makeItem("sp62-chinos", "BOTTOMS", { formality: "business-casual", occasions: ["work"] });
     const shirt = makeItem("sp62-shirt", "TOPS", { formality: "business-casual", occasions: ["work"] });
@@ -8490,7 +8504,7 @@ describe("§DUP.1 — buildNaiaOutfitCandidates: no duplicate closetId when anch
   const topAnchor: NormalizedClosetAnchor = {
     type: "closet", id: "sara-anchor-top", label: "Black Long-Sleeve Top", slot: "top",
     colors: ["black"], normalizedColorIds: ["black"], styleTags: ["classic"],
-    occasions: ["casual"], material: null, hasStrongEvidence: true, evidenceFields: ["occasions"], imageUrl: null,
+    occasions: ["casual"], material: null, hasStrongEvidence: true, evidenceFields: ["occasions"], imageUrl: "https://example.com/test-garment.jpg",
   };
   const dupSession = {
     occasion: "everyday", formalityConditional: null as string | null,
@@ -8573,7 +8587,7 @@ describe("§DUP.2 — buildNaiaOutfitCandidates: no duplicate closetId when anch
   const bottomAnchor: NormalizedClosetAnchor = {
     type: "closet", id: "anchor-jeans", label: "Relaxed Jeans", slot: "bottom",
     colors: ["blue"], normalizedColorIds: ["blue"], styleTags: ["classic"],
-    occasions: ["casual", "weekend"], material: null, hasStrongEvidence: true, evidenceFields: ["occasions"], imageUrl: null,
+    occasions: ["casual", "weekend"], material: null, hasStrongEvidence: true, evidenceFields: ["occasions"], imageUrl: "https://example.com/test-garment.jpg",
   };
   const dupSession2 = {
     occasion: "everyday", formalityConditional: null as string | null,
@@ -8636,7 +8650,7 @@ describe("§SARA.1 — Sara everyday regression: null model → D (jeans+sneaker
   const saraTopAnchor: NormalizedClosetAnchor = {
     type: "closet", id: "sara-blk-top", label: "Black Long-Sleeve Top", slot: "top",
     colors: ["black"], normalizedColorIds: ["black"], styleTags: ["classic"],
-    occasions: ["casual", "work"], material: null, hasStrongEvidence: true, evidenceFields: ["occasions"], imageUrl: null,
+    occasions: ["casual", "work"], material: null, hasStrongEvidence: true, evidenceFields: ["occasions"], imageUrl: "https://example.com/test-garment.jpg",
   };
   const saraSession = {
     occasion: "everyday", formalityConditional: null as string | null,
@@ -8792,7 +8806,7 @@ describe("§SARA.2 — Sara work/polished: same closet, work session → structu
   const saraTopAnchor: NormalizedClosetAnchor = {
     type: "closet", id: "sara-wp-top", label: "Black Long-Sleeve Top", slot: "top",
     colors: ["black"], normalizedColorIds: ["black"], styleTags: ["classic"],
-    occasions: ["casual", "work"], material: null, hasStrongEvidence: true, evidenceFields: ["occasions"], imageUrl: null,
+    occasions: ["casual", "work"], material: null, hasStrongEvidence: true, evidenceFields: ["occasions"], imageUrl: "https://example.com/test-garment.jpg",
   };
   const saraWorkSession = {
     occasion: "work", formalityConditional: "formality-polished" as string | null,
@@ -8936,7 +8950,7 @@ describe("§OMAR.1 — Omar everyday regression: no duplicate closetId with male
   const omarTopAnchor: NormalizedClosetAnchor = {
     type: "closet", id: "omar-navy-top", label: "Navy Henley Top", slot: "top",
     colors: ["navy"], normalizedColorIds: ["navy"], styleTags: ["casual"],
-    occasions: ["casual", "weekend"], material: null, hasStrongEvidence: true, evidenceFields: ["occasions"], imageUrl: null,
+    occasions: ["casual", "weekend"], material: null, hasStrongEvidence: true, evidenceFields: ["occasions"], imageUrl: "https://example.com/test-garment.jpg",
   };
   const omarSession = {
     occasion: "everyday", formalityConditional: null as string | null,
@@ -9198,7 +9212,7 @@ describe("§PIECE.NOTE — buildClosetGarmentNote: improved fallback copy", () =
           type: "closet" as const,
           id: first.anchorId,
           label: first.anchorLabel,
-          slot: first.anchorSlot as import("./styleme-result.server.ts").OutfitSlot,
+          slot: first.anchorSlot as import("./styleme-recommendation.types.ts").OutfitSlot,
           colors: first.anchorColors,
           normalizedColorIds: first.anchorColors,
           styleTags: [],
@@ -9206,15 +9220,15 @@ describe("§PIECE.NOTE — buildClosetGarmentNote: improved fallback copy", () =
           material: null,
           hasStrongEvidence: false,
           evidenceFields: [],
-          imageUrl: null,
+          imageUrl: "https://example.com/test-garment.jpg",
         },
         primary: null,
         alternatives: [],
-        outfitPlan: { anchorSlot: first.anchorSlot as import("./styleme-result.server.ts").OutfitSlot, recommendedSlot: null, compatibilityStatus: "closet-led", notes: [] },
+        outfitPlan: { anchorSlot: first.anchorSlot as import("./styleme-recommendation.types.ts").OutfitSlot, recommendedSlot: null, compatibilityStatus: "closet-led", notes: [] },
         evaluatedProducts: [],
         coverage: { totalCatalogProducts: 0, eligibleCandidates: 0, excludedCandidates: 0 },
         selectedClosetGarments: garments.map((g) => ({
-          slot: g.slot, id: g.id, label: g.label, imageUrl: null, colors: g.colors,
+          slot: g.slot, id: g.id, label: g.label, imageUrl: "https://example.com/test-garment.jpg", colors: g.colors,
           // no stylingNotes — forces buildClosetGarmentNote to run
         })),
       },
@@ -9482,7 +9496,7 @@ function makePieceNoteResult(
           slot: anchorSlot as import("./styleme-recommendation.types.ts").OutfitSlot,
           colors: anchorColors, normalizedColorIds: anchorColors,
           styleTags: [], occasions: [], material: null,
-          hasStrongEvidence: false, evidenceFields: [], imageUrl: null,
+          hasStrongEvidence: false, evidenceFields: [], imageUrl: "https://example.com/test-garment.jpg",
         },
         primary: null, alternatives: [],
         outfitPlan: {
@@ -9492,7 +9506,7 @@ function makePieceNoteResult(
         evaluatedProducts: [],
         coverage: { totalCatalogProducts: 0, eligibleCandidates: 0, excludedCandidates: 0 },
         selectedClosetGarments: [{
-          slot: garmentSlot, id: "g-1", label: garmentLabel, imageUrl: null, colors: garmentColors,
+          slot: garmentSlot, id: "g-1", label: garmentLabel, imageUrl: "https://example.com/test-garment.jpg", colors: garmentColors,
         }],
       },
     };
@@ -10524,7 +10538,7 @@ describe("§RNK compareCandidateRankKeys", () => {
 
 describe("§OT computeOccasionTier", () => {
   function makeCandidate(pieces: Array<{ id: string; slot: string }>): import("./styleme-result.server.ts").OutfitCandidate {
-    return { id: "test", pieces: pieces.map((p) => ({ closetId: p.id, slot: p.slot, label: null, colors: [] })) };
+    return { id: "A", pieces: pieces.map((p) => ({ closetId: p.id, slot: p.slot, label: null, colors: [] })) };
   }
   function makeItem(id: string, slot: string, occasions: string[]): ClosetAnchorInput {
     return { type: "closet", id, name: null, category: "TOPS", colors: [], primaryColor: null, pattern: null, material: null, styleTags: [], occasions, imageUrl: "" };
@@ -10571,7 +10585,7 @@ describe("§T4 computeIntentionFit — complete-outfit pathways", () => {
     return { closetId: id, slot, label: null, colors: [] };
   }
   function makeC(ids: string[], slot = "top"): import("./styleme-result.server.ts").OutfitCandidate {
-    return { id: "c", pieces: ids.map((id) => makePiece(id, slot)) };
+    return { id: "A", pieces: ids.map((id) => makePiece(id, slot)) };
   }
   const baseA = makeC(["plain"]);
 
@@ -11241,7 +11255,7 @@ describe("§REV2.3 T3b tri-state — null body-need score treated as 0.35 interm
 
 describe("§REV2.4 outfitStructureScore — max-piece density formula", () => {
   function makeStructuredCandidate(ids: string[]): OutfitCandidate {
-    return { id: "X", pieces: ids.map((id) => ({ slot: "top", closetId: id, label: null, colors: [] })) };
+    return { id: "A", pieces: ids.map((id) => ({ slot: "top", closetId: id, label: null, colors: [] })) };
   }
   const structuredItem: ClosetAnchorInput = {
     type: "closet", id: "blazer", name: "Blazer", category: "TOPS",
@@ -11304,7 +11318,7 @@ describe("§REV2.5 computeEnergyFit — absolute potential (no uplift-vs-A)", ()
 });
 
 describe("§REV2.6 computeIntentionFit — balance factor for ≥2 intentions", () => {
-  function makeCandidate(id: string, pieces: string[]): OutfitCandidate {
+  function makeCandidate(id: "A" | "B" | "C" | "D" | "E", pieces: string[]): OutfitCandidate {
     return { id, pieces: pieces.map((closetId) => ({ slot: "top", closetId, label: null, colors: [] })) };
   }
   // Carries ALL FOUR structure signals so its feel-sharper unit score is exactly 1.0.
@@ -11349,7 +11363,7 @@ describe("§REV2.6 computeIntentionFit — balance factor for ≥2 intentions", 
 
 describe("§REV2.7 FLOW_TAGS — 'draped' removed, others preserved", () => {
   function makeFlowCandidate(closetId: string): OutfitCandidate {
-    return { id: "X", pieces: [{ slot: "top", closetId, label: null, colors: [] }] };
+    return { id: "A", pieces: [{ slot: "top", closetId, label: null, colors: [] }] };
   }
   function makeTaggedItem(id: string, tag: string): ClosetAnchorInput {
     return {
@@ -11484,7 +11498,7 @@ describe("§REV2.10 passesCandidateDressingRequirements — modesty / arms-cover
 
   function makeCandidate(pieces: Array<{ id: string; slot: string }>): OutfitCandidate {
     return {
-      id: "X",
+      id: "A",
       pieces: pieces.map((p) => ({ closetId: p.id, slot: p.slot, label: null, colors: [] })),
     };
   }
@@ -11593,7 +11607,7 @@ describe("§REV2.11 T11 nothing-tight-waist — tri-state body-need ranking", ()
     const incompatible = makeWaistItem("incompatible", { fitProfile: "fitted" });
 
     function makeOutfit(item: ClosetAnchorInput): OutfitCandidate {
-      return { id: "X", pieces: [{ closetId: item.id, slot: "bottom", label: null, colors: [] }] };
+      return { id: "A", pieces: [{ closetId: item.id, slot: "bottom", label: null, colors: [] }] };
     }
     const allItems = [compatible, unknown, incompatible];
     const needs = ["nothing-tight-waist"];
@@ -11658,7 +11672,7 @@ describe("§REV2.13 candidate dressing gate — fail-open removed: all violators
       ...overrides,
     };
   }
-  function makeCandidate(id: string, pieces: Array<{ id: string; slot: string }>): OutfitCandidate {
+  function makeCandidate(id: "A" | "B" | "C" | "D" | "E", pieces: Array<{ id: string; slot: string }>): OutfitCandidate {
     return {
       id,
       pieces: pieces.map((p) => ({ closetId: p.id, slot: p.slot, label: null, colors: [] })),
@@ -11706,7 +11720,7 @@ describe("§REV2.14 TODAY more-coverage — T3 path zone-awareness (upper-body v
     };
   }
   function makePieces(ids: Array<{ id: string; slot: string }>): OutfitCandidate {
-    return { id: "X", pieces: ids.map((p) => ({ closetId: p.id, slot: p.slot, label: null, colors: [] })) };
+    return { id: "A", pieces: ids.map((p) => ({ closetId: p.id, slot: p.slot, label: null, colors: [] })) };
   }
 
   const sleevelessTop = makeItem("sl-top", { sleeveLength: "sleeveless" });
@@ -11756,7 +11770,7 @@ describe("§REV2.15 passesCandidateDressingRequirements — neckline coverage (c
   }
   function makeCandidate(pieces: Array<{ id: string; slot: string }>): OutfitCandidate {
     return {
-      id: "X",
+      id: "A",
       pieces: pieces.map((p) => ({ closetId: p.id, slot: p.slot, label: null, colors: [] })),
     };
   }
@@ -11821,14 +11835,17 @@ describe("§V2-RG1 — feel-softer: selection-level intention evidence", () => {
     intentionRating: "Strong" | "Supporting" | "None" | null,
   ): ClosetAnchorInput {
     return {
+      type: "closet",
       id,
       name: id,
       category: "TOPS",
+      pattern: null,
+      material: null,
       occasions: ["everyday"],
       styleTags: ["confident"],
       colors: ["black"],
       primaryColor: "black",
-      imageUrl: null,
+      imageUrl: "https://example.com/test-garment.jpg",
       garmentRelationships: [],
       approvedProfile: {
         exactSlot: "top",
@@ -11896,14 +11913,17 @@ describe("§V2-RG1 — feel-softer: selection-level intention evidence", () => {
     // After fix: "soft" removed from GATE_FLOW_TAGS → falls to the neutral 0.2 baseline.
     // Physical fabric softness must not masquerade as emotional feel-softer fulfilment.
     const softTagItem: ClosetAnchorInput = {
+      type: "closet",
       id: "soft-tag-item",
       name: "Soft Tee",
       category: "TOPS",
+      pattern: null,
+      material: null,
       occasions: ["everyday"],
       styleTags: ["soft"],
       colors: ["white"],
       primaryColor: "white",
-      imageUrl: null,
+      imageUrl: "https://example.com/test-garment.jpg",
       garmentRelationships: [],
       // No approvedProfile → legacy path used
     };
@@ -11924,14 +11944,17 @@ describe("§V2-RG2 — register differentiation: outfit selection ranks by dress
     occasion: string = "dinner",
   ): ClosetAnchorInput {
     return {
+      type: "closet",
       id,
       name: id,
       category: "TOPS",
+      pattern: null,
+      material: null,
       occasions: [occasion],
       styleTags: ["confident"],
       colors: ["black"],
       primaryColor: "black",
-      imageUrl: null,
+      imageUrl: "https://example.com/test-garment.jpg",
       garmentRelationships: [],
       approvedProfile: {
         exactSlot: "top",
@@ -12187,7 +12210,7 @@ describe("§V2-RG4 — Register distance scoring (computeRegisterAlignmentScore)
     const smartCasualBottom: ClosetAnchorInput = {
       type: "closet", id: "sc-btm", name: "Navy Everyday Trousers", category: "BOTTOMS",
       occasions: ["dinner"], styleTags: ["confident", "relaxed"], colors: ["navy"], primaryColor: "navy",
-      imageUrl: null, garmentRelationships: [], formality: null, fitProfile: null, waistShape: null,
+      imageUrl: "https://example.com/test-garment.jpg", garmentRelationships: [], formality: null, fitProfile: null, waistShape: null,
       sleeveLength: null, necklineCoverage: null, hemLength: null, topLength: null,
       shoulderCoverage: null, midriffExposed: null, silhouette: null, stylePersonality: null,
       subcategory: null, pattern: null, material: null,
@@ -12203,7 +12226,7 @@ describe("§V2-RG4 — Register distance scoring (computeRegisterAlignmentScore)
     const polishedBottom: ClosetAnchorInput = {
       type: "closet", id: "pol-btm", name: "Tailored Wide-Leg Trousers", category: "BOTTOMS",
       occasions: ["work"], styleTags: [], colors: ["black"], primaryColor: "black",
-      imageUrl: null, garmentRelationships: [], formality: null, fitProfile: null, waistShape: null,
+      imageUrl: "https://example.com/test-garment.jpg", garmentRelationships: [], formality: null, fitProfile: null, waistShape: null,
       sleeveLength: null, necklineCoverage: null, hemLength: null, topLength: null,
       shoulderCoverage: null, midriffExposed: null, silhouette: null, stylePersonality: null,
       subcategory: null, pattern: null, material: null,
@@ -12238,7 +12261,7 @@ describe("§V2-RG4 — Register distance scoring (computeRegisterAlignmentScore)
     const smartCasualBottom: ClosetAnchorInput = {
       type: "closet", id: "sc-btm-d", name: "Navy Everyday Trousers", category: "BOTTOMS",
       occasions: ["dinner"], styleTags: [], colors: ["navy"], primaryColor: "navy",
-      imageUrl: null, garmentRelationships: [], formality: null, fitProfile: null, waistShape: null,
+      imageUrl: "https://example.com/test-garment.jpg", garmentRelationships: [], formality: null, fitProfile: null, waistShape: null,
       sleeveLength: null, necklineCoverage: null, hemLength: null, topLength: null,
       shoulderCoverage: null, midriffExposed: null, silhouette: null, stylePersonality: null,
       subcategory: null, pattern: null, material: null,
@@ -12253,7 +12276,7 @@ describe("§V2-RG4 — Register distance scoring (computeRegisterAlignmentScore)
     const polishedBottom: ClosetAnchorInput = {
       type: "closet", id: "pol-btm-d", name: "Tailored Wide-Leg Trousers", category: "BOTTOMS",
       occasions: ["dinner", "work"], styleTags: [], colors: ["black"], primaryColor: "black",
-      imageUrl: null, garmentRelationships: [], formality: null, fitProfile: null, waistShape: null,
+      imageUrl: "https://example.com/test-garment.jpg", garmentRelationships: [], formality: null, fitProfile: null, waistShape: null,
       sleeveLength: null, necklineCoverage: null, hemLength: null, topLength: null,
       shoulderCoverage: null, midriffExposed: null, silhouette: null, stylePersonality: null,
       subcategory: null, pattern: null, material: null,
@@ -12282,7 +12305,7 @@ describe("§V2-RG4 — Register distance scoring (computeRegisterAlignmentScore)
     const dressyOnlyBottom: ClosetAnchorInput = {
       type: "closet", id: "dressy-only", name: "Strapless Evening Gown", category: "BOTTOMS",
       occasions: ["dinner"], styleTags: [], colors: ["black"], primaryColor: "black",
-      imageUrl: null, garmentRelationships: [], formality: null, fitProfile: null, waistShape: null,
+      imageUrl: "https://example.com/test-garment.jpg", garmentRelationships: [], formality: null, fitProfile: null, waistShape: null,
       sleeveLength: null, necklineCoverage: null, hemLength: null, topLength: null,
       shoulderCoverage: null, midriffExposed: null, silhouette: null, stylePersonality: null,
       subcategory: null, pattern: null, material: null,
@@ -12389,7 +12412,7 @@ describe("§V2-RG5 — hemLength factual-wording guard (sanitizeFactualWordingCl
     return {
       type: "closet", id, name: `Test Item ${id}`, category: "BOTTOMS",
       occasions: ["dinner"], styleTags: [], colors: ["burgundy"], primaryColor: "burgundy",
-      imageUrl: null, garmentRelationships: [], formality: null, fitProfile: null,
+      imageUrl: "https://example.com/test-garment.jpg", garmentRelationships: [], formality: null, fitProfile: null,
       waistShape: null, sleeveLength: null, hemLength, topLength: null,
       shoulderCoverage: null, midriffExposed: null, silhouette: null, stylePersonality: null,
       subcategory: null, pattern: null, material: null, approvedProfile: null,

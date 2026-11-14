@@ -205,7 +205,7 @@ describe("IC-B — sharpness is read from the vocabulary the Closet AI emits", (
   for (const tag of ["clean", "refined", "elevated", "sophisticated", "classic", "minimal", "understated"]) {
     test(`IC-B.1 a garment tagged "${tag}" registers as structured`, () => {
       const item = garment({ id: tag, styleTags: [tag] });
-      const cand: OutfitCandidate = { id: "X", pieces: [{ closetId: tag, slot: "top", label: tag, colors: [] }] };
+      const cand: OutfitCandidate = { id: "A", pieces: [{ closetId: tag, slot: "top", label: tag, colors: [] }] };
       assert.ok(
         outfitStructureScore(cand, [item]) > 0,
         `"${tag}" is in the Closet AI vocabulary but scored 0`,
@@ -217,7 +217,7 @@ describe("IC-B — sharpness is read from the vocabulary the Closet AI emits", (
     // "sharp" and "minimalist" were in the old set and are not in GARMENT_STYLE_TAG_VOCAB.
     for (const dead of ["sharp", "minimalist"]) {
       const item = garment({ id: dead, styleTags: [dead] });
-      const cand: OutfitCandidate = { id: "X", pieces: [{ closetId: dead, slot: "top", label: dead, colors: [] }] };
+      const cand: OutfitCandidate = { id: "A", pieces: [{ closetId: dead, slot: "top", label: dead, colors: [] }] };
       assert.equal(
         outfitStructureScore(cand, [item]), 0,
         `"${dead}" is not a Closet AI token and must not be scored`,
@@ -229,7 +229,7 @@ describe("IC-B — sharpness is read from the vocabulary the Closet AI emits", (
     // Documented principle: fitted ≠ structured. A body-skimming jersey top is not sharp.
     for (const fp of ["fitted", "body-skimming"]) {
       const item = garment({ id: fp, fitProfile: fp });
-      const cand: OutfitCandidate = { id: "X", pieces: [{ closetId: fp, slot: "top", label: fp, colors: [] }] };
+      const cand: OutfitCandidate = { id: "A", pieces: [{ closetId: fp, slot: "top", label: fp, colors: [] }] };
       assert.equal(
         outfitStructureScore(cand, [item]), 0,
         `fitProfile "${fp}" must not read as structure`,
@@ -240,7 +240,7 @@ describe("IC-B — sharpness is read from the vocabulary the Closet AI emits", (
   test("IC-B.4 construction fitProfile and a clean silhouette both count", () => {
     for (const over of [{ fitProfile: "structured" }, { fitProfile: "tailored" }, { silhouette: "straight" }, { silhouette: "column" }]) {
       const item = garment({ id: "g", ...over });
-      const cand: OutfitCandidate = { id: "X", pieces: [{ closetId: "g", slot: "top", label: "g", colors: [] }] };
+      const cand: OutfitCandidate = { id: "A", pieces: [{ closetId: "g", slot: "top", label: "g", colors: [] }] };
       assert.ok(outfitStructureScore(cand, [item]) > 0, `${JSON.stringify(over)} scored 0`);
     }
   });
@@ -253,12 +253,12 @@ describe("IC-C — the structure metric rewards more structure, not less", () =>
     // The old bestPiece/count formula did the opposite: blazer + trousers + loafers
     // scored 0.25 while trousers + loafers scored 0.33.
     const items = closet();
-    const withoutLayer: OutfitCandidate = { id: "W", pieces: [
+    const withoutLayer: OutfitCandidate = { id: "A", pieces: [
       { closetId: "top", slot: "top", label: "top", colors: [] },
       { closetId: "trousers", slot: "bottom", label: "trousers", colors: [] },
       { closetId: "loafers", slot: "shoe", label: "loafers", colors: [] },
     ] };
-    const withLayer: OutfitCandidate = { id: "L", pieces: [
+    const withLayer: OutfitCandidate = { id: "B", pieces: [
       ...withoutLayer.pieces,
       { closetId: "blazer", slot: "outerwear", label: "blazer", colors: [] },
     ] };
@@ -277,7 +277,7 @@ describe("IC-C — the structure metric rewards more structure, not less", () =>
       { closetId: "trousers", slot: "bottom", label: "trousers", colors: [] },
       { closetId: "sneakers", slot: "shoe", label: "sneakers", colors: [] },
     ] };
-    const swapped: OutfitCandidate = { id: "S", pieces: [
+    const swapped: OutfitCandidate = { id: "A", pieces: [
       base.pieces[0], base.pieces[1],
       { closetId: "loafers", slot: "shoe", label: "loafers", colors: [] },
     ] };
@@ -290,7 +290,7 @@ describe("IC-C — the structure metric rewards more structure, not less", () =>
 
   test("IC-C.3 an outfit with no structure evidence still scores 0", () => {
     const items = closet();
-    const plain: OutfitCandidate = { id: "P", pieces: [
+    const plain: OutfitCandidate = { id: "A", pieces: [
       { closetId: "top", slot: "top", label: "top", colors: [] },
       { closetId: "jeans", slot: "bottom", label: "jeans", colors: [] },
       { closetId: "sneakers", slot: "shoe", label: "sneakers", colors: [] },

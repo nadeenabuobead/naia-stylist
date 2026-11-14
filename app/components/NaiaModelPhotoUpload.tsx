@@ -137,6 +137,7 @@ export default function NaiaModelPhotoUpload({
       deliveryType: string;
       uploadUrl: string;
       maxFileSizeBytes: number;
+      transformation: string;
     };
     try {
       const sigRes = await fetch("/api/cloudinary-signature");

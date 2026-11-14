@@ -230,9 +230,9 @@ describe("AL-C — T6c distinguishes a working layer from a gratuitous one", () 
     { closetId: "jeans", slot: "bottom", label: "jeans", colors: [] },
     { closetId: "shoes", slot: "shoe", label: "shoes", colors: [] },
   ];
-  const withWorking: OutfitCandidate = { id: "W", pieces: [...base, { closetId: "workingLayer", slot: "outerwear", label: "w", colors: [] }] };
-  const withIdle: OutfitCandidate = { id: "I", pieces: [...base, { closetId: "idleLayer", slot: "outerwear", label: "i", colors: [] }] };
-  const bare: OutfitCandidate = { id: "N", pieces: base };
+  const withWorking: OutfitCandidate = { id: "A", pieces: [...base, { closetId: "workingLayer", slot: "outerwear", label: "w", colors: [] }] };
+  const withIdle: OutfitCandidate = { id: "B", pieces: [...base, { closetId: "idleLayer", slot: "outerwear", label: "i", colors: [] }] };
+  const bare: OutfitCandidate = { id: "C", pieces: base };
   const s = session({ intentions: ["feel-sharper"] });
 
   test("AL-C.1 a layer rated for today's intention is not counted as burden", () => {
@@ -305,7 +305,7 @@ describe("AL-E — Everyday formality constraints remain intact", () => {
       g({ id: "gown", category: "DRESSES", formality: "evening" }),
       g({ id: "heels", category: "SHOES", formality: "evening" }),
     ];
-    const cand: OutfitCandidate = { id: "X", pieces: [
+    const cand: OutfitCandidate = { id: "A", pieces: [
       { closetId: "gown", slot: "dress", label: "g", colors: [] },
       { closetId: "heels", slot: "shoe", label: "h", colors: [] },
     ] };
@@ -320,7 +320,7 @@ describe("AL-E — Everyday formality constraints remain intact", () => {
       g({ id: "jeans", category: "BOTTOMS" }),
       g({ id: "tux", category: "OUTERWEAR", formality: "evening", approvedProfile: rated("feel-sharper", "Strong") }),
     ];
-    const cand: OutfitCandidate = { id: "X", pieces: [
+    const cand: OutfitCandidate = { id: "A", pieces: [
       { closetId: "top", slot: "top", label: "t", colors: [] },
       { closetId: "jeans", slot: "bottom", label: "j", colors: [] },
       { closetId: "tux", slot: "outerwear", label: "x", colors: [] },
