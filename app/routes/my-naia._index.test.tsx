@@ -122,6 +122,19 @@ vi.mock("~/lib/plan/entitlement.server", () => ({
 
 vi.mock("~/styles/naia-design-system.css?url", () => ({ default: "/styles.css" }));
 
+// MyNaiaLayout's real implementation calls useClerk() (from
+// @clerk/react-router), which throws outside a <ClerkProvider> —
+// renderToString here has no provider tree at all. Stubbing only useClerk
+// itself (not MyNaiaLayout as a whole) is the minimal fix: the real
+// MyNaiaLayout still renders its actual chrome (header, sidebar nav,
+// footer) exactly as several of this file's own tests already assert —
+// a bare passthrough mock of MyNaiaLayout would have silently broken
+// those. Pre-existing gap (MyNaiaLayout has never been renderable in this
+// file's tests), not introduced by this change.
+vi.mock("@clerk/react-router", () => ({
+  useClerk: () => ({ signOut: vi.fn() }),
+}));
+
 // ── Imports after mocks ────────────────────────────────────────────────────────
 
 import { useLoaderData } from "react-router";
@@ -585,21 +598,35 @@ describe("my-naia component — static structure", () => {
 
   it("working page links have valid href paths", () => {
     const html = render();
-    const workingPaths = ["/style-me", "/closet", "/buyskip", "/my-naia/saved"];
+    // /my-naia/saved deliberately dropped from this list — the route itself
+    // exists and works, but this page has never linked to it by design
+    // (see MY nAia Saved audit, commit f40670c). This assertion predates
+    // that decision and was never updated; it was only invisible until the
+    // ClerkProvider test-setup gap above was fixed. Not a membership-status
+    // regression.
+    const workingPaths = ["/style-me", "/closet", "/buyskip"];
     for (const path of workingPaths) {
       expect(html, `expected href="${path}" in output`).toContain(`href="${path}"`);
     }
   });
 
   it("Plan & Usage section shows closet count from entitlement", () => {
+    // membershipStatus/effectiveMembershipStatus were always missing from
+    // this fixture — invisible until the ClerkProvider test-setup gap
+    // above was fixed, since the whole render threw before reaching this
+    // assertion. Without them, effectiveMembershipStatus === "MEMBER" was
+    // false, and the section rendered the explore-membership prompt
+    // instead of the usage-card grid this test actually means to exercise.
     const html = render({
       entitlement: {
+        membershipStatus: "MEMBER",
+        effectiveMembershipStatus: "MEMBER",
         plan: "FREE",
         styleMe: { monthlyLimit: 1, monthlyUsed: 0, welcomeAvailable: false },
         buySkip: { introAvailable: true, monthlyLimit: null, monthlyUsed: null },
         vto: { monthlyLimit: 0, monthlyCompleted: 0, monthlyInFlight: 0 },
         closet: { limit: 100, currentCount: 12 },
-        personalisedTrend: { monthlyLimit: 0 },
+        personalisedTrend: { monthlyLimit: 0, monthlyUsed: 0 },
       },
     });
     expect(html).toContain("12 of 100 items");

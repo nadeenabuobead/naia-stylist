@@ -47,6 +47,7 @@ import {
   reserveClosetSlot,
   reserveBuySkipSlot,
   reservePersonalisedTrendSlot,
+  hasManageableBillingAccount,
   type EffectiveContextDeps,
   type EntitledSubscription,
   type RunReservationFn,
@@ -862,5 +863,39 @@ describe("PH2-17 — AccessRevocation denies every one of the five paid-feature 
   it("resolveEffectiveContext itself reports zero VTO allowance under revocation — the fifth feature, VTO, has no dedicated reserve*Slot function and is gated through checkEntitlement's own prisma.virtualTryOnJob.count comparison instead (see entitlement-revocation-gate.test.ts RG.2 for the real end-to-end proof against a mocked prisma; checkEntitlement's vto branch makes a real DB count this file's own no-real-Prisma convention does not cover)", async () => {
     const ctx = await resolveEffectiveContext(CUSTOMER_ID, "MEMBER", revokedDeps);
     assert.equal(ctx.allowances.vtoPerMonth, 0);
+  });
+});
+
+// ── 18 — Subscribe-vs-Manage-Membership billing eligibility (correctness
+// review, 2026-11-14): hasManageableBillingAccount mirrors api.billing-
+// portal.tsx's own eligibility check exactly (most recent Subscription
+// row, any status, non-null providerCustomerId) — deliberately independent
+// of membershipStatus/effectiveMembershipStatus, since those answer a
+// different question (current entitlement) than this one (does a real
+// billing account exist to manage).
+describe("PH2-18 — hasManageableBillingAccount mirrors api.billing-portal.tsx's own eligibility check exactly", () => {
+  it("returns false when the finder reports no usable providerCustomerId — covers both real-world causes (zero Subscription rows ever, or a row with providerCustomerId null) identically, since this function only ever sees the finder's return value, never which case produced it", async () => {
+    const result = await hasManageableBillingAccount(CUSTOMER_ID, {
+      findMostRecentProviderCustomerId: async () => null,
+    });
+    assert.equal(result, false);
+  });
+
+  it("returns true when the most recent Subscription row has a providerCustomerId, regardless of its status", async () => {
+    const result = await hasManageableBillingAccount(CUSTOMER_ID, {
+      findMostRecentProviderCustomerId: async () => "cus_real123",
+    });
+    assert.equal(result, true);
+  });
+
+  it("defaults to a real, isolated query — most-recent-first, no status filter, selecting only providerCustomerId", () => {
+    const entSvc = readFile("app/lib/plan/entitlement.server.ts");
+    const fn = entSvc.slice(
+      entSvc.indexOf("async function defaultFindMostRecentProviderCustomerId"),
+      entSvc.indexOf("\n}", entSvc.indexOf("async function defaultFindMostRecentProviderCustomerId")),
+    );
+    assert.match(fn, /prisma\.subscription\.findFirst/);
+    assert.match(fn, /orderBy:\s*\{\s*createdAt:\s*"desc"\s*\}/, "must take the most recent row, matching api.billing-portal.tsx exactly");
+    assert.doesNotMatch(fn, /where:\s*\{[^}]*status/, "must not filter by status — a real billing account behind a CANCELED/EXPIRED/INCOMPLETE row still counts");
   });
 });

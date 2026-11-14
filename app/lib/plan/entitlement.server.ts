@@ -503,6 +503,42 @@ export interface EntitlementSummary {
   // redirect banner (my-naia.plan-usage.tsx's own checkoutOutcome) already
   // covers the immediate post-checkout case on its own.
   billingAlert: { status: "PAST_DUE"; graceDaysRemaining: number } | { status: "PAYMENT_PENDING" } | null;
+  // Whether this customer has a real Stripe billing relationship to
+  // manage — a Subscription row (any status) with a providerCustomerId —
+  // computed with the EXACT same check api.billing-portal.tsx itself
+  // performs before opening the portal, so this field and that route's
+  // own no_billing_account outcome can never disagree. Deliberately
+  // independent of effectiveMembershipStatus/membershipStatus above: a
+  // customer can be entitled with no billing account to manage (a stale
+  // cache with no real subscription — the Subscribe-vs-Manage bug this
+  // field exists to close) or have a real billing account with no CURRENT
+  // entitlement (e.g. a canceled subscription they may still want to view
+  // invoices for, or resume). Subscribe-vs-Manage-Membership must be
+  // decided from THIS field, never from membership tier.
+  hasBillingAccount: boolean;
+}
+
+// Mirrors api.billing-portal.tsx's own eligibility check exactly (most
+// recent Subscription row, any status, non-null providerCustomerId) — a
+// separate dedicated query, not reused from resolveEffectiveContext's
+// `subscription`, because that one is deliberately restricted to
+// ACTIVE/PAST_DUE-and-not-revoked and would miss a real billing account
+// behind a CANCELED/EXPIRED/INCOMPLETE subscription.
+async function defaultFindMostRecentProviderCustomerId(customerId: string): Promise<string | null> {
+  const sub = await prisma.subscription.findFirst({
+    where: { customerId },
+    orderBy: { createdAt: "desc" },
+    select: { providerCustomerId: true },
+  });
+  return sub?.providerCustomerId ?? null;
+}
+
+export async function hasManageableBillingAccount(
+  customerId: string,
+  deps: { findMostRecentProviderCustomerId?: (customerId: string) => Promise<string | null> } = {},
+): Promise<boolean> {
+  const find = deps.findMostRecentProviderCustomerId ?? defaultFindMostRecentProviderCustomerId;
+  return (await find(customerId)) !== null;
 }
 
 // ── Main function ──────────────────────────────────────────────────────────────
@@ -511,8 +547,10 @@ export async function getEntitlementSummary(
   customerId: string,
   membershipStatus: MembershipStatus,
   _contextDeps: EffectiveContextDeps = {},
+  _billingAccountDeps: { findMostRecentProviderCustomerId?: (customerId: string) => Promise<string | null> } = {},
 ): Promise<EntitlementSummary> {
   const { window, countingEnd, allowances, subscription, effectiveMembershipStatus } = await resolveEffectiveContext(customerId, membershipStatus, _contextDeps);
+  const hasBillingAccount = await hasManageableBillingAccount(customerId, _billingAccountDeps);
   // getCurrentSubscription (inside resolveEffectiveContext) only ever
   // returns an ACTIVE/PAST_DUE row — an INCOMPLETE one (a Checkout attempt
   // via an asynchronous payment method still waiting to clear) is
@@ -606,6 +644,7 @@ export async function getEntitlementSummary(
   return {
     membershipStatus,
     effectiveMembershipStatus,
+    hasBillingAccount,
     windowLabel: window.label,
     billingAlert,
 
