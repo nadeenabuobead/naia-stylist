@@ -4,11 +4,14 @@
 // (full-look-tryon-real.server.ts) — that module's own mechanics (submit-
 // then-poll, idempotent resume, per-step VirtualTryOnJob persistence) are
 // reused entirely unmodified. This file only decides:
-//   - which 3 of a real OutfitSuggestion's items become the chain's 3
-//     garments (selectFullLookGarments)
+//   - which (3-FULL_LOOK_MAX_GARMENTS) of a real OutfitSuggestion's items
+//     become the chain's garments (selectFullLookGarments)
 //   - what reservationScope to use so a page refresh resumes the SAME
-//     attempt, while an explicit retry after failure gets a genuinely new
-//     one (resolveCurrentAttemptScope / startNewAttemptScope)
+//     attempt, an explicit retry after failure gets a genuinely new one,
+//     and a plain start whose latest attempt already died (or whose
+//     garment selection has genuinely changed) gets a fresh one too,
+//     automatically (resolveCurrentAttemptScope / startNewAttemptScope /
+//     startFullLookOutfit's own terminal-state check)
 //   - automatically continuing past the chain's one human-review pause,
 //     so a real customer sees one continuous generation (advanceAutomatically)
 //   - finding an already-completed result so revisiting never regenerates
@@ -21,11 +24,13 @@
 // full-look-tryon-real.server.ts directly, with their own fixed test-only
 // reservationScope — this module is never imported by either.
 
+import { createHash } from "node:crypto";
 import prisma from "../../db.server.js";
 import {
   startOrResumeFullLookChain,
   advanceFullLookChain,
   continueToFinalStep,
+  walkFullLookChainJobs,
   REAL_PRODUCT_HANDLE_PREFIX,
   type FullLookChainContext,
   type FullLookRealGarmentInput,
@@ -67,6 +72,15 @@ const CATEGORY_PRIORITY: readonly OutfitItemType[] = [
 export interface SelectableOutfitItem extends Omit<ResolvableOutfitItem, "closetItem"> {
   itemType: OutfitItemType;
   productTitle: string | null;
+  // Stable identities (2026-11-15) — present on every real OutfitItem row
+  // (Prisma scalars, not something this interface invents). Used to detect
+  // when "the same suggestion" has genuinely different pieces now (a
+  // closet item was swapped, or a wider category set now resolves more of
+  // them) — see computeGarmentFingerprint below. Neither is required: a
+  // caller that can't supply them (none currently) still gets a
+  // deterministic fingerprint via the image-URL fallback.
+  closetItemId?: string | null;
+  shopifyProductId?: string | null;
   closetItem?: {
     name: string | null;
     imageUrl?: string | null;
@@ -85,6 +99,30 @@ export interface GarmentSelectionResult {
   // Requirement: nAia must disclose this, never present the result as if
   // it were the complete recommended look. Empty when nothing was omitted.
   omittedLabels: string[];
+  // 2026-11-15 — a short, stable identity for THIS exact chosen garment
+  // set, baked into the reservation scope (see scopeFor) so a chain whose
+  // garments have genuinely changed — e.g. a wider category set now
+  // resolving boots/a cap that an older code version excluded — can never
+  // resume a prior, incompatible attempt's data. Two calls with the same
+  // chosen pieces (by stable id, or by image URL when no id exists) always
+  // produce the same fingerprint; any real change to WHICH pieces were
+  // chosen produces a different one.
+  fingerprint: string;
+}
+
+function garmentIdentityKey(item: SelectableOutfitItem): string {
+  const stableId = item.closetItemId ?? item.shopifyProductId ?? null;
+  // Falls back to the image URL (captures "version" too — a replaced
+  // closet photo gets a new URL) when no catalog/closet id is present.
+  return stableId ? `id:${stableId}` : `img:${item.productImageUrl ?? item.closetItem?.imageUrl ?? ""}`;
+}
+
+export function computeGarmentFingerprint(chosen: readonly SelectableOutfitItem[]): string {
+  const identity = chosen.map(garmentIdentityKey).join("|");
+  // Short, fixed-length hash — keeps the reservation scope (and therefore
+  // the idempotencyKey it feeds into) bounded regardless of how many
+  // pieces or how long their identities are.
+  return createHash("sha256").update(identity).digest("hex").slice(0, 16);
 }
 
 // Fewer than 3 resolvable items (category match AND a real image) → null.
@@ -116,7 +154,7 @@ export function selectFullLookGarments(
     garments.push({ label, productImageUrl: imageUrl });
   }
   const omittedLabels = omitted.map((item) => item.productTitle ?? item.closetItem?.name ?? item.itemType);
-  return { garments, omittedLabels };
+  return { garments, omittedLabels, fingerprint: computeGarmentFingerprint(chosen) };
 }
 
 // ── Attempt scope — retry-safe idempotency ───────────────────────────────────
@@ -136,31 +174,52 @@ export function selectFullLookGarments(
 // server-computed from DB state, never trusting a client-supplied scope —
 // the one hard invariant FullLookChainContext.reservationScope's own doc
 // comment requires.
+//
+// 2026-11-15 — fingerprint is now baked into the scope string itself (not
+// used to filter this count). The numeric index only needs to be unique
+// PER FINGERPRINT, and it already is: two different fingerprints can
+// freely compute the same numeric index without ever colliding, because
+// the full scope string ("{suggestionId}:a{index}:{fingerprint}")
+// differs. This is also what fixes the real QA bug: an outfit resolved
+// under an older code version (fewer eligible categories, e.g. 3 pieces)
+// has a DIFFERENT fingerprint than the same outfit resolved now (5
+// pieces) — so the new request can never find, and therefore can never
+// resume or replay, that old, incompatible chain's data. It simply
+// computes a fresh scope and starts fresh, with no special-case
+// comparison logic required.
 async function countAttempts(customerId: string, outfitSuggestionId: string): Promise<number> {
   return prisma.virtualTryOnJob.count({
     where: { customerId, outfitSuggestionId, productHandle: { startsWith: STEP1_HANDLE_PREFIX } },
   });
 }
 
-function scopeFor(outfitSuggestionId: string, attemptIndex: number): string {
-  return `${outfitSuggestionId}:a${attemptIndex}`;
+function scopeFor(outfitSuggestionId: string, attemptIndex: number, fingerprint: string): string {
+  return `${outfitSuggestionId}:a${attemptIndex}:${fingerprint}`;
 }
 
 // Resume (the default for every page load / poll): reuse the LATEST
 // existing attempt, or attempt 0 if none exists yet. Never creates a new
 // attempt on its own — only startNewAttemptScope does that.
-export async function resolveCurrentAttemptScope(customerId: string, outfitSuggestionId: string): Promise<string> {
+export async function resolveCurrentAttemptScope(
+  customerId: string,
+  outfitSuggestionId: string,
+  fingerprint: string,
+): Promise<string> {
   const count = await countAttempts(customerId, outfitSuggestionId);
   const latestIndex = Math.max(0, count - 1);
-  return scopeFor(outfitSuggestionId, latestIndex);
+  return scopeFor(outfitSuggestionId, latestIndex, fingerprint);
 }
 
 // Retry: only ever called explicitly, after the customer's current
 // attempt reached FAILED. One past the latest existing attempt — by
 // construction, this can never collide with a dead key.
-export async function startNewAttemptScope(customerId: string, outfitSuggestionId: string): Promise<string> {
+export async function startNewAttemptScope(
+  customerId: string,
+  outfitSuggestionId: string,
+  fingerprint: string,
+): Promise<string> {
   const count = await countAttempts(customerId, outfitSuggestionId);
-  return scopeFor(outfitSuggestionId, count);
+  return scopeFor(outfitSuggestionId, count, fingerprint);
 }
 
 // ── Auto-advance ──────────────────────────────────────────────────────────────
@@ -222,13 +281,44 @@ async function advanceAutomatically(ctx: FullLookChainContext): Promise<Orchestr
   }
 }
 
+// A chain in one of these statuses can never advance again on its own —
+// resuming it for an EXPLICIT start would just replay the same dead
+// failure forever. COMPLETED is deliberately excluded: that's handled by
+// findCompletedFullLookForSuggestion before this function is ever called,
+// and advanceFullLookChain's own COMPLETED detection handles it correctly
+// regardless — this set exists only to detect "nothing more will ever
+// happen here," not "something happened here."
+const TERMINAL_DEAD_STATUSES = new Set(["FAILED", "CANCELED", "TIMED_OUT"]);
+
 export async function startFullLookOutfit(
   baseCtx: Omit<FullLookChainContext, "reservationScope">,
+  fingerprint: string,
   opts: { forceNewAttempt?: boolean } = {},
 ): Promise<OrchestratorStatus> {
-  const scope = opts.forceNewAttempt
-    ? await startNewAttemptScope(baseCtx.customerId, baseCtx.outfitSuggestionId)
-    : await resolveCurrentAttemptScope(baseCtx.customerId, baseCtx.outfitSuggestionId);
+  let scope = opts.forceNewAttempt
+    ? await startNewAttemptScope(baseCtx.customerId, baseCtx.outfitSuggestionId, fingerprint)
+    : await resolveCurrentAttemptScope(baseCtx.customerId, baseCtx.outfitSuggestionId, fingerprint);
+
+  // 2026-11-15 REGRESSION FIX — a plain (non-retry) explicit start used to
+  // unconditionally resume whatever the latest matching-fingerprint
+  // attempt was, even if it had already reached a dead terminal state —
+  // silently replaying an old failure instead of giving this click a real
+  // attempt. Checked via a pure DB read (walkFullLookChainJobs — no FASHN
+  // I/O, no cost) and ONLY on an explicit, non-retry start: a passive GET
+  // poll (pollFullLookOutfit, below) must keep reporting the true FAILED
+  // state so the UI's "Try Again" affordance stays meaningful, not
+  // auto-retry behind the customer's back. forceNewAttempt is excluded
+  // here too — it already computes a genuinely new scope unconditionally,
+  // so this check would be redundant (and the existingJobs read for the
+  // brand-new scope would always be empty anyway).
+  if (!opts.forceNewAttempt) {
+    const existingJobs = await walkFullLookChainJobs(baseCtx.customerId, undefined, scope);
+    const lastJob = existingJobs[existingJobs.length - 1];
+    if (lastJob && TERMINAL_DEAD_STATUSES.has(lastJob.status)) {
+      scope = await startNewAttemptScope(baseCtx.customerId, baseCtx.outfitSuggestionId, fingerprint);
+    }
+  }
+
   const ctx: FullLookChainContext = { ...baseCtx, reservationScope: scope };
 
   const start = await startOrResumeFullLookChain(ctx);
@@ -238,8 +328,9 @@ export async function startFullLookOutfit(
 
 export async function pollFullLookOutfit(
   baseCtx: Omit<FullLookChainContext, "reservationScope">,
+  fingerprint: string,
 ): Promise<OrchestratorStatus> {
-  const scope = await resolveCurrentAttemptScope(baseCtx.customerId, baseCtx.outfitSuggestionId);
+  const scope = await resolveCurrentAttemptScope(baseCtx.customerId, baseCtx.outfitSuggestionId, fingerprint);
   const ctx: FullLookChainContext = { ...baseCtx, reservationScope: scope };
   return advanceAutomatically(ctx);
 }
