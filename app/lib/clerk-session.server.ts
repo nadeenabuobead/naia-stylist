@@ -27,46 +27,15 @@
 import { createClerkClient } from "@clerk/backend";
 import { redirect } from "react-router";
 import prisma from "~/db.server";
+import { DatabaseUnavailableError, withTransientRetry } from "./prisma-transient-retry.server";
 
-const TRANSIENT_PRISMA_ERROR_CODES = new Set([
-  "P1001", // Can't reach database server
-  "P1002", // The database server was reached but timed out
-  "P1008", // Operations timed out
-  "P1017", // Server has closed the connection
-  // Correction (2026-11-13, live staging incident): connection-pool
-  // exhaustion arrives as a PrismaClientKnownRequestError WITH this stable
-  // code in this Prisma version (6.19.2) — not, as previously assumed
-  // below, only as a codeless PrismaClientInitializationError. Both checks
-  // are kept: this code-based one catches the real shape; the name+regex
-  // fallback below is harmless to leave in case an older/different code
-  // path still produces that shape.
-  "P2024", // Timed out fetching a new connection from the connection pool
-]);
-
-// Same typed-error contract naia-session.server.ts established for exactly
-// this reason: a transient DB failure while resolving the Clerk user's
-// Customer row must never be collapsed into "not signed in" — that would
-// bounce a genuinely-authenticated customer into sign-in again just because
-// the database had a bad moment. See naia-session-db-resilience.test.ts for
-// the original regression this guards against, and
-// clerk-session-db-resilience.test.ts for this module's own version.
-export class DatabaseUnavailableError extends Error {
-  constructor(cause: unknown) {
-    super("Database temporarily unavailable");
-    this.name = "DatabaseUnavailableError";
-    this.cause = cause;
-  }
-}
-
-function isTransientDatabaseError(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false;
-  const code = (error as { code?: string }).code;
-  if (code && TRANSIENT_PRISMA_ERROR_CODES.has(code)) return true;
-  const name = (error as { name?: string }).name;
-  const message = (error as { message?: string }).message ?? "";
-  if (name === "PrismaClientInitializationError" && /connection pool/i.test(message)) return true;
-  return false;
-}
+// Re-exported for every existing caller/test that imports
+// DatabaseUnavailableError from this file directly — same class reference
+// as naia-session.server.ts's own re-export, consolidated in
+// prisma-transient-retry.server.ts. See that file's header for why this is
+// a plain retry-wrapper function rather than a global Prisma Client
+// extension.
+export { DatabaseUnavailableError };
 
 let _clerkClient: ReturnType<typeof createClerkClient> | null = null;
 
@@ -123,22 +92,23 @@ export async function resolveClerkUserId(request: Request, deps: ClerkAuthDeps =
 // checkout/payment logic that runs AFTER this resolves, which is where any
 // real side effect would live. A plain SELECT by unique key is naturally
 // idempotent, so retrying it can never create a duplicate write, a second
-// upload, or a second charge.
-const TRANSIENT_RETRY_DELAY_MS = 200;
-
-function defaultSleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+// upload, or a second charge. Retry mechanics live in
+// prisma-transient-retry.server.ts, shared with naia-session.server.ts.
 
 export interface GetCurrentNaiaCustomerDeps extends ClerkAuthDeps {
   _sleep?: (ms: number) => Promise<void>;
 }
 
+function lookupCustomerByClerkUserId(clerkUserId: string) {
+  return prisma.customer.findUnique({
+    where: { clerkUserId },
+    include: { onboardingProfile: true },
+  });
+}
+
 export async function getCurrentNaiaCustomer(request: Request, deps: GetCurrentNaiaCustomerDeps = {}) {
   const clerkUserId = await resolveClerkUserId(request, deps);
   if (!clerkUserId) return null;
-
-  const sleep = deps._sleep ?? defaultSleep;
 
   // No linked Customer row is a real, non-error outcome — see this file's
   // own header comment. Returning null here (rather than throwing) is what
@@ -146,26 +116,17 @@ export async function getCurrentNaiaCustomer(request: Request, deps: GetCurrentN
   // through requireCurrentNaiaCustomer's normal "not signed in" branch,
   // which the sign-up callback route then routes onward correctly instead
   // of every other route in the app having to special-case it.
-  const lookup = () =>
-    prisma.customer.findUnique({
-      where: { clerkUserId },
-      include: { onboardingProfile: true },
-    });
-
-  try {
-    return await lookup();
-  } catch (firstError) {
-    if (!isTransientDatabaseError(firstError)) throw firstError;
-
-    await sleep(TRANSIENT_RETRY_DELAY_MS);
-
-    try {
-      return await lookup();
-    } catch (secondError) {
-      if (isTransientDatabaseError(secondError)) throw new DatabaseUnavailableError(secondError);
-      throw secondError;
-    }
-  }
+  //
+  // Explicit type argument, not inferred — see naia-session.server.ts's
+  // resolveNaiaSession for why: TypeScript's inference fails to resolve
+  // withTransientRetry's generic through this Prisma payload type when
+  // left implicit, silently collapsing the whole call site's type to `{}`
+  // with no runtime symptom — a typecheck-only failure, caught by diffing
+  // the typecheck baseline, confirmed in isolation before applying this fix.
+  return withTransientRetry<Awaited<ReturnType<typeof lookupCustomerByClerkUserId>>>(
+    () => lookupCustomerByClerkUserId(clerkUserId),
+    deps,
+  );
 }
 
 export async function requireCurrentNaiaCustomer(request: Request, deps: GetCurrentNaiaCustomerDeps = {}) {
