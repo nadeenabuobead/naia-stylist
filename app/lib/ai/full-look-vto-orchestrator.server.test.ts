@@ -213,6 +213,54 @@ describe("startFullLookOutfit / pollFullLookOutfit — auto-advance past the hum
     const ctxPassed = vi.mocked(startOrResumeFullLookChain).mock.calls[0][0];
     expect(ctxPassed.reservationScope).toBe("sugg-1:a1"); // new attempt, not a0 (the dead one)
   });
+
+  // 2026-11-15 — concurrency / credit-limit bypass review: a retry request
+  // computes a genuinely NEW reservationScope regardless of whether the
+  // customer's current attempt is still active, so this orchestration layer
+  // relies entirely on startOrResumeFullLookChain's own customer-wide
+  // active-job check (checkCustomerCooldown -> createOrFindTryOnJob's
+  // Serializable-transaction single-flight guarantee, shared unmodified
+  // with single-item VTO) to reject a new scope's step 0 while an older
+  // scope is still PROCESSING. This test proves THIS layer propagates that
+  // rejection as a hard ERROR rather than treating a new scope as license to
+  // proceed — no new job, no new credit-eligible chain, even though the
+  // scope itself computed successfully.
+  it("retrying while the current attempt is still ACTIVE (not yet failed) is rejected, not silently allowed to start a second concurrent chain", async () => {
+    mockCount().mockResolvedValue(1); // attempt a0 exists and is still PROCESSING — not yet failed
+    vi.mocked(startOrResumeFullLookChain).mockResolvedValueOnce({ ok: false, reason: "ACTIVE_JOB" });
+
+    const result = await startFullLookOutfit(BASE_CTX, { forceNewAttempt: true });
+
+    expect(result).toEqual({ status: "ERROR", reason: "ACTIVE_JOB" });
+    expect(advanceFullLookChain).not.toHaveBeenCalled();
+    // The new scope was computed (a1), but startOrResumeFullLookChain's own
+    // atomic guard — not this layer — is what actually blocked it.
+    const ctxPassed = vi.mocked(startOrResumeFullLookChain).mock.calls[0][0];
+    expect(ctxPassed.reservationScope).toBe("sugg-1:a1");
+  });
+
+  it("two concurrent calls racing to the SAME computed scope rely on the shared idempotency key, not a lock in this layer — both receive a coherent result, never a duplicate chain", async () => {
+    // Simulates createOrFindTryOnJob's own DB-unique-constraint outcome one
+    // level up: the winner gets a fresh PROCESSING chain, the loser's
+    // startOrResumeFullLookChain call resolves against the SAME row the
+    // winner just created (ok:true, same stepIndex) — never a second,
+    // independently-chargeable chain.
+    mockCount().mockResolvedValue(0);
+    vi.mocked(startOrResumeFullLookChain)
+      .mockResolvedValueOnce({ ok: true, stepIndex: 0 })
+      .mockResolvedValueOnce({ ok: true, stepIndex: 0 });
+    vi.mocked(advanceFullLookChain).mockResolvedValue({ status: "PROCESSING", stepIndex: 0 } as any);
+
+    const [a, b] = await Promise.all([
+      startFullLookOutfit(BASE_CTX),
+      startFullLookOutfit(BASE_CTX),
+    ]);
+
+    expect(a).toEqual({ status: "PROCESSING" });
+    expect(b).toEqual({ status: "PROCESSING" });
+    const scopes = vi.mocked(startOrResumeFullLookChain).mock.calls.map((c) => c[0].reservationScope);
+    expect(scopes).toEqual(["sugg-1:a0", "sugg-1:a0"]); // both requests converge on the same attempt, never two
+  });
 });
 
 // ── Existing-result lookup ───────────────────────────────────────────────────
