@@ -599,10 +599,10 @@ describe("BuyOrSkipResult — B5 does not alter the canonical verdict, and prese
 describe("BuyOrSkipResult — the analysis is already saved, independent of the outcome Save button", () => {
   it("shows the saved-confirmation note regardless of verdict", () => {
     const buyHtml = render({ verdict: "BUY", finalThought: "Great fit." });
-    expect(buyHtml).toContain("This look is saved to your My Decisions.");
+    expect(buyHtml).toContain("Saved to My Decisions.");
 
     const skipHtml = render({ verdict: "SKIP", finalThought: "Not quite right." });
-    expect(skipHtml).toContain("This look is saved to your My Decisions.");
+    expect(skipHtml).toContain("Saved to My Decisions.");
   });
 
   it("the note has its own data-testid, distinct from the outcome Save button", () => {
