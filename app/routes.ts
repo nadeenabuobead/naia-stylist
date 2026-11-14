@@ -220,7 +220,12 @@ export default [
   route("api/clerk-webhook", "routes/api.clerk-webhook.tsx"),
   // VTO M1 — customer-facing virtual try-on trigger
   route("api/trigger-tryon", "routes/api.trigger-tryon.tsx"),
-  // Full-look VTO — staging QA prototype only (blocked in production)
+  // Full-Look VTO — real, persisted (2026-11-14). Replaces the staging
+  // prototype below as the customer-facing trigger.
+  route("api/full-look-vto", "routes/api.full-look-vto.tsx"),
+  // Full-look VTO — staging QA prototype only (blocked in production).
+  // Kept registered for direct comparison/rollback; style-me/result.tsx
+  // no longer calls it once api/full-look-vto is wired in.
   route("api/staging-full-look-vto", "routes/api.staging-full-look-vto.tsx"),
   // VTO M2 — session-auth job status polling and result delivery
   route("api/tryon-status/:jobId", "routes/api.tryon-status.$jobId.tsx"),

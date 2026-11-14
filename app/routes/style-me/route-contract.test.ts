@@ -1181,10 +1181,15 @@ describe("StyleMe Result — Virtual Try-On customer UI", () => {
     assert.ok(text.includes("TRY THIS LOOK ON"), "customer CTA must render");
   });
 
-  it("VTO.5 — CTA invokes /api/staging-full-look-vto with the persisted suggestionId", () => {
+  it("VTO.5 — CTA invokes the real, persisted /api/full-look-vto with the persisted suggestionId", () => {
+    // 2026-11-14: the ephemeral staging prototype (/api/staging-full-look-vto,
+    // never persisted anything — see that route's own header) was replaced
+    // as the customer trigger by the real, persisted chain's orchestration
+    // route. api.staging-full-look-vto.tsx itself is untouched (VTO.10,
+    // below, still proves that) — this test only covers what result.tsx calls.
     const text = src("result.tsx");
-    assert.ok(text.includes('"/api/staging-full-look-vto"'), "must call existing VTO route");
-    assert.ok(text.includes("suggestionId: suggestion!.id"), "must pass persisted suggestionId");
+    assert.ok(text.includes('"/api/full-look-vto"'), "must call the real, persisted VTO route");
+    assert.ok(text.includes("outfitSuggestionId: suggestionId"), "must pass the persisted suggestionId");
     assert.ok(text.includes("virtualTryOnConsentAt: new Date().toISOString()"), "must include consent timestamp");
   });
 

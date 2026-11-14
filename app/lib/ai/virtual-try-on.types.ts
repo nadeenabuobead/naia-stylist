@@ -168,6 +168,10 @@ export interface VirtualTryOnJobRecord {
   updatedAt: Date;
   completedAt: Date | null;
   lastActivityAt: Date;
+  // Full-Look VTO persistence (2026-11-14) — set on every step of a
+  // full-look chain, null for the single-item flow and for every row
+  // written before this field existed.
+  outfitSuggestionId: string | null;
 }
 
 // ── My nAia Model readiness ───────────────────────────────────────────────────

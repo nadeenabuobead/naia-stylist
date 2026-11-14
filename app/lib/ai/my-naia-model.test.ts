@@ -93,6 +93,7 @@ function makeJob(overrides: Partial<VirtualTryOnJobRecord> = {}): VirtualTryOnJo
     updatedAt: new Date("2026-01-01"),
     completedAt: null,
     lastActivityAt: new Date("2026-01-01"),
+    outfitSuggestionId: null,
     ...overrides,
   };
 }
