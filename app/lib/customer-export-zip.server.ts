@@ -41,6 +41,24 @@ interface ExportImageRef {
   filename: string;
 }
 
+// Overrides compileCustomerExport's own `note` — which correctly describes
+// the JSON-only /settings export (a temporary signed link that expires) —
+// with wording accurate to what THIS export actually contains: real image
+// files already bundled in the archive, no link to chase. The JSON-only
+// export's own note is untouched; this only ever reaches the ZIP's data.json.
+const ZIP_NOTE =
+  "This export covers every record this application stores about you. " +
+  "Closet, My nAia Model (body photo only), and Virtual Try-On result " +
+  "photos are included as actual image files in this archive (see the " +
+  "images/ folder) — there is no link to follow or download separately. " +
+  "Any image that could not be bundled is listed in imageFetchFailures " +
+  "below. Your face/selfie photo reference is included as a storage " +
+  "identifier only, consistent with this app's stricter handling of face " +
+  "photos elsewhere. It does not include any copy that FASHN AI, " +
+  "Anthropic, or Bodygram may independently retain on their own systems — " +
+  "those are governed by each provider's own data retention policy, not by " +
+  "this application.";
+
 function countExportImages(exportData: CustomerExport): number {
   const closetCount = (exportData.closet as Array<{ downloadUrl?: string | null }>).filter(
     (c) => !!c.downloadUrl,
@@ -54,6 +72,43 @@ function countExportImages(exportData: CustomerExport): number {
   return closetCount + modelCount + vtoCount;
 }
 
+// Each personalised-edit snapshot's `evidenceClosetItems`/`routeInItems`/
+// `lookToTryItems` arrays carry a `closetItemId` + the short-lived signed
+// `imageUrl` that was live at generation time — see EvidenceClosetItem in
+// trend-evidence.server.ts. Left alone, those duplicate the exact same
+// Closet photos the ZIP already bundles under images/closet/, but as dead
+// links instead of the local file. This rewrites imageUrl to the matching
+// bundled filename (or null, if that Closet item was deleted since, or its
+// own image failed to fetch — see appendAll's imageFetchFailures) without
+// touching any other field, so the historical snapshot content (name,
+// category, roleNote, closetItemId) is preserved exactly as recorded.
+const EVIDENCE_ITEM_ARRAY_KEYS = ["evidenceClosetItems", "routeInItems", "lookToTryItems"] as const;
+
+function remapTrendEditSnapshotImages(
+  personalisedTrendEditUsage: unknown[],
+  closetFilenameById: Map<string, string>,
+): unknown[] {
+  return personalisedTrendEditUsage.map((row) => {
+    const usage = row as Record<string, unknown>;
+    const snapshot = usage.snapshot as Record<string, unknown> | null | undefined;
+    const edit = snapshot?.edit as Record<string, unknown> | undefined;
+    if (!snapshot || !edit) return usage;
+
+    const rewrittenEdit = { ...edit };
+    for (const key of EVIDENCE_ITEM_ARRAY_KEYS) {
+      const items = edit[key] as Array<Record<string, unknown>> | undefined;
+      if (!Array.isArray(items)) continue;
+      rewrittenEdit[key] = items.map((item) => {
+        const closetItemId = item.closetItemId as string | null;
+        const filename = closetItemId ? closetFilenameById.get(closetItemId) : undefined;
+        return { ...item, imageUrl: filename ?? null };
+      });
+    }
+
+    return { ...usage, snapshot: { ...snapshot, edit: rewrittenEdit } };
+  });
+}
+
 // Replaces each short-lived `downloadUrl` / `bodyDownloadUrl` field with
 // the ZIP-internal `filename` the image will be saved under — a link that
 // expires in minutes has no business inside a permanent offline archive.
@@ -65,6 +120,7 @@ function planImages(exportData: CustomerExport): {
 } {
   const images: ExportImageRef[] = [];
 
+  const closetFilenameById = new Map<string, string>();
   const closet = (
     exportData.closet as Array<Record<string, unknown> & { id: string; downloadUrl?: string | null; imageFormat?: string | null }>
   ).map((item) => {
@@ -73,6 +129,7 @@ function planImages(exportData: CustomerExport): {
     const ext = item.imageFormat || "jpg";
     const filename = `images/closet/${item.id}.${ext}`;
     images.push({ url: downloadUrl, filename });
+    closetFilenameById.set(item.id, filename);
     return { ...rest, filename };
   });
 
@@ -97,7 +154,15 @@ function planImages(exportData: CustomerExport): {
     return { ...rest, filename };
   });
 
-  return { data: { ...exportData, closet, naiaModel, virtualTryOnJobs }, images };
+  const personalisedTrendEditUsage = remapTrendEditSnapshotImages(
+    exportData.personalisedTrendEditUsage,
+    closetFilenameById,
+  );
+
+  return {
+    data: { ...exportData, closet, naiaModel, virtualTryOnJobs, personalisedTrendEditUsage, note: ZIP_NOTE },
+    images,
+  };
 }
 
 export interface BuildExportZipDeps {

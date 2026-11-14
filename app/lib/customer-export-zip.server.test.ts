@@ -211,6 +211,170 @@ describe("buildCustomerExportZip", () => {
     await expect(streamToBuffer(result.stream)).rejects.toThrow();
   });
 
+  it("remaps personalisedTrendEditUsage snapshot imageUrls to the bundled Closet filename, preserving all other snapshot content", async () => {
+    vi.mocked(compileCustomerExport).mockResolvedValueOnce(
+      baseExport({
+        closet: [
+          { id: "closet-1", imageFormat: "jpg", downloadUrl: "https://cdn.example/closet-1" } as any,
+        ],
+        personalisedTrendEditUsage: [
+          {
+            id: "usage-1",
+            reportSlug: "spring-2026",
+            periodKey: "2026-11",
+            snapshot: {
+              schemaVersion: "trend-edit-snapshot-v1",
+              reportSlug: "spring-2026",
+              reportTitle: "Spring 2026",
+              generatedAt: "2026-11-01T00:00:00.000Z",
+              edit: {
+                subTitle: "Your version",
+                evidenceClosetItems: [
+                  {
+                    name: "Navy Blazer",
+                    imageUrl: "https://res.cloudinary.com/signed/closet-1-stale",
+                    closetItemId: "closet-1",
+                    category: "outerwear",
+                    roleNote: "already yours",
+                  },
+                ],
+                routeInItems: [
+                  {
+                    name: "Navy Blazer",
+                    imageUrl: "https://res.cloudinary.com/signed/closet-1-stale",
+                    closetItemId: "closet-1",
+                    category: "outerwear",
+                    roleNote: "route in",
+                  },
+                ],
+                lookToTryItems: [
+                  {
+                    name: "Deleted Item",
+                    imageUrl: "https://res.cloudinary.com/signed/deleted-stale",
+                    closetItemId: "closet-deleted",
+                    category: "tops",
+                    roleNote: "look to try",
+                  },
+                ],
+              },
+              nadineRecommendation: { imageUrl: "https://cdn.shopify.com/product.jpg" },
+            },
+          },
+        ],
+      }) as any,
+    );
+
+    const _fetch = vi.fn(async () => ({
+      ok: true,
+      arrayBuffer: async () => new TextEncoder().encode("bytes").buffer,
+    })) as unknown as typeof fetch;
+
+    const result = await buildCustomerExportZip("cust-1", { _fetch });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected ok result");
+
+    const zipBuffer = await streamToBuffer(result.stream);
+    const zipPath = writeZipToTmp(zipBuffer);
+    const json = JSON.parse(readZipEntry(zipPath, "data.json"));
+
+    const [usage] = json.personalisedTrendEditUsage;
+    const [evidenceItem] = usage.snapshot.edit.evidenceClosetItems;
+    const [routeInItem] = usage.snapshot.edit.routeInItems;
+    const [lookToTryItem] = usage.snapshot.edit.lookToTryItems;
+
+    // Items whose closetItemId is still bundled point at the local filename...
+    expect(evidenceItem.imageUrl).toBe("images/closet/closet-1.jpg");
+    expect(routeInItem.imageUrl).toBe("images/closet/closet-1.jpg");
+    // ...an item whose Closet item no longer exists (nothing bundled under
+    // that id) gets null, never the stale dead link...
+    expect(lookToTryItem.imageUrl).toBeNull();
+    // ...a product-catalog image (not a customer photo, nothing bundled for
+    // it) is untouched — it was never a Closet-photo duplicate to begin with.
+    expect(usage.snapshot.nadineRecommendation.imageUrl).toBe("https://cdn.shopify.com/product.jpg");
+
+    // Every other field on the snapshot/items is preserved exactly.
+    expect(evidenceItem.name).toBe("Navy Blazer");
+    expect(evidenceItem.category).toBe("outerwear");
+    expect(evidenceItem.roleNote).toBe("already yours");
+    expect(evidenceItem.closetItemId).toBe("closet-1");
+    expect(usage.snapshot.reportTitle).toBe("Spring 2026");
+    expect(usage.snapshot.edit.subTitle).toBe("Your version");
+
+    // No stale signed Cloudinary link survives anywhere in the export.
+    expect(JSON.stringify(json)).not.toContain("res.cloudinary.com/signed");
+  });
+
+  it("leaves personalisedTrendEditUsage rows with no snapshot (legacy/no-snapshot rows) completely untouched", async () => {
+    vi.mocked(compileCustomerExport).mockResolvedValueOnce(
+      baseExport({
+        personalisedTrendEditUsage: [
+          { id: "usage-legacy", reportSlug: "old-report", periodKey: "2026-01", snapshot: null },
+        ],
+      }) as any,
+    );
+
+    const result = await buildCustomerExportZip("cust-1", { _fetch: vi.fn() });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected ok result");
+
+    const zipBuffer = await streamToBuffer(result.stream);
+    const zipPath = writeZipToTmp(zipBuffer);
+    const json = JSON.parse(readZipEntry(zipPath, "data.json"));
+    expect(json.personalisedTrendEditUsage).toEqual([
+      { id: "usage-legacy", reportSlug: "old-report", periodKey: "2026-01", snapshot: null },
+    ]);
+  });
+
+  it("describes the ZIP's actual bundled-files behaviour in its note, not the JSON-only export's expiring-link wording", async () => {
+    vi.mocked(compileCustomerExport).mockResolvedValueOnce(
+      baseExport({ note: "This export's images expire shortly after generation — download them separately." }) as any,
+    );
+
+    const result = await buildCustomerExportZip("cust-1", { _fetch: vi.fn() });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected ok result");
+
+    const zipBuffer = await streamToBuffer(result.stream);
+    const zipPath = writeZipToTmp(zipBuffer);
+    const json = JSON.parse(readZipEntry(zipPath, "data.json"));
+
+    expect(json.note).not.toContain("expire");
+    expect(json.note).not.toContain("download them separately");
+    expect(json.note).toContain("included as actual image files in this archive");
+  });
+
+  it("contains no auth tokens, credentials, or internal secrets anywhere in the ZIP's data.json", async () => {
+    vi.mocked(compileCustomerExport).mockResolvedValueOnce(
+      baseExport({
+        loginSessions: [
+          { id: "sess-1", createdAt: "2026-11-01T00:00:00.000Z", lastSeenAt: null, expiresAt: null, userAgent: "test-agent" },
+        ],
+        identityLinkRequests: [
+          { id: "link-1", email: "shopper@example.com", attemptCount: 1, expiresAt: null, confirmedAt: null, createdAt: "2026-11-01T00:00:00.000Z" },
+        ],
+      }) as any,
+    );
+
+    const result = await buildCustomerExportZip("cust-1", { _fetch: vi.fn() });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected ok result");
+
+    const zipBuffer = await streamToBuffer(result.stream);
+    const zipPath = writeZipToTmp(zipBuffer);
+    const json = JSON.parse(readZipEntry(zipPath, "data.json"));
+
+    // loginSessions/identityLinkRequests already come pre-scrubbed out of
+    // compileCustomerExport (see customer-privacy.server.ts) — this proves
+    // the ZIP path doesn't reintroduce anything beyond what it was given.
+    const raw = JSON.stringify(json);
+    for (const forbidden of ["sessionTokenHash", "idToken", "oneTimeCodeHash", "password", "secret", "Bearer "]) {
+      expect(raw).not.toContain(forbidden);
+    }
+    expect(json.loginSessions[0]).toEqual({
+      id: "sess-1", createdAt: "2026-11-01T00:00:00.000Z", lastSeenAt: null, expiresAt: null, userAgent: "test-agent",
+    });
+  });
+
   it("cross-customer isolation: the exact customerId passed in is the only one ever queried — never widened, never a second customer's id", async () => {
     vi.mocked(compileCustomerExport).mockResolvedValueOnce(baseExport() as any);
     await buildCustomerExportZip("cust-A", { _fetch: vi.fn() });
