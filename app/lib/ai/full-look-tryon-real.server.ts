@@ -399,7 +399,16 @@ export async function submitFullLookRealStep(
   stepIndex: number,
   priorJobId: string | null,
 ): Promise<SubmitStepResult> {
+  // 2026-11-15 — defense in depth. This is the actual site a missing
+  // ctx.garments[stepIndex] used to crash with a raw TypeError (see
+  // api.full-look-vto.tsx's GET loader regression, fixed the same day):
+  // every caller is responsible for passing the real garments the chain
+  // was started with, but a future caller making the same mistake must
+  // fail closed with a normal SubmitStepResult, never an unhandled throw.
   const garment = ctx.garments[stepIndex];
+  if (!garment) {
+    return { ok: false, reason: "missing_garment_for_step" };
+  }
   const idempotencyKey = getFullLookStepIdempotencyKey(ctx.customerId, stepIndex, priorJobId, ctx.reservationScope);
 
   const jobResult = await createOrFindTryOnJob({

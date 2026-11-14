@@ -97,13 +97,33 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const naiaModel = await loadNaiaModel(customer.id);
   if (!naiaModel) return data({ ok: true, status: "NOT_STARTED" }, { headers: { "Cache-Control": "no-store" } });
 
+  // 2026-11-15 REGRESSION FIX — garments are NOT "only read by start/submit".
+  // advanceFullLookChain auto-advances to the next step the instant the
+  // current one completes (per the founder's "progress through all garment
+  // steps automatically" decision), and that auto-advance calls
+  // submitFullLookRealStep(ctx, nextIndex, ...), which reads
+  // ctx.garments[nextIndex] to build the FASHN submission. A poll is exactly
+  // when that auto-advance fires — passing [] here crashed every single
+  // poll once the first step completed (TypeError: Cannot read properties
+  // of undefined (reading 'label')), which made every real Full-Look
+  // attempt appear to hang forever. Re-derive the same real garments the
+  // POST action used to start this chain, the same way.
+  const cloudinaryConfig = getCloudinaryConfig();
+  const garments = selectFullLookGarments(
+    suggestion.items as unknown as SelectableOutfitItem[],
+    { customerId: customer.id, cloudinaryConfig },
+  );
+  if (!garments) {
+    return serverError("This look's try-on–eligible pieces could not be resolved while resuming.");
+  }
+
   const result = await pollFullLookOutfit({
     customerId: customer.id,
     naiaModelId: naiaModel.id,
     bodyPublicId: naiaModel.bodyPublicId,
     bodyFormat: naiaModel.bodyFormat,
     deliveryType: naiaModel.deliveryType,
-    garments: [], // unused by advance/poll — only start/submit reads garments
+    garments,
     consent: { virtualTryOnConsent: true, policyVersion: "1.0", consentedAt: new Date().toISOString() },
     outfitSuggestionId: suggestionId,
   });

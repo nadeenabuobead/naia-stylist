@@ -213,6 +213,22 @@ describe("walkFullLookChainJobs", () => {
 // ── submitFullLookRealStep ───────────────────────────────────────────────────
 
 describe("submitFullLookRealStep", () => {
+  // 2026-11-15 REGRESSION — a caller passing a ctx with no garment for this
+  // step (e.g. api.full-look-vto.tsx's GET loader, which used to pass
+  // garments: [] on the mistaken belief that only start/submit ever reads
+  // them — auto-advance mid-poll reads them too) used to throw a raw
+  // TypeError ("Cannot read properties of undefined (reading 'label')"),
+  // which crashed every poll once the chain's current step completed and
+  // made every real attempt appear to hang forever. Must fail closed with
+  // a normal result instead, with zero provider/DB I/O.
+  it("FL.9b — a missing garment for this step index fails closed with missing_garment_for_step, never throws", async () => {
+    const ctx = { ...baseCtx(), garments: [baseCtx().garments[0]] }; // only 1 garment; step 1 has none
+    const result = await submitFullLookRealStep(ctx, 1, "job-0");
+    expect(result).toEqual({ ok: false, reason: "missing_garment_for_step" });
+    expect(mockCreateOrFind()).not.toHaveBeenCalled();
+    expect(mockSubmitProvider()).not.toHaveBeenCalled();
+  });
+
   it("FL.9 — step 0 downloads the real model photo, submits (POST-only), advances to PROCESSING", async () => {
     const job = fakeJob("job-0");
     mockCreateOrFind().mockResolvedValue({ ok: true, job, created: true });

@@ -191,3 +191,36 @@ describe("FL10 — the staging prototype route is untouched and kept for rollbac
     assert.ok(!/import[^;]*staging-full-look-vto/.test(route));
   });
 });
+
+// 2026-11-15 REGRESSION FIX — the GET loader used to pass garments: [] to
+// pollFullLookOutfit on the mistaken belief that advance/poll never reads
+// them. advanceFullLookChain's auto-advance-to-next-step DOES read
+// ctx.garments[nextIndex] the moment the current step completes — which is
+// exactly when a poll fires — so every real attempt crashed on its very
+// next poll after the first step finished, making generation look
+// permanently stuck. Fixed by having the loader re-derive the same real
+// garments selectFullLookGarments produced when the chain was started.
+describe("FL11 — the GET loader resolves real garments for poll/resume, never an empty array", () => {
+  it("loader calls selectFullLookGarments on the loaded suggestion's items, the same way the action does", () => {
+    const loaderBody = route.split("export async function loader")[1].split("export async function action")[0];
+    assert.ok(
+      loaderBody.includes("selectFullLookGarments(\n    suggestion.items"),
+      "loader must resolve garments from the owned suggestion, not pass an empty array",
+    );
+  });
+
+  it("loader passes the resolved garments (not a literal empty array) into pollFullLookOutfit", () => {
+    const loaderBody = route.split("export async function loader")[1].split("export async function action")[0];
+    const pollCallIdx = loaderBody.indexOf("pollFullLookOutfit(");
+    const pollCallArgs = loaderBody.slice(pollCallIdx, pollCallIdx + 400);
+    assert.ok(pollCallArgs.includes("garments,"));
+    assert.ok(!pollCallArgs.includes("garments: []"));
+  });
+
+  it("an unresolvable garment set on poll/resume returns a controlled server error, never lets the raw chain functions run with bad input", () => {
+    const loaderBody = route.split("export async function loader")[1].split("export async function action")[0];
+    const garmentsCheckIdx = loaderBody.indexOf("if (!garments)");
+    const pollCallIdx = loaderBody.indexOf("pollFullLookOutfit(");
+    assert.ok(garmentsCheckIdx !== -1 && garmentsCheckIdx < pollCallIdx, "garments must be validated before being used to poll");
+  });
+});
