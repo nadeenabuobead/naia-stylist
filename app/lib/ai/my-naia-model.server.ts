@@ -774,6 +774,9 @@ export interface CreateJobParams {
   virtualTryOnConsentAt: Date;
   saveTryOnResultConsentAt?: Date | null;
   idempotencyKey: string;
+  // Omitted by the single-item flow (defaults to null, byte-identical to
+  // before this field existed). Set by the full-look chain on every step.
+  outfitSuggestionId?: string | null;
 }
 
 export async function createOrFindTryOnJob(
@@ -814,6 +817,7 @@ export async function createOrFindTryOnJob(
     errorCode: null,
     completedAt: null,
     lastActivityAt: now,
+    outfitSuggestionId: params.outfitSuggestionId ?? null,
   };
 
   for (let attempt = 0; attempt <= MAX_TX_RETRIES; attempt++) {

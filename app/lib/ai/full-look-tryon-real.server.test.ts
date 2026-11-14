@@ -87,6 +87,7 @@ function baseCtx(): FullLookChainContext {
     deliveryType: "private",
     garments: GARMENTS,
     consent: CONSENT,
+    outfitSuggestionId: "suggestion-1",
   };
 }
 

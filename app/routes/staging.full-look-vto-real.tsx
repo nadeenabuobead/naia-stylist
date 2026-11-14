@@ -209,6 +209,11 @@ async function loaderImpl({ request }: LoaderFunctionArgs) {
     finalStepPrompt: FINAL_STEP_VISUAL_PROMPT,
     finalStepGenerationMode: FINAL_STEP_GENERATION_MODE,
     reservationScope: getReservationScope(),
+    // Internal QA harness, not a real saved look — no genuine
+    // OutfitSuggestion exists to link to. A fixed, clearly-named
+    // placeholder, never confused with a real cuid (OutfitSuggestion.id's
+    // own format), and never read for any ownership/security decision.
+    outfitSuggestionId: "staging-harness-no-suggestion",
   };
 
   const result = await advanceFullLookChain(ctx);
@@ -383,6 +388,11 @@ async function actionImpl({ request }: ActionFunctionArgs) {
       finalStepPrompt: FINAL_STEP_VISUAL_PROMPT,
       finalStepGenerationMode: FINAL_STEP_GENERATION_MODE,
       reservationScope: getReservationScope(),
+    // Internal QA harness, not a real saved look — no genuine
+    // OutfitSuggestion exists to link to. A fixed, clearly-named
+    // placeholder, never confused with a real cuid (OutfitSuggestion.id's
+    // own format), and never read for any ownership/security decision.
+    outfitSuggestionId: "staging-harness-no-suggestion",
     };
 
     const continueResult = await continueToFinalStep(continueCtx);
@@ -447,6 +457,11 @@ async function actionImpl({ request }: ActionFunctionArgs) {
     finalStepPrompt: FINAL_STEP_VISUAL_PROMPT,
     finalStepGenerationMode: FINAL_STEP_GENERATION_MODE,
     reservationScope: getReservationScope(),
+    // Internal QA harness, not a real saved look — no genuine
+    // OutfitSuggestion exists to link to. A fixed, clearly-named
+    // placeholder, never confused with a real cuid (OutfitSuggestion.id's
+    // own format), and never read for any ownership/security decision.
+    outfitSuggestionId: "staging-harness-no-suggestion",
   };
 
   const result = await startOrResumeFullLookChain(ctx);

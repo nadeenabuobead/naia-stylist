@@ -1821,6 +1821,17 @@ model VirtualTryOnJob {
   // on convention to keep test traffic out of real quota counts later.
   isTest Boolean @default(false)
 
+  // 2026-11-14 — Full-Look VTO persistence. Set on every step of a full-look
+  // chain (not just the final one), so an abandoned/retry attempt can be
+  // found and counted by suggestion without parsing idempotencyKey strings.
+  // Null for every existing row and for the single-item flow, which never
+  // sets this. No hard FK — OutfitSuggestion rows can be deleted
+  // independently (e.g. a customer removing a saved look) without needing
+  // to cascade into try-on history; a dangling reference here just means
+  // "this job's suggestion no longer exists," checked at read time by the
+  // surfaces that display it, never assumed valid.
+  outfitSuggestionId String?
+
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   completedAt    DateTime?
@@ -1828,6 +1839,7 @@ model VirtualTryOnJob {
 
   @@index([customerId])
   @@index([customerId, status])
+  @@index([outfitSuggestionId])
 }
 
 // Customer feedback on a single nAia First Read observation.

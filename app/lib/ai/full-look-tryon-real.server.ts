@@ -322,6 +322,16 @@ export interface FullLookChainContext {
   // (fashn-tryon-service.server.ts) — production idempotency there is
   // completely unaffected by this field's existence.
   reservationScope?: string;
+  // 2026-11-14 — the StyleMe OutfitSuggestion this chain is generating a
+  // full-look try-on for. Set on every step's VirtualTryOnJob row (not
+  // just the final one) so an in-progress or abandoned chain can be found
+  // by suggestion without parsing idempotencyKey strings. Required: every
+  // real customer-facing chain originates from a saved suggestion; the
+  // internal staging harness that doesn't have one passes a synthetic
+  // staging-only placeholder (see staging.full-look-vto-real.tsx), which
+  // is fine — this value is never used for ownership/security decisions,
+  // only for linking a completed result back to a display surface.
+  outfitSuggestionId: string;
 }
 
 // ── Walk the chain via deterministic keys — no new schema ───────────────────
@@ -392,6 +402,7 @@ export async function submitFullLookRealStep(
     bodyPublicId: ctx.bodyPublicId,
     virtualTryOnConsentAt: new Date(ctx.consent.consentedAt),
     idempotencyKey,
+    outfitSuggestionId: ctx.outfitSuggestionId,
   });
 
   if (!jobResult.ok) {
