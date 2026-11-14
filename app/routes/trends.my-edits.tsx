@@ -55,8 +55,20 @@ type CardItem = {
   isCurrentPeriod: boolean; // true only when publishedAt falls in the server's actual current month
 };
 
-type LoaderData = {
+// One real calendar month's worth of editorial content. Multiple reports can
+// legitimately share a periodKey (e.g. several reports all dated in the same
+// month, before a genuine monthly cadence existed) — grouping by periodKey,
+// not one-card-per-report, is what stops that from being displayed as if
+// each report were its own separate monthly edition.
+type MonthGroup = {
+  periodKey: string | null; // null when the report's publishedAt didn't parse
+  monthLabel: string;
+  isCurrentPeriod: boolean;
   cards: CardItem[];
+};
+
+type LoaderData = {
+  groups: MonthGroup[];
   hasProfile: boolean;
 };
 
@@ -91,7 +103,23 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
     };
   });
 
-  return { cards, hasProfile: evidence.hasProfile };
+  // Group consecutive cards sharing the same real periodKey. Cards already
+  // arrive newest-first, so each group's own order (and the overall group
+  // order) is preserved — this only merges adjacent same-month cards, it
+  // never reorders or re-labels anything.
+  const groups: MonthGroup[] = [];
+  for (const report of reports) {
+    const periodKey = reportPeriodKey(report.publishedAt);
+    const card = cards.find((c) => c.slug === report.slug)!;
+    const lastGroup = groups[groups.length - 1];
+    if (lastGroup && lastGroup.periodKey === periodKey) {
+      lastGroup.cards.push(card);
+    } else {
+      groups.push({ periodKey, monthLabel: card.monthLabel, isCurrentPeriod: card.isCurrentPeriod, cards: [card] });
+    }
+  }
+
+  return { groups, hasProfile: evidence.hasProfile };
 }
 
 const TINTS = ["#efeae0", "#e6dccb", "#d9c9b5", "#efe6d7", "#e2d3bf", "#ede2cf"];
@@ -191,24 +219,38 @@ const css = `
     margin-bottom: 20px;
   }
 
-  /* ── Featured (current month) ────────────────────────────────────
-     QA fix (2026-11-13): the approved design shows the current month's
-     edit prominently, with previous months below as an archive — the
-     flat equal-weight grid every card used to render in gave no visual
-     distinction between "this month" and "the archive." Reuses every
-     existing .tme-card-* part (num/top/dot/title/subtitle/locked/cta);
-     only the outer sizing differs. */
-  .tme-featured {
-    aspect-ratio: auto;
-    min-height: 220px;
-    padding: 32px;
-    margin-bottom: 36px;
+  /* ── Siblings — other reports sharing the featured card's own month ──
+     Smaller than the featured card but distinguished from the archive
+     grid below (different section, different heading) — these are NOT
+     "previous editions"; they are more content from the SAME month. */
+  .tme-siblings-label {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 0.85rem;
+    font-style: italic;
+    color: rgba(26,17,9,0.55);
+    margin: 0 0 12px;
   }
-  @media (min-width: 1024px) { .tme-featured { min-height: 260px; } }
-  .tme-featured .tme-card-num { font-size: clamp(9rem, 12vw, 12rem); }
-  .tme-featured .tme-card-title { font-size: clamp(1.75rem, 3vw, 2.5rem); margin-bottom: 16px; }
-  .tme-featured .tme-card-subtitle,
-  .tme-featured .tme-card-locked { font-size: 1rem; max-width: 40rem; }
+  .tme-siblings-grid {
+    display: grid;
+    gap: 14px;
+    margin-bottom: 28px;
+  }
+  @media (min-width: 640px) { .tme-siblings-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (min-width: 1024px) { .tme-siblings-grid { grid-template-columns: repeat(3, 1fr); } }
+
+  /* ── Archive month grouping ───────────────────────────────────────
+     Each past month gets its own small label before its own row of
+     cards, so multiple reports from one past month read as "more from
+     that month," not as separate months. */
+  .tme-archive-month {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.6rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: rgba(26,17,9,0.5);
+    margin: 24px 0 12px;
+  }
+  .tme-archive-month:first-of-type { margin-top: 0; }
 
   /* ── Card grid (archive) ──────────────────────────────────────── */
   .tme-grid {
@@ -231,6 +273,31 @@ const css = `
     aspect-ratio: 4 / 5;
   }
   .tme-card:hover { transform: translateY(-4px); }
+
+  /* ── Featured (current month) ────────────────────────────────────
+     QA fix (2026-11-13): shows the current month's edit prominently,
+     with previous months below as an archive.
+     QA fix (2026-11-14): the first compact pass (min-height 220-260px)
+     still read as oversized — large empty vertical space and an
+     oversized background numeral pushed the CTA below the fold
+     on mobile. This version sizes to content instead of a forced
+     min-height, and shrinks the decorative numeral so it reads as a
+     texture, not a headline. Reuses every existing .tme-card-* part
+     (num/top/dot/title/subtitle/locked/cta); only the outer sizing
+     differs. Must come AFTER .tme-card above — both are single-class
+     selectors, so without this ordering .tme-card's aspect-ratio: 4/5
+     silently wins the cascade and this override does nothing. */
+  .tme-featured {
+    aspect-ratio: auto;
+    padding: 22px 24px;
+    margin-bottom: 28px;
+  }
+  .tme-featured .tme-card-num { font-size: clamp(3.5rem, 5vw, 5rem); top: -6px; right: -4px; }
+  .tme-featured .tme-card-title { font-size: clamp(1.3rem, 2vw, 1.6rem); margin-bottom: 8px; }
+  .tme-featured .tme-card-subtitle,
+  .tme-featured .tme-card-locked { font-size: 0.92rem; max-width: 40rem; margin-bottom: 12px; }
+  .tme-featured .tme-card-top { margin-bottom: 4px; }
+
   .tme-card-num {
     position: absolute;
     right: -16px;
@@ -394,12 +461,16 @@ function TrendEditCard({ card, index, featured }: { card: CardItem; index: numbe
 }
 
 export default function MyTrendEdits() {
-  const { cards, hasProfile } = useLoaderData() as LoaderData;
-  // Cards arrive newest-first (loader sorts by publishedAt desc) — the
-  // first card is the latest edit, shown prominently; everything after it
-  // is the archive. Only labelled "this month's edit" when its own
-  // publishedAt genuinely falls in the current calendar month (isCurrentPeriod).
-  const [currentCard, ...archiveCards] = cards;
+  const { groups, hasProfile } = useLoaderData() as LoaderData;
+  // Groups arrive newest-month-first (loader groups cards by periodKey,
+  // preserving the loader's own newest-first card order) — the first
+  // group is the latest month's content. Within that group, the first
+  // card is featured; any OTHER cards in the same group are siblings from
+  // the same month, not separate "previous editions." Only groups strictly
+  // after the first are a real archive of earlier months.
+  const [currentGroup, ...archiveGroups] = groups;
+  const [currentCard, ...siblingCards] = currentGroup?.cards ?? [];
+  const totalCards = groups.reduce((n, g) => n + g.cards.length, 0);
 
   return (
     <MyNaiaLayout compact>
@@ -415,7 +486,7 @@ export default function MyTrendEdits() {
 
         <div className="tme-divider" />
 
-        {cards.length === 0 ? (
+        {totalCards === 0 ? (
           <div className="tme-empty">
             <p className="tme-empty-title">your trend edits<br /><em>are on their way.</em></p>
             <p className="tme-empty-sub">
@@ -436,21 +507,37 @@ export default function MyTrendEdits() {
             )}
 
             <div className="tme-section-eyebrow">
-              {currentCard.isCurrentPeriod
-                ? (hasProfile ? `This month's edit — ${currentCard.monthLabel}` : `Available now — ${currentCard.monthLabel}`)
-                : `Latest edit — ${currentCard.monthLabel}`}
+              {currentGroup.isCurrentPeriod
+                ? (hasProfile ? `This month's edit — ${currentGroup.monthLabel}` : `Available now — ${currentGroup.monthLabel}`)
+                : `Latest edit — ${currentGroup.monthLabel}`}
             </div>
 
             <TrendEditCard card={currentCard} index={0} featured />
 
-            {archiveCards.length > 0 && (
+            {siblingCards.length > 0 && (
               <>
-                <div className="tme-section-eyebrow">Previous editions</div>
-                <div className="tme-grid">
-                  {archiveCards.map((card, i) => (
+                <p className="tme-siblings-label">Also published in {currentGroup.monthLabel}:</p>
+                <div className="tme-siblings-grid">
+                  {siblingCards.map((card, i) => (
                     <TrendEditCard key={card.slug} card={card} index={i + 1} featured={false} />
                   ))}
                 </div>
+              </>
+            )}
+
+            {archiveGroups.length > 0 && (
+              <>
+                <div className="tme-section-eyebrow">Previous editions</div>
+                {archiveGroups.map((group) => (
+                  <div key={group.periodKey ?? group.monthLabel}>
+                    <div className="tme-archive-month">{group.monthLabel}</div>
+                    <div className="tme-grid">
+                      {group.cards.map((card, i) => (
+                        <TrendEditCard key={card.slug} card={card} index={i} featured={false} />
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </>
             )}
           </>

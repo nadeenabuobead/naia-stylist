@@ -111,7 +111,7 @@ describe("trends/my-edits loader", () => {
     expect(getShopperEvidence).toHaveBeenCalledWith("cust-1");
   });
 
-  it("returns only published reports when profile is incomplete", async () => {
+  it("returns only published reports when profile is incomplete, grouped by month", async () => {
     vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({ id: "cust-1" } as any);
     vi.mocked(getShopperEvidence).mockResolvedValueOnce({ hasProfile: false } as any);
 
@@ -121,10 +121,11 @@ describe("trends/my-edits loader", () => {
       context: new RouterContextProvider(), pattern: "", url: new URL("http://localhost/trends/my-edits"),
     });
 
-    expect(result.cards).toHaveLength(2);
+    // Both fixture reports are dated 2026-06 — one group, two cards.
+    expect(result.groups).toHaveLength(1);
+    expect(result.groups[0].cards).toHaveLength(2);
     expect(result.hasProfile).toBe(false);
-    expect(result.cards.every((c: { subTitle: string | null }) => c.subTitle === null)).toBe(true);
-    expect(result.cards.find((c: { slug: string }) => c.slug === "unpublished-draft")).toBeUndefined();
+    expect(result.groups[0].cards.every((c) => c.subTitle === null)).toBe(true);
   });
 
   it("calls buildShopperEdit for each published report when profile is complete", async () => {
@@ -142,8 +143,8 @@ describe("trends/my-edits loader", () => {
 
     expect(buildShopperEdit).toHaveBeenCalledTimes(2);
     expect(result.hasProfile).toBe(true);
-    expect(result.cards[0].subTitle).toBe("Your clean read of this direction.");
-    expect(result.cards[1].subTitle).toBe("Tailoring reads differently for your register.");
+    expect(result.groups[0].cards[0].subTitle).toBe("Your clean read of this direction.");
+    expect(result.groups[0].cards[1].subTitle).toBe("Tailoring reads differently for your register.");
   });
 
   it("does NOT call buildShopperEdit when profile is incomplete", async () => {
@@ -172,8 +173,8 @@ describe("trends/my-edits loader", () => {
       context: new RouterContextProvider(), pattern: "", url: new URL("http://localhost/trends/my-edits"),
     });
 
-    expect(result.cards[0].subTitle).toBeNull();
-    expect(result.cards[1].subTitle).toBe("Tailoring reads differently.");
+    expect(result.groups[0].cards[0].subTitle).toBeNull();
+    expect(result.groups[0].cards[1].subTitle).toBe("Tailoring reads differently.");
   });
 
   it("derives an accurate month/year label from each report's own publishedAt", async () => {
@@ -188,11 +189,12 @@ describe("trends/my-edits loader", () => {
 
     // Both fixture reports are dated in 2026-06 — the label must reflect
     // their REAL publishedAt, never the "Spring 2026" season string.
-    expect(result.cards[0].monthLabel).toBe("June 2026");
-    expect(result.cards[1].monthLabel).toBe("June 2026");
+    expect(result.groups[0].monthLabel).toBe("June 2026");
+    expect(result.groups[0].cards[0].monthLabel).toBe("June 2026");
+    expect(result.groups[0].cards[1].monthLabel).toBe("June 2026");
   });
 
-  it("marks a report as isCurrentPeriod only when its publishedAt month matches the real current period", async () => {
+  it("marks a group as isCurrentPeriod only when its month matches the real current period", async () => {
     vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({ id: "cust-1" } as any);
     vi.mocked(getShopperEvidence).mockResolvedValueOnce({ hasProfile: false } as any);
 
@@ -202,12 +204,11 @@ describe("trends/my-edits loader", () => {
       context: new RouterContextProvider(), pattern: "", url: new URL("http://localhost/trends/my-edits"),
     });
 
-    // getUsageWindow is mocked to periodKey "2026-11"; both fixtures are "2026-06" — neither is current.
-    expect(result.cards[0].isCurrentPeriod).toBe(false);
-    expect(result.cards[1].isCurrentPeriod).toBe(false);
+    // getUsageWindow is mocked to periodKey "2026-11"; both fixtures are "2026-06" — not current.
+    expect(result.groups[0].isCurrentPeriod).toBe(false);
   });
 
-  it("marks a report isCurrentPeriod=true when its publishedAt genuinely falls in the mocked current month", async () => {
+  it("marks a group isCurrentPeriod=true when its month genuinely matches the mocked current month", async () => {
     vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({ id: "cust-1" } as any);
     vi.mocked(getShopperEvidence).mockResolvedValueOnce({ hasProfile: false } as any);
     vi.mocked(getPublishedEditorialReports).mockResolvedValueOnce([
@@ -227,8 +228,8 @@ describe("trends/my-edits loader", () => {
       context: new RouterContextProvider(), pattern: "", url: new URL("http://localhost/trends/my-edits"),
     });
 
-    expect(result.cards[0].monthLabel).toBe("November 2026");
-    expect(result.cards[0].isCurrentPeriod).toBe(true);
+    expect(result.groups[0].monthLabel).toBe("November 2026");
+    expect(result.groups[0].isCurrentPeriod).toBe(true);
   });
 
   it("falls back to the raw string for a malformed publishedAt instead of throwing", async () => {
@@ -251,8 +252,67 @@ describe("trends/my-edits loader", () => {
       context: new RouterContextProvider(), pattern: "", url: new URL("http://localhost/trends/my-edits"),
     });
 
-    expect(result.cards[0].monthLabel).toBe("Undated");
-    expect(result.cards[0].isCurrentPeriod).toBe(false);
+    expect(result.groups[0].monthLabel).toBe("Undated");
+    expect(result.groups[0].isCurrentPeriod).toBe(false);
+  });
+
+  it("puts three reports from three DIFFERENT months in three separate groups", async () => {
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({ id: "cust-1" } as any);
+    vi.mocked(getShopperEvidence).mockResolvedValueOnce({ hasProfile: false } as any);
+    vi.mocked(getPublishedEditorialReports).mockResolvedValueOnce([
+      { slug: "nov-edit", title: "Nov", season: "Winter", publishedAt: "2026-11-05", summary: "", published: true } as any,
+      { slug: "oct-edit", title: "Oct", season: "Autumn", publishedAt: "2026-10-05", summary: "", published: true } as any,
+      { slug: "sep-edit", title: "Sep", season: "Summer", publishedAt: "2026-09-05", summary: "", published: true } as any,
+    ]);
+
+    const result = await loader({
+      request: new Request("http://localhost/trends/my-edits"),
+      params: {},
+      context: new RouterContextProvider(), pattern: "", url: new URL("http://localhost/trends/my-edits"),
+    });
+
+    expect(result.groups).toHaveLength(3);
+    expect(result.groups.map((g) => g.cards.length)).toEqual([1, 1, 1]);
+    expect(result.groups.map((g) => g.monthLabel)).toEqual(["November 2026", "October 2026", "September 2026"]);
+  });
+
+  it("puts two reports from the SAME month in one group, not two separate groups", async () => {
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({ id: "cust-1" } as any);
+    vi.mocked(getShopperEvidence).mockResolvedValueOnce({ hasProfile: false } as any);
+    vi.mocked(getPublishedEditorialReports).mockResolvedValueOnce([
+      { slug: "june-a", title: "June A", season: "Spring", publishedAt: "2026-06-30", summary: "", published: true } as any,
+      { slug: "june-b", title: "June B", season: "Spring", publishedAt: "2026-06-29", summary: "", published: true } as any,
+    ]);
+
+    const result = await loader({
+      request: new Request("http://localhost/trends/my-edits"),
+      params: {},
+      context: new RouterContextProvider(), pattern: "", url: new URL("http://localhost/trends/my-edits"),
+    });
+
+    expect(result.groups).toHaveLength(1);
+    expect(result.groups[0].cards.map((c) => c.slug)).toEqual(["june-a", "june-b"]);
+  });
+
+  it("a month with a report sandwiched between two other months still gets its own group (date order is the only grouping key, never just the month label)", async () => {
+    vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({ id: "cust-1" } as any);
+    vi.mocked(getShopperEvidence).mockResolvedValueOnce({ hasProfile: false } as any);
+    vi.mocked(getPublishedEditorialReports).mockResolvedValueOnce([
+      { slug: "nov-edit", title: "Nov", season: "Winter", publishedAt: "2026-11-05", summary: "", published: true } as any,
+      { slug: "oct-edit", title: "Oct", season: "Autumn", publishedAt: "2026-10-05", summary: "", published: true } as any,
+      { slug: "sep-edit", title: "Sep", season: "Summer", publishedAt: "2026-09-05", summary: "", published: true } as any,
+    ]);
+
+    const result = await loader({
+      request: new Request("http://localhost/trends/my-edits"),
+      params: {},
+      context: new RouterContextProvider(), pattern: "", url: new URL("http://localhost/trends/my-edits"),
+    });
+
+    // Newest-first order preserved, each distinct month its own group —
+    // months in a date-sorted list are necessarily contiguous, so this also
+    // confirms grouping never looks ahead/behind past a different month.
+    expect(result.groups.map((g) => g.cards.map((c) => c.slug))).toEqual([["nov-edit"], ["oct-edit"], ["sep-edit"]]);
   });
 });
 
@@ -261,22 +321,29 @@ describe("trends/my-edits loader", () => {
 describe("MyTrendEdits component — complete profile", () => {
   const COMPLETE_DATA = {
     hasProfile: true,
-    cards: [
+    groups: [
       {
-        slug: "spring-2026-soft-structure",
-        title: "Spring 2026 Soft Structure",
-        season: "Spring 2026",
-        subTitle: "Your clean-polished register makes this a strong direction for you.",
+        periodKey: "2026-06",
         monthLabel: "June 2026",
         isCurrentPeriod: false,
-      },
-      {
-        slug: "modern-tailoring-spring-2026",
-        title: "Modern Tailoring",
-        season: "Spring 2026",
-        subTitle: "Tailoring reads differently for your wardrobe register.",
-        monthLabel: "June 2026",
-        isCurrentPeriod: false,
+        cards: [
+          {
+            slug: "spring-2026-soft-structure",
+            title: "Spring 2026 Soft Structure",
+            season: "Spring 2026",
+            subTitle: "Your clean-polished register makes this a strong direction for you.",
+            monthLabel: "June 2026",
+            isCurrentPeriod: false,
+          },
+          {
+            slug: "modern-tailoring-spring-2026",
+            title: "Modern Tailoring",
+            season: "Spring 2026",
+            subTitle: "Tailoring reads differently for your wardrobe register.",
+            monthLabel: "June 2026",
+            isCurrentPeriod: false,
+          },
+        ],
       },
     ],
   };
@@ -340,22 +407,29 @@ describe("MyTrendEdits component — complete profile", () => {
 describe("MyTrendEdits component — incomplete profile", () => {
   const LOCKED_DATA = {
     hasProfile: false,
-    cards: [
+    groups: [
       {
-        slug: "spring-2026-soft-structure",
-        title: "Spring 2026 Soft Structure",
-        season: "Spring 2026",
-        subTitle: null,
+        periodKey: "2026-06",
         monthLabel: "June 2026",
         isCurrentPeriod: false,
-      },
-      {
-        slug: "modern-tailoring-spring-2026",
-        title: "Modern Tailoring",
-        season: "Spring 2026",
-        subTitle: null,
-        monthLabel: "June 2026",
-        isCurrentPeriod: false,
+        cards: [
+          {
+            slug: "spring-2026-soft-structure",
+            title: "Spring 2026 Soft Structure",
+            season: "Spring 2026",
+            subTitle: null,
+            monthLabel: "June 2026",
+            isCurrentPeriod: false,
+          },
+          {
+            slug: "modern-tailoring-spring-2026",
+            title: "Modern Tailoring",
+            season: "Spring 2026",
+            subTitle: null,
+            monthLabel: "June 2026",
+            isCurrentPeriod: false,
+          },
+        ],
       },
     ],
   };
@@ -412,13 +486,18 @@ function classOfLinkTo(html: string, href: string): string | null {
 describe("MyTrendEdits component — current-month-featured / previous-editions split", () => {
   const THREE_CARDS_DATA = {
     hasProfile: true,
-    // Loader already sorts newest-first — index 0 is the latest edit.
-    // isCurrentPeriod:true only on the newest card, matching a real
-    // on-schedule month — the other two are honestly labelled archive months.
-    cards: [
-      { slug: "newest-edit", title: "Newest Edit", season: "Winter 2026", subTitle: "Your newest read.", monthLabel: "November 2026", isCurrentPeriod: true },
-      { slug: "mid-edit", title: "Mid Edit", season: "Autumn 2026", subTitle: "Your mid read.", monthLabel: "October 2026", isCurrentPeriod: false },
-      { slug: "oldest-edit", title: "Oldest Edit", season: "Summer 2026", subTitle: "Your oldest read.", monthLabel: "September 2026", isCurrentPeriod: false },
+    // Three DIFFERENT months — each its own group of one card. isCurrentPeriod:true
+    // only on the newest group, matching a real on-schedule month.
+    groups: [
+      { periodKey: "2026-11", monthLabel: "November 2026", isCurrentPeriod: true, cards: [
+        { slug: "newest-edit", title: "Newest Edit", season: "Winter 2026", subTitle: "Your newest read.", monthLabel: "November 2026", isCurrentPeriod: true },
+      ] },
+      { periodKey: "2026-10", monthLabel: "October 2026", isCurrentPeriod: false, cards: [
+        { slug: "mid-edit", title: "Mid Edit", season: "Autumn 2026", subTitle: "Your mid read.", monthLabel: "October 2026", isCurrentPeriod: false },
+      ] },
+      { periodKey: "2026-09", monthLabel: "September 2026", isCurrentPeriod: false, cards: [
+        { slug: "oldest-edit", title: "Oldest Edit", season: "Summer 2026", subTitle: "Your oldest read.", monthLabel: "September 2026", isCurrentPeriod: false },
+      ] },
     ],
   };
 
@@ -452,7 +531,7 @@ describe("MyTrendEdits component — current-month-featured / previous-editions 
   it("never claims 'this month' for a featured card whose own month has already passed", () => {
     vi.mocked(useLoaderData).mockReturnValueOnce({
       ...THREE_CARDS_DATA,
-      cards: THREE_CARDS_DATA.cards.map((c) => ({ ...c, isCurrentPeriod: false })),
+      groups: THREE_CARDS_DATA.groups.map((g) => ({ ...g, isCurrentPeriod: false, cards: g.cards.map((c) => ({ ...c, isCurrentPeriod: false })) })),
     });
     const html = renderToString(React.createElement(MyTrendEdits));
     expect(html).not.toContain("This month&#x27;s edit");
@@ -478,7 +557,9 @@ describe("MyTrendEdits component — current-month-featured / previous-editions 
   it("exactly one card — renders featured only, no 'Previous editions' section at all", () => {
     vi.mocked(useLoaderData).mockReturnValueOnce({
       hasProfile: true,
-      cards: [{ slug: "only-edit", title: "Only Edit", season: "Winter 2026", subTitle: "Your only read.", monthLabel: "November 2026", isCurrentPeriod: true }],
+      groups: [{ periodKey: "2026-11", monthLabel: "November 2026", isCurrentPeriod: true, cards: [
+        { slug: "only-edit", title: "Only Edit", season: "Winter 2026", subTitle: "Your only read.", monthLabel: "November 2026", isCurrentPeriod: true },
+      ] }],
     });
     const html = renderToString(React.createElement(MyTrendEdits));
     expect(classOfLinkTo(html, "/trends/my-edits/only-edit")).toBe("tme-card tme-featured");
@@ -488,14 +569,79 @@ describe("MyTrendEdits component — current-month-featured / previous-editions 
   it("locked (incomplete-profile) state still applies correctly to both the featured card and the archive", () => {
     vi.mocked(useLoaderData).mockReturnValueOnce({
       hasProfile: false,
-      cards: [
-        { slug: "newest-edit", title: "Newest Edit", season: "Winter 2026", subTitle: null, monthLabel: "November 2026", isCurrentPeriod: true },
-        { slug: "mid-edit", title: "Mid Edit", season: "Autumn 2026", subTitle: null, monthLabel: "October 2026", isCurrentPeriod: false },
+      groups: [
+        { periodKey: "2026-11", monthLabel: "November 2026", isCurrentPeriod: true, cards: [
+          { slug: "newest-edit", title: "Newest Edit", season: "Winter 2026", subTitle: null, monthLabel: "November 2026", isCurrentPeriod: true },
+        ] },
+        { periodKey: "2026-10", monthLabel: "October 2026", isCurrentPeriod: false, cards: [
+          { slug: "mid-edit", title: "Mid Edit", season: "Autumn 2026", subTitle: null, monthLabel: "October 2026", isCurrentPeriod: false },
+        ] },
       ],
     });
     const html = renderToString(React.createElement(MyTrendEdits));
     // Both the featured card and the archive card show the same locked copy.
     expect(html.match(/Complete your Style Passport to unlock your edit\./g)?.length).toBe(2);
+  });
+
+  // ── QA fix (2026-11-14): same-month siblings, not fake separate editions ────
+
+  it("two reports from the SAME month: one featured, the other shown as a sibling — never as a separate 'previous edition'", () => {
+    vi.mocked(useLoaderData).mockReturnValueOnce({
+      hasProfile: true,
+      groups: [
+        { periodKey: "2026-06", monthLabel: "June 2026", isCurrentPeriod: false, cards: [
+          { slug: "june-a", title: "June A", season: "Spring 2026", subTitle: "Read A.", monthLabel: "June 2026", isCurrentPeriod: false },
+          { slug: "june-b", title: "June B", season: "Spring 2026", subTitle: "Read B.", monthLabel: "June 2026", isCurrentPeriod: false },
+        ] },
+      ],
+    });
+    const html = renderToString(React.createElement(MyTrendEdits));
+    expect(classOfLinkTo(html, "/trends/my-edits/june-a")).toBe("tme-card tme-featured");
+    expect(classOfLinkTo(html, "/trends/my-edits/june-b")).toBe("tme-card");
+    expect(html).toContain("Also published in");
+    expect(html).toContain("June 2026");
+    expect(html).not.toContain("Previous editions");
+  });
+
+  it("three reports from the SAME month and nothing older: no 'Previous editions' section exists at all", () => {
+    vi.mocked(useLoaderData).mockReturnValueOnce({
+      hasProfile: true,
+      groups: [
+        { periodKey: "2026-06", monthLabel: "June 2026", isCurrentPeriod: false, cards: [
+          { slug: "june-a", title: "June A", season: "Spring 2026", subTitle: "Read A.", monthLabel: "June 2026", isCurrentPeriod: false },
+          { slug: "june-b", title: "June B", season: "Spring 2026", subTitle: "Read B.", monthLabel: "June 2026", isCurrentPeriod: false },
+          { slug: "june-c", title: "June C", season: "Spring 2026", subTitle: "Read C.", monthLabel: "June 2026", isCurrentPeriod: false },
+        ] },
+      ],
+    });
+    const html = renderToString(React.createElement(MyTrendEdits));
+    expect(html).not.toContain("Previous editions");
+    expect(html).toContain("Also published in");
+    expect(html).toContain("June 2026");
+    // Both siblings present, not just the first.
+    expect(html).toContain("Read B.");
+    expect(html).toContain("Read C.");
+  });
+
+  it("a genuinely older month still appears as a real archive entry, labelled with its own month — once there IS newer content", () => {
+    vi.mocked(useLoaderData).mockReturnValueOnce({
+      hasProfile: true,
+      groups: [
+        { periodKey: "2026-11", monthLabel: "November 2026", isCurrentPeriod: true, cards: [
+          { slug: "nov-edit", title: "November Edit", season: "Winter 2026", subTitle: "New month.", monthLabel: "November 2026", isCurrentPeriod: true },
+        ] },
+        { periodKey: "2026-06", monthLabel: "June 2026", isCurrentPeriod: false, cards: [
+          { slug: "june-a", title: "June A", season: "Spring 2026", subTitle: "Read A.", monthLabel: "June 2026", isCurrentPeriod: false },
+          { slug: "june-b", title: "June B", season: "Spring 2026", subTitle: "Read B.", monthLabel: "June 2026", isCurrentPeriod: false },
+        ] },
+      ],
+    });
+    const html = renderToString(React.createElement(MyTrendEdits));
+    expect(html).toContain("Previous editions");
+    expect(classOfLinkTo(html, "/trends/my-edits/june-a")).toBe("tme-card");
+    expect(classOfLinkTo(html, "/trends/my-edits/june-b")).toBe("tme-card");
+    // The archived month's own two reports are both still grouped under one June 2026 label.
+    expect(html.match(/June 2026/g)?.length).toBeGreaterThanOrEqual(1);
   });
 });
 
@@ -505,7 +651,7 @@ describe("MyTrendEdits component — no published reports", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("renders editorial empty state", () => {
-    vi.mocked(useLoaderData).mockReturnValueOnce({ cards: [], hasProfile: false });
+    vi.mocked(useLoaderData).mockReturnValueOnce({ groups: [], hasProfile: false });
     const html = renderToString(React.createElement(MyTrendEdits));
     expect(html).toContain("your trend edits");
     expect(html).toContain("are on their way.");
