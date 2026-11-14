@@ -124,6 +124,19 @@ describe("createCheckoutSession — request shape", () => {
     assert.equal(parsed.get("line_items[0][price_data][recurring][interval]"), "month");
   });
 
+  it("SC.33 — sends tax_behavior=inclusive on the price AND automatic_tax.enabled=true, for both plan types — Founder Decision 18's fixed, tax-inclusive gross price requires BOTH, not either alone (verified against Stripe's own docs: tax_behavior is purely a presentation setting and calculates nothing without automatic_tax enabled)", async () => {
+    for (const planType of ["MONTHLY", "ANNUAL"] as const) {
+      const { fn, calls } = fakeFetch({ id: "cs_test_1", url: "https://checkout.stripe.com/x" });
+      await createCheckoutSession(
+        { customerId: "c", planType, amountMinorUnits: 3900, currency: "aed", successUrl: "https://x", cancelUrl: "https://y" },
+        { _fetch: fn, _getSecretKey: () => "sk_test_abc" },
+      );
+      const parsed = new URLSearchParams((calls[0].init.body as URLSearchParams).toString());
+      assert.equal(parsed.get("line_items[0][price_data][tax_behavior]"), "inclusive", `${planType}: price must be marked tax-inclusive`);
+      assert.equal(parsed.get("automatic_tax[enabled]"), "true", `${planType}: automatic_tax must be enabled or no tax is ever calculated at all`);
+    }
+  });
+
   it("SC.27 — expiresAtUnixSeconds is sent through as Stripe's expires_at param (concurrent-checkout protection, fix/stripe-clerk-phase1-security)", async () => {
     const { fn, calls } = fakeFetch({ id: "cs_test_1", url: "https://checkout.stripe.com/x" });
     await createCheckoutSession(

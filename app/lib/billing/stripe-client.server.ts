@@ -233,9 +233,40 @@ export async function createCheckoutSession(
             unit_amount: input.amountMinorUnits,
             recurring: { interval },
             product_data: { name: `nAia Stylist Membership — ${input.planType}` },
+            // Founder Decision 18: AED 39/month and AED 299/year are fixed,
+            // tax-inclusive gross prices — the customer's amount_total never
+            // moves regardless of what tax (if any) applies; a positive tax
+            // amount is backed OUT of this unit_amount, never added on top.
+            // Explicit here rather than relying on the account's Dashboard
+            // default (Tax Settings > "Include tax in prices"), since that
+            // default can change outside this code and this decision must
+            // not silently follow it.
+            tax_behavior: "inclusive",
           },
         },
       ],
+      // tax_behavior alone calculates nothing — verified against Stripe's
+      // own docs (docs.stripe.com/tax/products-prices-tax-codes-tax-
+      // behavior): it is purely a presentation setting for whatever tax
+      // Stripe Tax actually computes, and Stripe Tax only runs at all when
+      // automatic_tax.enabled is set on the Checkout Session itself. Without
+      // this, the two prior lines would do nothing — Founder Decision 18
+      // requires correct tax CALCULATION within the fixed gross price, not
+      // just a label describing how a (never-computed) tax would be shown.
+      //
+      // Stripe only calculates tax in jurisdictions where an active tax
+      // registration exists in the Dashboard (docs.stripe.com/tax/
+      // calculating) — with none configured, the SAME request below
+      // correctly computes zero tax everywhere, which is the safe, correct
+      // behavior while UK VAT/Ireland OSS registration remains separate and
+      // pending, exactly as instructed. No Dashboard/live Stripe setting is
+      // touched by this change; enabling this now is forward-compatible —
+      // tax starts calculating correctly the moment registrations exist,
+      // with zero further code changes. For subscription-mode Checkout
+      // specifically, this setting carries forward onto the created
+      // Subscription object itself, so every future renewal invoice is
+      // taxed the same way automatically — not just this first charge.
+      automatic_tax: { enabled: true },
       subscription_data: {
         metadata: { customerId: input.customerId, planType: input.planType },
       },
