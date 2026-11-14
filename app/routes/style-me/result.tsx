@@ -1370,13 +1370,6 @@ export default function StyleMeResult() {
   const generateFetcher = useFetcher<{ suggestion?: any; error?: string; sameCombination?: boolean; companionRecoveryBlocked?: boolean; companionRecoveryMessage?: string }>();
   const saveFetcher = useFetcher<{ saved?: boolean; error?: string; code?: string; pending?: boolean; next?: string; cleared?: boolean; alreadySaved?: boolean }>();
   const [msgIndex, setMsgIndex] = useState(0);
-  // ── Staging QA: full-look VTO trigger ────────────────────────────────────
-  type FullLookQAState =
-    | { status: "idle" }
-    | { status: "loading" }
-    | { status: "done"; outputDataUrl: string; items: Array<{ itemType: string; label: string }>; skipped: string[]; prompt: string }
-    | { status: "error"; message: string };
-  const [fullLookQA, setFullLookQA] = useState<FullLookQAState>({ status: "idle" });
   const [isSaved, setIsSaved] = useState(false);
   const [pendingDismissed, setPendingDismissed] = useState(false);
   const [isInitialGeneration] = useState(() => loaderData.isLoading);
@@ -1394,6 +1387,115 @@ export default function StyleMeResult() {
     isInitialGeneration && (!generationSettled || !minDelayPassed);
   const suggestion = generateFetcher.data?.suggestion || loaderData.suggestion;
   const error = generateFetcher.data?.error || loaderData.error;
+
+  // ── Full-Look VTO — real, persisted (2026-11-14) ─────────────────────────
+  // Still gated behind loaderData.isStagingProject below, same as the
+  // prototype it replaces — that gate is a separate, not-yet-made decision
+  // about rolling this out beyond staging, not something this change makes
+  // on its own.
+  type FullLookQAState =
+    | { status: "idle" }
+    | { status: "loading" }
+    | { status: "done"; resultUrl: string }
+    | { status: "error"; message: string };
+  const [fullLookQA, setFullLookQA] = useState<FullLookQAState>({ status: "idle" });
+  const fullLookPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopFullLookPolling = () => {
+    if (fullLookPollRef.current) {
+      clearInterval(fullLookPollRef.current);
+      fullLookPollRef.current = null;
+    }
+  };
+
+  const pollFullLookOnce = async (suggestionId: string) => {
+    try {
+      const res = await fetch(`/api/full-look-vto?suggestionId=${encodeURIComponent(suggestionId)}`);
+      const json = await res.json();
+      if (!json.ok) return;
+      if (json.status === "COMPLETED") {
+        stopFullLookPolling();
+        setFullLookQA({ status: "done", resultUrl: json.resultUrl });
+      } else if (json.status === "FAILED") {
+        stopFullLookPolling();
+        setFullLookQA({ status: "error", message: json.errorCode ?? "unknown" });
+      }
+      // PROCESSING / NOT_STARTED — keep polling (or stay idle for NOT_STARTED).
+    } catch {
+      // One poll failing is not fatal — the interval tries again shortly.
+    }
+  };
+
+  const startFullLookPolling = (suggestionId: string) => {
+    if (fullLookPollRef.current) return;
+    fullLookPollRef.current = setInterval(() => pollFullLookOnce(suggestionId), 3000);
+  };
+
+  // On mount: a customer revisiting this look must see an already-completed
+  // (or still-processing) result immediately — never a bare "try this look
+  // on" button that would let them re-trigger and waste/re-charge a
+  // generation that already exists. A brand-new suggestion with no chain
+  // yet simply stays idle (NOT_STARTED is a no-op here).
+  useEffect(() => {
+    const suggestionId = suggestion?.id;
+    if (!loaderData.isStagingProject || !suggestionId || !loaderData.naiaModelIsReady) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/full-look-vto?suggestionId=${encodeURIComponent(suggestionId)}`);
+        const json = await res.json();
+        if (cancelled || !json.ok) return;
+        if (json.status === "COMPLETED") {
+          setFullLookQA({ status: "done", resultUrl: json.resultUrl });
+        } else if (json.status === "PROCESSING") {
+          setFullLookQA({ status: "loading" });
+          startFullLookPolling(suggestionId);
+        }
+      } catch {
+        // Silent — the button remains available as a fallback.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [suggestion?.id, loaderData.naiaModelIsReady]);
+
+  useEffect(() => stopFullLookPolling, []);
+
+  const triggerFullLook = async (retry: boolean) => {
+    const suggestionId = suggestion?.id;
+    if (!suggestionId) return;
+    setFullLookQA({ status: "loading" });
+    try {
+      const res = await fetch("/api/full-look-vto", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          outfitSuggestionId: suggestionId,
+          virtualTryOnConsentAt: new Date().toISOString(),
+          retry,
+        }),
+      });
+      const json = await res.json();
+      if (!json.ok) {
+        setFullLookQA({ status: "error", message: json.code ?? "unknown" });
+        return;
+      }
+      if (json.status === "COMPLETED") {
+        setFullLookQA({ status: "done", resultUrl: json.resultUrl });
+      } else if (json.status === "FAILED") {
+        setFullLookQA({ status: "error", message: json.errorCode ?? "unknown" });
+      } else {
+        // Founder decision: automatically progress through all garment
+        // steps — the client only ever sees PROCESSING until COMPLETED/
+        // FAILED, never an intermediate-step state to manage.
+        startFullLookPolling(suggestionId);
+      }
+    } catch {
+      setFullLookQA({ status: "error", message: "network" });
+    }
+  };
 
   // ── New Look, Same Vibe: scroll to the new result once it actually arrives ────
   //
@@ -2012,33 +2114,7 @@ export default function StyleMeResult() {
                 <button
                   type="button"
                   className="sm-result-action-btn sm-result-action-btn--primary sm-vto-cta"
-                  onClick={async () => {
-                    setFullLookQA({ status: "loading" });
-                    try {
-                      const res = await fetch("/api/staging-full-look-vto", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                          suggestionId: suggestion!.id,
-                          virtualTryOnConsentAt: new Date().toISOString(),
-                        }),
-                      });
-                      const json = await res.json();
-                      if (json.ok) {
-                        setFullLookQA({
-                          status: "done",
-                          outputDataUrl: json.outputDataUrl,
-                          items: json.items ?? [],
-                          skipped: json.skipped ?? [],
-                          prompt: json.prompt ?? "",
-                        });
-                      } else {
-                        setFullLookQA({ status: "error", message: json.code ?? "unknown" });
-                      }
-                    } catch {
-                      setFullLookQA({ status: "error", message: "network" });
-                    }
-                  }}
+                  onClick={() => triggerFullLook(false)}
                 >
                   TRY THIS LOOK ON
                 </button>
@@ -2048,7 +2124,7 @@ export default function StyleMeResult() {
             {fullLookQA.status === "loading" && (
               <>
                 <h2 className="sm-vto-heading">Creating your try-on…</h2>
-                <p className="sm-vto-body">This can take a moment.</p>
+                <p className="sm-vto-body">This can take a moment — feel free to keep browsing.</p>
               </>
             )}
 
@@ -2056,17 +2132,10 @@ export default function StyleMeResult() {
               <>
                 <h2 className="sm-vto-heading">Your look, on you.</h2>
                 <img
-                  src={fullLookQA.outputDataUrl}
+                  src={fullLookQA.resultUrl}
                   alt="Your StyleMe outfit on your nAia Model"
                   className="sm-vto-image"
                 />
-                <button
-                  type="button"
-                  className="sm-result-action-btn sm-vto-cta"
-                  onClick={() => setFullLookQA({ status: "idle" })}
-                >
-                  Try Again
-                </button>
               </>
             )}
 
@@ -2074,11 +2143,11 @@ export default function StyleMeResult() {
               <>
                 <h2 className="sm-vto-heading">See this look on you.</h2>
                 <p className="sm-vto-body">We couldn't create your try-on this time.</p>
-                <p className="sm-vto-body-note">Your StyleMe look is still saved here.</p>
+                <p className="sm-vto-body-note">Your StyleMe look is still saved here — and you haven't been charged for this attempt.</p>
                 <button
                   type="button"
                   className="sm-result-action-btn sm-vto-cta"
-                  onClick={() => setFullLookQA({ status: "idle" })}
+                  onClick={() => triggerFullLook(true)}
                 >
                   Try Again
                 </button>
