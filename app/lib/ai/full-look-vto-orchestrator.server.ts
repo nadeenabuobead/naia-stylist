@@ -30,33 +30,39 @@ import {
   type FullLookChainContext,
   type FullLookRealGarmentInput,
 } from "./full-look-tryon-real.server.js";
-import { MAX_CHAIN_LENGTH } from "./poc-sequential-full-look-vto.server.js";
+import { FULL_LOOK_MAX_GARMENTS, FULL_LOOK_FINAL_STEP_HANDLE_PREFIX } from "./full-look-handle-constants.js";
 import { buildTryOnResultUrl } from "./fashn-tryon-service.server.js";
 import { resolveItemImage, type ResolvableOutfitItem } from "~/lib/styleme/look-image-resolution.server";
 import { getCloudinaryConfig, type CloudinaryConfig } from "~/lib/cloudinary-admin.server";
 import type { OutfitItemType } from "@prisma/client";
 
 const STEP1_HANDLE_PREFIX = `${REAL_PRODUCT_HANDLE_PREFIX}:step1:`;
-const FINAL_STEP_HANDLE_PREFIX = `${REAL_PRODUCT_HANDLE_PREFIX}:step${MAX_CHAIN_LENGTH}:`;
+const FINAL_STEP_HANDLE_PREFIX = FULL_LOOK_FINAL_STEP_HANDLE_PREFIX;
 
 // ── Garment selection ────────────────────────────────────────────────────────
 //
-// The chain is architecturally fixed at exactly MAX_CHAIN_LENGTH (3) steps
-// — idempotency-key derivation, product-handle naming, and the chain-walk
-// logic all assume it. A real OutfitSuggestion can have anywhere from 1 to
-// 8 items across every OutfitItemType. This priority order picks the 3
-// pieces that most visibly change how a full-body try-on reads: a DRESS
-// replaces the TOP+BOTTOM pairing outright (never selects both a dress and
-// a top/bottom); OUTERWEAR and SHOES fill the remaining slots next.
-// BAG/ACCESSORY/JEWELRY are never selected — small items FASHN's
-// tryon-max isn't built to visibly change on a full-body render, matching
-// this chain's own fixture precedent (trousers/shirt/blazer — BOTTOM,
-// TOP, OUTERWEAR — see full-look-tryon-real.server.test.ts's own fixtures).
+// 2026-11-15 — widened from a fixed 3-piece, clothing-only selection after
+// real QA surfaced it silently dropping recommended footwear and
+// accessories (e.g. brown Chelsea boots, a baseball cap) even though both
+// were available and FASHN's tryon-max documents support for "clothing,
+// shoes, hats, jewelry, bags, and other wearable fashion items" — there
+// was never a technical reason to exclude them, only an inherited POC-era
+// 3-item scope assumption.
 //
-// This is a pragmatic default, not a locked product decision — flagged
+// Every OutfitItemType is now eligible, selected up to FULL_LOOK_MAX_
+// GARMENTS (5 — a cost/complexity ceiling, not a FASHN limit) in priority
+// order: a DRESS replaces the TOP+BOTTOM pairing outright (never selects
+// both a dress and a top/bottom); OUTERWEAR, SHOES, then ACCESSORY fill
+// the remaining slots next (footwear and headwear read more in a
+// full-body shot than a bag or jewelry typically do); BAG and JEWELRY are
+// lowest priority, included when room remains.
+//
+// Still a pragmatic default, not a locked product decision — flagged
 // explicitly for review, same as the chain's existing QA-pause/pricing
 // comments flag their own open questions.
-const CATEGORY_PRIORITY: readonly OutfitItemType[] = ["DRESS", "TOP", "BOTTOM", "OUTERWEAR", "SHOES"];
+const CATEGORY_PRIORITY: readonly OutfitItemType[] = [
+  "DRESS", "TOP", "BOTTOM", "OUTERWEAR", "SHOES", "ACCESSORY", "BAG", "JEWELRY",
+];
 
 export interface SelectableOutfitItem extends Omit<ResolvableOutfitItem, "closetItem"> {
   itemType: OutfitItemType;
@@ -70,23 +76,37 @@ export interface SelectableOutfitItem extends Omit<ResolvableOutfitItem, "closet
   } | null;
 }
 
-// Fewer than MAX_CHAIN_LENGTH resolvable items (category match AND a real
-// image) → null. Full-Look VTO is simply not offered for this suggestion;
-// single-item VTO (showTryOnSection in style-me/result.tsx) is completely
-// unaffected and remains available regardless.
+export interface GarmentSelectionResult {
+  garments: FullLookRealGarmentInput[];
+  // Labels of recommended, available pieces that did NOT make it into this
+  // chain because the outfit had more eligible categories than
+  // FULL_LOOK_MAX_GARMENTS allows — never because of a resolution failure
+  // (an unresolvable image still declines the whole chain, see below).
+  // Requirement: nAia must disclose this, never present the result as if
+  // it were the complete recommended look. Empty when nothing was omitted.
+  omittedLabels: string[];
+}
+
+// Fewer than 3 resolvable items (category match AND a real image) → null.
+// Full-Look VTO is simply not offered for this suggestion; single-item VTO
+// (showTryOnSection in style-me/result.tsx) is completely unaffected and
+// remains available regardless. This floor is unchanged from the original
+// design — only the ceiling and category set grew.
 export function selectFullLookGarments(
   items: readonly SelectableOutfitItem[],
   ctx: { customerId: string; cloudinaryConfig: CloudinaryConfig | null },
-): FullLookRealGarmentInput[] | null {
+): GarmentSelectionResult | null {
   const hasDress = items.some((i) => i.itemType === "DRESS");
-  const chosen: SelectableOutfitItem[] = [];
+  const eligible: SelectableOutfitItem[] = [];
   for (const category of CATEGORY_PRIORITY) {
     if (hasDress && (category === "TOP" || category === "BOTTOM")) continue;
-    const match = items.find((i) => i.itemType === category && !chosen.includes(i));
-    if (match) chosen.push(match);
-    if (chosen.length === MAX_CHAIN_LENGTH) break;
+    const match = items.find((i) => i.itemType === category && !eligible.includes(i));
+    if (match) eligible.push(match);
   }
-  if (chosen.length < MAX_CHAIN_LENGTH) return null;
+  if (eligible.length < 3) return null;
+
+  const chosen = eligible.slice(0, FULL_LOOK_MAX_GARMENTS);
+  const omitted = eligible.slice(FULL_LOOK_MAX_GARMENTS);
 
   const garments: FullLookRealGarmentInput[] = [];
   for (const item of chosen) {
@@ -95,7 +115,8 @@ export function selectFullLookGarments(
     const label = item.productTitle ?? item.closetItem?.name ?? item.itemType;
     garments.push({ label, productImageUrl: imageUrl });
   }
-  return garments;
+  const omittedLabels = omitted.map((item) => item.productTitle ?? item.closetItem?.name ?? item.itemType);
+  return { garments, omittedLabels };
 }
 
 // ── Attempt scope — retry-safe idempotency ───────────────────────────────────
@@ -146,9 +167,10 @@ export async function startNewAttemptScope(customerId: string, outfitSuggestionI
 
 // stepIndex/totalSteps (2026-11-15) — genuine generation-stage progress for
 // the loading UI, not a simulated/fake progress bar. stepIndex is 0-based
-// (matching advanceFullLookChain's own convention); totalSteps is always
-// MAX_CHAIN_LENGTH, included so the client never needs its own copy of
-// that constant.
+// (matching advanceFullLookChain's own convention); totalSteps is THIS
+// chain's own real garment count (3-5, from ctx.garments.length — chain
+// length varies per outfit, see selectFullLookGarments), included so the
+// client never needs to compute or guess it.
 export type OrchestratorStatus =
   | { status: "PROCESSING"; stepIndex: number; totalSteps: number }
   | { status: "COMPLETED"; resultUrl: string }
@@ -156,8 +178,9 @@ export type OrchestratorStatus =
   | { status: "NOT_STARTED" }
   | { status: "ERROR"; reason: string };
 
-// advanceFullLookChain pauses exactly once (AWAITING_CONTINUE, between
-// steps 2 and 3) for the internal QA harness's human-review checkpoint —
+// advanceFullLookChain pauses exactly once (AWAITING_CONTINUE, one step
+// before whichever step is final for THIS chain's own garment count) for
+// the internal QA harness's human-review checkpoint —
 // founder decision: a real customer sees one continuous generation, never
 // an extra "continue?" step. continueToFinalStep is itself idempotent and
 // safe to call repeatedly (re-derives the chain's position from DB state
@@ -173,7 +196,7 @@ async function advanceAutomatically(ctx: FullLookChainContext): Promise<Orchestr
       if (!cont.ok) return { status: "ERROR", reason: cont.reason };
       // Final step is now submitted (not completed) — PROCESSING is
       // accurate; the next poll will observe its real status.
-      return { status: "PROCESSING", stepIndex: MAX_CHAIN_LENGTH - 1, totalSteps: MAX_CHAIN_LENGTH };
+      return { status: "PROCESSING", stepIndex: ctx.garments.length - 1, totalSteps: ctx.garments.length };
     }
     case "COMPLETED":
       return { status: "COMPLETED", resultUrl: result.resultUrl };
@@ -182,7 +205,7 @@ async function advanceAutomatically(ctx: FullLookChainContext): Promise<Orchestr
     case "NOT_STARTED":
       return { status: "NOT_STARTED" };
     case "PROCESSING":
-      return { status: "PROCESSING", stepIndex: result.stepIndex, totalSteps: MAX_CHAIN_LENGTH };
+      return { status: "PROCESSING", stepIndex: result.stepIndex, totalSteps: ctx.garments.length };
     case "SUBMIT_ERROR":
       return { status: "ERROR", reason: result.reason };
     case "EXPIRED":

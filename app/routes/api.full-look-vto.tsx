@@ -87,16 +87,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const suggestion = await loadOwnedSuggestion(customer.id, suggestionId);
   if (!suggestion) return notFound();
 
-  // Never regenerate on revisit — check for an already-completed result
-  // before touching the chain at all.
-  const existing = await findCompletedFullLookForSuggestion(customer.id, suggestionId);
-  if (existing) {
-    return data({ ok: true, status: "COMPLETED", resultUrl: existing.resultUrl }, { headers: { "Cache-Control": "no-store" } });
-  }
-
-  const naiaModel = await loadNaiaModel(customer.id);
-  if (!naiaModel) return data({ ok: true, status: "NOT_STARTED" }, { headers: { "Cache-Control": "no-store" } });
-
   // 2026-11-15 REGRESSION FIX — garments are NOT "only read by start/submit".
   // advanceFullLookChain auto-advances to the next step the instant the
   // current one completes (per the founder's "progress through all garment
@@ -107,15 +97,32 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // poll once the first step completed (TypeError: Cannot read properties
   // of undefined (reading 'label')), which made every real Full-Look
   // attempt appear to hang forever. Re-derive the same real garments the
-  // POST action used to start this chain, the same way.
+  // POST action used to start this chain, the same way. Computed BEFORE the
+  // completed-result short-circuit below so omittedLabels (requirement:
+  // disclose any recommended piece that didn't make the cut, on resume AND
+  // on revisit — never only on the initial start) is always available.
   const cloudinaryConfig = getCloudinaryConfig();
-  const garments = selectFullLookGarments(
+  const selection = selectFullLookGarments(
     suggestion.items as unknown as SelectableOutfitItem[],
     { customerId: customer.id, cloudinaryConfig },
   );
-  if (!garments) {
+  if (!selection) {
     return serverError("This look's try-on–eligible pieces could not be resolved while resuming.");
   }
+  const { garments, omittedLabels } = selection;
+
+  // Never regenerate on revisit — check for an already-completed result
+  // before touching the chain at all.
+  const existing = await findCompletedFullLookForSuggestion(customer.id, suggestionId);
+  if (existing) {
+    return data(
+      { ok: true, status: "COMPLETED", resultUrl: existing.resultUrl, omittedLabels },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
+  const naiaModel = await loadNaiaModel(customer.id);
+  if (!naiaModel) return data({ ok: true, status: "NOT_STARTED" }, { headers: { "Cache-Control": "no-store" } });
 
   const result = await pollFullLookOutfit({
     customerId: customer.id,
@@ -128,7 +135,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     outfitSuggestionId: suggestionId,
   });
 
-  return data({ ok: true, ...result }, { headers: { "Cache-Control": "no-store" } });
+  return data({ ok: true, ...result, omittedLabels }, { headers: { "Cache-Control": "no-store" } });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -164,12 +171,24 @@ export async function action({ request }: ActionFunctionArgs) {
   const suggestion = await loadOwnedSuggestion(customer.id, outfitSuggestionId);
   if (!suggestion) return notFound();
 
+  // Computed before the completed-result short-circuit — see the GET
+  // loader's identical comment for why.
+  const cloudinaryConfig = getCloudinaryConfig();
+  const selection = selectFullLookGarments(
+    suggestion.items as unknown as SelectableOutfitItem[],
+    { customerId: customer.id, cloudinaryConfig },
+  );
+  if (!selection) {
+    return badRequest("not_eligible", "This look doesn't have enough try-on–eligible pieces for a full-look preview.");
+  }
+  const { garments, omittedLabels } = selection;
+
   // A retry is only meaningful after the current attempt actually failed —
   // never a way to bypass "never regenerate" for a result that's already
   // done or still running.
   const existing = await findCompletedFullLookForSuggestion(customer.id, outfitSuggestionId);
   if (existing) {
-    return data({ ok: true, status: "COMPLETED", resultUrl: existing.resultUrl });
+    return data({ ok: true, status: "COMPLETED", resultUrl: existing.resultUrl, omittedLabels });
   }
 
   const naiaModel = await loadNaiaModel(customer.id);
@@ -188,15 +207,6 @@ export async function action({ request }: ActionFunctionArgs) {
     return tooMany("You've used all your Virtual Try-On sessions for this month.");
   }
 
-  const cloudinaryConfig = getCloudinaryConfig();
-  const garments = selectFullLookGarments(
-    suggestion.items as unknown as SelectableOutfitItem[],
-    { customerId: customer.id, cloudinaryConfig },
-  );
-  if (!garments) {
-    return badRequest("not_eligible", "This look doesn't have enough try-on–eligible pieces for a full-look preview.");
-  }
-
   const result = await startFullLookOutfit(
     {
       customerId: customer.id,
@@ -212,5 +222,5 @@ export async function action({ request }: ActionFunctionArgs) {
   );
 
   if (result.status === "ERROR") return serverError(result.reason);
-  return data({ ok: true, ...result });
+  return data({ ok: true, ...result, omittedLabels });
 }

@@ -74,12 +74,16 @@
 // poll again) — that case is outside this authorised test's scope.
 //
 // BILLING / VTO ALLOWANCE (verified, not decided here): this module makes NO
-// new decision about how 3 real FASHN calls should count against a
+// new decision about how real FASHN calls should count against a
 // customer's VTO allowance. It reuses exactly the policy
 // staging.full-look-vto-test.tsx already adopted and documented for its own
 // quota PRE-CHECK (hasQuotaRoomForFullLookChain, exported from that file,
-// reused unmodified here): a 3-garment Full-Look costs MAX_CHAIN_LENGTH (3)
-// VTO units, checked via getMembershipAllowances(status).vtoPerMonth and
+// reused unmodified here): that harness's own pre-check still assumes a
+// fixed 3-unit cost (it imports its OWN, untouched MAX_CHAIN_LENGTH=3 from
+// poc-sequential-full-look-vto.server.ts, deliberately not switched to
+// FULL_LOOK_MAX_GARMENTS) — conservative, staging-only, and irrelevant to
+// real customers, who are never gated by this pre-check at all; checked via
+// getMembershipAllowances(status).vtoPerMonth and
 // getEntitlementSummary — deliberately isolated from the pre-existing,
 // unresolved VTO_MONTHLY_LIMIT_OVERRIDE scoping bug, and unconditional
 // regardless of ENTITLEMENT_ENFORCEMENT. That file's own comment already
@@ -126,10 +130,9 @@ import {
   type CloudinaryConfig,
   type DeleteAssetFn,
 } from "../cloudinary-admin.server.js";
-import { MAX_CHAIN_LENGTH } from "./poc-sequential-full-look-vto.server.js";
 import type { VirtualTryOnConsent, VirtualTryOnJobRecord } from "./virtual-try-on.types.js";
 import prisma from "../../db.server.js";
-import { REAL_PRODUCT_HANDLE_PREFIX } from "./full-look-handle-constants.js";
+import { REAL_PRODUCT_HANDLE_PREFIX, FULL_LOOK_MAX_GARMENTS } from "./full-look-handle-constants.js";
 
 // Real DB implementation — the default for every caller except tests, which
 // inject a mock via WalkChainDeps._findJobFn instead.
@@ -305,7 +308,7 @@ export interface FullLookChainContext {
   bodyPublicId: string | null;
   bodyFormat: string | null;
   deliveryType: string;
-  garments: readonly FullLookRealGarmentInput[]; // exactly MAX_CHAIN_LENGTH, ordered
+  garments: readonly FullLookRealGarmentInput[]; // between 3 and FULL_LOOK_MAX_GARMENTS, ordered
   consent: VirtualTryOnConsent;
   // Applied ONLY to the final (outerwear) step's FASHN request — see
   // submitFullLookRealStep's own stepIndex check. Omitted entirely for
@@ -368,7 +371,7 @@ export async function walkFullLookChainJobs(
 ): Promise<VirtualTryOnJobRecord[]> {
   const jobs: VirtualTryOnJobRecord[] = [];
   let priorJobId: string | null = null;
-  for (let i = 0; i < MAX_CHAIN_LENGTH; i++) {
+  for (let i = 0; i < FULL_LOOK_MAX_GARMENTS; i++) {
     const key = getFullLookStepIdempotencyKey(customerId, i, priorJobId, reservationScope);
     const job = await findJobByIdempotencyKey(key, deps._findJobFn);
     if (!job) break;
@@ -411,10 +414,17 @@ export async function submitFullLookRealStep(
   }
   const idempotencyKey = getFullLookStepIdempotencyKey(ctx.customerId, stepIndex, priorJobId, ctx.reservationScope);
 
+  // Role-based, not position-based (2026-11-15) — see full-look-handle-
+  // constants.ts's header for why. ctx.garments.length is THIS chain's own
+  // real length (3-5), so "final" is correct regardless of how many
+  // garments any other chain happens to have.
+  const isFinalStep = stepIndex === ctx.garments.length - 1;
+  const stepHandleSegment = isFinalStep ? "final" : `step${stepIndex + 1}`;
+
   const jobResult = await createOrFindTryOnJob({
     customerId: ctx.customerId,
     naiaModelId: ctx.naiaModelId,
-    productHandle: `${REAL_PRODUCT_HANDLE_PREFIX}:step${stepIndex + 1}:${garment.label}`,
+    productHandle: `${REAL_PRODUCT_HANDLE_PREFIX}:${stepHandleSegment}:${garment.label}`,
     bodyPublicId: ctx.bodyPublicId,
     virtualTryOnConsentAt: new Date(ctx.consent.consentedAt),
     idempotencyKey,
@@ -452,10 +462,9 @@ export async function submitFullLookRealStep(
   }
 
   // ── Final-step-only tuning — see FullLookChainContext's own doc comment.
-  // Steps 0 and 1 never reach this branch; their request is byte-identical
-  // to before (no prompt, generation_mode "fast" via submitTryOnToProvider's
-  // own default). ─────────────────────────────────────────────────────────
-  const isFinalStep = stepIndex === MAX_CHAIN_LENGTH - 1;
+  // Every non-final step's request is byte-identical to before (no prompt,
+  // generation_mode "fast" via submitTryOnToProvider's own default).
+  // isFinalStep computed above, before the productHandle was built. ───────
 
   // ── Submit only — no poll. Returns immediately with a predictionId. ──────
   const fashnResult = await submitTryOnToProvider({
@@ -500,7 +509,7 @@ export async function pollFullLookRealStep(
   stepIndex: number,
 ): Promise<PollStepResult> {
   if (job.status === "COMPLETED") {
-    if (stepIndex === MAX_CHAIN_LENGTH - 1) {
+    if (stepIndex === ctx.garments.length - 1) {
       const resultUrl = buildTryOnResultUrl(ctx.customerId, job.id);
       if (!resultUrl) return { status: "FAILED", job };
       return { status: "COMPLETED", job, resultUrl };
@@ -531,7 +540,7 @@ export async function pollFullLookRealStep(
     }
     const outputDataUrl = outputs[0];
 
-    const isFinal = stepIndex === MAX_CHAIN_LENGTH - 1;
+    const isFinal = stepIndex === ctx.garments.length - 1;
     const upload = isFinal
       ? await uploadTryOnResult(ctx.customerId, job.id, outputDataUrl)
       : await uploadIntermediateStepResult(ctx.customerId, job.id, outputDataUrl);
@@ -686,7 +695,7 @@ export async function advanceFullLookChain(
     return { status: "FAILED", failedStepIndex: lastStepIndex, errorCode: lastJob.errorCode };
   }
 
-  if (lastJob.status === "COMPLETED" && lastStepIndex === MAX_CHAIN_LENGTH - 1) {
+  if (lastJob.status === "COMPLETED" && lastStepIndex === ctx.garments.length - 1) {
     const resultUrl = buildTryOnResultUrl(ctx.customerId, lastJob.id);
     if (!resultUrl) return { status: "SUBMIT_ERROR", reason: "NOT_CONFIGURED" };
     return { status: "COMPLETED", resultUrl };
@@ -699,7 +708,7 @@ export async function advanceFullLookChain(
   // or a long gap while the tester reviews the images all land here
   // identically. Cleanup is NOT run here: these are exactly the images the
   // tester needs to see.
-  if (lastJob.status === "COMPLETED" && lastStepIndex === MAX_CHAIN_LENGTH - 2) {
+  if (lastJob.status === "COMPLETED" && lastStepIndex === ctx.garments.length - 2) {
     if (isAwaitingContinueExpired(lastJob)) {
       await cleanupIntermediateStepResults(ctx.customerId, jobs.map((j) => j.id));
       return { status: "EXPIRED" };
@@ -729,7 +738,7 @@ export async function advanceFullLookChain(
   // below) rather than advancing on its own. Any other step keeps the
   // original immediate-auto-advance behavior.
   const nextIndex = lastStepIndex + 1;
-  if (nextIndex === MAX_CHAIN_LENGTH - 1) {
+  if (nextIndex === ctx.garments.length - 1) {
     const intermediates = buildIntermediatePreviews(ctx, [...jobs.slice(0, -1), poll.job]);
     if (!intermediates) return { status: "SUBMIT_ERROR", reason: "NOT_CONFIGURED" };
     return { status: "AWAITING_CONTINUE", intermediates };
@@ -769,7 +778,7 @@ export async function continueToFinalStep(
   const jobs = await walkFullLookChainJobs(ctx.customerId, deps, ctx.reservationScope);
   const lastStepIndex = jobs.length - 1;
 
-  if (lastStepIndex !== MAX_CHAIN_LENGTH - 2 || jobs[lastStepIndex]?.status !== "COMPLETED") {
+  if (lastStepIndex !== ctx.garments.length - 2 || jobs[lastStepIndex]?.status !== "COMPLETED") {
     return { ok: false, reason: "not_awaiting_continue" };
   }
 
@@ -780,7 +789,7 @@ export async function continueToFinalStep(
     return { ok: false, reason: "continue_window_expired" };
   }
 
-  const submit = await submitFullLookRealStep(ctx, MAX_CHAIN_LENGTH - 1, jobs[lastStepIndex].id);
+  const submit = await submitFullLookRealStep(ctx, ctx.garments.length - 1, jobs[lastStepIndex].id);
   if (!submit.ok) {
     return { ok: false, reason: submit.reason };
   }
@@ -802,7 +811,11 @@ export async function startOrResumeFullLookChain(
   ctx: FullLookChainContext,
   deps: WalkChainDeps = { _findJobFn: defaultFindJobByIdempotencyKey },
 ): Promise<StartChainResult> {
-  if (ctx.garments.length !== MAX_CHAIN_LENGTH) {
+  // 2026-11-15 — chain length is now per-outfit, between 3 (the original
+  // minimum — fewer than 3 real pieces means Full-Look simply isn't offered,
+  // same as before) and FULL_LOOK_MAX_GARMENTS (the cost/complexity
+  // ceiling, not a FASHN limit — see full-look-handle-constants.ts).
+  if (ctx.garments.length < 3 || ctx.garments.length > FULL_LOOK_MAX_GARMENTS) {
     return { ok: false, reason: "invalid_chain_length" };
   }
 
@@ -836,10 +849,25 @@ export async function startOrResumeFullLookChain(
 // images without depending on any further customer request, for ANY
 // customer, in ANY reservation scope at once.
 //
-// Finds every "shirt step" (step index 1) job that is COMPLETED, has no
-// "blazer step" (step index 2) job yet (i.e. never continued — a chain that
-// DID continue is never touched, active or not), and is past
-// QA_PAUSE_EXPIRY_MS. For each, cleans up both intermediate images.
+// 2026-11-15 — generalized for variable chain length. The ORIGINAL design
+// only ever queried for a job labeled "step2:" (1-based), because for the
+// fixed 3-item chain that WAS the one and only position "one step before
+// final" could ever be — the position where advanceFullLookChain's own
+// AWAITING_CONTINUE pause fires. Now that a chain can have 3-5 garments,
+// that position varies by chain (step2 for a 3-item chain, step3 for 4,
+// step4 for 5) — a dynamic-length chain abandoned at the pause would be
+// invisible to a sweep hardcoded to "step2:" alone.
+//
+// Finds every COMPLETED job labeled step2 through step{FULL_LOOK_MAX_
+// GARMENTS-1} (step1 itself can never be "one before final" for any valid
+// chain length ≥3, so it's correctly excluded) that has no NEXT step job
+// yet (i.e. never continued — a chain that DID continue, to another
+// numbered step OR to "final", is never touched, active or not), and is
+// past QA_PAUSE_EXPIRY_MS. For each, cleans up both intermediate images.
+// This also naturally covers a chain abandoned one step EARLIER than the
+// pause (e.g. a 5-item chain's step3, abandoned instead of self-healing on
+// a later poll) — a strict improvement over the original's narrower
+// coverage, not a behavior change for anyone it already protected.
 //
 // Idempotent and safe to call repeatedly or concurrently: an
 // already-cleaned chain's assets are simply "not found" on a later sweep
@@ -854,17 +882,25 @@ export interface SweepResult {
   skippedAlreadyAdvanced: number;
 }
 
-async function defaultFindCompletedShirtJobs(): Promise<VirtualTryOnJobRecord[]> {
+// Every step label that could ever be "one before final" for SOME valid
+// chain length (3..FULL_LOOK_MAX_GARMENTS) — step1 excluded, see header
+// comment above.
+const PAUSE_ADJACENT_HANDLE_PREFIXES = Array.from(
+  { length: FULL_LOOK_MAX_GARMENTS - 2 },
+  (_, i) => `${REAL_PRODUCT_HANDLE_PREFIX}:step${i + 2}:`,
+);
+
+async function defaultFindCompletedPauseAdjacentJobs(): Promise<VirtualTryOnJobRecord[]> {
   return prisma.virtualTryOnJob.findMany({
     where: {
-      productHandle: { startsWith: `${REAL_PRODUCT_HANDLE_PREFIX}:step2:` },
+      OR: PAUSE_ADJACENT_HANDLE_PREFIXES.map((prefix) => ({ productHandle: { startsWith: prefix } })),
       status: "COMPLETED",
     },
   }) as Promise<VirtualTryOnJobRecord[]>;
 }
 
-// The shirt step's OWN idempotencyKey already encodes the trousers job's id
-// (see getFullLookStepIdempotencyKey: `${REAL_STEP_KEY_PREFIX}${priorJobId}:${stepIndex}`)
+// A step's OWN idempotencyKey already encodes the prior job's id (see
+// getFullLookStepIdempotencyKey: `${REAL_STEP_KEY_PREFIX}${priorJobId}:${stepIndex}`)
 // — reading it back out avoids a second lookup/join for something this
 // module already guarantees is embedded in data we already have.
 function parsePriorJobIdFromStepKey(idempotencyKey: string): string | null {
@@ -875,32 +911,48 @@ function parsePriorJobIdFromStepKey(idempotencyKey: string): string | null {
   return rest.slice(0, lastColon);
 }
 
+// This job's own 0-based step index, read back out of its productHandle
+// (e.g. "fulllook-real:step3:Brown Chelsea Boots" -> 2). Used only to
+// compute the NEXT step's idempotency key — never to infer this chain's
+// total length, which this function has no need to know at all.
+function parseStepIndexFromHandle(productHandle: string): number | null {
+  const match = /^fulllook-real:step(\d+):/.exec(productHandle);
+  if (!match) return null;
+  return Number(match[1]) - 1;
+}
+
 export async function sweepAbandonedFullLookPauses(
-  _findShirtJobs: () => Promise<VirtualTryOnJobRecord[]> = defaultFindCompletedShirtJobs,
+  _findPauseAdjacentJobs: () => Promise<VirtualTryOnJobRecord[]> = defaultFindCompletedPauseAdjacentJobs,
   _findJobFn: (where: { idempotencyKey: string }) => Promise<VirtualTryOnJobRecord | null> = defaultFindJobByIdempotencyKey,
   _deleteAsset: DeleteAssetFn = deleteCloudinaryAsset,
 ): Promise<SweepResult> {
-  const shirtJobs = await _findShirtJobs();
+  const candidateJobs = await _findPauseAdjacentJobs();
   let cleanedChains = 0;
   let skippedActive = 0;
   let skippedAlreadyAdvanced = 0;
 
-  for (const shirtJob of shirtJobs) {
-    if (!isAwaitingContinueExpired(shirtJob)) {
+  for (const job of candidateJobs) {
+    if (!isAwaitingContinueExpired(job)) {
       skippedActive++;
       continue;
     }
 
-    const blazerKey = `${REAL_STEP_KEY_PREFIX}${shirtJob.id}:2`;
-    const blazerJob = await _findJobFn({ idempotencyKey: blazerKey });
-    if (blazerJob) {
+    const thisStepIndex = parseStepIndexFromHandle(job.productHandle);
+    if (thisStepIndex === null) {
+      skippedActive++; // unparseable handle — fail closed, never touch
+      continue;
+    }
+
+    const nextStepKey = `${REAL_STEP_KEY_PREFIX}${job.id}:${thisStepIndex + 1}`;
+    const nextJob = await _findJobFn({ idempotencyKey: nextStepKey });
+    if (nextJob) {
       skippedAlreadyAdvanced++; // continued (or in progress) — never touch
       continue;
     }
 
-    const trousersJobId = parsePriorJobIdFromStepKey(shirtJob.idempotencyKey);
-    const jobIds = trousersJobId ? [trousersJobId, shirtJob.id] : [shirtJob.id];
-    await cleanupIntermediateStepResults(shirtJob.customerId, jobIds, _deleteAsset);
+    const priorJobId = parsePriorJobIdFromStepKey(job.idempotencyKey);
+    const jobIds = priorJobId ? [priorJobId, job.id] : [job.id];
+    await cleanupIntermediateStepResults(job.customerId, jobIds, _deleteAsset);
     cleanedChains++;
   }
 
@@ -959,7 +1011,7 @@ async function defaultFindStaleFullLookProcessingJobs(thresholdMs: number): Prom
 }
 
 // Walks the idempotencyKey chain backward from a stale step to every earlier
-// step in the SAME chain — bounded by MAX_CHAIN_LENGTH, no new index or
+// step in the SAME chain — bounded by FULL_LOOK_MAX_GARMENTS, no new index or
 // query shape needed. Each earlier step, if it reached COMPLETED, already
 // has an uploaded intermediate image that advanceFullLookChain's own cleanup
 // will now never run (that cleanup only fires from the COMPLETED/FAILED
@@ -971,7 +1023,7 @@ async function collectAncestorStepJobIds(
   const ids: string[] = [];
   let priorId = parsePriorJobIdFromStepKey(job.idempotencyKey);
   let guard = 0;
-  while (priorId && guard < MAX_CHAIN_LENGTH) {
+  while (priorId && guard < FULL_LOOK_MAX_GARMENTS) {
     ids.unshift(priorId);
     const prior = await _findById(priorId);
     if (!prior) break;

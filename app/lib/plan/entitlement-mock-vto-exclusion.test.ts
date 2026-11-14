@@ -60,6 +60,8 @@ describe("getEntitlementSummary — mock VTO jobs excluded from real usage", () 
         { productHandle: { startsWith: "fulllook-poc:" } },
         { productHandle: { startsWith: "fulllook-real:step1:" } },
         { productHandle: { startsWith: "fulllook-real:step2:" } },
+        { productHandle: { startsWith: "fulllook-real:step3:" } },
+        { productHandle: { startsWith: "fulllook-real:step4:" } },
       ]);
     }
   });
@@ -86,6 +88,8 @@ describe("checkEntitlement('vto') — the real production gate also excludes moc
         { productHandle: { startsWith: "fulllook-poc:" } },
         { productHandle: { startsWith: "fulllook-real:step1:" } },
         { productHandle: { startsWith: "fulllook-real:step2:" } },
+        { productHandle: { startsWith: "fulllook-real:step3:" } },
+        { productHandle: { startsWith: "fulllook-real:step4:" } },
       ]);
     }
   });
@@ -143,34 +147,61 @@ describe("checkEntitlement('vto') — unpaid vs. paid access, real boundary beha
 // 2026-11-14 — founder decision: a completed Full-Look outfit costs exactly
 // 1 credit, not 1 per garment step. These prove the actual exclusion
 // semantics directly (not just the query's filter shape, which the tests
-// above already cover) — applying the real prefix list to a representative
-// set of productHandle values a real 3-step chain would write.
+// above already cover) — applying the real prefix list to representative
+// productHandle values a real chain would write.
+//
+// 2026-11-15 — chain length is now per-outfit (3-5 garments), and the
+// FINAL step is tagged by role ("fulllook-real:final:"), never by a fixed
+// step number — a 3-garment chain's final step and a 5-garment chain's
+// final step both use the identical "final" tag, so exactly one
+// COMPLETED row ever counts per outfit regardless of how many garments it
+// used. See full-look-handle-constants.ts's own header for why a fixed
+// step number can't identify "the final step" once length varies.
 describe("Full-Look VTO intermediate-step exclusion — 1 credit per outfit, not 1 per garment", () => {
   function isCountedHandle(productHandle: string): boolean {
     if (productHandle.startsWith("fulllook-poc:")) return false;
     return !FULL_LOOK_INTERMEDIATE_HANDLE_PREFIXES.some((prefix) => productHandle.startsWith(prefix));
   }
 
-  it("of a real chain's 3 step handles, only the final step (step3) counts", () => {
+  it("of a 3-garment chain's step handles, only the role-tagged 'final' step counts — never a numbered 'step3'", () => {
     expect(isCountedHandle("fulllook-real:step1:trousers")).toBe(false);
     expect(isCountedHandle("fulllook-real:step2:shirt")).toBe(false);
-    expect(isCountedHandle("fulllook-real:step3:blazer")).toBe(true);
+    expect(isCountedHandle("fulllook-real:step3:shirt")).toBe(false); // would ONLY be intermediate for a longer chain, but never counted either way
+    expect(isCountedHandle("fulllook-real:final:blazer")).toBe(true);
+  });
+
+  it("of a 5-garment chain's step handles (sweater/jeans/jacket/boots/cap), only 'final' counts — every numbered step, including step4, is excluded", () => {
+    expect(isCountedHandle("fulllook-real:step1:Black Sweater")).toBe(false);
+    expect(isCountedHandle("fulllook-real:step2:Black Jeans")).toBe(false);
+    expect(isCountedHandle("fulllook-real:step3:Black Wool Shirt Jacket")).toBe(false);
+    expect(isCountedHandle("fulllook-real:step4:Brown Chelsea Boots")).toBe(false);
+    expect(isCountedHandle("fulllook-real:final:Black Baseball Cap")).toBe(true);
   });
 
   it("a single-item VTO handle (no full-look prefix at all) still counts, unaffected by this exclusion", () => {
     expect(isCountedHandle("collar-shirt-12345")).toBe(true);
   });
 
-  it("one completed outfit (3 rows written, 1 of them step3) contributes exactly 1 to vtoCompleted's real query — proven via the actual exclusion filter, not a mocked count", async () => {
+  it("one completed 3-garment outfit (3 rows written, 1 of them 'final') contributes exactly 1 to vtoCompleted's real query — proven via the actual exclusion filter, not a mocked count", async () => {
     // The mock can't evaluate a real WHERE clause against rows, so this
     // proves the filter's OWN exclusion list — read directly off the
     // function under test, not duplicated here — matches the one genuine
     // chain-step handle format exactly, closing the gap between "the
     // filter shape is X" (asserted above) and "X actually excludes what a
     // real chain writes" (this test).
-    const chainHandles = ["fulllook-real:step1:trousers", "fulllook-real:step2:shirt", "fulllook-real:step3:blazer"];
+    const chainHandles = ["fulllook-real:step1:trousers", "fulllook-real:step2:shirt", "fulllook-real:final:blazer"];
     const countedAfterExclusion = chainHandles.filter(isCountedHandle);
-    expect(countedAfterExclusion).toEqual(["fulllook-real:step3:blazer"]);
+    expect(countedAfterExclusion).toEqual(["fulllook-real:final:blazer"]);
+  });
+
+  it("one completed 5-garment outfit (5 rows written, 1 of them 'final') ALSO contributes exactly 1 — the same guarantee holds at every supported chain length", async () => {
+    const chainHandles = [
+      "fulllook-real:step1:Black Sweater", "fulllook-real:step2:Black Jeans",
+      "fulllook-real:step3:Black Wool Shirt Jacket", "fulllook-real:step4:Brown Chelsea Boots",
+      "fulllook-real:final:Black Baseball Cap",
+    ];
+    const countedAfterExclusion = chainHandles.filter(isCountedHandle);
+    expect(countedAfterExclusion).toEqual(["fulllook-real:final:Black Baseball Cap"]);
   });
 
   it("the enforcement gate's own NOT filter includes both intermediate-step prefixes, not just the mock-harness one", async () => {

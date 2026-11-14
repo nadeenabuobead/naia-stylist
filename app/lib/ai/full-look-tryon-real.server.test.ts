@@ -92,6 +92,19 @@ function baseCtx(): FullLookChainContext {
   };
 }
 
+// 2026-11-15 — dynamic chain length. A real outfit can submit 3-5 garments
+// (see full-look-vto-orchestrator.server.ts's selectFullLookGarments);
+// this builds a ctx with exactly `count` garments so the pause/final-step
+// logic (now derived from ctx.garments.length, never a fixed constant) can
+// be exercised at lengths other than 3.
+function ctxWithGarmentCount(count: number): FullLookChainContext {
+  const labels = ["Black Sweater", "Black Jeans", "Black Wool Shirt Jacket", "Brown Chelsea Boots", "Black Baseball Cap"];
+  return {
+    ...baseCtx(),
+    garments: labels.slice(0, count).map((label) => ({ label, productImageUrl: `https://closet.example/${label}.jpg` })),
+  };
+}
+
 function fakeJob(id: string, overrides: Partial<VirtualTryOnJobRecord> = {}): VirtualTryOnJobRecord {
   return {
     id,
@@ -715,7 +728,7 @@ describe("prompt placement — final step only", () => {
 
     const createArgs = mockCreateOrFind().mock.calls[0][0];
     expect(createArgs.idempotencyKey).toBe(getFullLookStepIdempotencyKey("cust-1", 2, "job-1"));
-    expect(createArgs.productHandle).toBe(`${REAL_PRODUCT_HANDLE_PREFIX}:step3:Beige Tailored Blazer`);
+    expect(createArgs.productHandle).toBe(`${REAL_PRODUCT_HANDLE_PREFIX}:final:Beige Tailored Blazer`);
   });
 
   it("FL.35 — retention cleanup still fires normally on a chain that used the final-step tuning", async () => {
@@ -824,6 +837,109 @@ describe("advanceFullLookChain — pause before the final (blazer) step", () => 
     expect(mockDeleteAsset()).toHaveBeenCalledWith(expect.stringContaining("job-0"), "private");
     expect(mockDeleteAsset()).toHaveBeenCalledWith(expect.stringContaining("job-1"), "private");
     expect(global.fetch).not.toHaveBeenCalled(); // never checked FASHN — expiry is purely timestamp-derived
+    expect(mockSubmitProvider()).not.toHaveBeenCalled();
+  });
+});
+
+// 2026-11-15 — the exact scenario the dynamic-length fix exists for: the
+// founder's 5-item test outfit (sweater, jeans, jacket, boots, cap).
+// Proves the pause-before-final, final-detection, and final-step handle
+// tagging all generalize correctly for lengths other than the original
+// fixed 3, not just that they still work at 3.
+describe("advanceFullLookChain — dynamic chain length (4 and 5 garments)", () => {
+  it("5-garment chain: AWAITING_CONTINUE fires before step 5 (0-based index 4), not before step 3", async () => {
+    const ctx = ctxWithGarmentCount(5);
+    const jobs = [0, 1, 2].map((i) => fakeJob(`job-${i}`, { status: "COMPLETED" }));
+    const job3 = fakeJob("job-3", { status: "PROCESSING", predictionId: "pred-3" });
+    const _findJobFn = vi.fn(async (where: { idempotencyKey: string }) => {
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 0, null)) return jobs[0];
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 1, "job-0")) return jobs[1];
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 2, "job-1")) return jobs[2];
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 3, "job-2")) return job3;
+      return null;
+    });
+    (global.fetch as ReturnType<typeof vi.fn>).mockImplementation(async (url: string | URL | Request) => {
+      const u = url.toString();
+      if (u.includes("/v1/status/")) {
+        return new Response(JSON.stringify({ status: "completed", output: [PNG_DATA_URL] }), { status: 200 });
+      }
+      return new Response(new Uint8Array([1, 2, 3]).buffer, { status: 200 });
+    });
+    mockUploadPrivate().mockResolvedValue({ ok: true, publicId: "x", format: "png", version: "1" });
+    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job3, status: "COMPLETED" } });
+
+    const result = await advanceFullLookChain(ctx, { _findJobFn });
+
+    expect(result.status).toBe("AWAITING_CONTINUE"); // one before the REAL final (index 4), not index 2
+    expect(mockSubmitProvider()).not.toHaveBeenCalled();
+  });
+
+  it("5-garment chain: the final step's own productHandle is tagged 'final', not 'step5'", async () => {
+    const ctx = ctxWithGarmentCount(5);
+    const job3 = fakeJob("job-3", { status: "COMPLETED" });
+    mockCreateOrFind().mockResolvedValue({ ok: true, job: fakeJob("job-4"), created: true });
+    mockAdvance()
+      .mockResolvedValueOnce({ ok: true, job: { ...fakeJob("job-4"), status: "SUBMITTED" } })
+      .mockResolvedValueOnce({ ok: true, job: { ...fakeJob("job-4"), status: "PROCESSING", predictionId: "pred-4" } });
+    mockDownloadPhoto().mockResolvedValue({ ok: true, dataUrl: PNG_DATA_URL });
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(new Uint8Array([1, 2, 3]).buffer, { status: 200 }),
+    );
+    mockSubmitProvider().mockResolvedValue({ ok: true, predictionId: "pred-4" });
+
+    await submitFullLookRealStep(ctx, 4, job3.id); // index 4 = final for a 5-garment chain
+
+    const createArgs = mockCreateOrFind().mock.calls[0][0];
+    expect(createArgs.productHandle).toBe(`${REAL_PRODUCT_HANDLE_PREFIX}:final:Black Baseball Cap`);
+  });
+
+  it("5-garment chain: COMPLETED is only detected at the real final step (index 4), not at index 2 where a 3-garment chain's final would be", async () => {
+    const ctx = ctxWithGarmentCount(5);
+    const jobs = [0, 1, 2, 3, 4].map((i) => fakeJob(`job-${i}`, { status: "COMPLETED" }));
+    const _findJobFn = vi.fn(async (where: { idempotencyKey: string }) => {
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 0, null)) return jobs[0];
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 1, "job-0")) return jobs[1];
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 2, "job-1")) return jobs[2];
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 3, "job-2")) return jobs[3];
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 4, "job-3")) return jobs[4];
+      return null;
+    });
+    mockBuildResultUrl().mockReturnValue("https://signed/final-5.png");
+
+    const result = await advanceFullLookChain(ctx, { _findJobFn });
+
+    expect(result).toEqual({ status: "COMPLETED", resultUrl: "https://signed/final-5.png" });
+  });
+
+  it("4-garment chain: AWAITING_CONTINUE fires before step 4 (index 3), one position later than a 3-garment chain", async () => {
+    const ctx = ctxWithGarmentCount(4);
+    const job0 = fakeJob("job-0", { status: "COMPLETED" });
+    const job1 = fakeJob("job-1", { status: "COMPLETED" });
+    const job2 = fakeJob("job-2", { status: "COMPLETED" }); // already resolved by an earlier poll
+    const _findJobFn = vi.fn(async (where: { idempotencyKey: string }) => {
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 0, null)) return job0;
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 1, "job-0")) return job1;
+      if (where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 2, "job-1")) return job2;
+      return null;
+    });
+
+    const result = await advanceFullLookChain(ctx, { _findJobFn });
+
+    expect(result.status).toBe("AWAITING_CONTINUE"); // fast path — no FASHN call needed to know this
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("invalid chain length (6 garments, above FULL_LOOK_MAX_GARMENTS) is refused before any FASHN I/O", async () => {
+    const ctx = ctxWithGarmentCount(5);
+    const sixthGarment = { label: "extra", productImageUrl: "https://x/extra.jpg" };
+    const result = await startOrResumeFullLookChain({ ...ctx, garments: [...ctx.garments, sixthGarment] });
+    expect(result).toEqual({ ok: false, reason: "invalid_chain_length" });
+    expect(mockSubmitProvider()).not.toHaveBeenCalled();
+  });
+
+  it("invalid chain length (2 garments, below the 3-item floor) is refused before any FASHN I/O", async () => {
+    const result = await startOrResumeFullLookChain(ctxWithGarmentCount(2));
+    expect(result).toEqual({ ok: false, reason: "invalid_chain_length" });
     expect(mockSubmitProvider()).not.toHaveBeenCalled();
   });
 });
@@ -1029,6 +1145,11 @@ describe("sweepAbandonedFullLookPauses", () => {
     return fakeJob(shirtId, {
       customerId: "cust-1",
       idempotencyKey: `fulllook-real-step:${trousersId}:1`,
+      // Step index 1 (0-based) = "step2" (1-based label) — the sweep now
+      // parses its own step index back out of the handle, not the
+      // idempotencyKey, so this must actually say "step2", not fall back
+      // to fakeJob's own default ("step1").
+      productHandle: `${REAL_PRODUCT_HANDLE_PREFIX}:step2:Blue Chambray Button-Up Shirt`,
       status: "COMPLETED",
       ...overrides,
     });
@@ -1091,6 +1212,49 @@ describe("sweepAbandonedFullLookPauses", () => {
     expect(mockDeleteAsset()).toHaveBeenCalledTimes(2); // only the one genuinely-abandoned chain
     expect(mockDeleteAsset()).toHaveBeenCalledWith(expect.stringContaining("trousers-expired"), "private");
     expect(mockDeleteAsset()).toHaveBeenCalledWith(expect.stringContaining("shirt-expired"), "private");
+  });
+
+  // 2026-11-15 — the generalization this sweep needed for dynamic chain
+  // length: an abandoned pause at step3 or step4 (4- and 5-garment chains)
+  // is invisible to a sweep hardcoded to "step2:" alone. Proves the sweep
+  // now finds and correctly resolves BOTH positions, not just step2.
+  it("SW.6 — an abandoned pause at step3 (a 4-garment chain's pause-adjacent position, not step2) is found and cleaned up", async () => {
+    const stale = new Date(Date.now() - 45 * 60 * 1000);
+    const step3Job = fakeJob("step3-job", {
+      customerId: "cust-1",
+      idempotencyKey: "fulllook-real-step:step2-job:2",
+      productHandle: `${REAL_PRODUCT_HANDLE_PREFIX}:step3:Black Wool Shirt Jacket`,
+      status: "COMPLETED",
+      completedAt: stale,
+    });
+    const _findPauseAdjacentJobs = vi.fn(async () => [step3Job]);
+    const _findJobFn = vi.fn(async () => null); // no step4/final job — never continued
+
+    const result = await sweepAbandonedFullLookPauses(_findPauseAdjacentJobs, _findJobFn);
+
+    expect(result).toEqual({ cleanedChains: 1, skippedActive: 0, skippedAlreadyAdvanced: 0 });
+    expect(_findJobFn).toHaveBeenCalledWith({ idempotencyKey: "fulllook-real-step:step3-job:3" });
+    expect(mockDeleteAsset()).toHaveBeenCalledWith(expect.stringContaining("step2-job"), "private");
+    expect(mockDeleteAsset()).toHaveBeenCalledWith(expect.stringContaining("step3-job"), "private");
+  });
+
+  it("SW.7 — a step3 job that DID continue (a step4 or final job exists) is left completely alone", async () => {
+    const stale = new Date(Date.now() - 45 * 60 * 1000);
+    const step3Job = fakeJob("step3-job", {
+      idempotencyKey: "fulllook-real-step:step2-job:2",
+      productHandle: `${REAL_PRODUCT_HANDLE_PREFIX}:step3:Black Wool Shirt Jacket`,
+      status: "COMPLETED",
+      completedAt: stale,
+    });
+    const _findPauseAdjacentJobs = vi.fn(async () => [step3Job]);
+    const _findJobFn = vi.fn(async (where: { idempotencyKey: string }) =>
+      where.idempotencyKey === "fulllook-real-step:step3-job:3" ? fakeJob("final-job") : null,
+    );
+
+    const result = await sweepAbandonedFullLookPauses(_findPauseAdjacentJobs, _findJobFn);
+
+    expect(result).toEqual({ cleanedChains: 0, skippedActive: 0, skippedAlreadyAdvanced: 1 });
+    expect(mockDeleteAsset()).not.toHaveBeenCalled();
   });
 
   it("SW.5 — never mutates any VirtualTryOnJob row — only Cloudinary deletes happen", async () => {
