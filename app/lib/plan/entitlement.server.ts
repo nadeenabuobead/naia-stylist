@@ -446,11 +446,16 @@ export interface EntitlementSummary {
   personalisedTrend: PersonalisedTrendEntitlement;
   windowLabel: string;
   // Non-null only while a renewal payment has failed and the 7-day grace
-  // period (PAST_DUE_GRACE_PERIOD_MS) hasn't elapsed — purely informational,
-  // for Plan & Usage messaging. Access itself was already decided before
-  // this summary is built (see getCurrentSubscription); this field never
-  // feeds back into any entitlement check.
-  billingAlert: { status: "PAST_DUE"; graceDaysRemaining: number } | null;
+  // period (PAST_DUE_GRACE_PERIOD_MS) hasn't elapsed, OR a Checkout attempt
+  // via an asynchronous payment method (e.g. a bank debit) is still waiting
+  // to clear — purely informational, for Plan & Usage messaging. Access
+  // itself was already decided before this summary is built (see
+  // getCurrentSubscription, which never returns an INCOMPLETE row at all);
+  // this field never feeds back into any entitlement check. PAYMENT_PENDING
+  // is for a RETURNING visit with no checkout= redirect param — the one-time
+  // redirect banner (my-naia.plan-usage.tsx's own checkoutOutcome) already
+  // covers the immediate post-checkout case on its own.
+  billingAlert: { status: "PAST_DUE"; graceDaysRemaining: number } | { status: "PAYMENT_PENDING" } | null;
 }
 
 // ── Main function ──────────────────────────────────────────────────────────────
@@ -461,9 +466,26 @@ export async function getEntitlementSummary(
   _contextDeps: EffectiveContextDeps = {},
 ): Promise<EntitlementSummary> {
   const { window, countingEnd, allowances, subscription } = await resolveEffectiveContext(customerId, membershipStatus, _contextDeps);
+  // getCurrentSubscription (inside resolveEffectiveContext) only ever
+  // returns an ACTIVE/PAST_DUE row — an INCOMPLETE one (a Checkout attempt
+  // via an asynchronous payment method still waiting to clear) is
+  // deliberately invisible to it, since it must never grant access. This
+  // is the one place that INCOMPLETE state gets surfaced anyway, purely
+  // for messaging — only queried when there's no already-entitled
+  // subscription, keeping the common (ACTIVE/PAST_DUE/no-subscription-at-
+  // all) case at zero extra queries.
+  const pendingAsyncPayment = subscription
+    ? null
+    : await prisma.subscription.findFirst({
+        where: { customerId, status: "INCOMPLETE" },
+        orderBy: { createdAt: "desc" },
+        select: { id: true },
+      });
   const billingAlert: EntitlementSummary["billingAlert"] =
     subscription?.status === "PAST_DUE"
       ? { status: "PAST_DUE", graceDaysRemaining: getPastDueGraceDaysRemaining(subscription.pastDueSince) ?? 0 }
+      : pendingAsyncPayment
+      ? { status: "PAYMENT_PENDING" }
       : null;
   const resetDate = formatResetDate(window);
   const staleThreshold = new Date(Date.now() - VTO_IN_FLIGHT_STALE_MS);
