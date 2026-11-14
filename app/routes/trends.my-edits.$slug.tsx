@@ -20,7 +20,6 @@ import {
 } from "~/lib/trend-product-recommendation.server";
 import { checkEntitlement, reservePersonalisedTrendSlot, type EntitlementCheck } from "~/lib/plan/entitlement.server";
 import {
-  recordPersonalisedTrendEditUsage,
   getTrendEditUsageState,
   getMostRecentArchivedSnapshot,
   type TrendEditSnapshot,
@@ -150,10 +149,13 @@ async function generateAndRecordEdit(
     // Usage recording — fired only for a genuine personalised edit (never a
     // locked/empty/failed state). Two independent writes, two independent
     // purposes:
-    //   - recordPersonalisedTrendEditUsage: the customer entitlement/usage
-    //     source of truth (PersonalisedTrendEditUsage) — this is what Plan &
+    //   - reservePersonalisedTrendSlot (below): the customer entitlement/
+    //     usage source of truth (PersonalisedTrendEditUsage, written via its
+    //     own recordPersonalisedTrendEditUsage call) — this is what Plan &
     //     Usage and checkEntitlement read. Idempotent create-if-absent; the
-    //     DB unique constraint is the race-safety authority.
+    //     DB unique constraint is the race-safety authority. No longer a
+    //     direct call from this file — see that function's own comment for
+    //     why (fixed 2026-11-12, fix/stripe-clerk-phase1-security).
     //   - emitTrendEditGenerated: analytics only (JourneyEvent, hashed
     //     customerId) — never read for quota or Plan & Usage.
     // Both share one periodKey from getUsageWindow(), so the idempotency
