@@ -1930,7 +1930,13 @@ describe("S — Main Overview: loader no longer fans out Promise.all over the po
     // Window widened 2026-11 (billing-oauth integration merge): the countingEnd
     // and isTest/MOCK_VTO explanatory comments added above several of this
     // function's queries pushed monthlyPersonalisedTrendUsed further down.
-    const fnBody = entitlementSrc.slice(fnIdx, fnIdx + 4500);
+    // Widened again 2026-11-14 (effective-membership-status merge,
+    // 274a2cc): the new hasManageableBillingAccount eligibility check was
+    // added earlier in this same function, pushing monthlyPersonalisedTrendUsed
+    // from offset ~4300 to ~4624 — same recurring fragility the first
+    // comment already flagged, not a functional change (verified: the line
+    // itself is byte-identical, still a sequential `await`).
+    const fnBody = entitlementSrc.slice(fnIdx, fnIdx + 5200);
     assert.ok(!fnBody.includes("Promise.all("), "no Promise.all inside getEntitlementSummary");
     assert.ok(fnBody.includes("const monthlyQualifyingCount = await prisma.stylingSession.count"), "sequential await present");
     assert.ok(fnBody.includes("const monthlyPersonalisedTrendUsed = await prisma.personalisedTrendEditUsage.count"), "last query still present and sequential");
@@ -1938,7 +1944,7 @@ describe("S — Main Overview: loader no longer fans out Promise.all over the po
 
   it("getEntitlementSummary's return value shape is unchanged — same six fields read into the same result object", () => {
     const fnIdx = entitlementSrc.indexOf("export async function getEntitlementSummary");
-    const fnBody = entitlementSrc.slice(fnIdx, fnIdx + 4500);
+    const fnBody = entitlementSrc.slice(fnIdx, fnIdx + 5200);
     for (const field of [
       "monthlyQualifyingCount",
       "monthlyBuySkipUsed",
