@@ -2124,7 +2124,7 @@ export default function StyleMeResult() {
             {fullLookQA.status === "loading" && (
               <>
                 <h2 className="sm-vto-heading">Creating your try-on…</h2>
-                <p className="sm-vto-body">This can take a moment — feel free to keep browsing.</p>
+                <p className="sm-vto-body">Your outfit is coming together. This may take a moment.</p>
               </>
             )}
 
