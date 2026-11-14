@@ -393,7 +393,12 @@ describe("ENT-32 — mock VTO jobs (fulllook-poc: namespace) excluded from real 
   });
 
   it("both getEntitlementSummary VTO count queries exclude the mock namespace", () => {
-    const matches = entSvc.match(/NOT: \{ productHandle: \{ startsWith: MOCK_VTO_PRODUCT_HANDLE_PREFIX \} \}/g) ?? [];
+    // 2026-11-14: the single-prefix inline exclusion was replaced by
+    // excludingMockAndIntermediateFullLookHandles() — same MOCK_VTO_PRODUCT_HANDLE_PREFIX
+    // exclusion, now alongside the Full-Look intermediate-step exclusion
+    // (entitlement-mock-vto-exclusion.test.ts proves the full behavior and
+    // exact filter shape; this just confirms all 4 call sites still use it).
+    const matches = entSvc.match(/NOT: excludingMockAndIntermediateFullLookHandles\(\)/g) ?? [];
     assert.ok(matches.length >= 4,
               `expected the exclusion in all 4 VTO count call sites (summary completed+inFlight, checkEntitlement completed+inFlight) — found ${matches.length}`);
   });

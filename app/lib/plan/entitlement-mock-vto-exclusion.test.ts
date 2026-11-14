@@ -35,7 +35,7 @@ vi.mock("~/db.server", () => ({
 }));
 
 import prisma from "~/db.server";
-import { getEntitlementSummary, checkEntitlement } from "./entitlement.server";
+import { getEntitlementSummary, checkEntitlement, FULL_LOOK_INTERMEDIATE_HANDLE_PREFIXES } from "./entitlement.server";
 
 const mockVtoCount = () => (prisma as any).virtualTryOnJob.count as ReturnType<typeof vi.fn>;
 
@@ -56,7 +56,11 @@ describe("getEntitlementSummary — mock VTO jobs excluded from real usage", () 
     const vtoCalls = mockVtoCount().mock.calls.map((c: unknown[]) => c[0]);
     expect(vtoCalls).toHaveLength(2);
     for (const call of vtoCalls) {
-      expect((call as any).where.NOT).toEqual({ productHandle: { startsWith: "fulllook-poc:" } });
+      expect((call as any).where.NOT).toEqual([
+        { productHandle: { startsWith: "fulllook-poc:" } },
+        { productHandle: { startsWith: "fulllook-real:step1:" } },
+        { productHandle: { startsWith: "fulllook-real:step2:" } },
+      ]);
     }
   });
 
@@ -78,7 +82,11 @@ describe("checkEntitlement('vto') — the real production gate also excludes moc
     const vtoCalls = mockVtoCount().mock.calls.map((c: unknown[]) => c[0]);
     expect(vtoCalls).toHaveLength(2);
     for (const call of vtoCalls) {
-      expect((call as any).where.NOT).toEqual({ productHandle: { startsWith: "fulllook-poc:" } });
+      expect((call as any).where.NOT).toEqual([
+        { productHandle: { startsWith: "fulllook-poc:" } },
+        { productHandle: { startsWith: "fulllook-real:step1:" } },
+        { productHandle: { startsWith: "fulllook-real:step2:" } },
+      ]);
     }
   });
 
@@ -129,5 +137,51 @@ describe("checkEntitlement('vto') — unpaid vs. paid access, real boundary beha
     mockVtoCount().mockResolvedValueOnce(9).mockResolvedValueOnce(0);
     const result = await checkEntitlement("cust-member", "MEMBER", "vto");
     expect(result.allowed).toBe(true);
+  });
+});
+
+// 2026-11-14 — founder decision: a completed Full-Look outfit costs exactly
+// 1 credit, not 1 per garment step. These prove the actual exclusion
+// semantics directly (not just the query's filter shape, which the tests
+// above already cover) — applying the real prefix list to a representative
+// set of productHandle values a real 3-step chain would write.
+describe("Full-Look VTO intermediate-step exclusion — 1 credit per outfit, not 1 per garment", () => {
+  function isCountedHandle(productHandle: string): boolean {
+    if (productHandle.startsWith("fulllook-poc:")) return false;
+    return !FULL_LOOK_INTERMEDIATE_HANDLE_PREFIXES.some((prefix) => productHandle.startsWith(prefix));
+  }
+
+  it("of a real chain's 3 step handles, only the final step (step3) counts", () => {
+    expect(isCountedHandle("fulllook-real:step1:trousers")).toBe(false);
+    expect(isCountedHandle("fulllook-real:step2:shirt")).toBe(false);
+    expect(isCountedHandle("fulllook-real:step3:blazer")).toBe(true);
+  });
+
+  it("a single-item VTO handle (no full-look prefix at all) still counts, unaffected by this exclusion", () => {
+    expect(isCountedHandle("collar-shirt-12345")).toBe(true);
+  });
+
+  it("one completed outfit (3 rows written, 1 of them step3) contributes exactly 1 to vtoCompleted's real query — proven via the actual exclusion filter, not a mocked count", async () => {
+    // The mock can't evaluate a real WHERE clause against rows, so this
+    // proves the filter's OWN exclusion list — read directly off the
+    // function under test, not duplicated here — matches the one genuine
+    // chain-step handle format exactly, closing the gap between "the
+    // filter shape is X" (asserted above) and "X actually excludes what a
+    // real chain writes" (this test).
+    const chainHandles = ["fulllook-real:step1:trousers", "fulllook-real:step2:shirt", "fulllook-real:step3:blazer"];
+    const countedAfterExclusion = chainHandles.filter(isCountedHandle);
+    expect(countedAfterExclusion).toEqual(["fulllook-real:step3:blazer"]);
+  });
+
+  it("the enforcement gate's own NOT filter includes both intermediate-step prefixes, not just the mock-harness one", async () => {
+    await checkEntitlement("cust-1", "MEMBER", "vto");
+    const vtoCalls = mockVtoCount().mock.calls.map((c: unknown[]) => c[0]);
+    for (const call of vtoCalls) {
+      const notClauses = (call as any).where.NOT as Array<{ productHandle: { startsWith: string } }>;
+      const prefixes = notClauses.map((c) => c.productHandle.startsWith);
+      for (const intermediatePrefix of FULL_LOOK_INTERMEDIATE_HANDLE_PREFIXES) {
+        expect(prefixes).toContain(intermediatePrefix);
+      }
+    }
   });
 });

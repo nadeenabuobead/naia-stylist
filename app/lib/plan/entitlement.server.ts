@@ -84,6 +84,26 @@ const VTO_IN_FLIGHT_STALE_MS = 10 * 60 * 1000; // 10 minutes
 // this file to change again — both conditions would simply agree.
 const MOCK_VTO_PRODUCT_HANDLE_PREFIX = "fulllook-poc:";
 
+// 2026-11-14 — Full-Look VTO charges exactly 1 credit per completed outfit
+// (founder decision), not 1 per garment step. A full-look chain writes one
+// VirtualTryOnJob row per garment (fulllook-real:step{1,2,3}:...) — only
+// the FINAL step's row (step3) should ever count toward quota, identically
+// to a single-item job. Steps 1 and 2 are internal chain bookkeeping
+// (never a customer-facing preview — see full-look-tryon-real.server.ts's
+// own intermediate-image comment) and must never be counted, in either
+// direction: not toward vtoCompleted (a completed outfit must cost exactly
+// 1, not 3) and not toward vtoInFlight (an in-flight intermediate step
+// must not phantom-block the customer from starting anything else while
+// their own chain is still only partway through).
+export const FULL_LOOK_INTERMEDIATE_HANDLE_PREFIXES = ["fulllook-real:step1:", "fulllook-real:step2:"] as const;
+
+function excludingMockAndIntermediateFullLookHandles() {
+  return [
+    { productHandle: { startsWith: MOCK_VTO_PRODUCT_HANDLE_PREFIX } },
+    ...FULL_LOOK_INTERMEDIATE_HANDLE_PREFIXES.map((prefix) => ({ productHandle: { startsWith: prefix } })),
+  ];
+}
+
 // ── Transaction retry (mirrors my-naia-model.server.ts's VTO job creation) ────
 const MAX_TX_RETRIES = 2;
 
@@ -530,7 +550,7 @@ export async function getEntitlementSummary(
       status: "COMPLETED",
       isTest: false,
       createdAt: { gte: window.start, lt: countingEnd },
-      NOT: { productHandle: { startsWith: MOCK_VTO_PRODUCT_HANDLE_PREFIX } },
+      NOT: excludingMockAndIntermediateFullLookHandles(),
     },
   });
 
@@ -541,7 +561,7 @@ export async function getEntitlementSummary(
       status: { in: ["CREATED", "SUBMITTED", "PROCESSING"] },
       isTest: false,
       lastActivityAt: { gte: staleThreshold },
-      NOT: { productHandle: { startsWith: MOCK_VTO_PRODUCT_HANDLE_PREFIX } },
+      NOT: excludingMockAndIntermediateFullLookHandles(),
     },
   });
 
@@ -664,7 +684,7 @@ export async function checkEntitlement(
             customerId,
             status: "COMPLETED",
             isTest: false,
-            NOT: { productHandle: { startsWith: MOCK_VTO_PRODUCT_HANDLE_PREFIX } },
+            NOT: excludingMockAndIntermediateFullLookHandles(),
             createdAt: { gte: window.start, lt: countingEnd },
           },
         }),
@@ -674,7 +694,7 @@ export async function checkEntitlement(
             status: { in: ["CREATED", "SUBMITTED", "PROCESSING"] },
             isTest: false,
             lastActivityAt: { gte: staleThreshold },
-            NOT: { productHandle: { startsWith: MOCK_VTO_PRODUCT_HANDLE_PREFIX } },
+            NOT: excludingMockAndIntermediateFullLookHandles(),
           },
         }),
       ]);
