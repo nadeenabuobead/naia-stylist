@@ -79,10 +79,13 @@ describe("selectFullLookGarments", () => {
     vi.mocked(resolveItemImage).mockImplementation((i: any) => i.productImageUrl ?? null);
   });
 
-  it("selects BOTTOM, TOP, OUTERWEAR when no dress is present — matching the chain's own fixture precedent", () => {
-    const items = [item("TOP", "shirt"), item("BOTTOM", "trousers"), item("OUTERWEAR", "blazer"), item("SHOES", "boots")];
-    const garments = selectFullLookGarments(items, { customerId: "cust-1", cloudinaryConfig: null });
-    expect(garments?.map((g) => g.label)).toEqual(["shirt", "trousers", "blazer"]);
+  // ── 3-item outfits ───────────────────────────────────────────────────────
+
+  it("3-item outfit: selects BOTTOM, TOP, OUTERWEAR when nothing else is present — nothing omitted", () => {
+    const items = [item("TOP", "shirt"), item("BOTTOM", "trousers"), item("OUTERWEAR", "blazer")];
+    const result = selectFullLookGarments(items, { customerId: "cust-1", cloudinaryConfig: null });
+    expect(result?.garments.map((g) => g.label)).toEqual(["shirt", "trousers", "blazer"]);
+    expect(result?.omittedLabels).toEqual([]);
   });
 
   it("a DRESS replaces TOP+BOTTOM outright — selects dress+outerwear+shoes, never a top or bottom alongside the dress", () => {
@@ -93,27 +96,113 @@ describe("selectFullLookGarments", () => {
       item("OUTERWEAR", "blazer"),
       item("SHOES", "boots"),
     ];
-    const garments = selectFullLookGarments(items, { customerId: "cust-1", cloudinaryConfig: null });
-    expect(garments?.map((g) => g.label)).toEqual(["dress", "blazer", "boots"]);
+    const result = selectFullLookGarments(items, { customerId: "cust-1", cloudinaryConfig: null });
+    expect(result?.garments.map((g) => g.label)).toEqual(["dress", "blazer", "boots"]);
+    expect(result?.omittedLabels).toEqual([]);
   });
 
   it("fewer than 3 resolvable items (category match) returns null — Full-Look VTO not offered", () => {
     const items = [item("TOP", "shirt"), item("BOTTOM", "trousers")];
-    const garments = selectFullLookGarments(items, { customerId: "cust-1", cloudinaryConfig: null });
-    expect(garments).toBeNull();
+    const result = selectFullLookGarments(items, { customerId: "cust-1", cloudinaryConfig: null });
+    expect(result).toBeNull();
   });
 
   it("an item whose image can't be resolved makes the whole selection decline, not submit a broken chain", () => {
     vi.mocked(resolveItemImage).mockImplementation((i: any) => (i.productTitle === "trousers" ? null : (i.productImageUrl ?? null)));
     const items = [item("TOP", "shirt"), item("BOTTOM", "trousers"), item("OUTERWEAR", "blazer")];
-    const garments = selectFullLookGarments(items, { customerId: "cust-1", cloudinaryConfig: null });
-    expect(garments).toBeNull();
+    const result = selectFullLookGarments(items, { customerId: "cust-1", cloudinaryConfig: null });
+    expect(result).toBeNull();
   });
 
-  it("BAG/ACCESSORY/JEWELRY are never selected, even as a last resort to reach 3", () => {
-    const items = [item("TOP", "shirt"), item("BAG", "tote"), item("JEWELRY", "necklace"), item("ACCESSORY", "scarf")];
-    const garments = selectFullLookGarments(items, { customerId: "cust-1", cloudinaryConfig: null });
-    expect(garments).toBeNull(); // only 1 real qualifying item (shirt) — never pads with bag/jewelry/accessory
+  // ── 4-item outfits ───────────────────────────────────────────────────────
+
+  it("4-item outfit: TOP+BOTTOM+OUTERWEAR+SHOES all included — nothing omitted", () => {
+    const items = [item("TOP", "sweater"), item("BOTTOM", "jeans"), item("OUTERWEAR", "jacket"), item("SHOES", "boots")];
+    const result = selectFullLookGarments(items, { customerId: "cust-1", cloudinaryConfig: null });
+    expect(result?.garments.map((g) => g.label)).toEqual(["sweater", "jeans", "jacket", "boots"]);
+    expect(result?.omittedLabels).toEqual([]);
+  });
+
+  // ── 5-item outfits — the exact founder QA case ──────────────────────────
+
+  it("5-item outfit (black sweater, jeans, wool jacket, brown Chelsea boots, baseball cap): ALL FIVE pieces are included, nothing omitted", () => {
+    const items = [
+      item("TOP", "Black Sweater"),
+      item("BOTTOM", "Black Jeans"),
+      item("OUTERWEAR", "Black Wool Shirt Jacket"),
+      item("SHOES", "Brown Chelsea Boots"),
+      item("ACCESSORY", "Black Baseball Cap"),
+    ];
+    const result = selectFullLookGarments(items, { customerId: "cust-1", cloudinaryConfig: null });
+    expect(result?.garments.map((g) => g.label)).toEqual([
+      "Black Sweater", "Black Jeans", "Black Wool Shirt Jacket", "Brown Chelsea Boots", "Black Baseball Cap",
+    ]);
+    expect(result?.omittedLabels).toEqual([]);
+  });
+
+  it("5-item outfit order follows CATEGORY_PRIORITY, not input order — SHOES before ACCESSORY regardless of list position", () => {
+    const items = [
+      item("ACCESSORY", "cap"), // listed first, but lower priority than shoes
+      item("SHOES", "boots"),
+      item("TOP", "sweater"),
+      item("BOTTOM", "jeans"),
+      item("OUTERWEAR", "jacket"),
+    ];
+    const result = selectFullLookGarments(items, { customerId: "cust-1", cloudinaryConfig: null });
+    expect(result?.garments.map((g) => g.label)).toEqual(["sweater", "jeans", "jacket", "boots", "cap"]);
+  });
+
+  // ── Beyond 5 — the disclosure requirement ───────────────────────────────
+
+  it("an outfit with MORE than 5 eligible categories is capped at 5, and the dropped piece(s) are reported in omittedLabels — never silently", () => {
+    // No TOP/BOTTOM (dress excludes them) — 6 real categories: DRESS, OUTERWEAR,
+    // SHOES, ACCESSORY, BAG, JEWELRY. Priority keeps the top 5, drops JEWELRY (last).
+    const items = [
+      item("DRESS", "dress"),
+      item("OUTERWEAR", "coat"),
+      item("SHOES", "boots"),
+      item("ACCESSORY", "cap"),
+      item("BAG", "tote"),
+      item("JEWELRY", "necklace"),
+    ];
+    const result = selectFullLookGarments(items, { customerId: "cust-1", cloudinaryConfig: null });
+    expect(result?.garments.map((g) => g.label)).toEqual(["dress", "coat", "boots", "cap", "tote"]);
+    expect(result?.omittedLabels).toEqual(["necklace"]);
+  });
+
+  it("omittedLabels falls back to the item type when neither productTitle nor a closet name is available", () => {
+    const items = [
+      item("DRESS", "dress"), item("OUTERWEAR", "coat"), item("SHOES", "boots"),
+      item("ACCESSORY", "cap"), item("BAG", "tote"),
+      { itemType: "JEWELRY", productTitle: null, productImageUrl: "https://example.com/j.jpg" } as SelectableOutfitItem,
+    ];
+    const result = selectFullLookGarments(items, { customerId: "cust-1", cloudinaryConfig: null });
+    expect(result?.omittedLabels).toEqual(["JEWELRY"]);
+  });
+
+  // ── Shoes and accessories specifically ──────────────────────────────────
+
+  it("BAG/ACCESSORY/JEWELRY alone (no clothing) CAN now reach the 3-item floor and be selected — no longer structurally excluded", () => {
+    const items = [item("BAG", "tote"), item("JEWELRY", "necklace"), item("ACCESSORY", "scarf")];
+    const result = selectFullLookGarments(items, { customerId: "cust-1", cloudinaryConfig: null });
+    expect(result?.garments.map((g) => g.label)).toEqual(["scarf", "tote", "necklace"]);
+  });
+
+  it("a single extra accessory on top of a complete 3-item clothing outfit is included as the 4th piece, not dropped", () => {
+    const items = [item("TOP", "shirt"), item("BOTTOM", "trousers"), item("OUTERWEAR", "blazer"), item("ACCESSORY", "scarf")];
+    const result = selectFullLookGarments(items, { customerId: "cust-1", cloudinaryConfig: null });
+    expect(result?.garments.map((g) => g.label)).toEqual(["shirt", "trousers", "blazer", "scarf"]);
+    expect(result?.omittedLabels).toEqual([]);
+  });
+
+  it("an unresolvable image among 5 eligible categories still declines the whole chain, even though fewer than 5 would otherwise be needed", () => {
+    vi.mocked(resolveItemImage).mockImplementation((i: any) => (i.productTitle === "boots" ? null : (i.productImageUrl ?? null)));
+    const items = [
+      item("TOP", "sweater"), item("BOTTOM", "jeans"), item("OUTERWEAR", "jacket"),
+      item("SHOES", "boots"), item("ACCESSORY", "cap"),
+    ];
+    const result = selectFullLookGarments(items, { customerId: "cust-1", cloudinaryConfig: null });
+    expect(result).toBeNull();
   });
 });
 
@@ -148,13 +237,18 @@ describe("resolveCurrentAttemptScope / startNewAttemptScope — retry-safe idemp
 
 // ── Auto-advance ──────────────────────────────────────────────────────────────
 
+// 3 garments — totalSteps assertions below (3) assume this exact length.
 const BASE_CTX = {
   customerId: "cust-1",
   naiaModelId: "model-1",
   bodyPublicId: "body-1",
   bodyFormat: "jpg",
   deliveryType: "private",
-  garments: [{ label: "a", productImageUrl: "https://x/a.jpg" }],
+  garments: [
+    { label: "a", productImageUrl: "https://x/a.jpg" },
+    { label: "b", productImageUrl: "https://x/b.jpg" },
+    { label: "c", productImageUrl: "https://x/c.jpg" },
+  ],
   consent: { virtualTryOnConsent: true, policyVersion: "1.0", consentedAt: "2026-11-14T00:00:00.000Z" },
   outfitSuggestionId: "sugg-1",
 } as any;
@@ -182,6 +276,22 @@ describe("startFullLookOutfit / pollFullLookOutfit — auto-advance past the hum
 
     const result = await pollFullLookOutfit(BASE_CTX);
     expect(result).toEqual({ status: "ERROR", reason: "continue_window_expired" });
+  });
+
+  it("totalSteps reflects THIS chain's own real garment count (5), not a fixed global — genuine progress, never simulated", async () => {
+    const fiveGarmentCtx = {
+      ...BASE_CTX,
+      garments: [
+        { label: "sweater", productImageUrl: "https://x/1.jpg" },
+        { label: "jeans", productImageUrl: "https://x/2.jpg" },
+        { label: "jacket", productImageUrl: "https://x/3.jpg" },
+        { label: "boots", productImageUrl: "https://x/4.jpg" },
+        { label: "cap", productImageUrl: "https://x/5.jpg" },
+      ],
+    };
+    vi.mocked(advanceFullLookChain).mockResolvedValueOnce({ status: "PROCESSING", stepIndex: 1 } as any);
+    const result = await pollFullLookOutfit(fiveGarmentCtx);
+    expect(result).toEqual({ status: "PROCESSING", stepIndex: 1, totalSteps: 5 });
   });
 
   it("COMPLETED passes through with the real resultUrl", async () => {
@@ -266,7 +376,7 @@ describe("startFullLookOutfit / pollFullLookOutfit — auto-advance past the hum
 // ── Existing-result lookup ───────────────────────────────────────────────────
 
 describe("findCompletedFullLookForSuggestion — never regenerate on revisit", () => {
-  it("finds the final (step3) COMPLETED job for this suggestion and returns its signed result URL", async () => {
+  it("finds the final (role-tagged, not position-tagged) COMPLETED job for this suggestion and returns its signed result URL", async () => {
     mockFindFirst().mockResolvedValueOnce({ id: "job-final", completedAt: new Date("2026-11-14T00:00:00.000Z") });
     vi.mocked(buildTryOnResultUrl).mockReturnValueOnce("https://signed/final.png");
 
@@ -276,7 +386,7 @@ describe("findCompletedFullLookForSuggestion — never regenerate on revisit", (
       where: {
         customerId: "cust-1",
         outfitSuggestionId: "sugg-1",
-        productHandle: { startsWith: "fulllook-real:step3:" },
+        productHandle: { startsWith: "fulllook-real:final:" },
         status: "COMPLETED",
       },
       orderBy: { createdAt: "desc" },

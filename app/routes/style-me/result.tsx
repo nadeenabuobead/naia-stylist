@@ -1397,10 +1397,15 @@ export default function StyleMeResult() {
   // from the server's own real chain position, never a simulated/fake
   // progress indicator. Optional: absent for the brief moment between
   // triggering/resuming and the first response that actually carries one.
+  // omittedLabels (2026-11-15) — requirement: never present a Full-Look
+  // result as the complete recommended outfit when a piece didn't make it
+  // in (e.g. the outfit had more eligible categories than this chain's
+  // ceiling). Always a real array from the server's own selection — never
+  // a guess made in this component.
   type FullLookQAState =
     | { status: "idle" }
     | { status: "loading"; stepIndex?: number; totalSteps?: number }
-    | { status: "done"; resultUrl: string }
+    | { status: "done"; resultUrl: string; omittedLabels?: string[] }
     | { status: "error"; message: string };
   const [fullLookQA, setFullLookQA] = useState<FullLookQAState>({ status: "idle" });
   const fullLookPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -1419,7 +1424,7 @@ export default function StyleMeResult() {
       if (!json.ok) return;
       if (json.status === "COMPLETED") {
         stopFullLookPolling();
-        setFullLookQA({ status: "done", resultUrl: json.resultUrl });
+        setFullLookQA({ status: "done", resultUrl: json.resultUrl, omittedLabels: json.omittedLabels });
       } else if (json.status === "FAILED") {
         stopFullLookPolling();
         setFullLookQA({ status: "error", message: json.errorCode ?? "unknown" });
@@ -1452,7 +1457,7 @@ export default function StyleMeResult() {
         const json = await res.json();
         if (cancelled || !json.ok) return;
         if (json.status === "COMPLETED") {
-          setFullLookQA({ status: "done", resultUrl: json.resultUrl });
+          setFullLookQA({ status: "done", resultUrl: json.resultUrl, omittedLabels: json.omittedLabels });
         } else if (json.status === "PROCESSING") {
           setFullLookQA({ status: "loading", stepIndex: json.stepIndex, totalSteps: json.totalSteps });
           startFullLookPolling(suggestionId);
@@ -1489,7 +1494,7 @@ export default function StyleMeResult() {
         return;
       }
       if (json.status === "COMPLETED") {
-        setFullLookQA({ status: "done", resultUrl: json.resultUrl });
+        setFullLookQA({ status: "done", resultUrl: json.resultUrl, omittedLabels: json.omittedLabels });
       } else if (json.status === "FAILED") {
         setFullLookQA({ status: "error", message: json.errorCode ?? "unknown" });
       } else {
@@ -2154,6 +2159,11 @@ export default function StyleMeResult() {
                   alt="Your StyleMe outfit on your nAia Model"
                   className="sm-vto-image"
                 />
+                {fullLookQA.omittedLabels && fullLookQA.omittedLabels.length > 0 && (
+                  <p className="sm-vto-body-note">
+                    Shown without: {fullLookQA.omittedLabels.join(", ")}.
+                  </p>
+                )}
               </>
             )}
 

@@ -159,7 +159,7 @@ describe("FL8 — never regenerates on revisit; retry only applies to a genuinel
   it("loader short-circuits to the saved result via findCompletedFullLookForSuggestion before touching the chain", () => {
     const loaderBody = route.split("export async function loader")[1].split("export async function action")[0];
     assert.ok(loaderBody.includes("findCompletedFullLookForSuggestion(customer.id, suggestionId)"));
-    assert.ok(/if \(existing\) \{\s*return data\(\{ ok: true, status: "COMPLETED"/.test(loaderBody));
+    assert.ok(/if \(existing\) \{\s*return data\(\s*\{ ok: true, status: "COMPLETED"/.test(loaderBody));
   });
 
   it("action's retry flag only maps to forceNewAttempt on startFullLookOutfit — it cannot skip ownership, consent, model-readiness, or entitlement checks", () => {
@@ -219,8 +219,30 @@ describe("FL11 — the GET loader resolves real garments for poll/resume, never 
 
   it("an unresolvable garment set on poll/resume returns a controlled server error, never lets the raw chain functions run with bad input", () => {
     const loaderBody = route.split("export async function loader")[1].split("export async function action")[0];
-    const garmentsCheckIdx = loaderBody.indexOf("if (!garments)");
+    const selectionCheckIdx = loaderBody.indexOf("if (!selection)");
     const pollCallIdx = loaderBody.indexOf("pollFullLookOutfit(");
-    assert.ok(garmentsCheckIdx !== -1 && garmentsCheckIdx < pollCallIdx, "garments must be validated before being used to poll");
+    assert.ok(selectionCheckIdx !== -1 && selectionCheckIdx < pollCallIdx, "garment selection must be validated before being used to poll");
+  });
+});
+
+// 2026-11-15 — requirement: nAia must disclose, not silently hide, any
+// recommended piece that didn't make it into a Full-Look chain (e.g. the
+// outfit had more eligible categories than FULL_LOOK_MAX_GARMENTS). This
+// is never allowed to be presented as if it were the complete look.
+describe("FL12 — omitted recommended pieces are disclosed, never silently dropped", () => {
+  it("loader includes omittedLabels in every response shape, computed before the completed-result short-circuit", () => {
+    const loaderBody = route.split("export async function loader")[1].split("export async function action")[0];
+    const selectionIdx = loaderBody.indexOf("selectFullLookGarments(");
+    const existingCheckIdx = loaderBody.indexOf("findCompletedFullLookForSuggestion(");
+    assert.ok(selectionIdx !== -1 && existingCheckIdx !== -1 && selectionIdx < existingCheckIdx,
+      "garment selection (and therefore omittedLabels) must be computed before the completed-result check, so it's available on every branch");
+    const occurrences = (loaderBody.match(/omittedLabels/g) || []).length;
+    assert.ok(occurrences >= 2, "omittedLabels must appear in more than one response — both the COMPLETED short-circuit and the live poll result");
+  });
+
+  it("action includes omittedLabels in both the completed-result short-circuit and the started/resumed result", () => {
+    const actionBody = route.split("export async function action")[1];
+    const occurrences = (actionBody.match(/omittedLabels/g) || []).length;
+    assert.ok(occurrences >= 2);
   });
 });
