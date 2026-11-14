@@ -352,6 +352,38 @@ describe("§COLLAGE — the history gallery shows each completed look's own real
     assert.deepEqual(history[0].resolvedImages, ["https://a.example/1.jpg", "https://a.example/2.jpg"]);
   });
 
+  it("hasFullLookResult is false by default — omitting the new 4th param preserves prior callers' behavior", () => {
+    const completed = session("s-no-fl", 1, [{ id: "sugg-no-fl", outfitName: "Look", itemCount: 1, resolvedImages: ["https://a.example/1.jpg"], extraCount: 0 }]);
+    const history = buildUnifiedHistory([completed], [], new Set());
+    assert.equal(history[0].hasFullLookResult, false);
+  });
+
+  it("hasFullLookResult is true only for the exact suggestion id passed, on both a recent card and an extra (saved) card", () => {
+    const recent = session("s-fl-recent", 1, [{ id: "sugg-fl-recent", outfitName: "Look A", itemCount: 1, resolvedImages: ["https://a.example/1.jpg"], extraCount: 0 }]);
+    const extraSugg: ExtraSuggestionInput = {
+      suggestionId: "sugg-fl-extra", outfitName: "Look B", suggestionCreatedAt: new Date("2026-01-01"),
+      sessionId: "s-fl-extra", sessionOccasion: null, itemCount: 1, resolvedImages: ["https://b.example/1.jpg"], extraCount: 0,
+    };
+    const history = buildUnifiedHistory(
+      [recent],
+      [extraSugg],
+      new Set(["sugg-fl-extra"]),
+      new Set(["sugg-fl-recent", "sugg-fl-extra"]),
+    );
+    const bySuggestionId = new Map(history.map((h) => [h.suggestionId, h]));
+    assert.equal(bySuggestionId.get("sugg-fl-recent")?.hasFullLookResult, true);
+    assert.equal(bySuggestionId.get("sugg-fl-extra")?.hasFullLookResult, true);
+  });
+
+  it("hasFullLookResult does not leak onto a suggestion that isn't in the set — only the named suggestion is badged", () => {
+    const sessionA = session("s-fl-a", 1, [{ id: "sugg-fl-a", outfitName: "Look A", itemCount: 1, resolvedImages: ["https://a.example/1.jpg"], extraCount: 0 }]);
+    const sessionB = session("s-fl-b", 1, [{ id: "sugg-fl-b", outfitName: "Look B", itemCount: 1, resolvedImages: ["https://b.example/1.jpg"], extraCount: 0 }]);
+    const history = buildUnifiedHistory([sessionA, sessionB], [], new Set(), new Set(["sugg-fl-a"]));
+    const bySuggestionId = new Map(history.map((h) => [h.suggestionId, h]));
+    assert.equal(bySuggestionId.get("sugg-fl-a")?.hasFullLookResult, true);
+    assert.equal(bySuggestionId.get("sugg-fl-b")?.hasFullLookResult, false);
+  });
+
   it("View Look / Delete link identity (session id + suggestionId) is unchanged by the collage addition", () => {
     const completed = session("s-link", 1, [{ id: "sugg-link", outfitName: "Look", itemCount: 1, resolvedImages: ["https://a.example/1.jpg"], extraCount: 0 }]);
     const history = buildUnifiedHistory([completed], [], new Set());

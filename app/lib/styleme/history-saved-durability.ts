@@ -22,6 +22,11 @@ export type SessionRecord = {
   outfitName: string | null;
   suggestionId: string | null; // the EXACT suggestion this card represents and links to
   saved: boolean; // true iff suggestionId is an actually-saved suggestion
+  // 2026-11-14 — true iff a COMPLETED Full-Look VTO result exists for this
+  // exact suggestion. result.tsx itself resolves and displays that saved
+  // result on load (never regenerating), so this badge is purely a
+  // discoverability signal — the link always resolves correctly either way.
+  hasFullLookResult: boolean;
   resolvedImages: string[]; // real per-item images for this exact result's collage
   extraCount: number; // pieces beyond what the collage shows
 };
@@ -120,6 +125,7 @@ export function buildUnifiedHistory(
   recentSessions: HistorySessionInput[],
   extraSuggestions: ExtraSuggestionInput[],
   savedSuggestionIds: ReadonlySet<string>,
+  fullLookSuggestionIds: ReadonlySet<string> = new Set(),
 ): SessionRecord[] {
   // "Latest StyleMe"/history means completed looks: a session with no
   // suggestion at all, or a suggestion with zero items, never finished
@@ -138,6 +144,7 @@ export function buildUnifiedHistory(
         outfitName: sugg.outfitName,
         suggestionId: sugg.id,
         saved: savedSuggestionIds.has(sugg.id),
+        hasFullLookResult: fullLookSuggestionIds.has(sugg.id),
         resolvedImages: sugg.resolvedImages ?? [],
         extraCount: sugg.extraCount ?? 0,
       };
@@ -153,6 +160,7 @@ export function buildUnifiedHistory(
       outfitName: s.outfitName,
       suggestionId: s.suggestionId,
       saved: true, // extraSuggestions are, by construction, always saved suggestions
+      hasFullLookResult: fullLookSuggestionIds.has(s.suggestionId),
       resolvedImages: s.resolvedImages ?? [],
       extraCount: s.extraCount ?? 0,
     }));

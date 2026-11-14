@@ -19,6 +19,7 @@ import {
 import { getCloudinaryConfig } from "~/lib/cloudinary-admin.server";
 import { resolveCollageImages } from "~/lib/styleme/look-image-resolution.server";
 import { LookCollage } from "~/components/styleme/LookCollage";
+import { FULL_LOOK_FINAL_STEP_HANDLE_PREFIX } from "~/lib/ai/full-look-handle-constants";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: naiaStyles },
@@ -214,7 +215,35 @@ export async function loader({ request }: LoaderFunctionArgs) {
     };
   });
 
-  const recentSessions: SessionRecord[] = buildUnifiedHistory(recentWithImages, extraSuggestionInputs, savedSuggestionIds);
+  // 2026-11-14 — which of the suggestions displayed on this page have a
+  // completed Full-Look VTO result? Scoped to exactly the suggestion ids
+  // being rendered (not a customer-wide scan) and to the final chain step
+  // only — an intermediate step is never a real, customer-facing result.
+  const displayedSuggestionIds = [
+    ...recentWithImages.flatMap((s) => s.suggestions.map((sg) => sg.id)),
+    ...extraSuggestionIds,
+  ];
+  const fullLookJobs = displayedSuggestionIds.length > 0
+    ? await prisma.virtualTryOnJob.findMany({
+        where: {
+          customerId,
+          status: "COMPLETED",
+          outfitSuggestionId: { in: displayedSuggestionIds },
+          productHandle: { startsWith: FULL_LOOK_FINAL_STEP_HANDLE_PREFIX },
+        },
+        select: { outfitSuggestionId: true },
+      })
+    : [];
+  const fullLookSuggestionIds = new Set(
+    fullLookJobs.map((j) => j.outfitSuggestionId).filter((id): id is string => Boolean(id)),
+  );
+
+  const recentSessions: SessionRecord[] = buildUnifiedHistory(
+    recentWithImages,
+    extraSuggestionInputs,
+    savedSuggestionIds,
+    fullLookSuggestionIds,
+  );
 
   return data({
     hasProfile: !!profile,
@@ -340,6 +369,7 @@ function SessionCard({ session }: { session: SessionRecord }) {
       <div className="sml-card-date">
         {formattedDate}
         {session.saved && <span className="sml-card-saved-badge">SAVED</span>}
+        {session.hasFullLookResult && <span className="sml-card-saved-badge">TRY-ON READY</span>}
       </div>
       <Link
         to={resultHref}
