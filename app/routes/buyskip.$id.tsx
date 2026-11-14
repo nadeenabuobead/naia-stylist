@@ -2,6 +2,7 @@ import { Link, useLoaderData, useFetcher, type LinksFunction, type LoaderFunctio
 import { data, redirect } from "react-router";
 import { useState, useEffect } from "react";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
+import { withTransientRetry } from "~/lib/prisma-transient-retry.server";
 import prisma from "~/db.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
@@ -22,13 +23,15 @@ export function meta({ data: loaderData }: any) {
   return [{ title: `${verdict} | Buy or Skip | nAia` }];
 }
 
-export async function loader({ request, params }: LoaderFunctionArgs) {
-  const naiaCustomer = await requireCurrentNaiaCustomer(request);
-  const { id } = params;
-
-  if (!id) return redirect("/buyskip");
-
-  const analysis = await prisma.buyOrSkipAnalysis.findUnique({
+// Named, not inlined — explicit type argument at the call site below is
+// required because TypeScript's inference fails to resolve
+// withTransientRetry's generic through this Prisma payload type (a nested
+// `select`-derived conditional type) when left implicit, silently
+// collapsing the whole call site's type to `{}` with no runtime symptom.
+// Caught by diffing the typecheck baseline before/after this change, not
+// by any test — confirmed in isolation before applying this pattern.
+function lookupBuyOrSkipAnalysis(id: string) {
+  return prisma.buyOrSkipAnalysis.findUnique({
     where: { id },
     select: {
       id: true,
@@ -56,6 +59,21 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       },
     },
   });
+}
+
+export async function loader({ request, params }: LoaderFunctionArgs) {
+  const naiaCustomer = await requireCurrentNaiaCustomer(request);
+  const { id } = params;
+
+  if (!id) return redirect("/buyskip");
+
+  // Plain, standalone, read-only lookup by unique key — never inside a
+  // $transaction, never followed by a write in this branch — safe to
+  // retry once on a transient connection-pool error (see
+  // prisma-transient-retry.server.ts's own caller contract).
+  const analysis = await withTransientRetry<Awaited<ReturnType<typeof lookupBuyOrSkipAnalysis>>>(
+    () => lookupBuyOrSkipAnalysis(id),
+  );
 
   // Not found or belongs to another customer — redirect rather than 404 to avoid leaking existence
   if (!analysis || analysis.customerId !== naiaCustomer.id) {

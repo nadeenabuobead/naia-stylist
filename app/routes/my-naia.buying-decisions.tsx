@@ -10,6 +10,7 @@ import {
 } from "react-router";
 import { data } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
+import { withTransientRetry } from "~/lib/prisma-transient-retry.server";
 import prisma from "~/db.server";
 import {
   getCloudinaryConfig,
@@ -68,25 +69,31 @@ export async function loader({ request }: LoaderFunctionArgs) {
     category: string | null;
     reasoning: string;
     outcome: { decision: string; postPurchaseOutcome: string | null } | null;
-  }> = await prisma.buyOrSkipAnalysis.findMany({
-    where: { customerId: naiaCustomer.id },
-    orderBy: { createdAt: "desc" },
-    take: 50,
-    select: {
-      id: true,
-      createdAt: true,
-      imageUrl: true,
-      imagePublicId: true,
-      imageFormat: true,
-      verdict: true,
-      confidence: true,
-      category: true,
-      reasoning: true,
-      outcome: {
-        select: { decision: true, postPurchaseOutcome: true },
+    // Plain, standalone, read-only list query — never inside a
+    // $transaction, never followed by a write in this branch — safe to
+    // retry once on a transient connection-pool error (see
+    // prisma-transient-retry.server.ts's own caller contract).
+  }> = await withTransientRetry(() =>
+    prisma.buyOrSkipAnalysis.findMany({
+      where: { customerId: naiaCustomer.id },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+      select: {
+        id: true,
+        createdAt: true,
+        imageUrl: true,
+        imagePublicId: true,
+        imageFormat: true,
+        verdict: true,
+        confidence: true,
+        category: true,
+        reasoning: true,
+        outcome: {
+          select: { decision: true, postPurchaseOutcome: true },
+        },
       },
-    },
-  });
+    }),
+  );
 
   return data({
     decisions: analyses.map(a => {
