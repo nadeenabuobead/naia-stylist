@@ -219,28 +219,6 @@ const css = `
     margin-bottom: 20px;
   }
 
-  /* ── Featured (current month) ────────────────────────────────────
-     QA fix (2026-11-13): shows the current month's edit prominently,
-     with previous months below as an archive.
-     QA fix (2026-11-14): the first compact pass (min-height 220-260px)
-     still read as oversized — large empty vertical space and an
-     oversized background numeral pushed the CTA below the fold
-     on mobile. This version sizes to content instead of a forced
-     min-height, and shrinks the decorative numeral so it reads as a
-     texture, not a headline. Reuses every existing .tme-card-* part
-     (num/top/dot/title/subtitle/locked/cta); only the outer sizing
-     differs. */
-  .tme-featured {
-    aspect-ratio: auto;
-    padding: 22px 24px;
-    margin-bottom: 28px;
-  }
-  .tme-featured .tme-card-num { font-size: clamp(3.5rem, 5vw, 5rem); top: -6px; right: -4px; }
-  .tme-featured .tme-card-title { font-size: clamp(1.3rem, 2vw, 1.6rem); margin-bottom: 8px; }
-  .tme-featured .tme-card-subtitle,
-  .tme-featured .tme-card-locked { font-size: 0.92rem; max-width: 40rem; margin-bottom: 12px; }
-  .tme-featured .tme-card-top { margin-bottom: 4px; }
-
   /* ── Siblings — other reports sharing the featured card's own month ──
      Smaller than the featured card but distinguished from the archive
      grid below (different section, different heading) — these are NOT
@@ -295,6 +273,31 @@ const css = `
     aspect-ratio: 4 / 5;
   }
   .tme-card:hover { transform: translateY(-4px); }
+
+  /* ── Featured (current month) ────────────────────────────────────
+     QA fix (2026-11-13): shows the current month's edit prominently,
+     with previous months below as an archive.
+     QA fix (2026-11-14): the first compact pass (min-height 220-260px)
+     still read as oversized — large empty vertical space and an
+     oversized background numeral pushed the CTA below the fold
+     on mobile. This version sizes to content instead of a forced
+     min-height, and shrinks the decorative numeral so it reads as a
+     texture, not a headline. Reuses every existing .tme-card-* part
+     (num/top/dot/title/subtitle/locked/cta); only the outer sizing
+     differs. Must come AFTER .tme-card above — both are single-class
+     selectors, so without this ordering .tme-card's aspect-ratio: 4/5
+     silently wins the cascade and this override does nothing. */
+  .tme-featured {
+    aspect-ratio: auto;
+    padding: 22px 24px;
+    margin-bottom: 28px;
+  }
+  .tme-featured .tme-card-num { font-size: clamp(3.5rem, 5vw, 5rem); top: -6px; right: -4px; }
+  .tme-featured .tme-card-title { font-size: clamp(1.3rem, 2vw, 1.6rem); margin-bottom: 8px; }
+  .tme-featured .tme-card-subtitle,
+  .tme-featured .tme-card-locked { font-size: 0.92rem; max-width: 40rem; margin-bottom: 12px; }
+  .tme-featured .tme-card-top { margin-bottom: 4px; }
+
   .tme-card-num {
     position: absolute;
     right: -16px;
