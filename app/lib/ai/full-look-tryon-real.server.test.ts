@@ -633,7 +633,7 @@ describe("startOrResumeFullLookChain", () => {
     expect(mockCreateOrFind()).not.toHaveBeenCalled();
   });
 
-  it("FL.26 — a stale job that reconciliation resolves (TIMED_OUT) no longer blocks the fresh start via cooldown", async () => {
+  it("FL.49 — a stale job that reconciliation resolves (TIMED_OUT) no longer blocks the fresh start via cooldown", async () => {
     const _findJobFn = vi.fn(async () => null);
     // Reconciliation itself timed out the old job — checkCustomerCooldown is
     // mocked directly here (its own unit tests cover the real staleness
@@ -665,7 +665,7 @@ describe("startOrResumeFullLookChain", () => {
 // ── reconcileStaleFullLookJobForCustomer ────────────────────────────────────
 
 describe("reconcileStaleFullLookJobForCustomer", () => {
-  it("FL.27 — no active Full-Look job for this customer: no-op, no FASHN call", async () => {
+  it("FL.50 — no active Full-Look job for this customer: no-op, no FASHN call", async () => {
     const _findActiveJob = vi.fn(async () => null);
     const _pollStep = vi.fn();
     const _timeoutJob = vi.fn();
@@ -677,7 +677,7 @@ describe("reconcileStaleFullLookJobForCustomer", () => {
     expect(_pollStep).not.toHaveBeenCalled();
   });
 
-  it("FL.28 — an active job younger than the threshold is left untouched (preserves real concurrent-generation blocking)", async () => {
+  it("FL.51 — an active job younger than the threshold is left untouched (preserves real concurrent-generation blocking)", async () => {
     const freshJob = fakeJob("job-fresh", {
       status: "PROCESSING",
       predictionId: "pred-1",
@@ -695,7 +695,7 @@ describe("reconcileStaleFullLookJobForCustomer", () => {
     expect(_timeoutJob).not.toHaveBeenCalled();
   });
 
-  it("FL.29 — a stale job that FASHN reports as actually COMPLETED is recovered, not timed out", async () => {
+  it("FL.52 — a stale job that FASHN reports as actually COMPLETED is recovered, not timed out", async () => {
     const staleJob = fakeJob("job-stale", {
       status: "PROCESSING",
       predictionId: "pred-1",
@@ -720,7 +720,7 @@ describe("reconcileStaleFullLookJobForCustomer", () => {
     expect(passedCtx.garments.length - 1).toBe(stepIndex);
   });
 
-  it("FL.30 — a stale job FASHN still reports in-flight is force-transitioned to TIMED_OUT via the atomic guard, with ancestor cleanup", async () => {
+  it("FL.53 — a stale job FASHN still reports in-flight is force-transitioned to TIMED_OUT via the atomic guard, with ancestor cleanup", async () => {
     const staleJob = fakeJob("job-stale", {
       status: "PROCESSING",
       predictionId: "pred-1",
@@ -742,7 +742,7 @@ describe("reconcileStaleFullLookJobForCustomer", () => {
     expect(mockDeleteAsset()).toHaveBeenCalled();
   });
 
-  it("FL.31 — a race where a real poll resolves the job between find and timeout leaves that outcome untouched", async () => {
+  it("FL.54 — a race where a real poll resolves the job between find and timeout leaves that outcome untouched", async () => {
     const staleJob = fakeJob("job-stale", {
       status: "PROCESSING",
       predictionId: "pred-1",
@@ -759,7 +759,7 @@ describe("reconcileStaleFullLookJobForCustomer", () => {
     expect(result).toEqual({ reconciled: false });
   });
 
-  it("FL.32 — a stale job FASHN reports as failed is reported FAILED, not forced to TIMED_OUT", async () => {
+  it("FL.55 — a stale job FASHN reports as failed is reported FAILED, not forced to TIMED_OUT", async () => {
     const staleJob = fakeJob("job-stale", {
       status: "PROCESSING",
       predictionId: "pred-1",
@@ -775,6 +775,111 @@ describe("reconcileStaleFullLookJobForCustomer", () => {
     );
     expect(result).toEqual({ reconciled: true, outcome: "FAILED" });
     expect(_timeoutJob).not.toHaveBeenCalled();
+  });
+});
+
+// ── End-to-end: a PLAIN REFRESH or "Check Again" recovers a stale chain ─────
+//
+// reconcileStaleFullLookJobForCustomer only ever runs from
+// startOrResumeFullLookChain, which short-circuits as soon as a chain has
+// ANY job under its own reservationScope (walkFullLookChainJobs returns
+// jobs.length > 0) — exactly the case for a customer simply refreshing the
+// result page (pollFullLookOutfit -> advanceAutomatically -> advanceFullLookChain,
+// no cooldown check, no reconciliation call at all) or clicking the
+// non-destructive "Check Again" (retry:false -> resolveCurrentAttemptScope
+// resolves to the SAME scope -> startOrResumeFullLookChain's own
+// jobs.length > 0 branch -> advanceAutomatically -> advanceFullLookChain,
+// same path). Only an explicit "Try Again" (retry:true) computes a brand
+// new scope and ever reaches checkCustomerCooldown/reconciliation.
+// advanceFullLookChain's OWN staleness check (added alongside
+// reconcileStaleFullLookJobForCustomer) is what makes THIS path recover
+// too — these tests prove that path specifically, end to end, including
+// the "no new FASHN submission" guarantee.
+describe("advanceFullLookChain — stale-job self-healing via refresh/resume (no new FASHN submission)", () => {
+  it("FL.56 — a refresh (advanceFullLookChain on the SAME scope) force-times-out a step FASHN still reports in flight, without creating or submitting a new job", async () => {
+    const staleJob0 = fakeJob("job-0", {
+      status: "PROCESSING",
+      predictionId: "pred-0",
+      lastActivityAt: new Date(Date.now() - 20 * 60 * 1000), // 20 min — well past the 10-min threshold
+    });
+    const _findJobFn = vi.fn(async (where: { idempotencyKey: string }) =>
+      where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 0, null) ? staleJob0 : null,
+    );
+    // FASHN still genuinely reports it in flight — not a recoverable result.
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(JSON.stringify({ status: "processing" }), { status: 200 }),
+    );
+    const _timeoutJob = vi.fn(async () => true);
+    const _findById = vi.fn(async () => null);
+
+    const result = await advanceFullLookChain(baseCtx(), { _findJobFn }, {
+      _timeoutJob, _findById, _deleteAsset: deleteCloudinaryAsset,
+    });
+
+    expect(result).toEqual({ status: "FAILED", failedStepIndex: 0, errorCode: "ABANDONED_NO_POLL" });
+    expect(_timeoutJob).toHaveBeenCalledWith("job-0");
+    // The customer recovers from a simple refresh/"Check Again" — never a
+    // new provider call, never a new job row, never a second charge.
+    expect(mockSubmitProvider()).not.toHaveBeenCalled();
+    expect(mockCreateOrFind()).not.toHaveBeenCalled();
+  });
+
+  it("FL.57 — a refresh recovers a step FASHN actually completed (just never got polled in time), without forcing TIMED_OUT or submitting anything new", async () => {
+    const staleJob0 = fakeJob("job-0", {
+      status: "PROCESSING",
+      predictionId: "pred-0",
+      productHandle: `${REAL_PRODUCT_HANDLE_PREFIX}:step1:Beige Tailored Trousers`,
+      lastActivityAt: new Date(Date.now() - 20 * 60 * 1000),
+    });
+    const _findJobFn = vi.fn(async (where: { idempotencyKey: string }) =>
+      where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 0, null) ? staleJob0 : null,
+    );
+    // Two distinct real calls happen through global.fetch: the FASHN status
+    // check for step 0, and step 1's download of step 0's now-completed
+    // intermediate image — each needs its own fresh Response (see the
+    // identical pattern a few tests above this one, for a non-stale chain).
+    (global.fetch as ReturnType<typeof vi.fn>).mockImplementation(async (url: string | URL | Request) => {
+      const u = url.toString();
+      if (u.includes("/v1/status/")) {
+        return new Response(JSON.stringify({ status: "completed", output: [PNG_DATA_URL] }), { status: 200 });
+      }
+      return new Response(new Uint8Array([1, 2, 3]).buffer, { status: 200 });
+    });
+    mockUploadPrivate().mockResolvedValue({ ok: true, publicId: "x", format: "png", version: "1" });
+    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...staleJob0, status: "COMPLETED" } }); // step 0 recovered → COMPLETED
+
+    const job1 = fakeJob("job-1");
+    mockCreateOrFind().mockResolvedValue({ ok: true, job: job1, created: true });
+    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job1, status: "SUBMITTED" } });
+    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job1, status: "PROCESSING", predictionId: "pred-1" } });
+    mockSubmitProvider().mockResolvedValue({ ok: true, predictionId: "pred-1" });
+
+    const _timeoutJob = vi.fn();
+    const _findById = vi.fn();
+
+    const result = await advanceFullLookChain(baseCtx(), { _findJobFn }, {
+      _timeoutJob, _findById, _deleteAsset: deleteCloudinaryAsset,
+    });
+
+    expect(result).toEqual({ status: "PROCESSING", stepIndex: 1 }); // step 0 recovered; step 1 auto-submitted next
+    expect(_timeoutJob).not.toHaveBeenCalled(); // never forced dead once FASHN proved it actually finished
+    expect(mockSubmitProvider()).toHaveBeenCalledTimes(1); // the NEXT step's own legitimate submission, not a resubmission of step 0
+  });
+
+  it("FL.58 — calling advanceFullLookChain again after a forced TIMED_OUT reports the same FAILED state without re-checking FASHN or re-timing-out", async () => {
+    const timedOutJob0 = fakeJob("job-0", { status: "TIMED_OUT", errorCode: "ABANDONED_NO_POLL" });
+    const _findJobFn = vi.fn(async (where: { idempotencyKey: string }) =>
+      where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 0, null) ? timedOutJob0 : null,
+    );
+    const _timeoutJob = vi.fn();
+
+    const result = await advanceFullLookChain(baseCtx(), { _findJobFn }, {
+      _timeoutJob, _findById: vi.fn(), _deleteAsset: deleteCloudinaryAsset,
+    });
+
+    expect(result).toEqual({ status: "FAILED", failedStepIndex: 0, errorCode: "ABANDONED_NO_POLL" });
+    expect(_timeoutJob).not.toHaveBeenCalled(); // already terminal — the early status check short-circuits before any FASHN I/O
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 });
 

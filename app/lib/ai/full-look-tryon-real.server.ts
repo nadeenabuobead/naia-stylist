@@ -682,9 +682,38 @@ async function cleanupIntermediateStepResults(
   }
 }
 
+// 2026-11-15 — advanceFullLookChain is the ONE function both a passive GET
+// poll (pollFullLookOutfit) and a same-scope resume (startOrResumeFullLookChain
+// finding jobs.length > 0) funnel through for an EXISTING chain. Neither of
+// those callers ever reaches reconcileStaleFullLookJobForCustomer or
+// checkCustomerCooldown — both only run when a chain has zero jobs yet
+// under its OWN reservationScope, which is never true for a chain a
+// customer is simply refreshing or re-checking. Without a staleness check
+// HERE too, a customer who only ever refreshes or clicks a non-destructive
+// "Check Again" (never an explicit, scope-resetting "Try Again") would
+// poll a dead job forever: pollFullLookRealStep's own FASHN status check
+// has no age awareness and will just keep reporting PROCESSING for as
+// long as FASHN itself does (or forever, if FASHN silently lost the job).
+// This mirrors reconcileStaleFullLookJobForCustomer's exact policy — real
+// FASHN check first (already just happened, via the poll three lines
+// below), force TIMED_OUT only if it's still reported in-flight AND past
+// the threshold — via staleDeps, defaulting to the real implementations.
+export interface AdvanceStaleDeps {
+  _timeoutJob: (jobId: string) => Promise<boolean>;
+  _findById: (id: string) => Promise<VirtualTryOnJobRecord | null>;
+  _deleteAsset: DeleteAssetFn;
+}
+
+const defaultAdvanceStaleDeps: AdvanceStaleDeps = {
+  _timeoutJob: defaultTimeoutStaleJob,
+  _findById: defaultFindJobById,
+  _deleteAsset: deleteCloudinaryAsset,
+};
+
 export async function advanceFullLookChain(
   ctx: FullLookChainContext,
   deps: WalkChainDeps = { _findJobFn: defaultFindJobByIdempotencyKey },
+  staleDeps: AdvanceStaleDeps = defaultAdvanceStaleDeps,
 ): Promise<ChainAdvanceResult> {
   const jobs = await walkFullLookChainJobs(ctx.customerId, deps, ctx.reservationScope);
 
@@ -733,6 +762,26 @@ export async function advanceFullLookChain(
     return { status: "COMPLETED", resultUrl: poll.resultUrl };
   }
   if (poll.status === "PROCESSING") {
+    // Real FASHN check (just above) still reports it in flight — but if
+    // this step has sat unchanged since before the same stale threshold
+    // reconcileStaleFullLookJobForCustomer uses, stop reporting PROCESSING
+    // forever and force the identical atomic TIMED_OUT transition the
+    // scheduled sweep and the start-time reconciliation both use. This is
+    // what lets a customer recover via a PLAIN REFRESH or "Check Again"
+    // (same reservationScope, resumed here) — not only an explicit "Try
+    // Again" that computes a brand-new scope and goes through
+    // startOrResumeFullLookChain's own reconciliation instead.
+    if (Date.now() - lastJob.lastActivityAt.getTime() > STALE_PROCESSING_THRESHOLD_MS) {
+      const applied = await tryForceTimeoutAndCleanup(
+        lastJob, staleDeps._timeoutJob, staleDeps._findById, staleDeps._deleteAsset,
+      );
+      if (applied) {
+        return { status: "FAILED", failedStepIndex: lastStepIndex, errorCode: "ABANDONED_NO_POLL" };
+      }
+      // Lost a race — a concurrent real resolution won; report the
+      // current (still-PROCESSING, about-to-change-on-the-next-poll)
+      // state honestly rather than guessing at its new outcome.
+    }
     return { status: "PROCESSING", stepIndex: lastStepIndex };
   }
 
@@ -1068,6 +1117,28 @@ async function defaultTimeoutStaleJob(jobId: string): Promise<boolean> {
   return result.count === 1;
 }
 
+// Shared by sweepStaleFullLookSteps's loop (inlined there, unchanged),
+// reconcileStaleFullLookJobForCustomer, and advanceFullLookChain's own
+// staleness check below: atomically transition one job to TIMED_OUT and,
+// only if that transition actually applied, clean up every earlier step's
+// now-orphaned intermediate image. Returns false on a lost race (a real
+// poll already resolved the job) — the caller must leave that outcome
+// untouched, never overwrite it.
+async function tryForceTimeoutAndCleanup(
+  job: VirtualTryOnJobRecord,
+  _timeoutJob: (jobId: string) => Promise<boolean>,
+  _findById: (id: string) => Promise<VirtualTryOnJobRecord | null>,
+  _deleteAsset: DeleteAssetFn,
+): Promise<boolean> {
+  const applied = await _timeoutJob(job.id);
+  if (!applied) return false;
+  const ancestorIds = await collectAncestorStepJobIds(job, _findById);
+  if (ancestorIds.length > 0) {
+    await cleanupIntermediateStepResults(job.customerId, ancestorIds, _deleteAsset);
+  }
+  return true;
+}
+
 export async function sweepStaleFullLookSteps(
   thresholdMs: number = STALE_PROCESSING_THRESHOLD_MS,
   _findStaleJobs: (thresholdMs: number) => Promise<VirtualTryOnJobRecord[]> = defaultFindStaleFullLookProcessingJobs,
@@ -1202,13 +1273,8 @@ export async function reconcileStaleFullLookJobForCustomer(
   // threshold — force the same atomic, status-guarded transition
   // sweepStaleFullLookSteps uses, so a race against a real poll resolving
   // this same job in the gap can never silently overwrite a true outcome.
-  const applied = await _timeoutJob(job.id);
+  const applied = await tryForceTimeoutAndCleanup(job, _timeoutJob, _findById, _deleteAsset);
   if (!applied) return { reconciled: false }; // a real poll won the race — leave its outcome untouched.
-
-  const ancestorIds = await collectAncestorStepJobIds(job, _findById);
-  if (ancestorIds.length > 0) {
-    await cleanupIntermediateStepResults(job.customerId, ancestorIds, _deleteAsset);
-  }
 
   return { reconciled: true, outcome: "TIMED_OUT" };
 }
