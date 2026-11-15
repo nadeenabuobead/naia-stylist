@@ -10,7 +10,7 @@
 //
 // Run: npx vitest run app/lib/ai/full-look-tryon-real.server.test.ts
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("./my-naia-model.server.js", () => ({
   checkCustomerCooldown: vi.fn(),
@@ -242,6 +242,94 @@ describe("submitFullLookRealStep", () => {
     expect(result).toEqual({ ok: false, reason: "missing_garment_for_step" });
     expect(mockCreateOrFind()).not.toHaveBeenCalled();
     expect(mockSubmitProvider()).not.toHaveBeenCalled();
+  });
+
+  // ── [vto-diag] TEMPORARY dry-run guard — remove alongside the diagnostic
+  // logging once the investigation closes. Proves the guard blocks every
+  // submission site (start, auto-advance, final-step) for the ONE
+  // suggestion under investigation, is scoped by BOTH the suggestion id
+  // AND an explicit Preview-only env var, creates no DB row, calls no
+  // provider, and never affects any other suggestion.
+  describe("[vto-diag] diagnostic dry-run guard", () => {
+    const DIAG_SUGGESTION_ID = "cmwgxsbac0004kx08iqw6bnhf";
+    const originalEnv = process.env.VTO_DIAGNOSTIC_DRY_RUN;
+    afterEach(() => {
+      if (originalEnv === undefined) delete process.env.VTO_DIAGNOSTIC_DRY_RUN;
+      else process.env.VTO_DIAGNOSTIC_DRY_RUN = originalEnv;
+    });
+
+    it("FL.62 — blocks step 0 for the diagnostic suggestion when the env flag is set — no job created, no provider call", async () => {
+      process.env.VTO_DIAGNOSTIC_DRY_RUN = "true";
+      const ctx = { ...baseCtx(), outfitSuggestionId: DIAG_SUGGESTION_ID };
+      const result = await submitFullLookRealStep(ctx, 0, null);
+      expect(result).toEqual({ ok: false, reason: "diagnostic_dry_run" });
+      expect(mockCreateOrFind()).not.toHaveBeenCalled();
+      expect(mockSubmitProvider()).not.toHaveBeenCalled();
+      expect(mockDownloadPhoto()).not.toHaveBeenCalled();
+    });
+
+    it("FL.63 — blocks auto-advance to a LATER step too — the same guard covers every submission site, not just step 0", async () => {
+      process.env.VTO_DIAGNOSTIC_DRY_RUN = "true";
+      const ctx = { ...baseCtx(), outfitSuggestionId: DIAG_SUGGESTION_ID };
+      const result = await submitFullLookRealStep(ctx, 1, "job-0"); // the auto-advance shape: a later step, a real priorJobId
+      expect(result).toEqual({ ok: false, reason: "diagnostic_dry_run" });
+      expect(mockCreateOrFind()).not.toHaveBeenCalled();
+      expect(mockSubmitProvider()).not.toHaveBeenCalled();
+    });
+
+    it("FL.64 — inert without the env flag, even for the exact diagnostic suggestion — a real customer on this same suggestion id (practically impossible, but checked) submits normally", async () => {
+      delete process.env.VTO_DIAGNOSTIC_DRY_RUN;
+      const ctx = { ...baseCtx(), outfitSuggestionId: DIAG_SUGGESTION_ID };
+      const job = fakeJob("job-0");
+      mockCreateOrFind().mockResolvedValue({ ok: true, job, created: true });
+      mockAdvance()
+        .mockResolvedValueOnce({ ok: true, job: { ...job, status: "SUBMITTED" } })
+        .mockResolvedValueOnce({ ok: true, job: { ...job, status: "PROCESSING", predictionId: "pred-0" } });
+      mockDownloadPhoto().mockResolvedValue({ ok: true, dataUrl: PNG_DATA_URL });
+      mockSubmitProvider().mockResolvedValue({ ok: true, predictionId: "pred-0" });
+
+      const result = await submitFullLookRealStep(ctx, 0, null);
+      expect(result.ok).toBe(true);
+      expect(mockSubmitProvider()).toHaveBeenCalledTimes(1);
+    });
+
+    it("FL.65 — inert for any OTHER suggestion even with the env flag set — the guard never affects a different customer's attempt on this same deployment", async () => {
+      process.env.VTO_DIAGNOSTIC_DRY_RUN = "true";
+      const ctx = { ...baseCtx(), outfitSuggestionId: "some-other-suggestion" };
+      const job = fakeJob("job-0");
+      mockCreateOrFind().mockResolvedValue({ ok: true, job, created: true });
+      mockAdvance()
+        .mockResolvedValueOnce({ ok: true, job: { ...job, status: "SUBMITTED" } })
+        .mockResolvedValueOnce({ ok: true, job: { ...job, status: "PROCESSING", predictionId: "pred-0" } });
+      mockDownloadPhoto().mockResolvedValue({ ok: true, dataUrl: PNG_DATA_URL });
+      mockSubmitProvider().mockResolvedValue({ ok: true, predictionId: "pred-0" });
+
+      const result = await submitFullLookRealStep(ctx, 0, null);
+      expect(result.ok).toBe(true);
+      expect(mockSubmitProvider()).toHaveBeenCalledTimes(1);
+    });
+
+    it("FL.66 — end to end: startOrResumeFullLookChain still runs reconciliation and logs cooldown/scope normally, but a cooldown PASS still cannot reach the provider", async () => {
+      process.env.VTO_DIAGNOSTIC_DRY_RUN = "true";
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const ctx = { ...baseCtx(), outfitSuggestionId: DIAG_SUGGESTION_ID };
+      const _findJobFn = vi.fn(async () => null);
+      const _reconcileStale = vi.fn(async () => ({ reconciled: true, outcome: "TIMED_OUT" as const }));
+      mockCooldown().mockResolvedValue({ ok: true }); // the exact scenario the user asked about: cooldown PASSES
+
+      const result = await startOrResumeFullLookChain(ctx, { _findJobFn }, _reconcileStale);
+
+      // The real action's own decision (cooldown passed) still runs and is
+      // still logged — the diagnostic is not interfered with...
+      expect(_reconcileStale).toHaveBeenCalledWith(ctx.customerId);
+      const reconcileLog = logSpy.mock.calls.find((c: unknown[]) => c[0] === "[vto-diag] reconcile");
+      expect(reconcileLog).toBeDefined();
+      // ...but the guard still stops it one line short of a real submission.
+      expect(result).toEqual({ ok: false, reason: "diagnostic_dry_run" });
+      expect(mockCreateOrFind()).not.toHaveBeenCalled();
+      expect(mockSubmitProvider()).not.toHaveBeenCalled();
+      logSpy.mockRestore();
+    });
   });
 
   it("FL.9 — step 0 downloads the real model photo, submits (POST-only), advances to PROCESSING", async () => {

@@ -424,11 +424,48 @@ async function markFailedBestEffort(job: VirtualTryOnJobRecord, errorCode: strin
   }
 }
 
+// ── [vto-diag] TEMPORARY DRY-RUN GUARD (2026-11-15) ─────────────────────────
+//
+// Blocks the ONE real choke point every garment step's FASHN submission —
+// start, auto-advance, AND the post-pause final step — all funnel through
+// this single function (startOrResumeFullLookChain, advanceFullLookChain's
+// STEP_COMPLETE branch, and continueToFinalStep each call it, never FASHN
+// directly), so gating here covers every one of them with a single check,
+// including automatic advancement to subsequent garments.
+//
+// Requires BOTH conditions, independently, before it activates:
+//   1. VTO_DIAGNOSTIC_DRY_RUN=true — a Preview-only env var set ONLY on this
+//      one diagnostic deployment (never Production, never any other
+//      Preview), so this guard is structurally inert everywhere else even
+//      if this exact code were ever deployed elsewhere.
+//   2. ctx.outfitSuggestionId matches the ONE suggestion this diagnostic
+//      investigation is about — any other suggestion, on this SAME
+//      deployment, submits normally and is completely unaffected.
+// Returns BEFORE createOrFindTryOnJob is ever called — no VirtualTryOnJob
+// row is created, so nothing here can affect credits/quota (counted only
+// off COMPLETED rows) or customer data of any kind. Remove this entire
+// block, the env var, and DIAGNOSTIC_DRY_RUN_SUGGESTION_ID once the
+// investigation closes.
+const DIAGNOSTIC_DRY_RUN_SUGGESTION_ID = "cmwgxsbac0004kx08iqw6bnhf";
+
+function diagnosticDryRunShouldBlock(ctx: FullLookChainContext): boolean {
+  return process.env.VTO_DIAGNOSTIC_DRY_RUN === "true" && ctx.outfitSuggestionId === DIAGNOSTIC_DRY_RUN_SUGGESTION_ID;
+}
+
 export async function submitFullLookRealStep(
   ctx: FullLookChainContext,
   stepIndex: number,
   priorJobId: string | null,
 ): Promise<SubmitStepResult> {
+  if (diagnosticDryRunShouldBlock(ctx)) {
+    console.log("[vto-diag] dry-run-blocked-submission", {
+      customerHash: shortHash(ctx.customerId),
+      stepIndex,
+      isFinalStep: stepIndex === ctx.garments.length - 1,
+    });
+    return { ok: false, reason: "diagnostic_dry_run" };
+  }
+
   // 2026-11-15 — defense in depth. This is the actual site a missing
   // ctx.garments[stepIndex] used to crash with a raw TypeError (see
   // api.full-look-vto.tsx's GET loader regression, fixed the same day):
