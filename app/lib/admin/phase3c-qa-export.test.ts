@@ -435,6 +435,55 @@ describe("§P3CX-06 Images — embedded as data URIs when fetch succeeds", () =>
       "HTML should not contain Cloudinary CDN URLs (should be embedded)",
     );
   });
+
+  it("a null imageFormat (legacy row saved before format tracking) never guesses \"jpg\" — no download is even attempted", async () => {
+    // A real public_id with NO tracked format — exactly the shape of a
+    // pre-format-tracking legacy ClosetItem row. Requesting format "jpg"
+    // for an asset that is actually e.g. png forces Cloudinary's
+    // /image/download endpoint to perform a real conversion, which gets
+    // cached as a derived resource regardless of Strict Transformations.
+    const legacyItem = { ...BASE_ITEM, imageFormat: null, thumbnailUrl: null };
+    let fetchCalls = 0;
+    const spyFetch: typeof fetch = async (...args) => {
+      fetchCalls++;
+      return makeMockFetch(true)(...args);
+    };
+
+    const result = await generatePhase3CQAExport({
+      _prisma: makeMockPrisma([legacyItem]),
+      _fetch: spyFetch,
+      _getCloudinaryConfig: () => ({
+        cloudName: "testcloud",
+        apiKey: "testkey",
+        apiSecret: "testsecret",
+      }),
+      _nowFn: () => 1000000,
+    });
+
+    assert.equal(fetchCalls, 0, "must never attempt a download when format is unknown — guessing jpg is exactly the bug being fixed");
+    const json = JSON.parse(result.jsonContent) as { items: Array<{ hasEmbeddedImage: boolean }> };
+    assert.equal(json.items[0]!.hasEmbeddedImage, false, "fails closed to no-image, same as any other missing-image case");
+  });
+
+  it("a null imageFormat still falls through to thumbnailUrl when one is available", async () => {
+    const legacyItemWithThumbnail = {
+      ...BASE_ITEM,
+      imageFormat: null,
+      thumbnailUrl: "https://res.cloudinary.com/testcloud/image/private/w_160,h_160,c_fill,q_60/naia-wardrobe/cust-aaa/item-001",
+    };
+    const result = await generatePhase3CQAExport({
+      _prisma: makeMockPrisma([legacyItemWithThumbnail]),
+      _fetch: makeMockFetch(true),
+      _getCloudinaryConfig: () => ({
+        cloudName: "testcloud",
+        apiKey: "testkey",
+        apiSecret: "testsecret",
+      }),
+      _nowFn: () => 1000000,
+    });
+    const json = JSON.parse(result.jsonContent) as { items: Array<{ hasEmbeddedImage: boolean }> };
+    assert.equal(json.items[0]!.hasEmbeddedImage, true, "the thumbnailUrl fallback path is unaffected by the format fix");
+  });
 });
 
 // ── §P3CX-07 Intentions — all 12 present ─────────────────────────────────────
