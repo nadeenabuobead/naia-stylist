@@ -1,10 +1,15 @@
 // app/lib/customer-export-zip-large.server.test.ts
 //
 // Behavioral coverage for the >300-image secure completion mechanism:
-// job creation, archive build + raw upload, expiration, cleanup, and
-// customer isolation. Real archiver, real compileCustomerExport/planImages
-// plumbing (via a real customer-export-zip.server.ts import) — only the DB
-// and Cloudinary I/O are mocked. No live Cloudinary call of any kind.
+// job creation, streamed chunked-upload archive build, expiration, cleanup,
+// and customer isolation. Real archiver, real compileCustomerExport/
+// planImages plumbing (via a real customer-export-zip.server.ts import) —
+// only the DB and the Cloudinary uploader are faked. No live Cloudinary
+// call of any kind; createChunkedRawUploader's own wire protocol (chunk
+// boundaries, Content-Range, X-Unique-Upload-Id) is covered separately in
+// cloudinary-admin.server.test.ts — this file fakes it entirely via
+// _createUploader so tests here focus on buildLargeCustomerExportZip's own
+// orchestration (abort conditions, DB state transitions, overlap guard).
 //
 // Run: npx vitest run app/lib/customer-export-zip-large.server.test.ts
 
@@ -34,13 +39,12 @@ vi.mock("./cloudinary-admin.server", async (importOriginal) => {
   return {
     ...actual,
     getCloudinaryConfig: vi.fn(() => ({ cloudName: "test-cloud", apiKey: "k", apiSecret: "s" })),
-    uploadCloudinaryRawPrivate: vi.fn(),
     deleteCloudinaryAsset: vi.fn(),
   };
 });
 
 import prisma from "../db.server";
-import { uploadCloudinaryRawPrivate, deleteCloudinaryAsset } from "./cloudinary-admin.server";
+import { deleteCloudinaryAsset } from "./cloudinary-admin.server";
 import {
   buildLargeCustomerExportZip,
   getExportJobForCustomer,
@@ -50,9 +54,49 @@ import {
   SWEEP_BATCH_SIZE,
   MAX_LARGE_EXPORT_IMAGES,
   MAX_LARGE_EXPORT_BYTES,
+  MAX_TIME_BUDGET_MS,
   STALE_EXPORT_PROCESSING_THRESHOLD_MS,
   type RunExportReservationFn,
+  type LargeExportDeps,
 } from "./customer-export-zip-large.server";
+
+// ── Fake chunked uploader ─────────────────────────────────────────────────
+// Stands in for createChunkedRawUploader so these tests never touch the
+// real signing/HTTP logic (covered in cloudinary-admin.server.test.ts) and
+// never risk falling through to the real global fetch if a test forgets to
+// inject one.
+interface FakeUploaderConfig {
+  failOnWriteNumber?: number; // 1-indexed — the Nth write() call fails
+  writeFailure?: { ok: false; errorCode: string };
+  finishResult?: { ok: true; publicId: string } | { ok: false; errorCode: string };
+}
+
+function makeFakeUploaderFactory(config: FakeUploaderConfig = {}) {
+  const writes: Buffer[] = [];
+  let writeCount = 0;
+  let finishCallCount = 0;
+  let permanentFailure: { ok: false; errorCode: string } | null = null;
+
+  const factory = ((publicId: string) => ({
+    async write(buf: Buffer) {
+      if (permanentFailure) return permanentFailure;
+      writeCount++;
+      if (config.failOnWriteNumber && writeCount === config.failOnWriteNumber) {
+        permanentFailure = config.writeFailure ?? { ok: false, errorCode: "PROVIDER_ERROR" };
+        return permanentFailure;
+      }
+      writes.push(buf);
+      return { ok: true as const };
+    },
+    async finish() {
+      finishCallCount++;
+      if (permanentFailure) return permanentFailure;
+      return config.finishResult ?? { ok: true as const, publicId };
+    },
+  })) as unknown as NonNullable<LargeExportDeps["_createUploader"]>;
+
+  return { factory, writes, getWriteCount: () => writeCount, getFinishCallCount: () => finishCallCount };
+}
 
 const CUSTOMER_ID = "cust-1";
 
@@ -87,38 +131,42 @@ function mockCustomer() {
   };
 }
 
+let defaultUploader: ReturnType<typeof makeFakeUploaderFactory>;
+
 beforeEach(() => {
   vi.clearAllMocks();
   (prisma as any).customer.findUnique.mockResolvedValue(mockCustomer());
   (prisma as any).customerExportJob.create.mockResolvedValue({ id: "job-1" });
   (prisma as any).customerExportJob.update.mockResolvedValue({});
-  vi.mocked(uploadCloudinaryRawPrivate).mockResolvedValue({ ok: true, publicId: "naia-exports/cust-1/job-1.zip" });
+  defaultUploader = makeFakeUploaderFactory();
 });
+
+// Merges in the default fake uploader so most tests don't need to repeat
+// it — callers that care about upload behavior specifically pass their own
+// _createUploader/_fetch/_maxBytes/_maxTimeBudgetMs/_now via overrides.
+function deps(overrides: LargeExportDeps = {}): LargeExportDeps {
+  return { _createUploader: defaultUploader.factory, ...overrides };
+}
 
 describe("buildLargeCustomerExportZip", () => {
   it("returns not_found when compileCustomerExport resolves no customer — no job row created", async () => {
     (prisma as any).customer.findUnique.mockResolvedValueOnce(null);
-    const result = await buildLargeCustomerExportZip(CUSTOMER_ID, 301);
+    const result = await buildLargeCustomerExportZip(CUSTOMER_ID, 301, deps());
     expect(result).toEqual({ ok: false, reason: "not_found" });
     expect((prisma as any).customerExportJob.create).not.toHaveBeenCalled();
   });
 
-  it("creates a PROCESSING job, builds a real archive with no images, uploads it as a raw asset, and marks it COMPLETED with an expiry", async () => {
-    const result = await buildLargeCustomerExportZip(CUSTOMER_ID, 301);
+  it("creates a PROCESSING job, streams a real archive with no images to the uploader, and marks it COMPLETED with an expiry", async () => {
+    const result = await buildLargeCustomerExportZip(CUSTOMER_ID, 301, deps());
 
     expect((prisma as any).customerExportJob.create).toHaveBeenCalledWith({
       data: { customerId: CUSTOMER_ID, imageCount: 301, status: "PROCESSING" },
     });
-    expect(uploadCloudinaryRawPrivate).toHaveBeenCalledWith(
-      "naia-exports/cust-1/job-1.zip",
-      expect.any(Array), // chunks, passed straight through — never Buffer.concat'd
-      "naia-data-export-job-1.zip",
-      "private",
-    );
-    const uploadedChunks = vi.mocked(uploadCloudinaryRawPrivate).mock.calls[0][1] as Buffer[];
-    expect(Array.isArray(uploadedChunks)).toBe(true);
-    expect(uploadedChunks.every((c) => Buffer.isBuffer(c))).toBe(true);
-    expect(uploadedChunks.reduce((sum, c) => sum + c.length, 0)).toBeGreaterThan(0); // a real zip was actually produced
+    // A real zip was actually produced and streamed through write() —
+    // never collected into one giant in-memory buffer first.
+    expect(defaultUploader.getWriteCount()).toBeGreaterThan(0);
+    expect(defaultUploader.writes.every((c) => Buffer.isBuffer(c))).toBe(true);
+    expect(defaultUploader.writes.reduce((sum, c) => sum + c.length, 0)).toBeGreaterThan(0);
 
     const updateCall = (prisma as any).customerExportJob.update.mock.calls.find(
       (c: any[]) => c[0].data.status === "COMPLETED",
@@ -133,10 +181,10 @@ describe("buildLargeCustomerExportZip", () => {
     expect(result).toEqual({ ok: true, jobId: "job-1" });
   });
 
-  it("marks the job FAILED (never COMPLETED, never a publicId left pointing nowhere) when the Cloudinary upload itself fails", async () => {
-    vi.mocked(uploadCloudinaryRawPrivate).mockResolvedValueOnce({ ok: false, errorCode: "PROVIDER_ERROR" });
+  it("marks the job FAILED (never COMPLETED, never a publicId left pointing nowhere) when the upload's own finish() fails", async () => {
+    const failingUploader = makeFakeUploaderFactory({ finishResult: { ok: false, errorCode: "PROVIDER_ERROR" } });
 
-    const result = await buildLargeCustomerExportZip(CUSTOMER_ID, 301);
+    const result = await buildLargeCustomerExportZip(CUSTOMER_ID, 301, deps({ _createUploader: failingUploader.factory }));
 
     expect(result).toEqual({ ok: false, reason: "upload_failed", jobId: "job-1", errorCode: "PROVIDER_ERROR" });
     expect((prisma as any).customerExportJob.update).toHaveBeenCalledWith({
@@ -149,6 +197,40 @@ describe("buildLargeCustomerExportZip", () => {
     expect(completedCall).toBeUndefined();
   });
 
+  it("CLEANUP AFTER PARTIAL FAILURE — a mid-stream write() failure (not just a finish() failure) stops the fetch loop immediately, marks the job FAILED with that exact errorCode, and never calls write() or finish() again afterward", async () => {
+    (prisma as any).customer.findUnique.mockResolvedValueOnce({
+      ...mockCustomer(),
+      closetItems: [
+        { id: "item-1", name: "Jacket", imagePublicId: "naia-wardrobe/cust-1/jacket", imageFormat: "jpg" },
+        { id: "item-2", name: "Coat", imagePublicId: "naia-wardrobe/cust-1/coat", imageFormat: "jpg" },
+        { id: "item-3", name: "Scarf", imagePublicId: "naia-wardrobe/cust-1/scarf", imageFormat: "jpg" },
+      ],
+    });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      arrayBuffer: async () => new TextEncoder().encode("img-bytes").buffer,
+    });
+    // Fail on the very first chunk written to the uploader — guaranteed to
+    // land mid-stream, before the fetch loop has processed every image.
+    const flaky = makeFakeUploaderFactory({ failOnWriteNumber: 1, writeFailure: { ok: false, errorCode: "NETWORK_ERROR" } });
+
+    const result = await buildLargeCustomerExportZip(CUSTOMER_ID, 3, deps({ _createUploader: flaky.factory, _fetch: fetchMock }));
+
+    expect(result).toEqual({ ok: false, reason: "upload_failed", jobId: "job-1", errorCode: "NETWORK_ERROR" });
+    expect((prisma as any).customerExportJob.update).toHaveBeenCalledWith({
+      where: { id: "job-1" },
+      data: { status: "FAILED", errorCode: "NETWORK_ERROR" },
+    });
+    // The archive is small enough that archiver may not flush any output
+    // to the uploader until finalize() runs — so all 3 images can
+    // legitimately be fetched before the write failure is even discovered.
+    // What must never happen is a retry or a second attempt once it's
+    // discovered: exactly one write() call (the one that failed) and
+    // finish() never reached.
+    expect(flaky.getWriteCount()).toBe(1);
+    expect(flaky.getFinishCallCount()).toBe(0);
+  });
+
   it("bundles Closet/body-photo/VTO images exactly like the synchronous path — reuses planImages, never re-derives what gets included", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, arrayBuffer: async () => new TextEncoder().encode("img-bytes").buffer });
     (prisma as any).customer.findUnique.mockResolvedValueOnce({
@@ -156,7 +238,7 @@ describe("buildLargeCustomerExportZip", () => {
       closetItems: [{ id: "item-1", name: "Jacket", imagePublicId: "naia-wardrobe/cust-1/jacket", imageFormat: "jpg" }],
     });
 
-    await buildLargeCustomerExportZip(CUSTOMER_ID, 1, { _fetch: fetchMock });
+    await buildLargeCustomerExportZip(CUSTOMER_ID, 1, deps({ _fetch: fetchMock }));
 
     // deriving a real download URL requires getCloudinaryConfig/buildPrivateDownloadUrl,
     // already exercised by customer-privacy.server.ts's own tests — here we only need
@@ -164,22 +246,22 @@ describe("buildLargeCustomerExportZip", () => {
     expect(fetchMock).toHaveBeenCalled();
   });
 
-  it("rejects an anomalous image count above MAX_LARGE_EXPORT_IMAGES before touching the DB or Cloudinary — never attempts to build or upload it", async () => {
-    const result = await buildLargeCustomerExportZip(CUSTOMER_ID, MAX_LARGE_EXPORT_IMAGES + 1);
+  it("rejects an anomalous image count above MAX_LARGE_EXPORT_IMAGES before touching the DB or the uploader — never attempts to build or upload it", async () => {
+    const result = await buildLargeCustomerExportZip(CUSTOMER_ID, MAX_LARGE_EXPORT_IMAGES + 1, deps());
     expect(result).toEqual({ ok: false, reason: "exceeds_hard_limit", imageCount: MAX_LARGE_EXPORT_IMAGES + 1 });
     expect((prisma as any).customer.findUnique).not.toHaveBeenCalled();
     expect((prisma as any).customerExportJob.create).not.toHaveBeenCalled();
-    expect(uploadCloudinaryRawPrivate).not.toHaveBeenCalled();
+    expect(defaultUploader.getWriteCount()).toBe(0);
   });
 
   it("allows an image count exactly at MAX_LARGE_EXPORT_IMAGES — the ceiling is exclusive, not off-by-one", async () => {
-    const result = await buildLargeCustomerExportZip(CUSTOMER_ID, MAX_LARGE_EXPORT_IMAGES);
+    const result = await buildLargeCustomerExportZip(CUSTOMER_ID, MAX_LARGE_EXPORT_IMAGES, deps());
     expect(result).not.toEqual(
       expect.objectContaining({ ok: false, reason: "exceeds_hard_limit" }),
     );
   });
 
-  it("REGRESSION — a second concurrent call for the same customer while the first is still PROCESSING never starts a second build or job row", async () => {
+  it("DUPLICATE REQUEST — a second concurrent call for the same customer while the first is still PROCESSING never starts a second build or job row", async () => {
     (prisma as any).customerExportJob.findFirst.mockResolvedValueOnce({
       id: "job-already-running",
       customerId: CUSTOMER_ID,
@@ -187,11 +269,11 @@ describe("buildLargeCustomerExportZip", () => {
       createdAt: new Date(),
     });
 
-    const result = await buildLargeCustomerExportZip(CUSTOMER_ID, 301);
+    const result = await buildLargeCustomerExportZip(CUSTOMER_ID, 301, deps());
 
     expect(result).toEqual({ ok: false, reason: "already_processing", jobId: "job-already-running" });
     expect((prisma as any).customerExportJob.create).not.toHaveBeenCalled();
-    expect(uploadCloudinaryRawPrivate).not.toHaveBeenCalled();
+    expect(defaultUploader.getWriteCount()).toBe(0);
   });
 
   it("a stale PROCESSING job (past STALE_EXPORT_PROCESSING_THRESHOLD_MS — its owning container is gone) is terminalized and a fresh build proceeds", async () => {
@@ -202,7 +284,7 @@ describe("buildLargeCustomerExportZip", () => {
       createdAt: new Date(Date.now() - STALE_EXPORT_PROCESSING_THRESHOLD_MS - 1),
     });
 
-    const result = await buildLargeCustomerExportZip(CUSTOMER_ID, 301);
+    const result = await buildLargeCustomerExportZip(CUSTOMER_ID, 301, deps());
 
     expect((prisma as any).customerExportJob.update).toHaveBeenCalledWith({
       where: { id: "job-abandoned" },
@@ -214,53 +296,112 @@ describe("buildLargeCustomerExportZip", () => {
     expect(result).toEqual({ ok: true, jobId: "job-1" });
   });
 
-  it("REGRESSION — aborts and marks the job FAILED once cumulative fetched bytes exceed the real byte ceiling, never finalizing or uploading a truncated archive as if complete", async () => {
-    (prisma as any).customer.findUnique.mockResolvedValueOnce({
-      ...mockCustomer(),
-      closetItems: [
-        { id: "item-1", name: "Jacket", imagePublicId: "naia-wardrobe/cust-1/jacket", imageFormat: "jpg" },
-        { id: "item-2", name: "Coat", imagePublicId: "naia-wardrobe/cust-1/coat", imageFormat: "jpg" },
-      ],
-    });
-    // A tiny injected ceiling (10 bytes) lets this test prove the real
-    // byte-counting logic without allocating real gigabytes — see
-    // LargeExportDeps._maxBytes's own doc comment.
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      arrayBuffer: async () => new TextEncoder().encode("this-is-way-more-than-ten-bytes").buffer,
-    });
-
-    const result = await buildLargeCustomerExportZip(CUSTOMER_ID, 2, { _fetch: fetchMock, _maxBytes: 10 });
-
-    expect(result).toEqual({ ok: false, reason: "upload_failed", jobId: "job-1", errorCode: "EXCEEDS_BYTE_CEILING" });
-    expect((prisma as any).customerExportJob.update).toHaveBeenCalledWith({
-      where: { id: "job-1" },
-      data: { status: "FAILED", errorCode: "EXCEEDS_BYTE_CEILING" },
-    });
-    expect(uploadCloudinaryRawPrivate).not.toHaveBeenCalled();
-    // The second image's fetch must never even be attempted once the first
-    // already pushed cumulative bytes past the ceiling.
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("stays under the real MAX_LARGE_EXPORT_BYTES ceiling for a normal small export — never trips on ordinary traffic", async () => {
-    const result = await buildLargeCustomerExportZip(CUSTOMER_ID, 301);
-    expect(result).toEqual({ ok: true, jobId: "job-1" });
-    expect(MAX_LARGE_EXPORT_BYTES).toBeGreaterThan(0);
-  });
-
   it("a PROCESSING job exactly at the staleness threshold is NOT yet treated as abandoned — the boundary is exclusive", async () => {
+    // REGRESSION (flaky-test fix, 2026-11-16): this previously built
+    // createdAt from a real Date.now() call and let reserveExportJobSlot's
+    // own default nowFn independently call the real Date.now() again later
+    // — the gap between those two real timestamps is whatever wall-clock
+    // time the test runner actually takes in between, which is zero only by
+    // luck. Under load (running alongside many other test files) that gap
+    // can exceed 0ms, silently pushing ageMs just past the threshold and
+    // flipping this "exactly at the boundary" case to the stale branch
+    // instead. A single fixed, injected clock removes the real-time
+    // dependency entirely, so the boundary math itself is what's tested.
+    const fixedNow = 1_700_000_000_000;
     (prisma as any).customerExportJob.findFirst.mockResolvedValueOnce({
       id: "job-at-boundary",
       customerId: CUSTOMER_ID,
       status: "PROCESSING",
-      createdAt: new Date(Date.now() - STALE_EXPORT_PROCESSING_THRESHOLD_MS),
+      createdAt: new Date(fixedNow - STALE_EXPORT_PROCESSING_THRESHOLD_MS),
     });
 
-    const result = await buildLargeCustomerExportZip(CUSTOMER_ID, 301);
+    const result = await buildLargeCustomerExportZip(CUSTOMER_ID, 301, deps({ _now: () => fixedNow }));
 
     expect(result).toEqual({ ok: false, reason: "already_processing", jobId: "job-at-boundary" });
     expect((prisma as any).customerExportJob.create).not.toHaveBeenCalled();
+  });
+
+  describe("MEMORY/SIZE LIMITS — byte-ceiling backstop (secondary now that upload streams in bounded chunks)", () => {
+    it("aborts and marks the job FAILED once cumulative fetched bytes exceed the configured ceiling, never finalizing or uploading a truncated archive as if complete", async () => {
+      (prisma as any).customer.findUnique.mockResolvedValueOnce({
+        ...mockCustomer(),
+        closetItems: [
+          { id: "item-1", name: "Jacket", imagePublicId: "naia-wardrobe/cust-1/jacket", imageFormat: "jpg" },
+          { id: "item-2", name: "Coat", imagePublicId: "naia-wardrobe/cust-1/coat", imageFormat: "jpg" },
+        ],
+      });
+      // A tiny injected ceiling (10 bytes) lets this test prove the real
+      // byte-counting logic without allocating real gigabytes — see
+      // LargeExportDeps._maxBytes's own doc comment.
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        arrayBuffer: async () => new TextEncoder().encode("this-is-way-more-than-ten-bytes").buffer,
+      });
+
+      const result = await buildLargeCustomerExportZip(CUSTOMER_ID, 2, deps({ _fetch: fetchMock, _maxBytes: 10 }));
+
+      expect(result).toEqual({ ok: false, reason: "upload_failed", jobId: "job-1", errorCode: "EXCEEDS_BYTE_CEILING" });
+      expect((prisma as any).customerExportJob.update).toHaveBeenCalledWith({
+        where: { id: "job-1" },
+        data: { status: "FAILED", errorCode: "EXCEEDS_BYTE_CEILING" },
+      });
+      // The second image's fetch must never even be attempted once the first
+      // already pushed cumulative bytes past the ceiling.
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("stays under the real MAX_LARGE_EXPORT_BYTES ceiling for a normal small export — never trips on ordinary traffic", async () => {
+      const result = await buildLargeCustomerExportZip(CUSTOMER_ID, 301, deps());
+      expect(result).toEqual({ ok: true, jobId: "job-1" });
+      expect(MAX_LARGE_EXPORT_BYTES).toBeGreaterThan(0);
+    });
+  });
+
+  describe("TIMEOUT RECOVERY — proactive time-budget abort", () => {
+    it("aborts and marks the job FAILED (EXCEEDS_TIME_BUDGET) once elapsed time crosses the configured budget, with margin BEFORE the real platform kill — never lets the fetch loop run past it", async () => {
+      (prisma as any).customer.findUnique.mockResolvedValueOnce({
+        ...mockCustomer(),
+        closetItems: [
+          { id: "item-1", name: "Jacket", imagePublicId: "naia-wardrobe/cust-1/jacket", imageFormat: "jpg" },
+          { id: "item-2", name: "Coat", imagePublicId: "naia-wardrobe/cust-1/coat", imageFormat: "jpg" },
+        ],
+      });
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, arrayBuffer: async () => new TextEncoder().encode("x").buffer });
+      // Fake clock: the SECOND call (checked at the top of the loop's
+      // second iteration) reports time already past the tiny injected
+      // budget — proves the check is live elapsed time, not a one-shot
+      // check at entry.
+      let now = 0;
+      const nowFn = vi.fn(() => {
+        const value = now;
+        now += 1000;
+        return value;
+      });
+
+      const result = await buildLargeCustomerExportZip(
+        CUSTOMER_ID, 2, deps({ _fetch: fetchMock, _now: nowFn, _maxTimeBudgetMs: 1500 }),
+      );
+
+      expect(result).toEqual({ ok: false, reason: "upload_failed", jobId: "job-1", errorCode: "EXCEEDS_TIME_BUDGET" });
+      expect((prisma as any).customerExportJob.update).toHaveBeenCalledWith({
+        where: { id: "job-1" },
+        data: { status: "FAILED", errorCode: "EXCEEDS_TIME_BUDGET" },
+      });
+      // Stopped after the first image, before ever fetching the second.
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("completes normally when elapsed time stays within the budget", async () => {
+      const result = await buildLargeCustomerExportZip(CUSTOMER_ID, 301, deps({ _now: () => 0, _maxTimeBudgetMs: MAX_TIME_BUDGET_MS }));
+      expect(result).toEqual({ ok: true, jobId: "job-1" });
+    });
+
+    it("STALE-JOB SAFETY INVARIANT — the 10-minute stale-job threshold cannot incorrectly terminate a row that's still legitimately processing: no single invocation can legitimately run past the verified real 300s Vercel function timeout, and this proactive abort fires with margin before that, so the threshold must stay safely above both", () => {
+      const VERIFIED_REAL_FUNCTION_TIMEOUT_MS = 300 * 1000; // `vercel inspect <deployment> --json`: timeout: 300
+      expect(MAX_TIME_BUDGET_MS).toBeLessThan(VERIFIED_REAL_FUNCTION_TIMEOUT_MS);
+      expect(STALE_EXPORT_PROCESSING_THRESHOLD_MS).toBeGreaterThan(VERIFIED_REAL_FUNCTION_TIMEOUT_MS);
+      expect(STALE_EXPORT_PROCESSING_THRESHOLD_MS).toBeGreaterThan(MAX_TIME_BUDGET_MS);
+    });
   });
 });
 

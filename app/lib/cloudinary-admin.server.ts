@@ -504,6 +504,144 @@ export async function uploadCloudinaryRawPrivate(
   }
 }
 
+// ── Chunked streaming raw upload (2026-11-16) ────────────────────────────────
+//
+// uploadCloudinaryRawPrivate above requires the ENTIRE file already sitting
+// in memory as a Buffer/Buffer[] before the first byte is sent — fine for a
+// small file, but customer-export-zip-large.server.ts's archive output can
+// legitimately reach hundreds of MB to low GB, and holding that much in one
+// Vercel Function instance (verified: 2048 MB real memory, 300s real
+// duration for this project's actual deployed function — see that file's
+// own comment) was the exact risk a byte-count ceiling alone could only ever
+// paper over, never remove. This uses Cloudinary's own documented chunked
+// upload protocol (POST the same /raw/upload endpoint repeatedly, same
+// X-Unique-Upload-Id per chunk, Content-Range bytes <start>-<end>/<total>,
+// -1 for <total> until the final chunk) so peak memory for the upload
+// itself stays bounded at roughly one chunk (CHUNK_SIZE_BYTES), regardless
+// of total file size — the caller streams bytes in via write() as they're
+// produced instead of collecting them all first.
+//
+// Minimum chunk size per Cloudinary's own documented limit: every chunk
+// except the final one must exceed 5 MB. CHUNK_SIZE_BYTES (20 MB) is
+// Cloudinary's own documented default/recommended size — comfortably above
+// that floor with margin, and small enough to keep this function's own
+// memory footprint trivial next to the 2048 MB real ceiling.
+export const CHUNK_SIZE_BYTES = 20 * 1024 * 1024;
+
+export interface ChunkedUploadDeps {
+  _fetch?: typeof fetch;
+  _getConfig?: () => CloudinaryConfig | null;
+  _uniqueUploadId?: () => string;
+}
+
+export type ChunkWriteResult = { ok: true } | { ok: false; errorCode: string };
+export type ChunkFinishResult = { ok: true; publicId: string } | { ok: false; errorCode: string };
+
+export interface ChunkedRawUploader {
+  // Feed the next slice of bytes as it's produced. Internally buffers until
+  // a full CHUNK_SIZE_BYTES is available, then sends exactly one HTTP call
+  // per threshold crossing — never holds more than ~one chunk at a time.
+  write(buf: Buffer): Promise<ChunkWriteResult>;
+  // Sends whatever remains (the final chunk, which may be smaller than
+  // CHUNK_SIZE_BYTES and is exempt from the 5 MB-per-chunk minimum) with the
+  // now-known real total size, completing the upload.
+  finish(): Promise<ChunkFinishResult>;
+}
+
+export function createChunkedRawUploader(
+  publicId: string,
+  filename: string,
+  deliveryType: string = "private",
+  deps: ChunkedUploadDeps = {},
+): ChunkedRawUploader {
+  const _fetch = deps._fetch ?? fetch;
+  const _getConfig = deps._getConfig ?? getCloudinaryConfig;
+  const uploadId = (deps._uniqueUploadId ?? (() => crypto.randomUUID()))();
+
+  let pending: Buffer[] = [];
+  let pendingBytes = 0;
+  let bytesSent = 0;
+  let failure: { ok: false; errorCode: string } | null = null;
+
+  async function sendChunk(chunk: Buffer, isFinal: boolean): Promise<ChunkFinishResult> {
+    const cfg = _getConfig();
+    if (!cfg) return { ok: false, errorCode: "NOT_CONFIGURED" };
+
+    const timestamp = Math.floor(Date.now() / 1000);
+    // Same alphabetical signature convention as uploadCloudinaryRawPrivate —
+    // identical across every chunk of this upload (public_id and type never
+    // change mid-upload; only the Content-Range/body differ).
+    const sigString =
+      `public_id=${publicId}` +
+      `&timestamp=${timestamp}` +
+      (deliveryType && deliveryType !== "upload" ? `&type=${deliveryType}` : "") +
+      cfg.apiSecret;
+    const signature = crypto.createHash("sha1").update(sigString).digest("hex");
+
+    const body = new FormData();
+    body.append("public_id", publicId);
+    body.append("api_key", cfg.apiKey);
+    body.append("timestamp", String(timestamp));
+    body.append("signature", signature);
+    if (deliveryType && deliveryType !== "upload") body.append("type", deliveryType);
+    body.append("file", new Blob([new Uint8Array(chunk)], { type: "application/zip" }), filename);
+
+    const start = bytesSent;
+    const end = start + chunk.length - 1;
+    // Real total is only known once the final chunk is being sent — every
+    // prior chunk reports -1, per Cloudinary's own documented protocol for
+    // an upload whose total size isn't known upfront (true here: the real
+    // archive size depends on which image fetches succeed/fail and isn't
+    // fixed ahead of time).
+    const total = isFinal ? end + 1 : -1;
+
+    try {
+      const res = await _fetch(`https://api.cloudinary.com/v1_1/${cfg.cloudName}/raw/upload`, {
+        method: "POST",
+        headers: { "X-Unique-Upload-Id": uploadId, "Content-Range": `bytes ${start}-${end}/${total}` },
+        body,
+      });
+      if (!res.ok) return { ok: false, errorCode: "PROVIDER_ERROR" };
+
+      const json = (await res.json()) as { public_id?: string; error?: { message?: string } };
+      if (json.error) return { ok: false, errorCode: "PROVIDER_REJECTED" };
+
+      bytesSent = end + 1;
+      return { ok: true, publicId: json.public_id ?? publicId };
+    } catch {
+      return { ok: false, errorCode: "NETWORK_ERROR" };
+    }
+  }
+
+  return {
+    async write(buf: Buffer): Promise<ChunkWriteResult> {
+      if (failure) return failure;
+      pending.push(buf);
+      pendingBytes += buf.length;
+      // Flush every time a full chunk has accumulated — may fire more than
+      // once per write() if a single incoming slice is itself large.
+      while (pendingBytes >= CHUNK_SIZE_BYTES) {
+        const joined = Buffer.concat(pending, pendingBytes); // bounded to ~one chunk, never the whole file
+        const toSend = joined.subarray(0, CHUNK_SIZE_BYTES);
+        const rest = joined.subarray(CHUNK_SIZE_BYTES);
+        const result = await sendChunk(toSend, false);
+        if (!result.ok) {
+          failure = result;
+          return result;
+        }
+        pending = rest.length ? [rest] : [];
+        pendingBytes = rest.length;
+      }
+      return { ok: true };
+    },
+    async finish(): Promise<ChunkFinishResult> {
+      if (failure) return failure;
+      const finalChunk = Buffer.concat(pending, pendingBytes);
+      return sendChunk(finalChunk, true);
+    },
+  };
+}
+
 // ── Public ID ownership validation ───────────────────────────────────────────
 //
 // Validates that a Cloudinary public ID belongs to the authenticated customer's folder.

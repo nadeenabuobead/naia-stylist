@@ -14,6 +14,8 @@ import {
   buildPrivateDownloadUrl,
   deleteCloudinaryAsset,
   uploadCloudinaryRawPrivate,
+  createChunkedRawUploader,
+  CHUNK_SIZE_BYTES,
   type CloudinaryConfig,
 } from "./cloudinary-admin.server";
 
@@ -128,6 +130,115 @@ describe("uploadCloudinaryRawPrivate", () => {
     const result = await uploadCloudinaryRawPrivate(
       "pub-id", Buffer.from("x"), "f.zip", "private", fetchMock as any, () => CONFIG,
     );
+    expect(result).toEqual({ ok: false, errorCode: "NETWORK_ERROR" });
+  });
+});
+
+describe("createChunkedRawUploader — bounded-memory streaming upload", () => {
+  const fetchMock = vi.fn();
+  beforeEach(() => fetchMock.mockReset());
+
+  function okResponse(body: Record<string, unknown> = {}) {
+    return { ok: true, json: async () => body };
+  }
+
+  it("never sends a chunk until CHUNK_SIZE_BYTES has accumulated — several small writes stay buffered", async () => {
+    const uploader = createChunkedRawUploader("pub-id", "f.zip", "private", { _fetch: fetchMock as any, _getConfig: () => CONFIG });
+    await uploader.write(Buffer.alloc(1024));
+    await uploader.write(Buffer.alloc(1024));
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("flushes exactly one chunk of CHUNK_SIZE_BYTES as soon as the threshold is crossed, keeping the remainder buffered", async () => {
+    fetchMock.mockResolvedValueOnce(okResponse());
+    const uploader = createChunkedRawUploader("pub-id", "f.zip", "private", { _fetch: fetchMock as any, _getConfig: () => CONFIG });
+
+    const overCeiling = Buffer.alloc(CHUNK_SIZE_BYTES + 1000);
+    await uploader.write(overCeiling);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init.headers["Content-Range"]).toBe(`bytes 0-${CHUNK_SIZE_BYTES - 1}/-1`);
+    const sentFile = (init.body as FormData).get("file") as File;
+    expect(sentFile.size).toBe(CHUNK_SIZE_BYTES);
+  });
+
+  it("every chunk of the same upload carries the SAME X-Unique-Upload-Id header", async () => {
+    fetchMock.mockResolvedValue(okResponse());
+    const uploader = createChunkedRawUploader("pub-id", "f.zip", "private", { _fetch: fetchMock as any, _getConfig: () => CONFIG });
+
+    await uploader.write(Buffer.alloc(CHUNK_SIZE_BYTES));
+    await uploader.write(Buffer.alloc(CHUNK_SIZE_BYTES));
+    await uploader.finish();
+
+    const ids = fetchMock.mock.calls.map((c: any[]) => c[1].headers["X-Unique-Upload-Id"]);
+    expect(ids.length).toBe(3);
+    expect(new Set(ids).size).toBe(1);
+  });
+
+  it("Content-Range start/end advance correctly across consecutive chunks, never overlapping or skipping bytes", async () => {
+    fetchMock.mockResolvedValue(okResponse());
+    const uploader = createChunkedRawUploader("pub-id", "f.zip", "private", { _fetch: fetchMock as any, _getConfig: () => CONFIG });
+
+    await uploader.write(Buffer.alloc(CHUNK_SIZE_BYTES));
+    await uploader.write(Buffer.alloc(CHUNK_SIZE_BYTES));
+    await uploader.finish();
+
+    const ranges = fetchMock.mock.calls.map((c: any[]) => c[1].headers["Content-Range"]);
+    expect(ranges[0]).toBe(`bytes 0-${CHUNK_SIZE_BYTES - 1}/-1`);
+    expect(ranges[1]).toBe(`bytes ${CHUNK_SIZE_BYTES}-${2 * CHUNK_SIZE_BYTES - 1}/-1`);
+  });
+
+  it("finish() sends whatever remains as the final chunk, with the real now-known total size", async () => {
+    fetchMock.mockResolvedValueOnce(okResponse({ public_id: "naia-exports/cust-1/job-1.zip" }));
+    const uploader = createChunkedRawUploader("naia-exports/cust-1/job-1.zip", "f.zip", "private", {
+      _fetch: fetchMock as any, _getConfig: () => CONFIG,
+    });
+
+    await uploader.write(Buffer.alloc(500));
+    const result = await uploader.finish();
+
+    expect(result).toEqual({ ok: true, publicId: "naia-exports/cust-1/job-1.zip" });
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init.headers["Content-Range"]).toBe("bytes 0-499/500");
+  });
+
+  it("finish() with nothing ever written still sends one valid (empty) final chunk — never skips the upload entirely", async () => {
+    fetchMock.mockResolvedValueOnce(okResponse({ public_id: "pub-id" }));
+    const uploader = createChunkedRawUploader("pub-id", "f.zip", "private", { _fetch: fetchMock as any, _getConfig: () => CONFIG });
+
+    const result = await uploader.finish();
+    expect(result).toEqual({ ok: true, publicId: "pub-id" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("a mid-upload PROVIDER_ERROR is surfaced from write(), and no further chunks are ever sent afterward", async () => {
+    fetchMock.mockResolvedValueOnce({ ok: false, json: async () => ({}) });
+    const uploader = createChunkedRawUploader("pub-id", "f.zip", "private", { _fetch: fetchMock as any, _getConfig: () => CONFIG });
+
+    const result = await uploader.write(Buffer.alloc(CHUNK_SIZE_BYTES));
+    expect(result).toEqual({ ok: false, errorCode: "PROVIDER_ERROR" });
+
+    // A later write/finish must not retry or send anything further — the
+    // uploader is permanently failed once one chunk fails.
+    fetchMock.mockClear();
+    await uploader.write(Buffer.alloc(100));
+    const finishResult = await uploader.finish();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(finishResult).toEqual({ ok: false, errorCode: "PROVIDER_ERROR" });
+  });
+
+  it("returns NOT_CONFIGURED without calling fetch when Cloudinary config is unavailable", async () => {
+    const uploader = createChunkedRawUploader("pub-id", "f.zip", "private", { _fetch: fetchMock as any, _getConfig: () => null });
+    const result = await uploader.finish();
+    expect(result).toEqual({ ok: false, errorCode: "NOT_CONFIGURED" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("returns NETWORK_ERROR when the chunk's own fetch throws", async () => {
+    fetchMock.mockRejectedValueOnce(new Error("ECONNRESET"));
+    const uploader = createChunkedRawUploader("pub-id", "f.zip", "private", { _fetch: fetchMock as any, _getConfig: () => CONFIG });
+    const result = await uploader.write(Buffer.alloc(CHUNK_SIZE_BYTES));
     expect(result).toEqual({ ok: false, errorCode: "NETWORK_ERROR" });
   });
 });

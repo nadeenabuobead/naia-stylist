@@ -8,9 +8,11 @@
 // Flow:
 //   1. buildLargeCustomerExportZip — builds the SAME archive contents as
 //      the normal path (reusing compileCustomerExport + planImages, never
-//      re-deriving what gets bundled or which photos are excluded), buffers
-//      the complete ZIP, uploads it to Cloudinary as a private RAW asset,
-//      and records a CustomerExportJob row.
+//      re-deriving what gets bundled or which photos are excluded),
+//      streaming the archive to Cloudinary as a private RAW asset via
+//      chunked upload as it's produced (never buffering the whole ZIP in
+//      memory — see this file's own memory/time safety note below), and
+//      records a CustomerExportJob row.
 //   2. getExportJobForCustomer / buildExportJobDownloadUrl — the retrieval
 //      side, used both for the first download and for a customer retrying
 //      after a failed/expired download without triggering a full rebuild.
@@ -32,13 +34,41 @@
 //      api.export-zip-sweep.ts into a real recurring trigger before this can
 //      be described as "deleted after 24 hours" anywhere customer-facing.
 //
-// Memory/time safety: MAX_LARGE_EXPORT_IMAGES below is a hard outer ceiling
-// distinct from MAX_SYNC_EXPORT_IMAGES — this path buffers the complete
-// archive before uploading (no verified streaming-upload path to this
-// provider exists in this codebase, and a hand-rolled one couldn't be
-// verified without a live Cloudinary call, which is out of bounds here), so
-// peak memory scales with total image count. See the constant's own comment
-// for the exact reasoning.
+// Memory/time safety (REVISED 2026-11-16 against the project's actual
+// verified Vercel limits — `vercel inspect <deployment-url> --json` against
+// this project's real staging deployment reports every route, including
+// api/export-zip, sharing ONE function instance with memorySize: 2048 (2048
+// MB) and timeout: 300 (300s). A fixed byte-count ceiling on an in-memory
+// buffer (the previous approach) cannot be sized safely against that real
+// 2048 MB ceiling once Fluid Compute's "optimized concurrency" is accounted
+// for — two concurrent large-export requests could land in the SAME
+// instance, and any single generously-sized in-memory buffer risks an OOM
+// that an arbitrary byte ceiling only ever gambles against, never removes.
+//
+// So this no longer buffers the whole archive. buildLargeCustomerExportZip
+// streams archiver's output into Cloudinary via chunked upload
+// (createChunkedRawUploader, cloudinary-admin.server.ts) as each piece is
+// produced — peak memory for the upload itself stays bounded to roughly one
+// CHUNK_SIZE_BYTES (20 MB) regardless of total export size, the one
+// genuinely scale-independent fix for the memory risk. MAX_LARGE_EXPORT_BYTES
+// below is kept only as a secondary sanity/cost backstop (an anomalous
+// export shouldn't silently run to an unbounded size just because memory is
+// no longer the limiting factor) — it is NOT the primary defense anymore.
+//
+// Execution time is the remaining real risk: the verified 300s function
+// timeout is a hard platform kill with no chance for this code to run its
+// own cleanup. MAX_TIME_BUDGET_MS below proactively aborts the fetch loop
+// with margin BEFORE that kill, so a run that's taking too long fails
+// cleanly (job marked FAILED, a fresh retry can start) instead of leaving a
+// row that can only be recovered by the separate stale-job reconciliation
+// after the fact.
+//
+// Stale-job reconciliation safety: STALE_EXPORT_PROCESSING_THRESHOLD_MS (10
+// minutes) cannot incorrectly terminate a row that's still legitimately
+// processing, because no single invocation can legitimately still be
+// running past the verified 300s (5 minute) real function timeout — the
+// platform itself guarantees that. 10 minutes carries a full 2x safety
+// margin past the longest any one invocation can possibly still be alive.
 //
 // Overlap guard (2026-11-16): buildLargeCustomerExportZip reserves its
 // CustomerExportJob row inside a Serializable transaction (see
@@ -46,6 +76,12 @@
 // double-click, a retried fetch, or a customer re-requesting while their
 // first >300-image export is still building would each start an independent
 // full fetch-archive-upload cycle for the same customer at the same time.
+//
+// Open, unverified item (flagged, not assumed): Cloudinary's own maximum
+// file size per chunked upload depends on the account's plan and was not
+// checked here — that would require a live call, which is out of bounds
+// for this change. Confirm it against the actual Cloudinary account before
+// relying on this path for a genuinely large (multi-hundred-MB+) export.
 
 import archiver from "archiver";
 import prisma from "../db.server";
@@ -55,7 +91,7 @@ import {
   getCloudinaryConfig,
   buildPrivateDownloadUrl,
   deleteCloudinaryAsset,
-  uploadCloudinaryRawPrivate,
+  createChunkedRawUploader,
   type CloudinaryConfig,
 } from "./cloudinary-admin.server";
 
@@ -64,33 +100,32 @@ const EXPORT_RESOURCE_TYPE = "raw";
 const EXPORT_DELIVERY_TYPE = "private";
 const DOWNLOAD_LINK_EXPIRY_SECONDS = 600; // 10 minutes — same signed-link convention as every other asset in this app
 
-// Hard outer ceiling for the buffered path. Chosen as a data-anomaly
-// backstop, not a realistic-customer sizing: the real Closet cap is 250
-// (plan-limits.server.ts) and no genuine customer today comes remotely
-// close to this number — same reasoning MAX_SYNC_EXPORT_IMAGES's own
-// comment already uses for 300. At the code-enforced 5MB-per-image upload
-// ceiling, 1000 images is ~5GB worst case; a request this large is treated
-// as a data anomaly needing manual handling (same "contact support"
-// fallback as the pre-existing too_large case), not something the
-// synchronous buffered build should ever attempt. Final Integration should
-// confirm this stays comfortably under the deployed function's actual
-// memory limit — if real traffic ever approaches it, LOWER this constant
-// rather than raise the function's memory/duration budget to chase it.
+// Data-anomaly backstop, not a realistic-customer sizing: the real Closet
+// cap is 250 (plan-limits.server.ts) and no genuine customer today comes
+// remotely close to this number — same reasoning MAX_SYNC_EXPORT_IMAGES's
+// own comment already uses for 300. A request this large is treated as a
+// data anomaly needing manual handling (same "contact support" fallback as
+// the pre-existing too_large case). This is NOT the real defense against
+// the execution-time risk — MAX_TIME_BUDGET_MS below is, since it reacts to
+// actual elapsed time rather than an assumed per-image duration.
 export const MAX_LARGE_EXPORT_IMAGES = 1000;
 
-// Real byte-size backstop, not just an image-count proxy. MAX_LARGE_EXPORT_IMAGES
-// alone assumes every image sits near the enforced per-image upload cap (5MB
-// — closet._index.tsx's own SERVER_MAX_BYTES/MAX_FILE_BYTES convention,
-// duplicated here rather than imported since a route module isn't a
-// server-lib dependency) — true only in the worst case; the count check by
-// itself never actually verifies the real archive size before buffering it.
-// This tracks cumulative bytes actually fetched and aborts before memory
-// pressure threatens the deployed function's own ceiling, rather than
-// discovering the problem via an OOM crash mid-build. 2GB leaves headroom
-// under Vercel's classic serverless function memory ceiling (3008MB) for
-// the archiver's internal buffering, Node/V8 overhead, and the one image
-// buffer transiently held mid-fetch.
+// Secondary sanity/cost backstop only — now that the upload itself streams
+// in bounded chunks (createChunkedRawUploader), memory no longer scales
+// with this number, so it is not load-bearing for the OOM risk the way it
+// used to be. Kept so an anomalous export doesn't silently grow to an
+// unbounded size, and because Cloudinary's own maximum file size per
+// account plan is unverified (see this file's top-of-file note) — 2GB is a
+// conservative guess at "probably fine," not a confirmed safe value.
 export const MAX_LARGE_EXPORT_BYTES = 2 * 1024 * 1024 * 1024;
+
+// The real defense against the execution-time risk. Verified real function
+// timeout for this project is 300s (see this file's top-of-file note) — a
+// hard platform kill with zero chance to run our own cleanup once it fires.
+// 240s leaves a fixed 60s margin for appending data.json, finalizing the
+// archive, flushing the last upload chunk, and writing the terminal DB
+// status — all of which still need to happen AFTER this check trips.
+export const MAX_TIME_BUDGET_MS = 240 * 1000;
 
 // Mirrors STALE_PROCESSING_THRESHOLD_MS's own 10-minute convention
 // (full-look-tryon-real.server.ts) for the same underlying reason: this
@@ -177,13 +212,19 @@ export async function reserveExportJobSlot(
 
 export interface LargeExportDeps {
   _fetch?: typeof fetch;
-  _uploadRaw?: typeof uploadCloudinaryRawPrivate;
+  _createUploader?: typeof createChunkedRawUploader;
   _runReservation?: RunExportReservationFn;
+  // Shared by the reservation's staleness check AND the time-budget abort —
+  // one clock for the whole call, same discipline as every other injected
+  // nowFn in this codebase.
   _now?: () => number;
   // Overridable only so tests can exercise the ceiling without allocating
   // real gigabytes of Buffer data. Production callers never pass this —
   // it always defaults to the real MAX_LARGE_EXPORT_BYTES.
   _maxBytes?: number;
+  // Same idea for MAX_TIME_BUDGET_MS — lets a test trip the abort in
+  // milliseconds of fake-clock time instead of waiting 240 real seconds.
+  _maxTimeBudgetMs?: number;
 }
 
 export type BuildLargeExportResult =
@@ -206,8 +247,11 @@ export async function buildLargeCustomerExportZip(
   }
 
   const _fetch = deps._fetch ?? fetch;
-  const _uploadRaw = deps._uploadRaw ?? uploadCloudinaryRawPrivate;
+  const _createUploader = deps._createUploader ?? createChunkedRawUploader;
+  const _now = deps._now ?? Date.now;
   const _maxBytes = deps._maxBytes ?? MAX_LARGE_EXPORT_BYTES;
+  const _maxTimeBudgetMs = deps._maxTimeBudgetMs ?? MAX_TIME_BUDGET_MS;
+  const startTime = _now();
 
   const exportData = await compileCustomerExport(customerId);
   if (!exportData) return { ok: false, reason: "not_found" };
@@ -225,15 +269,69 @@ export async function buildLargeCustomerExportZip(
 
   const { data, images } = planImages(exportData);
   const archive = archiver("zip", { zlib: { level: 6 } });
-  const chunks: Buffer[] = [];
-  archive.on("data", (chunk: Buffer) => chunks.push(chunk));
+  const publicId = exportPublicId(customerId, job.id);
+  const uploader = _createUploader(publicId, `naia-data-export-${job.id}.zip`, EXPORT_DELIVERY_TYPE, { _fetch });
+
+  // Drains archive's compressed output into the uploader AS it's produced —
+  // started before the fetch loop below so nothing backs up unconsumed in
+  // archiver's own internal stream buffer. uploadFailure is a plain mutable
+  // ref (not just this promise's eventual resolution) specifically so the
+  // synchronous fetch loop below can notice a failed chunk upload and stop
+  // feeding more images into a stream nobody is draining anymore, rather
+  // than only finding out after every image has already been fetched.
+  const uploadFailure: { current: { ok: false; errorCode: string } | null } = { current: null };
+  // Read through a function rather than the bare property everywhere below
+  // — TS's control-flow narrowing otherwise treats `uploadFailure.current`
+  // as permanently falsy after the first `if (!uploadFailure.current)`-style
+  // check in this function, since it can't see that the async closure below
+  // mutates it across an await boundary. A function call's return value is
+  // never narrowed by unrelated prior conditionals, which sidesteps that.
+  function getUploadFailure() {
+    return uploadFailure.current;
+  }
+  const consumeUpload = (async (): Promise<void> => {
+    try {
+      for await (const chunk of archive as unknown as AsyncIterable<Buffer>) {
+        if (uploadFailure.current) {
+          archive.destroy();
+          return;
+        }
+        const result = await uploader.write(chunk);
+        if (!result.ok) {
+          uploadFailure.current = result;
+          // Destroy immediately, from right here — waiting for the fetch
+          // loop below to notice on its next iteration would leave
+          // archiver's internal buffer filling with nothing draining it,
+          // which can stall archive.finalize() indefinitely waiting for a
+          // 'drain' that will never come once nobody reads the output side
+          // again.
+          archive.destroy();
+          return;
+        }
+      }
+    } catch (err) {
+      if (!uploadFailure.current) {
+        uploadFailure.current = {
+          ok: false,
+          errorCode: err instanceof Error ? err.message.slice(0, 200) : "ARCHIVE_STREAM_ERROR",
+        };
+      }
+    }
+  })();
 
   const imageFetchFailures: string[] = [];
   let bytesFetched = 0;
-  let exceededByteCeiling = false;
-  // Sequential, not parallel — same reasoning as the common path: one image
-  // buffered at a time keeps peak memory bounded regardless of total count.
+  let abortReason: "EXCEEDS_BYTE_CEILING" | "EXCEEDS_TIME_BUDGET" | null = null;
+  // Sequential, not parallel — keeps the fetch side simple and ordered;
+  // peak memory is no longer a reason to stay sequential (the uploader
+  // streams in bounded chunks regardless), but nothing here needed
+  // concurrency to be safe within the real time budget either.
   for (const img of images) {
+    if (getUploadFailure()) break;
+    if (_now() - startTime > _maxTimeBudgetMs) {
+      abortReason = "EXCEEDS_TIME_BUDGET";
+      break;
+    }
     try {
       const res = await _fetch(img.url);
       if (!res.ok) {
@@ -243,11 +341,7 @@ export async function buildLargeCustomerExportZip(
       const buf = Buffer.from(await res.arrayBuffer());
       bytesFetched += buf.length;
       if (bytesFetched > _maxBytes) {
-        // Stop fetching immediately — the archive built so far is
-        // incomplete and must never be finalized/uploaded as if it were a
-        // real export. Terminalized as its own distinct errorCode below,
-        // never silently truncated and marked COMPLETED.
-        exceededByteCeiling = true;
+        abortReason = "EXCEEDS_BYTE_CEILING";
         break;
       }
       archive.append(buf, { name: img.filename });
@@ -256,49 +350,80 @@ export async function buildLargeCustomerExportZip(
     }
   }
 
-  if (exceededByteCeiling) {
+  if (abortReason || getUploadFailure()) {
+    // Snapshot the real reason BEFORE destroying — destroying the stream
+    // can itself make consumeUpload's for-await throw a "Premature close"
+    // style stream error, which must never override the actual reason this
+    // abort happened in the first place. abortReason (a proactive local
+    // check) always takes precedence over whatever uploadFailure held at
+    // this exact moment, since abortReason being set means THAT is what
+    // triggered this branch, not an upload failure.
+    const errorCode = abortReason ?? getUploadFailure()!.errorCode;
+    // The archive built so far is incomplete and must never be
+    // finalized/uploaded as if it were a real export.
     archive.destroy();
-    const errorCode = "EXCEEDS_BYTE_CEILING";
+    await consumeUpload;
     await prisma.customerExportJob.update({ where: { id: job.id }, data: { status: "FAILED", errorCode } });
     return { ok: false, reason: "upload_failed", jobId: job.id, errorCode };
   }
 
   archive.append(JSON.stringify({ ...data, note: ZIP_NOTE, imageFetchFailures }, null, 2), { name: "data.json" });
 
-  const archiveSettled = new Promise<void>((resolve, reject) => {
-    archive.on("end", resolve);
-    archive.on("error", reject);
+  let finalizeError: string | null = null;
+  const finalizeTask = archive.finalize().catch((err: unknown) => {
+    finalizeError = err instanceof Error ? err.message.slice(0, 200) : "ARCHIVE_BUILD_FAILED";
   });
 
-  try {
-    await archive.finalize();
-    await archiveSettled;
-  } catch (err) {
-    const errorCode = err instanceof Error ? err.message.slice(0, 200) : "ARCHIVE_BUILD_FAILED";
+  // Race, don't sequence: if the upload fails WHILE finalize is still
+  // flushing (plausible for a small archive — nothing may reach the
+  // uploader until finalize's own flush), consumeUpload destroys the
+  // stream and returns immediately, but archive.finalize()'s own promise
+  // is tied to the stream ending NORMALLY — a forced destroy may leave it
+  // settling late or never. Waiting on finalizeTask first would risk
+  // hanging forever on exactly the failure path this code exists to
+  // handle cleanly. Whichever settles first is enough to act on.
+  await Promise.race([finalizeTask, consumeUpload]);
+
+  const failureFromRace = getUploadFailure();
+  if (failureFromRace) {
+    const errorCode = failureFromRace.errorCode;
     await prisma.customerExportJob.update({ where: { id: job.id }, data: { status: "FAILED", errorCode } });
     return { ok: false, reason: "upload_failed", jobId: job.id, errorCode };
   }
 
-  // Pass the chunks array straight through — NOT Buffer.concat(chunks).
-  // Concatenating first would allocate a second full-size copy of the
-  // entire archive in addition to the chunks already held, roughly
-  // doubling peak memory for no benefit; uploadCloudinaryRawPrivate accepts
-  // the chunk array natively (see its own comment for why).
-  const publicId = exportPublicId(customerId, job.id);
-  const uploadResult = await _uploadRaw(publicId, chunks, `naia-data-export-${job.id}.zip`, EXPORT_DELIVERY_TYPE);
+  // No upload failure — so finalizeTask must be the one that actually
+  // settled (or settles shortly); wait for it properly now.
+  await finalizeTask;
+  if (finalizeError) {
+    const errorCode = finalizeError;
+    await prisma.customerExportJob.update({ where: { id: job.id }, data: { status: "FAILED", errorCode } });
+    return { ok: false, reason: "upload_failed", jobId: job.id, errorCode };
+  }
 
-  if (!uploadResult.ok) {
+  // Resolves once archive's stream has fully ended (for-await's own
+  // completion signals that) — this IS the "archive settled" wait, no
+  // separate end/error listener needed alongside it.
+  await consumeUpload;
+  const failureAfterSettle = getUploadFailure();
+  if (failureAfterSettle) {
+    const errorCode = failureAfterSettle.errorCode;
+    await prisma.customerExportJob.update({ where: { id: job.id }, data: { status: "FAILED", errorCode } });
+    return { ok: false, reason: "upload_failed", jobId: job.id, errorCode };
+  }
+
+  const finishResult = await uploader.finish();
+  if (!finishResult.ok) {
     await prisma.customerExportJob.update({
       where: { id: job.id },
-      data: { status: "FAILED", errorCode: uploadResult.errorCode },
+      data: { status: "FAILED", errorCode: finishResult.errorCode },
     });
-    return { ok: false, reason: "upload_failed", jobId: job.id, errorCode: uploadResult.errorCode };
+    return { ok: false, reason: "upload_failed", jobId: job.id, errorCode: finishResult.errorCode };
   }
 
   const expiresAt = new Date(Date.now() + EXPORT_EXPIRY_HOURS * 60 * 60 * 1000);
   await prisma.customerExportJob.update({
     where: { id: job.id },
-    data: { status: "COMPLETED", publicId, completedAt: new Date(), expiresAt },
+    data: { status: "COMPLETED", publicId: finishResult.publicId, completedAt: new Date(), expiresAt },
   });
 
   return { ok: true, jobId: job.id };
