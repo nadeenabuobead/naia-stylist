@@ -63,9 +63,12 @@ describe("Logo (NADINE wordmark) links to storefront homepage", () => {
     );
   });
   it("trends.$slug.lens.$lens.tsx: NADINE wordmark links to storefront origin", () => {
+    // The lens page's header was later unified with the public report page's
+    // own psl-* header (see trends.$slug.tsx) — it no longer has its own
+    // tr-header-logo class. psl-header-logo is the current, shipped name.
     assert.ok(
-      lensTsx.includes(`\`\${STOREFRONT_ORIGIN}/\`} className="tr-header-logo">NADINE`) ||
-      lensTsx.includes(`href="${STOREFRONT_ORIGIN}/" className="tr-header-logo">NADINE`),
+      lensTsx.includes(`\`\${STOREFRONT_ORIGIN}/\`} className="psl-header-logo">NADINE`) ||
+      lensTsx.includes(`href="${STOREFRONT_ORIGIN}/" className="psl-header-logo">NADINE`),
       `trends.$slug.lens.$lens.tsx NADINE wordmark must link to storefront (${STOREFRONT_ORIGIN})`,
     );
   });
@@ -81,8 +84,8 @@ describe("Logo (NADINE wordmark) links to storefront homepage", () => {
       "trends.$slug.tsx must not link NADINE to / (authenticated dashboard)",
     );
     assert.ok(
-      !lensTsx.includes('to="/" className="tr-header-logo">NADINE') &&
-      !lensTsx.includes('href="/" className="tr-header-logo">NADINE'),
+      !lensTsx.includes('to="/" className="psl-header-logo">NADINE') &&
+      !lensTsx.includes('href="/" className="psl-header-logo">NADINE'),
       "lens route must not link NADINE to / (authenticated dashboard)",
     );
   });
@@ -104,8 +107,10 @@ describe("TREND REPORTS nav link marked active", () => {
     );
   });
   it("trends.$slug.lens.$lens.tsx: TREND REPORTS link has active class", () => {
+    // Same psl-* unification as the header logo above — the lens page's nav
+    // links share the public report page's psl-sitenav-link class.
     assert.ok(
-      lensTsx.includes('"tr-sitenav-link active">TREND REPORTS</Link>'),
+      lensTsx.includes('"psl-sitenav-link active">TREND REPORTS</Link>'),
       "trends.$slug.lens.$lens.tsx must render TREND REPORTS with active class as an internal Link",
     );
   });
@@ -196,10 +201,14 @@ describe("My Edit is visually separated from professional lenses", () => {
 
 describe("Professional lenses appear before My Edit on lens page", () => {
   it("lens page: professional lenses in lens nav before My Edit section", () => {
-    const proLensPos = lensTsx.indexOf("tr-lens-nav-row");
-    const myEditPos = lensTsx.indexOf("tr-my-edit-sep");
-    assert.ok(proLensPos !== -1, "tr-lens-nav-row must exist");
-    assert.ok(myEditPos !== -1, "tr-my-edit-sep must exist");
+    // tr-lens-nav-row/tr-my-edit-sep predate the lens page's unification
+    // with the public report page's psl-* naming (see trends.$slug.tsx) —
+    // psl-lens-row/psl-my-edit-sep are the current, shipped names for the
+    // same two elements this test is actually checking the order of.
+    const proLensPos = lensTsx.indexOf("psl-lens-row");
+    const myEditPos = lensTsx.indexOf("psl-my-edit-sep");
+    assert.ok(proLensPos !== -1, "psl-lens-row must exist");
+    assert.ok(myEditPos !== -1, "psl-my-edit-sep must exist");
     assert.ok(proLensPos < myEditPos, "professional lens row must precede My Edit separator");
   });
 });
@@ -207,9 +216,13 @@ describe("Professional lenses appear before My Edit on lens page", () => {
 // ─── Personal CTA exists on lens pages ───────────────────────────────────────
 
 describe("Personal CTA rendered on lens page", () => {
-  it("trends.$slug.lens.$lens.tsx has tr-personal-cta section", () => {
+  it("trends.$slug.lens.$lens.tsx has a personal CTA section", () => {
+    // tr-personal-cta predates the lens page sharing the public report
+    // page's own dark psl-cta section (same visual, lens-specific copy —
+    // see the "CTA — same psl-cta visual, lens-specific copy" comment in
+    // the route itself) rather than having its own separately-named one.
     assert.ok(
-      lensTsx.includes("tr-personal-cta"),
+      lensTsx.includes("psl-cta"),
       "lens page must have a personal CTA section",
     );
   });
