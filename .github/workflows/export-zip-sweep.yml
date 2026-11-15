@@ -1,0 +1,102 @@
+# .github/workflows/export-zip-sweep.yml
+#
+# Independent trigger for the large-export cleanup sweep —
+# app/routes/api.export-zip-sweep.ts, which deletes the Cloudinary RAW asset
+# behind every expired CustomerExportJob (customer-export-zip-large.server.ts).
+# expiresAt alone only blocks issuing a new signed download link; nothing
+# actually removes the underlying bytes until this endpoint is invoked.
+# Vercel Cron cannot reach this project's staging environment (verified
+# separately for full-look-vto-sweep.yml, same project): Vercel Cron always
+# targets a project's PRODUCTION deployment, and this project's staging is
+# deliberately Preview-only. Follows that same workflow's established
+# pattern instead of inventing a new one.
+#
+# NOT ACTIVE YET. GitHub only honors a `schedule` trigger from the copy of
+# this file on the repository's DEFAULT branch — this commit sits on an
+# integration branch, so nothing fires until it is pushed and merged to
+# `main`, an explicit, separate action requiring approval that was not
+# taken here.
+#
+# Requires a repository secret named EXPORT_ZIP_SWEEP_SECRET, which does
+# NOT exist yet and was not created by this change. Its value must equal
+# the Vercel project's own EXPORT_ZIP_SWEEP_SECRET (Preview scope) — a
+# secret dedicated to this one endpoint's one capability (deleting already-
+# expired export ZIPs), never CRON_SECRET or any other route's secret. Add
+# it via GitHub → this repo → Settings → Secrets and variables → Actions →
+# New repository secret — a step for a human with repo-admin access, not
+# taken here.
+#
+# Targets the STABLE ALIAS domain, not an ephemeral Preview URL, for the
+# same reason as full-look-vto-sweep.yml: an unaliased deployment sits
+# behind Vercel Authentication, which this workflow cannot pass.
+#
+# Batch continuation: sweepExpiredExportJobs (customer-export-zip-large.
+# server.ts) is bounded per call (SWEEP_BATCH_SIZE) and reports `more: true`
+# when a backlog exceeds one batch. Rather than wait for the next scheduled
+# tick to drain a large backlog one batch at a time, this workflow loops
+# within a single run while `more` is true, up to MAX_BATCHES — a generous
+# per-run cap, not an unbounded drain; any backlog beyond it is picked up by
+# the next scheduled run. Each HTTP call is retried up to 3 times on a
+# transient failure before the step (and therefore the run) is marked
+# failed — GitHub's own run-failure notification is the alert mechanism
+# here, matching full-look-vto-sweep.yml's convention; no separate alerting
+# channel was wired up, and none should be without that being a deliberate,
+# separate decision.
+#
+# If the repository is public: GitHub auto-disables scheduled workflows
+# after 60 days of repository inactivity (re-enable from the Actions tab if
+# that happens) — not a concern on a private repository. Repository
+# visibility was not checked here — confirm it yourself if this matters.
+
+name: Customer export ZIP expiry sweep
+
+on:
+  schedule:
+    # Every 20 minutes — expiresAt only ever matters at 24-hour granularity
+    # (EXPORT_EXPIRY_HOURS), so there is no latency pressure anywhere near
+    # the VTO sweep's 10-minute interval; this cadence just keeps the
+    # backlog from building up between runs.
+    - cron: "*/20 * * * *"
+  # Lets a human fire one sweep on demand from the Actions tab, without
+  # waiting for the schedule — zero cost, no new auth surface.
+  workflow_dispatch: {}
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Drain the expired-export backlog
+        run: |
+          set -e
+          MAX_BATCHES=10
+          MAX_RETRIES=3
+          batch=0
+          while [ "$batch" -lt "$MAX_BATCHES" ]; do
+            batch=$((batch + 1))
+            attempt=0
+            status=""
+            while [ "$attempt" -lt "$MAX_RETRIES" ]; do
+              attempt=$((attempt + 1))
+              status=$(curl -s -o /tmp/response.json -w "%{http_code}" \
+                "https://naia-stylist-staging.vercel.app/api/export-zip-sweep" \
+                -H "x-export-zip-sweep-secret: ${{ secrets.EXPORT_ZIP_SWEEP_SECRET }}")
+              if [ "$status" = "200" ]; then break; fi
+              echo "Batch $batch, attempt $attempt failed (HTTP $status), retrying..." >&2
+              sleep 5
+            done
+
+            echo "Batch $batch — HTTP status: $status"
+            cat /tmp/response.json
+            echo ""
+
+            if [ "$status" != "200" ]; then
+              echo "Export sweep batch $batch failed after $MAX_RETRIES attempts (HTTP $status)" >&2
+              exit 1
+            fi
+
+            more=$(jq -r '.more' /tmp/response.json)
+            if [ "$more" != "true" ]; then
+              echo "Backlog drained after $batch batch(es)."
+              break
+            fi
+          done

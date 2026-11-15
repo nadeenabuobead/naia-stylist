@@ -49,6 +49,7 @@ import {
   reserveExportJobSlot,
   SWEEP_BATCH_SIZE,
   MAX_LARGE_EXPORT_IMAGES,
+  MAX_LARGE_EXPORT_BYTES,
   STALE_EXPORT_PROCESSING_THRESHOLD_MS,
   type RunExportReservationFn,
 } from "./customer-export-zip-large.server";
@@ -211,6 +212,41 @@ describe("buildLargeCustomerExportZip", () => {
       data: { customerId: CUSTOMER_ID, imageCount: 301, status: "PROCESSING" },
     });
     expect(result).toEqual({ ok: true, jobId: "job-1" });
+  });
+
+  it("REGRESSION — aborts and marks the job FAILED once cumulative fetched bytes exceed the real byte ceiling, never finalizing or uploading a truncated archive as if complete", async () => {
+    (prisma as any).customer.findUnique.mockResolvedValueOnce({
+      ...mockCustomer(),
+      closetItems: [
+        { id: "item-1", name: "Jacket", imagePublicId: "naia-wardrobe/cust-1/jacket", imageFormat: "jpg" },
+        { id: "item-2", name: "Coat", imagePublicId: "naia-wardrobe/cust-1/coat", imageFormat: "jpg" },
+      ],
+    });
+    // A tiny injected ceiling (10 bytes) lets this test prove the real
+    // byte-counting logic without allocating real gigabytes — see
+    // LargeExportDeps._maxBytes's own doc comment.
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      arrayBuffer: async () => new TextEncoder().encode("this-is-way-more-than-ten-bytes").buffer,
+    });
+
+    const result = await buildLargeCustomerExportZip(CUSTOMER_ID, 2, { _fetch: fetchMock, _maxBytes: 10 });
+
+    expect(result).toEqual({ ok: false, reason: "upload_failed", jobId: "job-1", errorCode: "EXCEEDS_BYTE_CEILING" });
+    expect((prisma as any).customerExportJob.update).toHaveBeenCalledWith({
+      where: { id: "job-1" },
+      data: { status: "FAILED", errorCode: "EXCEEDS_BYTE_CEILING" },
+    });
+    expect(uploadCloudinaryRawPrivate).not.toHaveBeenCalled();
+    // The second image's fetch must never even be attempted once the first
+    // already pushed cumulative bytes past the ceiling.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("stays under the real MAX_LARGE_EXPORT_BYTES ceiling for a normal small export — never trips on ordinary traffic", async () => {
+    const result = await buildLargeCustomerExportZip(CUSTOMER_ID, 301);
+    expect(result).toEqual({ ok: true, jobId: "job-1" });
+    expect(MAX_LARGE_EXPORT_BYTES).toBeGreaterThan(0);
   });
 
   it("a PROCESSING job exactly at the staleness threshold is NOT yet treated as abandoned — the boundary is exclusive", async () => {

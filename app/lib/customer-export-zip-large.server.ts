@@ -78,6 +78,20 @@ const DOWNLOAD_LINK_EXPIRY_SECONDS = 600; // 10 minutes — same signed-link con
 // rather than raise the function's memory/duration budget to chase it.
 export const MAX_LARGE_EXPORT_IMAGES = 1000;
 
+// Real byte-size backstop, not just an image-count proxy. MAX_LARGE_EXPORT_IMAGES
+// alone assumes every image sits near the enforced per-image upload cap (5MB
+// — closet._index.tsx's own SERVER_MAX_BYTES/MAX_FILE_BYTES convention,
+// duplicated here rather than imported since a route module isn't a
+// server-lib dependency) — true only in the worst case; the count check by
+// itself never actually verifies the real archive size before buffering it.
+// This tracks cumulative bytes actually fetched and aborts before memory
+// pressure threatens the deployed function's own ceiling, rather than
+// discovering the problem via an OOM crash mid-build. 2GB leaves headroom
+// under Vercel's classic serverless function memory ceiling (3008MB) for
+// the archiver's internal buffering, Node/V8 overhead, and the one image
+// buffer transiently held mid-fetch.
+export const MAX_LARGE_EXPORT_BYTES = 2 * 1024 * 1024 * 1024;
+
 // Mirrors STALE_PROCESSING_THRESHOLD_MS's own 10-minute convention
 // (full-look-tryon-real.server.ts) for the same underlying reason: this
 // build runs entirely synchronously within one request, so while its
@@ -166,6 +180,10 @@ export interface LargeExportDeps {
   _uploadRaw?: typeof uploadCloudinaryRawPrivate;
   _runReservation?: RunExportReservationFn;
   _now?: () => number;
+  // Overridable only so tests can exercise the ceiling without allocating
+  // real gigabytes of Buffer data. Production callers never pass this —
+  // it always defaults to the real MAX_LARGE_EXPORT_BYTES.
+  _maxBytes?: number;
 }
 
 export type BuildLargeExportResult =
@@ -189,6 +207,7 @@ export async function buildLargeCustomerExportZip(
 
   const _fetch = deps._fetch ?? fetch;
   const _uploadRaw = deps._uploadRaw ?? uploadCloudinaryRawPrivate;
+  const _maxBytes = deps._maxBytes ?? MAX_LARGE_EXPORT_BYTES;
 
   const exportData = await compileCustomerExport(customerId);
   if (!exportData) return { ok: false, reason: "not_found" };
@@ -210,6 +229,8 @@ export async function buildLargeCustomerExportZip(
   archive.on("data", (chunk: Buffer) => chunks.push(chunk));
 
   const imageFetchFailures: string[] = [];
+  let bytesFetched = 0;
+  let exceededByteCeiling = false;
   // Sequential, not parallel — same reasoning as the common path: one image
   // buffered at a time keeps peak memory bounded regardless of total count.
   for (const img of images) {
@@ -220,11 +241,28 @@ export async function buildLargeCustomerExportZip(
         continue;
       }
       const buf = Buffer.from(await res.arrayBuffer());
+      bytesFetched += buf.length;
+      if (bytesFetched > _maxBytes) {
+        // Stop fetching immediately — the archive built so far is
+        // incomplete and must never be finalized/uploaded as if it were a
+        // real export. Terminalized as its own distinct errorCode below,
+        // never silently truncated and marked COMPLETED.
+        exceededByteCeiling = true;
+        break;
+      }
       archive.append(buf, { name: img.filename });
     } catch {
       imageFetchFailures.push(img.filename);
     }
   }
+
+  if (exceededByteCeiling) {
+    archive.destroy();
+    const errorCode = "EXCEEDS_BYTE_CEILING";
+    await prisma.customerExportJob.update({ where: { id: job.id }, data: { status: "FAILED", errorCode } });
+    return { ok: false, reason: "upload_failed", jobId: job.id, errorCode };
+  }
+
   archive.append(JSON.stringify({ ...data, note: ZIP_NOTE, imageFetchFailures }, null, 2), { name: "data.json" });
 
   const archiveSettled = new Promise<void>((resolve, reject) => {
