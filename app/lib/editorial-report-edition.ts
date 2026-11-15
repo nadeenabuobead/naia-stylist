@@ -41,3 +41,34 @@ export function formatEditionMonthLabel(periodKey: string | null): string {
   const asDate = new Date(Date.UTC(Number(yearStr), Number(monthStr) - 1, 1));
   return asDate.toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
 }
+
+// A report's edition number — 1 for the chronologically EARLIEST edition
+// period among the given reports, counting up from there (April 2026 -> 01,
+// May 2026 -> 02, June 2026 -> 03). Computed purely from each report's own
+// getEffectiveEditionPeriod, never from an authored display/admin `order`
+// field and never from a page's own newest-first render position — those
+// are independent concerns that happened to disagree with real chronology
+// and with each other across pages before this existed. Reports that share
+// one edition period share one number, matching the "one edition = one
+// calendar month" framing already used for grouping in My Trend Edits.
+// A report with no parseable period (getEffectiveEditionPeriod returns
+// null) is never assigned a number — callers must handle that case
+// explicitly rather than seeing a fabricated 00.
+export function getEditionNumberMap(
+  reports: EditionPeriodInput[],
+): Map<string, number> {
+  const periods = Array.from(
+    new Set(
+      reports
+        .map((r) => getEffectiveEditionPeriod(r))
+        .filter((p): p is string => p !== null),
+    ),
+  ).sort(); // "YYYY-MM" strings sort chronologically ascending as plain strings.
+  return new Map(periods.map((p, i) => [p, i + 1]));
+}
+
+// 3 -> "03". Mirrors the zero-padded style already used for every other
+// decorative/eyebrow number on these pages.
+export function formatEditionNumber(n: number | null | undefined): string | null {
+  return typeof n === "number" ? String(n).padStart(2, "0") : null;
+}

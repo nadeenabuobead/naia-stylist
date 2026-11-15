@@ -1,7 +1,12 @@
 import { Link, useLoaderData } from "react-router";
 import { STOREFRONT_ORIGIN, STOREFRONT_NAV } from "../lib/storefront-config";
 import { getPublishedEditorialReports } from "../lib/editorial-reports.server";
-import { getEffectiveEditionPeriod, formatEditionMonthLabel } from "../lib/editorial-report-edition";
+import {
+  getEffectiveEditionPeriod,
+  formatEditionMonthLabel,
+  getEditionNumberMap,
+  formatEditionNumber,
+} from "../lib/editorial-report-edition";
 import { reportVisual } from "../lib/report-visual";
 
 export async function loader() {
@@ -612,6 +617,13 @@ function formatSeason(season) {
 
 export default function TrendReports() {
   const { featured, rest } = useLoaderData();
+  // Computed here, not in the loader, so the edition number is always
+  // derived from real chronology across every report currently on the
+  // page — never from render position (newest-first here) or an admin
+  // `order` field, which is what produced disagreeing numbers before.
+  const editionNumbers = getEditionNumberMap(featured ? [featured, ...rest] : rest);
+  const editionNumberOf = (report) => editionNumbers.get(getEffectiveEditionPeriod(report) ?? "") ?? null;
+  const featuredEditionNumber = featured ? editionNumberOf(featured) : null;
 
   return (
     <div className="pub-page">
@@ -670,7 +682,9 @@ export default function TrendReports() {
       {featured && (
         <section className="pub-featured">
           <div className="pub-featured-card">
-            <span className="pub-featured-num" aria-hidden="true">00</span>
+            <span className="pub-featured-num" aria-hidden="true">
+              {formatEditionNumber(featuredEditionNumber) ?? "00"}
+            </span>
             <div className="pub-featured-inner">
               <div>
                 <div className="pub-featured-kicker">latest report</div>
@@ -688,6 +702,9 @@ export default function TrendReports() {
                   </Link>
                 </div>
                 <div className="pub-featured-meta">
+                  {formatEditionNumber(featuredEditionNumber) && (
+                    <span>Edition {formatEditionNumber(featuredEditionNumber)}</span>
+                  )}
                   <span>{featured.season}</span>
                   <span>{formatEditionMonthLabel(getEffectiveEditionPeriod(featured))}</span>
                 </div>
@@ -712,8 +729,9 @@ export default function TrendReports() {
           <div className="pub-grid-label">all reports</div>
           <div className="pub-grid">
             {rest.map((report, i) => {
+              const editionNumber = editionNumberOf(report);
               const tint = TINTS[(i + 1) % TINTS.length];
-              const num = String(i + 2).padStart(2, "0");
+              const num = formatEditionNumber(editionNumber) ?? String(i + 2).padStart(2, "0");
               return (
                 <Link
                   key={report.slug}
@@ -735,7 +753,10 @@ export default function TrendReports() {
                     <div className="pub-card-title">{report.title}</div>
                     <p className="pub-card-excerpt">{report.summary}</p>
                     <div className="pub-card-footer">
-                      <span>{formatEditionMonthLabel(getEffectiveEditionPeriod(report))}</span>
+                      <span>
+                        {formatEditionNumber(editionNumber) && `Edition ${formatEditionNumber(editionNumber)} · `}
+                        {formatEditionMonthLabel(getEffectiveEditionPeriod(report))}
+                      </span>
                       <span className="pub-card-arrow">↗</span>
                     </div>
                   </div>

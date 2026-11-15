@@ -9,6 +9,12 @@ import {
   getPublishedEditorialReports,
 } from "~/lib/editorial-reports.server";
 import {
+  getEffectiveEditionPeriod,
+  formatEditionMonthLabel,
+  getEditionNumberMap,
+  formatEditionNumber,
+} from "~/lib/editorial-report-edition";
+import {
   getShopperEvidence,
   buildShopperEdit,
   hydrateShopperEditImages,
@@ -41,6 +47,10 @@ type LoaderData = {
   generationFailed: boolean;
   nadineRecommendation: NadineProductRecommendation | null;
   reportIndex: number;
+  /** Real chronological edition number (01 = earliest edition period
+   *  among all published reports) — same numbering as the public Trend
+   *  Reports pages, never derived from reportIndex. */
+  editionNumber: number | null;
   /** Customer has no personalised-trend entitlement at all (never a member,
    *  or a membership tier with a zero allowance) — show the membership
    *  upsell. Mutually exclusive with monthlyQuotaExhausted; see
@@ -241,6 +251,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   ]);
   if (!report) throw new Response("Not Found", { status: 404 });
   const reportIndex = allPublished.findIndex((r) => r.slug === report.slug);
+  // Real chronological edition number — same numbering as the public
+  // Trend Reports pages and My Trend Edits listing, never derived from
+  // reportIndex (which only drives the decorative tint cycle).
+  const editionNumber = getEditionNumberMap(allPublished).get(getEffectiveEditionPeriod(report) ?? "") ?? null;
 
   // Frozen-at-first-generation behaviour: once this customer has a stored
   // snapshot for this report in the current period, EVERY later view this
@@ -272,6 +286,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       generationFailed: false,
       nadineRecommendation: usageState.snapshot.nadineRecommendation,
       reportIndex,
+      editionNumber,
       membershipRequired: false,
       monthlyQuotaExhausted: false,
       historicalUnavailable: false,
@@ -286,6 +301,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       generationFailed: false,
       nadineRecommendation: null,
       reportIndex,
+      editionNumber,
       membershipRequired: false,
       monthlyQuotaExhausted: false,
       historicalUnavailable: true,
@@ -311,6 +327,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       generationFailed: false,
       nadineRecommendation: archived.snapshot.nadineRecommendation,
       reportIndex,
+      editionNumber,
       membershipRequired: false,
       monthlyQuotaExhausted: false,
       historicalUnavailable: false,
@@ -347,6 +364,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         generationFailed: false,
         nadineRecommendation: null,
         reportIndex,
+        editionNumber,
         membershipRequired: blockState === "membership_required",
         monthlyQuotaExhausted: blockState === "monthly_quota_exhausted",
         historicalUnavailable: false,
@@ -359,6 +377,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   return {
     report,
     reportIndex,
+    editionNumber,
     membershipRequired: false,
     monthlyQuotaExhausted: false,
     historicalUnavailable: false,
@@ -631,9 +650,9 @@ export function ErrorBoundary() {
 }
 
 export default function MyTrendEditDetail() {
-  const { report, edit, hasProfile, generationFailed, nadineRecommendation, reportIndex, membershipRequired, monthlyQuotaExhausted, historicalUnavailable, archivedPeriodLabel } = useLoaderData() as LoaderData;
+  const { report, edit, hasProfile, generationFailed, nadineRecommendation, reportIndex, editionNumber, membershipRequired, monthlyQuotaExhausted, historicalUnavailable, archivedPeriodLabel } = useLoaderData() as LoaderData;
   const tint = TINTS[Math.max(0, reportIndex) % TINTS.length];
-  const num = String(Math.max(0, reportIndex)).padStart(2, "0");
+  const num = formatEditionNumber(editionNumber) ?? String(Math.max(0, reportIndex)).padStart(2, "0");
 
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "error">("idle");
   const generateFetcher = useFetcher();
@@ -728,7 +747,10 @@ export default function MyTrendEditDetail() {
         <div className="tmd-hero" style={{ background: tint }}>
           <span className="tmd-hero-num" aria-hidden="true">{num}</span>
           <div className="tmd-hero-inner">
-            <div className="tmd-hero-kicker">{report.season} · personal edit</div>
+            <div className="tmd-hero-kicker">
+              {formatEditionNumber(editionNumber) && `Edition ${formatEditionNumber(editionNumber)} · `}
+              {report.season} · {formatEditionMonthLabel(getEffectiveEditionPeriod(report))} · personal edit
+            </div>
             <h1 className="tmd-hero-title">
               {report.title.split(" ").slice(0, -1).join(" ")}<br />
               <em>{report.title.split(" ").slice(-1)[0]}</em>
