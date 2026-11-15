@@ -107,7 +107,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   );
 
   const finalStep = jobs.find((j) => j.productHandle.startsWith(FULL_LOOK_FINAL_STEP_HANDLE_PREFIX));
-  const creditRecorded = finalStep?.status === "COMPLETED";
+  const finalStepCompleted = finalStep?.status === "COMPLETED";
 
   return data(
     {
@@ -115,10 +115,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
       suggestionId,
       totalJobRows: jobs.length,
       steps,
-      finalStepCompleted: creditRecorded,
-      creditNote: creditRecorded
-        ? "Final step is COMPLETED — entitlement.server.ts's counting query would include this outfit."
-        : "No final step COMPLETED yet — no credit recorded for this suggestion.",
+      // Deliberately NOT a credit-consumption answer. This only reflects
+      // whether the final garment's own row reached COMPLETED — it does
+      // not query entitlement.server.ts's actual counting logic
+      // (getEntitlementSummary's vtoCompleted count, which also applies
+      // isTest/mock-handle exclusions and a billing-window boundary this
+      // route never computes). Report credit consumption as unverified
+      // unless/until that query is run directly.
+      finalStepCompleted,
+      creditConsumptionVerified: false,
+      creditNote: finalStepCompleted
+        ? "Final step row is COMPLETED. This is necessary but not sufficient proof a credit was recorded — credit consumption is NOT independently verified by this diagnostic. Check entitlement.server.ts's getEntitlementSummary (vtoCompleted) directly for a real answer."
+        : "Final step row is not COMPLETED. Credit consumption is NOT independently verified by this diagnostic either way.",
     },
     { headers: { "Cache-Control": "no-store" } },
   );

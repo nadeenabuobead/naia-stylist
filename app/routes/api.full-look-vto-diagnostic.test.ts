@@ -134,6 +134,10 @@ describe("api.full-look-vto-diagnostic — loader behavior", () => {
     expect(body.finalStepCompleted).toBe(true);
     expect(body.totalJobRows).toBe(2);
     expect(mockFashnCheck()).not.toHaveBeenCalled(); // nothing is PROCESSING, so no live check is made
+    // Even with the final step COMPLETED, this diagnostic must never claim
+    // to have verified credit consumption — it doesn't query
+    // entitlement.server.ts's actual counting logic.
+    expect(body.creditConsumptionVerified).toBe(false);
   });
 
   it("performs exactly one live, read-only FASHN status check for a PROCESSING row with a predictionId — never more, never a submission", async () => {
