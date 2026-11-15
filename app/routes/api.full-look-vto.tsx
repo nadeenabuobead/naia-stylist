@@ -55,6 +55,18 @@ function tooMany(message: string) {
 function serverError(message: string) {
   return data({ ok: false, code: "server_error", message }, { status: 500 });
 }
+// Another generation is already in flight for this customer, or the short
+// post-completion cooldown hasn't elapsed yet (checkCustomerCooldown's two
+// rejection reasons, surfaced by startFullLookOutfit as OrchestratorStatus
+// "BUSY") — an expected, temporary business condition, not a server
+// failure. 409 Conflict: the request is well-formed, but can't be actioned
+// against the customer's current state right now.
+function busy(reason: string) {
+  return data(
+    { ok: false, code: "busy", message: "Still finishing a previous try-on — please wait a moment and try again.", reason },
+    { status: 409 },
+  );
+}
 
 // Loads the suggestion scoped to the authenticated customer in one query —
 // a client-supplied id that belongs to another customer, or doesn't exist,
@@ -225,6 +237,7 @@ export async function action({ request }: ActionFunctionArgs) {
     { forceNewAttempt: retry === true },
   );
 
+  if (result.status === "BUSY") return busy(result.reason);
   if (result.status === "ERROR") return serverError(result.reason);
   return data({ ok: true, ...result, omittedLabels });
 }

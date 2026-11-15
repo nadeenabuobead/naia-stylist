@@ -235,7 +235,17 @@ export type OrchestratorStatus =
   | { status: "COMPLETED"; resultUrl: string }
   | { status: "FAILED"; errorCode?: string }
   | { status: "NOT_STARTED" }
+  // checkCustomerCooldown's own "another generation is already in flight"
+  // / "just finished, wait a beat" rejections — a normal, expected business
+  // condition, not a server error. Distinguished from ERROR below so the
+  // route can return a controlled, user-friendly response (its own HTTP
+  // status, not a 500) and the client can show accurate copy instead of
+  // "we couldn't create your try-on" for something that never actually
+  // failed.
+  | { status: "BUSY"; reason: "ACTIVE_JOB" | "COOLDOWN" }
   | { status: "ERROR"; reason: string };
+
+const BUSY_REASONS = new Set(["ACTIVE_JOB", "COOLDOWN"]);
 
 // advanceFullLookChain pauses exactly once (AWAITING_CONTINUE, one step
 // before whichever step is final for THIS chain's own garment count) for
@@ -322,7 +332,12 @@ export async function startFullLookOutfit(
   const ctx: FullLookChainContext = { ...baseCtx, reservationScope: scope };
 
   const start = await startOrResumeFullLookChain(ctx);
-  if (!start.ok) return { status: "ERROR", reason: start.reason };
+  if (!start.ok) {
+    if (BUSY_REASONS.has(start.reason)) {
+      return { status: "BUSY", reason: start.reason as "ACTIVE_JOB" | "COOLDOWN" };
+    }
+    return { status: "ERROR", reason: start.reason };
+  }
   return advanceAutomatically(ctx);
 }
 

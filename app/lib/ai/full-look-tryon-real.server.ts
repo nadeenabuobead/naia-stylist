@@ -132,7 +132,11 @@ import {
 } from "../cloudinary-admin.server.js";
 import type { VirtualTryOnConsent, VirtualTryOnJobRecord } from "./virtual-try-on.types.js";
 import prisma from "../../db.server.js";
-import { REAL_PRODUCT_HANDLE_PREFIX, FULL_LOOK_MAX_GARMENTS } from "./full-look-handle-constants.js";
+import {
+  REAL_PRODUCT_HANDLE_PREFIX,
+  FULL_LOOK_MAX_GARMENTS,
+  FULL_LOOK_FINAL_STEP_HANDLE_PREFIX,
+} from "./full-look-handle-constants.js";
 
 // Real DB implementation — the default for every caller except tests, which
 // inject a mock via WalkChainDeps._findJobFn instead.
@@ -810,6 +814,10 @@ export type StartChainResult =
 export async function startOrResumeFullLookChain(
   ctx: FullLookChainContext,
   deps: WalkChainDeps = { _findJobFn: defaultFindJobByIdempotencyKey },
+  // Defaults to the real reconciliation function in production. Tests that
+  // don't exercise this path inject a no-op stub instead, so they never
+  // touch prisma through it — see this file's own test suite.
+  _reconcileStale: (customerId: string) => Promise<ReconcileResult> = reconcileStaleFullLookJobForCustomer,
 ): Promise<StartChainResult> {
   // 2026-11-15 — chain length is now per-outfit, between 3 (the original
   // minimum — fewer than 3 real pieces means Full-Look simply isn't offered,
@@ -826,6 +834,12 @@ export async function startOrResumeFullLookChain(
     // never re-submit step 0. The status loader drives actual progress.
     return { ok: true, stepIndex: jobs.length - 1 };
   }
+
+  // Reconcile this customer's OWN stale Full-Look job (if any) before the
+  // cooldown check below might otherwise block a genuinely new attempt on
+  // a chain that's actually dead — see reconcileStaleFullLookJobForCustomer's
+  // own header comment. A no-op in the common case (no stale job exists).
+  await _reconcileStale(ctx.customerId);
 
   const cooldown = await checkCustomerCooldown(ctx.customerId);
   if (!cooldown.ok) {
@@ -1082,4 +1096,119 @@ export async function sweepStaleFullLookSteps(
   }
 
   return { timedOut, skippedRace };
+}
+
+// ── Per-customer reconciliation — runs INLINE on the request path, not on a
+// schedule ───────────────────────────────────────────────────────────────────
+//
+// sweepStaleFullLookSteps (above) is a scheduled backstop: it cannot be
+// relied on to run promptly (GitHub Actions does not guarantee a
+// sub-hourly `schedule` trigger fires anywhere near its configured cron —
+// observed in production as runs every 5-8 hours against a "*/10 * * * *"
+// schedule, not a reliability bug in this repo's config but a documented
+// limitation of GitHub's own scheduler under load). A customer should
+// never be blocked waiting on that backstop's next, unpredictable run.
+//
+// This function is called from startOrResumeFullLookChain, synchronously,
+// before the cooldown check that would otherwise reject a brand-new chain
+// because of an OLD, never-resolved job. Unlike the sweep, it does not
+// assume a stale job is dead — "reconcile before blocking," not "ignore if
+// old": it gives FASHN one real status check (the exact same read-only
+// GET pollFullLookRealStep already issues on every normal poll, never a
+// new submission) to find out what actually happened, and only forces a
+// terminal TIMED_OUT state if FASHN still reports it in flight. A
+// genuinely fresh, still-active job (younger than the threshold) is left
+// completely untouched, so checkCustomerCooldown's existing "only one
+// generation at a time" protection is unaffected for real concurrent
+// attempts.
+//
+// Scoped to this customer's own Full-Look jobs only (productHandle prefix
+// "fulllook-real:") — a stale SINGLE-ITEM VTO job is never found or acted
+// on here, so that feature's cooldown behavior is unchanged by this
+// function's existence.
+export interface ReconcileResult {
+  reconciled: boolean; // true only if a stale job was found AND acted on
+  outcome?: "COMPLETED" | "STEP_COMPLETE" | "FAILED" | "TIMED_OUT";
+}
+
+async function defaultFindActiveFullLookJobForCustomer(customerId: string): Promise<VirtualTryOnJobRecord | null> {
+  return prisma.virtualTryOnJob.findFirst({
+    where: {
+      customerId,
+      productHandle: { startsWith: `${REAL_PRODUCT_HANDLE_PREFIX}:` },
+      status: "PROCESSING",
+    },
+    orderBy: { lastActivityAt: "desc" },
+  }) as Promise<VirtualTryOnJobRecord | null>;
+}
+
+// pollFullLookRealStep only ever reads ctx.garments.length to decide FINAL
+// vs intermediate (to pick uploadTryOnResult vs uploadIntermediateStepResult,
+// and whether to build a customer-facing resultUrl) — it never reads a
+// garment's label or image. Reconciliation already knows which role this
+// job itself has (its own productHandle says "final" or "stepN" — see
+// full-look-handle-constants.ts), so it can encode just that one fact as a
+// minimal synthetic context instead of re-deriving the real outfit
+// (re-fetching the suggestion, Cloudinary config, and naiaModel) — which
+// would also require importing back from full-look-vto-orchestrator.server.ts,
+// the module that already imports FROM this one, creating a cycle. stepIndex
+// is fixed at 0; garments.length is set to 1 (final) or 2 (not final) so
+// `stepIndex === ctx.garments.length - 1` evaluates to exactly the role this
+// job already has, regardless of its real position in a 3-5 step chain.
+function buildReconciliationCtx(job: VirtualTryOnJobRecord): FullLookChainContext {
+  const isFinal = job.productHandle.startsWith(FULL_LOOK_FINAL_STEP_HANDLE_PREFIX);
+  return {
+    customerId: job.customerId,
+    naiaModelId: null,
+    bodyPublicId: null,
+    bodyFormat: null,
+    deliveryType: "private",
+    garments: Array.from({ length: isFinal ? 1 : 2 }, () => ({ label: "", productImageUrl: "" })),
+    consent: { virtualTryOnConsent: true, policyVersion: "reconciliation", consentedAt: new Date().toISOString() },
+    outfitSuggestionId: job.outfitSuggestionId ?? "",
+  };
+}
+
+export async function reconcileStaleFullLookJobForCustomer(
+  customerId: string,
+  thresholdMs: number = STALE_PROCESSING_THRESHOLD_MS,
+  _findActiveJob: (customerId: string) => Promise<VirtualTryOnJobRecord | null> = defaultFindActiveFullLookJobForCustomer,
+  _pollStep: (ctx: FullLookChainContext, job: VirtualTryOnJobRecord, stepIndex: number) => Promise<PollStepResult> = pollFullLookRealStep,
+  _timeoutJob: (jobId: string) => Promise<boolean> = defaultTimeoutStaleJob,
+  _findById: (id: string) => Promise<VirtualTryOnJobRecord | null> = defaultFindJobById,
+  _deleteAsset: DeleteAssetFn = deleteCloudinaryAsset,
+): Promise<ReconcileResult> {
+  const job = await _findActiveJob(customerId);
+  if (!job) return { reconciled: false };
+
+  const ageMs = Date.now() - job.lastActivityAt.getTime();
+  if (ageMs < thresholdMs) {
+    // Genuinely in-flight, not stale — leave it exactly as it is so
+    // checkCustomerCooldown's own ACTIVE_JOB rejection still correctly
+    // blocks a second concurrent generation for this customer.
+    return { reconciled: false };
+  }
+
+  // Stale by age alone — give FASHN one real, final chance to report what
+  // actually happened before assuming it's dead. Same category of call as
+  // any normal poll: read-only, free, never a new submission.
+  const poll = await _pollStep(buildReconciliationCtx(job), job, 0);
+
+  if (poll.status === "COMPLETED") return { reconciled: true, outcome: "COMPLETED" };
+  if (poll.status === "STEP_COMPLETE") return { reconciled: true, outcome: "STEP_COMPLETE" };
+  if (poll.status === "FAILED") return { reconciled: true, outcome: "FAILED" };
+
+  // Still genuinely PROCESSING after a real check, and already past the
+  // threshold — force the same atomic, status-guarded transition
+  // sweepStaleFullLookSteps uses, so a race against a real poll resolving
+  // this same job in the gap can never silently overwrite a true outcome.
+  const applied = await _timeoutJob(job.id);
+  if (!applied) return { reconciled: false }; // a real poll won the race — leave its outcome untouched.
+
+  const ancestorIds = await collectAncestorStepJobIds(job, _findById);
+  if (ancestorIds.length > 0) {
+    await cleanupIntermediateStepResults(job.customerId, ancestorIds, _deleteAsset);
+  }
+
+  return { reconciled: true, outcome: "TIMED_OUT" };
 }

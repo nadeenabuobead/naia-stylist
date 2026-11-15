@@ -52,6 +52,8 @@ import {
   continueToFinalStep,
   sweepAbandonedFullLookPauses,
   sweepStaleFullLookSteps,
+  reconcileStaleFullLookJobForCustomer,
+  STALE_PROCESSING_THRESHOLD_MS,
   REAL_PRODUCT_HANDLE_PREFIX,
   type FullLookChainContext,
 } from "./full-look-tryon-real.server.js";
@@ -597,8 +599,9 @@ describe("startOrResumeFullLookChain", () => {
     expect(mockCooldown()).not.toHaveBeenCalled();
   });
 
-  it("FL.24 — fresh start checks cooldown exactly once, then submits step 0", async () => {
+  it("FL.24 — fresh start reconciles any stale job, checks cooldown exactly once, then submits step 0", async () => {
     const _findJobFn = vi.fn(async () => null);
+    const _reconcileStale = vi.fn(async () => ({ reconciled: false }));
     mockCooldown().mockResolvedValue({ ok: true });
     const job = fakeJob("job-0");
     mockCreateOrFind().mockResolvedValue({ ok: true, job, created: true });
@@ -608,22 +611,170 @@ describe("startOrResumeFullLookChain", () => {
     mockDownloadPhoto().mockResolvedValue({ ok: true, dataUrl: PNG_DATA_URL });
     mockSubmitProvider().mockResolvedValue({ ok: true, predictionId: "pred-0" });
 
-    const result = await startOrResumeFullLookChain(baseCtx(), { _findJobFn });
+    const result = await startOrResumeFullLookChain(baseCtx(), { _findJobFn }, _reconcileStale);
     expect(result).toEqual({ ok: true, stepIndex: 0 });
+    expect(_reconcileStale).toHaveBeenCalledTimes(1);
+    expect(_reconcileStale).toHaveBeenCalledWith("cust-1");
     expect(mockCooldown()).toHaveBeenCalledTimes(1);
   });
 
-  it("FL.25 — a chain already in progress resumes without re-checking cooldown or resubmitting step 0 (duplicate-request safe)", async () => {
+  it("FL.25 — a chain already in progress resumes without re-checking cooldown, reconciling, or resubmitting step 0 (duplicate-request safe)", async () => {
     const job0 = fakeJob("job-0", { status: "PROCESSING", predictionId: "pred-0" });
     const _findJobFn = vi.fn(async (where: { idempotencyKey: string }) =>
       where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 0, null) ? job0 : null,
     );
+    const _reconcileStale = vi.fn(async () => ({ reconciled: false }));
 
-    const result = await startOrResumeFullLookChain(baseCtx(), { _findJobFn });
+    const result = await startOrResumeFullLookChain(baseCtx(), { _findJobFn }, _reconcileStale);
     expect(result).toEqual({ ok: true, stepIndex: 0 });
+    expect(_reconcileStale).not.toHaveBeenCalled();
     expect(mockCooldown()).not.toHaveBeenCalled();
     expect(mockSubmitProvider()).not.toHaveBeenCalled();
     expect(mockCreateOrFind()).not.toHaveBeenCalled();
+  });
+
+  it("FL.26 — a stale job that reconciliation resolves (TIMED_OUT) no longer blocks the fresh start via cooldown", async () => {
+    const _findJobFn = vi.fn(async () => null);
+    // Reconciliation itself timed out the old job — checkCustomerCooldown is
+    // mocked directly here (its own unit tests cover the real staleness
+    // logic), so this just asserts the ORDER: reconcile runs, then cooldown
+    // is consulted (and, in this scenario, now correctly sees no active job).
+    const callOrder: string[] = [];
+    const _reconcileStale = vi.fn(async () => {
+      callOrder.push("reconcile");
+      return { reconciled: true, outcome: "TIMED_OUT" as const };
+    });
+    mockCooldown().mockImplementation(async () => {
+      callOrder.push("cooldown");
+      return { ok: true };
+    });
+    const job = fakeJob("job-0");
+    mockCreateOrFind().mockResolvedValue({ ok: true, job, created: true });
+    mockAdvance()
+      .mockResolvedValueOnce({ ok: true, job: { ...job, status: "SUBMITTED" } })
+      .mockResolvedValueOnce({ ok: true, job: { ...job, status: "PROCESSING", predictionId: "pred-0" } });
+    mockDownloadPhoto().mockResolvedValue({ ok: true, dataUrl: PNG_DATA_URL });
+    mockSubmitProvider().mockResolvedValue({ ok: true, predictionId: "pred-0" });
+
+    const result = await startOrResumeFullLookChain(baseCtx(), { _findJobFn }, _reconcileStale);
+    expect(result).toEqual({ ok: true, stepIndex: 0 });
+    expect(callOrder).toEqual(["reconcile", "cooldown"]);
+  });
+});
+
+// ── reconcileStaleFullLookJobForCustomer ────────────────────────────────────
+
+describe("reconcileStaleFullLookJobForCustomer", () => {
+  it("FL.27 — no active Full-Look job for this customer: no-op, no FASHN call", async () => {
+    const _findActiveJob = vi.fn(async () => null);
+    const _pollStep = vi.fn();
+    const _timeoutJob = vi.fn();
+    const _findById = vi.fn();
+    const result = await reconcileStaleFullLookJobForCustomer(
+      "cust-1", STALE_PROCESSING_THRESHOLD_MS, _findActiveJob, _pollStep, _timeoutJob, _findById,
+    );
+    expect(result).toEqual({ reconciled: false });
+    expect(_pollStep).not.toHaveBeenCalled();
+  });
+
+  it("FL.28 — an active job younger than the threshold is left untouched (preserves real concurrent-generation blocking)", async () => {
+    const freshJob = fakeJob("job-fresh", {
+      status: "PROCESSING",
+      predictionId: "pred-1",
+      lastActivityAt: new Date(Date.now() - 60_000), // 1 minute old
+    });
+    const _findActiveJob = vi.fn(async () => freshJob);
+    const _pollStep = vi.fn();
+    const _timeoutJob = vi.fn();
+    const _findById = vi.fn();
+    const result = await reconcileStaleFullLookJobForCustomer(
+      "cust-1", STALE_PROCESSING_THRESHOLD_MS, _findActiveJob, _pollStep, _timeoutJob, _findById,
+    );
+    expect(result).toEqual({ reconciled: false });
+    expect(_pollStep).not.toHaveBeenCalled(); // never even checks FASHN for a genuinely fresh job
+    expect(_timeoutJob).not.toHaveBeenCalled();
+  });
+
+  it("FL.29 — a stale job that FASHN reports as actually COMPLETED is recovered, not timed out", async () => {
+    const staleJob = fakeJob("job-stale", {
+      status: "PROCESSING",
+      predictionId: "pred-1",
+      productHandle: `${REAL_PRODUCT_HANDLE_PREFIX}:final:Blazer`,
+      lastActivityAt: new Date(Date.now() - 20 * 60 * 1000), // 20 minutes old
+    });
+    const _findActiveJob = vi.fn(async () => staleJob);
+    const _pollStep = vi.fn(async () => ({ status: "COMPLETED" as const, job: staleJob, resultUrl: "https://result.example/x" }));
+    const _timeoutJob = vi.fn();
+    const _findById = vi.fn();
+    const result = await reconcileStaleFullLookJobForCustomer(
+      "cust-1", STALE_PROCESSING_THRESHOLD_MS, _findActiveJob, _pollStep, _timeoutJob, _findById,
+    );
+    expect(result).toEqual({ reconciled: true, outcome: "COMPLETED" });
+    expect(_timeoutJob).not.toHaveBeenCalled();
+    // The synthetic ctx passed to pollStep must correctly encode "final" so
+    // the real function's isFinal branch (stepIndex === garments.length-1)
+    // evaluates true for this job's own role.
+    const call = _pollStep.mock.calls[0] as unknown as [FullLookChainContext, VirtualTryOnJobRecord, number];
+    const [passedCtx, , stepIndex] = call;
+    expect(stepIndex).toBe(0);
+    expect(passedCtx.garments.length - 1).toBe(stepIndex);
+  });
+
+  it("FL.30 — a stale job FASHN still reports in-flight is force-transitioned to TIMED_OUT via the atomic guard, with ancestor cleanup", async () => {
+    const staleJob = fakeJob("job-stale", {
+      status: "PROCESSING",
+      predictionId: "pred-1",
+      productHandle: `${REAL_PRODUCT_HANDLE_PREFIX}:final:Blazer`,
+      idempotencyKey: "fulllook-real-step:prior-job-id:2",
+      lastActivityAt: new Date(Date.now() - 20 * 60 * 1000),
+    });
+    const priorJob = fakeJob("prior-job-id", { status: "COMPLETED" });
+    const _findActiveJob = vi.fn(async () => staleJob);
+    const _pollStep = vi.fn(async () => ({ status: "PROCESSING" as const }));
+    const _timeoutJob = vi.fn(async () => true);
+    const _findById = vi.fn(async (id: string) => (id === "prior-job-id" ? priorJob : null));
+
+    const result = await reconcileStaleFullLookJobForCustomer(
+      "cust-1", STALE_PROCESSING_THRESHOLD_MS, _findActiveJob, _pollStep, _timeoutJob, _findById,
+    );
+    expect(result).toEqual({ reconciled: true, outcome: "TIMED_OUT" });
+    expect(_timeoutJob).toHaveBeenCalledWith("job-stale");
+    expect(mockDeleteAsset()).toHaveBeenCalled();
+  });
+
+  it("FL.31 — a race where a real poll resolves the job between find and timeout leaves that outcome untouched", async () => {
+    const staleJob = fakeJob("job-stale", {
+      status: "PROCESSING",
+      predictionId: "pred-1",
+      lastActivityAt: new Date(Date.now() - 20 * 60 * 1000),
+    });
+    const _findActiveJob = vi.fn(async () => staleJob);
+    const _pollStep = vi.fn(async () => ({ status: "PROCESSING" as const }));
+    const _timeoutJob = vi.fn(async () => false); // conditional update found 0 rows — already resolved elsewhere
+    const _findById = vi.fn();
+
+    const result = await reconcileStaleFullLookJobForCustomer(
+      "cust-1", STALE_PROCESSING_THRESHOLD_MS, _findActiveJob, _pollStep, _timeoutJob, _findById,
+    );
+    expect(result).toEqual({ reconciled: false });
+  });
+
+  it("FL.32 — a stale job FASHN reports as failed is reported FAILED, not forced to TIMED_OUT", async () => {
+    const staleJob = fakeJob("job-stale", {
+      status: "PROCESSING",
+      predictionId: "pred-1",
+      lastActivityAt: new Date(Date.now() - 20 * 60 * 1000),
+    });
+    const _findActiveJob = vi.fn(async () => staleJob);
+    const _pollStep = vi.fn(async () => ({ status: "FAILED" as const, job: staleJob }));
+    const _timeoutJob = vi.fn();
+    const _findById = vi.fn();
+
+    const result = await reconcileStaleFullLookJobForCustomer(
+      "cust-1", STALE_PROCESSING_THRESHOLD_MS, _findActiveJob, _pollStep, _timeoutJob, _findById,
+    );
+    expect(result).toEqual({ reconciled: true, outcome: "FAILED" });
+    expect(_timeoutJob).not.toHaveBeenCalled();
   });
 });
 
@@ -1126,7 +1277,8 @@ describe("reservationScope — independent, non-destructive second-test mechanis
     mockSubmitProvider().mockResolvedValue({ ok: true, predictionId: "pred-0" });
 
     const ctx = { ...baseCtx(), reservationScope: scope };
-    const result = await startOrResumeFullLookChain(ctx, { _findJobFn });
+    const _reconcileStale = vi.fn(async () => ({ reconciled: false }));
+    const result = await startOrResumeFullLookChain(ctx, { _findJobFn }, _reconcileStale);
 
     expect(result).toEqual({ ok: true, stepIndex: 0 });
     const createArgs = mockCreateOrFind().mock.calls[0][0];
