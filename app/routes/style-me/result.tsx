@@ -2144,9 +2144,11 @@ export default function StyleMeResult() {
                   </span>
                 </h2>
                 <p className="sm-vto-body">
-                  {typeof fullLookQA.stepIndex === "number" && typeof fullLookQA.totalSteps === "number"
-                    ? `Step ${fullLookQA.stepIndex + 1} of ${fullLookQA.totalSteps} — your outfit is coming together.`
-                    : "Your outfit is coming together. This may take a moment."}
+                  {/* Customer-facing copy deliberately never shows step counts
+                      ("Step 2 of 5"). stepIndex/totalSteps are still tracked in
+                      fullLookQA's state (server-driven, real generation
+                      progress) for internal use — just not rendered here. */}
+                  Your outfit is coming together.
                 </p>
               </>
             )}
