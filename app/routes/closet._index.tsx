@@ -1185,6 +1185,7 @@ const css = `
     .cl-stat-num{font-size:28px}
     .cl-guide-cols{grid-template-columns:1fr}
     .cl-filter-row{flex-direction:column;align-items:flex-start}
+    .cl-filters{width:100%}
     .cl-search-input{width:100%}
     .cl-grid{grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px}
   }
