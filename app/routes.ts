@@ -14,6 +14,7 @@ export default [
   route("api/health", "routes/api.health.tsx"),
   route("api/export-zip", "routes/api.export-zip.ts"),
   route("api/export-zip-download/:jobId", "routes/api.export-zip-download.$jobId.ts"),
+  route("api/export-zip-sweep", "routes/api.export-zip-sweep.ts"),
   route("onboarding/step/:step", "routes/onboarding/step.$step.tsx"),
   route("onboarding/age-confirm", "routes/onboarding.age-confirm.tsx"),
   route("onboarding/complete", "routes/onboarding/complete.tsx"),

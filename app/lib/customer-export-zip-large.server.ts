@@ -18,20 +18,27 @@
 //      together, never id alone — a mismatched customerId is indistinguishable
 //      from "not found," same discipline as every other per-customer job
 //      table in this app (VirtualTryOnJob, BuyOrSkipAnalysis).
-//   3. sweepExpiredExportJobs — admin-triggered cleanup (matching
-//      data-retention.server.ts's own established convention — no cron
-//      exists for this, deliberately, same as that module), deletes the
-//      Cloudinary asset for every expired row and clears publicId so
-//      nothing is left to leak or re-serve.
+//   3. sweepExpiredExportJobs — the ONLY thing that actually deletes the
+//      Cloudinary bytes. Admin-triggered (or hit via api.export-zip-sweep.ts
+//      with a dedicated secret, matching the GitHub-Actions-scheduled
+//      pattern api.staging-full-look-vto-sweep.ts already established for
+//      exactly this "no built-in cron" situation) — see that route for the
+//      actual operational trigger. Retention correction, explicit: expiresAt
+//      controls ACCESS only (buildExportJobDownloadUrl refuses to issue a
+//      new signed link once past it) — it does NOT delete anything by
+//      itself. If sweepExpiredExportJobs is never invoked by anything, an
+//      expired export's Cloudinary bytes persist indefinitely, inaccessible
+//      through this app but not actually gone. Final Integration MUST wire
+//      api.export-zip-sweep.ts into a real recurring trigger before this can
+//      be described as "deleted after 24 hours" anywhere customer-facing.
 //
-// Memory note, documented rather than hidden: unlike the streaming common
-// path, this buffers the complete archive in memory before uploading (a
-// Cloudinary raw upload needs the complete file; there is no verified
-// streaming-upload path for this provider in this codebase today). At the
-// same ~300-image / ~1.5GB envelope MAX_SYNC_EXPORT_IMAGES already assumes
-// is safe for a sequential fetch, this stays within typical serverless
-// memory budgets — if that ceiling is ever raised substantially, this
-// buffering approach should be revisited before the ceiling is, not after.
+// Memory/time safety: MAX_LARGE_EXPORT_IMAGES below is a hard outer ceiling
+// distinct from MAX_SYNC_EXPORT_IMAGES — this path buffers the complete
+// archive before uploading (no verified streaming-upload path to this
+// provider exists in this codebase, and a hand-rolled one couldn't be
+// verified without a live Cloudinary call, which is out of bounds here), so
+// peak memory scales with total image count. See the constant's own comment
+// for the exact reasoning.
 
 import archiver from "archiver";
 import prisma from "../db.server";
@@ -50,6 +57,20 @@ const EXPORT_RESOURCE_TYPE = "raw";
 const EXPORT_DELIVERY_TYPE = "private";
 const DOWNLOAD_LINK_EXPIRY_SECONDS = 600; // 10 minutes — same signed-link convention as every other asset in this app
 
+// Hard outer ceiling for the buffered path. Chosen as a data-anomaly
+// backstop, not a realistic-customer sizing: the real Closet cap is 250
+// (plan-limits.server.ts) and no genuine customer today comes remotely
+// close to this number — same reasoning MAX_SYNC_EXPORT_IMAGES's own
+// comment already uses for 300. At the code-enforced 5MB-per-image upload
+// ceiling, 1000 images is ~5GB worst case; a request this large is treated
+// as a data anomaly needing manual handling (same "contact support"
+// fallback as the pre-existing too_large case), not something the
+// synchronous buffered build should ever attempt. Final Integration should
+// confirm this stays comfortably under the deployed function's actual
+// memory limit — if real traffic ever approaches it, LOWER this constant
+// rather than raise the function's memory/duration budget to chase it.
+export const MAX_LARGE_EXPORT_IMAGES = 1000;
+
 function exportPublicId(customerId: string, jobId: string): string {
   return `naia-exports/${customerId}/${jobId}.zip`;
 }
@@ -62,6 +83,7 @@ export interface LargeExportDeps {
 export type BuildLargeExportResult =
   | { ok: true; jobId: string }
   | { ok: false; reason: "not_found" }
+  | { ok: false; reason: "exceeds_hard_limit"; imageCount: number }
   | { ok: false; reason: "upload_failed"; jobId: string; errorCode: string };
 
 export async function buildLargeCustomerExportZip(
@@ -69,6 +91,13 @@ export async function buildLargeCustomerExportZip(
   imageCount: number,
   deps: LargeExportDeps = {},
 ): Promise<BuildLargeExportResult> {
+  // Checked BEFORE touching the DB or compiling anything — a data-anomaly
+  // count should never even start the expensive path, same discipline as
+  // MAX_SYNC_EXPORT_IMAGES's own check in the synchronous path.
+  if (imageCount > MAX_LARGE_EXPORT_IMAGES) {
+    return { ok: false, reason: "exceeds_hard_limit", imageCount };
+  }
+
   const _fetch = deps._fetch ?? fetch;
   const _uploadRaw = deps._uploadRaw ?? uploadCloudinaryRawPrivate;
 
@@ -116,9 +145,13 @@ export async function buildLargeCustomerExportZip(
     return { ok: false, reason: "upload_failed", jobId: job.id, errorCode };
   }
 
-  const buffer = Buffer.concat(chunks);
+  // Pass the chunks array straight through — NOT Buffer.concat(chunks).
+  // Concatenating first would allocate a second full-size copy of the
+  // entire archive in addition to the chunks already held, roughly
+  // doubling peak memory for no benefit; uploadCloudinaryRawPrivate accepts
+  // the chunk array natively (see its own comment for why).
   const publicId = exportPublicId(customerId, job.id);
-  const uploadResult = await _uploadRaw(publicId, buffer, `naia-data-export-${job.id}.zip`, EXPORT_DELIVERY_TYPE);
+  const uploadResult = await _uploadRaw(publicId, chunks, `naia-data-export-${job.id}.zip`, EXPORT_DELIVERY_TYPE);
 
   if (!uploadResult.ok) {
     await prisma.customerExportJob.update({
@@ -189,17 +222,36 @@ export interface SweepExpiredExportJobsResult {
   checked: number;
   deleted: number;
   failed: number;
+  // True when more expired rows exist beyond this call's own batch cap —
+  // the caller (the cron/admin trigger) should invoke this again rather
+  // than assume one call always drains the full backlog.
+  more: boolean;
 }
+
+// Bounded per call — an unbounded sweep could itself run long enough to
+// risk a serverless timeout if a large backlog ever accumulates (e.g. the
+// trigger route below went unwired for a while). Each invocation processes
+// at most this many rows and reports whether more remain; the trigger is
+// expected to run on a short recurring schedule (see
+// api.export-zip-sweep.ts), so draining a backlog over a few calls is fine.
+export const SWEEP_BATCH_SIZE = 50;
 
 // Admin-triggered only — no cron exists for this, deliberately, matching
 // data-retention.server.ts's own established convention for this codebase.
+// In practice this must actually be invoked by something recurring (see
+// api.export-zip-sweep.ts) or expired exports are never actually deleted
+// from Cloudinary — expiresAt alone only blocks issuing a new signed link,
+// it does not remove the underlying bytes.
 export async function sweepExpiredExportJobs(
   _deleteAsset: typeof deleteCloudinaryAsset = deleteCloudinaryAsset,
   nowFn: () => number = Date.now,
 ): Promise<SweepExpiredExportJobsResult> {
   const expired = await prisma.customerExportJob.findMany({
     where: { status: "COMPLETED", expiresAt: { lte: new Date(nowFn()) }, publicId: { not: null } },
+    take: SWEEP_BATCH_SIZE + 1, // +1 purely to detect "more remain" without a second count query
   });
+  const more = expired.length > SWEEP_BATCH_SIZE;
+  if (more) expired.length = SWEEP_BATCH_SIZE;
 
   let deleted = 0;
   let failed = 0;
@@ -213,5 +265,5 @@ export async function sweepExpiredExportJobs(
     }
   }
 
-  return { checked: expired.length, deleted, failed };
+  return { checked: expired.length, deleted, failed, more };
 }

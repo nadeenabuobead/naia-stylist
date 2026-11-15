@@ -439,9 +439,19 @@ export async function uploadCloudinaryPrivate(
 // and lose the point of using a raw upload in the first place.
 //
 // Signature params — identical alphabetical convention to uploadCloudinaryPrivate's own comment above.
+//
+// Accepts a single Buffer OR an array of Buffers (the exact chunks a stream
+// emitted) — a caller holding the file as streamed chunks should pass the
+// array directly rather than pre-concatenating with Buffer.concat first.
+// Buffer.concat allocates one new contiguous buffer the size of the whole
+// file IN ADDITION to the chunks already held — for a large file that is a
+// real, avoidable doubling of peak memory, which is exactly what
+// customer-export-zip-large.server.ts's buffered path needs to avoid. The
+// Blob constructor accepts multiple parts natively and does not require the
+// caller to pre-join them.
 export async function uploadCloudinaryRawPrivate(
   publicId: string,
-  buffer: Buffer,
+  buffer: Buffer | Buffer[],
   filename: string,
   deliveryType: string = "private",
   _fetch: typeof fetch = fetch,
@@ -471,8 +481,11 @@ export async function uploadCloudinaryRawPrivate(
   if (deliveryType && deliveryType !== "upload") {
     body.append("type", deliveryType);
   }
-  // Buffer -> Blob via a plain Uint8Array view (same bytes, a type BlobPart accepts).
-  body.append("file", new Blob([new Uint8Array(buffer)], { type: "application/zip" }), filename);
+  // Buffer(s) -> Blob via plain Uint8Array views (same bytes, a type BlobPart
+  // accepts) — passed as multiple parts when given an array, never
+  // pre-concatenated into a second full-size copy.
+  const parts = (Array.isArray(buffer) ? buffer : [buffer]).map((b) => new Uint8Array(b));
+  body.append("file", new Blob(parts, { type: "application/zip" }), filename);
 
   try {
     const res = await _fetch(

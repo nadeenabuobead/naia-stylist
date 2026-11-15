@@ -46,6 +46,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
     if (result.reason === "too_large") {
       const large = await buildLargeCustomerExportZip(customer.id, result.imageCount);
       if (!large.ok) {
+        if (large.reason === "exceeds_hard_limit") {
+          // A genuine data anomaly (see MAX_LARGE_EXPORT_IMAGES's own
+          // comment) — retrying changes nothing; this needs a person, same
+          // as the pre-existing too_large message below.
+          recordExportAudit(customer.id, "failed", { reason: "exceeds_hard_limit", imageCount: result.imageCount });
+          return new Response(
+            "Your export is larger than this automatic download can currently handle. " +
+              "Please contact support and we will prepare a copy for you manually.",
+            { status: 200, headers: { "Content-Type": "text/plain; charset=utf-8" } },
+          );
+        }
         recordExportAudit(customer.id, "failed", { reason: "large_export_build_failed", imageCount: result.imageCount });
         return new Response(
           "Your export could not be prepared right now. Please try again shortly, or contact support if this continues.",

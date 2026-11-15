@@ -39,6 +39,8 @@ import {
   getExportJobForCustomer,
   buildExportJobDownloadUrl,
   sweepExpiredExportJobs,
+  SWEEP_BATCH_SIZE,
+  MAX_LARGE_EXPORT_IMAGES,
 } from "./customer-export-zip-large.server";
 
 const CUSTOMER_ID = "cust-1";
@@ -98,12 +100,14 @@ describe("buildLargeCustomerExportZip", () => {
     });
     expect(uploadCloudinaryRawPrivate).toHaveBeenCalledWith(
       "naia-exports/cust-1/job-1.zip",
-      expect.any(Buffer),
+      expect.any(Array), // chunks, passed straight through — never Buffer.concat'd
       "naia-data-export-job-1.zip",
       "private",
     );
-    const uploadedBuffer = vi.mocked(uploadCloudinaryRawPrivate).mock.calls[0][1];
-    expect(uploadedBuffer.length).toBeGreaterThan(0); // a real zip was actually produced
+    const uploadedChunks = vi.mocked(uploadCloudinaryRawPrivate).mock.calls[0][1] as Buffer[];
+    expect(Array.isArray(uploadedChunks)).toBe(true);
+    expect(uploadedChunks.every((c) => Buffer.isBuffer(c))).toBe(true);
+    expect(uploadedChunks.reduce((sum, c) => sum + c.length, 0)).toBeGreaterThan(0); // a real zip was actually produced
 
     const updateCall = (prisma as any).customerExportJob.update.mock.calls.find(
       (c: any[]) => c[0].data.status === "COMPLETED",
@@ -147,6 +151,21 @@ describe("buildLargeCustomerExportZip", () => {
     // already exercised by customer-privacy.server.ts's own tests — here we only need
     // proof that an image fetch was attempted at all, confirming planImages ran.
     expect(fetchMock).toHaveBeenCalled();
+  });
+
+  it("rejects an anomalous image count above MAX_LARGE_EXPORT_IMAGES before touching the DB or Cloudinary — never attempts to build or upload it", async () => {
+    const result = await buildLargeCustomerExportZip(CUSTOMER_ID, MAX_LARGE_EXPORT_IMAGES + 1);
+    expect(result).toEqual({ ok: false, reason: "exceeds_hard_limit", imageCount: MAX_LARGE_EXPORT_IMAGES + 1 });
+    expect((prisma as any).customer.findUnique).not.toHaveBeenCalled();
+    expect((prisma as any).customerExportJob.create).not.toHaveBeenCalled();
+    expect(uploadCloudinaryRawPrivate).not.toHaveBeenCalled();
+  });
+
+  it("allows an image count exactly at MAX_LARGE_EXPORT_IMAGES — the ceiling is exclusive, not off-by-one", async () => {
+    const result = await buildLargeCustomerExportZip(CUSTOMER_ID, MAX_LARGE_EXPORT_IMAGES);
+    expect(result).not.toEqual(
+      expect.objectContaining({ ok: false, reason: "exceeds_hard_limit" }),
+    );
   });
 });
 
@@ -227,7 +246,7 @@ describe("sweepExpiredExportJobs — admin-triggered cleanup", () => {
       where: { id: "job-1" },
       data: { status: "EXPIRED", publicId: null },
     });
-    expect(result).toEqual({ checked: 2, deleted: 2, failed: 0 });
+    expect(result).toEqual({ checked: 2, deleted: 2, failed: 0, more: false });
   });
 
   it("only queries COMPLETED jobs past their expiry — never a still-valid or already-expired-and-cleared row", async () => {
@@ -235,6 +254,7 @@ describe("sweepExpiredExportJobs — admin-triggered cleanup", () => {
     await sweepExpiredExportJobs();
     expect((prisma as any).customerExportJob.findMany).toHaveBeenCalledWith({
       where: { status: "COMPLETED", expiresAt: { lte: expect.any(Date) }, publicId: { not: null } },
+      take: expect.any(Number),
     });
   });
 
@@ -246,13 +266,45 @@ describe("sweepExpiredExportJobs — admin-triggered cleanup", () => {
 
     const result = await sweepExpiredExportJobs();
 
-    expect(result).toEqual({ checked: 1, deleted: 0, failed: 1 });
+    expect(result).toEqual({ checked: 1, deleted: 0, failed: 1, more: false });
     expect((prisma as any).customerExportJob.update).not.toHaveBeenCalled();
   });
 
   it("nothing expired — a clean no-op, not an error", async () => {
     (prisma as any).customerExportJob.findMany.mockResolvedValueOnce([]);
     const result = await sweepExpiredExportJobs();
-    expect(result).toEqual({ checked: 0, deleted: 0, failed: 0 });
+    expect(result).toEqual({ checked: 0, deleted: 0, failed: 0, more: false });
+  });
+
+  it("is bounded per call (SWEEP_BATCH_SIZE) and reports more:true when a backlog exceeds one batch — never attempts an unbounded sweep in one invocation", async () => {
+    const oversized = Array.from({ length: SWEEP_BATCH_SIZE + 1 }, (_, i) => ({
+      id: `job-${i}`,
+      publicId: `naia-exports/cust-${i}/job-${i}.zip`,
+    }));
+    (prisma as any).customerExportJob.findMany.mockResolvedValueOnce(oversized);
+    vi.mocked(deleteCloudinaryAsset).mockResolvedValue({ ok: true });
+
+    const result = await sweepExpiredExportJobs();
+
+    expect((prisma as any).customerExportJob.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ take: SWEEP_BATCH_SIZE + 1 }),
+    );
+    // Only the batch-sized slice is actually processed, even though the mock
+    // returned one more than that.
+    expect(deleteCloudinaryAsset).toHaveBeenCalledTimes(SWEEP_BATCH_SIZE);
+    expect(result).toEqual({ checked: SWEEP_BATCH_SIZE, deleted: SWEEP_BATCH_SIZE, failed: 0, more: true });
+  });
+
+  it("reports more:false when the backlog exactly fits in one batch", async () => {
+    const exact = Array.from({ length: SWEEP_BATCH_SIZE }, (_, i) => ({
+      id: `job-${i}`,
+      publicId: `naia-exports/cust-${i}/job-${i}.zip`,
+    }));
+    (prisma as any).customerExportJob.findMany.mockResolvedValueOnce(exact);
+    vi.mocked(deleteCloudinaryAsset).mockResolvedValue({ ok: true });
+
+    const result = await sweepExpiredExportJobs();
+    expect(result.more).toBe(false);
+    expect(result.checked).toBe(SWEEP_BATCH_SIZE);
   });
 });
