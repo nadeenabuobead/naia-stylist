@@ -137,6 +137,29 @@ import {
   FULL_LOOK_MAX_GARMENTS,
   FULL_LOOK_FINAL_STEP_HANDLE_PREFIX,
 } from "./full-look-handle-constants.js";
+import { createHash } from "node:crypto";
+
+// ── TEMPORARY DIAGNOSTIC LOGGING (2026-11-15) ───────────────────────────────
+//
+// Investigating why the stale-job reconciliation fix still produced a BUSY
+// response against a real staging attempt. Every line below is tagged
+// "[vto-diag]" for easy grep and removal once the investigation closes —
+// see the session's own diagnostic-logging commit message. Privacy-safe by
+// construction: shortHash is one-way and truncated (never reversible to
+// the original id in practice), vtoType is a derived 2-value category
+// (never the raw productHandle, which can embed a garment label),
+// ageSeconds is a number (never a raw timestamp someone could correlate
+// elsewhere), and nothing below ever logs a customerId, suggestionId,
+// image URL, or FASHN prediction id in full. Purely additive — every
+// console.log call sits beside an existing return/decision, changing
+// nothing about what that decision actually does.
+function shortHash(value: string): string {
+  return createHash("sha256").update(value).digest("hex").slice(0, 8);
+}
+
+function vtoTypeOf(productHandle: string): "full-look" | "single-item" {
+  return productHandle.startsWith(`${REAL_PRODUCT_HANDLE_PREFIX}:`) ? "full-look" : "single-item";
+}
 
 // Real DB implementation — the default for every caller except tests, which
 // inject a mock via WalkChainDeps._findJobFn instead.
@@ -860,6 +883,18 @@ export type StartChainResult =
   | { ok: true; stepIndex: number }
   | { ok: false; reason: string };
 
+// [vto-diag] TEMPORARY — the real lookup behind the diagnostic log below,
+// factored out so tests can inject a stub instead of hitting real prisma.
+// Deliberately replicates checkCustomerCooldown's own query exactly (see
+// my-naia-model.server.ts's _findJob) — a second, side-effect-free read of
+// the same row, purely to report what it is.
+async function defaultFindMostRecentJobForCustomer(customerId: string): Promise<VirtualTryOnJobRecord | null> {
+  return prisma.virtualTryOnJob.findFirst({
+    where: { customerId },
+    orderBy: [{ lastActivityAt: "desc" }, { createdAt: "desc" }, { id: "desc" }],
+  }) as Promise<VirtualTryOnJobRecord | null>;
+}
+
 export async function startOrResumeFullLookChain(
   ctx: FullLookChainContext,
   deps: WalkChainDeps = { _findJobFn: defaultFindJobByIdempotencyKey },
@@ -867,6 +902,8 @@ export async function startOrResumeFullLookChain(
   // don't exercise this path inject a no-op stub instead, so they never
   // touch prisma through it — see this file's own test suite.
   _reconcileStale: (customerId: string) => Promise<ReconcileResult> = reconcileStaleFullLookJobForCustomer,
+  // [vto-diag] TEMPORARY — see defaultFindMostRecentJobForCustomer above.
+  _findMostRecentJob: (customerId: string) => Promise<VirtualTryOnJobRecord | null> = defaultFindMostRecentJobForCustomer,
 ): Promise<StartChainResult> {
   // 2026-11-15 — chain length is now per-outfit, between 3 (the original
   // minimum — fewer than 3 real pieces means Full-Look simply isn't offered,
@@ -888,10 +925,34 @@ export async function startOrResumeFullLookChain(
   // cooldown check below might otherwise block a genuinely new attempt on
   // a chain that's actually dead — see reconcileStaleFullLookJobForCustomer's
   // own header comment. A no-op in the common case (no stale job exists).
-  await _reconcileStale(ctx.customerId);
+  const reconcileResult = await _reconcileStale(ctx.customerId);
+  // [vto-diag] whether reconciliation found and acted on anything this
+  // request, and specifically whether it JUST wrote a fresh TIMED_OUT
+  // transition — the one case that could make the cooldown check below
+  // see a near-zero-age "most recent job" and reject on COOLDOWN rather
+  // than ACTIVE_JOB, within this SAME request.
+  console.log("[vto-diag] reconcile", {
+    customerHash: shortHash(ctx.customerId),
+    reconciled: reconcileResult.reconciled,
+    outcome: reconcileResult.outcome ?? null,
+  });
 
   const cooldown = await checkCustomerCooldown(ctx.customerId);
   if (!cooldown.ok) {
+    // [vto-diag] one additional READ-ONLY lookup, replicating exactly the
+    // query checkCustomerCooldown itself just used internally, purely to
+    // report WHICH job it found. No write, no new behavior — the real
+    // cooldown decision above is already made; this only explains it.
+    const blockingJob = await _findMostRecentJob(ctx.customerId);
+    console.log("[vto-diag] cooldown-rejected", {
+      customerHash: shortHash(ctx.customerId),
+      reason: cooldown.reason,
+      blockingJobStatus: blockingJob?.status ?? null,
+      blockingJobVtoType: blockingJob ? vtoTypeOf(blockingJob.productHandle) : null,
+      blockingJobAgeSeconds: blockingJob ? Math.round((Date.now() - blockingJob.lastActivityAt.getTime()) / 1000) : null,
+      blockingJobSameSuggestion: blockingJob ? blockingJob.outfitSuggestionId === ctx.outfitSuggestionId : null,
+      reconciledJustNow: reconcileResult.reconciled,
+    });
     return { ok: false, reason: cooldown.reason };
   }
 

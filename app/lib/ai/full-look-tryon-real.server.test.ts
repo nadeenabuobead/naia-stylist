@@ -660,6 +660,91 @@ describe("startOrResumeFullLookChain", () => {
     expect(result).toEqual({ ok: true, stepIndex: 0 });
     expect(callOrder).toEqual(["reconcile", "cooldown"]);
   });
+
+  // ── [vto-diag] TEMPORARY diagnostic-logging tests — remove alongside the
+  // logging itself once the investigation closes. These exist to prove two
+  // things: (1) the logged fields never contain a raw customerId/
+  // suggestionId/productHandle, only derived, privacy-safe values; (2) the
+  // logging is purely additive — the function's own return value and every
+  // call it makes are byte-identical to before these lines existed.
+  describe("[vto-diag] diagnostic logging — privacy-safe fields, zero behavior change", () => {
+    let logSpy: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+      logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    });
+
+    it("FL.59 — a cooldown rejection logs derived fields only — no raw customerId, suggestionId, or productHandle anywhere in the payload", async () => {
+      const _findJobFn = vi.fn(async () => null);
+      const _reconcileStale = vi.fn(async () => ({ reconciled: false }));
+      mockCooldown().mockResolvedValue({ ok: false, reason: "ACTIVE_JOB" });
+      const blockingJob = fakeJob("job-blocking", {
+        customerId: "cust-1",
+        status: "PROCESSING",
+        productHandle: `${REAL_PRODUCT_HANDLE_PREFIX}:step1:Beige Tailored Trousers`,
+        outfitSuggestionId: "suggestion-1",
+        lastActivityAt: new Date(Date.now() - 5 * 60 * 1000),
+      });
+      const _findMostRecentJob = vi.fn(async () => blockingJob);
+
+      const result = await startOrResumeFullLookChain(baseCtx(), { _findJobFn }, _reconcileStale, _findMostRecentJob);
+
+      expect(result).toEqual({ ok: false, reason: "ACTIVE_JOB" });
+      const diagCall = logSpy.mock.calls.find((c: unknown[]) => c[0] === "[vto-diag] cooldown-rejected");
+      expect(diagCall).toBeDefined();
+      const payload = diagCall![1] as Record<string, unknown>;
+      const serialized = JSON.stringify(payload);
+      // The exact strings this test must NEVER see in the logged payload.
+      expect(serialized).not.toContain("cust-1");
+      expect(serialized).not.toContain("suggestion-1");
+      expect(serialized).not.toContain("Beige Tailored Trousers");
+      expect(serialized).not.toContain(REAL_PRODUCT_HANDLE_PREFIX);
+      // What it SHOULD contain: a derived category, a number, and a
+      // short one-way hash — never the raw id itself.
+      expect(payload.reason).toBe("ACTIVE_JOB");
+      expect(payload.blockingJobStatus).toBe("PROCESSING");
+      expect(payload.blockingJobVtoType).toBe("full-look");
+      expect(payload.blockingJobSameSuggestion).toBe(true);
+      expect(payload.blockingJobAgeSeconds).toBeGreaterThanOrEqual(299);
+      expect(typeof payload.customerHash).toBe("string");
+      expect((payload.customerHash as string).length).toBe(8);
+      expect(payload.customerHash).not.toBe("cust-1");
+    });
+
+    it("FL.60 — a single-item VTO job blocking cooldown is correctly identified as such, distinct from a Full-Look job", async () => {
+      const _findJobFn = vi.fn(async () => null);
+      const _reconcileStale = vi.fn(async () => ({ reconciled: false }));
+      mockCooldown().mockResolvedValue({ ok: false, reason: "ACTIVE_JOB" });
+      const singleItemJob = fakeJob("job-single", {
+        customerId: "cust-1",
+        status: "PROCESSING",
+        productHandle: "some-closet-item-handle",
+        outfitSuggestionId: null,
+        lastActivityAt: new Date(),
+      });
+      const _findMostRecentJob = vi.fn(async () => singleItemJob);
+
+      await startOrResumeFullLookChain(baseCtx(), { _findJobFn }, _reconcileStale, _findMostRecentJob);
+
+      const diagCall = logSpy.mock.calls.find((c: unknown[]) => c[0] === "[vto-diag] cooldown-rejected");
+      const payload = diagCall![1] as Record<string, unknown>;
+      expect(payload.blockingJobVtoType).toBe("single-item");
+      expect(payload.blockingJobSameSuggestion).toBe(false);
+    });
+
+    it("FL.61 — logging adds no new real I/O: diagnostic reads are injected (never real prisma), and the function's own return value is unaffected by logging", async () => {
+      const _findJobFn = vi.fn(async () => null);
+      const _reconcileStale = vi.fn(async () => ({ reconciled: true, outcome: "FAILED" as const }));
+      mockCooldown().mockResolvedValue({ ok: false, reason: "COOLDOWN", retryAfterMs: 1500 });
+      const _findMostRecentJob = vi.fn(async () => null); // e.g. the row vanished between checks — logging must not crash on this
+      const result = await startOrResumeFullLookChain(baseCtx(), { _findJobFn }, _reconcileStale, _findMostRecentJob);
+      expect(result).toEqual({ ok: false, reason: "COOLDOWN" }); // identical to the pre-diagnostic-logging behavior
+      expect(_findMostRecentJob).toHaveBeenCalledTimes(1);
+      const diagCall = logSpy.mock.calls.find((c: unknown[]) => c[0] === "[vto-diag] cooldown-rejected");
+      const payload = diagCall![1] as Record<string, unknown>;
+      expect(payload.blockingJobStatus).toBeNull();
+      expect(payload.blockingJobVtoType).toBeNull();
+    });
+  });
 });
 
 // ── reconcileStaleFullLookJobForCustomer ────────────────────────────────────

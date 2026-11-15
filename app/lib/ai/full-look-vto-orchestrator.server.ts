@@ -305,6 +305,21 @@ export async function startFullLookOutfit(
   fingerprint: string,
   opts: { forceNewAttempt?: boolean } = {},
 ): Promise<OrchestratorStatus> {
+  // [vto-diag] TEMPORARY (2026-11-15, see full-look-tryon-real.server.ts's
+  // matching header comment for scope/removal). countAttempts is keyed by
+  // {customerId, outfitSuggestionId} — zero prior attempts for THIS
+  // customer against THIS suggestion is direct evidence the authenticated
+  // customer does not map to whoever created an earlier attempt on this
+  // same suggestion. Privacy-safe: a count and a one-way truncated hash,
+  // never the raw customerId/suggestionId.
+  const priorAttemptCount = await countAttempts(baseCtx.customerId, baseCtx.outfitSuggestionId);
+  console.log("[vto-diag] start-scope", {
+    customerHash: createHash("sha256").update(baseCtx.customerId).digest("hex").slice(0, 8),
+    suggestionHash: createHash("sha256").update(baseCtx.outfitSuggestionId).digest("hex").slice(0, 8),
+    priorAttemptCount,
+    forceNewAttempt: opts.forceNewAttempt ?? false,
+  });
+
   let scope = opts.forceNewAttempt
     ? await startNewAttemptScope(baseCtx.customerId, baseCtx.outfitSuggestionId, fingerprint)
     : await resolveCurrentAttemptScope(baseCtx.customerId, baseCtx.outfitSuggestionId, fingerprint);
