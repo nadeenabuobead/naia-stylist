@@ -46,6 +46,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
     if (result.reason === "too_large") {
       const large = await buildLargeCustomerExportZip(customer.id, result.imageCount);
       if (!large.ok) {
+        if (large.reason === "already_processing") {
+          // Not a failure — a prior request for this same customer is still
+          // building. Never start a second concurrent build or job row; see
+          // reserveExportJobSlot (customer-export-zip-large.server.ts).
+          recordExportAudit(customer.id, "failed", { reason: "already_processing", imageCount: result.imageCount });
+          return new Response(
+            "Your export is already being prepared. This can take a few minutes for a large account — please check back shortly.",
+            { status: 200, headers: { "Content-Type": "text/plain; charset=utf-8" } },
+          );
+        }
         if (large.reason === "exceeds_hard_limit") {
           // A genuine data anomaly (see MAX_LARGE_EXPORT_IMAGES's own
           // comment) — retrying changes nothing; this needs a person, same

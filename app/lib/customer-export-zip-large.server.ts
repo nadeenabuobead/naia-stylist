@@ -39,6 +39,13 @@
 // verified without a live Cloudinary call, which is out of bounds here), so
 // peak memory scales with total image count. See the constant's own comment
 // for the exact reasoning.
+//
+// Overlap guard (2026-11-16): buildLargeCustomerExportZip reserves its
+// CustomerExportJob row inside a Serializable transaction (see
+// reserveExportJobSlot) rather than calling .create() directly — otherwise a
+// double-click, a retried fetch, or a customer re-requesting while their
+// first >300-image export is still building would each start an independent
+// full fetch-archive-upload cycle for the same customer at the same time.
 
 import archiver from "archiver";
 import prisma from "../db.server";
@@ -71,19 +78,101 @@ const DOWNLOAD_LINK_EXPIRY_SECONDS = 600; // 10 minutes — same signed-link con
 // rather than raise the function's memory/duration budget to chase it.
 export const MAX_LARGE_EXPORT_IMAGES = 1000;
 
+// Mirrors STALE_PROCESSING_THRESHOLD_MS's own 10-minute convention
+// (full-look-tryon-real.server.ts) for the same underlying reason: this
+// build runs entirely synchronously within one request, so while its
+// container is alive PROCESSING means "actively running right now." Any
+// container that dies mid-build (serverless function timeout) does so in
+// well under 10 minutes, so a PROCESSING row surviving past this threshold
+// can only mean its owning container is gone, never that it's still
+// legitimately working.
+export const STALE_EXPORT_PROCESSING_THRESHOLD_MS = 10 * 60 * 1000;
+
+// Local retry/serialization-conflict convention — mirrors entitlement.server.ts's
+// identically-shaped (but unexported) helpers for its own atomic
+// reservations; duplicated rather than imported since that module's helpers
+// aren't exported and this is a different domain's reservation.
+const MAX_EXPORT_TX_RETRIES = 2;
+
+function isExportSerializationError(e: unknown): boolean {
+  // Prisma P2034: Transaction failed due to a write conflict or a deadlock.
+  return (e as { code?: string })?.code === "P2034";
+}
+
 function exportPublicId(customerId: string, jobId: string): string {
   return `naia-exports/${customerId}/${jobId}.zip`;
+}
+
+export type RunExportReservationFn = <T>(
+  fn: (tx: Pick<typeof prisma, "customerExportJob">) => Promise<T>,
+) => Promise<T>;
+
+const _runExportReservationTransaction: RunExportReservationFn = (fn) =>
+  prisma.$transaction((tx: Pick<typeof prisma, "customerExportJob">) => fn(tx), {
+    isolationLevel: "Serializable",
+  });
+
+export type ReserveExportJobResult =
+  | { ok: true; job: { id: string } }
+  | { ok: false; reason: "already_processing"; jobId: string };
+
+// Closes the race a plain .create() call leaves open: re-checks for an
+// existing, non-stale PROCESSING job and creates the new row inside one
+// Serializable transaction, so two concurrent requests from the same
+// customer cannot both pass the check before either commits. A stale
+// PROCESSING row (see STALE_EXPORT_PROCESSING_THRESHOLD_MS) is terminalized
+// in the SAME transaction as the fresh create — same reconciliation shape as
+// reconcileStaleFullLookJobForCustomer (full-look-tryon-real.server.ts),
+// applied to this job table instead.
+export async function reserveExportJobSlot(
+  customerId: string,
+  imageCount: number,
+  runTransaction: RunExportReservationFn = _runExportReservationTransaction,
+  nowFn: () => number = Date.now,
+): Promise<ReserveExportJobResult> {
+  for (let attempt = 0; attempt <= MAX_EXPORT_TX_RETRIES; attempt++) {
+    try {
+      return await runTransaction(async (tx) => {
+        const existing = await tx.customerExportJob.findFirst({
+          where: { customerId, status: "PROCESSING" },
+          orderBy: { createdAt: "desc" },
+        });
+        if (existing) {
+          const ageMs = nowFn() - existing.createdAt.getTime();
+          if (ageMs <= STALE_EXPORT_PROCESSING_THRESHOLD_MS) {
+            return { ok: false, reason: "already_processing", jobId: existing.id };
+          }
+          await tx.customerExportJob.update({
+            where: { id: existing.id },
+            data: { status: "FAILED", errorCode: "ABANDONED_STALE_PROCESSING" },
+          });
+        }
+        const job = await tx.customerExportJob.create({
+          data: { customerId, imageCount, status: "PROCESSING" },
+        });
+        return { ok: true, job };
+      });
+    } catch (e) {
+      if (isExportSerializationError(e) && attempt < MAX_EXPORT_TX_RETRIES) continue;
+      throw e;
+    }
+  }
+  // Unreachable — loop always returns or throws.
+  throw new Error("Unexpected exit from reserveExportJobSlot retry loop");
 }
 
 export interface LargeExportDeps {
   _fetch?: typeof fetch;
   _uploadRaw?: typeof uploadCloudinaryRawPrivate;
+  _runReservation?: RunExportReservationFn;
+  _now?: () => number;
 }
 
 export type BuildLargeExportResult =
   | { ok: true; jobId: string }
   | { ok: false; reason: "not_found" }
   | { ok: false; reason: "exceeds_hard_limit"; imageCount: number }
+  | { ok: false; reason: "already_processing"; jobId: string }
   | { ok: false; reason: "upload_failed"; jobId: string; errorCode: string };
 
 export async function buildLargeCustomerExportZip(
@@ -104,9 +193,16 @@ export async function buildLargeCustomerExportZip(
   const exportData = await compileCustomerExport(customerId);
   if (!exportData) return { ok: false, reason: "not_found" };
 
-  const job = await prisma.customerExportJob.create({
-    data: { customerId, imageCount, status: "PROCESSING" },
-  });
+  const reservation = await reserveExportJobSlot(
+    customerId,
+    imageCount,
+    deps._runReservation,
+    deps._now,
+  );
+  if (!reservation.ok) {
+    return { ok: false, reason: "already_processing", jobId: reservation.jobId };
+  }
+  const job = reservation.job;
 
   const { data, images } = planImages(exportData);
   const archive = archiver("zip", { zlib: { level: 6 } });

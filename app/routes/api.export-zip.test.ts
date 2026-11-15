@@ -170,6 +170,24 @@ describe("api/export-zip loader", () => {
       );
     });
 
+    it("tells the customer their export is already being prepared, and never requests a download link for the OTHER in-flight job", async () => {
+      vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({ id: "cust-1" } as any);
+      vi.mocked(buildCustomerExportZip).mockResolvedValueOnce({ ok: false, reason: "too_large", imageCount: 301 });
+      vi.mocked(buildLargeCustomerExportZip).mockResolvedValueOnce({
+        ok: false, reason: "already_processing", jobId: "job-already-running",
+      });
+
+      const response = await loader({ request: new Request("http://localhost/api/export-zip") } as any);
+
+      expect(response.status).toBe(200);
+      const body = await response.text();
+      expect(body).toContain("already being prepared");
+      expect(buildExportJobDownloadUrl).not.toHaveBeenCalled();
+      expect(recordExportAudit).toHaveBeenCalledWith(
+        "cust-1", "failed", { reason: "already_processing", imageCount: 301 },
+      );
+    });
+
     it("if the archive builds and uploads but the immediate signed link can't be generated, tells the customer to retry rather than losing the already-built export", async () => {
       vi.mocked(requireCurrentNaiaCustomer).mockResolvedValueOnce({ id: "cust-1" } as any);
       vi.mocked(buildCustomerExportZip).mockResolvedValueOnce({ ok: false, reason: "too_large", imageCount: 301 });

@@ -10,8 +10,8 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("../db.server", () => ({
-  default: {
+vi.mock("../db.server", () => {
+  const db = {
     customer: { findUnique: vi.fn() },
     customerExportJob: {
       create: vi.fn(),
@@ -19,8 +19,15 @@ vi.mock("../db.server", () => ({
       findFirst: vi.fn(),
       findMany: vi.fn(),
     },
-  },
-}));
+  };
+  // A straight passthrough — real $transaction isolation semantics are
+  // exercised in reserveExportJobSlot's own dedicated tests below via an
+  // explicitly injected runTransaction, same convention as
+  // entitlement-reservation.test.ts. This default keeps every pre-existing
+  // test in this file working unchanged: tx.customerExportJob.* is the exact
+  // same mock as prisma.customerExportJob.*.
+  return { default: { ...db, $transaction: vi.fn((fn: (tx: typeof db) => unknown) => fn(db)) } };
+});
 
 vi.mock("./cloudinary-admin.server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./cloudinary-admin.server")>();
@@ -39,8 +46,11 @@ import {
   getExportJobForCustomer,
   buildExportJobDownloadUrl,
   sweepExpiredExportJobs,
+  reserveExportJobSlot,
   SWEEP_BATCH_SIZE,
   MAX_LARGE_EXPORT_IMAGES,
+  STALE_EXPORT_PROCESSING_THRESHOLD_MS,
+  type RunExportReservationFn,
 } from "./customer-export-zip-large.server";
 
 const CUSTOMER_ID = "cust-1";
@@ -166,6 +176,109 @@ describe("buildLargeCustomerExportZip", () => {
     expect(result).not.toEqual(
       expect.objectContaining({ ok: false, reason: "exceeds_hard_limit" }),
     );
+  });
+
+  it("REGRESSION — a second concurrent call for the same customer while the first is still PROCESSING never starts a second build or job row", async () => {
+    (prisma as any).customerExportJob.findFirst.mockResolvedValueOnce({
+      id: "job-already-running",
+      customerId: CUSTOMER_ID,
+      status: "PROCESSING",
+      createdAt: new Date(),
+    });
+
+    const result = await buildLargeCustomerExportZip(CUSTOMER_ID, 301);
+
+    expect(result).toEqual({ ok: false, reason: "already_processing", jobId: "job-already-running" });
+    expect((prisma as any).customerExportJob.create).not.toHaveBeenCalled();
+    expect(uploadCloudinaryRawPrivate).not.toHaveBeenCalled();
+  });
+
+  it("a stale PROCESSING job (past STALE_EXPORT_PROCESSING_THRESHOLD_MS — its owning container is gone) is terminalized and a fresh build proceeds", async () => {
+    (prisma as any).customerExportJob.findFirst.mockResolvedValueOnce({
+      id: "job-abandoned",
+      customerId: CUSTOMER_ID,
+      status: "PROCESSING",
+      createdAt: new Date(Date.now() - STALE_EXPORT_PROCESSING_THRESHOLD_MS - 1),
+    });
+
+    const result = await buildLargeCustomerExportZip(CUSTOMER_ID, 301);
+
+    expect((prisma as any).customerExportJob.update).toHaveBeenCalledWith({
+      where: { id: "job-abandoned" },
+      data: { status: "FAILED", errorCode: "ABANDONED_STALE_PROCESSING" },
+    });
+    expect((prisma as any).customerExportJob.create).toHaveBeenCalledWith({
+      data: { customerId: CUSTOMER_ID, imageCount: 301, status: "PROCESSING" },
+    });
+    expect(result).toEqual({ ok: true, jobId: "job-1" });
+  });
+
+  it("a PROCESSING job exactly at the staleness threshold is NOT yet treated as abandoned — the boundary is exclusive", async () => {
+    (prisma as any).customerExportJob.findFirst.mockResolvedValueOnce({
+      id: "job-at-boundary",
+      customerId: CUSTOMER_ID,
+      status: "PROCESSING",
+      createdAt: new Date(Date.now() - STALE_EXPORT_PROCESSING_THRESHOLD_MS),
+    });
+
+    const result = await buildLargeCustomerExportZip(CUSTOMER_ID, 301);
+
+    expect(result).toEqual({ ok: false, reason: "already_processing", jobId: "job-at-boundary" });
+    expect((prisma as any).customerExportJob.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("reserveExportJobSlot — overlap guard, in isolation", () => {
+  const CUST = "cust-iso";
+
+  function passthroughTx(db: {
+    customerExportJob: { findFirst: ReturnType<typeof vi.fn>; create: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn> };
+  }): RunExportReservationFn {
+    return (async (fn: any) => fn(db)) as RunExportReservationFn;
+  }
+
+  it("no existing PROCESSING row — creates one and returns ok", async () => {
+    const db = {
+      customerExportJob: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({ id: "new-job" }),
+        update: vi.fn(),
+      },
+    };
+    const result = await reserveExportJobSlot(CUST, 5, passthroughTx(db));
+    expect(result).toEqual({ ok: true, job: { id: "new-job" } });
+    expect(db.customerExportJob.update).not.toHaveBeenCalled();
+  });
+
+  it("retries once on a Prisma P2034 serialization conflict, then succeeds — mirrors entitlement.server.ts's own retry convention", async () => {
+    let attempts = 0;
+    const db = {
+      customerExportJob: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({ id: "new-job" }),
+        update: vi.fn(),
+      },
+    };
+    const flakyTx: RunExportReservationFn = (async (fn: any) => {
+      attempts++;
+      if (attempts === 1) {
+        const err: any = new Error("conflict");
+        err.code = "P2034";
+        throw err;
+      }
+      return fn(db);
+    }) as RunExportReservationFn;
+
+    const result = await reserveExportJobSlot(CUST, 5, flakyTx);
+    expect(attempts).toBe(2);
+    expect(result).toEqual({ ok: true, job: { id: "new-job" } });
+  });
+
+  it("a non-serialization error propagates immediately — never silently retried", async () => {
+    const boom: RunExportReservationFn = (async () => {
+      throw new Error("unrelated DB failure");
+    }) as RunExportReservationFn;
+    await expect(reserveExportJobSlot(CUST, 5, boom)).rejects.toThrow("unrelated DB failure");
   });
 });
 
