@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { STYLEME_STATE_LABELS } from "~/lib/styleme/session-vocabulary";
+import { STYLEME_STATE_LABELS, STYLEME_FORMALITY_OPTIONS } from "~/lib/styleme/session-vocabulary";
 
 const dir = join(import.meta.dirname ?? new URL(".", import.meta.url).pathname);
 
@@ -348,11 +348,19 @@ describe("Phase 4B3 recovery — route contract", () => {
 
   // ── Step 2A: Occasion + conditional Formality (same screen) ─────
 
+  // The 4 IDs moved to session-vocabulary.ts's STYLEME_FORMALITY_OPTIONS as
+  // the single source of truth (occasion.tsx's own comment: "also read by
+  // ..."), so they no longer appear as literal strings in occasion.tsx
+  // itself. Verifying the actual exported options directly (real runtime
+  // values, not a source-text guess) plus that occasion.tsx genuinely wires
+  // up to that shared constant rather than a stale, disconnected import.
   it("occasion renders the 4 formality options with exact engine IDs", () => {
-    const text = src("occasion.tsx");
+    const ids = STYLEME_FORMALITY_OPTIONS.map((f) => f.id);
     for (const id of ["formality-relaxed", "formality-smart", "formality-polished", "formality-occasion"]) {
-      assert.ok(text.includes(id), `formality option ${id} present`);
+      assert.ok(ids.includes(id), `formality option ${id} present in STYLEME_FORMALITY_OPTIONS`);
     }
+    const text = src("occasion.tsx");
+    assert.ok(text.includes("STYLEME_FORMALITY_OPTIONS"), "occasion.tsx imports the shared formality options");
   });
 
   it("occasion formality question copy reads 'How dressed-up does this need to be?'", () => {
