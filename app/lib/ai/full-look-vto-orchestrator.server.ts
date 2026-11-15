@@ -32,6 +32,7 @@ import {
   continueToFinalStep,
   walkFullLookChainJobs,
   REAL_PRODUCT_HANDLE_PREFIX,
+  REAL_RESERVATION_KEY_PREFIX,
   type FullLookChainContext,
   type FullLookRealGarmentInput,
 } from "./full-look-tryon-real.server.js";
@@ -197,6 +198,47 @@ function scopeFor(outfitSuggestionId: string, attemptIndex: number, fingerprint:
   return `${outfitSuggestionId}:a${attemptIndex}:${fingerprint}`;
 }
 
+// A step-0 row's own idempotencyKey IS "fulllook-real-reservation:{customerId}:{reservationScope}",
+// and reservationScope IS scopeFor's own "{outfitSuggestionId}:a{N}:{fingerprint}"
+// (or, for a row created before fingerprint-embedding existed, the shorter
+// "{outfitSuggestionId}:a{N}" with no trailing fingerprint). Reading N
+// directly out of the row that actually used it is the one way to recover
+// the true latest index with zero ambiguity, regardless of which format
+// era created it.
+function parseAttemptIndexFromStep0Key(
+  idempotencyKey: string,
+  customerId: string,
+  outfitSuggestionId: string,
+): number | null {
+  const prefix = `${REAL_RESERVATION_KEY_PREFIX}${customerId}:${outfitSuggestionId}:a`;
+  if (!idempotencyKey.startsWith(prefix)) return null;
+  const match = /^(\d+)/.exec(idempotencyKey.slice(prefix.length));
+  return match ? Number(match[1]) : null;
+}
+
+// 2026-11-15 BUG FIX — resolveCurrentAttemptScope used to compute
+// latestIndex as count-1, inferring "which attempt is latest" from how
+// MANY step1 rows exist right now. That breaks the instant a new attempt's
+// own step1 row is created: the very next read sees a count that already
+// includes it, so latestIndex comes out ONE HIGHER than the index that
+// attempt actually used — making a customer's own genuinely in-progress
+// attempt permanently unreachable by their own next refresh (confirmed
+// live: a customer's step-1 FASHN call had completed, but every
+// subsequent poll resolved to a fresh, empty scope one index ahead,
+// showing "Try This Look On" instead of resuming it). Fixed by reading
+// which index the MOST RECENTLY CREATED step-0 row actually used,
+// directly off its own idempotencyKey, instead of inferring it from a
+// count that shifts the moment that very row comes into existence.
+async function findLatestAttemptIndex(customerId: string, outfitSuggestionId: string): Promise<number> {
+  const latest = await prisma.virtualTryOnJob.findFirst({
+    where: { customerId, outfitSuggestionId, productHandle: { startsWith: STEP1_HANDLE_PREFIX } },
+    orderBy: [{ createdAt: "desc" }],
+    select: { idempotencyKey: true },
+  });
+  if (!latest) return 0;
+  return parseAttemptIndexFromStep0Key(latest.idempotencyKey, customerId, outfitSuggestionId) ?? 0;
+}
+
 // Resume (the default for every page load / poll): reuse the LATEST
 // existing attempt, or attempt 0 if none exists yet. Never creates a new
 // attempt on its own — only startNewAttemptScope does that.
@@ -205,8 +247,7 @@ export async function resolveCurrentAttemptScope(
   outfitSuggestionId: string,
   fingerprint: string,
 ): Promise<string> {
-  const count = await countAttempts(customerId, outfitSuggestionId);
-  const latestIndex = Math.max(0, count - 1);
+  const latestIndex = await findLatestAttemptIndex(customerId, outfitSuggestionId);
   return scopeFor(outfitSuggestionId, latestIndex, fingerprint);
 }
 
