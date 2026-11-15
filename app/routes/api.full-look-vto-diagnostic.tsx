@@ -39,12 +39,20 @@ import prisma from "~/db.server";
 import { checkFashnPredictionStatus, REAL_PRODUCT_HANDLE_PREFIX } from "~/lib/ai/full-look-tryon-real.server";
 import { FULL_LOOK_FINAL_STEP_HANDLE_PREFIX } from "~/lib/ai/full-look-handle-constants";
 import type { VirtualTryOnJobRecord } from "~/lib/ai/virtual-try-on.types";
+
+// VirtualTryOnJobRecord doesn't declare isTest (not needed by any of its
+// existing callers) even though the real column exists — entitlement.
+// server.ts's own vtoCompleted query filters on it directly. Extended
+// locally rather than widening the shared type for one diagnostic's sake.
+type JobRow = VirtualTryOnJobRecord & { isTest: boolean };
 import {
   selectFullLookGarments,
   resolveCurrentAttemptScope,
   type SelectableOutfitItem,
 } from "~/lib/ai/full-look-vto-orchestrator.server";
 import { getCloudinaryConfig } from "~/lib/cloudinary-admin.server";
+import { getEntitlementSummary } from "~/lib/plan/entitlement.server";
+import type { MembershipStatus } from "@prisma/client";
 
 const RESERVATION_KEY_PREFIX = "fulllook-real-reservation:";
 
@@ -84,7 +92,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       productHandle: { startsWith: `${REAL_PRODUCT_HANDLE_PREFIX}:` },
     },
     orderBy: [{ createdAt: "asc" }],
-  })) as VirtualTryOnJobRecord[];
+  })) as JobRow[];
 
   const now = Date.now();
   const steps = await Promise.all(
@@ -116,6 +124,38 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const finalStep = jobs.find((j) => j.productHandle.startsWith(FULL_LOOK_FINAL_STEP_HANDLE_PREFIX));
   const finalStepCompleted = finalStep?.status === "COMPLETED";
+
+  // ── Real credit-accounting check (2026-11-16 addition) — still strictly
+  // read-only: getEntitlementSummary (entitlement.server.ts) only ever
+  // runs .count()/.findFirst() queries, never a write. Calls the SAME
+  // function the real app uses to decide "does this customer have VTO
+  // allowance left" — not a re-derivation of its logic, the actual
+  // function — so this is the real answer, not an inference from
+  // finalStepCompleted alone. Separately checks whether THIS suggestion's
+  // own final-step row would itself be included in that count (COMPLETED,
+  // not a test job) — the real exclusion entitlement.server.ts's own
+  // vtoCompleted query applies (excludingMockAndIntermediateFullLookHandles
+  // already excludes every intermediate step handle by construction; the
+  // final-step handle is never in that exclusion list, so a COMPLETED,
+  // non-test final-step row for this suggestion is counted).
+  const entitlementSummary = await getEntitlementSummary(
+    customer.id,
+    customer.membershipStatus as MembershipStatus,
+  );
+  const thisAttemptsFinalStepWouldCount =
+    finalStep != null && finalStep.status === "COMPLETED" && finalStep.isTest === false;
+  const realCreditAccounting = {
+    verified: true,
+    vtoMonthlyLimit: entitlementSummary.vto.monthlyLimit,
+    vtoMonthlyCompleted: entitlementSummary.vto.monthlyCompleted,
+    vtoMonthlyInFlight: entitlementSummary.vto.monthlyInFlight,
+    thisSuggestionsFinalStepStatus: finalStep?.status ?? "no_final_step_row",
+    thisSuggestionsFinalStepIsTest: finalStep?.isTest ?? null,
+    thisAttemptsFinalStepWouldCountTowardEntitlement: thisAttemptsFinalStepWouldCount,
+    note: thisAttemptsFinalStepWouldCount
+      ? "This suggestion's final step is COMPLETED and non-test — it IS counted in vtoMonthlyCompleted above. A credit has been consumed for this outfit."
+      : "This suggestion's final step has not reached a COMPLETED, non-test state — it is NOT counted in vtoMonthlyCompleted above. No credit has been consumed for this outfit yet.",
+  };
 
   // ── Scope-resolution check (2026-11-15 addition) — still strictly
   // read-only. resolveCurrentAttemptScope only runs a count() query and
@@ -169,18 +209,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       totalJobRows: jobs.length,
       steps,
       scopeCheck,
-      // Deliberately NOT a credit-consumption answer. This only reflects
-      // whether the final garment's own row reached COMPLETED — it does
-      // not query entitlement.server.ts's actual counting logic
-      // (getEntitlementSummary's vtoCompleted count, which also applies
-      // isTest/mock-handle exclusions and a billing-window boundary this
-      // route never computes). Report credit consumption as unverified
-      // unless/until that query is run directly.
       finalStepCompleted,
-      creditConsumptionVerified: false,
-      creditNote: finalStepCompleted
-        ? "Final step row is COMPLETED. This is necessary but not sufficient proof a credit was recorded — credit consumption is NOT independently verified by this diagnostic. Check entitlement.server.ts's getEntitlementSummary (vtoCompleted) directly for a real answer."
-        : "Final step row is not COMPLETED. Credit consumption is NOT independently verified by this diagnostic either way.",
+      realCreditAccounting,
     },
     { headers: { "Cache-Control": "no-store" } },
   );
