@@ -366,6 +366,20 @@ export interface CustomerExport {
   // never be returned to the client.
   loginSessions: unknown[];
   identityLinkRequests: unknown[];
+  // Completeness fix (2026-11-15): previously omitted entirely despite the
+  // export's own note claiming "every record." Subscription/BillingTransaction
+  // are deliberately NOT Cascade-deleted on erasure (onDelete: Restrict — see
+  // their own schema comments: UAE tax law / financial record-keeping require
+  // this independent of an erasure request), but that retention rule is about
+  // ERASURE, not export — a customer is still entitled to see their own
+  // billing history. Nothing here is a payment credential: Stripe holds the
+  // card itself, and these models only ever store Stripe's own opaque
+  // reference ids (providerCustomerId/providerSubscriptionId/
+  // providerTransactionId — safe to return, not secrets, confirmed against
+  // the schema; there is no field on either model that is a credential,
+  // token, or secret, so nothing needs scrubbing on these two sets).
+  subscriptions: unknown[];
+  billingTransactions: unknown[];
   note: string;
 }
 
@@ -395,6 +409,8 @@ export async function compileCustomerExport(customerId: string): Promise<Custome
       personalisedTrendEditUsage: true,
       sessions: true,
       identityLinkRequests: true,
+      subscriptions: true,
+      billingTransactions: true,
     },
   });
 
@@ -405,7 +421,8 @@ export async function compileCustomerExport(customerId: string): Promise<Custome
     wardrobeInsights, savedLooks, postOutfitReviews, confidenceScores, trendReportViews,
     stylingEvents, naiaModel, tryOnJobs, recommendationFeedback, selfieAnalysis,
     naiaObservationFeedback, styleMemoryOutcomes, tasteEvidence, styleTendencies,
-    personalisedTrendEditUsage, sessions, identityLinkRequests, ...customerFields
+    personalisedTrendEditUsage, sessions, identityLinkRequests, subscriptions,
+    billingTransactions, ...customerFields
   } = customer as any;
 
   // QA fix (2026-11-13): these were previously dumped as raw internal
@@ -491,6 +508,8 @@ export async function compileCustomerExport(customerId: string): Promise<Custome
     personalisedTrendEditUsage,
     loginSessions,
     identityLinkRequests: scrubbedIdentityLinkRequests,
+    subscriptions,
+    billingTransactions,
     note:
       "This export covers every record this application stores about you. " +
       "Closet, My nAia Model (body photo only), and Virtual Try-On result " +

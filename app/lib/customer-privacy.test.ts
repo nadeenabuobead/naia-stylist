@@ -309,6 +309,8 @@ describe("compileCustomerExport — synthetic customer, mocked DB", () => {
       personalisedTrendEditUsage: [],
       sessions: [],
       identityLinkRequests: [],
+      subscriptions: [],
+      billingTransactions: [],
       ...overrides,
     };
   }
@@ -492,6 +494,82 @@ describe("compileCustomerExport — synthetic customer, mocked DB", () => {
       const result = await compileCustomerExport(SYNTHETIC_CUSTOMER_ID);
       expect(result!.loginSessions).toEqual([]);
       expect(result!.identityLinkRequests).toEqual([]);
+    });
+  });
+
+  describe("completeness fix (2026-11-15) — Subscription/BillingTransaction", () => {
+    it("includes the customer's subscriptions and billing transactions — previously omitted despite the export's own note claiming 'every record'", async () => {
+      mockFindUnique().mockResolvedValueOnce(
+        baseSyntheticCustomer({
+          subscriptions: [
+            {
+              id: "sub-1",
+              status: "ACTIVE",
+              planType: "ANNUAL",
+              provider: "stripe",
+              providerCustomerId: "cus_synthetic123",
+              providerSubscriptionId: "sub_synthetic456",
+              currentPeriodStart: "2026-11-01T00:00:00.000Z",
+              currentPeriodEnd: "2027-11-01T00:00:00.000Z",
+            },
+          ],
+          billingTransactions: [
+            {
+              id: "txn-1",
+              subscriptionId: "sub-1",
+              type: "SUBSCRIPTION_INITIAL",
+              status: "SUCCEEDED",
+              amount: 29900,
+              currency: "AED",
+              provider: "stripe",
+              providerTransactionId: "pi_synthetic789",
+            },
+          ],
+        }),
+      );
+
+      const result = await compileCustomerExport(SYNTHETIC_CUSTOMER_ID);
+
+      expect(result!.subscriptions).toEqual([
+        expect.objectContaining({ id: "sub-1", status: "ACTIVE", providerSubscriptionId: "sub_synthetic456" }),
+      ]);
+      expect(result!.billingTransactions).toEqual([
+        expect.objectContaining({ id: "txn-1", amount: 29900, currency: "AED", providerTransactionId: "pi_synthetic789" }),
+      ]);
+    });
+
+    it("provider reference ids (providerCustomerId/providerSubscriptionId/providerTransactionId) are NOT scrubbed — they are opaque Stripe object ids, not payment credentials", async () => {
+      mockFindUnique().mockResolvedValueOnce(
+        baseSyntheticCustomer({
+          subscriptions: [{ id: "sub-1", providerCustomerId: "cus_abc", providerSubscriptionId: "sub_xyz" }],
+          billingTransactions: [{ id: "txn-1", providerTransactionId: "pi_123" }],
+        }),
+      );
+
+      const result = await compileCustomerExport(SYNTHETIC_CUSTOMER_ID);
+
+      expect((result!.subscriptions[0] as any).providerCustomerId).toBe("cus_abc");
+      expect((result!.subscriptions[0] as any).providerSubscriptionId).toBe("sub_xyz");
+      expect((result!.billingTransactions[0] as any).providerTransactionId).toBe("pi_123");
+    });
+
+    it("no billing history — both export as empty arrays, not undefined or a crash", async () => {
+      mockFindUnique().mockResolvedValueOnce(baseSyntheticCustomer({ subscriptions: [], billingTransactions: [] }));
+      const result = await compileCustomerExport(SYNTHETIC_CUSTOMER_ID);
+      expect(result!.subscriptions).toEqual([]);
+      expect(result!.billingTransactions).toEqual([]);
+    });
+
+    it("relation data is moved out, not duplicated onto result.customer", async () => {
+      mockFindUnique().mockResolvedValueOnce(
+        baseSyntheticCustomer({
+          subscriptions: [{ id: "sub-1" }],
+          billingTransactions: [{ id: "txn-1" }],
+        }),
+      );
+      const result = await compileCustomerExport(SYNTHETIC_CUSTOMER_ID);
+      expect((result!.customer as any).subscriptions).toBeUndefined();
+      expect((result!.customer as any).billingTransactions).toBeUndefined();
     });
   });
 });
