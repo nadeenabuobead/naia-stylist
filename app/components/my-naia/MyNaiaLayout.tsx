@@ -332,6 +332,7 @@ export default function MyNaiaLayout({ children, compact = false }: Props) {
                 type="button"
                 className="mn-footer-accordion-btn"
                 aria-expanded={footerOpen === col.title}
+                aria-controls={`mn-footer-panel-${col.title.replace(/\s+/g, "-")}`}
                 onClick={() => setFooterOpen((o) => o === col.title ? null : col.title)}
               >
                 <span className="mn-footer-accordion-title">{col.title}</span>
@@ -342,7 +343,7 @@ export default function MyNaiaLayout({ children, compact = false }: Props) {
                 }}>+</span>
               </button>
               {footerOpen === col.title && (
-                <ul className="mn-footer-accordion-list">
+                <ul className="mn-footer-accordion-list" id={`mn-footer-panel-${col.title.replace(/\s+/g, "-")}`}>
                   {col.links.map((l) => (
                     <li key={l.label}>
                       {"pending" in l && l.pending ? (

@@ -248,3 +248,42 @@ describe("J — follow-up (same day): Instagram/TikTok/Press drop the unverifiab
     assert.ok(mobileBlock.includes("footerPendingSuffix("), "mobile accordion uses the shared helper");
   });
 });
+
+describe("K — footer accordion button is programmatically associated with the panel it controls (2026-11-15 a11y fix)", () => {
+  // The mobile nav trigger already does this correctly (aria-expanded +
+  // aria-controls pointing at a real id on the revealed panel). The
+  // footer accordion button had aria-expanded alone — a screen reader
+  // announces "expanded/collapsed" with no indication of WHICH content
+  // that refers to. Matches the existing mn-mobile-nav pattern exactly,
+  // no new convention introduced.
+
+  it("the accordion button's aria-controls matches a real id on its own revealed <ul>, derived from the same column title", () => {
+    const btnIdx = SRC.indexOf("mn-footer-accordion-btn");
+    const btnBlock = SRC.slice(btnIdx, SRC.indexOf("</button>", btnIdx));
+    const controlsMatch = btnBlock.match(/aria-controls=\{`([^`]+)`\}/);
+    assert.ok(controlsMatch, "button has an aria-controls expression");
+    assert.match(controlsMatch![1], /\$\{col\.title\.replace\(\/\\s\+\/g, "-"\)\}$/, "derived from col.title, same slug rule as the id below");
+
+    const ulIdx = SRC.indexOf('<ul className="mn-footer-accordion-list"');
+    const ulTag = SRC.slice(ulIdx, SRC.indexOf(">", ulIdx) + 1);
+    assert.match(ulTag, /id=\{`[^`]+\$\{col\.title\.replace\(\/\\s\+\/g, "-"\)\}`\}/, "the <ul> carries a matching id built from the same expression");
+  });
+
+  it("the id/aria-controls prefix is identical on both sides — not just both present", () => {
+    const btnIdx = SRC.indexOf("mn-footer-accordion-btn");
+    const btnBlock = SRC.slice(btnIdx, SRC.indexOf("</button>", btnIdx));
+    const controlsValue = btnBlock.match(/aria-controls=\{`([^`]+)`\}/)![1];
+
+    const ulIdx = SRC.indexOf('<ul className="mn-footer-accordion-list"');
+    const ulTag = SRC.slice(ulIdx, SRC.indexOf(">", ulIdx) + 1);
+    const idValue = ulTag.match(/id=\{`([^`]+)`\}/)![1];
+
+    assert.strictEqual(controlsValue, idValue, "aria-controls and id must be built from the exact same template, or they can silently drift apart");
+  });
+
+  it("mirrors the mobile nav trigger's own existing aria-expanded + aria-controls pattern — not a new one-off convention", () => {
+    const triggerIdx = SRC.indexOf("mn-mobile-menu-btn");
+    const triggerBlock = SRC.slice(triggerIdx, SRC.indexOf("</button>", triggerIdx));
+    assert.ok(triggerBlock.includes("aria-controls=\"mn-mobile-nav\""), "the existing trigger this fix is modeled on still has its own aria-controls");
+  });
+});
