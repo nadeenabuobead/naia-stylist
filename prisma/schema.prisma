@@ -143,6 +143,12 @@ model Customer {
   // never read as "already linked" on its own.
   identityLinkRequests IdentityLinkRequest[]
 
+  // Large-export completion (2026-11-15) — see CustomerExportJob's own
+  // comment. Cascade is correct here (unlike Subscription/BillingTransaction
+  // above): an export job is nAia's own transient bookkeeping, never a
+  // financial record subject to independent retention law.
+  exportJobs CustomerExportJob[]
+
   // ── Secondary use of this customer's data for NADINE design research ──────
   //
   // Opt-in only, and the default is no. Declining changes nothing about the
@@ -322,6 +328,55 @@ model PendingCloudinaryDeletion {
 
   @@index([customerId])
   @@index([resolvedAt])
+}
+
+enum ExportJobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  EXPIRED
+}
+
+/// Tracks a customer's full-data export once it exceeds
+/// MAX_SYNC_EXPORT_IMAGES (customer-export-zip.server.ts) and can no longer
+/// be streamed directly in a single request. The ZIP itself is stored as a
+/// Cloudinary RAW private asset (never publicly reachable), referenced here
+/// only by publicId — the archive's bytes live in Cloudinary, not in this
+/// row. publicId is namespaced "naia-exports/{customerId}/{jobId}.zip" —
+/// the same customerId-prefixed-folder convention every other Cloudinary
+/// asset in this app already uses, which is what makes
+/// validatePublicIdOwnership-style scoping possible here too.
+///
+/// Customer isolation: a job is only ever looked up by (id, customerId)
+/// together — see getExportJobForCustomer in customer-export-zip.server.ts —
+/// never by id alone, the same discipline every other per-customer job
+/// table in this app (VirtualTryOnJob, BuyOrSkipAnalysis) already follows.
+///
+/// Expiration + cleanup: expiresAt is set once the archive upload succeeds
+/// (COMPLETED). sweepExpiredExportJobs (admin-triggered only, matching
+/// data-retention.server.ts's own established convention — no cron exists
+/// for this, deliberately, same as that module) deletes the Cloudinary
+/// asset for every expired, still-COMPLETED row and flips it to EXPIRED,
+/// clearing publicId so there is nothing left to leak or re-serve.
+model CustomerExportJob {
+  id         String           @id @default(cuid())
+  customerId String
+  customer   Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  status     ExportJobStatus  @default(PENDING)
+  /// Null until the archive upload succeeds; cleared again once the asset is
+  /// deleted by the retention sweep (EXPIRED) — never left pointing at a
+  /// Cloudinary asset that no longer exists.
+  publicId   String?          @unique
+  imageCount Int
+  errorCode  String?
+  createdAt    DateTime  @default(now())
+  completedAt  DateTime?
+  expiresAt    DateTime?
+  downloadedAt DateTime?
+
+  @@index([customerId])
+  @@index([expiresAt])
 }
 
 /// Audit + overlap-guard record for one run of the bounded, resumable,

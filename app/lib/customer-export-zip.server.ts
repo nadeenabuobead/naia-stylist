@@ -36,7 +36,7 @@ export type ExportZipResult =
   | { ok: false; reason: "not_found" }
   | { ok: false; reason: "too_large"; imageCount: number };
 
-interface ExportImageRef {
+export interface ExportImageRef {
   url: string;
   filename: string;
 }
@@ -46,7 +46,7 @@ interface ExportImageRef {
 // with wording accurate to what THIS export actually contains: real image
 // files already bundled in the archive, no link to chase. The JSON-only
 // export's own note is untouched; this only ever reaches the ZIP's data.json.
-const ZIP_NOTE =
+export const ZIP_NOTE =
   "This export covers every record this application stores about you. " +
   "Closet, My nAia Model (body photo only), and Virtual Try-On result " +
   "photos are included as actual image files in this archive (see the " +
@@ -59,7 +59,11 @@ const ZIP_NOTE =
   "those are governed by each provider's own data retention policy, not by " +
   "this application.";
 
-function countExportImages(exportData: CustomerExport): number {
+// Exported for reuse by customer-export-zip-large.server.ts — the same
+// "how many images would this export bundle" question the >300 path needs
+// to ask before deciding whether to even attempt a build, now asked in
+// exactly one place instead of two.
+export function countExportImages(exportData: CustomerExport): number {
   const closetCount = (exportData.closet as Array<{ downloadUrl?: string | null }>).filter(
     (c) => !!c.downloadUrl,
   ).length;
@@ -114,7 +118,12 @@ function remapTrendEditSnapshotImages(
 // expires in minutes has no business inside a permanent offline archive.
 // Returns the rewritten export data plus the ordered {url, filename} list
 // to actually fetch.
-function planImages(exportData: CustomerExport): {
+// Exported for reuse by customer-export-zip-large.server.ts — the >300 path
+// builds the exact same archive contents, just buffered instead of streamed
+// directly to the HTTP response, and must never re-derive this planning
+// logic separately (that would reopen the door to the two paths silently
+// disagreeing about what gets bundled).
+export function planImages(exportData: CustomerExport): {
   data: Record<string, unknown>;
   images: ExportImageRef[];
 } {

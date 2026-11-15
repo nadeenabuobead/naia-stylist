@@ -53,6 +53,7 @@ export function buildPrivateDownloadUrl(
   nowFn: () => number = Date.now,
   expirySeconds: number = 600, // 10 minutes — within the required 5–15 min range
   transformation?: string, // optional Cloudinary transformation string, e.g. "w_300,h_400,c_fill,q_60"
+  resourceType: string = "image", // "image" | "raw" — part of the URL path only, never signed (see signature params below)
 ): string {
   const timestamp = Math.floor(nowFn() / 1000);
   const expiresAt = timestamp + expirySeconds;
@@ -88,7 +89,7 @@ export function buildPrivateDownloadUrl(
   };
   if (transformation) urlParams.transformation = transformation;
 
-  return `https://api.cloudinary.com/v1_1/${config.cloudName}/image/download?${new URLSearchParams(urlParams).toString()}`;
+  return `https://api.cloudinary.com/v1_1/${config.cloudName}/${resourceType}/download?${new URLSearchParams(urlParams).toString()}`;
 }
 
 // ── Browser upload endpoint URL ──────────────────────────────────────────────
@@ -308,6 +309,7 @@ export async function deleteCloudinaryAsset(
   deliveryType: string = "private",
   _fetch: typeof fetch = fetch,
   _getConfig: () => CloudinaryConfig | null = getCloudinaryConfig,
+  resourceType: string = "image", // "image" | "raw" — part of the URL path only, never signed
 ): Promise<{ ok: boolean; errorCode?: string }> {
   const cfg = _getConfig();
   if (!cfg) {
@@ -338,7 +340,7 @@ export async function deleteCloudinaryAsset(
 
   try {
     const res = await _fetch(
-      `https://api.cloudinary.com/v1_1/${cfg.cloudName}/image/destroy`,
+      `https://api.cloudinary.com/v1_1/${cfg.cloudName}/${resourceType}/destroy`,
       { method: "POST", body },
     );
 
@@ -421,6 +423,69 @@ export async function uploadCloudinaryPrivate(
       format: json.format ?? "png",
       version: json.version != null ? String(json.version) : "",
     };
+  } catch {
+    return { ok: false, errorCode: "NETWORK_ERROR" };
+  }
+}
+
+// ── Server-side private RAW-file upload ──────────────────────────────────────
+//
+// For binary files that are not images (e.g. a generated ZIP archive) —
+// uploaded as a Buffer via multipart/form-data, not a base64 data URL like
+// uploadCloudinaryPrivate. A separate function rather than branching inside
+// uploadCloudinaryPrivate: the body construction genuinely differs (binary
+// multipart vs. a base64 string field), and base64-encoding a large archive
+// just to fit the existing function's data-URL shape would both bloat memory
+// and lose the point of using a raw upload in the first place.
+//
+// Signature params — identical alphabetical convention to uploadCloudinaryPrivate's own comment above.
+export async function uploadCloudinaryRawPrivate(
+  publicId: string,
+  buffer: Buffer,
+  filename: string,
+  deliveryType: string = "private",
+  _fetch: typeof fetch = fetch,
+  _getConfig: () => CloudinaryConfig | null = getCloudinaryConfig,
+): Promise<
+  | { ok: true; publicId: string }
+  | { ok: false; errorCode: string }
+> {
+  const cfg = _getConfig();
+  if (!cfg) return { ok: false, errorCode: "NOT_CONFIGURED" };
+
+  const timestamp = Math.floor(Date.now() / 1000);
+
+  const sigString =
+    `public_id=${publicId}` +
+    `&timestamp=${timestamp}` +
+    (deliveryType && deliveryType !== "upload" ? `&type=${deliveryType}` : "") +
+    cfg.apiSecret;
+
+  const signature = crypto.createHash("sha1").update(sigString).digest("hex");
+
+  const body = new FormData();
+  body.append("public_id", publicId);
+  body.append("api_key", cfg.apiKey);
+  body.append("timestamp", String(timestamp));
+  body.append("signature", signature);
+  if (deliveryType && deliveryType !== "upload") {
+    body.append("type", deliveryType);
+  }
+  // Buffer -> Blob via a plain Uint8Array view (same bytes, a type BlobPart accepts).
+  body.append("file", new Blob([new Uint8Array(buffer)], { type: "application/zip" }), filename);
+
+  try {
+    const res = await _fetch(
+      `https://api.cloudinary.com/v1_1/${cfg.cloudName}/raw/upload`,
+      { method: "POST", body },
+    );
+
+    if (!res.ok) return { ok: false, errorCode: "PROVIDER_ERROR" };
+
+    const json = (await res.json()) as { public_id?: string; error?: { message?: string } };
+    if (json.error) return { ok: false, errorCode: "PROVIDER_REJECTED" };
+
+    return { ok: true, publicId: json.public_id ?? publicId };
   } catch {
     return { ok: false, errorCode: "NETWORK_ERROR" };
   }
