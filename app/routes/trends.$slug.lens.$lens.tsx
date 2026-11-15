@@ -2,8 +2,13 @@ import { useState } from "react";
 import { Link, useLoaderData, type LoaderFunctionArgs } from "react-router";
 import { STOREFRONT_ORIGIN, STOREFRONT_NAV } from "../lib/storefront-config";
 import type { TrendReportData } from "../lib/trend-reports";
-import { getEditorialReportBySlug } from "../lib/editorial-reports.server";
-import { getEffectiveEditionPeriod, formatEditionMonthLabel } from "../lib/editorial-report-edition";
+import { getEditorialReportBySlug, getPublishedEditorialReports } from "../lib/editorial-reports.server";
+import {
+  getEffectiveEditionPeriod,
+  formatEditionMonthLabel,
+  getEditionNumberMap,
+  formatEditionNumber,
+} from "../lib/editorial-report-edition";
 import {
   PROFESSIONAL_LENS_CONTENT,
   LENS_LABELS,
@@ -16,6 +21,7 @@ type LoaderData = {
   report: TrendReportData;
   lens: LensKey;
   modules: LensModule[];
+  editionNumber: number | null;
 };
 
 export async function loader({ params }: LoaderFunctionArgs) {
@@ -26,7 +32,18 @@ export async function loader({ params }: LoaderFunctionArgs) {
   const reportLenses = PROFESSIONAL_LENS_CONTENT[report.slug];
   if (!reportLenses) throw new Response("Not Found", { status: 404 });
   const lensKey = lens as LensKey;
-  return { report, lens: lensKey, modules: reportLenses[lensKey].modules } satisfies LoaderData;
+  // Same cross-report edition numbering as the public report page and
+  // listing — computed from every published report's real chronology so
+  // this lens view never disagrees with the report it's a lens on.
+  const allPublished = await getPublishedEditorialReports();
+  const editionNumbers = getEditionNumberMap(allPublished);
+  const editionNumber = editionNumbers.get(getEffectiveEditionPeriod(report) ?? "") ?? null;
+  return {
+    report,
+    lens: lensKey,
+    modules: reportLenses[lensKey].modules,
+    editionNumber,
+  } satisfies LoaderData;
 }
 
 export function meta({ data }: { data?: LoaderData }) {
@@ -978,12 +995,12 @@ export function ErrorBoundary() {
 }
 
 export default function TrendLens() {
-  const { report, lens, modules } = useLoaderData() as LoaderData;
+  const { report, lens, modules, editionNumber } = useLoaderData() as LoaderData;
   const lensLabel = LENS_LABELS[lens];
 
   const reportIndex = (report.order ?? 1) - 1;
   const tint = TINTS[Math.max(0, reportIndex) % TINTS.length];
-  const num = String(Math.max(0, reportIndex)).padStart(2, "0");
+  const num = formatEditionNumber(editionNumber) ?? String(Math.max(0, reportIndex)).padStart(2, "0");
 
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "error">("idle");
 
@@ -1108,6 +1125,7 @@ export default function TrendLens() {
           </h1>
           <p className="psl-hero-lede">{report.editorialIntro || report.summary}</p>
           <div className="psl-hero-meta">
+            {formatEditionNumber(editionNumber) && <span>Edition {formatEditionNumber(editionNumber)}</span>}
             <span>{report.season}</span>
             {getEffectiveEditionPeriod(report) && (
               <span>

@@ -3,7 +3,12 @@ import { Link, useLoaderData, useRouteError, type LoaderFunctionArgs } from "rea
 import { STOREFRONT_ORIGIN, STOREFRONT_NAV } from "../lib/storefront-config";
 import type { TrendReportData } from "../lib/trend-reports";
 import { getEditorialReportBySlug, getPublishedEditorialReports } from "../lib/editorial-reports.server";
-import { getEffectiveEditionPeriod, formatEditionMonthLabel } from "../lib/editorial-report-edition";
+import {
+  getEffectiveEditionPeriod,
+  formatEditionMonthLabel,
+  getEditionNumberMap,
+  formatEditionNumber,
+} from "../lib/editorial-report-edition";
 import { reportVisual } from "../lib/report-visual";
 
 const FONTS =
@@ -818,7 +823,13 @@ export default function TrendReportDetail() {
 
   const reportIndex = allPublished.findIndex((r) => r.slug === report.slug);
   const tint = TINTS[Math.max(0, reportIndex) % TINTS.length];
-  const num = String(Math.max(0, reportIndex)).padStart(2, "0");
+  // Edition number is derived from real chronology (earliest edition period
+  // = 01), never from reportIndex — reportIndex only drives the tint cycle
+  // above, which has no meaning beyond visual variety.
+  const editionNumbers = getEditionNumberMap(allPublished);
+  const editionNumberOf = (r: TrendReportData) => editionNumbers.get(getEffectiveEditionPeriod(r) ?? "") ?? null;
+  const editionNumber = editionNumberOf(report);
+  const num = formatEditionNumber(editionNumber) ?? String(Math.max(0, reportIndex)).padStart(2, "0");
 
   const otherReports = allPublished
     .filter((r) => r.slug !== report.slug)
@@ -982,6 +993,7 @@ export default function TrendReportDetail() {
           </h1>
           <p className="psl-hero-lede">{report.editorialIntro || report.summary}</p>
           <div className="psl-hero-meta">
+            {formatEditionNumber(editionNumber) && <span>Edition {formatEditionNumber(editionNumber)}</span>}
             <span>{report.season}</span>
             <span>{formatEditionMonthLabel(getEffectiveEditionPeriod(report))}</span>
           </div>
@@ -1221,7 +1233,8 @@ export default function TrendReportDetail() {
             {otherReports.map((r, i) => {
               const rIndex = allPublished.findIndex((x) => x.slug === r.slug);
               const rTint = TINTS[Math.max(0, rIndex) % TINTS.length];
-              const rNum = String(Math.max(0, rIndex)).padStart(2, "0");
+              const rEditionNumber = editionNumberOf(r);
+              const rNum = formatEditionNumber(rEditionNumber) ?? String(Math.max(0, rIndex)).padStart(2, "0");
               return (
                 <Link
                   key={r.slug}
@@ -1239,7 +1252,10 @@ export default function TrendReportDetail() {
                   <div className="psl-card-bottom">
                     <div className="psl-card-title">{r.title}</div>
                     <div className="psl-card-footer">
-                      <span>{formatEditionMonthLabel(getEffectiveEditionPeriod(r))}</span>
+                      <span>
+                        {formatEditionNumber(rEditionNumber) && `Edition ${formatEditionNumber(rEditionNumber)} · `}
+                        {formatEditionMonthLabel(getEffectiveEditionPeriod(r))}
+                      </span>
                       <span className="psl-card-arrow">↗</span>
                     </div>
                   </div>

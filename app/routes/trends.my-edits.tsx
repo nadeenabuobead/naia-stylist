@@ -2,7 +2,12 @@ import type { LinksFunction, LoaderFunctionArgs } from "react-router";
 import { Link, useLoaderData } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { getPublishedEditorialReports } from "~/lib/editorial-reports.server";
-import { getEffectiveEditionPeriod, formatEditionMonthLabel } from "~/lib/editorial-report-edition";
+import {
+  getEffectiveEditionPeriod,
+  formatEditionMonthLabel,
+  getEditionNumberMap,
+  formatEditionNumber,
+} from "~/lib/editorial-report-edition";
 import { getUsageWindow } from "~/lib/plan/usage-window.server";
 import {
   getShopperEvidence,
@@ -30,6 +35,7 @@ type CardItem = {
   subTitle: string | null; // null = Passport incomplete
   monthLabel: string; // derived from the report's effective edition period — never relabelled
   isCurrentPeriod: boolean; // true only when the effective edition period matches the server's actual current month
+  editionNumber: number | null; // 01 for the earliest real edition period among all published reports, counting up
 };
 
 // One real editorial edition's worth of content. Multiple reports can
@@ -65,6 +71,10 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
   // Single DB round-trip for all personalisation signals.
   const evidence = await getShopperEvidence(customer.id);
   const { periodKey: currentPeriodKey } = getUsageWindow();
+  // Real chronology, not render order: the earliest edition period among
+  // every published report is 01, counting up from there — matches the
+  // same numbering used on the public Trend Reports pages.
+  const editionNumbers = getEditionNumberMap(reports);
 
   const cards: CardItem[] = reports.map((report) => {
     let subTitle: string | null = null;
@@ -83,6 +93,7 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
       subTitle,
       monthLabel: formatEditionMonthLabel(getEffectiveEditionPeriod(report)),
       isCurrentPeriod: getEffectiveEditionPeriod(report) === currentPeriodKey,
+      editionNumber: editionNumbers.get(getEffectiveEditionPeriod(report) ?? "") ?? null,
     };
   });
 
@@ -222,26 +233,31 @@ const css = `
   @media (min-width: 1024px) { .tme-siblings-grid { grid-template-columns: repeat(3, 1fr); } }
 
   /* ── Archive month grouping ───────────────────────────────────────
-     Each past month gets its own small label before its own row of
-     cards, so multiple reports from one past month read as "more from
-     that month," not as separate months. */
+     Each past edition keeps its own small month label above its own
+     card(s), so multiple reports from one past month still read as
+     "more from that month," not as separate editions — but the months
+     themselves now sit side by side on desktop/tablet instead of
+     stacking one full-width row per month, so e.g. April and May don't
+     each waste two empty grid columns next to a single card. */
+  .tme-archive-groups {
+    display: grid;
+    gap: 24px;
+  }
+  @media (min-width: 640px) { .tme-archive-groups { grid-template-columns: repeat(2, 1fr); } }
+  @media (min-width: 1024px) { .tme-archive-groups { grid-template-columns: repeat(3, 1fr); } }
+  .tme-archive-group-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
   .tme-archive-month {
     font-family: 'Space Mono', monospace;
     font-size: 0.6rem;
     letter-spacing: 0.22em;
     text-transform: uppercase;
     color: rgba(26,17,9,0.5);
-    margin: 24px 0 12px;
+    margin: 0 0 12px;
   }
-  .tme-archive-month:first-of-type { margin-top: 0; }
-
-  /* ── Card grid (archive) ──────────────────────────────────────── */
-  .tme-grid {
-    display: grid;
-    gap: 16px;
-  }
-  @media (min-width: 640px) { .tme-grid { grid-template-columns: repeat(2, 1fr); } }
-  @media (min-width: 1024px) { .tme-grid { grid-template-columns: repeat(3, 1fr); } }
 
   .tme-card {
     position: relative;
@@ -411,7 +427,11 @@ const css = `
 
 function TrendEditCard({ card, index, featured }: { card: CardItem; index: number; featured: boolean }) {
   const tint = TINTS[index % TINTS.length];
-  const num = String(index + 1).padStart(2, "0");
+  // Real chronological edition number (01 = earliest month), not render
+  // position — falls back to position only for the rare report with no
+  // parseable edition period at all, so the decorative numeral is never
+  // left blank.
+  const num = formatEditionNumber(card.editionNumber) ?? String(index + 1).padStart(2, "0");
 
   return (
     <Link
@@ -422,6 +442,7 @@ function TrendEditCard({ card, index, featured }: { card: CardItem; index: numbe
       <span className="tme-card-num" aria-hidden="true">{num}</span>
       <div className="tme-card-top">
         <span className="tme-card-dot" />
+        {formatEditionNumber(card.editionNumber) && `Edition ${formatEditionNumber(card.editionNumber)} · `}
         {card.monthLabel}
       </div>
       <div className="tme-card-bottom">
@@ -511,16 +532,18 @@ export default function MyTrendEdits() {
             {archiveGroups.length > 0 && (
               <>
                 <div className="tme-section-eyebrow">Previous editions</div>
-                {archiveGroups.map((group) => (
-                  <div key={group.periodKey ?? group.monthLabel}>
-                    <div className="tme-archive-month">{group.monthLabel}</div>
-                    <div className="tme-grid">
-                      {group.cards.map((card, i) => (
-                        <TrendEditCard key={card.slug} card={card} index={i} featured={false} />
-                      ))}
+                <div className="tme-archive-groups">
+                  {archiveGroups.map((group) => (
+                    <div key={group.periodKey ?? group.monthLabel}>
+                      <div className="tme-archive-month">{group.monthLabel}</div>
+                      <div className="tme-archive-group-cards">
+                        {group.cards.map((card, i) => (
+                          <TrendEditCard key={card.slug} card={card} index={i} featured={false} />
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </>
             )}
           </>
