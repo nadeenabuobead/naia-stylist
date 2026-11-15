@@ -990,7 +990,38 @@ export async function startOrResumeFullLookChain(
       blockingJobSameSuggestion: blockingJob ? blockingJob.outfitSuggestionId === ctx.outfitSuggestionId : null,
       reconciledJustNow: reconcileResult.reconciled,
     });
-    return { ok: false, reason: cooldown.reason };
+
+    // PERMANENT FIX (2026-11-15) — narrowly request-scoped, not based on
+    // errorCode alone. reconcileStaleFullLookJobForCustomer's own
+    // TIMED_OUT write (tryForceTimeoutAndCleanup, moments earlier in THIS
+    // SAME call) bumps that row's lastActivityAt to "now" — which can
+    // itself look like "a job just completed" to checkCustomerCooldown's
+    // 2-second anti-double-tap guard, producing a false COOLDOWN
+    // rejection caused entirely by our own cleanup, never a real customer
+    // action. Bypassed ONLY when every one of these holds for THIS exact
+    // request:
+    //   - the rejection reason is specifically COOLDOWN — ACTIVE_JOB is
+    //     NEVER bypassed; a genuinely still-active job keeps blocking.
+    //   - reconciliation, earlier in this SAME call, actually forced a
+    //     TIMED_OUT transition (reconcileResult.outcome === "TIMED_OUT").
+    //   - the row checkCustomerCooldown is now looking at is the EXACT
+    //     SAME row, matched by id — never by errorCode alone, which could
+    //     match an older, unrelated job from a past request and
+    //     incorrectly bypass a genuine customer cooldown on a different
+    //     job entirely.
+    // A real double-tap (two rapid clicks, nothing for reconciliation to
+    // act on this request) never satisfies this and still blocks exactly
+    // as before.
+    const selfResolvedThisRequest =
+      cooldown.reason === "COOLDOWN" &&
+      reconcileResult.outcome === "TIMED_OUT" &&
+      reconcileResult.jobId != null &&
+      blockingJob?.id === reconcileResult.jobId;
+
+    if (!selfResolvedThisRequest) {
+      return { ok: false, reason: cooldown.reason };
+    }
+    // Falls through — proceed exactly as if cooldown had returned {ok:true}.
   }
 
   const submit = await submitFullLookRealStep(ctx, 0, null);
@@ -1298,6 +1329,13 @@ export async function sweepStaleFullLookSteps(
 export interface ReconcileResult {
   reconciled: boolean; // true only if a stale job was found AND acted on
   outcome?: "COMPLETED" | "STEP_COMPLETE" | "FAILED" | "TIMED_OUT";
+  // The specific job this request's reconciliation acted on, when
+  // reconciled is true. Lets a caller narrowly identify "the row THIS
+  // request just transitioned," never "any row with a matching
+  // errorCode" (which could belong to a different, unrelated job from an
+  // earlier request) — see startOrResumeFullLookChain's own use of this
+  // for the request-scoped COOLDOWN exemption.
+  jobId?: string;
 }
 
 async function defaultFindActiveFullLookJobForCustomer(customerId: string): Promise<VirtualTryOnJobRecord | null> {
@@ -1363,9 +1401,9 @@ export async function reconcileStaleFullLookJobForCustomer(
   // any normal poll: read-only, free, never a new submission.
   const poll = await _pollStep(buildReconciliationCtx(job), job, 0);
 
-  if (poll.status === "COMPLETED") return { reconciled: true, outcome: "COMPLETED" };
-  if (poll.status === "STEP_COMPLETE") return { reconciled: true, outcome: "STEP_COMPLETE" };
-  if (poll.status === "FAILED") return { reconciled: true, outcome: "FAILED" };
+  if (poll.status === "COMPLETED") return { reconciled: true, outcome: "COMPLETED", jobId: job.id };
+  if (poll.status === "STEP_COMPLETE") return { reconciled: true, outcome: "STEP_COMPLETE", jobId: job.id };
+  if (poll.status === "FAILED") return { reconciled: true, outcome: "FAILED", jobId: job.id };
 
   // Still genuinely PROCESSING after a real check, and already past the
   // threshold — force the same atomic, status-guarded transition
@@ -1374,5 +1412,5 @@ export async function reconcileStaleFullLookJobForCustomer(
   const applied = await tryForceTimeoutAndCleanup(job, _timeoutJob, _findById, _deleteAsset);
   if (!applied) return { reconciled: false }; // a real poll won the race — leave its outcome untouched.
 
-  return { reconciled: true, outcome: "TIMED_OUT" };
+  return { reconciled: true, outcome: "TIMED_OUT", jobId: job.id };
 }

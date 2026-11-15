@@ -749,6 +749,134 @@ describe("startOrResumeFullLookChain", () => {
     expect(callOrder).toEqual(["reconcile", "cooldown"]);
   });
 
+  // ── PERMANENT FIX regression tests (2026-11-15) ───────────────────────────
+  //
+  // Root cause, confirmed live on staging: reconcileStaleFullLookJobForCustomer's
+  // own TIMED_OUT write bumps that row's lastActivityAt to "now," which can
+  // itself trip checkCustomerCooldown's 2-second anti-double-tap COOLDOWN
+  // guard on the SAME request — a false rejection caused entirely by our
+  // own cleanup, never a real customer action. The fix narrowly bypasses
+  // COOLDOWN only when THIS request's own reconciliation call just
+  // force-timed-out the EXACT row cooldown is now looking at (matched by
+  // job id, never by errorCode alone — an errorCode match could belong to
+  // an older, unrelated job from a past request and would incorrectly
+  // bypass a genuine customer cooldown on a different job entirely).
+  describe("permanent fix — self-generated COOLDOWN bypass is narrowly request-scoped", () => {
+    it("FIX.1 — a self-generated COOLDOWN (same job id reconciliation just timed out) is bypassed; the fresh start proceeds", async () => {
+      const _findJobFn = vi.fn(async () => null);
+      const _reconcileStale = vi.fn(async () => ({ reconciled: true, outcome: "TIMED_OUT" as const, jobId: "job-stale" }));
+      mockCooldown().mockResolvedValue({ ok: false, reason: "COOLDOWN", retryAfterMs: 1800 });
+      const _findMostRecentJob = vi.fn(async () => fakeJob("job-stale", { status: "TIMED_OUT", errorCode: "ABANDONED_NO_POLL" }));
+      const job = fakeJob("job-0");
+      mockCreateOrFind().mockResolvedValue({ ok: true, job, created: true });
+      mockAdvance()
+        .mockResolvedValueOnce({ ok: true, job: { ...job, status: "SUBMITTED" } })
+        .mockResolvedValueOnce({ ok: true, job: { ...job, status: "PROCESSING", predictionId: "pred-0" } });
+      mockDownloadPhoto().mockResolvedValue({ ok: true, dataUrl: PNG_DATA_URL });
+      mockSubmitProvider().mockResolvedValue({ ok: true, predictionId: "pred-0" });
+
+      const result = await startOrResumeFullLookChain(baseCtx(), { _findJobFn }, _reconcileStale, _findMostRecentJob);
+
+      expect(result).toEqual({ ok: true, stepIndex: 0 });
+      expect(mockSubmitProvider()).toHaveBeenCalledTimes(1); // exactly one legitimate new submission
+      expect(mockCreateOrFind()).toHaveBeenCalledTimes(1); // exactly one new job row — no duplicate
+    });
+
+    it("FIX.2 — a genuine double-tap COOLDOWN (reconciliation found nothing this request) is still correctly blocked", async () => {
+      const _findJobFn = vi.fn(async () => null);
+      const _reconcileStale = vi.fn(async () => ({ reconciled: false })); // nothing to reconcile — this really is just a rapid re-click
+      mockCooldown().mockResolvedValue({ ok: false, reason: "COOLDOWN", retryAfterMs: 1200 });
+      const _findMostRecentJob = vi.fn(async () => fakeJob("job-recent", { status: "COMPLETED" }));
+
+      const result = await startOrResumeFullLookChain(baseCtx(), { _findJobFn }, _reconcileStale, _findMostRecentJob);
+
+      expect(result).toEqual({ ok: false, reason: "COOLDOWN" });
+      expect(mockSubmitProvider()).not.toHaveBeenCalled();
+      expect(mockCreateOrFind()).not.toHaveBeenCalled();
+    });
+
+    it("FIX.3 — ACTIVE_JOB is NEVER bypassed, even if reconciliation just timed out a job this same request", async () => {
+      const _findJobFn = vi.fn(async () => null);
+      // Reconciliation resolved ONE stale job, but a DIFFERENT job is
+      // genuinely still active (e.g. a second, independent in-flight
+      // Full-Look chain under a different scope) — ACTIVE_JOB must still block.
+      const _reconcileStale = vi.fn(async () => ({ reconciled: true, outcome: "TIMED_OUT" as const, jobId: "job-stale" }));
+      mockCooldown().mockResolvedValue({ ok: false, reason: "ACTIVE_JOB" });
+      const _findMostRecentJob = vi.fn(async () => fakeJob("job-stale", { status: "TIMED_OUT", errorCode: "ABANDONED_NO_POLL" }));
+
+      const result = await startOrResumeFullLookChain(baseCtx(), { _findJobFn }, _reconcileStale, _findMostRecentJob);
+
+      expect(result).toEqual({ ok: false, reason: "ACTIVE_JOB" });
+      expect(mockSubmitProvider()).not.toHaveBeenCalled();
+    });
+
+    it("FIX.4 — a COOLDOWN on a DIFFERENT job than the one reconciliation just resolved is still correctly blocked (not matched by errorCode alone)", async () => {
+      const _findJobFn = vi.fn(async () => null);
+      const _reconcileStale = vi.fn(async () => ({ reconciled: true, outcome: "TIMED_OUT" as const, jobId: "job-stale-OLD" }));
+      mockCooldown().mockResolvedValue({ ok: false, reason: "COOLDOWN", retryAfterMs: 500 });
+      // The row cooldown is actually looking at is a DIFFERENT, more
+      // recent job that merely shares the same errorCode by coincidence
+      // (e.g. an older abandonment from a past, unrelated request) — must
+      // never be treated as "this request's own cleanup."
+      const _findMostRecentJob = vi.fn(async () => fakeJob("job-different", { status: "TIMED_OUT", errorCode: "ABANDONED_NO_POLL" }));
+
+      const result = await startOrResumeFullLookChain(baseCtx(), { _findJobFn }, _reconcileStale, _findMostRecentJob);
+
+      expect(result).toEqual({ ok: false, reason: "COOLDOWN" });
+      expect(mockSubmitProvider()).not.toHaveBeenCalled();
+    });
+
+    it("FIX.5 — reconciliation outcome COMPLETED/FAILED (a genuine FASHN-reported result, not our own abandonment) never bypasses COOLDOWN — the anti-double-tap courtesy window still applies to a real completion", async () => {
+      const _findJobFn = vi.fn(async () => null);
+      const _reconcileStale = vi.fn(async () => ({ reconciled: true, outcome: "COMPLETED" as const, jobId: "job-stale" }));
+      mockCooldown().mockResolvedValue({ ok: false, reason: "COOLDOWN", retryAfterMs: 1900 });
+      const _findMostRecentJob = vi.fn(async () => fakeJob("job-stale", { status: "COMPLETED" }));
+
+      const result = await startOrResumeFullLookChain(baseCtx(), { _findJobFn }, _reconcileStale, _findMostRecentJob);
+
+      expect(result).toEqual({ ok: false, reason: "COOLDOWN" });
+      expect(mockSubmitProvider()).not.toHaveBeenCalled();
+    });
+
+    it("FIX.6 — an already-in-progress chain (existing attempt, jobs.length > 0) never reaches cooldown or the bypass logic at all — resume path fully unaffected", async () => {
+      const job0 = fakeJob("job-0", { status: "PROCESSING", predictionId: "pred-0" });
+      const _findJobFn = vi.fn(async (where: { idempotencyKey: string }) =>
+        where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 0, null) ? job0 : null,
+      );
+      const _reconcileStale = vi.fn(async () => ({ reconciled: false }));
+      const _findMostRecentJob = vi.fn();
+
+      const result = await startOrResumeFullLookChain(baseCtx(), { _findJobFn }, _reconcileStale, _findMostRecentJob);
+
+      expect(result).toEqual({ ok: true, stepIndex: 0 });
+      expect(_reconcileStale).not.toHaveBeenCalled();
+      expect(mockCooldown()).not.toHaveBeenCalled();
+      expect(_findMostRecentJob).not.toHaveBeenCalled();
+    });
+
+    it("FIX.7 — single-item VTO isolation: a single-item job blocking COOLDOWN is never bypassed, even when reconciliation separately resolved an unrelated Full-Look job this same request", async () => {
+      const _findJobFn = vi.fn(async () => null);
+      // Reconciliation is scoped to productHandle "fulllook-real:" only
+      // (defaultFindActiveFullLookJobForCustomer) — it can resolve a
+      // Full-Look job, but can never find or touch a single-item VTO job.
+      // Here it resolved its own (different) Full-Look job...
+      const _reconcileStale = vi.fn(async () => ({ reconciled: true, outcome: "TIMED_OUT" as const, jobId: "fulllook-job" }));
+      mockCooldown().mockResolvedValue({ ok: false, reason: "COOLDOWN", retryAfterMs: 1700 });
+      // ...but the row checkCustomerCooldown is ACTUALLY blocking on is a
+      // genuinely-recent SINGLE-ITEM VTO completion — checkCustomerCooldown
+      // itself is customer-wide, not Full-Look-scoped, by design (shared
+      // with single-item VTO, unmodified by this fix).
+      const _findMostRecentJob = vi.fn(async () => fakeJob("single-item-job", { status: "COMPLETED", productHandle: "some-closet-item-handle" }));
+
+      const result = await startOrResumeFullLookChain(baseCtx(), { _findJobFn }, _reconcileStale, _findMostRecentJob);
+
+      expect(result).toEqual({ ok: false, reason: "COOLDOWN" });
+      expect(mockSubmitProvider()).not.toHaveBeenCalled();
+      // checkCustomerCooldown's own single-item VTO protection is completely untouched by this fix.
+      expect(mockCooldown()).toHaveBeenCalledWith("cust-1");
+    });
+  });
+
   // ── [vto-diag] TEMPORARY diagnostic-logging tests — remove alongside the
   // logging itself once the investigation closes. These exist to prove two
   // things: (1) the logged fields never contain a raw customerId/
@@ -882,7 +1010,7 @@ describe("reconcileStaleFullLookJobForCustomer", () => {
     const result = await reconcileStaleFullLookJobForCustomer(
       "cust-1", STALE_PROCESSING_THRESHOLD_MS, _findActiveJob, _pollStep, _timeoutJob, _findById,
     );
-    expect(result).toEqual({ reconciled: true, outcome: "COMPLETED" });
+    expect(result).toEqual({ reconciled: true, outcome: "COMPLETED", jobId: "job-stale" });
     expect(_timeoutJob).not.toHaveBeenCalled();
     // The synthetic ctx passed to pollStep must correctly encode "final" so
     // the real function's isFinal branch (stepIndex === garments.length-1)
@@ -910,7 +1038,7 @@ describe("reconcileStaleFullLookJobForCustomer", () => {
     const result = await reconcileStaleFullLookJobForCustomer(
       "cust-1", STALE_PROCESSING_THRESHOLD_MS, _findActiveJob, _pollStep, _timeoutJob, _findById,
     );
-    expect(result).toEqual({ reconciled: true, outcome: "TIMED_OUT" });
+    expect(result).toEqual({ reconciled: true, outcome: "TIMED_OUT", jobId: "job-stale" });
     expect(_timeoutJob).toHaveBeenCalledWith("job-stale");
     expect(mockDeleteAsset()).toHaveBeenCalled();
   });
@@ -946,7 +1074,7 @@ describe("reconcileStaleFullLookJobForCustomer", () => {
     const result = await reconcileStaleFullLookJobForCustomer(
       "cust-1", STALE_PROCESSING_THRESHOLD_MS, _findActiveJob, _pollStep, _timeoutJob, _findById,
     );
-    expect(result).toEqual({ reconciled: true, outcome: "FAILED" });
+    expect(result).toEqual({ reconciled: true, outcome: "FAILED", jobId: "job-stale" });
     expect(_timeoutJob).not.toHaveBeenCalled();
   });
 });
@@ -1370,6 +1498,165 @@ describe("advanceFullLookChain — dynamic chain length (4 and 5 garments)", () 
     const result = await startOrResumeFullLookChain(ctxWithGarmentCount(2));
     expect(result).toEqual({ ok: false, reason: "invalid_chain_length" });
     expect(mockSubmitProvider()).not.toHaveBeenCalled();
+  });
+});
+
+// ── End-to-end: a full 5-garment chain, with a stateful in-memory job
+// store standing in for the DB, driven exactly the way the orchestrator's
+// own advanceAutomatically loop drives it (repeated advanceFullLookChain
+// calls, auto-continuing past the one human-review pause) ─────────────────
+describe("end-to-end — complete 5-garment Full-Look chain: progression, failure recovery, retry, credit accounting", () => {
+  // Minimal in-memory stand-in for the VirtualTryOnJob table, keyed by
+  // idempotencyKey exactly as the real _findJobFn query is. Lets this one
+  // test drive createOrFindTryOnJob/advanceTryOnJob (both mocked at the
+  // module boundary) with real persistence semantics across many calls,
+  // without a live DB.
+  function makeJobStore() {
+    const byKey = new Map<string, VirtualTryOnJobRecord>();
+    let counter = 0;
+    const _findJobFn = async (where: { idempotencyKey: string }) => byKey.get(where.idempotencyKey) ?? null;
+    mockCreateOrFind().mockImplementation(async (args: any) => {
+      const existing = byKey.get(args.idempotencyKey);
+      if (existing) return { ok: true, job: existing, created: false };
+      const job = fakeJob(`job-${counter++}`, {
+        customerId: args.customerId,
+        productHandle: args.productHandle,
+        idempotencyKey: args.idempotencyKey,
+        outfitSuggestionId: args.outfitSuggestionId ?? null,
+        status: "CREATED",
+      });
+      byKey.set(args.idempotencyKey, job);
+      return { ok: true, job, created: true };
+    });
+    mockAdvance().mockImplementation(async (job: VirtualTryOnJobRecord, newStatus: string, fields: Record<string, unknown>) => {
+      const updated = { ...job, status: newStatus, ...fields, lastActivityAt: new Date() } as VirtualTryOnJobRecord;
+      for (const [key, existing] of byKey) {
+        if (existing.id === job.id) {
+          byKey.set(key, updated);
+          break;
+        }
+      }
+      return { ok: true, job: updated };
+    });
+    return { byKey, _findJobFn };
+  }
+
+  function mockAllFashnStepsCompleteImmediately() {
+    (global.fetch as ReturnType<typeof vi.fn>).mockImplementation(async (url: string | URL | Request) => {
+      const u = url.toString();
+      if (u.includes("/v1/status/")) {
+        return new Response(JSON.stringify({ status: "completed", output: [PNG_DATA_URL] }), { status: 200 });
+      }
+      return new Response(new Uint8Array([1, 2, 3]).buffer, { status: 200 }); // intermediate-image download
+    });
+  }
+
+  it("E2E.1 — all 5 garments submit and complete in order, auto-continuing past the pause exactly once, to a single COMPLETED result", async () => {
+    const ctx = ctxWithGarmentCount(5);
+    const { byKey, _findJobFn } = makeJobStore();
+    mockCooldown().mockResolvedValue({ ok: true });
+    mockAllFashnStepsCompleteImmediately();
+    mockDownloadPhoto().mockResolvedValue({ ok: true, dataUrl: PNG_DATA_URL });
+    mockSubmitProvider().mockResolvedValue({ ok: true, predictionId: "pred-x" });
+    mockUploadPrivate().mockResolvedValue({ ok: true, publicId: "x", format: "png", version: "1" });
+    mockUploadResult().mockResolvedValue({ ok: true });
+    mockBuildResultUrl().mockReturnValue("https://signed.example/final.png");
+
+    const start = await startOrResumeFullLookChain(ctx, { _findJobFn }, async () => ({ reconciled: false }));
+    expect(start).toEqual({ ok: true, stepIndex: 0 });
+
+    let result: Awaited<ReturnType<typeof advanceFullLookChain>> | undefined;
+    for (let guard = 0; guard < 10 && (!result || result.status !== "COMPLETED"); guard++) {
+      result = await advanceFullLookChain(ctx, { _findJobFn });
+      if (result.status === "AWAITING_CONTINUE") {
+        const cont = await continueToFinalStep(ctx, { _findJobFn });
+        expect(cont.ok).toBe(true);
+      }
+    }
+
+    expect(result).toEqual({ status: "COMPLETED", resultUrl: "https://signed.example/final.png" });
+    expect(mockSubmitProvider()).toHaveBeenCalledTimes(5); // exactly one real submission per garment — never duplicated
+
+    const allJobs = [...byKey.values()];
+    expect(allJobs).toHaveLength(5); // exactly 5 rows — one per garment, none extra
+    const finalJobs = allJobs.filter((j) => j.productHandle.startsWith(`${REAL_PRODUCT_HANDLE_PREFIX}:final:`));
+    expect(finalJobs).toHaveLength(1); // exactly one "final"-tagged row — the sole credit-eligible one
+    expect(finalJobs[0].status).toBe("COMPLETED");
+    const intermediateJobs = allJobs.filter((j) => j.productHandle.startsWith(`${REAL_PRODUCT_HANDLE_PREFIX}:step`));
+    expect(intermediateJobs).toHaveLength(4); // steps 1-4, all excluded from credit counting by entitlement.server.ts
+    expect(intermediateJobs.every((j) => j.status === "COMPLETED")).toBe(true);
+  });
+
+  it("E2E.2 — a mid-chain failure (step 3 of 5) stops the chain with no credit at risk; a retry under a new scope completes the SAME 5 garments and is the only attempt ever counted", async () => {
+    const baseGarments = ctxWithGarmentCount(5).garments;
+
+    // ── Attempt 1: fails at step index 2 (the 3rd garment) ──────────────────
+    const attempt1 = { ...ctxWithGarmentCount(5), reservationScope: "attempt-1" };
+    const store1 = makeJobStore();
+    mockCooldown().mockResolvedValue({ ok: true });
+    mockDownloadPhoto().mockResolvedValue({ ok: true, dataUrl: PNG_DATA_URL });
+    mockSubmitProvider().mockResolvedValue({ ok: true, predictionId: "pred-x" });
+    mockUploadPrivate().mockResolvedValue({ ok: true, publicId: "x", format: "png", version: "1" });
+
+    let stepCallCount = 0;
+    (global.fetch as ReturnType<typeof vi.fn>).mockImplementation(async (url: string | URL | Request) => {
+      const u = url.toString();
+      if (u.includes("/v1/status/")) {
+        stepCallCount++;
+        // The 3rd real FASHN status check (step index 2) reports failed.
+        if (stepCallCount === 3) {
+          return new Response(JSON.stringify({ status: "failed", error: "provider error" }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ status: "completed", output: [PNG_DATA_URL] }), { status: 200 });
+      }
+      return new Response(new Uint8Array([1, 2, 3]).buffer, { status: 200 });
+    });
+
+    const start1 = await startOrResumeFullLookChain(attempt1, { _findJobFn: store1._findJobFn }, async () => ({ reconciled: false }));
+    expect(start1).toEqual({ ok: true, stepIndex: 0 });
+
+    let result1: Awaited<ReturnType<typeof advanceFullLookChain>> | undefined;
+    for (let guard = 0; guard < 10 && (!result1 || (result1.status !== "COMPLETED" && result1.status !== "FAILED")); guard++) {
+      result1 = await advanceFullLookChain(attempt1, { _findJobFn: store1._findJobFn });
+      if (result1.status === "AWAITING_CONTINUE") {
+        await continueToFinalStep(attempt1, { _findJobFn: store1._findJobFn });
+      }
+    }
+    expect(result1).toMatchObject({ status: "FAILED", failedStepIndex: 2 });
+
+    // No credit at risk: nothing in this failed attempt ever reached a
+    // "final"-tagged COMPLETED row — entitlement.server.ts's own counting
+    // query (confirmed passing separately in entitlement-mock-vto-
+    // exclusion.test.ts) can never see a completed outfit here.
+    const attempt1Jobs = [...store1.byKey.values()];
+    expect(attempt1Jobs.some((j) => j.productHandle.includes(":final:") && j.status === "COMPLETED")).toBe(false);
+    expect(mockSubmitProvider()).toHaveBeenCalledTimes(3); // steps 0, 1, 2 submitted; 3 and 4 never reached
+
+    // ── Retry under a NEW, independent scope — the customer's own retry,
+    // never auto-triggered — completes clean through all 5 garments ──────
+    mockSubmitProvider().mockClear();
+    const attempt2 = { ...ctxWithGarmentCount(5), garments: baseGarments, reservationScope: "attempt-2" };
+    const store2 = makeJobStore();
+    mockAllFashnStepsCompleteImmediately();
+
+    const start2 = await startOrResumeFullLookChain(attempt2, { _findJobFn: store2._findJobFn }, async () => ({ reconciled: false }));
+    expect(start2).toEqual({ ok: true, stepIndex: 0 });
+
+    let result2: Awaited<ReturnType<typeof advanceFullLookChain>> | undefined;
+    for (let guard = 0; guard < 10 && (!result2 || result2.status !== "COMPLETED"); guard++) {
+      result2 = await advanceFullLookChain(attempt2, { _findJobFn: store2._findJobFn });
+      if (result2.status === "AWAITING_CONTINUE") {
+        await continueToFinalStep(attempt2, { _findJobFn: store2._findJobFn });
+      }
+    }
+
+    expect(result2?.status).toBe("COMPLETED");
+    // Attempt 2's own rows are completely independent of attempt 1's dead
+    // ones — a brand-new, fresh set of 5, with exactly one "final" credit.
+    const attempt2Jobs = [...store2.byKey.values()];
+    expect(attempt2Jobs).toHaveLength(5);
+    const attempt2Final = attempt2Jobs.filter((j) => j.productHandle.includes(":final:") && j.status === "COMPLETED");
+    expect(attempt2Final).toHaveLength(1); // exactly one completed outfit — exactly one credit, across BOTH attempts combined
   });
 });
 
