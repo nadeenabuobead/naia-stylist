@@ -2144,11 +2144,10 @@ export default function StyleMeResult() {
                   </span>
                 </h2>
                 <p className="sm-vto-body">
-                  {/* 2026-11-15 — customer-facing copy deliberately never shows
-                      step counts ("Step 2 of 5"). stepIndex/totalSteps are
-                      still tracked in fullLookQA's state (server-driven, real
-                      generation progress) for internal use — just not
-                      rendered here. */}
+                  {/* Customer-facing copy deliberately never shows step counts
+                      ("Step 2 of 5"). stepIndex/totalSteps are still tracked in
+                      fullLookQA's state (server-driven, real generation
+                      progress) for internal use — just not rendered here. */}
                   Your outfit is coming together.
                 </p>
               </>
@@ -2170,7 +2169,22 @@ export default function StyleMeResult() {
               </>
             )}
 
-            {fullLookQA.status === "error" && (
+            {fullLookQA.status === "error" && fullLookQA.message === "busy" && (
+              <>
+                <h2 className="sm-vto-heading">See this look on you.</h2>
+                <p className="sm-vto-body">Still finishing a previous try-on — please wait a moment and check again.</p>
+                <p className="sm-vto-body-note">Your StyleMe look is still saved here — and you haven't been charged for this attempt.</p>
+                <button
+                  type="button"
+                  className="sm-result-action-btn sm-vto-cta"
+                  onClick={() => triggerFullLook(false)}
+                >
+                  Check Again
+                </button>
+              </>
+            )}
+
+            {fullLookQA.status === "error" && fullLookQA.message !== "busy" && (
               <>
                 <h2 className="sm-vto-heading">See this look on you.</h2>
                 <p className="sm-vto-body">We couldn't create your try-on this time.</p>

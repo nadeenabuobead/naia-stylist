@@ -268,3 +268,28 @@ describe("FL13 — the garment-selection fingerprint reaches both startFullLookO
     assert.ok(startCallArgs.includes("fingerprint,"), "startFullLookOutfit must receive the fingerprint as its second argument");
   });
 });
+
+// 2026-11-15 — a stale, never-resolved job from an earlier attempt used to
+// surface as a raw HTTP 500 the moment a new attempt's cooldown check hit
+// ACTIVE_JOB (see full-look-vto-orchestrator.server.ts's OrchestratorStatus
+// BUSY case). "Another generation is already running" is an expected,
+// temporary business condition, not a server failure — this must be a
+// controlled response the client can distinguish from a real crash, not
+// lumped into serverError().
+describe("FL14 — a BUSY orchestrator status (ACTIVE_JOB/COOLDOWN) returns a controlled response, never the generic 500", () => {
+  it("action checks result.status === \"BUSY\" before the ERROR check and returns busy(), not serverError()", () => {
+    const actionBody = route.split("export async function action")[1];
+    const busyCheckIdx = actionBody.indexOf('result.status === "BUSY"');
+    const errorCheckIdx = actionBody.indexOf('result.status === "ERROR"');
+    assert.ok(busyCheckIdx !== -1, "action must explicitly branch on a BUSY status");
+    assert.ok(errorCheckIdx !== -1 && busyCheckIdx < errorCheckIdx, "BUSY must be checked before the generic ERROR fallthrough");
+    const busyLine = actionBody.slice(busyCheckIdx, busyCheckIdx + 80);
+    assert.ok(busyLine.includes("busy(result.reason)"), "a BUSY status must be routed to the dedicated busy() helper, not serverError()");
+  });
+
+  it("busy() returns HTTP 409, not 500 — distinguishable from a real server error", () => {
+    const busyFnBody = route.split("function busy(")[1].split("function ")[0];
+    assert.ok(busyFnBody.includes('status: 409'));
+    assert.ok(busyFnBody.includes('code: "busy"'));
+  });
+});

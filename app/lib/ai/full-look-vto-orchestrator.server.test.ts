@@ -343,6 +343,7 @@ describe("startFullLookOutfit / pollFullLookOutfit — auto-advance past the hum
     expect(result).toEqual({ status: "PROCESSING", stepIndex: 2, totalSteps: 3 });
   });
 
+
   it("a continueToFinalStep failure surfaces as ERROR, not silently swallowed", async () => {
     vi.mocked(startOrResumeFullLookChain).mockResolvedValueOnce({ ok: true, stepIndex: 1 });
     vi.mocked(advanceFullLookChain).mockResolvedValueOnce({ status: "AWAITING_CONTINUE", intermediates: [] } as any);
@@ -499,16 +500,19 @@ describe("startFullLookOutfit / pollFullLookOutfit — auto-advance past the hum
   // Serializable-transaction single-flight guarantee, shared unmodified
   // with single-item VTO) to reject a new scope's step 0 while an older
   // scope is still PROCESSING. This test proves THIS layer propagates that
-  // rejection as a hard ERROR rather than treating a new scope as license to
-  // proceed — no new job, no new credit-eligible chain, even though the
+  // rejection as a controlled BUSY status (2026-11-15 — previously a hard
+  // ERROR; checkCustomerCooldown's ACTIVE_JOB/COOLDOWN reasons are an
+  // expected business condition, not a server failure, so the route no
+  // longer maps them to a 500) rather than treating a new scope as license
+  // to proceed — no new job, no new credit-eligible chain, even though the
   // scope itself computed successfully.
-  it("retrying while the current attempt is still ACTIVE (not yet failed) is rejected, not silently allowed to start a second concurrent chain", async () => {
+  it("retrying while the current attempt is still ACTIVE (not yet failed) is rejected as BUSY, not silently allowed to start a second concurrent chain", async () => {
     mockCount().mockResolvedValue(1); // attempt a0 exists and is still PROCESSING — not yet failed
     vi.mocked(startOrResumeFullLookChain).mockResolvedValueOnce({ ok: false, reason: "ACTIVE_JOB" });
 
     const result = await startFullLookOutfit(BASE_CTX, BASE_FP, { forceNewAttempt: true });
 
-    expect(result).toEqual({ status: "ERROR", reason: "ACTIVE_JOB" });
+    expect(result).toEqual({ status: "BUSY", reason: "ACTIVE_JOB" });
     expect(advanceFullLookChain).not.toHaveBeenCalled();
     // The new scope was computed (a1), but startOrResumeFullLookChain's own
     // atomic guard — not this layer — is what actually blocked it.
