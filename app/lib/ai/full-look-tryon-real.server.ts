@@ -137,30 +137,6 @@ import {
   FULL_LOOK_MAX_GARMENTS,
   FULL_LOOK_FINAL_STEP_HANDLE_PREFIX,
 } from "./full-look-handle-constants.js";
-import { createHash } from "node:crypto";
-
-// ── TEMPORARY DIAGNOSTIC LOGGING (2026-11-15) ───────────────────────────────
-//
-// Investigating why the stale-job reconciliation fix still produced a BUSY
-// response against a real staging attempt. Every line below is tagged
-// "[vto-diag]" for easy grep and removal once the investigation closes —
-// see the session's own diagnostic-logging commit message. Privacy-safe by
-// construction: shortHash is one-way and truncated (never reversible to
-// the original id in practice), vtoType is a derived 2-value category
-// (never the raw productHandle, which can embed a garment label),
-// ageSeconds is a number (never a raw timestamp someone could correlate
-// elsewhere), and nothing below ever logs a customerId, suggestionId,
-// image URL, or FASHN prediction id in full. Purely additive — every
-// console.log call sits beside an existing return/decision, changing
-// nothing about what that decision actually does.
-function shortHash(value: string): string {
-  return createHash("sha256").update(value).digest("hex").slice(0, 8);
-}
-
-function vtoTypeOf(productHandle: string): "full-look" | "single-item" {
-  return productHandle.startsWith(`${REAL_PRODUCT_HANDLE_PREFIX}:`) ? "full-look" : "single-item";
-}
-
 // Real DB implementation — the default for every caller except tests, which
 // inject a mock via WalkChainDeps._findJobFn instead.
 async function defaultFindJobByIdempotencyKey(
@@ -424,48 +400,11 @@ async function markFailedBestEffort(job: VirtualTryOnJobRecord, errorCode: strin
   }
 }
 
-// ── [vto-diag] TEMPORARY DRY-RUN GUARD (2026-11-15) ─────────────────────────
-//
-// Blocks the ONE real choke point every garment step's FASHN submission —
-// start, auto-advance, AND the post-pause final step — all funnel through
-// this single function (startOrResumeFullLookChain, advanceFullLookChain's
-// STEP_COMPLETE branch, and continueToFinalStep each call it, never FASHN
-// directly), so gating here covers every one of them with a single check,
-// including automatic advancement to subsequent garments.
-//
-// Requires BOTH conditions, independently, before it activates:
-//   1. VTO_DIAGNOSTIC_DRY_RUN=true — a Preview-only env var set ONLY on this
-//      one diagnostic deployment (never Production, never any other
-//      Preview), so this guard is structurally inert everywhere else even
-//      if this exact code were ever deployed elsewhere.
-//   2. ctx.outfitSuggestionId matches the ONE suggestion this diagnostic
-//      investigation is about — any other suggestion, on this SAME
-//      deployment, submits normally and is completely unaffected.
-// Returns BEFORE createOrFindTryOnJob is ever called — no VirtualTryOnJob
-// row is created, so nothing here can affect credits/quota (counted only
-// off COMPLETED rows) or customer data of any kind. Remove this entire
-// block, the env var, and DIAGNOSTIC_DRY_RUN_SUGGESTION_ID once the
-// investigation closes.
-const DIAGNOSTIC_DRY_RUN_SUGGESTION_ID = "cmwgxsbac0004kx08iqw6bnhf";
-
-function diagnosticDryRunShouldBlock(ctx: FullLookChainContext): boolean {
-  return process.env.VTO_DIAGNOSTIC_DRY_RUN === "true" && ctx.outfitSuggestionId === DIAGNOSTIC_DRY_RUN_SUGGESTION_ID;
-}
-
 export async function submitFullLookRealStep(
   ctx: FullLookChainContext,
   stepIndex: number,
   priorJobId: string | null,
 ): Promise<SubmitStepResult> {
-  if (diagnosticDryRunShouldBlock(ctx)) {
-    console.log("[vto-diag] dry-run-blocked-submission", {
-      customerHash: shortHash(ctx.customerId),
-      stepIndex,
-      isFinalStep: stepIndex === ctx.garments.length - 1,
-    });
-    return { ok: false, reason: "diagnostic_dry_run" };
-  }
-
   // 2026-11-15 — defense in depth. This is the actual site a missing
   // ctx.garments[stepIndex] used to crash with a raw TypeError (see
   // api.full-look-vto.tsx's GET loader regression, fixed the same day):
@@ -920,11 +859,12 @@ export type StartChainResult =
   | { ok: true; stepIndex: number }
   | { ok: false; reason: string };
 
-// [vto-diag] TEMPORARY — the real lookup behind the diagnostic log below,
-// factored out so tests can inject a stub instead of hitting real prisma.
-// Deliberately replicates checkCustomerCooldown's own query exactly (see
+// The read behind the permanent COOLDOWN-bypass fix below, factored out so
+// tests can inject a stub instead of hitting real prisma. Deliberately
+// replicates checkCustomerCooldown's own query exactly (see
 // my-naia-model.server.ts's _findJob) — a second, side-effect-free read of
-// the same row, purely to report what it is.
+// the same row, used to confirm it's the EXACT row reconciliation just
+// resolved, never a different job that merely shares an errorCode.
 async function defaultFindMostRecentJobForCustomer(customerId: string): Promise<VirtualTryOnJobRecord | null> {
   return prisma.virtualTryOnJob.findFirst({
     where: { customerId },
@@ -939,7 +879,8 @@ export async function startOrResumeFullLookChain(
   // don't exercise this path inject a no-op stub instead, so they never
   // touch prisma through it — see this file's own test suite.
   _reconcileStale: (customerId: string) => Promise<ReconcileResult> = reconcileStaleFullLookJobForCustomer,
-  // [vto-diag] TEMPORARY — see defaultFindMostRecentJobForCustomer above.
+  // See defaultFindMostRecentJobForCustomer above — backs the permanent
+  // COOLDOWN-bypass fix below, not just diagnostics.
   _findMostRecentJob: (customerId: string) => Promise<VirtualTryOnJobRecord | null> = defaultFindMostRecentJobForCustomer,
 ): Promise<StartChainResult> {
   // 2026-11-15 — chain length is now per-outfit, between 3 (the original
@@ -963,33 +904,14 @@ export async function startOrResumeFullLookChain(
   // a chain that's actually dead — see reconcileStaleFullLookJobForCustomer's
   // own header comment. A no-op in the common case (no stale job exists).
   const reconcileResult = await _reconcileStale(ctx.customerId);
-  // [vto-diag] whether reconciliation found and acted on anything this
-  // request, and specifically whether it JUST wrote a fresh TIMED_OUT
-  // transition — the one case that could make the cooldown check below
-  // see a near-zero-age "most recent job" and reject on COOLDOWN rather
-  // than ACTIVE_JOB, within this SAME request.
-  console.log("[vto-diag] reconcile", {
-    customerHash: shortHash(ctx.customerId),
-    reconciled: reconcileResult.reconciled,
-    outcome: reconcileResult.outcome ?? null,
-  });
 
   const cooldown = await checkCustomerCooldown(ctx.customerId);
   if (!cooldown.ok) {
-    // [vto-diag] one additional READ-ONLY lookup, replicating exactly the
-    // query checkCustomerCooldown itself just used internally, purely to
-    // report WHICH job it found. No write, no new behavior — the real
-    // cooldown decision above is already made; this only explains it.
+    // One additional READ-ONLY lookup, replicating exactly the query
+    // checkCustomerCooldown itself just used internally — needed to
+    // confirm the row it's looking at is the SAME one reconciliation just
+    // resolved, for the permanent fix below. No write, no new behavior.
     const blockingJob = await _findMostRecentJob(ctx.customerId);
-    console.log("[vto-diag] cooldown-rejected", {
-      customerHash: shortHash(ctx.customerId),
-      reason: cooldown.reason,
-      blockingJobStatus: blockingJob?.status ?? null,
-      blockingJobVtoType: blockingJob ? vtoTypeOf(blockingJob.productHandle) : null,
-      blockingJobAgeSeconds: blockingJob ? Math.round((Date.now() - blockingJob.lastActivityAt.getTime()) / 1000) : null,
-      blockingJobSameSuggestion: blockingJob ? blockingJob.outfitSuggestionId === ctx.outfitSuggestionId : null,
-      reconciledJustNow: reconcileResult.reconciled,
-    });
 
     // PERMANENT FIX (2026-11-15) — narrowly request-scoped, not based on
     // errorCode alone. reconcileStaleFullLookJobForCustomer's own

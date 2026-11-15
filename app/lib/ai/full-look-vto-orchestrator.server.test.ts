@@ -343,30 +343,6 @@ describe("startFullLookOutfit / pollFullLookOutfit — auto-advance past the hum
     expect(result).toEqual({ status: "PROCESSING", stepIndex: 2, totalSteps: 3 });
   });
 
-  // [vto-diag] TEMPORARY — remove alongside the diagnostic logging. Proves
-  // the start-scope log line never leaks the raw customerId/suggestionId,
-  // and that logging changes nothing about the function's own return value.
-  it("[vto-diag] start-scope logs priorAttemptCount and hashes only — never the raw customerId or outfitSuggestionId", async () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    mockCount().mockResolvedValue(2); // 2 prior attempts for THIS customer+suggestion
-    vi.mocked(startOrResumeFullLookChain).mockResolvedValueOnce({ ok: true, stepIndex: 0 });
-    vi.mocked(advanceFullLookChain).mockResolvedValueOnce({ status: "PROCESSING", stepIndex: 0 } as any);
-
-    const result = await startFullLookOutfit(BASE_CTX, BASE_FP);
-
-    expect(result).toEqual({ status: "PROCESSING", stepIndex: 0, totalSteps: 3 }); // unchanged by logging
-    const diagCall = logSpy.mock.calls.find((c) => c[0] === "[vto-diag] start-scope");
-    expect(diagCall).toBeDefined();
-    const payload = diagCall![1] as Record<string, unknown>;
-    const serialized = JSON.stringify(payload);
-    expect(serialized).not.toContain(BASE_CTX.customerId);
-    expect(serialized).not.toContain(BASE_CTX.outfitSuggestionId);
-    expect(payload.priorAttemptCount).toBe(2);
-    expect(typeof payload.customerHash).toBe("string");
-    expect((payload.customerHash as string).length).toBe(8);
-    expect(typeof payload.suggestionHash).toBe("string");
-    logSpy.mockRestore();
-  });
 
   it("a continueToFinalStep failure surfaces as ERROR, not silently swallowed", async () => {
     vi.mocked(startOrResumeFullLookChain).mockResolvedValueOnce({ ok: true, stepIndex: 1 });
