@@ -39,6 +39,14 @@ import prisma from "~/db.server";
 import { checkFashnPredictionStatus, REAL_PRODUCT_HANDLE_PREFIX } from "~/lib/ai/full-look-tryon-real.server";
 import { FULL_LOOK_FINAL_STEP_HANDLE_PREFIX } from "~/lib/ai/full-look-handle-constants";
 import type { VirtualTryOnJobRecord } from "~/lib/ai/virtual-try-on.types";
+import {
+  selectFullLookGarments,
+  resolveCurrentAttemptScope,
+  type SelectableOutfitItem,
+} from "~/lib/ai/full-look-vto-orchestrator.server";
+import { getCloudinaryConfig } from "~/lib/cloudinary-admin.server";
+
+const RESERVATION_KEY_PREFIX = "fulllook-real-reservation:";
 
 function authRequired() {
   return data({ ok: false, code: "auth_required" }, { status: 401 });
@@ -109,12 +117,58 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const finalStep = jobs.find((j) => j.productHandle.startsWith(FULL_LOOK_FINAL_STEP_HANDLE_PREFIX));
   const finalStepCompleted = finalStep?.status === "COMPLETED";
 
+  // ── Scope-resolution check (2026-11-15 addition) — still strictly
+  // read-only. resolveCurrentAttemptScope only runs a count() query and
+  // formats a string; selectFullLookGarments/computeGarmentFingerprint are
+  // pure, synchronous, no I/O. Added to settle, empirically, exactly which
+  // reservationScope a GET refresh would resolve to RIGHT NOW, and whether
+  // that matches the scope any existing step-0 job actually lives under —
+  // rather than inferring it by hand, which produced two disagreeing
+  // answers on manual re-derivation.
+  let scopeCheck: Record<string, unknown> = { attempted: false };
+  const suggestion = await prisma.outfitSuggestion.findUnique({
+    where: { id: suggestionId },
+    include: {
+      session: { select: { customerId: true } },
+      items: { include: { closetItem: { select: { name: true, imageUrl: true, imagePublicId: true, imageFormat: true, category: true } } } },
+    },
+  });
+  if (suggestion && suggestion.session.customerId === customer.id) {
+    const selection = selectFullLookGarments(suggestion.items as unknown as SelectableOutfitItem[], {
+      customerId: customer.id,
+      cloudinaryConfig: getCloudinaryConfig(),
+    });
+    if (selection) {
+      const currentlyResolvedScope = await resolveCurrentAttemptScope(customer.id, suggestionId, selection.fingerprint);
+      const step0Jobs = jobs
+        .filter((j) => j.idempotencyKey.startsWith(`${RESERVATION_KEY_PREFIX}${customer.id}:`))
+        .map((j) => ({
+          jobId: j.id,
+          status: j.status,
+          ownScope: j.idempotencyKey.slice(`${RESERVATION_KEY_PREFIX}${customer.id}:`.length),
+        }));
+      scopeCheck = {
+        attempted: true,
+        currentFingerprint: selection.fingerprint,
+        currentlyResolvedScope,
+        step0Jobs,
+        aScopeMatchesTheMostRecentStep0Job:
+          step0Jobs.length > 0 && step0Jobs[step0Jobs.length - 1].ownScope === currentlyResolvedScope,
+      };
+    } else {
+      scopeCheck = { attempted: true, error: "selectFullLookGarments returned null (fewer than 3 eligible garments)." };
+    }
+  } else {
+    scopeCheck = { attempted: true, error: "Suggestion not found or not owned by this customer." };
+  }
+
   return data(
     {
       ok: true,
       suggestionId,
       totalJobRows: jobs.length,
       steps,
+      scopeCheck,
       // Deliberately NOT a credit-consumption answer. This only reflects
       // whether the final garment's own row reached COMPLETED — it does
       // not query entitlement.server.ts's actual counting logic

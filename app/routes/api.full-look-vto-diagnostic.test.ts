@@ -16,21 +16,35 @@ vi.mock("~/lib/naia-session.server", () => ({
   getCurrentNaiaCustomer: vi.fn(),
 }));
 vi.mock("~/db.server", () => ({
-  default: { virtualTryOnJob: { findMany: vi.fn() } },
+  default: {
+    virtualTryOnJob: { findMany: vi.fn() },
+    outfitSuggestion: { findUnique: vi.fn() },
+  },
 }));
 vi.mock("~/lib/ai/full-look-tryon-real.server", () => ({
   checkFashnPredictionStatus: vi.fn(),
   REAL_PRODUCT_HANDLE_PREFIX: "fulllook-real",
 }));
+vi.mock("~/lib/ai/full-look-vto-orchestrator.server", () => ({
+  selectFullLookGarments: vi.fn(() => null), // default: no suggestion/selection — keeps existing tests unaffected
+  resolveCurrentAttemptScope: vi.fn(),
+}));
+vi.mock("~/lib/cloudinary-admin.server", () => ({
+  getCloudinaryConfig: vi.fn(() => null),
+}));
 
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import prisma from "~/db.server";
 import { checkFashnPredictionStatus } from "~/lib/ai/full-look-tryon-real.server";
+import { selectFullLookGarments, resolveCurrentAttemptScope } from "~/lib/ai/full-look-vto-orchestrator.server";
 import { loader } from "./api.full-look-vto-diagnostic";
 
 const mockCustomer = () => getCurrentNaiaCustomer as ReturnType<typeof vi.fn>;
 const mockFindMany = () => (prisma as any).virtualTryOnJob.findMany as ReturnType<typeof vi.fn>;
 const mockFashnCheck = () => checkFashnPredictionStatus as ReturnType<typeof vi.fn>;
+const mockFindSuggestion = () => (prisma as any).outfitSuggestion.findUnique as ReturnType<typeof vi.fn>;
+const mockSelectGarments = () => selectFullLookGarments as ReturnType<typeof vi.fn>;
+const mockResolveScope = () => resolveCurrentAttemptScope as ReturnType<typeof vi.fn>;
 
 function makeJob(overrides: Record<string, unknown> = {}) {
   return {
@@ -176,5 +190,78 @@ describe("api.full-look-vto-diagnostic — loader behavior", () => {
     const res: any = await loader(makeRequest("https://x.test/api/full-look-vto-diagnostic?suggestionId=sugg-1"));
     const body = res.data ?? res;
     expect(body.steps[0].liveFashnStatus).toBe("status_check_failed");
+  });
+});
+
+describe("api.full-look-vto-diagnostic — scopeCheck (empirical scope-resolution comparison)", () => {
+  const suggestionFixture = { id: "sugg-1", session: { customerId: "cust-1" }, items: [] };
+
+  it("reports a mismatch when the freshly-resolved scope does not match any existing step-0 job's own scope — the exact empirical signal for the reported bug", async () => {
+    mockCustomer().mockResolvedValue({ id: "cust-1" });
+    mockFindSuggestion().mockResolvedValue(suggestionFixture);
+    mockSelectGarments().mockReturnValue({ garments: [], omittedLabels: [], fingerprint: "fp-abc" });
+    mockResolveScope().mockResolvedValue("sugg-1:a2:fp-abc"); // what a GET refresh would resolve to right now
+    const jobs = [
+      makeJob({
+        id: "job-c-step1",
+        status: "PROCESSING",
+        predictionId: "pred-c",
+        idempotencyKey: "fulllook-real-reservation:cust-1:sugg-1:a2:fp-xyz", // the ACTUAL attempt's own scope — different fingerprint
+      }),
+    ];
+    mockFindMany().mockResolvedValue(jobs);
+
+    const res: any = await loader(makeRequest("https://x.test/api/full-look-vto-diagnostic?suggestionId=sugg-1"));
+    const body = res.data ?? res;
+
+    expect(body.scopeCheck.attempted).toBe(true);
+    expect(body.scopeCheck.currentlyResolvedScope).toBe("sugg-1:a2:fp-abc");
+    expect(body.scopeCheck.step0Jobs).toEqual([
+      { jobId: "job-c-step1", status: "PROCESSING", ownScope: "sugg-1:a2:fp-xyz" },
+    ]);
+    expect(body.scopeCheck.aScopeMatchesTheMostRecentStep0Job).toBe(false);
+  });
+
+  it("reports a match when the freshly-resolved scope equals the most recent step-0 job's own scope", async () => {
+    mockCustomer().mockResolvedValue({ id: "cust-1" });
+    mockFindSuggestion().mockResolvedValue(suggestionFixture);
+    mockSelectGarments().mockReturnValue({ garments: [], omittedLabels: [], fingerprint: "fp-abc" });
+    mockResolveScope().mockResolvedValue("sugg-1:a2:fp-abc");
+    const jobs = [
+      makeJob({ id: "job-a-step1", idempotencyKey: "fulllook-real-reservation:cust-1:sugg-1:a0:fp-abc" }),
+      makeJob({ id: "job-c-step1", idempotencyKey: "fulllook-real-reservation:cust-1:sugg-1:a2:fp-abc" }),
+    ];
+    mockFindMany().mockResolvedValue(jobs);
+
+    const res: any = await loader(makeRequest("https://x.test/api/full-look-vto-diagnostic?suggestionId=sugg-1"));
+    const body = res.data ?? res;
+
+    expect(body.scopeCheck.aScopeMatchesTheMostRecentStep0Job).toBe(true);
+  });
+
+  it("the scope check never writes anything and never calls a submission function — it only calls resolveCurrentAttemptScope and selectFullLookGarments, both pure/read", async () => {
+    mockCustomer().mockResolvedValue({ id: "cust-1" });
+    mockFindSuggestion().mockResolvedValue(suggestionFixture);
+    mockSelectGarments().mockReturnValue({ garments: [], omittedLabels: [], fingerprint: "fp-abc" });
+    mockResolveScope().mockResolvedValue("sugg-1:a0:fp-abc");
+    mockFindMany().mockResolvedValue([]);
+
+    await loader(makeRequest("https://x.test/api/full-look-vto-diagnostic?suggestionId=sugg-1"));
+
+    expect(mockResolveScope()).toHaveBeenCalledTimes(1);
+    expect(mockResolveScope()).toHaveBeenCalledWith("cust-1", "sugg-1", "fp-abc");
+  });
+
+  it("reports a clean error, not a crash, when the suggestion belongs to a different customer", async () => {
+    mockCustomer().mockResolvedValue({ id: "cust-1" });
+    mockFindSuggestion().mockResolvedValue({ id: "sugg-1", session: { customerId: "someone-else" }, items: [] });
+    mockFindMany().mockResolvedValue([]);
+
+    const res: any = await loader(makeRequest("https://x.test/api/full-look-vto-diagnostic?suggestionId=sugg-1"));
+    const body = res.data ?? res;
+
+    expect(body.scopeCheck.attempted).toBe(true);
+    expect(body.scopeCheck.error).toBeDefined();
+    expect(mockResolveScope()).not.toHaveBeenCalled();
   });
 });
