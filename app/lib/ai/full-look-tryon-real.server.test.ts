@@ -286,6 +286,20 @@ describe("submitFullLookRealStep", () => {
     expect(global.fetch).toHaveBeenCalled(); // fetched the prior step's stored output instead
   });
 
+  it("FL.10b — REGRESSION: when the prior step's intermediate Cloudinary download fails, the HTTP status is preserved in the errorCode instead of a bare 'PROVIDER_ERROR' — distinguishes a 404 (expired/missing asset) from a 401/403 (auth) from a 429/5xx (transient)", async () => {
+    const job = fakeJob("job-1");
+    mockCreateOrFind().mockResolvedValue({ ok: true, job, created: true });
+    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job, status: "SUBMITTED" } });
+    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job, status: "FAILED" } }); // markFailedBestEffort
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(new Response(null, { status: 404 }));
+
+    const result = await submitFullLookRealStep(baseCtx(), 1, "job-0");
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("PROVIDER_ERROR_404");
+    expect(mockAdvance()).toHaveBeenCalledWith(expect.anything(), "FAILED", { errorCode: "PROVIDER_ERROR_404" });
+  });
+
   it("FL.11 — duplicate request (job already exists) is idempotent: no second FASHN submission", async () => {
     const existing = fakeJob("job-0", { status: "PROCESSING", predictionId: "pred-0" });
     mockCreateOrFind().mockResolvedValue({ ok: true, job: existing, created: false });
