@@ -141,6 +141,49 @@ import { createHash } from "node:crypto";
 function hashCustomerId(customerId: string): string {
   return createHash("sha256").update(customerId).digest("hex").slice(0, 12);
 }
+
+// ── FASHN output validation (2026-11-16) ────────────────────────────────────
+//
+// CONFIRMED GAP from the Cloudinary upload investigation: outputs[0] was
+// only ever checked with `typeof === "string"` before being handed
+// straight to Cloudinary — never validated as an actual well-formed image
+// data URI, and never size-checked at all. A malformed or truncated
+// string, or a legitimately oversized one, would reach Cloudinary with no
+// earlier, clearer signal from our own side — Cloudinary's own rejection
+// (if any) is the only thing that would ever catch it, exactly the kind
+// of silent-until-it-fails gap this whole investigation started from.
+// This does NOT claim to explain any of the three real failures already
+// investigated — it closes a real validation gap found during that
+// investigation, confirmed separately from (not a substitute for) the
+// still-open question of what Cloudinary itself actually rejected.
+//
+// Sanity backstop, not a tuned business limit — FASHN's own real full-
+// body tryon-max output size is unverified without a live call; 25 MB
+// decoded is deliberately generous (several times larger than any
+// realistic image this pipeline should ever produce) so this only ever
+// catches a genuinely anomalous payload, never a normal one.
+export const MAX_FASHN_OUTPUT_BYTES = 25 * 1024 * 1024;
+
+export type ValidateFashnOutputResult = { ok: true } | { ok: false; errorCode: string };
+
+export function validateFashnOutputDataUrl(value: unknown): ValidateFashnOutputResult {
+  if (typeof value !== "string" || value.length === 0) {
+    return { ok: false, errorCode: "INVALID_OUTPUT_FORMAT" };
+  }
+  if (!isValidModelImageDataUrl(value)) {
+    return { ok: false, errorCode: "INVALID_OUTPUT_FORMAT" };
+  }
+  // Decoded byte size from the base64 payload's own length — no need to
+  // actually decode it to check this (4 base64 chars encode 3 bytes,
+  // minus 1-2 for trailing '=' padding).
+  const base64 = value.slice(value.indexOf(",") + 1);
+  const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+  const decodedBytes = Math.floor((base64.length * 3) / 4) - padding;
+  if (decodedBytes > MAX_FASHN_OUTPUT_BYTES) {
+    return { ok: false, errorCode: "OUTPUT_TOO_LARGE" };
+  }
+  return { ok: true };
+}
 import {
   REAL_PRODUCT_HANDLE_PREFIX,
   FULL_LOOK_MAX_GARMENTS,
@@ -564,6 +607,11 @@ export async function pollFullLookRealStep(
       await markFailedBestEffort(job, "PROVIDER_FAILED");
       return { status: "FAILED", job };
     }
+    const outputValidation = validateFashnOutputDataUrl(outputs[0]);
+    if (!outputValidation.ok) {
+      await markFailedBestEffort(job, outputValidation.errorCode);
+      return { status: "FAILED", job };
+    }
     const outputDataUrl = outputs[0];
 
     const isFinal = stepIndex === ctx.garments.length - 1;
@@ -744,6 +792,14 @@ export async function recoverFailedUploadStep(
   if (!Array.isArray(outputs) || outputs.length === 0 || typeof outputs[0] !== "string") {
     await markFailedBestEffort(recoveryJob, "INVALID_OUTPUT");
     return { ok: false, reason: "INVALID_OUTPUT" };
+  }
+  // Same format/size validation as the normal path (pollFullLookRealStep)
+  // — never assume every string FASHN reports is a valid, safely-sized
+  // image before attempting to upload it.
+  const outputValidation = validateFashnOutputDataUrl(outputs[0]);
+  if (!outputValidation.ok) {
+    await markFailedBestEffort(recoveryJob, outputValidation.errorCode);
+    return { ok: false, reason: outputValidation.errorCode };
   }
   const outputDataUrl = outputs[0];
 

@@ -57,6 +57,8 @@ import {
   REAL_PRODUCT_HANDLE_PREFIX,
   recoverFailedUploadStep,
   getFullLookStepRecoveryIdempotencyKey,
+  validateFashnOutputDataUrl,
+  MAX_FASHN_OUTPUT_BYTES,
   type FullLookChainContext,
 } from "./full-look-tryon-real.server.js";
 import { FULL_LOOK_FINAL_STEP_HANDLE_PREFIX } from "./full-look-handle-constants.js";
@@ -191,6 +193,45 @@ describe("checkFashnPredictionStatus", () => {
 
     const result2 = await checkFashnPredictionStatus("pred-1", fetchMock as unknown as typeof fetch, () => undefined);
     expect(result2).toEqual({ ok: false });
+  });
+});
+
+// 2026-11-16 CONFIRMED GAP CLOSED — FASHN's own output was only ever
+// checked with typeof === "string" before being handed to Cloudinary;
+// never validated as a real image data URI, never size-checked.
+describe("validateFashnOutputDataUrl", () => {
+  it("accepts a well-formed image data URI within the size ceiling", () => {
+    expect(validateFashnOutputDataUrl("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA")).toEqual({ ok: true });
+  });
+
+  it("rejects a non-string value", () => {
+    expect(validateFashnOutputDataUrl(123)).toEqual({ ok: false, errorCode: "INVALID_OUTPUT_FORMAT" });
+    expect(validateFashnOutputDataUrl(null)).toEqual({ ok: false, errorCode: "INVALID_OUTPUT_FORMAT" });
+    expect(validateFashnOutputDataUrl(undefined)).toEqual({ ok: false, errorCode: "INVALID_OUTPUT_FORMAT" });
+  });
+
+  it("rejects an empty string", () => {
+    expect(validateFashnOutputDataUrl("")).toEqual({ ok: false, errorCode: "INVALID_OUTPUT_FORMAT" });
+  });
+
+  it("rejects a plain remote URL — not a recognized image data URI shape", () => {
+    expect(validateFashnOutputDataUrl("https://fashn.example/output/123.png")).toEqual({ ok: false, errorCode: "INVALID_OUTPUT_FORMAT" });
+  });
+
+  it("rejects an unsupported/malformed MIME prefix", () => {
+    expect(validateFashnOutputDataUrl("data:application/octet-stream;base64,AAAA")).toEqual({ ok: false, errorCode: "INVALID_OUTPUT_FORMAT" });
+    expect(validateFashnOutputDataUrl("not-a-data-url-at-all")).toEqual({ ok: false, errorCode: "INVALID_OUTPUT_FORMAT" });
+  });
+
+  it("rejects a decoded payload over MAX_FASHN_OUTPUT_BYTES, while staying well under it for a normal-sized image", () => {
+    // ~1KB of real base64 — comfortably under the ceiling.
+    const smallPayload = "data:image/png;base64," + "A".repeat(1024);
+    expect(validateFashnOutputDataUrl(smallPayload)).toEqual({ ok: true });
+
+    // Oversized: base64 length chosen so the decoded size exceeds the ceiling.
+    const oversizedBase64Length = Math.ceil((MAX_FASHN_OUTPUT_BYTES + 1024) * 4 / 3);
+    const oversizedPayload = "data:image/png;base64," + "A".repeat(oversizedBase64Length);
+    expect(validateFashnOutputDataUrl(oversizedPayload)).toEqual({ ok: false, errorCode: "OUTPUT_TOO_LARGE" });
   });
 });
 
@@ -397,6 +438,20 @@ describe("pollFullLookRealStep", () => {
   // it ever reached the DB. This had zero test coverage before this fix —
   // confirmed by grep, no pre-existing test asserted on this branch's
   // errorCode value at all.
+  it("FL.15a — a malformed FASHN output (not a valid image data URI) is rejected BEFORE ever attempting a Cloudinary upload", async () => {
+    const job = fakeJob("job-0", { status: "PROCESSING", predictionId: "pred-0" });
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(JSON.stringify({ status: "completed", output: ["not-a-real-image-data-url"] }), { status: 200 }),
+    );
+    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job, status: "FAILED", errorCode: "INVALID_OUTPUT_FORMAT" } });
+
+    const result = await pollFullLookRealStep(baseCtx(), job, 0);
+
+    expect(result.status).toBe("FAILED");
+    expect(mockAdvance()).toHaveBeenCalledWith(expect.anything(), "FAILED", { errorCode: "INVALID_OUTPUT_FORMAT" });
+    expect(mockUploadPrivate()).not.toHaveBeenCalled(); // never reaches Cloudinary at all
+  });
+
   it("FL.15b — an intermediate-step Cloudinary upload failure persists the REAL errorCode (not a hardcoded string), never resubmits anything, and logs once without the raw customerId", async () => {
     const job = fakeJob("job-0", { status: "PROCESSING", predictionId: "pred-0" });
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
@@ -574,6 +629,23 @@ describe("recoverFailedUploadStep", () => {
     const result = await recoverFailedUploadStep(baseCtx(), failedJob);
 
     expect(result).toEqual({ ok: false, reason: "INVALID_OUTPUT" });
+    expect(mockSubmitProvider()).not.toHaveBeenCalled();
+  });
+
+  it("REC.6b — a malformed or oversized output during RECOVERY is rejected before ever attempting the upload — never assumes the string is a valid image", async () => {
+    const failedJob = failedIntermediateJob();
+    const recoveryJob = fakeJob("job-recovery", { status: "CREATED", predictionId: null });
+    mockCreateOrFind().mockResolvedValueOnce({ ok: true, job: recoveryJob, created: true });
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(JSON.stringify({ status: "completed", output: ["not-a-real-image-data-url"] }), { status: 200 }),
+    );
+    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...recoveryJob, status: "FAILED", errorCode: "INVALID_OUTPUT_FORMAT" } });
+
+    const result = await recoverFailedUploadStep(baseCtx(), failedJob);
+
+    expect(result).toEqual({ ok: false, reason: "INVALID_OUTPUT_FORMAT" });
+    expect(mockAdvance()).toHaveBeenCalledWith(expect.anything(), "FAILED", { errorCode: "INVALID_OUTPUT_FORMAT" });
+    expect(mockUploadPrivate()).not.toHaveBeenCalled();
     expect(mockSubmitProvider()).not.toHaveBeenCalled();
   });
 
