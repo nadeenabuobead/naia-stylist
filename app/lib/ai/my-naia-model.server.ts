@@ -895,6 +895,76 @@ export async function advanceTryOnJob(
   return { ok: true, job: updated };
 }
 
+// ── Atomic compare-and-set close-out (2026-11-16) ───────────────────────────
+//
+// advanceTryOnJob (above) performs an UNCONDITIONAL update by id — correct
+// for every one of its own existing callers, where only one caller could
+// ever reach that exact transition (a fresh submission; a brand-new
+// recovery row nothing else is watching). It is NOT safe for a row that a
+// genuinely concurrent SECOND caller might also be closing out at the same
+// instant — the real scenario found in Full-Look VTO's own server-side
+// reconciliation work: a customer's own live poll and an independent
+// reconciliation sweep (or two overlapping reconciliation workers) can
+// both observe the same PROCESSING row's provider status at the same time
+// and both decide to close it out. A separate read-then-write re-check
+// cannot close that: two readers can both observe PROCESSING before
+// either's write lands.
+//
+// This performs the transition and the "is this row still mine to close"
+// check as ONE atomic SQL statement. updateMany's WHERE clause is
+// evaluated against the database's own currently-committed row at the
+// instant each UPDATE physically executes, so of two genuinely
+// simultaneous attempts to close out the SAME row, only one can ever
+// match `status: "PROCESSING"` and actually write — the other affects
+// zero rows and is told so directly (claimed: false). No explicit lock,
+// no new intermediate status value, no schema change (TryOnJobStatus
+// already has every value this needs).
+//
+// Generic over which job/table this guards (not Full-Look-specific) —
+// lives here, next to advanceTryOnJob and the Prisma client both already
+// use, rather than in full-look-tryon-real.server.ts, so any other
+// feature with the same "two independent pollers might race to close the
+// same row" shape can reuse it instead of re-deriving this.
+export type AtomicCloseOutResult =
+  | { claimed: true; job: VirtualTryOnJobRecord }
+  | { claimed: false };
+
+// DI hook (same convention as advanceTryOnJob's own _updateJobFn) so this
+// can be unit-tested against a small, realistic fake that implements the
+// actual conditional-update contract, without mocking the whole module
+// away — see this file's own test suite for exactly that, including a
+// genuinely concurrent (same-tick, not sequential) two-caller race.
+export type AtomicUpdateManyFn = (
+  jobId: string,
+  data: { status: "COMPLETED" | "FAILED"; predictionId: string | null; errorCode: string | null; completedAt: Date; lastActivityAt: Date },
+) => Promise<{ count: number }>;
+
+async function _defaultAtomicUpdateMany(
+  jobId: string,
+  data: { status: "COMPLETED" | "FAILED"; predictionId: string | null; errorCode: string | null; completedAt: Date; lastActivityAt: Date },
+): Promise<{ count: number }> {
+  return prisma.virtualTryOnJob.updateMany({ where: { id: jobId, status: "PROCESSING" }, data });
+}
+
+export async function atomicallyCloseOutProcessingJob(
+  job: VirtualTryOnJobRecord,
+  newStatus: "COMPLETED" | "FAILED",
+  extras: { predictionId?: string; errorCode?: string } = {},
+  _updateMany: AtomicUpdateManyFn = _defaultAtomicUpdateMany,
+): Promise<AtomicCloseOutResult> {
+  const now = new Date();
+  const predictionId = extras.predictionId ?? job.predictionId;
+  const errorCode = extras.errorCode ?? job.errorCode;
+  const result = await _updateMany(job.id, { status: newStatus, predictionId, errorCode, completedAt: now, lastActivityAt: now });
+  if (result.count === 0) {
+    // Someone else — the customer's own concurrent poll, or another
+    // reconciliation worker — already closed this row out first. Never
+    // write, never overwrite whatever THEY persisted.
+    return { claimed: false };
+  }
+  return { claimed: true, job: { ...job, status: newStatus, predictionId, errorCode, completedAt: now, lastActivityAt: now } };
+}
+
 // ── Re-exports for route / component compatibility ────────────────────────────
 
 export { DEFAULT_CONSENT_STATE };

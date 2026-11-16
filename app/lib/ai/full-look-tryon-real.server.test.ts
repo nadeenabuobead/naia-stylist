@@ -16,6 +16,7 @@ vi.mock("./my-naia-model.server.js", () => ({
   checkCustomerCooldown: vi.fn(),
   createOrFindTryOnJob: vi.fn(),
   advanceTryOnJob: vi.fn(),
+  atomicallyCloseOutProcessingJob: vi.fn(),
 }));
 
 vi.mock("./fashn-try-on.server.js", async (importOriginal) => {
@@ -36,7 +37,7 @@ vi.mock("../cloudinary-admin.server.js", () => ({
   deleteCloudinaryAsset: vi.fn(async () => ({ ok: true })),
 }));
 
-import { checkCustomerCooldown, createOrFindTryOnJob, advanceTryOnJob } from "./my-naia-model.server.js";
+import { checkCustomerCooldown, createOrFindTryOnJob, advanceTryOnJob, atomicallyCloseOutProcessingJob } from "./my-naia-model.server.js";
 import { submitTryOnToProvider } from "./fashn-try-on.server.js";
 import { downloadModelPhotoAsDataUrl, uploadTryOnResult, buildTryOnResultUrl } from "./fashn-tryon-service.server.js";
 import { uploadCloudinaryPrivate, deleteCloudinaryAsset } from "../cloudinary-admin.server.js";
@@ -72,6 +73,7 @@ import type { VirtualTryOnConsent, VirtualTryOnJobRecord } from "./virtual-try-o
 const mockCooldown = () => checkCustomerCooldown as ReturnType<typeof vi.fn>;
 const mockCreateOrFind = () => createOrFindTryOnJob as ReturnType<typeof vi.fn>;
 const mockAdvance = () => advanceTryOnJob as ReturnType<typeof vi.fn>;
+const mockAtomicClaim = () => atomicallyCloseOutProcessingJob as ReturnType<typeof vi.fn>;
 const mockSubmitProvider = () => submitTryOnToProvider as ReturnType<typeof vi.fn>;
 const mockDownloadPhoto = () => downloadModelPhotoAsDataUrl as ReturnType<typeof vi.fn>;
 const mockUploadResult = () => uploadTryOnResult as ReturnType<typeof vi.fn>;
@@ -150,6 +152,23 @@ beforeEach(() => {
   // thread DI through it — without this, every status check short-circuits
   // to {ok:false} before ever calling the mocked fetch above.
   process.env.FASHN_API_KEY = "mock-key";
+  // Default: the atomic claim always succeeds, computing the exact same
+  // shape the real function does — this lets every existing test that
+  // doesn't care about the concurrency mechanics itself keep asserting on
+  // {status, job: {...job, status: X, errorCode/predictionId: Y}} exactly
+  // as before. Tests that DO care about losing the race override this
+  // explicitly to {claimed: false}.
+  mockAtomicClaim().mockImplementation(
+    async (job: VirtualTryOnJobRecord, newStatus: "COMPLETED" | "FAILED", extras: { predictionId?: string; errorCode?: string } = {}) => ({
+      claimed: true,
+      job: {
+        ...job,
+        status: newStatus,
+        predictionId: extras.predictionId ?? job.predictionId,
+        errorCode: extras.errorCode ?? job.errorCode,
+      },
+    }),
+  );
 });
 
 // ── Pure helpers — no mocking needed ─────────────────────────────────────────
@@ -533,7 +552,6 @@ describe("pollFullLookRealStep", () => {
       new Response(JSON.stringify({ status: "completed", output: [PNG_DATA_URL] }), { status: 200 }),
     );
     mockUploadPrivate().mockResolvedValue({ ok: true, publicId: "x", format: "png", version: "1" });
-    mockAdvance().mockResolvedValue({ ok: true, job: { ...job, status: "COMPLETED" } });
 
     const result = await pollFullLookRealStep(baseCtx(), job, 0); // stepIndex 0 of 3 — not final
 
@@ -554,7 +572,6 @@ describe("pollFullLookRealStep", () => {
       new Response(JSON.stringify({ status: "completed", output: [PNG_DATA_URL] }), { status: 200 }),
     );
     mockUploadResult().mockResolvedValue({ ok: true });
-    mockAdvance().mockResolvedValue({ ok: true, job: { ...job, status: "COMPLETED" } });
     mockBuildResultUrl().mockReturnValue("https://signed.example/result.png");
 
     const result = await pollFullLookRealStep(baseCtx(), job, 2); // stepIndex 2 of 3 — final
@@ -577,12 +594,10 @@ describe("pollFullLookRealStep", () => {
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
       new Response(JSON.stringify({ status: "completed", output: ["not-a-real-image-data-url"] }), { status: 200 }),
     );
-    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job, status: "FAILED", errorCode: "INVALID_OUTPUT_FORMAT" } });
-
     const result = await pollFullLookRealStep(baseCtx(), job, 0);
 
     expect(result.status).toBe("FAILED");
-    expect(mockAdvance()).toHaveBeenCalledWith(expect.anything(), "FAILED", { errorCode: "INVALID_OUTPUT_FORMAT" });
+    expect(mockAtomicClaim()).toHaveBeenCalledWith(expect.anything(), "FAILED", { errorCode: "INVALID_OUTPUT_FORMAT" });
     expect(mockUploadPrivate()).not.toHaveBeenCalled(); // never reaches Cloudinary at all
   });
 
@@ -596,12 +611,10 @@ describe("pollFullLookRealStep", () => {
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
       new Response(JSON.stringify({ status: "completed", output: ["<base64>_expired"] }), { status: 200 }),
     );
-    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job, status: "FAILED", errorCode: "PREDICTION_NO_LONGER_AVAILABLE" } });
-
     const result = await pollFullLookRealStep(baseCtx(), job, 0);
 
     expect(result.status).toBe("FAILED");
-    expect(mockAdvance()).toHaveBeenCalledWith(expect.anything(), "FAILED", { errorCode: "PREDICTION_NO_LONGER_AVAILABLE" });
+    expect(mockAtomicClaim()).toHaveBeenCalledWith(expect.anything(), "FAILED", { errorCode: "PREDICTION_NO_LONGER_AVAILABLE" });
     expect(mockUploadPrivate()).not.toHaveBeenCalled();
   });
 
@@ -613,13 +626,12 @@ describe("pollFullLookRealStep", () => {
     // Simulates bbd953e's own real detail — a 413 (payload too large) is
     // exactly the kind of distinction the old hardcoded string erased.
     mockUploadPrivate().mockResolvedValueOnce({ ok: false, errorCode: "PROVIDER_ERROR_413" });
-    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job, status: "FAILED", errorCode: "PROVIDER_ERROR_413" } });
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const result = await pollFullLookRealStep(baseCtx(), job, 0); // stepIndex 0 of 3 — intermediate, not final
 
     expect(result.status).toBe("FAILED");
-    expect(mockAdvance()).toHaveBeenCalledWith(
+    expect(mockAtomicClaim()).toHaveBeenCalledWith(
       expect.objectContaining({ id: "job-0" }), "FAILED", { errorCode: "PROVIDER_ERROR_413" },
     );
     expect(mockSubmitProvider()).not.toHaveBeenCalled(); // no new FASHN call, under any circumstance
@@ -640,13 +652,12 @@ describe("pollFullLookRealStep", () => {
       new Response(JSON.stringify({ status: "completed", output: [PNG_DATA_URL] }), { status: 200 }),
     );
     mockUploadResult().mockResolvedValueOnce({ ok: false, errorCode: "NETWORK_ERROR" });
-    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job, status: "FAILED", errorCode: "NETWORK_ERROR" } });
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const result = await pollFullLookRealStep(baseCtx(), job, 2); // stepIndex 2 of 3 — final
 
     expect(result.status).toBe("FAILED");
-    expect(mockAdvance()).toHaveBeenCalledWith(
+    expect(mockAtomicClaim()).toHaveBeenCalledWith(
       expect.objectContaining({ id: "job-2" }), "FAILED", { errorCode: "NETWORK_ERROR" },
     );
     const loggedPayload = consoleErrorSpy.mock.calls[0][1] as Record<string, unknown>;
@@ -659,8 +670,6 @@ describe("pollFullLookRealStep", () => {
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
       new Response(JSON.stringify({ status: "failed", error: "provider error" }), { status: 200 }),
     );
-    mockAdvance().mockResolvedValue({ ok: true, job: { ...job, status: "FAILED" } });
-
     const result = await pollFullLookRealStep(baseCtx(), job, 0);
     expect(result.status).toBe("FAILED");
 
@@ -677,19 +686,18 @@ describe("pollFullLookRealStep", () => {
 // (2026-11-16) ───────────────────────────────────────────────────────────────
 
 describe("reconcileOnePendingFullLookJob", () => {
-  it("recovers a completed prediction exactly like a live poll would — uploads as intermediate, transitions to COMPLETED", async () => {
+  it("recovers a completed prediction exactly like a live poll would — uploads as intermediate, atomically transitions to COMPLETED", async () => {
     const job = fakeJob("job-1", { status: "PROCESSING", predictionId: "pred-1" }); // step1, non-final
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
       new Response(JSON.stringify({ status: "completed", output: [PNG_DATA_URL] }), { status: 200 }),
     );
     mockUploadPrivate().mockResolvedValueOnce({ ok: true, publicId: "x", format: "png", version: "1" });
-    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job, status: "COMPLETED" } });
 
     const outcome = await reconcileOnePendingFullLookJob(job);
 
     expect(outcome).toEqual({ status: "RECOVERED_COMPLETED", jobId: "job-1" });
     expect(mockUploadResult()).not.toHaveBeenCalled(); // non-final — intermediate namespace only
-    expect(mockAdvance()).toHaveBeenCalledWith(expect.objectContaining({ id: "job-1" }), "COMPLETED", { predictionId: "pred-1" });
+    expect(mockAtomicClaim()).toHaveBeenCalledWith(expect.objectContaining({ id: "job-1" }), "COMPLETED", { predictionId: "pred-1" });
   });
 
   it("determines isFinal from the job's own productHandle, never from a chain context — correctly uses the FINAL upload namespace with no ctx at all", async () => {
@@ -702,7 +710,6 @@ describe("reconcileOnePendingFullLookJob", () => {
       new Response(JSON.stringify({ status: "completed", output: [PNG_DATA_URL] }), { status: 200 }),
     );
     mockUploadResult().mockResolvedValueOnce({ ok: true });
-    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job, status: "COMPLETED" } });
 
     const outcome = await reconcileOnePendingFullLookJob(job);
 
@@ -716,7 +723,6 @@ describe("reconcileOnePendingFullLookJob", () => {
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
       new Response(JSON.stringify({ status: "completed", output: ["<base64>_expired"] }), { status: 200 }),
     );
-    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job, status: "FAILED", errorCode: "PREDICTION_NO_LONGER_AVAILABLE" } });
 
     const outcome = await reconcileOnePendingFullLookJob(job);
 
@@ -728,7 +734,6 @@ describe("reconcileOnePendingFullLookJob", () => {
   it("a FASHN-reported 'failed'/'canceled' prediction is marked FAILED — never submits anything new", async () => {
     const job = fakeJob("job-1", { status: "PROCESSING", predictionId: "pred-1" });
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(new Response(JSON.stringify({ status: "failed" }), { status: 200 }));
-    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job, status: "FAILED", errorCode: "PROVIDER_FAILED" } });
 
     const outcome = await reconcileOnePendingFullLookJob(job);
 
@@ -743,7 +748,7 @@ describe("reconcileOnePendingFullLookJob", () => {
     const outcome = await reconcileOnePendingFullLookJob(job);
 
     expect(outcome).toEqual({ status: "STILL_PROCESSING", jobId: "job-1" });
-    expect(mockAdvance()).not.toHaveBeenCalled();
+    expect(mockAtomicClaim()).not.toHaveBeenCalled();
   });
 
   it("a transient status-check failure (network/timeout) leaves the job exactly as it is — STATUS_CHECK_FAILED, never marked FAILED, free to check again later", async () => {
@@ -753,7 +758,7 @@ describe("reconcileOnePendingFullLookJob", () => {
     const outcome = await reconcileOnePendingFullLookJob(job);
 
     expect(outcome).toEqual({ status: "STATUS_CHECK_FAILED", jobId: "job-1" });
-    expect(mockAdvance()).not.toHaveBeenCalled();
+    expect(mockAtomicClaim()).not.toHaveBeenCalled();
   });
 
   it("refuses to act on a job that isn't PROCESSING or has no predictionId — defensive, even though the batch query below never selects one", async () => {
@@ -765,7 +770,31 @@ describe("reconcileOnePendingFullLookJob", () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
-  it("CONCURRENT WORKERS — two overlapping reconciliation passes over the SAME job (simulating a cron overlap, or a sweep racing a customer's own live poll) converge on one consistent outcome, never a duplicate upload treated as an error or a double credit", async () => {
+  // 2026-11-16 — GENUINE SIMULTANEOUS RACE, not sequential interleaving.
+  // A separate read-then-write re-check (this file's own earlier attempt)
+  // could not close this: two readers can both observe PROCESSING before
+  // either's write lands. The real fix lives in atomicallyCloseOutProcessingJob
+  // (my-naia-model.server.js) — ONE atomic SQL statement, so of two truly
+  // simultaneous attempts, only one can ever win. That atomicity itself is
+  // proven in my-naia-model.server.test.ts (against a real Postgres
+  // transaction, not a mock); here, the mocked atomic function simply
+  // reports "I lost the race" on its second call, and this proves
+  // reconcileOnePendingFullLookJob reacts to that correctly.
+  it("CONCURRENCY — when the atomic claim reports it lost the race (another worker won), stops cleanly: ALREADY_RESOLVED_CONCURRENTLY, never a second write attempted", async () => {
+    const job = fakeJob("job-1", { status: "PROCESSING", predictionId: "pred-1" });
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(JSON.stringify({ status: "completed", output: [PNG_DATA_URL] }), { status: 200 }),
+    );
+    mockUploadPrivate().mockResolvedValueOnce({ ok: true, publicId: "x", format: "png", version: "1" });
+    mockAtomicClaim().mockResolvedValueOnce({ claimed: false });
+
+    const outcome = await reconcileOnePendingFullLookJob(job);
+
+    expect(outcome).toEqual({ status: "ALREADY_RESOLVED_CONCURRENTLY", jobId: "job-1" });
+    expect(mockAtomicClaim()).toHaveBeenCalledTimes(1); // exactly one attempt — no retry loop
+  });
+
+  it("CONCURRENT WORKERS — two truly simultaneous reconciliation passes over the SAME job both reach the atomic claim at once; only one is told it won", async () => {
     const job = fakeJob("job-1", { status: "PROCESSING", predictionId: "pred-1" });
     // A fresh Response per call, deliberately — a Response body can only be
     // read once; reusing one instance across both concurrent calls (via
@@ -779,22 +808,30 @@ describe("reconcileOnePendingFullLookJob", () => {
     // overwrite guarantee, proven separately in cloudinary-admin.server.test.ts)
     // — both calls here succeed exactly as they would against the real API.
     mockUploadPrivate().mockResolvedValue({ ok: true, publicId: "x", format: "png", version: "1" });
-    mockAdvance().mockResolvedValue({ ok: true, job: { ...job, status: "COMPLETED" } });
+
+    // Both callers reach this at genuinely the same point (both already
+    // past the FASHN check and the upload, both now calling the atomic
+    // claim for the SAME job in the same Promise.all tick). The mock
+    // simulates exactly what the real database guarantees: of two
+    // concurrent UPDATE...WHERE status='PROCESSING' statements against
+    // the SAME row, only the first to physically commit affects any
+    // rows — the second's WHERE clause no longer matches and it is told
+    // claimed: false. Vitest's mock queue (FIFO across both callers)
+    // stands in for the database's own write-serialization here, which
+    // is the actual guarantee under test in my-naia-model.server.test.ts.
+    mockAtomicClaim()
+      .mockResolvedValueOnce({ claimed: true, job: { ...job, status: "COMPLETED" } })
+      .mockResolvedValueOnce({ claimed: false });
 
     const [first, second] = await Promise.all([
       reconcileOnePendingFullLookJob(job),
       reconcileOnePendingFullLookJob(job),
     ]);
 
-    expect(first).toEqual({ status: "RECOVERED_COMPLETED", jobId: "job-1" });
-    expect(second).toEqual({ status: "RECOVERED_COMPLETED", jobId: "job-1" });
-    // Both passes acted on the SAME read of the row (status still
-    // PROCESSING when each one started) — this proves the outcome is
-    // consistent, not that only one attempt was made; a real deployment
-    // only ever gets this double-read if a true overlap occurs, which is
-    // exactly the scenario a cron-interval-vs-batch-duration margin
-    // should make rare, not something this test claims to prevent.
-    expect(mockUploadPrivate()).toHaveBeenCalledTimes(2);
+    const outcomes = [first, second];
+    expect(outcomes).toContainEqual({ status: "RECOVERED_COMPLETED", jobId: "job-1" });
+    expect(outcomes).toContainEqual({ status: "ALREADY_RESOLVED_CONCURRENTLY", jobId: "job-1" });
+    expect(mockAtomicClaim()).toHaveBeenCalledTimes(2); // both attempted; only one could ever win
   });
 });
 
@@ -826,13 +863,10 @@ describe("reconcilePendingFullLookPredictions — bounded, authenticated-by-its-
       throw new Error("ECONNRESET");
     });
     mockUploadPrivate().mockResolvedValueOnce({ ok: true, publicId: "x", format: "png", version: "1" });
-    mockAdvance()
-      .mockResolvedValueOnce({ ok: true, job: { ...jobs[0], status: "COMPLETED" } })
-      .mockResolvedValueOnce({ ok: true, job: { ...jobs[1], status: "FAILED", errorCode: "PROVIDER_FAILED" } });
 
     const result = await reconcilePendingFullLookPredictions(findPendingJobs);
 
-    expect(result).toEqual({ scanned: 4, recoveredCompleted: 1, recoveredFailed: 1, stillProcessing: 1, statusCheckFailed: 1 });
+    expect(result).toEqual({ scanned: 4, recoveredCompleted: 1, recoveredFailed: 1, stillProcessing: 1, statusCheckFailed: 1, alreadyResolvedConcurrently: 0 });
     expect(global.fetch).toHaveBeenCalledTimes(4); // one status check per job, strictly sequential
   });
 
@@ -842,9 +876,48 @@ describe("reconcilePendingFullLookPredictions — bounded, authenticated-by-its-
 
     const result = await reconcilePendingFullLookPredictions(findPendingJobs);
 
-    expect(result).toEqual({ scanned: 1, recoveredCompleted: 0, recoveredFailed: 0, stillProcessing: 1, statusCheckFailed: 0 });
+    expect(result).toEqual({ scanned: 1, recoveredCompleted: 0, recoveredFailed: 0, stillProcessing: 1, statusCheckFailed: 0, alreadyResolvedConcurrently: 0 });
     expect(mockSubmitProvider()).not.toHaveBeenCalled();
     expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  // 2026-11-16 — the user's own explicit challenge: idempotent Cloudinary
+  // overwrites alone are not sufficient proof, and a read-then-write
+  // re-check doesn't close a GENUINE simultaneous race either. This runs
+  // TWO separate sweep invocations (simulating two overlapping cron/
+  // worker runs) whose batch queries both return the SAME job, with the
+  // mocked atomic claim reporting exactly what a real database would for
+  // two truly concurrent UPDATE...WHERE statements against one row: the
+  // first to commit wins, the second affects zero rows.
+  it("CONCURRENT WORKERS at the batch level — two overlapping sweep invocations whose batches both contain the SAME job converge on exactly one completed row, never a double credit", async () => {
+    const job = fakeJob("job-1", { status: "PROCESSING", predictionId: "pred-1" });
+    const findPendingJobs = vi.fn().mockResolvedValue([job]);
+    (global.fetch as ReturnType<typeof vi.fn>).mockImplementation(
+      async () => new Response(JSON.stringify({ status: "completed", output: [PNG_DATA_URL] }), { status: 200 }),
+    );
+    mockUploadPrivate().mockResolvedValue({ ok: true, publicId: "x", format: "png", version: "1" });
+    mockAtomicClaim()
+      .mockResolvedValueOnce({ claimed: true, job: { ...job, status: "COMPLETED" } })
+      .mockResolvedValueOnce({ claimed: false });
+
+    const [resultA, resultB] = await Promise.all([
+      reconcilePendingFullLookPredictions(findPendingJobs),
+      reconcilePendingFullLookPredictions(findPendingJobs),
+    ]);
+
+    // Across the two invocations combined: exactly one row recovered,
+    // exactly one caught by the concurrency guard — never two recoveries
+    // of the same row, which is the only way a credit could ever be
+    // double-counted (it can't be, since getEntitlementSummary's count is
+    // a COUNT() over this row's own unique primary key, not an
+    // incrementing field — but this proves the write itself only
+    // happened once too, not just that double-writing would be harmless).
+    const combined = {
+      recoveredCompleted: resultA.recoveredCompleted + resultB.recoveredCompleted,
+      alreadyResolvedConcurrently: resultA.alreadyResolvedConcurrently + resultB.alreadyResolvedConcurrently,
+    };
+    expect(combined).toEqual({ recoveredCompleted: 1, alreadyResolvedConcurrently: 1 });
+    expect(mockAtomicClaim()).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -1134,8 +1207,7 @@ describe("advanceFullLookChain", () => {
       }
       return new Response(new Uint8Array([1, 2, 3]).buffer, { status: 200 }); // intermediate-image download
     });
-    mockUploadPrivate().mockResolvedValue({ ok: true, publicId: "x", format: "png", version: "1" });
-    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job0, status: "COMPLETED" } }); // step 0 → COMPLETED
+    mockUploadPrivate().mockResolvedValue({ ok: true, publicId: "x", format: "png", version: "1" }); // step 0 → COMPLETED, via the atomic claim's own default
 
     const job1 = fakeJob("job-1");
     mockCreateOrFind().mockResolvedValue({ ok: true, job: job1, created: true });
@@ -1167,13 +1239,12 @@ describe("advanceFullLookChain", () => {
       new Response(JSON.stringify({ status: "completed", output: [PNG_DATA_URL] }), { status: 200 }),
     );
     mockUploadPrivate().mockResolvedValue({ ok: true, publicId: "x", format: "png", version: "1" });
-    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job0, status: "COMPLETED" } }); // step 0 → COMPLETED persisted
 
     const result = await advanceFullLookChain(baseCtx(), { _findJobFn }, undefined, { allowSubmitNext: false });
 
     expect(result).toEqual({ status: "STEP_COMPLETE_AWAITING_AUTHORIZATION", completedStepIndex: 0, nextStepIndex: 1 });
-    // The recovery/persist call did happen (advanceTryOnJob → COMPLETED)...
-    expect(mockAdvance()).toHaveBeenCalledWith(expect.objectContaining({ id: "job-0" }), "COMPLETED", expect.anything());
+    // The recovery/persist call did happen (the atomic claim → COMPLETED)...
+    expect(mockAtomicClaim()).toHaveBeenCalledWith(expect.objectContaining({ id: "job-0" }), "COMPLETED", expect.anything());
     // ...but nothing resembling a new submission for step 1 ever happened.
     expect(mockSubmitProvider()).not.toHaveBeenCalled();
     expect(mockCreateOrFind()).not.toHaveBeenCalled();
@@ -1201,7 +1272,6 @@ describe("advanceFullLookChain", () => {
       new Response(JSON.stringify({ status: "completed", output: [PNG_DATA_URL] }), { status: 200 }),
     );
     mockUploadPrivate().mockResolvedValue({ ok: true, publicId: "x", format: "png", version: "1" });
-    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...attemptCJob, status: "COMPLETED" } });
 
     const result = await advanceFullLookChain(ctx, { _findJobFn }, undefined, { allowSubmitNext: false });
 
@@ -1219,10 +1289,11 @@ describe("advanceFullLookChain", () => {
     expect(publicIdArg).toBe("naia-tryon-fulllook-intermediate/cust-1/cmwhxjd0w0001l607s25kwvq1");
     expect(deliveryTypeArg).toBe("private");
 
-    // The one DB write: this exact job, PROCESSING -> COMPLETED. No other
-    // row is ever touched by this call.
-    expect(mockAdvance()).toHaveBeenCalledTimes(1);
-    expect(mockAdvance()).toHaveBeenCalledWith(
+    // The one DB write: this exact job, PROCESSING -> COMPLETED, via the
+    // atomic claim (never the old unconditional advanceTryOnJob — that
+    // path is what left this race open). No other row is ever touched.
+    expect(mockAtomicClaim()).toHaveBeenCalledTimes(1);
+    expect(mockAtomicClaim()).toHaveBeenCalledWith(
       expect.objectContaining({ id: "cmwhxjd0w0001l607s25kwvq1" }), "COMPLETED", expect.anything(),
     );
 
@@ -1258,7 +1329,6 @@ describe("advanceFullLookChain", () => {
       return new Response(new Uint8Array([1, 2, 3]).buffer, { status: 200 });
     });
     mockUploadPrivate().mockResolvedValue({ ok: true, publicId: "x", format: "png", version: "1" });
-    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job0, status: "COMPLETED" } });
 
     // No 4th argument at all — exactly the shape of a caller that hasn't
     // been updated to know about this gate.
@@ -1311,15 +1381,16 @@ describe("advanceFullLookChain", () => {
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
       new Response(JSON.stringify({ status: "completed", output: [PNG_DATA_URL] }), { status: 200 }),
     );
-    // REGRESSION (2026-11-16): both were plain .mockResolvedValue (not
+    // REGRESSION (2026-11-16): this was a plain .mockResolvedValue (not
     // Once) — clearAllMocks() in beforeEach clears call history but NOT a
     // persisted implementation, so this leaked into whichever later test
-    // happened to call advanceTryOnJob/uploadTryOnResult without setting
-    // its own override first, silently returning THIS test's job id
-    // instead. Matches the .mockResolvedValueOnce() convention every
-    // other test in this file already uses for exactly this reason.
+    // happened to call uploadTryOnResult without setting its own override
+    // first, silently returning THIS test's job id instead. Matches the
+    // .mockResolvedValueOnce() convention every other test in this file
+    // already uses for exactly this reason. (job2's own PROCESSING ->
+    // COMPLETED transition goes through the atomic claim's own default,
+    // not advanceTryOnJob, since 2026-11-16's concurrency fix.)
     mockUploadResult().mockResolvedValueOnce({ ok: true });
-    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job2, status: "COMPLETED" } });
     mockBuildResultUrl().mockReturnValue("https://signed.example/final.png");
 
     const result = await advanceFullLookChain(baseCtx(), { _findJobFn });
@@ -1357,11 +1428,9 @@ describe("advanceFullLookChain", () => {
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
       new Response(JSON.stringify({ status: "failed", error: "provider error" }), { status: 200 }),
     );
-    mockAdvance().mockResolvedValue({ ok: true, job: { ...job1, status: "FAILED" } });
-
     const result = await advanceFullLookChain(baseCtx(), { _findJobFn });
 
-    expect(result).toEqual({ status: "FAILED", failedStepIndex: 1, errorCode: null });
+    expect(result).toEqual({ status: "FAILED", failedStepIndex: 1, errorCode: "PROVIDER_FAILED" });
     expect(mockDeleteAsset()).toHaveBeenCalledTimes(1);
     expect(mockDeleteAsset()).toHaveBeenCalledWith(expect.stringContaining("job-0"), "private");
   });
@@ -1377,11 +1446,10 @@ describe("advanceFullLookChain", () => {
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
       new Response(JSON.stringify({ status: "failed", error: "provider error" }), { status: 200 }),
     );
-    mockAdvance().mockResolvedValue({ ok: true, job: { ...job1, status: "FAILED" } });
     mockDeleteAsset().mockRejectedValue(new Error("cloudinary down"));
 
     const result = await advanceFullLookChain(baseCtx(), { _findJobFn });
-    expect(result).toEqual({ status: "FAILED", failedStepIndex: 1, errorCode: null });
+    expect(result).toEqual({ status: "FAILED", failedStepIndex: 1, errorCode: "PROVIDER_FAILED" });
   });
 });
 
@@ -1803,8 +1871,7 @@ describe("advanceFullLookChain — stale-job self-healing via refresh/resume (no
       }
       return new Response(new Uint8Array([1, 2, 3]).buffer, { status: 200 });
     });
-    mockUploadPrivate().mockResolvedValue({ ok: true, publicId: "x", format: "png", version: "1" });
-    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...staleJob0, status: "COMPLETED" } }); // step 0 recovered → COMPLETED
+    mockUploadPrivate().mockResolvedValue({ ok: true, publicId: "x", format: "png", version: "1" }); // step 0 recovered → COMPLETED, via the atomic claim's own default
 
     const job1 = fakeJob("job-1");
     mockCreateOrFind().mockResolvedValue({ ok: true, job: job1, created: true });
@@ -1962,15 +2029,16 @@ describe("prompt placement — final step only", () => {
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
       new Response(JSON.stringify({ status: "completed", output: [PNG_DATA_URL] }), { status: 200 }),
     );
-    // REGRESSION (2026-11-16): both were plain .mockResolvedValue (not
+    // REGRESSION (2026-11-16): this was a plain .mockResolvedValue (not
     // Once) — clearAllMocks() in beforeEach clears call history but NOT a
     // persisted implementation, so this leaked into whichever later test
-    // happened to call advanceTryOnJob/uploadTryOnResult without setting
-    // its own override first, silently returning THIS test's job id
-    // instead. Matches the .mockResolvedValueOnce() convention every
-    // other test in this file already uses for exactly this reason.
+    // happened to call uploadTryOnResult without setting its own override
+    // first, silently returning THIS test's job id instead. Matches the
+    // .mockResolvedValueOnce() convention every other test in this file
+    // already uses for exactly this reason. (job2's own PROCESSING ->
+    // COMPLETED transition goes through the atomic claim's own default,
+    // not advanceTryOnJob, since 2026-11-16's concurrency fix.)
     mockUploadResult().mockResolvedValueOnce({ ok: true });
-    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job2, status: "COMPLETED" } });
     mockBuildResultUrl().mockReturnValue("https://signed.example/final.png");
 
     const result = await advanceFullLookChain(ctxWithFinalStepTuning(), { _findJobFn });
@@ -1998,7 +2066,6 @@ describe("advanceFullLookChain — duplicate/concurrent polls with allowSubmitNe
       new Response(JSON.stringify({ status: "completed", output: [PNG_DATA_URL] }), { status: 200 }),
     );
     mockUploadPrivate().mockResolvedValue({ ok: true, publicId: "x", format: "png", version: "1" });
-    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job0, status: "COMPLETED" } });
 
     const first = await advanceFullLookChain(baseCtx(), { _findJobFn }, undefined, { allowSubmitNext: false });
     expect(first).toEqual({ status: "STEP_COMPLETE_AWAITING_AUTHORIZATION", completedStepIndex: 0, nextStepIndex: 1 });
@@ -2036,7 +2103,6 @@ describe("advanceFullLookChain — pause before the final (blazer) step", () => 
       return new Response(new Uint8Array([1, 2, 3]).buffer, { status: 200 });
     });
     mockUploadPrivate().mockResolvedValue({ ok: true, publicId: "x", format: "png", version: "1" });
-    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job1, status: "COMPLETED" } });
 
     const result = await advanceFullLookChain(baseCtx(), { _findJobFn });
 
@@ -2128,7 +2194,6 @@ describe("advanceFullLookChain — dynamic chain length (4 and 5 garments)", () 
       return new Response(new Uint8Array([1, 2, 3]).buffer, { status: 200 });
     });
     mockUploadPrivate().mockResolvedValue({ ok: true, publicId: "x", format: "png", version: "1" });
-    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job3, status: "COMPLETED" } });
 
     const result = await advanceFullLookChain(ctx, { _findJobFn });
 
@@ -2243,6 +2308,33 @@ describe("end-to-end — complete 5-garment Full-Look chain: progression, failur
       }
       return { ok: true, job: updated };
     });
+    // Mirrors advanceTryOnJob's own mock above, but with the atomic
+    // claim's real semantics: refuses (claimed: false) if the store's OWN
+    // current row for this id is no longer PROCESSING by the time this
+    // runs — exactly what the real updateMany's WHERE clause would do.
+    mockAtomicClaim().mockImplementation(
+      async (job: VirtualTryOnJobRecord, newStatus: "COMPLETED" | "FAILED", extras: { predictionId?: string; errorCode?: string } = {}) => {
+        let current: VirtualTryOnJobRecord | undefined;
+        let storeKey: string | undefined;
+        for (const [key, existing] of byKey) {
+          if (existing.id === job.id) {
+            current = existing;
+            storeKey = key;
+            break;
+          }
+        }
+        if (!current || current.status !== "PROCESSING") return { claimed: false };
+        const updated = {
+          ...current,
+          status: newStatus,
+          predictionId: extras.predictionId ?? current.predictionId,
+          errorCode: extras.errorCode ?? current.errorCode,
+          lastActivityAt: new Date(),
+        } as VirtualTryOnJobRecord;
+        byKey.set(storeKey!, updated);
+        return { claimed: true, job: updated };
+      },
+    );
     return { byKey, _findJobFn };
   }
 

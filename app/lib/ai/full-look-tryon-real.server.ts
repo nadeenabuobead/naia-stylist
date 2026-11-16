@@ -112,6 +112,7 @@ import {
   checkCustomerCooldown,
   createOrFindTryOnJob,
   advanceTryOnJob,
+  atomicallyCloseOutProcessingJob,
   type FindJobFn,
 } from "./my-naia-model.server.js";
 import {
@@ -583,6 +584,13 @@ async function markFailedBestEffort(job: VirtualTryOnJobRecord, errorCode: strin
   }
 }
 
+// atomicallyCloseOutProcessingJob (used below) now lives in
+// my-naia-model.server.js, next to advanceTryOnJob and the Prisma client
+// both already use — see that function's own header for the full
+// reasoning on why a separate read-then-write re-check (this file's own
+// earlier attempt) cannot close this race, and why this one atomic SQL
+// statement does.
+
 export async function submitFullLookRealStep(
   ctx: FullLookChainContext,
   stepIndex: number,
@@ -721,13 +729,19 @@ export async function pollFullLookRealStep(
   if (fashnStatus === "completed") {
     const outputs = check.body.output;
     if (!Array.isArray(outputs) || outputs.length === 0 || typeof outputs[0] !== "string") {
-      await markFailedBestEffort(job, "PROVIDER_FAILED");
-      return { status: "FAILED", job };
+      const claim = await atomicallyCloseOutProcessingJob(job, "FAILED", { errorCode: "PROVIDER_FAILED" });
+      // claim.claimed === false means a concurrent caller (the customer's
+      // own live poll, or the independent reconciliation sweep) already
+      // closed this row out first — never overwrite whatever they
+      // persisted. Report PROCESSING: the next poll's own COMPLETED/FAILED
+      // fast path (top of this function) will see and report the real,
+      // already-persisted outcome correctly.
+      return claim.claimed ? { status: "FAILED", job: claim.job } : { status: "PROCESSING" };
     }
     const outputValidation = validateFashnOutputDataUrl(outputs[0]);
     if (!outputValidation.ok) {
-      await markFailedBestEffort(job, outputValidation.errorCode);
-      return { status: "FAILED", job };
+      const claim = await atomicallyCloseOutProcessingJob(job, "FAILED", { errorCode: outputValidation.errorCode });
+      return claim.claimed ? { status: "FAILED", job: claim.job } : { status: "PROCESSING" };
     }
     const outputDataUrl = outputValidation.normalizedDataUrl;
 
@@ -757,29 +771,35 @@ export async function pollFullLookRealStep(
         isFinal,
         errorCode: upload.errorCode,
       });
-      await markFailedBestEffort(job, upload.errorCode);
-      return { status: "FAILED", job };
+      const claim = await atomicallyCloseOutProcessingJob(job, "FAILED", { errorCode: upload.errorCode });
+      return claim.claimed ? { status: "FAILED", job: claim.job } : { status: "PROCESSING" };
     }
 
-    const completed = await advanceTryOnJob(job, "COMPLETED", { predictionId });
-    if (!completed.ok) {
-      // FASHN succeeded and the result is already safely uploaded; only our
-      // own status transition failed to persist. Report FAILED rather than
-      // silently retrying — a human can inspect the uploaded asset directly.
-      return { status: "FAILED", job };
+    // ATOMIC CLAIM (2026-11-16) — replaces the prior unconditional
+    // advanceTryOnJob call. Of two genuinely simultaneous closers for
+    // this same row (this live poll and an independent reconciliation
+    // worker both observing the same completed prediction), only one can
+    // ever win this write.
+    const claim = await atomicallyCloseOutProcessingJob(job, "COMPLETED", { predictionId });
+    if (!claim.claimed) {
+      // Someone else already completed this row — their write already
+      // uploaded and persisted the real result; report PROCESSING so the
+      // next poll picks up the already-COMPLETED fast path, never a
+      // second, conflicting upload from this caller.
+      return { status: "PROCESSING" };
     }
 
     if (isFinal) {
-      const resultUrl = buildTryOnResultUrl(ctx.customerId, completed.job.id);
-      if (!resultUrl) return { status: "FAILED", job: completed.job };
-      return { status: "COMPLETED", job: completed.job, resultUrl };
+      const resultUrl = buildTryOnResultUrl(ctx.customerId, claim.job.id);
+      if (!resultUrl) return { status: "FAILED", job: claim.job };
+      return { status: "COMPLETED", job: claim.job, resultUrl };
     }
-    return { status: "STEP_COMPLETE", job: completed.job };
+    return { status: "STEP_COMPLETE", job: claim.job };
   }
 
   if (fashnStatus === "failed" || fashnStatus === "canceled") {
-    await markFailedBestEffort(job, "PROVIDER_FAILED");
-    return { status: "FAILED", job };
+    const claim = await atomicallyCloseOutProcessingJob(job, "FAILED", { errorCode: "PROVIDER_FAILED" });
+    return claim.claimed ? { status: "FAILED", job: claim.job } : { status: "PROCESSING" };
   }
 
   // starting | in_queue | processing
@@ -822,7 +842,8 @@ export type ReconcileOneJobOutcome =
   | { status: "RECOVERED_COMPLETED"; jobId: string }
   | { status: "RECOVERED_FAILED"; jobId: string; errorCode: string }
   | { status: "STILL_PROCESSING"; jobId: string }
-  | { status: "STATUS_CHECK_FAILED"; jobId: string };
+  | { status: "STATUS_CHECK_FAILED"; jobId: string }
+  | { status: "ALREADY_RESOLVED_CONCURRENTLY"; jobId: string };
 
 export async function reconcileOnePendingFullLookJob(
   job: VirtualTryOnJobRecord,
@@ -845,8 +866,10 @@ export async function reconcileOnePendingFullLookJob(
   const fashnStatus = check.body.status;
 
   if (fashnStatus === "failed" || fashnStatus === "canceled") {
-    await markFailedBestEffort(job, "PROVIDER_FAILED");
-    return { status: "RECOVERED_FAILED", jobId: job.id, errorCode: "PROVIDER_FAILED" };
+    const claim = await atomicallyCloseOutProcessingJob(job, "FAILED", { errorCode: "PROVIDER_FAILED" });
+    return claim.claimed
+      ? { status: "RECOVERED_FAILED", jobId: job.id, errorCode: "PROVIDER_FAILED" }
+      : { status: "ALREADY_RESOLVED_CONCURRENTLY", jobId: job.id };
   }
   if (fashnStatus !== "completed") {
     return { status: "STILL_PROCESSING", jobId: job.id }; // starting | in_queue | processing
@@ -854,17 +877,32 @@ export async function reconcileOnePendingFullLookJob(
 
   const outputs = check.body.output;
   if (!Array.isArray(outputs) || outputs.length === 0 || typeof outputs[0] !== "string") {
-    await markFailedBestEffort(job, "PROVIDER_FAILED");
-    return { status: "RECOVERED_FAILED", jobId: job.id, errorCode: "PROVIDER_FAILED" };
+    const claim = await atomicallyCloseOutProcessingJob(job, "FAILED", { errorCode: "PROVIDER_FAILED" });
+    return claim.claimed
+      ? { status: "RECOVERED_FAILED", jobId: job.id, errorCode: "PROVIDER_FAILED" }
+      : { status: "ALREADY_RESOLVED_CONCURRENTLY", jobId: job.id };
   }
   const outputValidation = validateFashnOutputDataUrl(outputs[0]);
   if (!outputValidation.ok) {
     // Catches the exact expired-output sentinel finding too —
     // PREDICTION_NO_LONGER_AVAILABLE, never INVALID_OUTPUT_FORMAT, never uploaded.
-    await markFailedBestEffort(job, outputValidation.errorCode);
-    return { status: "RECOVERED_FAILED", jobId: job.id, errorCode: outputValidation.errorCode };
+    const claim = await atomicallyCloseOutProcessingJob(job, "FAILED", { errorCode: outputValidation.errorCode });
+    return claim.claimed
+      ? { status: "RECOVERED_FAILED", jobId: job.id, errorCode: outputValidation.errorCode }
+      : { status: "ALREADY_RESOLVED_CONCURRENTLY", jobId: job.id };
   }
 
+  // 2026-11-16 — the FASHN status check above is a free, idempotent read;
+  // running it twice under a genuine overlap (another reconciliation
+  // worker, or the customer's own live poll, checking the same row at
+  // the same instant) is harmless on its own, which is why there is no
+  // guard before it. The upload below is where real, if harmless, waste
+  // could happen on a true overlap — accepted, same as Cloudinary's own
+  // idempotent same-publicId overwrite guarantee (proven in cloudinary-
+  // admin.server.test.ts). What must NOT happen under that same overlap
+  // is a double DB transition, which is what the atomic claim below
+  // (not a separate read-then-write — see atomicallyCloseOutProcessingJob's
+  // own header for exactly why that distinction matters) actually closes.
   const isFinal = job.productHandle.startsWith(FULL_LOOK_FINAL_STEP_HANDLE_PREFIX);
   const upload = isFinal
     ? await uploadTryOnResult(job.customerId, job.id, outputValidation.normalizedDataUrl)
@@ -877,18 +915,19 @@ export async function reconcileOnePendingFullLookJob(
       isFinal,
       errorCode: upload.errorCode,
     });
-    await markFailedBestEffort(job, upload.errorCode);
-    return { status: "RECOVERED_FAILED", jobId: job.id, errorCode: upload.errorCode };
+    const claim = await atomicallyCloseOutProcessingJob(job, "FAILED", { errorCode: upload.errorCode });
+    return claim.claimed
+      ? { status: "RECOVERED_FAILED", jobId: job.id, errorCode: upload.errorCode }
+      : { status: "ALREADY_RESOLVED_CONCURRENTLY", jobId: job.id };
   }
 
-  const completed = await advanceTryOnJob(job, "COMPLETED", { predictionId: job.predictionId });
-  if (!completed.ok) {
-    // The image is already safely uploaded; only our own status
-    // transition failed to persist. A later sweep will see this row is
-    // still (structurally) PROCESSING and simply try the transition
-    // again — re-uploading the same bytes under the same publicId is a
-    // harmless overwrite, never a duplicate.
-    return { status: "STATUS_CHECK_FAILED", jobId: job.id };
+  const claim = await atomicallyCloseOutProcessingJob(job, "COMPLETED", { predictionId: job.predictionId });
+  if (!claim.claimed) {
+    // Someone else — the customer's own concurrent poll, or another
+    // reconciliation worker — already completed this exact row first.
+    // Their write already persisted the real result; never a second,
+    // conflicting write from this caller.
+    return { status: "ALREADY_RESOLVED_CONCURRENTLY", jobId: job.id };
   }
   return { status: "RECOVERED_COMPLETED", jobId: job.id };
 }
@@ -908,6 +947,7 @@ export interface ReconciliationBatchResult {
   recoveredFailed: number;
   stillProcessing: number;
   statusCheckFailed: number;
+  alreadyResolvedConcurrently: number;
 }
 
 async function defaultFindPendingFullLookJobs(cutoff: Date, limit: number): Promise<VirtualTryOnJobRecord[]> {
@@ -936,6 +976,7 @@ export async function reconcilePendingFullLookPredictions(
     recoveredFailed: 0,
     stillProcessing: 0,
     statusCheckFailed: 0,
+    alreadyResolvedConcurrently: 0,
   };
 
   // Sequential, deliberately — never a Promise.all burst against FASHN or
@@ -947,6 +988,7 @@ export async function reconcilePendingFullLookPredictions(
     if (outcome.status === "RECOVERED_COMPLETED") result.recoveredCompleted++;
     else if (outcome.status === "RECOVERED_FAILED") result.recoveredFailed++;
     else if (outcome.status === "STILL_PROCESSING") result.stillProcessing++;
+    else if (outcome.status === "ALREADY_RESOLVED_CONCURRENTLY") result.alreadyResolvedConcurrently++;
     else result.statusCheckFailed++;
   }
 
