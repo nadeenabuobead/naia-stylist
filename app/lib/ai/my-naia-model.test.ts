@@ -1219,6 +1219,29 @@ describe("PE — private-download endpoint and delivery enforcement", () => {
     assert.equal(url, null, "must return null when config is unavailable (URL must never be stored)");
   });
 
+  it("PE.8a — buildModelPreviewUrl returns null (never guesses jpg) when format is null — a legacy row with no tracked format", () => {
+    const url = buildModelPreviewUrl(
+      VALID_PUBLIC_ID,
+      null,   // e.g. a legacy NaiaModel row, or faceFormat propagated null from SelfieAnalysis.photoFormat
+      "private",
+      () => cfg,
+    );
+    assert.equal(
+      url,
+      null,
+      "a null format must fail closed, never default to \"jpg\" — a wrong-format request forces " +
+        "Cloudinary's /image/download endpoint to perform a real conversion, which is cached as a " +
+        "derived resource regardless of Strict Transformations",
+    );
+  });
+
+  it("PE.8b — buildModelPreviewUrl, given a real format, never falls back to jpg even though the function used to default there", () => {
+    const url = buildModelPreviewUrl(VALID_PUBLIC_ID, "png", "private", () => cfg);
+    assert.ok(url, "must still build a URL when format is present");
+    const params = new URL(url!).searchParams;
+    assert.equal(params.get("format"), "png", "must use the real format verbatim, not \"jpg\"");
+  });
+
   it("PE.9 — saveNaiaModelPhoto uses Admin API-verified format, not browser-supplied format", async () => {
     let upsertedData: Partial<NaiaModelRecord> = {};
     const result = await saveNaiaModelPhoto(

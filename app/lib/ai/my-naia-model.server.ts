@@ -170,6 +170,18 @@ export async function loadNaiaModel(
 // is enforced by the Cloudinary API server — the URL becomes invalid after expires_at.
 // Client has no input into the expiry duration.
 // The returned URL must NOT be stored in the DB. Must never be logged.
+//
+// format must be the asset's real, server-verified format. A null format (a
+// legacy row saved before format tracking, or propagated from another
+// nullable source such as SelfieAnalysis.photoFormat) must never be guessed
+// at — Cloudinary's /image/download endpoint performs a real format
+// conversion whenever the requested format differs from what's actually
+// stored, and that conversion is cached by Cloudinary as a derived resource
+// regardless of Strict Transformations (which only gates new *unsigned* CDN
+// transformation requests, not this authenticated Admin API call). Guessing
+// "jpg" for a row whose real format is e.g. png silently materializes one of
+// these derivatives on every preview render. Matches the fail-closed, never-
+// guess precedent already established for Closet garment analysis.
 export function buildModelPreviewUrl(
   publicId: string,
   format: string | null,
@@ -177,9 +189,10 @@ export function buildModelPreviewUrl(
   _getConfig: () => CloudinaryConfig | null = getCloudinaryConfig,
   nowFn: () => number = Date.now,
 ): string | null {
+  if (!format) return null;
   const cfg = _getConfig();
   if (!cfg) return null;
-  return buildPrivateDownloadUrl(cfg, publicId, format ?? "jpg", deliveryType, nowFn);
+  return buildPrivateDownloadUrl(cfg, publicId, format, deliveryType, nowFn);
 }
 
 // ── NaiaModel — save photo reference (with compensation) ─────────────────────

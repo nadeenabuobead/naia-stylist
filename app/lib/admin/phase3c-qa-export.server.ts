@@ -130,12 +130,20 @@ async function fetchImageDataUri(
 ): Promise<string | null> {
   let url: string | null = null;
 
-  if (imagePublicId && cloudinaryConfig) {
+  // A missing imageFormat (legacy rows saved before format tracking existed)
+  // must never be guessed at "jpg" — Cloudinary's /image/download endpoint
+  // performs a real format conversion whenever the requested format differs
+  // from what's actually stored (e.g. real file is png), and that conversion
+  // is cached by Cloudinary as a derived resource regardless of Strict
+  // Transformations (which only gates new *unsigned* CDN transformation
+  // requests, not this authenticated Admin API call). Falls through to the
+  // thumbnailUrl fallback below, same as a build/fetch failure.
+  if (imagePublicId && imageFormat && cloudinaryConfig) {
     try {
       url = buildPrivateDownloadUrl(
         cloudinaryConfig,
         imagePublicId,
-        imageFormat ?? "jpg",
+        imageFormat,
         "private",
         nowFn,
         600,
