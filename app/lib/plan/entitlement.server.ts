@@ -50,6 +50,7 @@ import { getUsageWindow, formatResetDate, type SubscriptionWindowInput, type Usa
 import { recordPersonalisedTrendEditUsage, type TrendEditSnapshot } from "./personalised-trend-edit-usage.server";
 import { assertPublicIdAvailable, AssetPendingDeletionError } from "../cloudinary-deletion-claim.server";
 import { FULL_LOOK_INTERMEDIATE_HANDLE_PREFIXES } from "../ai/full-look-handle-constants";
+import { isTransientDatabaseError, DatabaseUnavailableError } from "../prisma-transient-retry.server";
 
 // ── VTO stale threshold ────────────────────────────────────────────────────────
 const VTO_IN_FLIGHT_STALE_MS = 10 * 60 * 1000; // 10 minutes
@@ -995,10 +996,18 @@ export async function reserveClosetSlot(
   // (0 for NONE) via the same branch that drops the add-on boost — the cap
   // can drop, but nothing here ever deletes an existing ClosetItem; it only
   // ever gates NEW creates, exactly as before Phase 2.
-  const { allowances } = await resolveEffectiveContext(customerId, membershipStatus, _contextDeps);
-
+  //
+  // Both resolveEffectiveContext and the transaction below now run inside
+  // the same per-attempt try block, and the catch retries on a transient
+  // connection failure (P2024 pool-exhaustion, etc. — see
+  // prisma-transient-retry.server.ts) as well as a P2034 serialization
+  // conflict. This is safe to retry from scratch in both cases: a P2024
+  // means Prisma failed to even acquire a connection, so neither
+  // resolveEffectiveContext's read nor any statement inside the
+  // transaction callback ran — there is nothing to duplicate.
   for (let attempt = 0; attempt <= MAX_TX_RETRIES; attempt++) {
     try {
+      const { allowances } = await resolveEffectiveContext(customerId, membershipStatus, _contextDeps);
       return await _runTransaction(async (tx) => {
         // Closet is a hard-delete model — every row is an active item, no
         // window filter (matches checkEntitlement's "closet" case and
@@ -1019,7 +1028,8 @@ export async function reserveClosetSlot(
         return { allowed: true, record };
       });
     } catch (e) {
-      if (isSerializationError(e) && attempt < MAX_TX_RETRIES) continue;
+      if ((isSerializationError(e) || isTransientDatabaseError(e)) && attempt < MAX_TX_RETRIES) continue;
+      if (isTransientDatabaseError(e)) throw new DatabaseUnavailableError(e);
       throw e;
     }
   }

@@ -490,6 +490,94 @@ describe("reserveClosetSlot", () => {
     const result = await reserveClosetSlot(CUSTOMER_ID, "MEMBER", itemData, mockTx, NO_SUBSCRIPTION);
     assert.equal(result.allowed, true);
   });
+
+  // ── Connection-pool exhaustion (2026-11-16 Closet DB reliability pass) ──────
+  // Unlike StyleMe/BuySkip's RSV.6, reserveClosetSlot's own retry loop now
+  // also retries a transient connection failure (P2024 pool-exhaustion,
+  // P1001/P1002/P1008/P1017), not just a P2034 serialization conflict — see
+  // entitlement.server.ts. Safe because a connection-acquisition failure
+  // means the transaction's callback never ran, so nothing can duplicate.
+
+  function p2024() {
+    return Object.assign(new Error("Timed out fetching a new connection from the connection pool"), { code: "P2024" });
+  }
+
+  it("RSV.31 — retries once on a P2024 connection-pool-exhaustion error, then succeeds, with no duplicate create", async () => {
+    let txCalls = 0;
+    let createCalls = 0;
+    const mockTx: RunReservationFn = async (fn) => {
+      txCalls++;
+      if (txCalls === 1) throw p2024();
+      return fn({
+        closetItem: {
+          count: async () => 100,
+          create: async ({ data }: any) => { createCalls++; return { id: "item-after-pool-retry", ...data }; },
+        },
+      } as any);
+    };
+
+    const result = await reserveClosetSlot(CUSTOMER_ID, "MEMBER", itemData, mockTx, NO_SUBSCRIPTION);
+    assert.equal(result.allowed, true);
+    assert.equal(txCalls, 2, "must retry exactly once on P2024");
+    assert.equal(createCalls, 1, "the retried attempt creates the item exactly once — the failed first attempt never ran the callback at all");
+  });
+
+  it("RSV.32 — a P2024 on every attempt is bounded to MAX_TX_RETRIES, then rejects as DatabaseUnavailableError (never a raw Prisma error, never a third attempt)", async () => {
+    let txCalls = 0;
+    const mockTx: RunReservationFn = async (_fn) => { txCalls++; throw p2024(); };
+
+    await assert.rejects(
+      () => reserveClosetSlot(CUSTOMER_ID, "MEMBER", itemData, mockTx, NO_SUBSCRIPTION),
+      (e: any) => e.name === "DatabaseUnavailableError",
+    );
+    assert.equal(txCalls, 3, "exactly MAX_TX_RETRIES + 1 attempts (3), never a fourth");
+  });
+
+  it("RSV.33 — a non-transient, non-serialization error (e.g. a validation failure inside the transaction) is never retried, it propagates immediately and unwrapped", async () => {
+    let txCalls = 0;
+    const mockTx: RunReservationFn = async (_fn) => {
+      txCalls++;
+      throw Object.assign(new Error("unique constraint failed"), { code: "P2002" });
+    };
+    await assert.rejects(
+      () => reserveClosetSlot(CUSTOMER_ID, "MEMBER", itemData, mockTx, NO_SUBSCRIPTION),
+      (e: any) => e.code === "P2002",
+    );
+    assert.equal(txCalls, 1, "a non-retryable error must not trigger the retry loop");
+  });
+
+  it("RSV.34 — simultaneous Closet saves: one customer's two concurrent uploads, the first transiently pool-exhausted then recovering, the second succeeding outright — both land, neither is lost nor duplicated, and the final count is exactly right", async () => {
+    // Shared backing store simulates the two real ClosetItem rows a live
+    // Postgres instance would end up with — proving recovery-after-retry
+    // and a genuinely concurrent second request don't step on each other.
+    const rows: string[] = [];
+    let firstAttemptFailed = false;
+    const mockTx: RunReservationFn = async (fn) => {
+      if (!firstAttemptFailed) {
+        firstAttemptFailed = true;
+        throw p2024(); // the first upload's first attempt hits pool exhaustion
+      }
+      return fn({
+        closetItem: {
+          count: async () => rows.length,
+          create: async ({ data }: any) => {
+            const id = `item-${rows.length + 1}`;
+            rows.push(id);
+            return { id, ...data };
+          },
+        },
+      } as any);
+    };
+
+    const [first, second] = await Promise.all([
+      reserveClosetSlot(CUSTOMER_ID, "MEMBER", itemData, mockTx, NO_SUBSCRIPTION),
+      reserveClosetSlot(CUSTOMER_ID, "MEMBER", itemData, mockTx, NO_SUBSCRIPTION),
+    ]);
+
+    assert.equal(first.allowed, true);
+    assert.equal(second.allowed, true);
+    assert.equal(rows.length, 2, "both concurrent saves landed exactly once each — no lost update, no duplicate");
+  });
 });
 
 // ── reservePersonalisedTrendSlot ─────────────────────────────────────────────

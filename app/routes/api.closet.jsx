@@ -3,9 +3,17 @@ import prisma from "../db.server";
 import { deleteClosetItemWithImage } from "../lib/closet-item-deletion.server.js";
 import { checkEntitlement, reserveClosetSlot } from "../lib/plan/entitlement.server";
 import { getMembershipAllowances } from "../lib/plan/plan-limits.server";
+import { isTransientDatabaseError } from "../lib/prisma-transient-retry.server";
 
 function isSerializationError(e) {
   return e?.code === "P2034";
+}
+// Retrying the whole transaction below is safe for either error class: a
+// P2034 (serialization conflict) and a transient connection failure (P2024
+// pool-exhaustion, etc.) both mean the transaction never committed, so
+// nothing inside its callback (the createMany) ran more than once.
+function isRetryableSyncTxError(e) {
+  return isSerializationError(e) || isTransientDatabaseError(e);
 }
 const MAX_SYNC_TX_RETRIES = 2;
 
@@ -164,7 +172,7 @@ export async function action({ request }) {
         }, { isolationLevel: "Serializable" });
         break;
       } catch (e) {
-        if (isSerializationError(e) && attempt < MAX_SYNC_TX_RETRIES) continue;
+        if (isRetryableSyncTxError(e) && attempt < MAX_SYNC_TX_RETRIES) continue;
         throw e;
       }
     }
