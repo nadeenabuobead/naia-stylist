@@ -57,6 +57,7 @@ import type { OutfitSlot } from "~/lib/ai/styleme-recommendation.types";
 import type { OutfitItemType } from "@prisma/client";
 import { getCloudinaryConfig } from "~/lib/cloudinary-admin.server";
 import { selectFullLookGarments, type SelectableOutfitItem } from "~/lib/ai/full-look-vto-orchestrator.server";
+import { loadNaiaModel, computeModelReadinessFromRecord } from "~/lib/ai/my-naia-model.server";
 
 // Mirrors slotToItemType in app/lib/ai/styleme-result.server.ts exactly —
 // that function is private to a large, sensitive file this fixture has no
@@ -239,6 +240,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     cloudinaryConfig: getCloudinaryConfig(),
   });
 
+  const [naiaModel, priorJobCount] = await Promise.all([
+    loadNaiaModel(customerId),
+    prisma.virtualTryOnJob.count({ where: { customerId, outfitSuggestionId: suggestionId } }),
+  ]);
+  const modelReadiness = computeModelReadinessFromRecord(naiaModel);
+
   return data({
     ok: true,
     sessionId: suggestion.session.id,
@@ -249,5 +256,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     eligibleGarmentCount: selection?.garments.length ?? 0,
     eligibleGarmentLabels: selection?.garments.map((g) => g.label) ?? [],
     omittedLabels: selection?.omittedLabels ?? [],
+    naiaModelReadyForTryOn: modelReadiness.isReadyForTryOn,
+    priorVirtualTryOnJobsOnThisSuggestion: priorJobCount,
   });
 }

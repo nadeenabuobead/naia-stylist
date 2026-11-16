@@ -16,11 +16,13 @@ const mockSessionCreate = vi.fn();
 const mockSuggestionCreate = vi.fn();
 const mockItemCreate = vi.fn();
 const mockSuggestionFindUnique = vi.fn();
+const mockVtoJobCount = vi.fn();
 
 vi.mock("~/lib/prisma.server", () => ({
   prisma: {
     closetItem: { findMany: (...args: unknown[]) => mockFindMany(...args) },
     outfitSuggestion: { findUnique: (...args: unknown[]) => mockSuggestionFindUnique(...args) },
+    virtualTryOnJob: { count: (...args: unknown[]) => mockVtoJobCount(...args) },
     $transaction: async (fn: (tx: unknown) => unknown) =>
       fn({
         stylingSession: { create: (...args: unknown[]) => mockSessionCreate(...args) },
@@ -28,6 +30,16 @@ vi.mock("~/lib/prisma.server", () => ({
         outfitItem: { create: (...args: unknown[]) => mockItemCreate(...args) },
       }),
   },
+}));
+
+const mockLoadNaiaModel = vi.fn();
+vi.mock("~/lib/ai/my-naia-model.server", () => ({
+  loadNaiaModel: (...args: unknown[]) => mockLoadNaiaModel(...args),
+  computeModelReadinessFromRecord: (model: unknown) => ({
+    hasFacePhoto: false,
+    hasFullBodyPhoto: Boolean(model),
+    isReadyForTryOn: Boolean(model),
+  }),
 }));
 
 // getCloudinaryConfig is real code with real env-var reads — mocked here so
@@ -81,6 +93,8 @@ beforeEach(() => {
   mockSessionCreate.mockResolvedValue({ id: "session-1" });
   mockSuggestionCreate.mockResolvedValue({ id: "suggestion-1" });
   mockItemCreate.mockResolvedValue({ id: "outfititem-1" });
+  mockVtoJobCount.mockResolvedValue(0);
+  mockLoadNaiaModel.mockResolvedValue({ bodyPublicId: "p", bodyFormat: "jpg", saveModelConsentAt: new Date() });
 });
 
 afterEach(() => {
@@ -393,10 +407,34 @@ describe("api.vto-qa-fixture loader (GET) — read-only verification, no duplica
     expect(json.fullLookEligible).toBe(true);
     expect(json.eligibleGarmentCount).toBe(3);
     expect(json.eligibleGarmentLabels).toEqual(["Shirt", "Jeans", "Sneakers"]);
+    expect(json.naiaModelReadyForTryOn).toBe(true);
+    expect(json.priorVirtualTryOnJobsOnThisSuggestion).toBe(0);
     // Read-only: nothing created, same mocks from the action describe block untouched.
     expect(mockSessionCreate).not.toHaveBeenCalled();
     expect(mockSuggestionCreate).not.toHaveBeenCalled();
     expect(mockItemCreate).not.toHaveBeenCalled();
+  });
+
+  it("reports naiaModelReadyForTryOn: false when the customer has no ready model, and surfaces a nonzero prior job count", async () => {
+    setAuthorizedEnv();
+    mockLoadNaiaModel.mockResolvedValue(null);
+    mockVtoJobCount.mockResolvedValue(2);
+    mockSuggestionFindUnique.mockResolvedValue({
+      id: "sugg-3",
+      session: { id: "session-3", customerId: QA_ID },
+      items: [
+        outfitItem({ itemType: "TOP" }),
+        outfitItem({ itemType: "BOTTOM" }),
+        outfitItem({ itemType: "SHOES" }),
+      ],
+    });
+    const res = await loader({
+      request: getReq({ customerId: QA_ID, suggestionId: "sugg-3" }, { "x-vto-qa-fixture-secret": "the-real-secret" }),
+    } as any);
+    const json = res.data as any;
+    expect(json.ok).toBe(true);
+    expect(json.naiaModelReadyForTryOn).toBe(false);
+    expect(json.priorVirtualTryOnJobsOnThisSuggestion).toBe(2);
   });
 
   it("reports fullLookEligible: false when the persisted items don't actually clear the real 3-category floor", async () => {
