@@ -29,7 +29,41 @@ import { ALL_INTENTIONS } from "~/lib/admin/garment-intelligence-v1.server";
 
 // ── Test fixtures ─────────────────────────────────────────────────────────────
 
-const BASE_ITEM = {
+// Explicit type annotation (not inferred from the literal below) so that
+// fields with a null placeholder value here (adminReview, thumbnailUrl,
+// imagePublicId, imageFormat) don't get narrowed to exactly `null` —
+// ITEM_WITH_OVERRIDE below assigns a real object to adminReview, and other
+// fixtures further down assign real strings to the others.
+const BASE_ITEM: {
+  id: string;
+  name: string;
+  category: string;
+  subcategory: string;
+  customerId: string;
+  imagePublicId: string | null;
+  imageFormat: string | null;
+  thumbnailUrl: string | null;
+  silhouette: string;
+  fitProfile: string;
+  hemLength: string | null;
+  topLength: string | null;
+  waistShape: string | null;
+  sleeveLength: string | null;
+  necklineCoverage: string | null;
+  shoulderCoverage: string | null;
+  midriffExposed: string | null;
+  material: string | null;
+  pattern: string;
+  primaryColor: string;
+  colors: string[];
+  occasions: string[];
+  seasons: string[];
+  formality: string;
+  stylePersonality: string;
+  styleTags: string[];
+  garmentRelationships: unknown[];
+  adminReview: { reviewStatus: string; overrides: Record<string, string> } | null;
+} = {
   id: "item-001",
   name: "Navy Blazer",
   category: "OUTERWEAR",
