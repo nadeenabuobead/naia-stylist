@@ -824,6 +824,200 @@ describe("submitTryOnToProvider — bounded retry on transient 429/5xx", () => {
   });
 });
 
+// ── submitTryOnToProvider — FASHN's documented 429 sub-types (2026-11-17) ──
+// docs.fashn.ai/api-overview/error-handling: a 429 body's `error` field is
+// exactly one of RateLimitExceeded, ConcurrencyLimitExceeded, or
+// OutOfCredits. The first two are transient; OutOfCredits is permanent
+// (no credits left, waiting never helps) and must never be retried, even
+// though it shares the same HTTP 429 status as the other two.
+
+function make429Body(errorName: string): Response {
+  return new Response(JSON.stringify({ error: errorName }), { status: 429, headers: { "Content-Type": "application/json" } });
+}
+
+describe("submitTryOnToProvider — FASHN 429 sub-type classification", () => {
+  it("CLASSIFY.1 — RateLimitExceeded retries and can succeed", async () => {
+    let callCount = 0;
+    const _fetch = (async () => {
+      callCount++;
+      if (callCount === 1) return make429Body("RateLimitExceeded");
+      return makeRunResponse("pred-rle");
+    }) as typeof fetch;
+    const result = await submitTryOnToProvider(makeInput(), { _fetch, _getApiKey: () => "k", _sleep: noSleep });
+    assert.equal(result.ok, true);
+    assert.equal(callCount, 2);
+  });
+
+  it("CLASSIFY.2 — ConcurrencyLimitExceeded retries and can succeed", async () => {
+    let callCount = 0;
+    const _fetch = (async () => {
+      callCount++;
+      if (callCount === 1) return make429Body("ConcurrencyLimitExceeded");
+      return makeRunResponse("pred-cle");
+    }) as typeof fetch;
+    const result = await submitTryOnToProvider(makeInput(), { _fetch, _getApiKey: () => "k", _sleep: noSleep });
+    assert.equal(result.ok, true);
+    assert.equal(callCount, 2);
+  });
+
+  it("CLASSIFY.3 — OutOfCredits NEVER retries, even though it is HTTP 429 — exactly one call", async () => {
+    let callCount = 0;
+    const _fetch = (async () => {
+      callCount++;
+      return make429Body("OutOfCredits");
+    }) as typeof fetch;
+    const result = await submitTryOnToProvider(makeInput(), { _fetch, _getApiKey: () => "k", _sleep: noSleep });
+    assert.equal(result.ok, false);
+    assert.equal(callCount, 1, "OutOfCredits must never be retried — waiting cannot restore a zero credit balance");
+  });
+
+  it("CLASSIFY.4 — OutOfCredits is never retried even when _sleep would throw if called (proves it's truly never invoked)", async () => {
+    const _fetch = (async () => make429Body("OutOfCredits")) as typeof fetch;
+    const result = await submitTryOnToProvider(makeInput(), {
+      _fetch,
+      _getApiKey: () => "k",
+      _sleep: async () => {
+        throw new Error("_sleep must not be called for OutOfCredits");
+      },
+    });
+    assert.equal(result.ok, false);
+  });
+
+  it("CLASSIFY.5 — an unrecognized error-name string falls back to the bare HTTP status (still retries a 429)", async () => {
+    let callCount = 0;
+    const _fetch = (async () => {
+      callCount++;
+      if (callCount === 1) return make429Body("SomeFutureErrorFashnHasNotDocumentedYet");
+      return makeRunResponse("pred-fallback");
+    }) as typeof fetch;
+    const result = await submitTryOnToProvider(makeInput(), { _fetch, _getApiKey: () => "k", _sleep: noSleep });
+    assert.equal(result.ok, true);
+    assert.equal(callCount, 2);
+  });
+
+  it("CLASSIFY.6 — a 429 with no parseable JSON body at all still retries via the bare-status fallback", async () => {
+    let callCount = 0;
+    const _fetch = (async () => {
+      callCount++;
+      if (callCount === 1) return new Response("plain text rate limit message", { status: 429 });
+      return makeRunResponse("pred-no-json");
+    }) as typeof fetch;
+    const result = await submitTryOnToProvider(makeInput(), { _fetch, _getApiKey: () => "k", _sleep: noSleep });
+    assert.equal(result.ok, true);
+    assert.equal(callCount, 2);
+  });
+
+  it("CLASSIFY.7 — the logged failure for OutOfCredits carries the classified name, never the raw provider error text verbatim in an unexpected field", async () => {
+    const _fetch = (async () => make429Body("OutOfCredits")) as typeof fetch;
+    const logs: string[] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => logs.push(args.join(" "));
+    try {
+      await submitTryOnToProvider(makeInput(), { _fetch, _getApiKey: () => "k", _sleep: noSleep });
+    } finally {
+      console.error = originalError;
+    }
+    assert.equal(logs.length, 1);
+    assert.match(logs[0], /OutOfCredits/);
+    assert.match(logs[0], /PROVIDER_REJECTED/);
+  });
+});
+
+// ── submitTryOnToProvider — Retry-After header (2026-11-17) ─────────────────
+// Not documented by FASHN today, but read and honored if ever present —
+// standard HTTP practice for 429 — with a hard cap so a large or malformed
+// value can never stall a serverless invocation.
+
+describe("submitTryOnToProvider — Retry-After header", () => {
+  it("RETRY-AFTER.1 — a Retry-After: <seconds> header overrides the default delay", async () => {
+    let callCount = 0;
+    const _fetch = (async () => {
+      callCount++;
+      if (callCount === 1) {
+        return new Response(JSON.stringify({ error: "RateLimitExceeded" }), {
+          status: 429,
+          headers: { "Content-Type": "application/json", "Retry-After": "2" },
+        });
+      }
+      return makeRunResponse("pred-retry-after");
+    }) as typeof fetch;
+    const sleptMs: number[] = [];
+    await submitTryOnToProvider(makeInput(), {
+      _fetch,
+      _getApiKey: () => "k",
+      _sleep: async (ms: number) => {
+        sleptMs.push(ms);
+      },
+    });
+    assert.deepEqual(sleptMs, [2000]);
+  });
+
+  it("RETRY-AFTER.2 — a Retry-After value larger than the cap is clamped, never awaited in full", async () => {
+    let callCount = 0;
+    const _fetch = (async () => {
+      callCount++;
+      if (callCount === 1) {
+        return new Response(JSON.stringify({ error: "ConcurrencyLimitExceeded" }), {
+          status: 429,
+          headers: { "Content-Type": "application/json", "Retry-After": "3600" },
+        });
+      }
+      return makeRunResponse("pred-capped");
+    }) as typeof fetch;
+    const sleptMs: number[] = [];
+    await submitTryOnToProvider(makeInput(), {
+      _fetch,
+      _getApiKey: () => "k",
+      _sleep: async (ms: number) => {
+        sleptMs.push(ms);
+      },
+    });
+    assert.equal(sleptMs.length, 1);
+    assert.ok(sleptMs[0] <= 5000, `Retry-After must be capped, got ${sleptMs[0]}ms`);
+  });
+
+  it("RETRY-AFTER.3 — a missing Retry-After header falls back to the default delay", async () => {
+    let callCount = 0;
+    const _fetch = (async () => {
+      callCount++;
+      if (callCount === 1) return make429Body("RateLimitExceeded");
+      return makeRunResponse("pred-default-delay");
+    }) as typeof fetch;
+    const sleptMs: number[] = [];
+    await submitTryOnToProvider(makeInput(), {
+      _fetch,
+      _getApiKey: () => "k",
+      _sleep: async (ms: number) => {
+        sleptMs.push(ms);
+      },
+    });
+    assert.deepEqual(sleptMs, [500]);
+  });
+
+  it("RETRY-AFTER.4 — a malformed (non-numeric) Retry-After value is ignored, falling back to the default delay", async () => {
+    let callCount = 0;
+    const _fetch = (async () => {
+      callCount++;
+      if (callCount === 1) {
+        return new Response(JSON.stringify({ error: "RateLimitExceeded" }), {
+          status: 429,
+          headers: { "Content-Type": "application/json", "Retry-After": "not-a-number" },
+        });
+      }
+      return makeRunResponse("pred-malformed-retry-after");
+    }) as typeof fetch;
+    const sleptMs: number[] = [];
+    await submitTryOnToProvider(makeInput(), {
+      _fetch,
+      _getApiKey: () => "k",
+      _sleep: async (ms: number) => {
+        sleptMs.push(ms);
+      },
+    });
+    assert.deepEqual(sleptMs, [500]);
+  });
+});
+
 // ── Phase 1 ops: failure logging (safe) ──────────────────────────────────────
 //
 // Every failure path must now log something retrievable (prior behavior:

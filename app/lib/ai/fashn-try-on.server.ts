@@ -57,13 +57,17 @@ function logFashnFailure(
   stage: "submit" | "poll",
   code: VirtualTryOnErrorCode,
   customerId: string,
-  extra?: { predictionId?: string; httpStatus?: number; providerStatus?: string },
+  extra?: { predictionId?: string; httpStatus?: number; providerStatus?: string; fashnErrorName?: string },
 ): void {
   captureFailure(`fashn:${stage}`, code, {
     customerIdHash: hashCustomerId(customerId),
     ...(extra?.predictionId ? { predictionId: extra.predictionId } : {}),
     ...(extra?.httpStatus !== undefined ? { httpStatus: extra.httpStatus } : {}),
     ...(extra?.providerStatus ? { providerStatus: extra.providerStatus } : {}),
+    // Safe to log as-is: fashnErrorName is only ever one of the three fixed,
+    // documented 429 names (see FASHN_429_ERROR_NAMES) — never the
+    // provider's raw free-text error field, which this module never logs.
+    ...(extra?.fashnErrorName ? { fashnErrorName: extra.fashnErrorName } : {}),
   });
 }
 
@@ -137,6 +141,19 @@ interface FashnRunResponse {
   id: string;
   error?: string;
 }
+
+// FASHN's documented 429 sub-types (docs.fashn.ai/api-overview/error-handling)
+// — the response body's `error` field is exactly one of these three strings
+// for a rate-limit-class rejection. Only RateLimitExceeded and
+// ConcurrencyLimitExceeded are transient; OutOfCredits means the account has
+// no credits left and will return the identical rejection no matter how many
+// times or how long we wait — retrying it is never appropriate.
+type Fashn429ErrorName = "RateLimitExceeded" | "ConcurrencyLimitExceeded" | "OutOfCredits";
+const FASHN_429_ERROR_NAMES: ReadonlySet<string> = new Set<Fashn429ErrorName>([
+  "RateLimitExceeded",
+  "ConcurrencyLimitExceeded",
+  "OutOfCredits",
+]);
 
 type FashnStatus = "starting" | "in_queue" | "processing" | "completed" | "failed" | "canceled";
 
@@ -315,19 +332,60 @@ export type SubmitToProviderResult =
 // see full-look-tryon-real.server.ts). The request was rejected before
 // FASHN ever created a prediction (confirmed: predictionId stayed null on
 // the FAILED row) — nothing was billed, but the whole chain stopped for a
-// single transient rate-limit response. A bounded retry on exactly 429 and
-// 5xx closes this, mirroring the identical, already-proven pattern
-// downloadIntermediateStepResult uses for transient Cloudinary failures
-// (full-look-tryon-real.server.ts's isTransientCloudinaryDownloadErrorCode).
-// Deliberately NOT applied to any other !runRes.ok status (400/401/413/...)
-// or to the runBody.error case below — those are the provider rejecting
-// the actual request content, not a transient capacity signal, and retrying
-// them would just repeat the same rejection for no benefit.
+// single transient rate-limit response.
+//
+// A bounded retry closes this — but the original fix (retry on bare HTTP
+// 429/5xx) was too coarse: FASHN's own docs (docs.fashn.ai/api-overview/
+// error-handling) distinguish THREE distinct 429 sub-types in the response
+// body's `error` field, and only two of them are actually worth retrying.
+// classifyFashnSubmitRejection below reads that field when present;
+// OutOfCredits is excluded from retry entirely (waiting does not help —
+// the account has no credits until it's topped up), and an unrecognized or
+// absent error field falls back to the bare HTTP status (429/5xx), the
+// same posture downloadIntermediateStepResult already uses for transient
+// Cloudinary failures (isTransientCloudinaryDownloadErrorCode). Deliberately
+// NOT applied to any other !runRes.ok status (400/401/413/...) — those are
+// the provider rejecting the actual request content, not a capacity signal.
+//
+// Retry-After: not documented by FASHN today, but read and honored if ever
+// present (standard HTTP practice for 429/503) — capped so a large or
+// malformed value can never stall a serverless invocation anywhere close
+// to its own timeout.
 const FASHN_SUBMIT_MAX_ATTEMPTS = 2;
-const FASHN_SUBMIT_RETRY_DELAY_MS = 500;
+const FASHN_SUBMIT_DEFAULT_RETRY_DELAY_MS = 500;
+const FASHN_SUBMIT_MAX_RETRY_DELAY_MS = 5_000;
 
-function isTransientFashnSubmitStatus(status: number): boolean {
-  return status === 429 || status >= 500;
+type FashnSubmitRetryDecision = { retry: true; delayMs: number } | { retry: false; errorName?: Fashn429ErrorName };
+
+function parseRetryAfterMs(headerValue: string | null): number | null {
+  if (!headerValue) return null;
+  // Retry-After is either an integer number of seconds, or an HTTP-date —
+  // only the (overwhelmingly common) seconds form is worth supporting here.
+  const seconds = Number(headerValue);
+  if (!Number.isFinite(seconds) || seconds < 0) return null;
+  return Math.min(seconds * 1000, FASHN_SUBMIT_MAX_RETRY_DELAY_MS);
+}
+
+function classifyFashnSubmitRejection(res: Response, errorField: string | undefined): FashnSubmitRetryDecision {
+  const errorName = errorField && FASHN_429_ERROR_NAMES.has(errorField) ? (errorField as Fashn429ErrorName) : undefined;
+
+  if (errorName === "OutOfCredits") {
+    // Never retry — explicitly excluded regardless of status code or
+    // Retry-After. Waiting cannot fix an empty credit balance.
+    return { retry: false, errorName };
+  }
+  if (errorName === "RateLimitExceeded" || errorName === "ConcurrencyLimitExceeded") {
+    const retryAfterMs = parseRetryAfterMs(res.headers.get("Retry-After"));
+    return { retry: true, delayMs: retryAfterMs ?? FASHN_SUBMIT_DEFAULT_RETRY_DELAY_MS };
+  }
+  // No recognized error field — fall back to the bare HTTP status. A
+  // genuine permanent rejection (400/401/413/...) never reaches here as
+  // "transient"; only 429 (unclassified) or 5xx do.
+  if (res.status === 429 || res.status >= 500) {
+    const retryAfterMs = parseRetryAfterMs(res.headers.get("Retry-After"));
+    return { retry: true, delayMs: retryAfterMs ?? FASHN_SUBMIT_DEFAULT_RETRY_DELAY_MS };
+  }
+  return { retry: false };
 }
 
 export async function submitTryOnToProvider(
@@ -368,11 +426,25 @@ export async function submitTryOnToProvider(
       });
 
       if (!runRes.ok) {
-        if (attempt < FASHN_SUBMIT_MAX_ATTEMPTS && isTransientFashnSubmitStatus(runRes.status)) {
-          await _sleep(FASHN_SUBMIT_RETRY_DELAY_MS);
+        // Read the body (tolerating a non-JSON or empty one) so a 429 can be
+        // classified by FASHN's own documented error name rather than
+        // guessed at from the HTTP status alone.
+        let errorField: string | undefined;
+        try {
+          const errorBody = (await runRes.json()) as { error?: string };
+          errorField = errorBody?.error;
+        } catch {
+          // No parseable body — classification falls back to bare status.
+        }
+        const decision = classifyFashnSubmitRejection(runRes, errorField);
+        if (decision.retry && attempt < FASHN_SUBMIT_MAX_ATTEMPTS) {
+          await _sleep(decision.delayMs);
           continue;
         }
-        logFashnFailure("submit", "PROVIDER_REJECTED", input.customerId, { httpStatus: runRes.status });
+        logFashnFailure("submit", "PROVIDER_REJECTED", input.customerId, {
+          httpStatus: runRes.status,
+          ...(!decision.retry && decision.errorName ? { fashnErrorName: decision.errorName } : {}),
+        });
         return submitErr("PROVIDER_REJECTED");
       }
       const runBody = (await runRes.json()) as FashnRunResponse;

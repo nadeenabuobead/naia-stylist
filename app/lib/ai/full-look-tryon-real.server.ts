@@ -1538,6 +1538,20 @@ export async function advanceFullLookChain(
 
   const submit = await submitFullLookRealStep(ctx, nextIndex, poll.job.id);
   if (!submit.ok) {
+    // 2026-11-17 — confirmed gap: this was the one terminal-failure branch
+    // that never called cleanupIntermediateStepResults, unlike the
+    // poll.status === "FAILED"/"COMPLETED" branches above. nextIndex is
+    // guaranteed non-final here (the next-step-is-final case pauses for
+    // AWAITING_CONTINUE above and never reaches this call at all), so
+    // every job in `jobs` is a genuine intermediate step — none of them is
+    // ever the chain's real saved result — and the chain is now dead (a
+    // future attempt computes a fresh scope; nothing ever resumes THIS
+    // one), so cleaning them up here is as safe as it is on the other two
+    // terminal paths. Ownership-safe by construction: deriveIntermediate
+    // StepPublicId embeds customerId in the asset path itself, so this can
+    // only ever target this customer's own assets, matching every other
+    // call to this same function.
+    await cleanupIntermediateStepResults(ctx.customerId, jobs.map((j) => j.id));
     return { status: "SUBMIT_ERROR", reason: submit.reason };
   }
   return { status: "PROCESSING", stepIndex: nextIndex };

@@ -1303,6 +1303,105 @@ describe("advanceFullLookChain", () => {
     expect(mockSubmitProvider()).toHaveBeenCalledTimes(1); // exactly one new FASHN submission this call
   });
 
+  // 2026-11-17 CONFIRMED GAP FIX — live incident: garment 1 completed and
+  // its intermediate Cloudinary asset was correctly uploaded; garment 2's
+  // submission was then rejected by FASHN (429). This SUBMIT_ERROR branch
+  // was the one terminal-failure path that never called
+  // cleanupIntermediateStepResults, unlike poll.status === "FAILED"/
+  // "COMPLETED" above — step 0's now-orphaned intermediate asset was left
+  // behind. Same scenario as FL.20 (step 0 completes, step 1 attempts to
+  // submit), except the submission itself is rejected this time.
+  it("FL.20e — a step's submission being rejected (SUBMIT_ERROR) cleans up every prior intermediate asset, ownership-scoped, same as the FAILED/COMPLETED branches", async () => {
+    const job0 = fakeJob("job-0", { status: "PROCESSING", predictionId: "pred-0" });
+    const _findJobFn = vi.fn(async (where: { idempotencyKey: string }) =>
+      where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 0, null) ? job0 : null,
+    );
+    (global.fetch as ReturnType<typeof vi.fn>).mockImplementation(async (url: string | URL | Request) => {
+      const u = url.toString();
+      if (u.includes("/v1/status/")) {
+        return new Response(JSON.stringify({ status: "completed", output: [PNG_DATA_URL] }), { status: 200 });
+      }
+      return new Response(new Uint8Array([1, 2, 3]).buffer, { status: 200 });
+    });
+    mockUploadPrivate().mockResolvedValue({ ok: true, publicId: "x", format: "png", version: "1" });
+
+    const job1 = fakeJob("job-1");
+    mockCreateOrFind().mockResolvedValue({ ok: true, job: job1, created: true });
+    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job1, status: "SUBMITTED" } });
+    // The provider rejects this submission — e.g. a transient FASHN 429
+    // that outlasted submitTryOnToProvider's own bounded retry.
+    mockSubmitProvider().mockResolvedValue({ ok: false, code: "PROVIDER_REJECTED", customerMessage: "We couldn't create your try-on this time." });
+
+    const result = await advanceFullLookChain(baseCtx(), { _findJobFn }, undefined, { allowSubmitNext: true });
+
+    expect(result).toEqual({ status: "SUBMIT_ERROR", reason: "PROVIDER_REJECTED" });
+    // Step 0's intermediate asset — the only one that existed before this
+    // failed submission — is cleaned up exactly like the other two
+    // terminal branches, never left orphaned.
+    expect(mockDeleteAsset()).toHaveBeenCalledTimes(1);
+    expect(mockDeleteAsset()).toHaveBeenCalledWith(
+      "naia-tryon-fulllook-intermediate/cust-1/job-0",
+      "private",
+    );
+  });
+
+  it("FL.20f — SUBMIT_ERROR cleanup is ownership-scoped: the deleted public_id always embeds this customer's own id, never another's", async () => {
+    const job0 = fakeJob("job-0", { customerId: "cust-other-owner", status: "PROCESSING", predictionId: "pred-0" });
+    const _findJobFn = vi.fn(async (where: { idempotencyKey: string }) =>
+      where.idempotencyKey === getFullLookStepIdempotencyKey("cust-other-owner", 0, null) ? job0 : null,
+    );
+    (global.fetch as ReturnType<typeof vi.fn>).mockImplementation(async (url: string | URL | Request) => {
+      const u = url.toString();
+      if (u.includes("/v1/status/")) {
+        return new Response(JSON.stringify({ status: "completed", output: [PNG_DATA_URL] }), { status: 200 });
+      }
+      return new Response(new Uint8Array([1, 2, 3]).buffer, { status: 200 });
+    });
+    mockUploadPrivate().mockResolvedValue({ ok: true, publicId: "x", format: "png", version: "1" });
+
+    const job1 = fakeJob("job-1", { customerId: "cust-other-owner" });
+    mockCreateOrFind().mockResolvedValue({ ok: true, job: job1, created: true });
+    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job1, status: "SUBMITTED" } });
+    mockSubmitProvider().mockResolvedValue({ ok: false, code: "PROVIDER_REJECTED", customerMessage: "We couldn't create your try-on this time." });
+
+    const ctx = { ...baseCtx(), customerId: "cust-other-owner" };
+    await advanceFullLookChain(ctx, { _findJobFn }, undefined, { allowSubmitNext: true });
+
+    expect(mockDeleteAsset()).toHaveBeenCalledWith(
+      "naia-tryon-fulllook-intermediate/cust-other-owner/job-0",
+      "private",
+    );
+    for (const call of mockDeleteAsset().mock.calls) {
+      expect(call[0]).toContain("cust-other-owner");
+      expect(call[0]).not.toContain("cust-1");
+    }
+  });
+
+  it("FL.20g — a cleanup failure after SUBMIT_ERROR is best-effort and never changes the reported result (same posture as the other two terminal branches)", async () => {
+    const job0 = fakeJob("job-0", { status: "PROCESSING", predictionId: "pred-0" });
+    const _findJobFn = vi.fn(async (where: { idempotencyKey: string }) =>
+      where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 0, null) ? job0 : null,
+    );
+    (global.fetch as ReturnType<typeof vi.fn>).mockImplementation(async (url: string | URL | Request) => {
+      const u = url.toString();
+      if (u.includes("/v1/status/")) {
+        return new Response(JSON.stringify({ status: "completed", output: [PNG_DATA_URL] }), { status: 200 });
+      }
+      return new Response(new Uint8Array([1, 2, 3]).buffer, { status: 200 });
+    });
+    mockUploadPrivate().mockResolvedValue({ ok: true, publicId: "x", format: "png", version: "1" });
+    mockDeleteAsset().mockRejectedValueOnce(new Error("cloudinary down"));
+
+    const job1 = fakeJob("job-1");
+    mockCreateOrFind().mockResolvedValue({ ok: true, job: job1, created: true });
+    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job1, status: "SUBMITTED" } });
+    mockSubmitProvider().mockResolvedValue({ ok: false, code: "PROVIDER_REJECTED", customerMessage: "We couldn't create your try-on this time." });
+
+    const result = await advanceFullLookChain(baseCtx(), { _findJobFn }, undefined, { allowSubmitNext: true });
+
+    expect(result).toEqual({ status: "SUBMIT_ERROR", reason: "PROVIDER_REJECTED" });
+  });
+
   // 2026-11-16 CONFIRMED DEFECT FIX — the exact gate this investigation
   // added: the SAME scenario as FL.20 (an intermediate step completing),
   // but with allowSubmitNext: false (what pollFullLookOutfit/GET always
