@@ -239,6 +239,12 @@ export default [
   // header for exactly why it's safe (no advanceFullLookChain, no
   // submission, customer-scoped by session only). Remove once closed.
   route("api/full-look-vto-diagnostic", "routes/api.full-look-vto-diagnostic.tsx"),
+  // Server-side reconciliation (2026-11-16) — authenticated via
+  // CRON_SECRET, never a customer session. NOT scheduled yet: no `crons`
+  // entry exists in vercel.json (see the route file's own header for why
+  // that's a separate, explicitly-approved step). Registered now so the
+  // route exists and is testable ahead of that approval.
+  route("api/full-look-vto-reconcile", "routes/api.full-look-vto-reconcile.ts"),
   // Full-look VTO — staging QA prototype only (blocked in production).
   // Kept registered for direct comparison/rollback; style-me/result.tsx
   // no longer calls it once api/full-look-vto is wired in.

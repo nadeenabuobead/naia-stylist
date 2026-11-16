@@ -450,6 +450,17 @@ export type CheckStatusResult =
   | { ok: true; body: FashnStatusBody }
   | { ok: false }; // network/parse error — caller must NOT treat this as failure or success
 
+// 2026-11-16 — same missing-timeout gap as the two Cloudinary-facing
+// calls in this file, found while building the reconciliation sweep
+// below: a hung status check here has no bound at all. Matters more for
+// that sweep than for a single customer's own poll — it calls this up to
+// RECONCILIATION_BATCH_LIMIT times per invocation, so one hung call could
+// otherwise consume the whole batch's time budget. No retry added here —
+// every existing caller already treats {ok:false} as "leave the job
+// exactly as it is, a later check simply tries again," which is the
+// correct behavior for a plain status read.
+const FASHN_STATUS_CHECK_TIMEOUT_MS = 15_000;
+
 export async function checkFashnPredictionStatus(
   predictionId: string,
   _fetch: typeof fetch = fetch,
@@ -460,6 +471,7 @@ export async function checkFashnPredictionStatus(
   try {
     const res = await _fetch(`${FASHN_BASE}/v1/status/${predictionId}`, {
       headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(FASHN_STATUS_CHECK_TIMEOUT_MS),
     });
     if (!res.ok) return { ok: false };
     const body = (await res.json()) as FashnStatusBody;
@@ -772,6 +784,173 @@ export async function pollFullLookRealStep(
 
   // starting | in_queue | processing
   return { status: "PROCESSING" };
+}
+
+// ── Server-side reconciliation — independent of the customer's own browser ──
+//
+// 2026-11-16 — closes the structural gap behind the expired-output
+// findings above: the real customer route only ever checks FASHN status
+// reactively, when the customer's own browser polls. A customer who
+// closes the tab mid-generation and doesn't return within FASHN's
+// documented 60-minute return_base64 window loses the image regardless
+// of any retry logic, because nothing checks on their behalf while
+// they're away. This is the server-side half of that fix: a bounded,
+// authenticated sweep (api.full-look-vto-reconcile.ts) that finds
+// PROCESSING rows no customer has touched recently and gives them the
+// exact same "check status, validate, persist" treatment
+// pollFullLookRealStep already gives a row the customer DID stick around
+// for — reused logic, same safety guarantees, just not gated on a browser
+// being open.
+//
+// Deliberately decoupled from FullLookChainContext — the only two things
+// pollFullLookRealStep needs ctx for are ctx.customerId (already on the
+// job row) and ctx.garments.length, used only to compute isFinal. A job's
+// own productHandle already encodes exactly the same fact (the "final:"
+// vs "stepN:" segment submitFullLookRealStep stamped it with), so this
+// never needs to reload the originating OutfitSuggestion or recompute a
+// garment selection for an arbitrary cross-customer row during a batch
+// sweep.
+//
+// Never submits anything new (only ever the same read-only status check
+// every live customer poll already makes) and never retries a row once
+// it's left PROCESSING: the batch query below only ever selects
+// status === "PROCESSING", so a row this function has already marked
+// COMPLETED or FAILED is structurally excluded from ever being selected
+// again — "silently restarting a dead generation" has no code path here
+// to do it through.
+export type ReconcileOneJobOutcome =
+  | { status: "RECOVERED_COMPLETED"; jobId: string }
+  | { status: "RECOVERED_FAILED"; jobId: string; errorCode: string }
+  | { status: "STILL_PROCESSING"; jobId: string }
+  | { status: "STATUS_CHECK_FAILED"; jobId: string };
+
+export async function reconcileOnePendingFullLookJob(
+  job: VirtualTryOnJobRecord,
+): Promise<ReconcileOneJobOutcome> {
+  // Defensive — the batch query below only ever selects rows matching
+  // this, but a direct unit-test call (or a future caller) must never
+  // assume that and touch a row outside it.
+  if (job.status !== "PROCESSING" || !job.predictionId) {
+    return { status: "STILL_PROCESSING", jobId: job.id };
+  }
+
+  const check = await checkFashnPredictionStatus(job.predictionId);
+  if (!check.ok) {
+    // Network/timeout on the status check itself — free, not billable.
+    // Leave the row exactly as it is; a later sweep (or the customer's
+    // own poll, if they do come back) simply checks again.
+    return { status: "STATUS_CHECK_FAILED", jobId: job.id };
+  }
+
+  const fashnStatus = check.body.status;
+
+  if (fashnStatus === "failed" || fashnStatus === "canceled") {
+    await markFailedBestEffort(job, "PROVIDER_FAILED");
+    return { status: "RECOVERED_FAILED", jobId: job.id, errorCode: "PROVIDER_FAILED" };
+  }
+  if (fashnStatus !== "completed") {
+    return { status: "STILL_PROCESSING", jobId: job.id }; // starting | in_queue | processing
+  }
+
+  const outputs = check.body.output;
+  if (!Array.isArray(outputs) || outputs.length === 0 || typeof outputs[0] !== "string") {
+    await markFailedBestEffort(job, "PROVIDER_FAILED");
+    return { status: "RECOVERED_FAILED", jobId: job.id, errorCode: "PROVIDER_FAILED" };
+  }
+  const outputValidation = validateFashnOutputDataUrl(outputs[0]);
+  if (!outputValidation.ok) {
+    // Catches the exact expired-output sentinel finding too —
+    // PREDICTION_NO_LONGER_AVAILABLE, never INVALID_OUTPUT_FORMAT, never uploaded.
+    await markFailedBestEffort(job, outputValidation.errorCode);
+    return { status: "RECOVERED_FAILED", jobId: job.id, errorCode: outputValidation.errorCode };
+  }
+
+  const isFinal = job.productHandle.startsWith(FULL_LOOK_FINAL_STEP_HANDLE_PREFIX);
+  const upload = isFinal
+    ? await uploadTryOnResult(job.customerId, job.id, outputValidation.normalizedDataUrl)
+    : await uploadIntermediateStepResult(job.customerId, job.id, outputValidation.normalizedDataUrl);
+
+  if (!upload.ok) {
+    console.error("[full-look-vto-reconciliation] upload failed", {
+      jobId: job.id,
+      customerIdHash: hashCustomerId(job.customerId),
+      isFinal,
+      errorCode: upload.errorCode,
+    });
+    await markFailedBestEffort(job, upload.errorCode);
+    return { status: "RECOVERED_FAILED", jobId: job.id, errorCode: upload.errorCode };
+  }
+
+  const completed = await advanceTryOnJob(job, "COMPLETED", { predictionId: job.predictionId });
+  if (!completed.ok) {
+    // The image is already safely uploaded; only our own status
+    // transition failed to persist. A later sweep will see this row is
+    // still (structurally) PROCESSING and simply try the transition
+    // again — re-uploading the same bytes under the same publicId is a
+    // harmless overwrite, never a duplicate.
+    return { status: "STATUS_CHECK_FAILED", jobId: job.id };
+  }
+  return { status: "RECOVERED_COMPLETED", jobId: job.id };
+}
+
+// Bounded — never an unbounded table scan. Oldest-first, so a backlog is
+// drained in the order jobs are actually closest to FASHN's 60-minute
+// cliff, not an arbitrary one. The age floor (not just an upper bound)
+// deliberately gives the customer's own live poll, if they're still on
+// the page, first chance at a job that was only just submitted — the
+// sweep exists for the case they're NOT there, not to race an open tab.
+export const RECONCILIATION_BATCH_LIMIT = 25;
+export const RECONCILIATION_MIN_AGE_MS = 90 * 1000;
+
+export interface ReconciliationBatchResult {
+  scanned: number;
+  recoveredCompleted: number;
+  recoveredFailed: number;
+  stillProcessing: number;
+  statusCheckFailed: number;
+}
+
+async function defaultFindPendingFullLookJobs(cutoff: Date, limit: number): Promise<VirtualTryOnJobRecord[]> {
+  return prisma.virtualTryOnJob.findMany({
+    where: {
+      status: "PROCESSING",
+      predictionId: { not: null },
+      productHandle: { startsWith: `${REAL_PRODUCT_HANDLE_PREFIX}:` },
+      lastActivityAt: { lt: cutoff },
+    },
+    orderBy: [{ createdAt: "asc" }],
+    take: limit,
+  }) as Promise<VirtualTryOnJobRecord[]>;
+}
+
+export async function reconcilePendingFullLookPredictions(
+  _findPendingJobs: (cutoff: Date, limit: number) => Promise<VirtualTryOnJobRecord[]> = defaultFindPendingFullLookJobs,
+  _now: () => number = Date.now,
+): Promise<ReconciliationBatchResult> {
+  const cutoff = new Date(_now() - RECONCILIATION_MIN_AGE_MS);
+  const jobs = await _findPendingJobs(cutoff, RECONCILIATION_BATCH_LIMIT);
+
+  const result: ReconciliationBatchResult = {
+    scanned: jobs.length,
+    recoveredCompleted: 0,
+    recoveredFailed: 0,
+    stillProcessing: 0,
+    statusCheckFailed: 0,
+  };
+
+  // Sequential, deliberately — never a Promise.all burst against FASHN or
+  // Cloudinary from one invocation. Gentler on both providers' own rate
+  // limits, and keeps one invocation's total work bounded and easy to
+  // reason about within a single function's time budget.
+  for (const job of jobs) {
+    const outcome = await reconcileOnePendingFullLookJob(job);
+    if (outcome.status === "RECOVERED_COMPLETED") result.recoveredCompleted++;
+    else if (outcome.status === "RECOVERED_FAILED") result.recoveredFailed++;
+    else if (outcome.status === "STILL_PROCESSING") result.stillProcessing++;
+    else result.statusCheckFailed++;
+  }
+
+  return result;
 }
 
 // ── Recovery: reuse an existing FAILED step's completed prediction ─────────
