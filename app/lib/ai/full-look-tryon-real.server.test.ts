@@ -17,6 +17,7 @@ vi.mock("./my-naia-model.server.js", () => ({
   createOrFindTryOnJob: vi.fn(),
   advanceTryOnJob: vi.fn(),
   atomicallyCloseOutProcessingJob: vi.fn(),
+  tryAcquireProcessingLease: vi.fn(),
 }));
 
 vi.mock("./fashn-try-on.server.js", async (importOriginal) => {
@@ -37,7 +38,7 @@ vi.mock("../cloudinary-admin.server.js", () => ({
   deleteCloudinaryAsset: vi.fn(async () => ({ ok: true })),
 }));
 
-import { checkCustomerCooldown, createOrFindTryOnJob, advanceTryOnJob, atomicallyCloseOutProcessingJob } from "./my-naia-model.server.js";
+import { checkCustomerCooldown, createOrFindTryOnJob, advanceTryOnJob, atomicallyCloseOutProcessingJob, tryAcquireProcessingLease } from "./my-naia-model.server.js";
 import { submitTryOnToProvider } from "./fashn-try-on.server.js";
 import { downloadModelPhotoAsDataUrl, uploadTryOnResult, buildTryOnResultUrl } from "./fashn-tryon-service.server.js";
 import { uploadCloudinaryPrivate, deleteCloudinaryAsset } from "../cloudinary-admin.server.js";
@@ -74,6 +75,7 @@ const mockCooldown = () => checkCustomerCooldown as ReturnType<typeof vi.fn>;
 const mockCreateOrFind = () => createOrFindTryOnJob as ReturnType<typeof vi.fn>;
 const mockAdvance = () => advanceTryOnJob as ReturnType<typeof vi.fn>;
 const mockAtomicClaim = () => atomicallyCloseOutProcessingJob as ReturnType<typeof vi.fn>;
+const mockTryAcquireLease = () => tryAcquireProcessingLease as ReturnType<typeof vi.fn>;
 const mockSubmitProvider = () => submitTryOnToProvider as ReturnType<typeof vi.fn>;
 const mockDownloadPhoto = () => downloadModelPhotoAsDataUrl as ReturnType<typeof vi.fn>;
 const mockUploadResult = () => uploadTryOnResult as ReturnType<typeof vi.fn>;
@@ -169,6 +171,11 @@ beforeEach(() => {
       },
     }),
   );
+  // Default: the claim-before-side-effect lease always succeeds, so every
+  // existing test that isn't specifically about the lease mechanics keeps
+  // reaching the FASHN check/upload exactly as before. Tests that DO care
+  // about losing the lease override this explicitly to {acquired: false}.
+  mockTryAcquireLease().mockResolvedValue({ acquired: true });
 });
 
 // ── Pure helpers — no mocking needed ─────────────────────────────────────────
@@ -680,6 +687,62 @@ describe("pollFullLookRealStep", () => {
     expect(second.status).toBe("FAILED");
     expect(global.fetch).not.toHaveBeenCalled();
   });
+
+  // 2026-11-16 — CONFIRMED GAP: atomicallyCloseOutProcessingJob alone only
+  // guards the FINAL write. Without a claim BEFORE the FASHN check and
+  // the real Cloudinary upload, two genuinely concurrent callers (this
+  // customer's own second browser tab, or the independent reconciliation
+  // sweep) could both reach the upload before either's atomic close-out
+  // resolved anything. tryAcquireProcessingLease closes that too — this
+  // proves losing the lease stops EVERYTHING before it starts, not just
+  // the final write.
+  it("LEASE — losing the lease stops before ANY external call: no FASHN status check, no Cloudinary upload, no DB write", async () => {
+    const job = fakeJob("job-0", { status: "PROCESSING", predictionId: "pred-0" });
+    mockTryAcquireLease().mockResolvedValueOnce({ acquired: false });
+
+    const result = await pollFullLookRealStep(baseCtx(), job, 0);
+
+    expect(result).toEqual({ status: "PROCESSING" });
+    expect(global.fetch).not.toHaveBeenCalled(); // no FASHN status check at all
+    expect(mockUploadPrivate()).not.toHaveBeenCalled();
+    expect(mockUploadResult()).not.toHaveBeenCalled();
+    expect(mockAtomicClaim()).not.toHaveBeenCalled();
+  });
+
+  // 2026-11-16 — "truly concurrent browser polling versus reconciliation,"
+  // tested directly: a live poll and an independent reconciliation pass
+  // racing on the SAME job, both reaching the lease-acquire via the SAME
+  // shared, stateful mock. Promise.all evaluates its array left-to-right,
+  // so the poll's own lease-acquire call happens first and wins
+  // deterministically here — genuine nondeterminism needs real parallel
+  // database transactions (see my-naia-model.server.test.ts's own header
+  // for why that's checked, not assumed, to be unavailable in this
+  // environment). What this proves regardless of who wins: exactly ONE of
+  // the two callers ever reaches Cloudinary — the loser backs off at the
+  // lease, before touching FASHN or Cloudinary at all.
+  it("CONCURRENT — a live poll racing the independent reconciliation sweep on the SAME job: only the lease-winner ever uploads", async () => {
+    const job = fakeJob("job-0", { status: "PROCESSING", predictionId: "pred-0" });
+    (global.fetch as ReturnType<typeof vi.fn>).mockImplementation(
+      async () => new Response(JSON.stringify({ status: "completed", output: [PNG_DATA_URL] }), { status: 200 }),
+    );
+    mockUploadPrivate().mockResolvedValue({ ok: true, publicId: "x", format: "png", version: "1" });
+
+    let leaseCalls = 0;
+    mockTryAcquireLease().mockImplementation(async () => ({ acquired: leaseCalls++ === 0 }));
+
+    const [pollResult, reconcileResult] = await Promise.all([
+      pollFullLookRealStep(baseCtx(), job, 0),
+      reconcileOnePendingFullLookJob(job),
+    ]);
+
+    // The poll's lease-acquire runs first (Promise.all's left-to-right
+    // evaluation) and wins; reconciliation's own attempt loses and backs
+    // off immediately.
+    expect(pollResult.status).toBe("STEP_COMPLETE");
+    expect(reconcileResult).toEqual({ status: "LEASE_NOT_ACQUIRED", jobId: "job-0" });
+    // The real proof: exactly one upload happened, not two.
+    expect(mockUploadPrivate()).toHaveBeenCalledTimes(1);
+  });
 });
 
 // ── Server-side reconciliation — independent of the customer's own browser
@@ -768,6 +831,22 @@ describe("reconcileOnePendingFullLookJob", () => {
     expect(await reconcileOnePendingFullLookJob(completedJob)).toEqual({ status: "STILL_PROCESSING", jobId: "job-1" });
     expect(await reconcileOnePendingFullLookJob(noPredictionJob)).toEqual({ status: "STILL_PROCESSING", jobId: "job-2" });
     expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  // 2026-11-16 — same claim-before-side-effect requirement as
+  // pollFullLookRealStep's own identical test: losing the lease must stop
+  // EVERYTHING before any external call, not just the final DB write.
+  it("LEASE — losing the lease stops before ANY external call: no FASHN status check, no Cloudinary upload, no DB write", async () => {
+    const job = fakeJob("job-1", { status: "PROCESSING", predictionId: "pred-1" });
+    mockTryAcquireLease().mockResolvedValueOnce({ acquired: false });
+
+    const outcome = await reconcileOnePendingFullLookJob(job);
+
+    expect(outcome).toEqual({ status: "LEASE_NOT_ACQUIRED", jobId: "job-1" });
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(mockUploadPrivate()).not.toHaveBeenCalled();
+    expect(mockUploadResult()).not.toHaveBeenCalled();
+    expect(mockAtomicClaim()).not.toHaveBeenCalled();
   });
 
   // 2026-11-16 — GENUINE SIMULTANEOUS RACE, not sequential interleaving.
@@ -866,7 +945,7 @@ describe("reconcilePendingFullLookPredictions — bounded, authenticated-by-its-
 
     const result = await reconcilePendingFullLookPredictions(findPendingJobs);
 
-    expect(result).toEqual({ scanned: 4, recoveredCompleted: 1, recoveredFailed: 1, stillProcessing: 1, statusCheckFailed: 1, alreadyResolvedConcurrently: 0 });
+    expect(result).toEqual({ scanned: 4, recoveredCompleted: 1, recoveredFailed: 1, stillProcessing: 1, statusCheckFailed: 1, alreadyResolvedConcurrently: 0, leaseNotAcquired: 0 });
     expect(global.fetch).toHaveBeenCalledTimes(4); // one status check per job, strictly sequential
   });
 
@@ -876,7 +955,7 @@ describe("reconcilePendingFullLookPredictions — bounded, authenticated-by-its-
 
     const result = await reconcilePendingFullLookPredictions(findPendingJobs);
 
-    expect(result).toEqual({ scanned: 1, recoveredCompleted: 0, recoveredFailed: 0, stillProcessing: 1, statusCheckFailed: 0, alreadyResolvedConcurrently: 0 });
+    expect(result).toEqual({ scanned: 1, recoveredCompleted: 0, recoveredFailed: 0, stillProcessing: 1, statusCheckFailed: 0, alreadyResolvedConcurrently: 0, leaseNotAcquired: 0 });
     expect(mockSubmitProvider()).not.toHaveBeenCalled();
     expect(global.fetch).not.toHaveBeenCalled();
   });
@@ -2387,6 +2466,172 @@ describe("end-to-end — complete 5-garment Full-Look chain: progression, failur
     const intermediateJobs = allJobs.filter((j) => j.productHandle.startsWith(`${REAL_PRODUCT_HANDLE_PREFIX}:step`));
     expect(intermediateJobs).toHaveLength(4); // steps 1-4, all excluded from credit counting by entitlement.server.ts
     expect(intermediateJobs.every((j) => j.status === "COMPLETED")).toBe(true);
+  });
+
+  // 2026-11-16 — THE EXPLICIT USER STORY: a customer closes the browser
+  // mid-generation, server-side reconciliation (not any poll) recovers
+  // whichever step was in flight while they're away, and reopening the
+  // app resumes from exactly that point — never re-submitting a garment
+  // already paid for, never losing one already completed, never
+  // double-counting a credit, and never auto-advancing to the next
+  // garment just because reconciliation happened to run (that's the
+  // explicit, separate authorization boundary — see the safe-poll
+  // assertions below). Runs this cycle at TWO real transitions (proving
+  // it generalizes across different steps, not a one-off), then fast-
+  // forwards the remaining steps via the already-proven allowSubmitNext
+  // path (E2E.1) to confirm the chain still reaches ONE complete, saved,
+  // viewable result afterward.
+  it("RESUME — browser closes after a step submits; reconciliation recovers it while closed; reopening resumes from exactly that step, through to one complete, saved, viewable result", async () => {
+    const ctx = ctxWithGarmentCount(4);
+    const { byKey, _findJobFn } = makeJobStore();
+    mockCooldown().mockResolvedValue({ ok: true });
+    mockAllFashnStepsCompleteImmediately();
+    mockDownloadPhoto().mockResolvedValue({ ok: true, dataUrl: PNG_DATA_URL });
+    mockSubmitProvider().mockResolvedValue({ ok: true, predictionId: "pred-x" });
+    mockUploadPrivate().mockResolvedValue({ ok: true, publicId: "x", format: "png", version: "1" });
+    mockUploadResult().mockResolvedValue({ ok: true });
+    mockBuildResultUrl().mockReturnValue("https://signed.example/final.png");
+
+    const start = await startOrResumeFullLookChain(ctx, { _findJobFn }, async () => ({ reconciled: false }));
+    expect(start).toEqual({ ok: true, stepIndex: 0 });
+
+    function currentlyProcessingRow(): VirtualTryOnJobRecord {
+      const row = [...byKey.values()].find((j) => j.status === "PROCESSING");
+      expect(row).toBeDefined(); // the step we just submitted really is in flight
+      return row!;
+    }
+
+    // ── Garment 1: submitted by startOrResumeFullLookChain above. Browser
+    // closes immediately — no poll of any kind happens. ───────────────────
+    const step0Row = currentlyProcessingRow();
+
+    // Reconciliation — NOT a poll, NOT the customer's browser — recovers
+    // it independently while the browser is closed.
+    const reconcileStep0 = await reconcileOnePendingFullLookJob(step0Row);
+    expect(reconcileStep0.status).toBe("RECOVERED_COMPLETED");
+    expect(mockSubmitProvider()).toHaveBeenCalledTimes(1); // still only garment 1's own original submission
+
+    // Browser reopens. A safe poll (allowSubmitNext: false — what every
+    // GET/page-load actually sends) must see garment 1 already done and
+    // awaiting authorization — and critically, must NOT have submitted
+    // garment 2 on its own, merely because reconciliation already
+    // finished garment 1 while no one was looking.
+    const safePollAfterStep0 = await advanceFullLookChain(ctx, { _findJobFn }, undefined, { allowSubmitNext: false });
+    expect(safePollAfterStep0).toEqual({ status: "STEP_COMPLETE_AWAITING_AUTHORIZATION", completedStepIndex: 0, nextStepIndex: 1 });
+    expect(mockSubmitProvider()).toHaveBeenCalledTimes(1); // still exactly one — the safe poll submitted nothing
+
+    // The customer explicitly continues (the authorized action — a real
+    // click, never implied by merely reopening the app). Exactly one new
+    // submission: garment 2.
+    const explicitContinue1 = await advanceFullLookChain(ctx, { _findJobFn }, undefined, { allowSubmitNext: true });
+    expect(explicitContinue1.status).toBe("PROCESSING");
+    expect(mockSubmitProvider()).toHaveBeenCalledTimes(2);
+
+    // ── Garment 2: same cycle again, proving it's not a one-off. Browser
+    // closes again; reconciliation recovers garment 2 independently. ──────
+    const step1Row = currentlyProcessingRow();
+    const reconcileStep1 = await reconcileOnePendingFullLookJob(step1Row);
+    expect(reconcileStep1.status).toBe("RECOVERED_COMPLETED");
+    expect(mockSubmitProvider()).toHaveBeenCalledTimes(2); // unchanged — reconciliation never submits
+
+    const safePollAfterStep1 = await advanceFullLookChain(ctx, { _findJobFn }, undefined, { allowSubmitNext: false });
+    expect(safePollAfterStep1).toEqual({ status: "STEP_COMPLETE_AWAITING_AUTHORIZATION", completedStepIndex: 1, nextStepIndex: 2 });
+    expect(mockSubmitProvider()).toHaveBeenCalledTimes(2); // still unchanged
+
+    // No completed garment was ever lost or regenerated across either
+    // cycle: exactly 2 rows exist so far, both COMPLETED, both still
+    // carrying their own original predictionId (never resubmitted).
+    const rowsSoFar = [...byKey.values()];
+    expect(rowsSoFar).toHaveLength(2);
+    expect(rowsSoFar.every((j) => j.status === "COMPLETED")).toBe(true);
+    expect(rowsSoFar.every((j) => j.predictionId != null)).toBe(true); // both carry a real predictionId, neither cleared or lost
+
+    // ── From here, the customer stays engaged — fast-forward through the
+    // remaining garments via the already-proven authorized-advance path
+    // (E2E.1) to confirm the chain still reaches ONE complete, saved,
+    // viewable result. ─────────────────────────────────────────────────
+    let result: Awaited<ReturnType<typeof advanceFullLookChain>> | undefined;
+    for (let guard = 0; guard < 10 && (!result || result.status !== "COMPLETED"); guard++) {
+      result = await advanceFullLookChain(ctx, { _findJobFn }, undefined, { allowSubmitNext: true });
+      if (result.status === "AWAITING_CONTINUE") {
+        const cont = await continueToFinalStep(ctx, { _findJobFn });
+        expect(cont.ok).toBe(true);
+      }
+    }
+
+    // THE ACTUAL DELIVERABLE: one complete, saved, viewable outfit.
+    expect(result).toEqual({ status: "COMPLETED", resultUrl: "https://signed.example/final.png" });
+    expect(mockSubmitProvider()).toHaveBeenCalledTimes(4); // exactly one real submission per garment, across the whole lifecycle — never duplicated by reconciliation, never re-submitted on reopen
+
+    const allJobs = [...byKey.values()];
+    expect(allJobs).toHaveLength(4); // exactly 4 rows for 4 garments — none extra, none from a lost/regenerated step
+    expect(allJobs.every((j) => j.status === "COMPLETED")).toBe(true);
+    const finalRows = allJobs.filter((j) => j.productHandle.startsWith(`${REAL_PRODUCT_HANDLE_PREFIX}:final:`));
+    expect(finalRows).toHaveLength(1); // exactly one credit-eligible row
+  });
+
+  it("RESUME — a step that expired (FASHN's documented sentinel) while the browser was closed is classified correctly by reconciliation; reopening sees a clear FAILED state, never endless PROCESSING, and nothing is ever resubmitted", async () => {
+    const ctx = ctxWithGarmentCount(4);
+    const { byKey, _findJobFn } = makeJobStore();
+    mockCooldown().mockResolvedValue({ ok: true });
+    mockDownloadPhoto().mockResolvedValue({ ok: true, dataUrl: PNG_DATA_URL });
+    mockSubmitProvider().mockResolvedValue({ ok: true, predictionId: "pred-x" });
+
+    const start = await startOrResumeFullLookChain(ctx, { _findJobFn }, async () => ({ reconciled: false }));
+    expect(start).toEqual({ ok: true, stepIndex: 0 });
+    const step0Row = [...byKey.values()].find((j) => j.status === "PROCESSING")!;
+
+    // Browser closes. By the time reconciliation checks, FASHN's own
+    // documented 60-minute return_base64 window has lapsed — the real,
+    // documented sentinel, not a network blip or malformed output.
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(JSON.stringify({ status: "completed", output: ["<base64>_expired"] }), { status: 200 }),
+    );
+    const reconcileOutcome = await reconcileOnePendingFullLookJob(step0Row);
+    expect(reconcileOutcome).toEqual({ status: "RECOVERED_FAILED", jobId: step0Row.id, errorCode: "PREDICTION_NO_LONGER_AVAILABLE" });
+    expect(mockUploadPrivate()).not.toHaveBeenCalled();
+    expect(mockSubmitProvider()).toHaveBeenCalledTimes(1); // still just the original submission
+
+    // Browser reopens — must see the real FAILED state immediately, not
+    // PROCESSING forever, and the reopened browser's own safe poll must
+    // never silently resubmit either.
+    const safePoll = await advanceFullLookChain(ctx, { _findJobFn }, undefined, { allowSubmitNext: false });
+    expect(safePoll).toEqual({ status: "FAILED", failedStepIndex: 0, errorCode: "PREDICTION_NO_LONGER_AVAILABLE" });
+    expect(mockSubmitProvider()).toHaveBeenCalledTimes(1);
+  });
+
+  it("RESUME — a Cloudinary upload failure while the browser was closed is marked FAILED with the real error code by reconciliation, never silently retried on a later sweep pass, and the customer sees it immediately on reopening", async () => {
+    const ctx = ctxWithGarmentCount(4);
+    const { byKey, _findJobFn } = makeJobStore();
+    mockCooldown().mockResolvedValue({ ok: true });
+    mockDownloadPhoto().mockResolvedValue({ ok: true, dataUrl: PNG_DATA_URL });
+    mockSubmitProvider().mockResolvedValue({ ok: true, predictionId: "pred-x" });
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(JSON.stringify({ status: "completed", output: [PNG_DATA_URL] }), { status: 200 }),
+    );
+    mockUploadPrivate().mockResolvedValueOnce({ ok: false, errorCode: "PROVIDER_ERROR_500" });
+
+    const start = await startOrResumeFullLookChain(ctx, { _findJobFn }, async () => ({ reconciled: false }));
+    expect(start).toEqual({ ok: true, stepIndex: 0 });
+    const step0Row = [...byKey.values()].find((j) => j.status === "PROCESSING")!;
+
+    const reconcileOutcome = await reconcileOnePendingFullLookJob(step0Row);
+    expect(reconcileOutcome).toEqual({ status: "RECOVERED_FAILED", jobId: step0Row.id, errorCode: "PROVIDER_ERROR_500" });
+    expect(mockSubmitProvider()).toHaveBeenCalledTimes(1);
+
+    // Reopening sees the real failure immediately.
+    const safePoll = await advanceFullLookChain(ctx, { _findJobFn }, undefined, { allowSubmitNext: false });
+    expect(safePoll).toEqual({ status: "FAILED", failedStepIndex: 0, errorCode: "PROVIDER_ERROR_500" });
+
+    // A later, independent reconciliation sweep pass must never retry
+    // this now-FAILED row — the batch query it runs against only ever
+    // selects status: "PROCESSING", and this row structurally no longer
+    // qualifies.
+    const currentRow = byKey.get(step0Row.idempotencyKey)!;
+    expect(currentRow.status).toBe("FAILED");
+    const secondReconcileAttempt = await reconcileOnePendingFullLookJob(currentRow);
+    expect(secondReconcileAttempt).toEqual({ status: "STILL_PROCESSING", jobId: currentRow.id }); // the defensive guard's own name for "not a PROCESSING row — nothing to do"
+    expect(mockUploadPrivate()).toHaveBeenCalledTimes(1); // the one failed attempt only — never retried
   });
 
   it("E2E.2 — a mid-chain failure (step 3 of 5) stops the chain with no credit at risk; a retry under a new scope completes the SAME 5 garments and is the only attempt ever counted", async () => {

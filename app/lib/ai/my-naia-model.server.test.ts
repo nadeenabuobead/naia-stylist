@@ -30,7 +30,7 @@
 // Run: npx vitest run app/lib/ai/my-naia-model.server.test.ts
 
 import { describe, it, expect } from "vitest";
-import { atomicallyCloseOutProcessingJob, type AtomicUpdateManyFn } from "./my-naia-model.server";
+import { atomicallyCloseOutProcessingJob, tryAcquireProcessingLease, type AtomicUpdateManyFn, type LeaseUpdateManyFn } from "./my-naia-model.server";
 import type { VirtualTryOnJobRecord } from "./virtual-try-on.types";
 
 function fakeJob(overrides: Partial<VirtualTryOnJobRecord> = {}): VirtualTryOnJobRecord {
@@ -190,5 +190,102 @@ describe("atomicallyCloseOutProcessingJob", () => {
 
     expect(results.filter((r) => r.claimed)).toHaveLength(1);
     expect(results.filter((r) => !r.claimed)).toHaveLength(9);
+  });
+});
+
+// ── tryAcquireProcessingLease — claim before any external side effect ───────
+//
+// CONFIRMED GAP this closes: atomicallyCloseOutProcessingJob (above) only
+// makes the FINAL database write atomic. Without a claim BEFORE the real
+// Cloudinary upload, two genuinely concurrent callers could both perform
+// that upload (harmless — idempotent, same publicId — but a real,
+// avoidable waste) before either's atomic close-out resolves anything.
+// This reuses the existing lastActivityAt column as a lease marker
+// (acquire = atomically bump it, but only if it's currently older than
+// the lease duration) rather than a new status value or schema change —
+// see the real function's own header for the full mechanism, including
+// why a crashed holder's lease self-heals once it expires.
+function makeFakeLeaseRow(initialStatus: "PROCESSING" | "COMPLETED" = "PROCESSING", initialLastActivityAt = 0) {
+  const row = { status: initialStatus as string, lastActivityAt: initialLastActivityAt };
+  const updateMany: LeaseUpdateManyFn = async (jobId, cutoff, now) => {
+    if (row.status !== "PROCESSING") return { count: 0 };
+    if (row.lastActivityAt >= cutoff.getTime()) return { count: 0 }; // lease still held (not stale enough)
+    row.lastActivityAt = now.getTime();
+    return { count: 1 };
+  };
+  return { row, updateMany };
+}
+
+describe("tryAcquireProcessingLease", () => {
+  it("acquires successfully when the row has had no recent activity", async () => {
+    const { updateMany } = makeFakeLeaseRow("PROCESSING", 0); // ancient lastActivityAt
+    const result = await tryAcquireProcessingLease("job-1", 90_000, updateMany, () => 1_000_000);
+    expect(result).toEqual({ acquired: true });
+  });
+
+  it("refuses when the lease is still fresh — another caller is actively holding it right now", async () => {
+    const now = 1_000_000;
+    const { updateMany } = makeFakeLeaseRow("PROCESSING", now - 1_000); // bumped 1s ago, well within a 90s lease
+    const result = await tryAcquireProcessingLease("job-1", 90_000, updateMany, () => now);
+    expect(result).toEqual({ acquired: false });
+  });
+
+  it("refuses when the row is no longer PROCESSING at all — nothing left to lease", async () => {
+    const { updateMany } = makeFakeLeaseRow("COMPLETED", 0);
+    const result = await tryAcquireProcessingLease("job-1", 90_000, updateMany, () => 1_000_000);
+    expect(result).toEqual({ acquired: false });
+  });
+
+  // 2026-11-16 — CRASH RECOVERY, the explicit requirement: a lease holder
+  // that acquires and then crashes before ever reaching the final
+  // close-out leaves the row at PROCESSING with a freshly-bumped
+  // lastActivityAt — indistinguishable from a lease still legitimately in
+  // use. This proves the self-healing half of that: once leaseDurationMs
+  // has genuinely elapsed with no further activity, a later caller's own
+  // acquire attempt succeeds again, safely retrying from scratch.
+  it("CRASH RECOVERY — a lease whose holder never returned is acquirable again once it has genuinely expired", async () => {
+    // lastActivityAt starts old enough (100s before t=100_000, the first
+    // acquire below) to be acquirable right away — a row that's simply
+    // never had any lease activity, not a special case.
+    const { updateMany } = makeFakeLeaseRow("PROCESSING", 0);
+
+    // The crashed holder's own acquire, at t=100_000.
+    const crashedHolder = await tryAcquireProcessingLease("job-1", 90_000, updateMany, () => 100_000);
+    expect(crashedHolder).toEqual({ acquired: true });
+    // ...and then it crashes. Nothing ever closes the row out.
+
+    // A second caller, moments later (well within the 90s lease): must
+    // see the lease as still held, not available.
+    const tooSoon = await tryAcquireProcessingLease("job-1", 90_000, updateMany, () => 130_000);
+    expect(tooSoon).toEqual({ acquired: false });
+
+    // A third caller, after the full lease duration has elapsed: the
+    // crashed holder's lease is now stale, and this caller safely
+    // reclaims it — the row was never stuck.
+    const afterExpiry = await tryAcquireProcessingLease("job-1", 90_000, updateMany, () => 195_000);
+    expect(afterExpiry).toEqual({ acquired: true });
+  });
+
+  // 2026-11-16 — GENUINE SIMULTANEOUS RACE at the lease layer itself, same
+  // rigor as atomicallyCloseOutProcessingJob's own tests above: both
+  // calls reach the fake "database" via a real await before either
+  // resolves, not sequential interleaving.
+  it("CONCURRENT WORKERS — two genuinely simultaneous callers racing to acquire the SAME lease: exactly one wins", async () => {
+    const row = { status: "PROCESSING" as string, lastActivityAt: 0 };
+    const updateMany: LeaseUpdateManyFn = async (jobId, cutoff, now) => {
+      await new Promise((resolve) => setTimeout(resolve, 0)); // see atomicallyCloseOutProcessingJob's own test for why this matters
+      if (row.status !== "PROCESSING" || row.lastActivityAt >= cutoff.getTime()) return { count: 0 };
+      row.lastActivityAt = now.getTime();
+      return { count: 1 };
+    };
+
+    const [first, second] = await Promise.all([
+      tryAcquireProcessingLease("job-1", 90_000, updateMany, () => 1_000_000),
+      tryAcquireProcessingLease("job-1", 90_000, updateMany, () => 1_000_000),
+    ]);
+
+    const results = [first, second];
+    expect(results.filter((r) => r.acquired)).toHaveLength(1);
+    expect(results.filter((r) => !r.acquired)).toHaveLength(1);
   });
 });

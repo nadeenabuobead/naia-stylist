@@ -113,6 +113,7 @@ import {
   createOrFindTryOnJob,
   advanceTryOnJob,
   atomicallyCloseOutProcessingJob,
+  tryAcquireProcessingLease,
   type FindJobFn,
 } from "./my-naia-model.server.js";
 import {
@@ -691,6 +692,30 @@ export async function submitFullLookRealStep(
 
 // ── Poll one step — single status check, no loop ─────────────────────────────
 
+// CONFIRMED GAP (2026-11-16) — atomicallyCloseOutProcessingJob only makes
+// the FINAL database write atomic; the FASHN status check and the real
+// Cloudinary upload before it still ran unguarded. Two genuinely
+// concurrent callers (this customer's own live poll racing the
+// independent reconciliation sweep, or two browser tabs polling the same
+// step) could both reach the Cloudinary upload before either's atomic
+// close-out resolved anything — never a correctness bug (the upload is
+// idempotent, same publicId, overwrite semantics), but a real, avoidable
+// waste. tryAcquireProcessingLease (my-naia-model.server.js) closes that
+// too, the same way: one atomic conditional UPDATE, reusing the existing
+// lastActivityAt column as a lease marker rather than a new status value
+// or schema change — see that function's own header for the full
+// mechanism, including why a crashed holder's lease self-heals once it
+// expires, with no manual intervention and never a second paid
+// prediction.
+//
+// Duration sized against this module's own real worst-case latency for
+// the work it protects, not guessed: FASHN_STATUS_CHECK_TIMEOUT_MS (15s)
+// + Cloudinary's own bounded retry (up to 2 attempts * 20s each, plus a
+// 300ms gap between them ≈ 40.3s) ≈ 55.3s worst case. 90s leaves a
+// healthy margin above that, so a lease is never mistaken for abandoned
+// while genuinely still in flight.
+export const PROCESSING_LEASE_DURATION_MS = 90_000;
+
 export type PollStepResult =
   | { status: "PROCESSING" }
   | { status: "STEP_COMPLETE"; job: VirtualTryOnJobRecord } // intermediate step done; caller submits next
@@ -716,6 +741,14 @@ export async function pollFullLookRealStep(
 
   const predictionId = job.predictionId;
   if (!predictionId) return { status: "PROCESSING" }; // SUBMITTED but not yet persisted
+
+  // Claim before any external side effect — see PROCESSING_LEASE_DURATION_MS's
+  // own comment above. A lost lease means another caller (this same
+  // customer's second tab, or the independent reconciliation sweep) is
+  // already actively working this exact row right now; back off without
+  // ever touching FASHN or Cloudinary.
+  const lease = await tryAcquireProcessingLease(job.id, PROCESSING_LEASE_DURATION_MS);
+  if (!lease.acquired) return { status: "PROCESSING" };
 
   const check = await checkFashnPredictionStatus(predictionId);
   if (!check.ok) {
@@ -843,7 +876,8 @@ export type ReconcileOneJobOutcome =
   | { status: "RECOVERED_FAILED"; jobId: string; errorCode: string }
   | { status: "STILL_PROCESSING"; jobId: string }
   | { status: "STATUS_CHECK_FAILED"; jobId: string }
-  | { status: "ALREADY_RESOLVED_CONCURRENTLY"; jobId: string };
+  | { status: "ALREADY_RESOLVED_CONCURRENTLY"; jobId: string }
+  | { status: "LEASE_NOT_ACQUIRED"; jobId: string };
 
 export async function reconcileOnePendingFullLookJob(
   job: VirtualTryOnJobRecord,
@@ -853,6 +887,16 @@ export async function reconcileOnePendingFullLookJob(
   // assume that and touch a row outside it.
   if (job.status !== "PROCESSING" || !job.predictionId) {
     return { status: "STILL_PROCESSING", jobId: job.id };
+  }
+
+  // Claim before any external side effect — see PROCESSING_LEASE_DURATION_MS's
+  // own comment (pollFullLookRealStep, above). A lost lease means another
+  // caller — this customer's own live poll, or a second, overlapping
+  // reconciliation worker — is already actively working this exact row
+  // right now; back off without ever touching FASHN or Cloudinary.
+  const lease = await tryAcquireProcessingLease(job.id, PROCESSING_LEASE_DURATION_MS);
+  if (!lease.acquired) {
+    return { status: "LEASE_NOT_ACQUIRED", jobId: job.id };
   }
 
   const check = await checkFashnPredictionStatus(job.predictionId);
@@ -948,6 +992,7 @@ export interface ReconciliationBatchResult {
   stillProcessing: number;
   statusCheckFailed: number;
   alreadyResolvedConcurrently: number;
+  leaseNotAcquired: number;
 }
 
 async function defaultFindPendingFullLookJobs(cutoff: Date, limit: number): Promise<VirtualTryOnJobRecord[]> {
@@ -977,6 +1022,7 @@ export async function reconcilePendingFullLookPredictions(
     stillProcessing: 0,
     statusCheckFailed: 0,
     alreadyResolvedConcurrently: 0,
+    leaseNotAcquired: 0,
   };
 
   // Sequential, deliberately — never a Promise.all burst against FASHN or
@@ -989,6 +1035,7 @@ export async function reconcilePendingFullLookPredictions(
     else if (outcome.status === "RECOVERED_FAILED") result.recoveredFailed++;
     else if (outcome.status === "STILL_PROCESSING") result.stillProcessing++;
     else if (outcome.status === "ALREADY_RESOLVED_CONCURRENTLY") result.alreadyResolvedConcurrently++;
+    else if (outcome.status === "LEASE_NOT_ACQUIRED") result.leaseNotAcquired++;
     else result.statusCheckFailed++;
   }
 

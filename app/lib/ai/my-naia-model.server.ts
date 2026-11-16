@@ -965,6 +965,68 @@ export async function atomicallyCloseOutProcessingJob(
   return { claimed: true, job: { ...job, status: newStatus, predictionId, errorCode, completedAt: now, lastActivityAt: now } };
 }
 
+// ── Claim-before-side-effect lease (2026-11-16) ─────────────────────────────
+//
+// CONFIRMED GAP in atomicallyCloseOutProcessingJob alone: that function
+// only makes the FINAL database write atomic. Everything before it —
+// checking the provider's status, then uploading the real result to
+// Cloudinary — still runs unguarded. Two genuinely concurrent callers (a
+// customer's own live poll racing the independent reconciliation sweep,
+// or two overlapping reconciliation workers) could BOTH reach the
+// Cloudinary upload before either's atomic close-out resolves anything.
+// The upload itself is idempotent (same publicId, overwrite semantics —
+// proven in cloudinary-admin.server.test.ts), so this was never a
+// correctness bug, but it is a real, avoidable waste: a second real
+// network call to Cloudinary that serves no purpose.
+//
+// This closes that gap the same way the close-out above does — one
+// atomic conditional UPDATE, this time reusing the EXISTING
+// lastActivityAt column as a lease marker instead of adding a new status
+// value or schema change. Acquiring the lease is exactly "bump
+// lastActivityAt to now, but ONLY if it's currently older than the lease
+// duration" — a genuinely concurrent second caller's own attempt to bump
+// the SAME column, checked against the SAME condition, fails the instant
+// the first caller's bump has landed, for exactly the same database-level
+// reason atomicallyCloseOutProcessingJob's own claim works.
+//
+// CRASH RECOVERY is a direct, free consequence of reusing this column
+// rather than inventing a separate lock table or lock row: if a caller
+// acquires the lease and then crashes before ever reaching the final
+// close-out, the row is left at status PROCESSING with a freshly-bumped
+// lastActivityAt — indistinguishable, to any other caller, from a lease
+// that is still legitimately in use. Once leaseDurationMs elapses with
+// no further activity, lastActivityAt ages past the threshold again and
+// the NEXT caller's own lease-acquire attempt succeeds, safely retrying
+// the whole operation from scratch (a fresh, free status check; an
+// idempotent re-upload under the same publicId; a fresh close-out
+// attempt) — no stuck row, no manual intervention, and never a second
+// paid prediction, since nothing here ever resubmits to the provider.
+export type TryAcquireLeaseResult = { acquired: true } | { acquired: false };
+
+export type LeaseUpdateManyFn = (
+  jobId: string,
+  cutoff: Date,
+  now: Date,
+) => Promise<{ count: number }>;
+
+async function _defaultLeaseUpdateMany(jobId: string, cutoff: Date, now: Date): Promise<{ count: number }> {
+  return prisma.virtualTryOnJob.updateMany({
+    where: { id: jobId, status: "PROCESSING", lastActivityAt: { lt: cutoff } },
+    data: { lastActivityAt: now },
+  });
+}
+
+export async function tryAcquireProcessingLease(
+  jobId: string,
+  leaseDurationMs: number,
+  _updateMany: LeaseUpdateManyFn = _defaultLeaseUpdateMany,
+  _now: () => number = Date.now,
+): Promise<TryAcquireLeaseResult> {
+  const now = _now();
+  const result = await _updateMany(jobId, new Date(now - leaseDurationMs), new Date(now));
+  return { acquired: result.count > 0 };
+}
+
 // ── Re-exports for route / component compatibility ────────────────────────────
 
 export { DEFAULT_CONSENT_STATE };
