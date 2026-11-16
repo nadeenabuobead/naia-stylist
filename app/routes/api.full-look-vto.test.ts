@@ -57,12 +57,13 @@ describe("FL2 — unauthenticated request rejected before any DB access", () => 
 });
 
 describe("FL3 — customerId never accepted from client input", () => {
-  it("action destructures only outfitSuggestionId, virtualTryOnConsentAt, retry from the body — never customerId", () => {
+  it("action destructures only outfitSuggestionId, virtualTryOnConsentAt, retry, recover from the body — never customerId or a jobId", () => {
     const match = route.match(/const \{ ([^}]+) \} = body as Record<string, unknown>;/);
     assert.ok(match, "expected a destructure of the parsed body");
     const destructured = match[1].split(",").map((s) => s.trim());
-    assert.deepEqual(destructured.sort(), ["outfitSuggestionId", "retry", "virtualTryOnConsentAt"].sort());
+    assert.deepEqual(destructured.sort(), ["outfitSuggestionId", "retry", "recover", "virtualTryOnConsentAt"].sort());
     assert.ok(!destructured.includes("customerId"));
+    assert.ok(!destructured.includes("jobId")); // recovery resolves its own target server-side, never from the client
   });
 
   it("every startFullLookOutfit/pollFullLookOutfit call passes customer.id, not a body/query value", () => {
@@ -291,5 +292,58 @@ describe("FL14 — a BUSY orchestrator status (ACTIVE_JOB/COOLDOWN) returns a co
     const busyFnBody = route.split("function busy(")[1].split("function ")[0];
     assert.ok(busyFnBody.includes('status: 409'));
     assert.ok(busyFnBody.includes('code: "busy"'));
+  });
+});
+
+// 2026-11-16 — FL15: the explicit, consent-gated recovery trigger.
+describe("FL15 — recover: an explicit, authenticated, consent-gated, POST-only recovery trigger", () => {
+  it("recover is handled ONLY inside the POST action — the GET loader never references it or recoverFullLookStep at all", () => {
+    const loaderBody = route.split("export async function loader")[1].split("export async function action")[0];
+    assert.ok(!loaderBody.includes("recover"), "the GET loader must never reference recover in any form");
+    assert.ok(!loaderBody.includes("recoverFullLookStep"), "the GET loader must never call recoverFullLookStep");
+  });
+
+  it("the recover branch sits AFTER ownership (loadOwnedSuggestion) and the shared consent-freshness check — it gets no exemption from either", () => {
+    const actionBody = route.split("export async function action")[1];
+    const consentCheckIdx = actionBody.indexOf("consentAgeMs > MAX_CONSENT_AGE_MS");
+    const ownershipIdx = actionBody.indexOf("loadOwnedSuggestion(customer.id, outfitSuggestionId)");
+    const recoverIdx = actionBody.indexOf("if (recover === true)");
+    assert.ok(consentCheckIdx !== -1 && ownershipIdx !== -1 && recoverIdx !== -1);
+    assert.ok(consentCheckIdx < recoverIdx, "consent freshness must be checked before the recover branch");
+    assert.ok(ownershipIdx < recoverIdx, "ownership must be verified before the recover branch");
+  });
+
+  it("recover sits AFTER the already-completed short-circuit — it can never re-run against an outfit that's already done", () => {
+    const actionBody = route.split("export async function action")[1];
+    const existingCheckIdx = actionBody.indexOf("findCompletedFullLookForSuggestion(customer.id, outfitSuggestionId)");
+    const recoverIdx = actionBody.indexOf("if (recover === true)");
+    assert.ok(existingCheckIdx !== -1 && recoverIdx !== -1 && existingCheckIdx < recoverIdx);
+  });
+
+  it("recover never reaches checkEntitlement or startFullLookOutfit — it returns from its own branch first", () => {
+    const actionBody = route.split("export async function action")[1];
+    const recoverBranch = actionBody.slice(
+      actionBody.indexOf("if (recover === true)"),
+      actionBody.indexOf("const naiaModel = await loadNaiaModel(customer.id);", actionBody.indexOf("if (recover === true)")),
+    );
+    assert.ok(!recoverBranch.includes("checkEntitlement"));
+    assert.ok(!recoverBranch.includes("startFullLookOutfit("));
+    assert.ok(recoverBranch.includes("return data("), "the recover branch must return before falling through to start/retry logic");
+  });
+
+  it("recoverFullLookStep is called with no client-supplied jobId anywhere in the call — the step to recover is always resolved server-side", () => {
+    const actionBody = route.split("export async function action")[1];
+    const callIdx = actionBody.indexOf("recoverFullLookStep(");
+    assert.ok(callIdx !== -1);
+    const callArgs = actionBody.slice(callIdx, actionBody.indexOf(");", callIdx));
+    assert.ok(!callArgs.includes("jobId"));
+    assert.ok(!callArgs.includes("body.job"));
+  });
+
+  it("every status recoverFullLookStep can report is handled explicitly (NOT_RECOVERABLE, ERROR) before the generic success response", () => {
+    const actionBody = route.split("export async function action")[1];
+    const recoverBranch = actionBody.slice(actionBody.indexOf("if (recover === true)"));
+    assert.ok(recoverBranch.includes('outcome.status === "NOT_RECOVERABLE"'));
+    assert.ok(recoverBranch.includes('outcome.status === "ERROR"'));
   });
 });

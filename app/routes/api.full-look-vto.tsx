@@ -6,7 +6,10 @@
 // longer called by style-me/result.tsx once this route is wired in).
 //
 // GET  /api/full-look-vto?suggestionId=X  — status / resume (no charge, no re-generation)
-// POST /api/full-look-vto                 — start a new outfit, or retry a failed one
+// POST /api/full-look-vto                 — start a new outfit, retry a failed one, or
+//                                            (2026-11-16) explicitly recover one whose
+//                                            FASHN prediction completed but whose own
+//                                            Cloudinary upload failed ({recover: true})
 //
 // Security contract (mirrors api.trigger-tryon.tsx exactly):
 //   - Customer identity from the authenticated session only, never the body.
@@ -16,12 +19,25 @@
 //   - Garment image URLs are resolved server-side only (selectFullLookGarments
 //     + resolveItemImage); the client never supplies an image URL.
 //   - Per-generation consent required, same 15-minute freshness window as
-//     the single-item flow.
+//     the single-item flow — recover is NOT exempt from this.
 //   - Entitlement is checked before starting a NEW outfit (never before
 //     resuming/polling an existing one) — "1 credit per completed outfit"
 //     is enforced by entitlement.server.ts's own exclusion of intermediate
 //     steps; this pre-check just avoids spending a FASHN call at all once
-//     over quota, same as the single-item route.
+//     over quota, same as the single-item route. recover never reaches
+//     this check either — it can never submit a new FASHN prediction, so
+//     there is no new FASHN spend to gate.
+//   - recover is POST-only, same as start/retry. The GET loader above
+//     never calls recoverFullLookStep or anything that could reach it —
+//     it only ever calls pollFullLookOutfit, which itself can never
+//     submit a new step (allowSubmitNext: false, see that module). There
+//     is no code path by which loading or refreshing a page can trigger
+//     a recovery, exactly as there is none by which it can submit a new
+//     garment.
+//   - recover never accepts a jobId from the client — the step to
+//     recover is always resolved server-side from the session's own
+//     current scope (recoverFullLookStep), the same way every other
+//     entry point here resolves what to act on.
 
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { data } from "react-router";
@@ -34,6 +50,7 @@ import {
   selectFullLookGarments,
   startFullLookOutfit,
   pollFullLookOutfit,
+  recoverFullLookStep,
   findCompletedFullLookForSuggestion,
   type SelectableOutfitItem,
 } from "~/lib/ai/full-look-vto-orchestrator.server";
@@ -166,7 +183,7 @@ export async function action({ request }: ActionFunctionArgs) {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     return badRequest("invalid_request", "Request body must be a JSON object.");
   }
-  const { outfitSuggestionId, virtualTryOnConsentAt, retry } = body as Record<string, unknown>;
+  const { outfitSuggestionId, virtualTryOnConsentAt, retry, recover } = body as Record<string, unknown>;
 
   if (typeof outfitSuggestionId !== "string" || !outfitSuggestionId.trim()) {
     return badRequest("invalid_request", "outfitSuggestionId is required.");
@@ -204,6 +221,46 @@ export async function action({ request }: ActionFunctionArgs) {
   const existing = await findCompletedFullLookForSuggestion(customer.id, outfitSuggestionId);
   if (existing) {
     return data({ ok: true, status: "COMPLETED", resultUrl: existing.resultUrl, omittedLabels });
+  }
+
+  // 2026-11-16 — "recover": the ONLY explicit, consent-gated trigger for
+  // recoverFailedUploadStep. POST only (this entire action is POST-only by
+  // construction — there is no GET equivalent of this branch, and the GET
+  // loader above never calls anything in this file past pollFullLookOutfit,
+  // which itself can never submit a new step either). Same ownership
+  // (loadOwnedSuggestion, above) and consent-freshness check (top of this
+  // action, shared with every other submission intent) as every other mutating path here —
+  // recovery gets no special exemption from either. The client never
+  // supplies a jobId: recoverFullLookStep resolves the exact step to
+  // recover itself, from the session's own current scope, the same way
+  // pollFullLookOutfit resolves what to report.
+  if (recover === true) {
+    // Recovery never downloads a new model photo or needs readiness —
+    // it only reuses a prediction that already completed. naiaModel is
+    // still loaded for its id (record-keeping on the new row only; see
+    // recoverFailedUploadStep's own comment on why this is never used
+    // functionally), not gated behind computeModelReadinessFromRecord.
+    const naiaModelForRecovery = await loadNaiaModel(customer.id);
+    const outcome = await recoverFullLookStep(
+      {
+        customerId: customer.id,
+        naiaModelId: naiaModelForRecovery?.id ?? null,
+        bodyPublicId: naiaModelForRecovery?.bodyPublicId ?? null,
+        bodyFormat: naiaModelForRecovery?.bodyFormat ?? null,
+        deliveryType: naiaModelForRecovery?.deliveryType ?? "private",
+        garments,
+        consent: { virtualTryOnConsent: true, policyVersion: "1.0", consentedAt: consentAt.toISOString() },
+        outfitSuggestionId,
+      },
+      fingerprint,
+    );
+    if (outcome.status === "NOT_RECOVERABLE") {
+      return badRequest("not_recoverable", outcome.reason);
+    }
+    if (outcome.status === "ERROR") {
+      return data({ ok: false, code: "recovery_failed", reason: outcome.reason }, { status: 400 });
+    }
+    return data({ ok: true, recovered: true, alreadyRecovered: outcome.alreadyRecovered });
   }
 
   const naiaModel = await loadNaiaModel(customer.id);

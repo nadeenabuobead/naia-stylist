@@ -31,6 +31,7 @@ import {
   advanceFullLookChain,
   continueToFinalStep,
   walkFullLookChainJobs,
+  recoverFailedUploadStep,
   REAL_PRODUCT_HANDLE_PREFIX,
   REAL_RESERVATION_KEY_PREFIX,
   type FullLookChainContext,
@@ -428,6 +429,46 @@ export async function pollFullLookOutfit(
   const scope = await resolveCurrentAttemptScope(baseCtx.customerId, baseCtx.outfitSuggestionId, fingerprint);
   const ctx: FullLookChainContext = { ...baseCtx, reservationScope: scope };
   return advanceAutomatically(ctx, { allowSubmitNext: false });
+}
+
+// ── Recovery (2026-11-16) — the ONLY entry point to recoverFailedUploadStep ──
+//
+// Reused machinery, new purpose: resolves the SAME current scope every
+// other entry point uses, walks it with the SAME walkFullLookChainJobs,
+// and only ever acts if the chain's own LATEST step is FAILED — never
+// touches any other job, never guesses which step to recover from client
+// input (the client never supplies a jobId; this always resolves it
+// server-side from the authenticated session's own current state, the
+// same discipline as everything else in this file).
+export type RecoveryOutcome =
+  | { status: "RECOVERED"; alreadyRecovered: boolean }
+  | { status: "NOT_RECOVERABLE"; reason: string }
+  | { status: "ERROR"; reason: string };
+
+export async function recoverFullLookStep(
+  baseCtx: Omit<FullLookChainContext, "reservationScope">,
+  fingerprint: string,
+): Promise<RecoveryOutcome> {
+  const scope = await resolveCurrentAttemptScope(baseCtx.customerId, baseCtx.outfitSuggestionId, fingerprint);
+  const ctx: FullLookChainContext = { ...baseCtx, reservationScope: scope };
+
+  const jobs = await walkFullLookChainJobs(ctx.customerId, undefined, scope);
+  const lastJob = jobs[jobs.length - 1];
+  if (!lastJob) {
+    return { status: "NOT_RECOVERABLE", reason: "NO_CHAIN_STARTED" };
+  }
+  if (lastJob.status !== "FAILED") {
+    // Nothing to recover — PROCESSING/COMPLETED/CREATED/SUBMITTED all mean
+    // the latest step either already succeeded or is still legitimately
+    // in flight. Recovery is only ever for a genuinely dead step.
+    return { status: "NOT_RECOVERABLE", reason: "LATEST_STEP_NOT_FAILED" };
+  }
+
+  const result = await recoverFailedUploadStep(ctx, lastJob);
+  if (!result.ok) {
+    return { status: "ERROR", reason: result.reason };
+  }
+  return { status: "RECOVERED", alreadyRecovered: result.alreadyRecovered };
 }
 
 // ── Existing-result lookup — never regenerate on revisit ─────────────────────

@@ -18,6 +18,7 @@ vi.mock("./full-look-tryon-real.server.js", async (importOriginal) => {
     advanceFullLookChain: vi.fn(),
     continueToFinalStep: vi.fn(),
     walkFullLookChainJobs: vi.fn(),
+    recoverFailedUploadStep: vi.fn(),
   };
 });
 
@@ -43,6 +44,7 @@ import {
   advanceFullLookChain,
   continueToFinalStep,
   walkFullLookChainJobs,
+  recoverFailedUploadStep,
 } from "./full-look-tryon-real.server.js";
 import {
   selectFullLookGarments,
@@ -51,6 +53,7 @@ import {
   startNewAttemptScope,
   startFullLookOutfit,
   pollFullLookOutfit,
+  recoverFullLookStep,
   findCompletedFullLookForSuggestion,
   type SelectableOutfitItem,
 } from "./full-look-vto-orchestrator.server";
@@ -75,6 +78,7 @@ beforeEach(() => {
   // this explicitly.
   vi.mocked(walkFullLookChainJobs).mockReset();
   vi.mocked(walkFullLookChainJobs).mockResolvedValue([]);
+  vi.mocked(recoverFailedUploadStep).mockReset();
 });
 
 // ── Garment selection ─────────────────────────────────────────────────────────
@@ -638,6 +642,68 @@ describe("startFullLookOutfit / pollFullLookOutfit — auto-advance past the hum
     expect(b).toEqual({ status: "PROCESSING", stepIndex: 0, totalSteps: 3 });
     const scopes = vi.mocked(startOrResumeFullLookChain).mock.calls.map((c) => c[0].reservationScope);
     expect(scopes).toEqual([`sugg-1:a0:${BASE_FP}`, `sugg-1:a0:${BASE_FP}`]); // both requests converge on the same attempt, never two
+  });
+});
+
+// ── Recovery ──────────────────────────────────────────────────────────────────
+
+describe("recoverFullLookStep — only ever acts on the chain's own current, latest, FAILED step", () => {
+  it("no chain started yet → NOT_RECOVERABLE (NO_CHAIN_STARTED), never calls recoverFailedUploadStep", async () => {
+    vi.mocked(walkFullLookChainJobs).mockResolvedValueOnce([]);
+
+    const result = await recoverFullLookStep(BASE_CTX, BASE_FP);
+
+    expect(result).toEqual({ status: "NOT_RECOVERABLE", reason: "NO_CHAIN_STARTED" });
+    expect(recoverFailedUploadStep).not.toHaveBeenCalled();
+  });
+
+  it("latest step is not FAILED (still in flight or already succeeded) → NOT_RECOVERABLE (LATEST_STEP_NOT_FAILED), never calls recoverFailedUploadStep", async () => {
+    vi.mocked(walkFullLookChainJobs).mockResolvedValueOnce([{ status: "PROCESSING" } as any]);
+
+    const result = await recoverFullLookStep(BASE_CTX, BASE_FP);
+
+    expect(result).toEqual({ status: "NOT_RECOVERABLE", reason: "LATEST_STEP_NOT_FAILED" });
+    expect(recoverFailedUploadStep).not.toHaveBeenCalled();
+  });
+
+  it("latest step is FAILED and recovery succeeds → RECOVERED, passing through alreadyRecovered: false on a fresh recovery", async () => {
+    const failedJob = { status: "FAILED", id: "job-1" } as any;
+    vi.mocked(walkFullLookChainJobs).mockResolvedValueOnce([failedJob]);
+    vi.mocked(recoverFailedUploadStep).mockResolvedValueOnce({ ok: true, alreadyRecovered: false } as any);
+
+    const result = await recoverFullLookStep(BASE_CTX, BASE_FP);
+
+    expect(result).toEqual({ status: "RECOVERED", alreadyRecovered: false });
+    expect(recoverFailedUploadStep).toHaveBeenCalledWith(expect.anything(), failedJob);
+  });
+
+  it("a repeat recovery request against an already-recovered step → RECOVERED, passing through alreadyRecovered: true — never a duplicate", async () => {
+    const failedJob = { status: "FAILED", id: "job-1" } as any;
+    vi.mocked(walkFullLookChainJobs).mockResolvedValueOnce([failedJob]);
+    vi.mocked(recoverFailedUploadStep).mockResolvedValueOnce({ ok: true, alreadyRecovered: true } as any);
+
+    const result = await recoverFullLookStep(BASE_CTX, BASE_FP);
+
+    expect(result).toEqual({ status: "RECOVERED", alreadyRecovered: true });
+  });
+
+  it("recoverFailedUploadStep itself fails (e.g. provider output unavailable, Cloudinary failure) → ERROR, passing through its reason", async () => {
+    vi.mocked(walkFullLookChainJobs).mockResolvedValueOnce([{ status: "FAILED" } as any]);
+    vi.mocked(recoverFailedUploadStep).mockResolvedValueOnce({ ok: false, reason: "UPLOAD_FAILED" } as any);
+
+    const result = await recoverFullLookStep(BASE_CTX, BASE_FP);
+
+    expect(result).toEqual({ status: "ERROR", reason: "UPLOAD_FAILED" });
+  });
+
+  it("resolves the SAME current-attempt scope every other entry point uses — never a client-supplied or guessed scope", async () => {
+    vi.mocked(walkFullLookChainJobs).mockResolvedValueOnce([{ status: "FAILED" } as any]);
+    vi.mocked(recoverFailedUploadStep).mockResolvedValueOnce({ ok: true, alreadyRecovered: false } as any);
+
+    await recoverFullLookStep(BASE_CTX, BASE_FP);
+
+    const scopeUsed = vi.mocked(walkFullLookChainJobs).mock.calls[0][2];
+    expect(scopeUsed).toBe(`sugg-1:a0:${BASE_FP}`);
   });
 });
 
