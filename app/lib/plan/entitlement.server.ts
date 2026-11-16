@@ -721,6 +721,13 @@ export type EntitlementFeature = "styleMe" | "buySkip" | "vto" | "closet" | "per
 export interface EntitlementCheck {
   allowed: boolean;
   reason?: "quota_exceeded" | "at_capacity";
+  // "closet" only — the resolved allowance this check was evaluated against.
+  // Lets a caller distinguish "limit is 0 (not a member at all)" from "limit
+  // is the real 250-item cap, genuinely reached" for messaging purposes —
+  // see closet._index.tsx's at_capacity branch, which used to show the same
+  // "remove some items" copy for both, misleadingly telling a non-member
+  // that deleting items would let them add one (it never would, at limit 0).
+  limit?: number;
 }
 
 export async function checkEntitlement(
@@ -746,8 +753,8 @@ export async function checkEntitlement(
           ...(options?.excludeItemId ? { id: { not: options.excludeItemId } } : {}),
         },
       });
-      if (count >= allowances.closetItems) return { allowed: false, reason: "at_capacity" };
-      return { allowed: true };
+      if (count >= allowances.closetItems) return { allowed: false, reason: "at_capacity", limit: allowances.closetItems };
+      return { allowed: true, limit: allowances.closetItems };
     }
 
     case "styleMe": {

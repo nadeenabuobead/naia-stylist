@@ -383,8 +383,17 @@ export async function action({ request }: ActionFunctionArgs) {
         // Deliberately does NOT delete the just-uploaded asset here (unchanged from
         // the pre-replace behaviour) — the customer can free capacity and resubmit
         // without re-uploading.
+        //
+        // limit === 0 means this customer has no Closet allowance at all (not a
+        // member) — "remove some items to add new ones" is actively wrong there:
+        // deleting every existing item still leaves 0 >= 0, so nothing they
+        // delete would ever let them add one. Only a real member who has
+        // genuinely filled their (non-zero) allowance gets that message.
+        const message = capacityCheck.limit === 0
+          ? "Closet access is included with nAia Membership. Subscribe to start adding pieces."
+          : "Your closet is full. Remove some items to add new ones.";
         return data(
-          { error: "Your closet is full. Remove some items to add new ones." },
+          { error: message },
           { status: 403 },
         );
       }
