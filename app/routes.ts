@@ -130,9 +130,11 @@ export default [
   route("webhooks/customers/redact", "routes/webhooks.customers.redact.tsx"),
   route("webhooks/shop/redact", "routes/webhooks.shop.redact.tsx"),
   route("quick-style", "routes/quick-style/_index.tsx"),
-  // api/quick-style retired 2026-10-19 — Phase 1 security lockdown. No live
-  // caller (the /quick-style page above posts to its own route action); this
-  // file called Anthropic directly with no auth and no entitlement checks.
+  // Public guest teaser (rebuilt 2026-11-16, no loader/action — see the
+  // route file's own header comment). api/quick-style was retired
+  // 2026-10-19 — Phase 1 security lockdown — and had no live caller even
+  // before that: it called Anthropic directly with no auth and no
+  // entitlement checks.
   route("full-style-profile", "routes/full-style-profile/_index.tsx"),
   route("api/full-style-profile", "routes/api.full-style-profile.jsx"),
   route("api/save-look", "routes/api.save-look.jsx"),

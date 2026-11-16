@@ -141,11 +141,9 @@ describe("C — no alert() in customer-facing routes", () => {
     assert.ok(!src.includes("alert("), "no alert() call — must use inline error state");
   });
 
-  it("quick-style/_index.tsx has inline error state for save validation", () => {
-    const src = route("quick-style/_index.tsx");
-    assert.ok(src.includes("saveError"), "has saveError state");
-    assert.ok(src.includes("setSaveError"), "has setSaveError setter");
-  });
+  // The closet-upload step (and its save-item modal with saveError/setSaveError
+  // validation state) was removed 2026-11-16 per approved product decision:
+  // quick-style is now a 3-question guest teaser with no upload step at all.
 
   it("my-naia.saved.tsx does not call alert()", () => {
     const src = route("my-naia.saved.tsx");
