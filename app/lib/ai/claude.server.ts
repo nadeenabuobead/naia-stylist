@@ -22,6 +22,16 @@ interface CallAIParams {
 // thrown Error — exactly the same path a network failure already took.
 const CLAUDE_REQUEST_TIMEOUT_MS = 30_000;
 
+// Load-test / local-dev escape hatch — same fail-safe shape as the FASHN
+// adapter's BASE_URL override (fashn-try-on.server.ts): both
+// ALLOW_PROVIDER_MOCKS="true" AND CLAUDE_MOCK_BASE_URL must be set, so a
+// stray env var alone never redirects a real call. Unset anywhere in this
+// repo's own config today — behavior is unchanged by default.
+const ANTHROPIC_MESSAGES_URL =
+  process.env.ALLOW_PROVIDER_MOCKS === "true" && process.env.CLAUDE_MOCK_BASE_URL
+    ? `${process.env.CLAUDE_MOCK_BASE_URL}/v1/messages`
+    : "https://api.anthropic.com/v1/messages";
+
 /**
  * Call Claude API with messages
  */
@@ -33,7 +43,7 @@ export async function callClaude({
   _fetch = fetch,
 }: CallAIParams): Promise<string> {
   try {
-    const response = await _fetch("https://api.anthropic.com/v1/messages", {
+    const response = await _fetch(ANTHROPIC_MESSAGES_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -150,7 +160,7 @@ export async function analyzeImage({
   const timeoutSignal = AbortSignal.timeout(CLAUDE_REQUEST_TIMEOUT_MS);
   const combinedSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
 
-  const response = await _fetch("https://api.anthropic.com/v1/messages", {
+  const response = await _fetch(ANTHROPIC_MESSAGES_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

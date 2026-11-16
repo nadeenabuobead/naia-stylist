@@ -23,7 +23,18 @@ import { captureFailure } from "../error-tracking.server.js";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const BASE_URL = "https://api.fashn.ai";
+// Load-test / local-dev escape hatch: lets a disposable mock FASHN server
+// stand in for the real provider so a synthetic load test never makes a
+// real paid call. Both ALLOW_PROVIDER_MOCKS="true" AND FASHN_MOCK_BASE_URL
+// must be set for the override to take effect — setting only one (e.g. a
+// stray FASHN_MOCK_BASE_URL left in an environment) has no effect, same
+// fail-safe shape as ENTITLEMENT_ENFORCEMENT elsewhere in this codebase.
+// Neither variable is set anywhere in this repo's own config, so behavior
+// is unchanged by default on every existing deployment.
+const BASE_URL =
+  process.env.ALLOW_PROVIDER_MOCKS === "true" && process.env.FASHN_MOCK_BASE_URL
+    ? process.env.FASHN_MOCK_BASE_URL
+    : "https://api.fashn.ai";
 const POLL_INTERVAL_MS = 2_000;
 const MAX_POLL_ATTEMPTS = 45; // 90s ceiling at 2s interval
 
