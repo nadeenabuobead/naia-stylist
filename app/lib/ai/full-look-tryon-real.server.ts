@@ -112,6 +112,7 @@ import {
   checkCustomerCooldown,
   createOrFindTryOnJob,
   advanceTryOnJob,
+  type FindJobFn,
 } from "./my-naia-model.server.js";
 import {
   submitTryOnToProvider,
@@ -618,6 +619,164 @@ export async function pollFullLookRealStep(
 
   // starting | in_queue | processing
   return { status: "PROCESSING" };
+}
+
+// ── Recovery: reuse an existing FAILED step's completed prediction ─────────
+//
+// 2026-11-16 — narrowly scoped to the exact problem this investigation
+// found: a step whose FASHN prediction genuinely completed, but whose own
+// Cloudinary upload failed afterward (now correctly distinguished from a
+// FASHN-side failure — see isUploadClassErrorCode below). The ORIGINAL
+// FAILED row is never mutated — ALLOWED_TRANSITIONS has no outgoing edge
+// from FAILED at all (virtual-try-on.types.ts), and this deliberately
+// does not try to work around that; it stays the immutable audit record
+// of exactly what happened. Recovery instead creates ONE new row, under
+// its own distinct, deterministic idempotency key, and completes it using
+// the SAME predictionId — submitTryOnToProvider is never called, so this
+// can never submit a new, billable FASHN prediction under any code path
+// here, including a retried or duplicate call.
+//
+// Deliberately NOT wired into the normal chain-walking logic
+// (walkFullLookChainJobs/advanceFullLookChain) — those still resolve this
+// step to the original dead row. Making a later step recognize and
+// continue from the recovery row instead is a separate, not-yet-built
+// integration; this function only proves the recovered step itself.
+
+// Upload-class failures: FASHN's own prediction succeeded and produced a
+// real output — only the subsequent Cloudinary upload failed. Recovery
+// only ever makes sense for these. Deliberately EXCLUDES PROVIDER_FAILED
+// (FASHN itself reported failed/canceled, or returned an unusable output)
+// — there is no valid output to recover in that case; that needs a new
+// submission, which is out of scope here.
+const UPLOAD_CLASS_ERROR_CODES = new Set<string>(["UPLOAD_FAILED", "NETWORK_ERROR", "PROVIDER_REJECTED"]);
+function isUploadClassErrorCode(errorCode: string | null): boolean {
+  if (!errorCode) return false;
+  if (UPLOAD_CLASS_ERROR_CODES.has(errorCode)) return true;
+  // bbd953e's detailed codes: PROVIDER_ERROR_404, _401, _413, etc.
+  return /^PROVIDER_ERROR_\d+$/.test(errorCode);
+}
+
+// Deterministic per (customerId, originalJobId) — a repeat click (or a
+// race between two requests) always resolves to the SAME recovery row via
+// createOrFindTryOnJob's own idempotency lookup, never a second one.
+// Distinct from both getFullLookStepIdempotencyKey's own prefixes (the
+// step-0 reservation key and the prior-job-derived step key) so normal
+// chain-walking can never mistake this for part of the ongoing chain.
+export function getFullLookStepRecoveryIdempotencyKey(customerId: string, originalJobId: string): string {
+  return `fulllook-real-recovery:${customerId}:${originalJobId}`;
+}
+
+export type RecoverFailedUploadResult =
+  | { ok: true; job: VirtualTryOnJobRecord; alreadyRecovered: boolean }
+  | { ok: false; reason: string };
+
+export async function recoverFailedUploadStep(
+  ctx: FullLookChainContext,
+  failedJob: VirtualTryOnJobRecord,
+  deps: { _findJobFn?: FindJobFn } = {},
+): Promise<RecoverFailedUploadResult> {
+  // Ownership — defensive, even though every real caller should already
+  // scope failedJob by the authenticated session's own customerId before
+  // ever reaching here.
+  if (failedJob.customerId !== ctx.customerId) {
+    return { ok: false, reason: "OWNERSHIP_MISMATCH" };
+  }
+  if (failedJob.status !== "FAILED") {
+    return { ok: false, reason: "NOT_FAILED" };
+  }
+  if (!failedJob.predictionId) {
+    return { ok: false, reason: "NO_PREDICTION_TO_REUSE" };
+  }
+  if (!isUploadClassErrorCode(failedJob.errorCode)) {
+    // e.g. PROVIDER_FAILED — FASHN's own prediction failed; nothing valid to recover.
+    return { ok: false, reason: "NOT_AN_UPLOAD_FAILURE" };
+  }
+
+  const recoveryKey = getFullLookStepRecoveryIdempotencyKey(ctx.customerId, failedJob.id);
+  const reserved = await createOrFindTryOnJob(
+    {
+      customerId: ctx.customerId,
+      naiaModelId: ctx.naiaModelId,
+      productHandle: failedJob.productHandle, // same garment, same role (intermediate stays intermediate, final stays final)
+      bodyPublicId: ctx.bodyPublicId,
+      virtualTryOnConsentAt: failedJob.virtualTryOnConsentAt, // reuses the ORIGINAL consent event — this isn't a new generation request
+      idempotencyKey: recoveryKey,
+      outfitSuggestionId: ctx.outfitSuggestionId,
+    },
+    deps._findJobFn,
+  );
+  if (!reserved.ok) {
+    return { ok: false, reason: reserved.code };
+  }
+
+  if (!reserved.created) {
+    // A repeat click, or a concurrent request — the SAME row every time.
+    if (reserved.job.status === "COMPLETED") {
+      return { ok: true, job: reserved.job, alreadyRecovered: true };
+    }
+    if (reserved.job.status === "FAILED") {
+      // A prior recovery attempt on this exact row already failed terminally.
+      return { ok: false, reason: reserved.job.errorCode ?? "RECOVERY_PREVIOUSLY_FAILED" };
+    }
+    // CREATED/SUBMITTED/PROCESSING from an interrupted earlier recovery
+    // call — fall through and continue the SAME row rather than starting over.
+  }
+
+  const recoveryJob = reserved.job;
+
+  // The one FASHN call recovery ever makes: a plain status GET against the
+  // EXISTING predictionId — free, non-billable, the same read every normal
+  // poll already performs. Never submitTryOnToProvider.
+  const check = await checkFashnPredictionStatus(failedJob.predictionId);
+  if (!check.ok) {
+    // Transient/network error on the check itself — leave the row at
+    // CREATED (or wherever it already was) so a later retry simply tries
+    // again, exactly like pollFullLookRealStep's own identical convention.
+    return { ok: false, reason: "STATUS_CHECK_FAILED" };
+  }
+  if (check.body.status !== "completed") {
+    // The prediction FASHN once reported "completed" no longer does (data
+    // expired, or something changed upstream) — nothing safe to recover.
+    await markFailedBestEffort(recoveryJob, "PREDICTION_NO_LONGER_AVAILABLE");
+    return { ok: false, reason: "PREDICTION_NO_LONGER_AVAILABLE" };
+  }
+  const outputs = check.body.output;
+  if (!Array.isArray(outputs) || outputs.length === 0 || typeof outputs[0] !== "string") {
+    await markFailedBestEffort(recoveryJob, "INVALID_OUTPUT");
+    return { ok: false, reason: "INVALID_OUTPUT" };
+  }
+  const outputDataUrl = outputs[0];
+
+  // CREATED -> SUBMITTED, stamping the REUSED predictionId directly —
+  // never a freshly submitted one.
+  const submitted = await advanceTryOnJob(recoveryJob, "SUBMITTED", { predictionId: failedJob.predictionId });
+  if (!submitted.ok) {
+    return { ok: false, reason: "STATE_ERROR" };
+  }
+
+  const isFinal = failedJob.productHandle.startsWith(FULL_LOOK_FINAL_STEP_HANDLE_PREFIX);
+  const upload = isFinal
+    ? await uploadTryOnResult(ctx.customerId, submitted.job.id, outputDataUrl)
+    : await uploadIntermediateStepResult(ctx.customerId, submitted.job.id, outputDataUrl);
+
+  if (!upload.ok) {
+    console.error("[full-look-vto] recovery upload failed", {
+      jobId: submitted.job.id,
+      originalFailedJobId: failedJob.id,
+      customerIdHash: hashCustomerId(ctx.customerId),
+      isFinal,
+      errorCode: upload.errorCode,
+    });
+    await markFailedBestEffort(submitted.job, upload.errorCode);
+    return { ok: false, reason: upload.errorCode };
+  }
+
+  const completed = await advanceTryOnJob(submitted.job, "COMPLETED", { predictionId: failedJob.predictionId });
+  if (!completed.ok) {
+    return { ok: false, reason: "STATE_ERROR" };
+  }
+
+  return { ok: true, job: completed.job, alreadyRecovered: false };
 }
 
 // ── Top-level: advance the chain by exactly one unit of work ────────────────

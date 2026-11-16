@@ -55,8 +55,11 @@ import {
   reconcileStaleFullLookJobForCustomer,
   STALE_PROCESSING_THRESHOLD_MS,
   REAL_PRODUCT_HANDLE_PREFIX,
+  recoverFailedUploadStep,
+  getFullLookStepRecoveryIdempotencyKey,
   type FullLookChainContext,
 } from "./full-look-tryon-real.server.js";
+import { FULL_LOOK_FINAL_STEP_HANDLE_PREFIX } from "./full-look-handle-constants.js";
 import type { VirtualTryOnConsent, VirtualTryOnJobRecord } from "./virtual-try-on.types.js";
 
 const mockCooldown = () => checkCustomerCooldown as ReturnType<typeof vi.fn>;
@@ -459,6 +462,210 @@ describe("pollFullLookRealStep", () => {
     const second = await pollFullLookRealStep(baseCtx(), terminalJob, 0);
     expect(second.status).toBe("FAILED");
     expect(global.fetch).not.toHaveBeenCalled();
+  });
+});
+
+// ── recoverFailedUploadStep — reuse an existing FAILED step's completed
+// prediction without ever submitting a new one (2026-11-16) ────────────────
+
+describe("recoverFailedUploadStep", () => {
+  function failedIntermediateJob(overrides: Partial<VirtualTryOnJobRecord> = {}): VirtualTryOnJobRecord {
+    return fakeJob("job-original", {
+      status: "FAILED",
+      errorCode: "UPLOAD_FAILED",
+      predictionId: "pred-real",
+      productHandle: `${REAL_PRODUCT_HANDLE_PREFIX}:step1:Black Polo Ralph Lauren Crew Neck Sweater`,
+      ...overrides,
+    });
+  }
+
+  it("REC.1 — successful recovery: reuses the existing predictionId, creates exactly one new row under a distinct idempotency key, never calls submitTryOnToProvider", async () => {
+    const failedJob = failedIntermediateJob();
+    const recoveryJob = fakeJob("job-recovery", { status: "CREATED", predictionId: null });
+    mockCreateOrFind().mockResolvedValueOnce({ ok: true, job: recoveryJob, created: true });
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(JSON.stringify({ status: "completed", output: [PNG_DATA_URL] }), { status: 200 }),
+    );
+    mockUploadPrivate().mockResolvedValueOnce({ ok: true, publicId: "x", format: "png", version: "1" });
+    mockAdvance()
+      .mockResolvedValueOnce({ ok: true, job: { ...recoveryJob, status: "SUBMITTED", predictionId: "pred-real" } })
+      .mockResolvedValueOnce({ ok: true, job: { ...recoveryJob, status: "COMPLETED", predictionId: "pred-real" } });
+
+    const result = await recoverFailedUploadStep(baseCtx(), failedJob);
+
+    expect(result).toEqual({ ok: true, job: expect.objectContaining({ status: "COMPLETED" }), alreadyRecovered: false });
+    expect(mockCreateOrFind()).toHaveBeenCalledTimes(1);
+    const createArgs = mockCreateOrFind().mock.calls[0][0];
+    expect(createArgs.idempotencyKey).toBe(getFullLookStepRecoveryIdempotencyKey("cust-1", "job-original"));
+    expect(createArgs.productHandle).toBe(failedJob.productHandle); // same garment, same role
+    expect(mockAdvance()).toHaveBeenCalledWith(expect.anything(), "SUBMITTED", { predictionId: "pred-real" });
+    expect(mockSubmitProvider()).not.toHaveBeenCalled(); // the one hard requirement — never a new prediction
+  });
+
+  it("REC.2 — repeat request (idempotent): a second call finds the SAME already-COMPLETED row, makes zero new DB rows and zero new FASHN calls", async () => {
+    const failedJob = failedIntermediateJob();
+    const alreadyRecovered = fakeJob("job-recovery", { status: "COMPLETED", predictionId: "pred-real" });
+    mockCreateOrFind().mockResolvedValueOnce({ ok: true, job: alreadyRecovered, created: false });
+
+    const result = await recoverFailedUploadStep(baseCtx(), failedJob);
+
+    expect(result).toEqual({ ok: true, job: alreadyRecovered, alreadyRecovered: true });
+    expect(global.fetch).not.toHaveBeenCalled(); // no FASHN status check even attempted — already done
+    expect(mockAdvance()).not.toHaveBeenCalled();
+    expect(mockSubmitProvider()).not.toHaveBeenCalled();
+  });
+
+  it("REC.3 — a repeat request while a PRIOR recovery attempt is still mid-flight (CREATED) continues the SAME row rather than starting a second one", async () => {
+    const failedJob = failedIntermediateJob();
+    const inFlightRecovery = fakeJob("job-recovery", { status: "CREATED", predictionId: null });
+    mockCreateOrFind().mockResolvedValueOnce({ ok: true, job: inFlightRecovery, created: false });
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(JSON.stringify({ status: "completed", output: [PNG_DATA_URL] }), { status: 200 }),
+    );
+    mockUploadPrivate().mockResolvedValueOnce({ ok: true, publicId: "x", format: "png", version: "1" });
+    mockAdvance()
+      .mockResolvedValueOnce({ ok: true, job: { ...inFlightRecovery, status: "SUBMITTED" } })
+      .mockResolvedValueOnce({ ok: true, job: { ...inFlightRecovery, status: "COMPLETED" } });
+
+    const result = await recoverFailedUploadStep(baseCtx(), failedJob);
+
+    expect(result.ok).toBe(true);
+    expect(mockCreateOrFind()).toHaveBeenCalledTimes(1); // never a second row
+    expect(mockSubmitProvider()).not.toHaveBeenCalled();
+  });
+
+  it("REC.4 — a prior recovery attempt that already failed terminally is reported as such, never silently retried", async () => {
+    const failedJob = failedIntermediateJob();
+    const deadRecovery = fakeJob("job-recovery", { status: "FAILED", errorCode: "PREDICTION_NO_LONGER_AVAILABLE" });
+    mockCreateOrFind().mockResolvedValueOnce({ ok: true, job: deadRecovery, created: false });
+
+    const result = await recoverFailedUploadStep(baseCtx(), failedJob);
+
+    expect(result).toEqual({ ok: false, reason: "PREDICTION_NO_LONGER_AVAILABLE" });
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("REC.5 — unavailable/expired provider output: FASHN no longer reports 'completed' for this predictionId — marks the recovery row FAILED, never creates a new submission", async () => {
+    const failedJob = failedIntermediateJob();
+    const recoveryJob = fakeJob("job-recovery", { status: "CREATED", predictionId: null });
+    mockCreateOrFind().mockResolvedValueOnce({ ok: true, job: recoveryJob, created: true });
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(JSON.stringify({ status: "processing" }), { status: 200 }), // no longer "completed"
+    );
+    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...recoveryJob, status: "FAILED", errorCode: "PREDICTION_NO_LONGER_AVAILABLE" } });
+
+    const result = await recoverFailedUploadStep(baseCtx(), failedJob);
+
+    expect(result).toEqual({ ok: false, reason: "PREDICTION_NO_LONGER_AVAILABLE" });
+    expect(mockAdvance()).toHaveBeenCalledWith(expect.anything(), "FAILED", { errorCode: "PREDICTION_NO_LONGER_AVAILABLE" });
+    expect(mockSubmitProvider()).not.toHaveBeenCalled();
+    expect(mockUploadPrivate()).not.toHaveBeenCalled();
+  });
+
+  it("REC.6 — invalid/missing output on an otherwise-'completed' status is treated the same as unavailable — FAILED, no submission", async () => {
+    const failedJob = failedIntermediateJob();
+    const recoveryJob = fakeJob("job-recovery", { status: "CREATED", predictionId: null });
+    mockCreateOrFind().mockResolvedValueOnce({ ok: true, job: recoveryJob, created: true });
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(JSON.stringify({ status: "completed", output: [] }), { status: 200 }),
+    );
+    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...recoveryJob, status: "FAILED", errorCode: "INVALID_OUTPUT" } });
+
+    const result = await recoverFailedUploadStep(baseCtx(), failedJob);
+
+    expect(result).toEqual({ ok: false, reason: "INVALID_OUTPUT" });
+    expect(mockSubmitProvider()).not.toHaveBeenCalled();
+  });
+
+  it("REC.7 — a Cloudinary failure DURING recovery (the exact scenario this investigation started from) persists the real errorCode, never retries automatically, never submits a new prediction", async () => {
+    const failedJob = failedIntermediateJob();
+    const recoveryJob = fakeJob("job-recovery", { status: "CREATED", predictionId: null });
+    mockCreateOrFind().mockResolvedValueOnce({ ok: true, job: recoveryJob, created: true });
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(JSON.stringify({ status: "completed", output: [PNG_DATA_URL] }), { status: 200 }),
+    );
+    mockUploadPrivate().mockResolvedValueOnce({ ok: false, errorCode: "PROVIDER_ERROR_413" });
+    mockAdvance()
+      .mockResolvedValueOnce({ ok: true, job: { ...recoveryJob, status: "SUBMITTED", predictionId: "pred-real" } })
+      .mockResolvedValueOnce({ ok: true, job: { ...recoveryJob, status: "FAILED", errorCode: "PROVIDER_ERROR_413" } });
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await recoverFailedUploadStep(baseCtx(), failedJob);
+
+    expect(result).toEqual({ ok: false, reason: "PROVIDER_ERROR_413" });
+    expect(mockAdvance()).toHaveBeenCalledWith(expect.anything(), "FAILED", { errorCode: "PROVIDER_ERROR_413" });
+    expect(mockSubmitProvider()).not.toHaveBeenCalled();
+    expect(consoleErrorSpy).toHaveBeenCalled();
+    consoleErrorSpy.mockRestore();
+  });
+
+  it("REC.8 — refuses a job that isn't FAILED at all (e.g. still PROCESSING) — recovery is only for terminal upload failures", async () => {
+    const result = await recoverFailedUploadStep(baseCtx(), failedIntermediateJob({ status: "PROCESSING" }));
+    expect(result).toEqual({ ok: false, reason: "NOT_FAILED" });
+    expect(mockCreateOrFind()).not.toHaveBeenCalled();
+  });
+
+  it("REC.9 — refuses a FAILED job with no predictionId at all — nothing to reuse", async () => {
+    const result = await recoverFailedUploadStep(baseCtx(), failedIntermediateJob({ predictionId: null }));
+    expect(result).toEqual({ ok: false, reason: "NO_PREDICTION_TO_REUSE" });
+    expect(mockCreateOrFind()).not.toHaveBeenCalled();
+  });
+
+  it("REC.10 — refuses PROVIDER_FAILED (FASHN's own prediction failed, not an upload problem) — there is no valid output to recover, and this must never be confused with an upload-class failure", async () => {
+    const result = await recoverFailedUploadStep(baseCtx(), failedIntermediateJob({ errorCode: "PROVIDER_FAILED" }));
+    expect(result).toEqual({ ok: false, reason: "NOT_AN_UPLOAD_FAILURE" });
+    expect(mockCreateOrFind()).not.toHaveBeenCalled();
+  });
+
+  it("REC.11 — recognizes every upload-class errorCode shape, old and new: legacy UPLOAD_FAILED, NETWORK_ERROR, PROVIDER_REJECTED, and bbd953e's PROVIDER_ERROR_<status> codes", async () => {
+    for (const errorCode of ["UPLOAD_FAILED", "NETWORK_ERROR", "PROVIDER_REJECTED", "PROVIDER_ERROR_404", "PROVIDER_ERROR_500"]) {
+      mockCreateOrFind().mockResolvedValueOnce({
+        ok: true, job: fakeJob("job-recovery", { status: "COMPLETED" }), created: false,
+      });
+      const result = await recoverFailedUploadStep(baseCtx(), failedIntermediateJob({ errorCode }));
+      expect(result.ok).toBe(true); // reached the idempotency check at all — i.e. was NOT rejected as "not an upload failure"
+    }
+  });
+
+  it("REC.12 — ownership mismatch (a failedJob belonging to a different customer) is refused before touching anything", async () => {
+    const result = await recoverFailedUploadStep(baseCtx(), failedIntermediateJob({ customerId: "someone-else" }));
+    expect(result).toEqual({ ok: false, reason: "OWNERSHIP_MISMATCH" });
+    expect(mockCreateOrFind()).not.toHaveBeenCalled();
+  });
+
+  it("REC.13 — a FINAL step's own recovery uploads via uploadTryOnResult (the real-deliverable namespace), not the intermediate one — no duplicate-asset risk between the two paths", async () => {
+    const failedFinal = failedIntermediateJob({
+      productHandle: `${FULL_LOOK_FINAL_STEP_HANDLE_PREFIX}Beige Tailored Blazer`,
+    });
+    const recoveryJob = fakeJob("job-recovery-final", { status: "CREATED", predictionId: null });
+    mockCreateOrFind().mockResolvedValueOnce({ ok: true, job: recoveryJob, created: true });
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(JSON.stringify({ status: "completed", output: [PNG_DATA_URL] }), { status: 200 }),
+    );
+    mockUploadResult().mockResolvedValueOnce({ ok: true });
+    mockAdvance()
+      .mockResolvedValueOnce({ ok: true, job: { ...recoveryJob, status: "SUBMITTED" } })
+      .mockResolvedValueOnce({ ok: true, job: { ...recoveryJob, status: "COMPLETED" } });
+
+    const result = await recoverFailedUploadStep(baseCtx(), failedFinal);
+
+    expect(result.ok).toBe(true);
+    expect(mockUploadResult()).toHaveBeenCalledWith("cust-1", "job-recovery-final", PNG_DATA_URL);
+    expect(mockUploadPrivate()).not.toHaveBeenCalled(); // never the intermediate namespace for the real deliverable
+  });
+
+  it("REC.14 — across every scenario above, checkFashnPredictionStatus is the ONLY possible FASHN call — submitTryOnToProvider is never imported-and-called by this function under any branch", async () => {
+    // Static proof, not just behavioral: this function's own source never
+    // references submitTryOnToProvider at all.
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const dir = path.dirname(new URL(import.meta.url).pathname);
+    const source = fs.readFileSync(path.join(dir, "full-look-tryon-real.server.ts"), "utf8");
+    const fnStart = source.indexOf("export async function recoverFailedUploadStep");
+    const fnEnd = source.indexOf("\n// ── Top-level: advance the chain", fnStart);
+    const fnBody = source.slice(fnStart, fnEnd === -1 ? undefined : fnEnd);
+    const codeOnly = fnBody.replace(/\/\/.*$/gm, ""); // strip comments — this file's OWN explanatory comments mention the name too
+    expect(codeOnly).not.toContain("submitTryOnToProvider");
   });
 });
 
