@@ -631,6 +631,16 @@ function isAwaitingContinueExpired(job: VirtualTryOnJobRecord): boolean {
 export type ChainAdvanceResult =
   | { status: "NOT_STARTED" }
   | { status: "PROCESSING"; stepIndex: number }
+  // 2026-11-16 — reached when the just-recovered step's own FASHN result
+  // (already paid for, downloaded and persisted above, regardless of this
+  // status) is NOT the final step, and allowSubmitNext is false. Submitting
+  // the next garment is NEW, genuinely billable FASHN work — it must never
+  // happen as a side effect of a bare status check (a GET, a page load, a
+  // refresh). Distinguishing this from PROCESSING matters: PROCESSING means
+  // a real FASHN call is in flight and polling again is free; this means
+  // nothing is in flight at all, and only an explicitly authorized call
+  // (allowSubmitNext: true) moves the chain forward from here.
+  | { status: "STEP_COMPLETE_AWAITING_AUTHORIZATION"; completedStepIndex: number; nextStepIndex: number }
   // QA pause checkpoint (2026-11-03): reached once the second-to-last step
   // (shirt) is COMPLETED and BEFORE the final (blazer) step is ever
   // submitted. Stable across repeated polls/refreshes — see the fast-path
@@ -727,7 +737,16 @@ export async function advanceFullLookChain(
   ctx: FullLookChainContext,
   deps: WalkChainDeps = { _findJobFn: defaultFindJobByIdempotencyKey },
   staleDeps: AdvanceStaleDeps = defaultAdvanceStaleDeps,
+  // 2026-11-16 — defaults to true so any direct caller outside this
+  // module's own two entry points (startFullLookOutfit, pollFullLookOutfit
+  // — see their own call sites below) keeps today's behavior unless it
+  // explicitly opts out. Both of those entry points always pass this
+  // explicitly; the default only matters for the QA harnesses
+  // (staging.full-look-vto-real.tsx, api.staging-full-look-vto-sweep.ts)
+  // that call this directly and were never part of this investigation.
+  opts: { allowSubmitNext?: boolean } = {},
 ): Promise<ChainAdvanceResult> {
+  const allowSubmitNext = opts.allowSubmitNext ?? true;
   const jobs = await walkFullLookChainJobs(ctx.customerId, deps, ctx.reservationScope);
 
   if (jobs.length === 0) {
@@ -808,6 +827,15 @@ export async function advanceFullLookChain(
     const intermediates = buildIntermediatePreviews(ctx, [...jobs.slice(0, -1), poll.job]);
     if (!intermediates) return { status: "SUBMIT_ERROR", reason: "NOT_CONFIGURED" };
     return { status: "AWAITING_CONTINUE", intermediates };
+  }
+
+  // 2026-11-16 — the current step's own result is already recovered and
+  // persisted above (pollFullLookRealStep already ran, unconditionally,
+  // regardless of allowSubmitNext) by the time execution reaches here.
+  // What's gated is ONLY the NEXT step — a new, genuinely billable FASHN
+  // submission — which must never happen from a bare status check.
+  if (!allowSubmitNext) {
+    return { status: "STEP_COMPLETE_AWAITING_AUTHORIZATION", completedStepIndex: lastStepIndex, nextStepIndex: nextIndex };
   }
 
   const submit = await submitFullLookRealStep(ctx, nextIndex, poll.job.id);

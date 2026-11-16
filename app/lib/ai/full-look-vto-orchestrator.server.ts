@@ -284,7 +284,17 @@ export type OrchestratorStatus =
   // "we couldn't create your try-on" for something that never actually
   // failed.
   | { status: "BUSY"; reason: "ACTIVE_JOB" | "COOLDOWN" }
-  | { status: "ERROR"; reason: string };
+  | { status: "ERROR"; reason: string }
+  // 2026-11-16 — CONFIRMED DEFECT FIX. A step just completed (its result
+  // was recovered/persisted from FASHN regardless — see
+  // advanceFullLookChain's own STEP_COMPLETE_AWAITING_AUTHORIZATION
+  // comment), but the next garment's submission is new, genuinely billable
+  // FASHN work and was NOT authorized by this call (pollFullLookOutfit,
+  // used by the GET loader, always passes allowSubmitNext: false). Never
+  // confuse this with PROCESSING: nothing is in flight at FASHN right now.
+  // Only startFullLookOutfit (the POST action, consent-checked) can move
+  // the chain past this.
+  | { status: "AWAITING_AUTHORIZATION"; stepIndex: number; totalSteps: number };
 
 const BUSY_REASONS = new Set(["ACTIVE_JOB", "COOLDOWN"]);
 
@@ -297,11 +307,26 @@ const BUSY_REASONS = new Set(["ACTIVE_JOB", "COOLDOWN"]);
 // alone; see its own doc comment) — calling it immediately here, inside
 // the SAME request that just observed the pause, is exactly that: one of
 // its already-anticipated callers, not a new code path in that file.
-async function advanceAutomatically(ctx: FullLookChainContext): Promise<OrchestratorStatus> {
-  const result = await advanceFullLookChain(ctx);
+//
+// 2026-11-16 — allowSubmitNext gates every place this function would
+// otherwise submit a NEW step (continueToFinalStep here; the equivalent
+// gate for a non-final next step lives inside advanceFullLookChain
+// itself). false for pollFullLookOutfit (GET — never initiates paid
+// work); true for startFullLookOutfit (POST — explicit, consent-checked).
+async function advanceAutomatically(
+  ctx: FullLookChainContext,
+  opts: { allowSubmitNext: boolean },
+): Promise<OrchestratorStatus> {
+  const result = await advanceFullLookChain(ctx, undefined, undefined, opts);
 
   switch (result.status) {
     case "AWAITING_CONTINUE": {
+      if (!opts.allowSubmitNext) {
+        // The pause itself is just information (nothing submitted to
+        // reach it) — only continuing PAST it (continueToFinalStep, a new
+        // FASHN submission) needs authorization.
+        return { status: "AWAITING_AUTHORIZATION", stepIndex: ctx.garments.length - 2, totalSteps: ctx.garments.length };
+      }
       const cont = await continueToFinalStep(ctx);
       if (!cont.ok) return { status: "ERROR", reason: cont.reason };
       // Final step is now submitted (not completed) — PROCESSING is
@@ -316,6 +341,8 @@ async function advanceAutomatically(ctx: FullLookChainContext): Promise<Orchestr
       return { status: "NOT_STARTED" };
     case "PROCESSING":
       return { status: "PROCESSING", stepIndex: result.stepIndex, totalSteps: ctx.garments.length };
+    case "STEP_COMPLETE_AWAITING_AUTHORIZATION":
+      return { status: "AWAITING_AUTHORIZATION", stepIndex: result.completedStepIndex, totalSteps: ctx.garments.length };
     case "SUBMIT_ERROR":
       return { status: "ERROR", reason: result.reason };
     case "EXPIRED":
@@ -379,16 +406,28 @@ export async function startFullLookOutfit(
     }
     return { status: "ERROR", reason: start.reason };
   }
-  return advanceAutomatically(ctx);
+  // Explicit, consented POST (start or retry) — authorized to submit a
+  // new step.
+  return advanceAutomatically(ctx, { allowSubmitNext: true });
 }
 
+// 2026-11-16 — CONFIRMED DEFECT FIX. Used exclusively by the GET loader
+// (api.full-look-vto.tsx), which fires automatically on every page mount
+// and every 3s poll with no consent check and no explicit customer action.
+// Before this fix, this function's own advanceAutomatically call could
+// submit a brand-new, genuinely billable FASHN prediction purely as a
+// side effect of loading or refreshing the page. allowSubmitNext: false
+// makes this strictly a status check: it still recovers and persists
+// whatever the CURRENT step's FASHN result already is (pollFullLookRealStep
+// runs unconditionally — that's free, since the prediction was already
+// paid for), but it can never submit the next one.
 export async function pollFullLookOutfit(
   baseCtx: Omit<FullLookChainContext, "reservationScope">,
   fingerprint: string,
 ): Promise<OrchestratorStatus> {
   const scope = await resolveCurrentAttemptScope(baseCtx.customerId, baseCtx.outfitSuggestionId, fingerprint);
   const ctx: FullLookChainContext = { ...baseCtx, reservationScope: scope };
-  return advanceAutomatically(ctx);
+  return advanceAutomatically(ctx, { allowSubmitNext: false });
 }
 
 // ── Existing-result lookup — never regenerate on revisit ─────────────────────

@@ -384,7 +384,7 @@ describe("startFullLookOutfit / pollFullLookOutfit — auto-advance past the hum
     mockCount().mockResolvedValue(0);
   });
 
-  it("AWAITING_CONTINUE is resolved automatically — continueToFinalStep is called in the same request, never surfaced to the caller", async () => {
+  it("AWAITING_CONTINUE is resolved automatically via the AUTHORIZED (POST/start) path — continueToFinalStep is called in the same request, never surfaced to the caller", async () => {
     vi.mocked(startOrResumeFullLookChain).mockResolvedValueOnce({ ok: true, stepIndex: 1 });
     vi.mocked(advanceFullLookChain).mockResolvedValueOnce({ status: "AWAITING_CONTINUE", intermediates: [] } as any);
     vi.mocked(continueToFinalStep).mockResolvedValueOnce({ ok: true });
@@ -393,16 +393,61 @@ describe("startFullLookOutfit / pollFullLookOutfit — auto-advance past the hum
 
     expect(continueToFinalStep).toHaveBeenCalledOnce();
     expect(result).toEqual({ status: "PROCESSING", stepIndex: 2, totalSteps: 3 });
+    // The authorized path passes allowSubmitNext: true through to
+    // advanceFullLookChain — this IS the explicit authorization.
+    expect(advanceFullLookChain).toHaveBeenCalledWith(expect.anything(), undefined, undefined, { allowSubmitNext: true });
   });
 
-
-  it("a continueToFinalStep failure surfaces as ERROR, not silently swallowed", async () => {
+  it("a continueToFinalStep failure surfaces as ERROR, not silently swallowed, via the authorized (POST/start) path", async () => {
     vi.mocked(startOrResumeFullLookChain).mockResolvedValueOnce({ ok: true, stepIndex: 1 });
     vi.mocked(advanceFullLookChain).mockResolvedValueOnce({ status: "AWAITING_CONTINUE", intermediates: [] } as any);
     vi.mocked(continueToFinalStep).mockResolvedValueOnce({ ok: false, reason: "continue_window_expired" });
 
-    const result = await pollFullLookOutfit(BASE_CTX, BASE_FP);
+    const result = await startFullLookOutfit(BASE_CTX, BASE_FP);
     expect(result).toEqual({ status: "ERROR", reason: "continue_window_expired" });
+  });
+
+  // 2026-11-16 CONFIRMED DEFECT FIX — the real bug this investigation
+  // found: a bare GET (pollFullLookOutfit, used by the loader that fires
+  // on every page mount and every 3s poll) used to call continueToFinalStep
+  // — a brand-new, genuinely billable FASHN submission — purely as a side
+  // effect of a status check, with no consent, no explicit action, no
+  // authorization of any kind.
+  describe("pollFullLookOutfit (GET) NEVER submits a new step — AWAITING_AUTHORIZATION instead", () => {
+    it("reaching the human-review pause via GET returns AWAITING_AUTHORIZATION and NEVER calls continueToFinalStep", async () => {
+      vi.mocked(advanceFullLookChain).mockResolvedValueOnce({ status: "AWAITING_CONTINUE", intermediates: [] } as any);
+
+      const result = await pollFullLookOutfit(BASE_CTX, BASE_FP);
+
+      expect(continueToFinalStep).not.toHaveBeenCalled();
+      expect(result).toEqual({ status: "AWAITING_AUTHORIZATION", stepIndex: 1, totalSteps: 3 });
+    });
+
+    it("an intermediate step completing via GET returns AWAITING_AUTHORIZATION — never silently submits the next garment", async () => {
+      vi.mocked(advanceFullLookChain).mockResolvedValueOnce({
+        status: "STEP_COMPLETE_AWAITING_AUTHORIZATION", completedStepIndex: 0, nextStepIndex: 1,
+      } as any);
+
+      const result = await pollFullLookOutfit(BASE_CTX, BASE_FP);
+
+      expect(result).toEqual({ status: "AWAITING_AUTHORIZATION", stepIndex: 0, totalSteps: 3 });
+    });
+
+    it("pollFullLookOutfit always passes allowSubmitNext: false through to advanceFullLookChain", async () => {
+      vi.mocked(advanceFullLookChain).mockResolvedValueOnce({ status: "PROCESSING", stepIndex: 0 } as any);
+
+      await pollFullLookOutfit(BASE_CTX, BASE_FP);
+
+      expect(advanceFullLookChain).toHaveBeenCalledWith(expect.anything(), undefined, undefined, { allowSubmitNext: false });
+    });
+
+    it("recovering an already-COMPLETED final step via GET still works — that's not a new submission, it's recovering existing paid-for work", async () => {
+      vi.mocked(advanceFullLookChain).mockResolvedValueOnce({ status: "COMPLETED", resultUrl: "https://signed/result.png" } as any);
+
+      const result = await pollFullLookOutfit(BASE_CTX, BASE_FP);
+
+      expect(result).toEqual({ status: "COMPLETED", resultUrl: "https://signed/result.png" });
+    });
   });
 
   it("totalSteps reflects THIS chain's own real garment count (5), not a fixed global — genuine progress, never simulated", async () => {

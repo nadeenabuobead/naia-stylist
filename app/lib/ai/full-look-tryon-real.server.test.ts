@@ -461,6 +461,119 @@ describe("advanceFullLookChain", () => {
     expect(mockSubmitProvider()).toHaveBeenCalledTimes(1); // exactly one new FASHN submission this call
   });
 
+  // 2026-11-16 CONFIRMED DEFECT FIX — the exact gate this investigation
+  // added: the SAME scenario as FL.20 (an intermediate step completing),
+  // but with allowSubmitNext: false (what pollFullLookOutfit/GET always
+  // passes now). The current step's result is still recovered and
+  // persisted — that part is unconditional and free, the prediction was
+  // already paid for — but the next step must NOT be submitted.
+  it("FL.20b — with allowSubmitNext: false, the current step's result IS still recovered/persisted, but the next step is NEVER submitted", async () => {
+    const job0 = fakeJob("job-0", { status: "PROCESSING", predictionId: "pred-0" });
+    const _findJobFn = vi.fn(async (where: { idempotencyKey: string }) =>
+      where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 0, null) ? job0 : null,
+    );
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(JSON.stringify({ status: "completed", output: [PNG_DATA_URL] }), { status: 200 }),
+    );
+    mockUploadPrivate().mockResolvedValue({ ok: true, publicId: "x", format: "png", version: "1" });
+    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job0, status: "COMPLETED" } }); // step 0 → COMPLETED persisted
+
+    const result = await advanceFullLookChain(baseCtx(), { _findJobFn }, undefined, { allowSubmitNext: false });
+
+    expect(result).toEqual({ status: "STEP_COMPLETE_AWAITING_AUTHORIZATION", completedStepIndex: 0, nextStepIndex: 1 });
+    // The recovery/persist call did happen (advanceTryOnJob → COMPLETED)...
+    expect(mockAdvance()).toHaveBeenCalledWith(expect.objectContaining({ id: "job-0" }), "COMPLETED", expect.anything());
+    // ...but nothing resembling a new submission for step 1 ever happened.
+    expect(mockSubmitProvider()).not.toHaveBeenCalled();
+    expect(mockCreateOrFind()).not.toHaveBeenCalled();
+  });
+
+  // 2026-11-16 — the EXACT real shape of the live Attempt C investigation:
+  // a 5-garment chain, ONLY the first garment (index 0) ever submitted, its
+  // job locally PROCESSING with a real predictionId FASHN now reports
+  // "completed". Written to give a test-verified, precise answer to
+  // "exactly what will reconciliation do to this job, the DB, and
+  // Cloudinary" before anyone runs it live — not just a narrative
+  // description of the code.
+  it("FL.20d — PRECISE RECONCILIATION TRACE (Attempt C's real shape): recovers+persists step 1 with exactly one free FASHN status check, exactly one Cloudinary upload scoped to this job, exactly one DB status transition, and NOTHING else — no new submission, no cleanup, no deletion", async () => {
+    const ctx = ctxWithGarmentCount(5);
+    const attemptCJob = fakeJob("cmwhxjd0w0001l607s25kwvq1", {
+      customerId: "cust-1",
+      status: "PROCESSING",
+      predictionId: "pred-real-attempt-c",
+    });
+    const _findJobFn = vi.fn(async (where: { idempotencyKey: string }) =>
+      where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 0, null) ? attemptCJob : null,
+    );
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ status: "completed", output: [PNG_DATA_URL] }), { status: 200 }),
+    );
+    mockUploadPrivate().mockResolvedValue({ ok: true, publicId: "x", format: "png", version: "1" });
+    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...attemptCJob, status: "COMPLETED" } });
+
+    const result = await advanceFullLookChain(ctx, { _findJobFn }, undefined, { allowSubmitNext: false });
+
+    // The one FASHN call: a plain status GET against the EXISTING
+    // predictionId — documented elsewhere in this file as free/non-billable.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // The one Cloudinary write: uploads the already-generated result,
+    // scoped by construction to THIS job id and customer only — no other
+    // customer's or job's assets are touched, and the deterministic
+    // public_id means a retry would overwrite the same asset, never
+    // accumulate duplicates.
+    expect(mockUploadPrivate()).toHaveBeenCalledTimes(1);
+    const [publicIdArg, , deliveryTypeArg] = mockUploadPrivate().mock.calls[0];
+    expect(publicIdArg).toBe("naia-tryon-fulllook-intermediate/cust-1/cmwhxjd0w0001l607s25kwvq1");
+    expect(deliveryTypeArg).toBe("private");
+
+    // The one DB write: this exact job, PROCESSING -> COMPLETED. No other
+    // row is ever touched by this call.
+    expect(mockAdvance()).toHaveBeenCalledTimes(1);
+    expect(mockAdvance()).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "cmwhxjd0w0001l607s25kwvq1" }), "COMPLETED", expect.anything(),
+    );
+
+    // Nothing else: no new FASHN prediction, no job creation, no asset
+    // deletion/cleanup of any kind.
+    expect(mockSubmitProvider()).not.toHaveBeenCalled();
+    expect(mockCreateOrFind()).not.toHaveBeenCalled();
+    expect(mockDeleteAsset()).not.toHaveBeenCalled();
+
+    // The reported outcome: step 1 done and persisted, step 2 explicitly
+    // NOT submitted, awaiting a separate authorized call.
+    expect(result).toEqual({ status: "STEP_COMPLETE_AWAITING_AUTHORIZATION", completedStepIndex: 0, nextStepIndex: 1 });
+  });
+
+  it("FL.20c — allowSubmitNext defaults to true when omitted — every existing caller that doesn't pass it keeps today's behavior unchanged", async () => {
+    const job0 = fakeJob("job-0", { status: "PROCESSING", predictionId: "pred-0" });
+    const _findJobFn = vi.fn(async (where: { idempotencyKey: string }) =>
+      where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 0, null) ? job0 : null,
+    );
+    (global.fetch as ReturnType<typeof vi.fn>).mockImplementation(async (url: string | URL | Request) => {
+      const u = url.toString();
+      if (u.includes("/v1/status/")) {
+        return new Response(JSON.stringify({ status: "completed", output: [PNG_DATA_URL] }), { status: 200 });
+      }
+      return new Response(new Uint8Array([1, 2, 3]).buffer, { status: 200 });
+    });
+    mockUploadPrivate().mockResolvedValue({ ok: true, publicId: "x", format: "png", version: "1" });
+    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job0, status: "COMPLETED" } });
+    const job1 = fakeJob("job-1");
+    mockCreateOrFind().mockResolvedValue({ ok: true, job: job1, created: true });
+    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job1, status: "SUBMITTED" } });
+    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job1, status: "PROCESSING", predictionId: "pred-1" } });
+    mockSubmitProvider().mockResolvedValue({ ok: true, predictionId: "pred-1" });
+
+    // No 4th argument at all — matches every pre-existing call site in
+    // this file and the two QA harnesses that call this directly.
+    const result = await advanceFullLookChain(baseCtx(), { _findJobFn });
+
+    expect(result).toEqual({ status: "PROCESSING", stepIndex: 1 });
+    expect(mockSubmitProvider()).toHaveBeenCalledTimes(1);
+  });
+
   it("FL.21 — a FAILED step reports FAILED with its step index, and is never auto-retried by a later call", async () => {
     const job0 = fakeJob("job-0", { status: "FAILED", errorCode: "PROVIDER_FAILED" });
     const _findJobFn = vi.fn(async (where: { idempotencyKey: string }) =>
@@ -1151,6 +1264,43 @@ describe("prompt placement — final step only", () => {
 
     expect(result).toEqual({ status: "COMPLETED", resultUrl: "https://signed.example/final.png" });
     expect(mockDeleteAsset()).toHaveBeenCalledTimes(2); // job-0 and job-1's intermediates, unchanged behavior
+  });
+});
+
+// ── Duplicate/concurrent GET-equivalent requests — CONFIRMED DEFECT FIX ─────
+// Requirement: page loads, polling, refreshes and duplicate requests must
+// never trigger an unapproved paid FASHN prediction, and an existing
+// completed provider result must be reused safely, not re-fetched or
+// re-submitted.
+
+describe("advanceFullLookChain — duplicate/concurrent polls with allowSubmitNext: false reuse the recovered result safely", () => {
+  it("two consecutive calls (simulating a duplicate request or rapid refresh): the FIRST recovers+persists the completed step and reports AWAITING_AUTHORIZATION; the SECOND finds it already COMPLETED locally, makes ZERO additional FASHN calls, and reports the identical AWAITING_AUTHORIZATION — no re-fetch, no re-submission, no double charge", async () => {
+    const job0 = fakeJob("job-0", { status: "PROCESSING", predictionId: "pred-0" });
+    let currentJob0 = job0;
+    const _findJobFn = vi.fn(async (where: { idempotencyKey: string }) =>
+      where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 0, null) ? currentJob0 : null,
+    );
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+    fetchMock.mockImplementation(async () =>
+      new Response(JSON.stringify({ status: "completed", output: [PNG_DATA_URL] }), { status: 200 }),
+    );
+    mockUploadPrivate().mockResolvedValue({ ok: true, publicId: "x", format: "png", version: "1" });
+    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job0, status: "COMPLETED" } });
+
+    const first = await advanceFullLookChain(baseCtx(), { _findJobFn }, undefined, { allowSubmitNext: false });
+    expect(first).toEqual({ status: "STEP_COMPLETE_AWAITING_AUTHORIZATION", completedStepIndex: 0, nextStepIndex: 1 });
+    expect(fetchMock).toHaveBeenCalledTimes(1); // one real FASHN status check — already free/non-billable per its own contract
+
+    // The "DB" now reflects what the first call just persisted — exactly
+    // what a second, duplicate request would actually see.
+    currentJob0 = { ...job0, status: "COMPLETED" };
+    fetchMock.mockClear();
+    mockSubmitProvider().mockClear();
+
+    const second = await advanceFullLookChain(baseCtx(), { _findJobFn }, undefined, { allowSubmitNext: false });
+    expect(second).toEqual({ status: "STEP_COMPLETE_AWAITING_AUTHORIZATION", completedStepIndex: 0, nextStepIndex: 1 });
+    expect(fetchMock).not.toHaveBeenCalled(); // locally COMPLETED — pollFullLookRealStep's own short-circuit, no FASHN call at all
+    expect(mockSubmitProvider()).not.toHaveBeenCalled(); // and definitely no new submission either way
   });
 });
 
