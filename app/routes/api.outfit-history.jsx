@@ -1,13 +1,9 @@
 import { authenticateCustomer } from "../customer-auth.server";
 import prisma from "../db.server";
-
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization",
-};
+import { buildCorsHeaders } from "../lib/storefront-cors.server";
 
 export async function loader({ request }) {
+  const CORS = buildCorsHeaders(request);
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS });
   }
@@ -39,6 +35,7 @@ export async function loader({ request }) {
 }
 
 export async function action({ request }) {
+  const CORS = buildCorsHeaders(request);
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS });
   }
@@ -51,8 +48,10 @@ export async function action({ request }) {
   try {
     const body = await request.json();
     const { mood, feeling, event, result, styleDNA, bodyPref, closetItemIds, naiaPiece, closetItems } = body;
-    console.log("OUTFIT-HISTORY DEBUG:", JSON.stringify({ hasClosetItems: !!closetItems, hasNaiaPiece: !!naiaPiece, closetItemsLength: closetItems?.length, naiaPieceTitle: naiaPiece?.title }));
-  console.log("Outfit history received:", { hasClosetItems: !!closetItems, hasNaiaPiece: !!naiaPiece, closetItems, naiaPiece });
+    // 2026-11-14 security hotfix: previously logged the full closetItems/naiaPiece
+    // payload (garment details, style preferences) on every call, twice (one line
+    // was a near-duplicate, plus the product title). Presence/count only.
+    console.log("OUTFIT-HISTORY DEBUG:", JSON.stringify({ hasClosetItems: !!closetItems, hasNaiaPiece: !!naiaPiece, closetItemsLength: closetItems?.length }));
 
     const session = await prisma.stylingSession.create({
       data: {
@@ -69,7 +68,7 @@ export async function action({ request }) {
     
     // Save the outfit items as a suggestion
     if (closetItems || naiaPiece) {
-      console.log("SAVING SUGGESTIONS - closetItems:", closetItems, "naiaPiece:", naiaPiece);
+      console.log("SAVING SUGGESTIONS:", { closetItemCount: closetItems?.length ?? 0, hasNaiaPiece: !!naiaPiece });
       try {
         const suggestionItems = [];
         
