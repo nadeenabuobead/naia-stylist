@@ -15,10 +15,12 @@ const mockFindMany = vi.fn();
 const mockSessionCreate = vi.fn();
 const mockSuggestionCreate = vi.fn();
 const mockItemCreate = vi.fn();
+const mockSuggestionFindUnique = vi.fn();
 
 vi.mock("~/lib/prisma.server", () => ({
   prisma: {
     closetItem: { findMany: (...args: unknown[]) => mockFindMany(...args) },
+    outfitSuggestion: { findUnique: (...args: unknown[]) => mockSuggestionFindUnique(...args) },
     $transaction: async (fn: (tx: unknown) => unknown) =>
       fn({
         stylingSession: { create: (...args: unknown[]) => mockSessionCreate(...args) },
@@ -28,7 +30,16 @@ vi.mock("~/lib/prisma.server", () => ({
   },
 }));
 
-import { action } from "./api.vto-qa-fixture";
+// getCloudinaryConfig is real code with real env-var reads — mocked here so
+// the GET loader's call into the real selectFullLookGarments resolves
+// images via the plain imageUrl fallback deterministically in tests,
+// without needing real Cloudinary credentials.
+vi.mock("~/lib/cloudinary-admin.server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("~/lib/cloudinary-admin.server")>();
+  return { ...actual, getCloudinaryConfig: () => null };
+});
+
+import { action, loader } from "./api.vto-qa-fixture";
 
 const QA_ID = "qa-disposable-customer-1";
 const ORIGINAL_ENV = { ...process.env };
@@ -298,5 +309,109 @@ describe("api.vto-qa-fixture action — eligibility and creation", () => {
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { customerId: QA_ID } }),
     );
+  });
+});
+
+describe("api.vto-qa-fixture loader (GET) — read-only verification, no duplicate creation", () => {
+  function getReq(params: Record<string, string>, headers: Record<string, string> = {}) {
+    const url = new URL("https://example.test/api/vto-qa-fixture");
+    for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+    return { url: url.toString(), headers: new Headers(headers) } as unknown as Request;
+  }
+
+  function outfitItem(overrides: Partial<Record<string, unknown>> = {}) {
+    return {
+      itemType: "TOP",
+      productTitle: null,
+      closetItemId: "closet-1",
+      shopifyProductId: null,
+      productImageUrl: null,
+      closetItem: { name: "Top", imageUrl: "https://cdn/top.jpg", imagePublicId: null, imageFormat: null, category: "TOPS" },
+      ...overrides,
+    };
+  }
+
+  it("rejects when unauthorized, identical gate to the POST action — never queries the DB", async () => {
+    const res = await loader({
+      request: getReq({ customerId: QA_ID, suggestionId: "sugg-1" }, { "x-vto-qa-fixture-secret": "wrong" }),
+    } as any);
+    expect(res.init?.status).toBe(403);
+    expect(mockSuggestionFindUnique).not.toHaveBeenCalled();
+  });
+
+  it("rejects with a missing suggestionId even when otherwise authorized", async () => {
+    setAuthorizedEnv();
+    const res = await loader({
+      request: getReq({ customerId: QA_ID }, { "x-vto-qa-fixture-secret": "the-real-secret" }),
+    } as any);
+    expect(res.init?.status).toBe(403);
+  });
+
+  it("returns not_found (never distinguishing from a wrong-customer suggestion) when the suggestion doesn't belong to the designated customer", async () => {
+    setAuthorizedEnv();
+    mockSuggestionFindUnique.mockResolvedValue({
+      id: "sugg-1",
+      session: { id: "session-1", customerId: "someone-else" },
+      items: [],
+    });
+    const res = await loader({
+      request: getReq({ customerId: QA_ID, suggestionId: "sugg-1" }, { "x-vto-qa-fixture-secret": "the-real-secret" }),
+    } as any);
+    expect(res.init?.status).toBe(404);
+  });
+
+  it("returns not_found when the suggestion doesn't exist at all", async () => {
+    setAuthorizedEnv();
+    mockSuggestionFindUnique.mockResolvedValue(null);
+    const res = await loader({
+      request: getReq({ customerId: QA_ID, suggestionId: "does-not-exist" }, { "x-vto-qa-fixture-secret": "the-real-secret" }),
+    } as any);
+    expect(res.init?.status).toBe(404);
+  });
+
+  it("confirms ownership, session id, and real Full-Look eligibility (re-running the actual selection logic) for an existing suggestion — creates nothing", async () => {
+    setAuthorizedEnv();
+    mockSuggestionFindUnique.mockResolvedValue({
+      id: "sugg-1",
+      session: { id: "session-1", customerId: QA_ID },
+      items: [
+        outfitItem({ itemType: "TOP", closetItemId: "c1", closetItem: { name: "Shirt", imageUrl: "https://cdn/1.jpg", imagePublicId: null, imageFormat: null, category: "TOPS" } }),
+        outfitItem({ itemType: "BOTTOM", closetItemId: "c2", closetItem: { name: "Jeans", imageUrl: "https://cdn/2.jpg", imagePublicId: null, imageFormat: null, category: "BOTTOMS" } }),
+        outfitItem({ itemType: "SHOES", closetItemId: "c3", closetItem: { name: "Sneakers", imageUrl: "https://cdn/3.jpg", imagePublicId: null, imageFormat: null, category: "SHOES" } }),
+      ],
+    });
+
+    const res = await loader({
+      request: getReq({ customerId: QA_ID, suggestionId: "sugg-1" }, { "x-vto-qa-fixture-secret": "the-real-secret" }),
+    } as any);
+    const json = res.data as any;
+
+    expect(json.ok).toBe(true);
+    expect(json.sessionId).toBe("session-1");
+    expect(json.suggestionId).toBe("sugg-1");
+    expect(json.belongsToCustomerId).toBe(QA_ID);
+    expect(json.fullLookEligible).toBe(true);
+    expect(json.eligibleGarmentCount).toBe(3);
+    expect(json.eligibleGarmentLabels).toEqual(["Shirt", "Jeans", "Sneakers"]);
+    // Read-only: nothing created, same mocks from the action describe block untouched.
+    expect(mockSessionCreate).not.toHaveBeenCalled();
+    expect(mockSuggestionCreate).not.toHaveBeenCalled();
+    expect(mockItemCreate).not.toHaveBeenCalled();
+  });
+
+  it("reports fullLookEligible: false when the persisted items don't actually clear the real 3-category floor", async () => {
+    setAuthorizedEnv();
+    mockSuggestionFindUnique.mockResolvedValue({
+      id: "sugg-2",
+      session: { id: "session-2", customerId: QA_ID },
+      items: [outfitItem({ itemType: "TOP" })],
+    });
+    const res = await loader({
+      request: getReq({ customerId: QA_ID, suggestionId: "sugg-2" }, { "x-vto-qa-fixture-secret": "the-real-secret" }),
+    } as any);
+    const json = res.data as any;
+    expect(json.ok).toBe(true);
+    expect(json.fullLookEligible).toBe(false);
+    expect(json.eligibleGarmentCount).toBe(0);
   });
 });

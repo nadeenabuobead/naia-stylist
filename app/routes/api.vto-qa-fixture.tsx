@@ -48,13 +48,15 @@
 // POST only. Never creates a ClosetItem, never creates a Customer, never
 // touches any customer other than the one named by QA_OVERRIDE_CUSTOMER_ID.
 
-import type { ActionFunctionArgs } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { data } from "react-router";
 import { timingSafeEqual } from "crypto";
 import { prisma } from "~/lib/prisma.server";
 import { closetItemToSlot } from "~/lib/ai/closet-slot";
 import type { OutfitSlot } from "~/lib/ai/styleme-recommendation.types";
 import type { OutfitItemType } from "@prisma/client";
+import { getCloudinaryConfig } from "~/lib/cloudinary-admin.server";
+import { selectFullLookGarments, type SelectableOutfitItem } from "~/lib/ai/full-look-vto-orchestrator.server";
 
 // Mirrors slotToItemType in app/lib/ai/styleme-result.server.ts exactly —
 // that function is private to a large, sensitive file this fixture has no
@@ -173,5 +175,79 @@ export async function action({ request }: ActionFunctionArgs) {
     suggestionId,
     chosenItems: chosen.map(({ slot, item }) => ({ slot, closetItemId: item.id, name: item.name })),
     totalEligibleCategoriesAvailable: chosen.length,
+  });
+}
+
+// ── Read-only verification of an existing fixture (or any) suggestion ──────
+//
+// GET /api/vto-qa-fixture?customerId=...&suggestionId=...
+//
+// Deliberately re-runs the REAL selectFullLookGarments against the
+// suggestion's actual persisted items — not a re-derivation from the
+// current closet state — so "eligible" here means exactly what
+// /api/full-look-vto's own POST action would see if the customer clicked
+// "TRY THIS LOOK ON" right now, image resolvability included. Creates and
+// changes nothing. Same authorization posture as the action above, with
+// customerId read from the query string (GET has no body) instead.
+export async function loader({ request }: LoaderFunctionArgs) {
+  const url = new URL(request.url);
+  const customerId = url.searchParams.get("customerId") ?? undefined;
+  const suggestionId = url.searchParams.get("suggestionId");
+
+  if (!isAuthorized(request, customerId) || !suggestionId) {
+    return data({ ok: false, code: "forbidden" }, { status: 403 });
+  }
+
+  const suggestion = await prisma.outfitSuggestion.findUnique({
+    where: { id: suggestionId },
+    include: {
+      session: { select: { id: true, customerId: true } },
+      items: {
+        include: {
+          closetItem: { select: { name: true, imageUrl: true, imagePublicId: true, imageFormat: true, category: true } },
+        },
+      },
+    },
+  });
+
+  // Same not-found-not-403 convention as api.full-look-vto.tsx's own
+  // loadOwnedSuggestion — never reveals whether a foreign-customer
+  // suggestionId exists at all.
+  if (!suggestion || suggestion.session.customerId !== customerId) {
+    return data({ ok: false, code: "not_found" }, { status: 404 });
+  }
+
+  const selectableItems: SelectableOutfitItem[] = suggestion.items.map((item) => ({
+    itemType: item.itemType,
+    productTitle: item.productTitle,
+    closetItemId: item.closetItemId,
+    shopifyProductId: item.shopifyProductId,
+    productImageUrl: item.productImageUrl,
+    closetItem: item.closetItem
+      ? {
+          name: item.closetItem.name,
+          imageUrl: item.closetItem.imageUrl,
+          imagePublicId: item.closetItem.imagePublicId,
+          imageFormat: item.closetItem.imageFormat,
+          category: item.closetItem.category,
+        }
+      : null,
+  }));
+
+  const selection = selectFullLookGarments(selectableItems, {
+    customerId,
+    cloudinaryConfig: getCloudinaryConfig(),
+  });
+
+  return data({
+    ok: true,
+    sessionId: suggestion.session.id,
+    suggestionId: suggestion.id,
+    belongsToCustomerId: suggestion.session.customerId,
+    rawItemCount: suggestion.items.length,
+    fullLookEligible: selection !== null,
+    eligibleGarmentCount: selection?.garments.length ?? 0,
+    eligibleGarmentLabels: selection?.garments.map((g) => g.label) ?? [],
+    omittedLabels: selection?.omittedLabels ?? [],
   });
 }
