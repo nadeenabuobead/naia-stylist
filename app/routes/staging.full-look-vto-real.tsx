@@ -216,7 +216,17 @@ async function loaderImpl({ request }: LoaderFunctionArgs) {
     outfitSuggestionId: "staging-harness-no-suggestion",
   };
 
-  const result = await advanceFullLookChain(ctx);
+  // 2026-11-16 CONFIRMED DEFECT FIX — this poll used to call
+  // advanceFullLookChain with no opts, which (before this fix) defaulted
+  // to allowSubmitNext: true: a real, genuinely billable FASHN submission
+  // for the next garment, purely as a side effect of this loader running
+  // on a 3s poll. allowSubmitNext is now explicitly false here — this
+  // recovers/persists whatever the current step's result already is (free,
+  // the prediction was already paid for) but never submits the next one.
+  // The "advance" action intent below is the only explicitly authorized
+  // way to move the chain forward from a STEP_COMPLETE_AWAITING_AUTHORIZATION
+  // report — same shape as "continue" is the only way past AWAITING_CONTINUE.
+  const result = await advanceFullLookChain(ctx, undefined, undefined, { allowSubmitNext: false });
   return data(
     { ok: true as const, modelReady, chain: result },
     { headers: { "Cache-Control": "no-store" } },
@@ -264,13 +274,20 @@ async function actionImpl({ request }: ActionFunctionArgs) {
 
   const form = await request.formData();
   // "continue" is the ONLY way the final (blazer) step is ever submitted —
-  // see continueToFinalStep's own doc comment. "diagnose" is a dead end that
-  // returns before any of the other branches. Any other/missing value
-  // (including a malformed or replayed form) falls back to "start", which
-  // is itself idempotent-safe (startOrResumeFullLookChain never resubmits
-  // an already-started chain).
+  // see continueToFinalStep's own doc comment. "advance" (2026-11-16,
+  // added alongside the loader's fail-closed fix above) is the ONLY way
+  // any OTHER intermediate step is ever submitted now — same shape,
+  // same explicit-authorization requirement, just for the step BEFORE the
+  // human-review pause instead of the one AFTER it. "diagnose" is a dead
+  // end that returns before any of the other branches. Any other/missing
+  // value (including a malformed or replayed form) falls back to "start",
+  // which is itself idempotent-safe (startOrResumeFullLookChain never
+  // resubmits an already-started chain).
   const rawIntent = form.get("intent");
-  const intent = rawIntent === "continue" ? "continue" : rawIntent === "diagnose" ? "diagnose" : "start";
+  const intent =
+    rawIntent === "continue" ? "continue" :
+    rawIntent === "advance" ? "advance" :
+    rawIntent === "diagnose" ? "diagnose" : "start";
 
   // ── Diagnostic-only: reports per-garment suitability for all 3 garments
   // without stopping at the first failure, so a tester can see every
@@ -402,6 +419,45 @@ async function actionImpl({ request }: ActionFunctionArgs) {
     return data({ ok: true } as ActionStartResult);
   }
 
+  // ── "advance" (2026-11-16) — the ONLY way an intermediate step (any step
+  // before the human-review pause) is ever submitted now that the loader
+  // is fail-closed. Same shape as "continue" above, just calling
+  // advanceFullLookChain with allowSubmitNext: true directly instead of
+  // continueToFinalStep — this is exactly what the loader itself used to
+  // do unconditionally on every poll; the only change is that it now
+  // requires this explicit, consent-reconfirmed submission instead of
+  // firing as a side effect of checking status.
+  if (intent === "advance") {
+    const advanceGarments: FullLookRealGarmentInput[] = [];
+    for (const g of sortForDisplay(outcome.garments)) {
+      const anchor = await resolveClosetAnchor(customer.id, g.closetItemId);
+      if (!anchor || !anchor.imageUrl) {
+        return data({ ok: false, reason: "garment_image_unavailable" } as ActionStartResult, { status: 400 });
+      }
+      advanceGarments.push({ label: g.name ?? g.closetItemId, productImageUrl: anchor.imageUrl });
+    }
+
+    const advanceCtx: FullLookChainContext = {
+      customerId: customer.id,
+      naiaModelId: naiaModel.id,
+      bodyPublicId: naiaModel.bodyPublicId,
+      bodyFormat: naiaModel.bodyFormat,
+      deliveryType: naiaModel.deliveryType,
+      garments: advanceGarments,
+      consent: { virtualTryOnConsent: true, policyVersion: "1.0-staging-real-test", consentedAt: consentAt.toISOString() },
+      finalStepPrompt: FINAL_STEP_VISUAL_PROMPT,
+      finalStepGenerationMode: FINAL_STEP_GENERATION_MODE,
+      reservationScope: getReservationScope(),
+      outfitSuggestionId: "staging-harness-no-suggestion",
+    };
+
+    const advanceResult = await advanceFullLookChain(advanceCtx, undefined, undefined, { allowSubmitNext: true });
+    if (advanceResult.status === "SUBMIT_ERROR") {
+      return data({ ok: false, reason: advanceResult.reason } as ActionStartResult, { status: 400 });
+    }
+    return data({ ok: true } as ActionStartResult);
+  }
+
   const ineligible = outcome.garments.find((g) => !isVtoCategoryAllowed(g.category, g.subcategory));
   if (ineligible) {
     return data({ ok: false, reason: "garment_not_eligible" } as ActionStartResult, { status: 400 });
@@ -502,6 +558,7 @@ export default function StagingFullLookVtoReal() {
   const revalidator = useRevalidator();
   const [confirmArmed, setConfirmArmed] = useState(false);
   const [continueConfirmArmed, setContinueConfirmArmed] = useState(false);
+  const [advanceConfirmArmed, setAdvanceConfirmArmed] = useState(false);
 
   const chain = loaderData.ok ? loaderData.chain : null;
   // Polling stops on its own once AWAITING_CONTINUE is reached — nothing
@@ -631,6 +688,48 @@ export default function StagingFullLookVtoReal() {
 
       {chain && chain.status === "PROCESSING" && (
         <p>Step {chain.stepIndex + 1} of 3 in progress — checking again in a few seconds…</p>
+      )}
+
+      {chain && chain.status === "STEP_COMPLETE_AWAITING_AUTHORIZATION" && (
+        <div>
+          <p style={{ fontWeight: "bold" }}>
+            Step {chain.completedStepIndex + 1} of 3 is done — nothing further has been submitted.
+          </p>
+          <p>
+            This step's result was recovered from the provider for free (it was already generated
+            and paid for). Submitting step {chain.nextStepIndex + 1} is a new, separate, real
+            FASHN call and will not happen until you explicitly continue below.
+          </p>
+          <Form
+            method="post"
+            onSubmit={(e) => {
+              const input = e.currentTarget.elements.namedItem("virtualTryOnConsentAt") as HTMLInputElement | null;
+              if (input) input.value = new Date().toISOString();
+            }}
+          >
+            <input type="hidden" name="intent" value="advance" />
+            <input type="hidden" name="virtualTryOnConsentAt" value="" />
+            <label>
+              <input type="checkbox" name="consent" value="yes" required /> I have reviewed step{" "}
+              {chain.completedStepIndex + 1} and consent to continuing.
+            </label>
+            <br />
+            <label>
+              <input
+                type="checkbox"
+                name="confirmReal"
+                value="yes-real-fashn-calls"
+                required
+                onChange={(e) => setAdvanceConfirmArmed(e.currentTarget.checked)}
+              />{" "}
+              I understand this submits a new, real, billable FASHN call for step {chain.nextStepIndex + 1}.
+            </label>
+            <br />
+            <button type="submit" disabled={!advanceConfirmArmed}>
+              Advance to step {chain.nextStepIndex + 1}
+            </button>
+          </Form>
+        </div>
       )}
 
       {chain && chain.status === "AWAITING_CONTINUE" && (

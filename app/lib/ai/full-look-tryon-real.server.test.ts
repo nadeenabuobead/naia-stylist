@@ -455,7 +455,10 @@ describe("advanceFullLookChain", () => {
     mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job1, status: "PROCESSING", predictionId: "pred-1" } });
     mockSubmitProvider().mockResolvedValue({ ok: true, predictionId: "pred-1" });
 
-    const result = await advanceFullLookChain(baseCtx(), { _findJobFn });
+    // allowSubmitNext: true — this is now the explicitly-authorized path
+    // (what startFullLookOutfit / the "advance" action pass); the default
+    // (omitted) is covered separately in FL.20b/FL.20c below.
+    const result = await advanceFullLookChain(baseCtx(), { _findJobFn }, undefined, { allowSubmitNext: true });
 
     expect(result).toEqual({ status: "PROCESSING", stepIndex: 1 });
     expect(mockSubmitProvider()).toHaveBeenCalledTimes(1); // exactly one new FASHN submission this call
@@ -546,7 +549,15 @@ describe("advanceFullLookChain", () => {
     expect(result).toEqual({ status: "STEP_COMPLETE_AWAITING_AUTHORIZATION", completedStepIndex: 0, nextStepIndex: 1 });
   });
 
-  it("FL.20c — allowSubmitNext defaults to true when omitted — every existing caller that doesn't pass it keeps today's behavior unchanged", async () => {
+  // 2026-11-16 REVISED — the default flipped from true to false (fail-
+  // closed). A second real instance of the confirmed GET-submits-paid-work
+  // defect was found in staging.full-look-vto-real.tsx's loader, which
+  // called this with no opts at all and inherited whatever the default
+  // was. A function whose job is deciding whether to spend real money
+  // should never silently default to "yes" for a caller that forgot to
+  // say — every caller that actually wants to submit must say so
+  // explicitly now.
+  it("FL.20c — allowSubmitNext defaults to FALSE when omitted — a caller that forgets to opt in fails closed, not expensive", async () => {
     const job0 = fakeJob("job-0", { status: "PROCESSING", predictionId: "pred-0" });
     const _findJobFn = vi.fn(async (where: { idempotencyKey: string }) =>
       where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 0, null) ? job0 : null,
@@ -560,18 +571,14 @@ describe("advanceFullLookChain", () => {
     });
     mockUploadPrivate().mockResolvedValue({ ok: true, publicId: "x", format: "png", version: "1" });
     mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job0, status: "COMPLETED" } });
-    const job1 = fakeJob("job-1");
-    mockCreateOrFind().mockResolvedValue({ ok: true, job: job1, created: true });
-    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job1, status: "SUBMITTED" } });
-    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job1, status: "PROCESSING", predictionId: "pred-1" } });
-    mockSubmitProvider().mockResolvedValue({ ok: true, predictionId: "pred-1" });
 
-    // No 4th argument at all — matches every pre-existing call site in
-    // this file and the two QA harnesses that call this directly.
+    // No 4th argument at all — exactly the shape of a caller that hasn't
+    // been updated to know about this gate.
     const result = await advanceFullLookChain(baseCtx(), { _findJobFn });
 
-    expect(result).toEqual({ status: "PROCESSING", stepIndex: 1 });
-    expect(mockSubmitProvider()).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ status: "STEP_COMPLETE_AWAITING_AUTHORIZATION", completedStepIndex: 0, nextStepIndex: 1 });
+    expect(mockSubmitProvider()).not.toHaveBeenCalled();
+    expect(mockCreateOrFind()).not.toHaveBeenCalled();
   });
 
   it("FL.21 — a FAILED step reports FAILED with its step index, and is never auto-retried by a later call", async () => {
@@ -616,8 +623,15 @@ describe("advanceFullLookChain", () => {
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
       new Response(JSON.stringify({ status: "completed", output: [PNG_DATA_URL] }), { status: 200 }),
     );
-    mockUploadResult().mockResolvedValue({ ok: true });
-    mockAdvance().mockResolvedValue({ ok: true, job: { ...job2, status: "COMPLETED" } });
+    // REGRESSION (2026-11-16): both were plain .mockResolvedValue (not
+    // Once) — clearAllMocks() in beforeEach clears call history but NOT a
+    // persisted implementation, so this leaked into whichever later test
+    // happened to call advanceTryOnJob/uploadTryOnResult without setting
+    // its own override first, silently returning THIS test's job id
+    // instead. Matches the .mockResolvedValueOnce() convention every
+    // other test in this file already uses for exactly this reason.
+    mockUploadResult().mockResolvedValueOnce({ ok: true });
+    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job2, status: "COMPLETED" } });
     mockBuildResultUrl().mockReturnValue("https://signed.example/final.png");
 
     const result = await advanceFullLookChain(baseCtx(), { _findJobFn });
@@ -1113,9 +1127,13 @@ describe("advanceFullLookChain — stale-job self-healing via refresh/resume (no
     const _timeoutJob = vi.fn();
     const _findById = vi.fn();
 
+    // allowSubmitNext: true — this test is about the authorized path
+    // (the "advance"/startFullLookOutfit call that follows a recovery);
+    // the title's "without... submitting anything new" refers to never
+    // RESUBMITTING step 0 itself, not to step 1's own legitimate submission.
     const result = await advanceFullLookChain(baseCtx(), { _findJobFn }, {
       _timeoutJob, _findById, _deleteAsset: deleteCloudinaryAsset,
-    });
+    }, { allowSubmitNext: true });
 
     expect(result).toEqual({ status: "PROCESSING", stepIndex: 1 }); // step 0 recovered; step 1 auto-submitted next
     expect(_timeoutJob).not.toHaveBeenCalled(); // never forced dead once FASHN proved it actually finished
@@ -1256,8 +1274,15 @@ describe("prompt placement — final step only", () => {
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
       new Response(JSON.stringify({ status: "completed", output: [PNG_DATA_URL] }), { status: 200 }),
     );
-    mockUploadResult().mockResolvedValue({ ok: true });
-    mockAdvance().mockResolvedValue({ ok: true, job: { ...job2, status: "COMPLETED" } });
+    // REGRESSION (2026-11-16): both were plain .mockResolvedValue (not
+    // Once) — clearAllMocks() in beforeEach clears call history but NOT a
+    // persisted implementation, so this leaked into whichever later test
+    // happened to call advanceTryOnJob/uploadTryOnResult without setting
+    // its own override first, silently returning THIS test's job id
+    // instead. Matches the .mockResolvedValueOnce() convention every
+    // other test in this file already uses for exactly this reason.
+    mockUploadResult().mockResolvedValueOnce({ ok: true });
+    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job2, status: "COMPLETED" } });
     mockBuildResultUrl().mockReturnValue("https://signed.example/final.png");
 
     const result = await advanceFullLookChain(ctxWithFinalStepTuning(), { _findJobFn });
@@ -1557,9 +1582,14 @@ describe("end-to-end — complete 5-garment Full-Look chain: progression, failur
     const start = await startOrResumeFullLookChain(ctx, { _findJobFn }, async () => ({ reconciled: false }));
     expect(start).toEqual({ ok: true, stepIndex: 0 });
 
+    // allowSubmitNext: true on every call — this simulates a fully
+    // authorized session (what startFullLookOutfit / the explicitly
+    // authorized "advance" action pass), repeatedly advancing. The
+    // fail-closed default is covered by its own dedicated tests
+    // (FL.20b/FL.20c) and is not what this end-to-end scenario is about.
     let result: Awaited<ReturnType<typeof advanceFullLookChain>> | undefined;
     for (let guard = 0; guard < 10 && (!result || result.status !== "COMPLETED"); guard++) {
-      result = await advanceFullLookChain(ctx, { _findJobFn });
+      result = await advanceFullLookChain(ctx, { _findJobFn }, undefined, { allowSubmitNext: true });
       if (result.status === "AWAITING_CONTINUE") {
         const cont = await continueToFinalStep(ctx, { _findJobFn });
         expect(cont.ok).toBe(true);
@@ -1607,9 +1637,10 @@ describe("end-to-end — complete 5-garment Full-Look chain: progression, failur
     const start1 = await startOrResumeFullLookChain(attempt1, { _findJobFn: store1._findJobFn }, async () => ({ reconciled: false }));
     expect(start1).toEqual({ ok: true, stepIndex: 0 });
 
+    // allowSubmitNext: true — same authorized-session simulation as E2E.1.
     let result1: Awaited<ReturnType<typeof advanceFullLookChain>> | undefined;
     for (let guard = 0; guard < 10 && (!result1 || (result1.status !== "COMPLETED" && result1.status !== "FAILED")); guard++) {
-      result1 = await advanceFullLookChain(attempt1, { _findJobFn: store1._findJobFn });
+      result1 = await advanceFullLookChain(attempt1, { _findJobFn: store1._findJobFn }, undefined, { allowSubmitNext: true });
       if (result1.status === "AWAITING_CONTINUE") {
         await continueToFinalStep(attempt1, { _findJobFn: store1._findJobFn });
       }
@@ -1636,7 +1667,7 @@ describe("end-to-end — complete 5-garment Full-Look chain: progression, failur
 
     let result2: Awaited<ReturnType<typeof advanceFullLookChain>> | undefined;
     for (let guard = 0; guard < 10 && (!result2 || result2.status !== "COMPLETED"); guard++) {
-      result2 = await advanceFullLookChain(attempt2, { _findJobFn: store2._findJobFn });
+      result2 = await advanceFullLookChain(attempt2, { _findJobFn: store2._findJobFn }, undefined, { allowSubmitNext: true });
       if (result2.status === "AWAITING_CONTINUE") {
         await continueToFinalStep(attempt2, { _findJobFn: store2._findJobFn });
       }

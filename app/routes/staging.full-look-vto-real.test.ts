@@ -316,6 +316,31 @@ describe("loader — poll only", () => {
     expect(ctx.garments.every((g: { productImageUrl: string }) => g.productImageUrl.startsWith("https://closet.example/"))).toBe(true);
   });
 
+  // 2026-11-16 CONFIRMED DEFECT FIX — this loader is a second, real
+  // instance of the exact same bug fixed for the real customer route
+  // (d609202): calling advanceFullLookChain with no opts meant it
+  // inherited whatever the default was, and that default used to be
+  // "submit" — a genuinely billable FASHN call purely as a side effect of
+  // this loader running on a 3s poll. Now explicit and fail-closed.
+  it("RT.23b — the loader always passes allowSubmitNext: false explicitly — a GET/poll here can never submit a new garment", async () => {
+    mockAdvanceChain().mockResolvedValue({ status: "PROCESSING", stepIndex: 0 });
+    await loader({ request: {} as Request } as never);
+    expect(mockAdvanceChain()).toHaveBeenCalledWith(
+      expect.anything(), undefined, undefined, { allowSubmitNext: false },
+    );
+  });
+
+  it("RT.23c — a recovered-but-not-yet-authorized step (STEP_COMPLETE_AWAITING_AUTHORIZATION) passes through to the page verbatim — never silently reported as still PROCESSING", async () => {
+    mockAdvanceChain().mockResolvedValue({
+      status: "STEP_COMPLETE_AWAITING_AUTHORIZATION", completedStepIndex: 0, nextStepIndex: 1,
+    });
+    const res = await loader({ request: {} as Request } as never);
+    expect(res.data).toEqual({
+      ok: true, modelReady: true,
+      chain: { status: "STEP_COMPLETE_AWAITING_AUTHORIZATION", completedStepIndex: 0, nextStepIndex: 1 },
+    });
+  });
+
   it("RT.24 — the QA pause checkpoint (AWAITING_CONTINUE) and its intermediate previews pass through verbatim", async () => {
     const intermediates = [
       { stepIndex: 0, label: "Beige Tailored Trousers", url: "https://signed.example/step1.png" },
@@ -396,6 +421,82 @@ describe("action — intent=continue", () => {
     mockContinueChain().mockResolvedValue({ ok: false, reason: "continue_window_expired" });
     const res = await action({ request: formRequest({ intent: "continue" }) } as never);
     expect(res.data).toEqual({ ok: false, reason: "continue_window_expired" });
+  });
+});
+
+// ── Action — "advance" intent (2026-11-16, the ONLY way an intermediate
+// step is ever submitted now that the loader is fail-closed) ───────────────
+
+describe("action — intent=advance", () => {
+  it("RT.A1 — requires its own fresh consent checkbox, independent of the start/continue forms", async () => {
+    const res = await action({ request: formRequest({ intent: "advance", consent: "no" }) } as never);
+    expect(res.data).toEqual({ ok: false, reason: "consent_required" });
+    expect(mockAdvanceChain()).not.toHaveBeenCalled();
+    expect(mockStartChain()).not.toHaveBeenCalled();
+    expect(mockContinueChain()).not.toHaveBeenCalled();
+  });
+
+  it("RT.A2 — requires its own fresh real-confirmation checkbox", async () => {
+    const res = await action({ request: formRequest({ intent: "advance", confirmReal: "no" }) } as never);
+    expect(res.data).toEqual({ ok: false, reason: "real_confirmation_required" });
+    expect(mockAdvanceChain()).not.toHaveBeenCalled();
+  });
+
+  it("RT.A3 — rejects an expired consent timestamp exactly like start/continue", async () => {
+    const stale = new Date(Date.now() - 16 * 60 * 1000).toISOString();
+    const res = await action({ request: formRequest({ intent: "advance", virtualTryOnConsentAt: stale }) } as never);
+    expect(res.data).toEqual({ ok: false, reason: "consent_expired" });
+    expect(mockAdvanceChain()).not.toHaveBeenCalled();
+  });
+
+  it("RT.A4 — never re-runs the quota pre-check or AI suitability screen (already passed at chain start) — same discipline as continue", async () => {
+    mockAdvanceChain().mockResolvedValue({ status: "PROCESSING", stepIndex: 1 });
+    await action({ request: formRequest({ intent: "advance" }) } as never);
+    expect(mockQuota()).not.toHaveBeenCalled();
+    expect(mockScreenSuitability()).not.toHaveBeenCalled();
+    expect(mockCategoryAllowed()).not.toHaveBeenCalled();
+  });
+
+  it("RT.A5 — still re-verifies garment ownership (resolveClosetAnchor) and fails closed if it can't", async () => {
+    mockResolveAnchor().mockResolvedValueOnce(null);
+    const res = await action({ request: formRequest({ intent: "advance" }) } as never);
+    expect(res.data).toEqual({ ok: false, reason: "garment_image_unavailable" });
+    expect(mockAdvanceChain()).not.toHaveBeenCalled();
+  });
+
+  it("RT.A6 — on success, delegates to advanceFullLookChain with allowSubmitNext: true explicitly, the real resolved garments, and never touches startOrResumeFullLookChain or continueToFinalStep", async () => {
+    mockAdvanceChain().mockResolvedValue({ status: "PROCESSING", stepIndex: 1 });
+    const res = await action({ request: formRequest({ intent: "advance" }) } as never);
+    expect(res.data).toEqual({ ok: true });
+    expect(mockAdvanceChain()).toHaveBeenCalledTimes(1);
+    expect(mockStartChain()).not.toHaveBeenCalled();
+    expect(mockContinueChain()).not.toHaveBeenCalled();
+    const [ctx, , , opts] = mockAdvanceChain().mock.calls[0];
+    expect(opts).toEqual({ allowSubmitNext: true });
+    expect(ctx.garments).toEqual([
+      { label: "Beige Tailored Trousers", productImageUrl: "https://closet.example/g-trousers.jpg" },
+      { label: "Blue Chambray Button-Up Shirt", productImageUrl: "https://closet.example/g-shirt.jpg" },
+      { label: "Beige Tailored Blazer", productImageUrl: "https://closet.example/g-blazer.jpg" },
+    ]);
+  });
+
+  it("RT.A7 — surfaces a SUBMIT_ERROR reason without crashing", async () => {
+    mockAdvanceChain().mockResolvedValue({ status: "SUBMIT_ERROR", reason: "NOT_CONFIGURED" });
+    const res = await action({ request: formRequest({ intent: "advance" }) } as never);
+    expect(res.data).toEqual({ ok: false, reason: "NOT_CONFIGURED" });
+  });
+
+  it("RT.A8 — a plain start request (no intent) is completely unaffected — still calls startOrResumeFullLookChain, never advanceFullLookChain", async () => {
+    mockStartChain().mockResolvedValue({ ok: true, stepIndex: 0 });
+    const res = await action({ request: formRequest() } as never);
+    expect(res.data).toEqual({ ok: true, stepIndex: 0 });
+    expect(mockAdvanceChain()).not.toHaveBeenCalled();
+  });
+
+  it("RT.A9 — a successful (non-SUBMIT_ERROR) result of any other status (e.g. a fresh AWAITING_CONTINUE reached by this exact advance) still reports ok:true — this intent only cares whether the submission itself succeeded, not which state it landed in", async () => {
+    mockAdvanceChain().mockResolvedValue({ status: "AWAITING_CONTINUE", intermediates: [] });
+    const res = await action({ request: formRequest({ intent: "advance" }) } as never);
+    expect(res.data).toEqual({ ok: true });
   });
 });
 

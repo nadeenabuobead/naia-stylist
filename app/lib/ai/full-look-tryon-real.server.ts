@@ -737,16 +737,24 @@ export async function advanceFullLookChain(
   ctx: FullLookChainContext,
   deps: WalkChainDeps = { _findJobFn: defaultFindJobByIdempotencyKey },
   staleDeps: AdvanceStaleDeps = defaultAdvanceStaleDeps,
-  // 2026-11-16 — defaults to true so any direct caller outside this
-  // module's own two entry points (startFullLookOutfit, pollFullLookOutfit
-  // — see their own call sites below) keeps today's behavior unless it
-  // explicitly opts out. Both of those entry points always pass this
-  // explicitly; the default only matters for the QA harnesses
-  // (staging.full-look-vto-real.tsx, api.staging-full-look-vto-sweep.ts)
-  // that call this directly and were never part of this investigation.
+  // 2026-11-16 REVISED — FAIL-CLOSED BY DEFAULT. Originally defaulted to
+  // true (preserve existing behavior for any caller that didn't opt in to
+  // the new gate). That left a second, real instance of the same
+  // confirmed defect in staging.full-look-vto-real.tsx's loader, which
+  // calls this function directly with no opts and was therefore still
+  // submitting a new, genuinely billable step automatically on every poll.
+  // A permissive default is the wrong shape for a function whose entire
+  // purpose is deciding whether to spend real money — every caller that
+  // actually wants to submit must now say so explicitly
+  // ({allowSubmitNext: true}); every caller that forgets, or that's
+  // written later without knowing this exists, fails closed instead of
+  // failing expensive. startFullLookOutfit (the real customer's explicit,
+  // consent-checked POST) and the staging harness's new explicit "advance"
+  // action both now pass this explicitly, for the same reason: it should
+  // be visible at the call site, not inherited from a default.
   opts: { allowSubmitNext?: boolean } = {},
 ): Promise<ChainAdvanceResult> {
-  const allowSubmitNext = opts.allowSubmitNext ?? true;
+  const allowSubmitNext = opts.allowSubmitNext ?? false;
   const jobs = await walkFullLookChainJobs(ctx.customerId, deps, ctx.reservationScope);
 
   if (jobs.length === 0) {
