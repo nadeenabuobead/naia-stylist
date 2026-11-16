@@ -253,7 +253,17 @@ export async function downloadIntermediateStepResult(
   const downloadUrl = buildPrivateDownloadUrl(cfg, publicId, "png", "private");
   try {
     const res = await _fetch(downloadUrl);
-    if (!res.ok) return { ok: false, errorCode: "PROVIDER_ERROR" };
+    // Confirmed actionable gap (2026-11-16, from the real Attempt A
+    // investigation): a bare "PROVIDER_ERROR" with no HTTP status recorded
+    // made it impossible to tell a 404 (asset expired/never uploaded) from
+    // a 401/403 (signature/auth problem) from a 429 (rate limited) from a
+    // 5xx (Cloudinary-side outage) after the fact — each needs a
+    // completely different fix, and none of that distinction survived
+    // past this one check. The status code is never sensitive (no
+    // signature or credential appears in it); appending it costs nothing
+    // and makes every future occurrence actually diagnosable from the DB
+    // row alone, without needing live Cloudinary access.
+    if (!res.ok) return { ok: false, errorCode: `PROVIDER_ERROR_${res.status}` };
     const buffer = await res.arrayBuffer();
     const base64 = Buffer.from(buffer).toString("base64");
     const dataUrl = `data:image/png;base64,${base64}`;

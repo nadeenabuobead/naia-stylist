@@ -406,7 +406,13 @@ export async function uploadCloudinaryPrivate(
       { method: "POST", body },
     );
 
-    if (!res.ok) return { ok: false, errorCode: "PROVIDER_ERROR" };
+    // Confirmed actionable gap (2026-11-16, from the real Attempt B
+    // investigation): see downloadIntermediateStepResult's identical fix
+    // (full-look-tryon-real.server.ts) for the full reasoning — a bare
+    // "PROVIDER_ERROR" with no HTTP status erased the one piece of
+    // information that would have distinguished a transient failure from
+    // a persistent one.
+    if (!res.ok) return { ok: false, errorCode: `PROVIDER_ERROR_${res.status}` };
 
     const json = (await res.json()) as {
       public_id?: string;
