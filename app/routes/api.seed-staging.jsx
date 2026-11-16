@@ -17,10 +17,22 @@ import { writeSourceEvidence, reconcileObservations } from "../lib/ai/taste-reco
 //                          ticket URL (GET /api/seed-staging?ticket=...) that logs
 //                          the browser in WITHOUT the secret ever appearing in that URL
 //   "createStylingSession" — create StylingSession for an existing customer
+//   "createSavedLookDetailed" — create a SavedLook from the customer's OWN
+//                          existing ClosetItem ids, no AI/provider call
+//   "getSavedLook"        — read-only fetch of one SavedLook by id
+//   "deleteSavedLook"     — delete one SavedLook by exact id
 //   "countRecords"       — return event/analysis counts scoped to a customerId
 //   "cleanup"            — delete all test records for a shopifyCustomerId
 //
 // All test records use shopifyCustomerId prefix "test-batch1-" to isolate them.
+// The three SavedLook actions above additionally require the target
+// customer's id/shopifyCustomerId to appear in SAVED_LOOKS_FIXTURE_CUSTOMER_IDS
+// (comma-separated) — an independent, fail-closed-when-empty allowlist, same
+// pattern as FULL_LOOK_VTO_TEST_CUSTOMER_IDS in staging.full-look-vto-test.tsx.
+// This means even a misconfiguration that accidentally sets
+// NAIA_PROJECT_VARIANT=staging on the real production project still can't
+// reach these three actions unless that allowlist is ALSO set and ALSO
+// happens to list the exact id being targeted.
 
 function hashToken(raw) {
   return createHash("sha256").update(raw).digest("hex");
@@ -78,6 +90,41 @@ async function requireTestCustomer(customerId) {
     select: { id: true, shopifyCustomerId: true },
   });
   if (!customer || !customer.shopifyCustomerId?.startsWith(TEST_CUSTOMER_PREFIX)) {
+    return null;
+  }
+  return customer;
+}
+
+/**
+ * Stricter gate for the SavedLook fixture actions specifically — the
+ * test-batch1- prefix check above is the standing convention for every
+ * other action in this file, but a standalone prefix string is only as
+ * strong as "nobody else ever writes that prefix", which the rest of the
+ * codebase already structurally guarantees (see the security review for
+ * commit b547dee) but which a second, independent layer should not have
+ * to rely on as its ONLY protection. Follows the exact same pattern
+ * already established and trusted for this codebase's most sensitive
+ * staging-only surface (real-FASHN calls) —
+ * isAuthorizedStagingTestAccount in staging.full-look-vto-test.tsx:
+ * NAIA_PROJECT_VARIANT === "staging" (unchanged) PLUS an explicit,
+ * comma-separated customerId/shopifyCustomerId allowlist that FAILS
+ * CLOSED when unset or empty — never "falls back to allow everything
+ * test-batch1--shaped" the way requireTestCustomer alone does. A
+ * misconfiguration that accidentally sets NAIA_PROJECT_VARIANT=staging
+ * on the real production project still can't reach these three actions
+ * unless SAVED_LOOKS_FIXTURE_CUSTOMER_IDS also happens to be set AND
+ * happens to list the exact id being targeted — a categorically
+ * different, much narrower failure than a single accidental env var.
+ */
+async function requireAllowlistedSavedLooksFixtureCustomer(customerId) {
+  const customer = await requireTestCustomer(customerId);
+  if (!customer) return null;
+  const allowlist = (process.env.SAVED_LOOKS_FIXTURE_CUSTOMER_IDS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (allowlist.length === 0) return null;
+  if (!allowlist.includes(customer.id) && !allowlist.includes(customer.shopifyCustomerId ?? "")) {
     return null;
   }
   return customer;
@@ -779,6 +826,88 @@ export async function action({ request }) {
     }
     const deleted = await prisma.closetItem.deleteMany({
       where: { customerId: String(customerId), name: String(name) },
+    });
+    return Response.json({ ok: true, deletedCount: deleted.count });
+  }
+
+  // ── createSavedLookDetailed — QA fixture only, explicit allowlist ────────
+  // Creates a SavedLook referencing the customer's OWN existing ClosetItem
+  // rows (never cross-customer — each closetItemId is independently
+  // ownership-checked, same discipline as createClosetItemDetailed above),
+  // so WI QA can exercise the create/view/edit/delete lifecycle without a
+  // real StyleMe session or any AI/provider call. Unlike the actions above,
+  // the target customer must ALSO be explicitly listed in
+  // SAVED_LOOKS_FIXTURE_CUSTOMER_IDS — see requireAllowlistedSavedLooksFixtureCustomer.
+  if (act === "createSavedLookDetailed") {
+    const { customerId, name, occasion, closetItemIds } = body ?? {};
+    if (!customerId || !Array.isArray(closetItemIds) || closetItemIds.length === 0) {
+      return Response.json({ error: "customerId and a non-empty closetItemIds array required" }, { status: 400 });
+    }
+    if (!(await requireAllowlistedSavedLooksFixtureCustomer(customerId))) {
+      return Response.json({ error: "customerId must be a test-batch1- fixture customer explicitly listed in SAVED_LOOKS_FIXTURE_CUSTOMER_IDS" }, { status: 403 });
+    }
+    const owned = await prisma.closetItem.findMany({
+      where: { id: { in: closetItemIds }, customerId: String(customerId) },
+      select: { id: true, category: true },
+    });
+    if (owned.length !== closetItemIds.length) {
+      return Response.json({ error: "one or more closetItemIds do not belong to this customer" }, { status: 403 });
+    }
+    // ClosetCategory (TOPS/BOTTOMS/...) -> OutfitItemType (TOP/BOTTOM/...) —
+    // direct categories only; ACTIVEWEAR/SWIMWEAR/LOUNGEWEAR/OTHER have no
+    // 1:1 OutfitItemType and are refused rather than guessed.
+    const CATEGORY_TO_ITEM_TYPE = {
+      TOPS: "TOP", BOTTOMS: "BOTTOM", DRESSES: "DRESS", OUTERWEAR: "OUTERWEAR",
+      SHOES: "SHOES", BAGS: "BAG", ACCESSORIES: "ACCESSORY", JEWELRY: "JEWELRY",
+    };
+    const unmapped = owned.find((item) => !CATEGORY_TO_ITEM_TYPE[item.category]);
+    if (unmapped) {
+      return Response.json({ error: `closetItem ${unmapped.id} has category ${unmapped.category}, which has no direct OutfitItemType mapping` }, { status: 400 });
+    }
+    const created = await prisma.savedLook.create({
+      data: {
+        customerId: String(customerId),
+        name: name ?? null,
+        occasion: occasion ?? null,
+        items: {
+          create: owned.map((item) => ({ itemType: CATEGORY_TO_ITEM_TYPE[item.category], closetItemId: item.id })),
+        },
+      },
+      select: { id: true, name: true, occasion: true, items: { select: { id: true, closetItemId: true } } },
+    });
+    return Response.json({ savedLookId: created.id, name: created.name, occasion: created.occasion, itemCount: created.items.length });
+  }
+
+  // ── getSavedLook — QA fixture only, read-only ────────────────────────────
+  if (act === "getSavedLook") {
+    const { customerId, savedLookId } = body ?? {};
+    if (!customerId || !savedLookId) {
+      return Response.json({ error: "customerId and savedLookId required" }, { status: 400 });
+    }
+    if (!(await requireAllowlistedSavedLooksFixtureCustomer(customerId))) {
+      return Response.json({ error: "customerId must be a test-batch1- fixture customer explicitly listed in SAVED_LOOKS_FIXTURE_CUSTOMER_IDS" }, { status: 403 });
+    }
+    const look = await prisma.savedLook.findFirst({
+      where: { id: String(savedLookId), customerId: String(customerId) },
+      select: { id: true, customerId: true, name: true, occasion: true, items: { select: { id: true, closetItemId: true, itemType: true } } },
+    });
+    if (!look) return Response.json({ notFound: true });
+    return Response.json({ savedLook: look });
+  }
+
+  // ── deleteSavedLook — QA fixture only ────────────────────────────────────
+  // Exact-id delete, scoped to the owning customer — never a sweep. Items
+  // cascade via the schema's onDelete: Cascade on SavedLookItem.
+  if (act === "deleteSavedLook") {
+    const { customerId, savedLookId } = body ?? {};
+    if (!customerId || !savedLookId) {
+      return Response.json({ error: "customerId and savedLookId required" }, { status: 400 });
+    }
+    if (!(await requireAllowlistedSavedLooksFixtureCustomer(customerId))) {
+      return Response.json({ error: "customerId must be a test-batch1- fixture customer explicitly listed in SAVED_LOOKS_FIXTURE_CUSTOMER_IDS" }, { status: 403 });
+    }
+    const deleted = await prisma.savedLook.deleteMany({
+      where: { id: String(savedLookId), customerId: String(customerId) },
     });
     return Response.json({ ok: true, deletedCount: deleted.count });
   }
