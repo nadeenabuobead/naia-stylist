@@ -245,6 +245,11 @@ export default [
   // that's a separate, explicitly-approved step). Registered now so the
   // route exists and is testable ahead of that approval.
   route("api/full-look-vto-reconcile", "routes/api.full-look-vto-reconcile.ts"),
+  // Narrowly-scoped, staging-only, deterministic Full-Look VTO test fixture
+  // (2026-11-16) — see the route file's own header. Gated by VERCEL_ENV +
+  // NAIA_PROJECT_VARIANT + a dedicated VTO_QA_FIXTURE_SECRET header +
+  // QA_OVERRIDE_CUSTOMER_ID match; inert unless all four are configured.
+  route("api/vto-qa-fixture", "routes/api.vto-qa-fixture.tsx"),
   // Full-look VTO — staging QA prototype only (blocked in production).
   // Kept registered for direct comparison/rollback; style-me/result.tsx
   // no longer calls it once api/full-look-vto is wired in.
