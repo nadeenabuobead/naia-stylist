@@ -240,9 +240,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
     cloudinaryConfig: getCloudinaryConfig(),
   });
 
-  const [naiaModel, priorJobCount] = await Promise.all([
+  const [naiaModel, priorJobs] = await Promise.all([
     loadNaiaModel(customerId),
-    prisma.virtualTryOnJob.count({ where: { customerId, outfitSuggestionId: suggestionId } }),
+    prisma.virtualTryOnJob.findMany({
+      where: { customerId, outfitSuggestionId: suggestionId },
+      select: {
+        id: true,
+        productHandle: true,
+        status: true,
+        predictionId: true,
+        errorCode: true,
+        isTest: true,
+        createdAt: true,
+        updatedAt: true,
+        completedAt: true,
+        lastActivityAt: true,
+      },
+      orderBy: { createdAt: "asc" },
+    }),
   ]);
   const modelReadiness = computeModelReadinessFromRecord(naiaModel);
 
@@ -257,6 +272,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     eligibleGarmentLabels: selection?.garments.map((g) => g.label) ?? [],
     omittedLabels: selection?.omittedLabels ?? [],
     naiaModelReadyForTryOn: modelReadiness.isReadyForTryOn,
-    priorVirtualTryOnJobsOnThisSuggestion: priorJobCount,
+    priorVirtualTryOnJobsOnThisSuggestion: priorJobs.length,
+    priorJobs,
   });
 }

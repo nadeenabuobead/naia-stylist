@@ -17,12 +17,13 @@ const mockSuggestionCreate = vi.fn();
 const mockItemCreate = vi.fn();
 const mockSuggestionFindUnique = vi.fn();
 const mockVtoJobCount = vi.fn();
+const mockVtoJobFindMany = vi.fn();
 
 vi.mock("~/lib/prisma.server", () => ({
   prisma: {
     closetItem: { findMany: (...args: unknown[]) => mockFindMany(...args) },
     outfitSuggestion: { findUnique: (...args: unknown[]) => mockSuggestionFindUnique(...args) },
-    virtualTryOnJob: { count: (...args: unknown[]) => mockVtoJobCount(...args) },
+    virtualTryOnJob: { count: (...args: unknown[]) => mockVtoJobCount(...args), findMany: (...args: unknown[]) => mockVtoJobFindMany(...args) },
     $transaction: async (fn: (tx: unknown) => unknown) =>
       fn({
         stylingSession: { create: (...args: unknown[]) => mockSessionCreate(...args) },
@@ -94,6 +95,7 @@ beforeEach(() => {
   mockSuggestionCreate.mockResolvedValue({ id: "suggestion-1" });
   mockItemCreate.mockResolvedValue({ id: "outfititem-1" });
   mockVtoJobCount.mockResolvedValue(0);
+  mockVtoJobFindMany.mockResolvedValue([]);
   mockLoadNaiaModel.mockResolvedValue({ bodyPublicId: "p", bodyFormat: "jpg", saveModelConsentAt: new Date() });
 });
 
@@ -418,7 +420,10 @@ describe("api.vto-qa-fixture loader (GET) — read-only verification, no duplica
   it("reports naiaModelReadyForTryOn: false when the customer has no ready model, and surfaces a nonzero prior job count", async () => {
     setAuthorizedEnv();
     mockLoadNaiaModel.mockResolvedValue(null);
-    mockVtoJobCount.mockResolvedValue(2);
+    mockVtoJobFindMany.mockResolvedValue([
+      { id: "job-1", productHandle: "h1", status: "FAILED", predictionId: null, errorCode: "PROVIDER_FAILED", isTest: false, createdAt: new Date(), updatedAt: new Date(), completedAt: null, lastActivityAt: new Date() },
+      { id: "job-2", productHandle: "h2", status: "FAILED", predictionId: null, errorCode: "PROVIDER_FAILED", isTest: false, createdAt: new Date(), updatedAt: new Date(), completedAt: null, lastActivityAt: new Date() },
+    ]);
     mockSuggestionFindUnique.mockResolvedValue({
       id: "sugg-3",
       session: { id: "session-3", customerId: QA_ID },
@@ -435,6 +440,9 @@ describe("api.vto-qa-fixture loader (GET) — read-only verification, no duplica
     expect(json.ok).toBe(true);
     expect(json.naiaModelReadyForTryOn).toBe(false);
     expect(json.priorVirtualTryOnJobsOnThisSuggestion).toBe(2);
+    expect(json.priorJobs).toHaveLength(2);
+    expect(json.priorJobs[0].errorCode).toBe("PROVIDER_FAILED");
+    expect(json.priorJobs[0].status).toBe("FAILED");
   });
 
   it("reports fullLookEligible: false when the persisted items don't actually clear the real 3-category floor", async () => {
