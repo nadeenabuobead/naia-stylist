@@ -40,9 +40,9 @@ const ALLOWED_ORIGINS = [
   "https://naia-test-store.myshopify.com", // staging Shopify test store
 ];
 
-export function buildCorsHeaders(request) {
+export function buildCorsHeaders(request: Request): Record<string, string> {
   const origin = request.headers.get("Origin");
-  const headers = {
+  const headers: Record<string, string> = {
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
   };
