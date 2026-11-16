@@ -67,7 +67,10 @@ const FOOTER_COLS = [
     title: "account",
     links: [
       { label: "My nAia", href: "/my-naia" },
-      { label: "Wishlist", href: "#" },
+      // Wishlist has no backing data model yet (WishlistItem doesn't exist
+      // in schema) — same "real feature, not built yet" situation as
+      // Privacy/Terms below, so it gets the same honest treatment.
+      { label: "Wishlist", href: "#", pending: true },
     ],
   },
   {
@@ -77,23 +80,51 @@ const FOOTER_COLS = [
       // weight — a customer clicking "Privacy Policy" or "Terms of
       // Service" and landing nowhere reads as those documents existing
       // when they don't. Marked pending so they render as plain, honest
-      // text rather than a dead link that looks complete. Accessibility
-      // and Cookie Preferences are left as-is — out of scope for this pass.
+      // text rather than a dead link that looks complete.
+      //
+      // 2026-11-13: Accessibility and Cookie Preferences carry the same
+      // weight — "Accessibility" rendered as a dead link is a particularly
+      // bad look to ship — so they now get the identical treatment rather
+      // than being left as silent `#` links.
       { label: "Privacy Policy", href: "#", pending: true },
       { label: "Terms of Service", href: "#", pending: true },
-      { label: "Accessibility", href: "#" },
-      { label: "Cookie Preferences", href: "#" },
+      { label: "Accessibility", href: "#", pending: true },
+      { label: "Cookie Preferences", href: "#", pending: true },
     ],
   },
   {
     title: "follow",
     links: [
-      { label: "Instagram", href: "#" },
-      { label: "TikTok", href: "#" },
-      { label: "Press", href: "#" },
+      // 2026-11-13, revised same day: unlike Privacy/Terms/Accessibility/
+      // Cookie Preferences/Wishlist above, there's no basis here to claim
+      // these are "coming soon" — that's a business fact outside this
+      // change's visibility, and asserting it would be its own kind of
+      // invented promise. suffix: "" keeps the same non-clickable
+      // treatment (reduced opacity, no cursor) without the claim — just
+      // the label, honestly inert, until there's a real link or a real
+      // decision to remove the item.
+      { label: "Instagram", href: "#", pending: true, suffix: "" },
+      { label: "TikTok", href: "#", pending: true, suffix: "" },
+      { label: "Press", href: "#", pending: true, suffix: "" },
     ],
   },
 ];
+
+// Pending footer links default to "— coming soon" (Privacy Policy, Terms
+// of Service, Accessibility, Cookie Preferences, Wishlist — all real,
+// planned work). An explicit suffix: "" opts out of that claim for items
+// where "coming soon" isn't a fact this codebase can vouch for (see
+// "follow" above) — the item still renders non-clickable, just without
+// asserting a timeline.
+//
+// Inlined at each call site rather than factored into a typed helper:
+// FOOTER_COLS's per-column literal shapes don't unify into one type TS
+// can narrow cleanly across a function-call boundary, and typing that
+// properly isn't worth it for two call sites doing one property read.
+function footerPendingSuffix(link: Record<string, unknown>): string | null {
+  const suffix = "suffix" in link ? (link.suffix as string) : "— coming soon";
+  return suffix ? suffix : null;
+}
 
 interface Props {
   children: React.ReactNode;
@@ -305,7 +336,7 @@ export default function MyNaiaLayout({ children, compact = false }: Props) {
                   <li key={l.label}>
                     {"pending" in l && l.pending ? (
                       <span className="mn-footer-link" style={{ opacity: 0.55, cursor: "default" }}>
-                        {l.label} <em style={{ fontStyle: "normal", fontSize: "0.85em" }}>— coming soon</em>
+                        {l.label}{footerPendingSuffix(l) ? <> <em style={{ fontStyle: "normal", fontSize: "0.85em" }}>{footerPendingSuffix(l)}</em></> : null}
                       </span>
                     ) : (
                       <a href={l.href} className="mn-footer-link">{l.label}</a>
@@ -325,6 +356,7 @@ export default function MyNaiaLayout({ children, compact = false }: Props) {
                 type="button"
                 className="mn-footer-accordion-btn"
                 aria-expanded={footerOpen === col.title}
+                aria-controls={`mn-footer-panel-${col.title.replace(/\s+/g, "-")}`}
                 onClick={() => setFooterOpen((o) => o === col.title ? null : col.title)}
               >
                 <span className="mn-footer-accordion-title">{col.title}</span>
@@ -335,12 +367,12 @@ export default function MyNaiaLayout({ children, compact = false }: Props) {
                 }}>+</span>
               </button>
               {footerOpen === col.title && (
-                <ul className="mn-footer-accordion-list">
+                <ul className="mn-footer-accordion-list" id={`mn-footer-panel-${col.title.replace(/\s+/g, "-")}`}>
                   {col.links.map((l) => (
                     <li key={l.label}>
                       {"pending" in l && l.pending ? (
                         <span className="mn-footer-link" style={{ opacity: 0.55, cursor: "default" }}>
-                          {l.label} <em style={{ fontStyle: "normal", fontSize: "0.85em" }}>— coming soon</em>
+                          {l.label}{footerPendingSuffix(l) ? <> <em style={{ fontStyle: "normal", fontSize: "0.85em" }}>{footerPendingSuffix(l)}</em></> : null}
                         </span>
                       ) : (
                         <a href={l.href} className="mn-footer-link">{l.label}</a>

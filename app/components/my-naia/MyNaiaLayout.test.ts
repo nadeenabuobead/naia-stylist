@@ -218,3 +218,147 @@ describe("F — Sign Out button typography matches the surrounding nav links", (
     assert.ok(linkRule.includes("font-size"), ".mn-mobile-nav-link declares font-size directly");
   });
 });
+
+describe("I — footer dead links (2026-11-13 cleanup) render as honest pending text, not silent `#` links", () => {
+  // Root issue: Accessibility, Cookie Preferences, Wishlist, Instagram,
+  // TikTok, and Press all rendered as a clickable-looking <a href="#">
+  // that goes nowhere — exactly the problem Privacy Policy/Terms of
+  // Service were already fixed for (Priority 5, 2026-10-19). This closes
+  // the same gap for the remaining six, reusing the identical mechanism —
+  // no new rendering code, only data.
+
+  const PREVIOUSLY_DEAD = ["Accessibility", "Cookie Preferences", "Wishlist", "Instagram", "TikTok", "Press"];
+  const ALREADY_PENDING = ["Privacy Policy", "Terms of Service"];
+
+  function footerLinkEntry(label: string): string {
+    // FOOTER_COLS entries are one-liners of the form { label: "X", href: "#", ... }
+    const re = new RegExp(`\\{\\s*label:\\s*"${label}"[^}]*\\}`);
+    const match = SRC.match(re);
+    assert.ok(match, `FOOTER_COLS entry found for "${label}"`);
+    return match![0];
+  }
+
+  for (const label of PREVIOUSLY_DEAD) {
+    it(`"${label}" is now marked pending: true`, () => {
+      assert.match(footerLinkEntry(label), /pending:\s*true/, `"${label}" should carry pending: true`);
+    });
+  }
+
+  for (const label of ALREADY_PENDING) {
+    it(`"${label}" is still pending: true — unchanged regression guard`, () => {
+      assert.match(footerLinkEntry(label), /pending:\s*true/, `"${label}" must remain pending: true`);
+    });
+  }
+
+  it("a real, working link (\"My nAia\") is untouched — not accidentally marked pending", () => {
+    assert.doesNotMatch(footerLinkEntry("My nAia"), /pending/, '"My nAia" must stay a plain working link');
+  });
+
+  it("every pending footer entry still carries href=\"#\" — pending marks intent, it doesn't remove the placeholder href", () => {
+    for (const label of [...PREVIOUSLY_DEAD, ...ALREADY_PENDING]) {
+      assert.match(footerLinkEntry(label), /href:\s*"#"/, `"${label}" should still have href: "#"`);
+    }
+  });
+
+  it("the render logic's pending branch is unchanged — no new rendering code was added for this fix", () => {
+    const occurrences = (SRC.match(/"pending" in l && l\.pending/g) || []).length;
+    assert.strictEqual(occurrences, 2, "exactly the existing desktop + mobile pending branches, nothing new added");
+  });
+});
+
+describe("J — follow-up (same day): Instagram/TikTok/Press drop the unverifiable \"coming soon\" claim", () => {
+  // Root issue: reusing the exact "— coming soon" copy for social/press
+  // links asserted something this codebase has no way to verify — that a
+  // live Instagram/TikTok/press presence is actually imminent. This adds
+  // one small, generic mechanism (an optional per-link `suffix`) so the
+  // non-clickable treatment can be kept — same opacity, same cursor, same
+  // "this isn't a working link" signal — without the implied promise.
+  // Privacy Policy/Terms of Service/Accessibility/Cookie Preferences/
+  // Wishlist are all genuinely planned work, confirmed by real code/
+  // compliance need elsewhere, so they keep the default "coming soon".
+
+  function footerLinkEntry(label: string): string {
+    const re = new RegExp(`\\{\\s*label:\\s*"${label}"[^}]*\\}`);
+    const match = SRC.match(re);
+    assert.ok(match, `FOOTER_COLS entry found for "${label}"`);
+    return match![0];
+  }
+
+  for (const label of ["Instagram", "TikTok", "Press"]) {
+    it(`"${label}" opts out of the "coming soon" claim via suffix: ""`, () => {
+      assert.match(footerLinkEntry(label), /suffix:\s*""/, `"${label}" should carry suffix: ""`);
+    });
+  }
+
+  for (const label of ["Privacy Policy", "Terms of Service", "Accessibility", "Cookie Preferences", "Wishlist"]) {
+    it(`"${label}" has no suffix override — still defaults to "coming soon"`, () => {
+      assert.doesNotMatch(footerLinkEntry(label), /suffix:/, `"${label}" should not carry an explicit suffix`);
+    });
+  }
+
+  it("footerPendingSuffix() defaults to the existing \"— coming soon\" copy when no suffix is given", () => {
+    const fnIdx = SRC.indexOf("function footerPendingSuffix(");
+    assert.ok(fnIdx !== -1, "footerPendingSuffix defined");
+    const fnBody = SRC.slice(fnIdx, SRC.indexOf("\n}", fnIdx));
+    assert.match(fnBody, /:\s*"—\s*coming soon"/, "falls back to the original copy, unchanged, for every pre-existing pending item");
+  });
+
+  it("footerPendingSuffix() returns null (no <em>, no claim) for an empty suffix", () => {
+    const fnIdx = SRC.indexOf("function footerPendingSuffix(");
+    const fnBody = SRC.slice(fnIdx, SRC.indexOf("\n}", fnIdx));
+    assert.match(fnBody, /return\s+suffix\s*\?\s*suffix\s*:\s*null/, "an empty string suffix renders nothing, not a fallback promise");
+  });
+
+  it("no hardcoded \"— coming soon\" literal remains in either render block — both now compute it via footerPendingSuffix()", () => {
+    assert.ok(!/\{l\.label\}\s*<em[^>]*>—\s*coming soon<\/em>/.test(SRC), "no leftover hardcoded JSX copy");
+  });
+
+  it("both the desktop grid and the mobile accordion call footerPendingSuffix()", () => {
+    const desktopIdx = SRC.indexOf("mn-footer-grid");
+    const mobileIdx = SRC.indexOf("mn-footer-accordion-list");
+    assert.ok(desktopIdx !== -1 && mobileIdx !== -1, "both footer sections present");
+    const desktopBlock = SRC.slice(desktopIdx, mobileIdx);
+    const mobileBlock = SRC.slice(mobileIdx, mobileIdx + 1200);
+    assert.ok(desktopBlock.includes("footerPendingSuffix("), "desktop grid uses the shared helper");
+    assert.ok(mobileBlock.includes("footerPendingSuffix("), "mobile accordion uses the shared helper");
+  });
+});
+
+describe("K — footer accordion button is programmatically associated with the panel it controls (2026-11-15 a11y fix)", () => {
+  // The mobile nav trigger already does this correctly (aria-expanded +
+  // aria-controls pointing at a real id on the revealed panel). The
+  // footer accordion button had aria-expanded alone — a screen reader
+  // announces "expanded/collapsed" with no indication of WHICH content
+  // that refers to. Matches the existing mn-mobile-nav pattern exactly,
+  // no new convention introduced.
+
+  it("the accordion button's aria-controls matches a real id on its own revealed <ul>, derived from the same column title", () => {
+    const btnIdx = SRC.indexOf("mn-footer-accordion-btn");
+    const btnBlock = SRC.slice(btnIdx, SRC.indexOf("</button>", btnIdx));
+    const controlsMatch = btnBlock.match(/aria-controls=\{`([^`]+)`\}/);
+    assert.ok(controlsMatch, "button has an aria-controls expression");
+    assert.match(controlsMatch![1], /\$\{col\.title\.replace\(\/\\s\+\/g, "-"\)\}$/, "derived from col.title, same slug rule as the id below");
+
+    const ulIdx = SRC.indexOf('<ul className="mn-footer-accordion-list"');
+    const ulTag = SRC.slice(ulIdx, SRC.indexOf(">", ulIdx) + 1);
+    assert.match(ulTag, /id=\{`[^`]+\$\{col\.title\.replace\(\/\\s\+\/g, "-"\)\}`\}/, "the <ul> carries a matching id built from the same expression");
+  });
+
+  it("the id/aria-controls prefix is identical on both sides — not just both present", () => {
+    const btnIdx = SRC.indexOf("mn-footer-accordion-btn");
+    const btnBlock = SRC.slice(btnIdx, SRC.indexOf("</button>", btnIdx));
+    const controlsValue = btnBlock.match(/aria-controls=\{`([^`]+)`\}/)![1];
+
+    const ulIdx = SRC.indexOf('<ul className="mn-footer-accordion-list"');
+    const ulTag = SRC.slice(ulIdx, SRC.indexOf(">", ulIdx) + 1);
+    const idValue = ulTag.match(/id=\{`([^`]+)`\}/)![1];
+
+    assert.strictEqual(controlsValue, idValue, "aria-controls and id must be built from the exact same template, or they can silently drift apart");
+  });
+
+  it("mirrors the mobile nav trigger's own existing aria-expanded + aria-controls pattern — not a new one-off convention", () => {
+    const triggerIdx = SRC.indexOf("mn-mobile-menu-btn");
+    const triggerBlock = SRC.slice(triggerIdx, SRC.indexOf("</button>", triggerIdx));
+    assert.ok(triggerBlock.includes("aria-controls=\"mn-mobile-nav\""), "the existing trigger this fix is modeled on still has its own aria-controls");
+  });
+});
