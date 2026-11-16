@@ -185,6 +185,27 @@ export type ValidateFashnOutputResult =
 const BARE_BASE64_RE = /^[A-Za-z0-9+/]+=*$/;
 const FASHN_REQUESTED_OUTPUT_FORMAT = "png";
 
+// PNG signature (first 8 bytes of every valid PNG file). Charset validity
+// (BARE_BASE64_RE) only proves a string COULD be base64 — it says nothing
+// about whether the decoded bytes are an actual image, let alone a PNG.
+// A bare payload is only ever re-wrapped as "image/png" (never an
+// arbitrary caller-supplied type), so this is the one check that backs
+// that label up: decode just the first few bytes and confirm they're a
+// real PNG header before trusting the rest of the (still size-checked)
+// payload enough to upload it anywhere.
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+function decodedBytesStartWithPngSignature(base64: string): boolean {
+  try {
+    // 16 base64 chars decode to 12 bytes — comfortably more than the 8-byte
+    // signature, tolerant of base64's 4-char block alignment.
+    const head = Buffer.from(base64.slice(0, 16), "base64");
+    return head.length >= PNG_SIGNATURE.length && head.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE);
+  } catch {
+    return false;
+  }
+}
+
 export function validateFashnOutputDataUrl(value: unknown): ValidateFashnOutputResult {
   if (typeof value !== "string" || value.length === 0) {
     return { ok: false, errorCode: "INVALID_OUTPUT_FORMAT" };
@@ -194,14 +215,14 @@ export function validateFashnOutputDataUrl(value: unknown): ValidateFashnOutputR
   if (/^data:image\/(jpeg|jpg|png|webp);base64,[A-Za-z0-9+/]+=*$/i.test(trimmed)) {
     const commaIdx = trimmed.indexOf(",");
     normalized = `${trimmed.slice(0, commaIdx).toLowerCase()},${trimmed.slice(commaIdx + 1)}`;
-  } else if (BARE_BASE64_RE.test(trimmed)) {
+  } else if (BARE_BASE64_RE.test(trimmed) && decodedBytesStartWithPngSignature(trimmed)) {
     normalized = `data:image/${FASHN_REQUESTED_OUTPUT_FORMAT};base64,${trimmed}`;
   } else {
     return { ok: false, errorCode: "INVALID_OUTPUT_FORMAT" };
   }
   // Decoded byte size from the base64 payload's own length — no need to
-  // actually decode it to check this (4 base64 chars encode 3 bytes,
-  // minus 1-2 for trailing '=' padding).
+  // actually decode the whole thing to check this (4 base64 chars encode
+  // 3 bytes, minus 1-2 for trailing '=' padding).
   const base64 = normalized.slice(normalized.indexOf(",") + 1);
   const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
   const decodedBytes = Math.floor((base64.length * 3) / 4) - padding;

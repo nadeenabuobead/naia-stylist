@@ -223,6 +223,17 @@ describe("validateFashnOutputDataUrl", () => {
     expect(result).toEqual({ ok: true, normalizedDataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA" });
   });
 
+  // 2026-11-16 ADDENDUM 2 — a bare payload must be a REAL PNG, not just a
+  // charset-valid base64 string merely labeled "image/png" because that's
+  // the format we happened to request. Base64("AAAAAAAAAAAAAAAA...") is a
+  // valid base64 string but decodes to all-zero bytes — nowhere near a
+  // PNG signature (89 50 4E 47 0D 0A 1A 0A) — and must be rejected, never
+  // silently prefixed and uploaded as if it were a genuine image.
+  it("rejects a bare, charset-valid base64 payload whose decoded bytes are NOT a real PNG — never trusts the label alone", () => {
+    const notActuallyAnImage = Buffer.from("this is definitely not a png file").toString("base64");
+    expect(validateFashnOutputDataUrl(notActuallyAnImage)).toEqual({ ok: false, errorCode: "INVALID_OUTPUT_FORMAT" });
+  });
+
   it("trims surrounding whitespace before classifying the shape", () => {
     const result = validateFashnOutputDataUrl("  data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA\n");
     expect(result).toEqual({ ok: true, normalizedDataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA" });
