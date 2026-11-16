@@ -1405,6 +1405,14 @@ export default function StyleMeResult() {
   type FullLookQAState =
     | { status: "idle" }
     | { status: "loading"; stepIndex?: number; totalSteps?: number }
+    // 2026-11-16 — server-reported AWAITING_AUTHORIZATION (see
+    // full-look-vto-orchestrator.server.ts's own doc comment on why): the
+    // current garment's result was recovered for free (no new provider call),
+    // but the next one is new, genuinely billable work and was NOT
+    // submitted automatically. This state exists so the client can show an
+    // explicit, cost-aware "Continue" action instead of silently stalling
+    // on the generic "loading" copy forever.
+    | { status: "awaiting_authorization"; stepIndex: number; totalSteps: number }
     | { status: "done"; resultUrl: string; omittedLabels?: string[] }
     | { status: "error"; message: string };
   const [fullLookQA, setFullLookQA] = useState<FullLookQAState>({ status: "idle" });
@@ -1430,6 +1438,12 @@ export default function StyleMeResult() {
         setFullLookQA({ status: "error", message: json.errorCode ?? "unknown" });
       } else if (json.status === "PROCESSING") {
         setFullLookQA({ status: "loading", stepIndex: json.stepIndex, totalSteps: json.totalSteps });
+      } else if (json.status === "AWAITING_AUTHORIZATION") {
+        // Nothing is in flight with the provider right now and nothing will change
+        // on its own — stop polling every 3s for no reason. The explicit
+        // Continue button (triggerFullLook) is what moves this forward.
+        stopFullLookPolling();
+        setFullLookQA({ status: "awaiting_authorization", stepIndex: json.stepIndex, totalSteps: json.totalSteps });
       }
       // NOT_STARTED — keep polling, stay idle.
     } catch {
@@ -1461,6 +1475,8 @@ export default function StyleMeResult() {
         } else if (json.status === "PROCESSING") {
           setFullLookQA({ status: "loading", stepIndex: json.stepIndex, totalSteps: json.totalSteps });
           startFullLookPolling(suggestionId);
+        } else if (json.status === "AWAITING_AUTHORIZATION") {
+          setFullLookQA({ status: "awaiting_authorization", stepIndex: json.stepIndex, totalSteps: json.totalSteps });
         }
       } catch {
         // Silent — the button remains available as a fallback.
@@ -2150,6 +2166,27 @@ export default function StyleMeResult() {
                       progress) for internal use — just not rendered here. */}
                   Your outfit is coming together.
                 </p>
+              </>
+            )}
+
+            {fullLookQA.status === "awaiting_authorization" && (
+              <>
+                <h2 className="sm-vto-heading">Garment {fullLookQA.stepIndex + 1} of {fullLookQA.totalSteps} is ready.</h2>
+                <p className="sm-vto-body">
+                  Continuing will generate the next garment as a new AI preview. Each remaining
+                  garment is a separate try-on generation.
+                </p>
+                <p className="sm-vto-body-note">
+                  Nothing further has been generated yet — this preview is saved, and no new
+                  preview is created until you choose to continue.
+                </p>
+                <button
+                  type="button"
+                  className="sm-result-action-btn sm-result-action-btn--primary sm-vto-cta"
+                  onClick={() => triggerFullLook(false)}
+                >
+                  Continue to Next Garment
+                </button>
               </>
             )}
 
