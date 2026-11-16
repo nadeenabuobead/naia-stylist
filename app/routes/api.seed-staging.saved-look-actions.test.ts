@@ -25,6 +25,8 @@ import { action } from "./api.seed-staging";
 const STAGING_SECRET = "test-secret-abc123";
 const FIXTURE_CUSTOMER_ID = "cust_fixture_1";
 const REAL_CUSTOMER_ID = "cust_real_1";
+const REAL_CLERK_NATIVE_CUSTOMER_ID = "cust_real_clerk_native";
+const NONEXISTENT_CUSTOMER_ID = "cust_does_not_exist";
 
 function makeActionRequest(body: object): { request: Request } {
   return {
@@ -50,8 +52,19 @@ describe("§S5 seed-staging SavedLook fixture actions", () => {
         return Promise.resolve({ id: FIXTURE_CUSTOMER_ID, shopifyCustomerId: "test-batch1-wi-fixture" });
       }
       if (where.id === REAL_CUSTOMER_ID) {
-        return Promise.resolve({ id: REAL_CUSTOMER_ID, shopifyCustomerId: "real-customer-456" });
+        // Mirrors the real shape written by the legacy Shopify OAuth callback
+        // (auth.shopify.callback.tsx) — a Shopify Customer Account API GID,
+        // never caller-suppliable or test-batch1--shaped.
+        return Promise.resolve({ id: REAL_CUSTOMER_ID, shopifyCustomerId: "gid://shopify/Customer/7234561890" });
       }
+      if (where.id === REAL_CLERK_NATIVE_CUSTOMER_ID) {
+        // Mirrors a real Clerk-native customer (signed up directly via Clerk,
+        // never through Shopify OAuth) — shopifyCustomerId is null by the
+        // schema's own documented convention (see identity-linking.server.ts),
+        // not merely "some other string".
+        return Promise.resolve({ id: REAL_CLERK_NATIVE_CUSTOMER_ID, shopifyCustomerId: null });
+      }
+      // NONEXISTENT_CUSTOMER_ID and anything else: no row at all.
       return Promise.resolve(null);
     });
   });
@@ -160,5 +173,79 @@ describe("§S5 seed-staging SavedLook fixture actions", () => {
     expect(body.deletedCount).toBe(1);
     const deleteCall = (prisma.savedLook.deleteMany as any).mock.calls[0][0];
     expect(deleteCall.where).toEqual({ id: "look1", customerId: FIXTURE_CUSTOMER_ID });
+  });
+
+  // ── Adversarial / negative security tests ───────────────────────────────
+  // Directly targets: "reject arbitrary customer IDs", "fails closed
+  // regardless of misconfiguration", requested as an explicit follow-up
+  // security pass on these three actions specifically.
+
+  it("S509 — createSavedLookDetailed refuses a real, Shopify-verified customerId (not merely 'some non-fixture string')", async () => {
+    const res: any = await action(
+      makeActionRequest({ _action: "createSavedLookDetailed", customerId: REAL_CUSTOMER_ID, closetItemIds: ["item1"] }) as any,
+    );
+    expect((res as Response).status).toBe(403);
+    expect(prisma.savedLook.create).not.toHaveBeenCalled();
+    expect(prisma.closetItem.findMany).not.toHaveBeenCalled();
+  });
+
+  it("S510 — all three actions refuse a real Clerk-native customerId (shopifyCustomerId: null) — null must not coerce into passing a startsWith check", async () => {
+    for (const _action of ["createSavedLookDetailed", "getSavedLook", "deleteSavedLook"]) {
+      const res: any = await action(
+        makeActionRequest({ _action, customerId: REAL_CLERK_NATIVE_CUSTOMER_ID, closetItemIds: ["item1"], savedLookId: "look1" }) as any,
+      );
+      expect((res as Response).status, `${_action} on a Clerk-native real customer`).toBe(403);
+    }
+    expect(prisma.savedLook.create).not.toHaveBeenCalled();
+    expect(prisma.savedLook.findFirst).not.toHaveBeenCalled();
+    expect(prisma.savedLook.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("S511 — all three actions refuse a customerId that does not exist at all, not just ones belonging to someone else", async () => {
+    for (const _action of ["createSavedLookDetailed", "getSavedLook", "deleteSavedLook"]) {
+      const res: any = await action(
+        makeActionRequest({ _action, customerId: NONEXISTENT_CUSTOMER_ID, closetItemIds: ["item1"], savedLookId: "look1" }) as any,
+      );
+      expect((res as Response).status, `${_action} on a nonexistent customerId`).toBe(403);
+    }
+  });
+
+  it("S512 — createSavedLookDetailed rejects every malformed customerId shape (object, array, empty string, null, undefined) — never creates a SavedLook, regardless of which status code the particular shape happens to trip", async () => {
+    // "" / null / undefined are falsy -> the early `!customerId` check returns
+    // 400 before any DB call. {} / [] are TRUTHY in JS, so they instead reach
+    // requireTestCustomer, where String({}) === "[object Object]" (and
+    // String([]) === "") never matches a real id -> prisma.customer.findUnique
+    // correctly returns null -> 403. Both paths are equally safe; the
+    // security-relevant invariant is "never creates a look", not the exact
+    // status code, which legitimately differs by input shape.
+    for (const badCustomerId of [{}, [], "", null, undefined]) {
+      vi.clearAllMocks();
+      const res: any = await action(
+        makeActionRequest({ _action: "createSavedLookDetailed", customerId: badCustomerId, closetItemIds: ["item1"] }) as any,
+      );
+      const status = (res as Response).status;
+      expect([400, 403], `customerId=${JSON.stringify(badCustomerId)} -> unexpected status ${status}`).toContain(status);
+      expect(prisma.savedLook.create, `customerId=${JSON.stringify(badCustomerId)}`).not.toHaveBeenCalled();
+    }
+  });
+
+  it("S513 — all three actions fail closed (404, before any DB call) when NAIA_PROJECT_VARIANT is anything other than the exact string 'staging' — including a plausible-looking misconfiguration, not just 'production' or unset", async () => {
+    for (const badVariant of [undefined, "", "production", "Staging", "staging ", "stage"]) {
+      vi.clearAllMocks();
+      if (badVariant === undefined) delete process.env.NAIA_PROJECT_VARIANT;
+      else process.env.NAIA_PROJECT_VARIANT = badVariant;
+
+      for (const _action of ["createSavedLookDetailed", "getSavedLook", "deleteSavedLook"]) {
+        const res: any = await action(
+          makeActionRequest({ _action, customerId: FIXTURE_CUSTOMER_ID, closetItemIds: ["item1"], savedLookId: "look1" }) as any,
+        );
+        expect((res as Response).status, `${_action} with NAIA_PROJECT_VARIANT=${JSON.stringify(badVariant)}`).toBe(404);
+      }
+      expect(prisma.customer.findUnique).not.toHaveBeenCalled();
+      expect(prisma.savedLook.create).not.toHaveBeenCalled();
+      expect(prisma.savedLook.findFirst).not.toHaveBeenCalled();
+      expect(prisma.savedLook.deleteMany).not.toHaveBeenCalled();
+    }
+    process.env.NAIA_PROJECT_VARIANT = "staging";
   });
 });
