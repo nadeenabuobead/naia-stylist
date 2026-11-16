@@ -1,13 +1,9 @@
 import { authenticateCustomer } from "../customer-auth.server";
 import prisma from "../db.server";
-
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization",
-};
+import { buildCorsHeaders } from "../lib/storefront-cors.server";
 
 export async function loader({ request }) {
+  const CORS = buildCorsHeaders(request);
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS });
   }
@@ -39,6 +35,7 @@ export async function loader({ request }) {
 }
 
 export async function action({ request }) {
+  const CORS = buildCorsHeaders(request);
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS });
   }

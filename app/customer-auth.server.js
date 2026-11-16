@@ -3,10 +3,14 @@ import prisma from "./db.server";
 
 // 2026-10-19 security review: this previously fell back to a hardcoded,
 // publicly-readable string ("naia-fallback-secret") if both real secrets were
-// unset, which would let anyone who has read this source forge a valid
-// 30-day customer token in that configuration. Fails closed instead — no
-// environment should ever be silently signing/verifying tokens with a secret
-// that isn't actually secret.
+// unset, which would let anyone who has read this source (this repo is
+// public) forge a valid 30-day customer token in that configuration. Fails
+// closed instead — no environment should ever be silently signing/verifying
+// tokens with a secret that isn't actually secret. Confirmed via read-only,
+// names-only Vercel env var inspection (2026-11-14) that both
+// NAIA_CUSTOMER_SECRET and SHOPIFY_API_SECRET are actually configured in
+// Production today, so this closes a defense-in-depth gap rather than a
+// live exploit.
 function getSecret() {
   const secret = process.env.NAIA_CUSTOMER_SECRET || process.env.SHOPIFY_API_SECRET;
   if (!secret) throw new Error("customer-auth: no NAIA_CUSTOMER_SECRET or SHOPIFY_API_SECRET configured");
