@@ -57,6 +57,16 @@ vi.mock("~/lib/plan/entitlement.server", () => ({
   // is imported, so every existing assertion on that mock keeps working
   // without rewriting each one.
   reservePersonalisedTrendSlot: vi.fn(),
+  // Same 2026-11-12 change added an unconditional call to this on every
+  // blocked path (to pick the honest membership_required vs
+  // monthly_quota_exhausted message off the *corrected* status rather than
+  // a possibly-stale cached one — see trends.my-edits.$slug.tsx's
+  // resolveTrendEditBlockState comment). Identity-passthrough default,
+  // same convention as hydrateShopperEditImages above: this suite exercises
+  // gating/usage-recording given a known membershipStatus, not the
+  // cache-correction behavior of resolveEffectiveContext itself (that's
+  // covered in entitlement.server.test.ts).
+  resolveEffectiveMembershipStatus: vi.fn(async (_customerId: string, membershipStatus: unknown) => membershipStatus),
 }));
 
 vi.mock("~/lib/plan/personalised-trend-edit-usage.server", () => ({
