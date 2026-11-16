@@ -25,6 +25,7 @@ import {
   CHUNK_SIZE_BYTES,
   type CloudinaryConfig,
 } from "./cloudinary-admin.server";
+import { downloadIntermediateStepResult, deriveIntermediateStepPublicId } from "./ai/full-look-tryon-real.server";
 
 const CONFIG: CloudinaryConfig = { cloudName: "test-cloud", apiKey: "test-key", apiSecret: "test-secret" };
 
@@ -361,5 +362,82 @@ describe("uploadCloudinaryPrivate — bounded timeout and idempotent transient-f
     const result = await uploadCloudinaryPrivate("pub-1", "data:image/png;base64,x", "private", fetchMock as any, () => CONFIG, async () => {});
     expect(result).toEqual({ ok: true, publicId: "pub-1", format: "png", version: "1" });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+// 2026-11-16 addition — genuine round-trip coverage. Every other test in
+// this file (and in full-look-tryon-real.server.test.ts, which mocks this
+// whole module away) exercises uploadCloudinaryPrivate and
+// downloadIntermediateStepResult in ISOLATION. Neither proves the actual
+// handoff this chain depends on every step: a step's real uploaded bytes
+// are the exact bytes the NEXT step later downloads. This fakes only the
+// raw HTTP layer (one in-memory store, keyed by public_id) — both
+// functions' real business logic (signing, validation, error
+// classification) runs unmocked.
+describe("uploadCloudinaryPrivate + downloadIntermediateStepResult — real intermediate-image round trip", () => {
+  function makeFakeCloudinary() {
+    const store = new Map<string, string>(); // publicId -> the uploaded dataUrl, verbatim
+
+    const fetchMock = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      const urlStr = String(url);
+      if (urlStr.includes("/image/upload")) {
+        // Upload: public_id + file come from the URLSearchParams body.
+        const params = new URLSearchParams(init?.body as any);
+        const publicId = params.get("public_id")!;
+        const file = params.get("file")!;
+        store.set(publicId, file);
+        return new Response(JSON.stringify({ public_id: publicId, format: "png", version: 1 }), { status: 200 });
+      }
+      // Download: a signed GET whose query string carries public_id.
+      const publicId = new URL(urlStr).searchParams.get("public_id")!;
+      const dataUrl = store.get(publicId);
+      if (!dataUrl) return new Response(null, { status: 404 });
+      const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+      const bytes = Buffer.from(base64, "base64");
+      return new Response(bytes, { status: 200 });
+    });
+
+    return { fetchMock, store };
+  }
+
+  it("the exact bytes uploaded for one step are the exact bytes the next step downloads", async () => {
+    const { fetchMock } = makeFakeCloudinary();
+    const originalPng = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA";
+    const publicId = deriveIntermediateStepPublicId("cust-1", "job-step3");
+
+    const uploadResult = await uploadCloudinaryPrivate(publicId, originalPng, "private", fetchMock as any, () => CONFIG);
+    expect(uploadResult.ok).toBe(true);
+
+    const downloadResult = await downloadIntermediateStepResult("cust-1", "job-step3", fetchMock as any, () => CONFIG);
+    expect(downloadResult).toEqual({ ok: true, dataUrl: originalPng });
+  });
+
+  it("customer ownership is structural, not an access check — a different customer's derived publicId can never collide with or read this one's asset", async () => {
+    const { fetchMock } = makeFakeCloudinary();
+    const originalPng = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA";
+    await uploadCloudinaryPrivate(deriveIntermediateStepPublicId("cust-1", "job-step3"), originalPng, "private", fetchMock as any, () => CONFIG);
+
+    // Same jobId, a DIFFERENT customerId — the derived publicId embeds
+    // customerId, so this is a different key entirely, never the same asset.
+    const otherCustomerResult = await downloadIntermediateStepResult("cust-2", "job-step3", fetchMock as any, () => CONFIG);
+    expect(otherCustomerResult).toEqual({ ok: false, errorCode: "PROVIDER_ERROR_404" });
+  });
+
+  it("re-uploading under the SAME publicId overwrites in place — idempotent, never a second asset", async () => {
+    const { fetchMock, store } = makeFakeCloudinary();
+    const publicId = deriveIntermediateStepPublicId("cust-1", "job-step3");
+
+    await uploadCloudinaryPrivate(publicId, "data:image/png;base64,AAAA", "private", fetchMock as any, () => CONFIG);
+    await uploadCloudinaryPrivate(publicId, "data:image/png;base64,BBBB", "private", fetchMock as any, () => CONFIG);
+
+    expect(store.size).toBe(1); // one key, not two
+    const downloadResult = await downloadIntermediateStepResult("cust-1", "job-step3", fetchMock as any, () => CONFIG);
+    expect(downloadResult).toEqual({ ok: true, dataUrl: "data:image/png;base64,BBBB" }); // the latest write wins
+  });
+
+  it("an asset that was never uploaded (or already cleaned up) downloads as a clean 404, never a silent empty image", async () => {
+    const { fetchMock } = makeFakeCloudinary();
+    const result = await downloadIntermediateStepResult("cust-1", "job-never-uploaded", fetchMock as any, () => CONFIG);
+    expect(result).toEqual({ ok: false, errorCode: "PROVIDER_ERROR_404" });
   });
 });
