@@ -220,43 +220,95 @@ describe("selectFullLookGarments", () => {
 describe("resolveCurrentAttemptScope / startNewAttemptScope — retry-safe idempotency", () => {
   const FP = "fingerprintABC";
 
+  function step0Row(index: number, fingerprint: string = FP, customerId = "cust-1", suggestionId = "sugg-1") {
+    return { idempotencyKey: `fulllook-real-reservation:${customerId}:${suggestionId}:a${index}:${fingerprint}` };
+  }
+
   it("first-ever attempt: both resolve to attempt 0 when no step1 row exists yet", async () => {
+    mockFindFirst().mockResolvedValue(null);
     mockCount().mockResolvedValue(0);
     expect(await resolveCurrentAttemptScope("cust-1", "sugg-1", FP)).toBe(`sugg-1:a0:${FP}`);
     expect(await startNewAttemptScope("cust-1", "sugg-1", FP)).toBe(`sugg-1:a0:${FP}`);
   });
 
   it("after one attempt exists: resume reuses it (a0); retry gets a genuinely new one (a1), never colliding", async () => {
+    mockFindFirst().mockResolvedValue(step0Row(0));
     mockCount().mockResolvedValue(1);
     expect(await resolveCurrentAttemptScope("cust-1", "sugg-1", FP)).toBe(`sugg-1:a0:${FP}`);
     expect(await startNewAttemptScope("cust-1", "sugg-1", FP)).toBe(`sugg-1:a1:${FP}`);
   });
 
   it("after two attempts exist (first failed, retried once more): resume reuses the latest (a1), a further retry would get a2", async () => {
+    mockFindFirst().mockResolvedValue(step0Row(1));
     mockCount().mockResolvedValue(2);
     expect(await resolveCurrentAttemptScope("cust-1", "sugg-1", FP)).toBe(`sugg-1:a1:${FP}`);
     expect(await startNewAttemptScope("cust-1", "sugg-1", FP)).toBe(`sugg-1:a2:${FP}`);
   });
 
-  it("counts step1 rows scoped to both this customer and this exact suggestion — never a different customer's or suggestion's attempts", async () => {
+  it("resolveCurrentAttemptScope reads the most-recently-created step1 row directly, scoped to this customer+suggestion, ordered by createdAt desc", async () => {
+    mockFindFirst().mockResolvedValue(null);
     await resolveCurrentAttemptScope("cust-1", "sugg-1", FP);
+    expect(mockFindFirst()).toHaveBeenCalledWith({
+      where: { customerId: "cust-1", outfitSuggestionId: "sugg-1", productHandle: { startsWith: "fulllook-real:step1:" } },
+      orderBy: [{ createdAt: "desc" }],
+      select: { idempotencyKey: true },
+    });
+  });
+
+  it("startNewAttemptScope still counts step1 rows (unchanged) — a genuinely new index must never collide with any existing one", async () => {
+    mockCount().mockResolvedValue(3);
+    await startNewAttemptScope("cust-1", "sugg-1", FP);
     expect(mockCount()).toHaveBeenCalledWith({
       where: { customerId: "cust-1", outfitSuggestionId: "sugg-1", productHandle: { startsWith: "fulllook-real:step1:" } },
     });
+  });
+
+  // 2026-11-15 — THE CONFIRMED LIVE BUG. The old count-based formula
+  // (latestIndex = count - 1) breaks the instant the attempt you're
+  // trying to resume has ALREADY incremented that count by existing.
+  // Reproduced exactly: a single attempt (a1) exists; a plain count of
+  // step1 rows for this customer+suggestion is 3 (two OLDER, unrelated
+  // dead attempts plus this one) — the old formula would compute
+  // latestIndex = 3-1 = 2, a scope nothing has ever used, making this
+  // customer's own genuinely in-progress attempt unreachable by their own
+  // next refresh. The fix must resolve to the row's OWN index (1),
+  // regardless of what the total count happens to be.
+  it("REGRESSION — resolves to the latest attempt's OWN index, not count-1, even when prior dead attempts have pushed the count ahead of it", async () => {
+    mockFindFirst().mockResolvedValue(step0Row(1)); // the row actually in progress
+    mockCount().mockResolvedValue(3); // old formula would have computed index 2 here — wrong
+    const scope = await resolveCurrentAttemptScope("cust-1", "sugg-1", FP);
+    expect(scope).toBe(`sugg-1:a1:${FP}`); // NOT a2
+  });
+
+  // The exact legacy format found live in production data: a step1 row
+  // created before fingerprint-embedding existed has NO trailing
+  // fingerprint segment at all ("sugg-1:a0", not "sugg-1:a0:fp"). Parsing
+  // must still recover its index correctly rather than silently falling
+  // back to 0 for the wrong reason.
+  it("parses the attempt index correctly from a legacy (pre-fingerprint-embedding) step1 row with no trailing fingerprint segment", async () => {
+    mockFindFirst().mockResolvedValue({ idempotencyKey: "fulllook-real-reservation:cust-1:sugg-1:a0" });
+    const scope = await resolveCurrentAttemptScope("cust-1", "sugg-1", FP);
+    expect(scope).toBe(`sugg-1:a0:${FP}`);
+  });
+
+  it("a malformed/unrecognized idempotencyKey fails closed to index 0 rather than throwing", async () => {
+    mockFindFirst().mockResolvedValue({ idempotencyKey: "something-unexpected" });
+    const scope = await resolveCurrentAttemptScope("cust-1", "sugg-1", FP);
+    expect(scope).toBe(`sugg-1:a0:${FP}`);
   });
 
   // 2026-11-15 — the actual QA bug fix: a different garment set (different
   // fingerprint) must never produce the same scope as an older, now-
   // incompatible attempt, even at the exact same numeric index.
   it("the SAME numeric index with a DIFFERENT fingerprint never collides with an older attempt's scope", async () => {
-    mockCount().mockResolvedValue(0);
+    mockFindFirst().mockResolvedValue(null);
     const oldThreeItemScope = await resolveCurrentAttemptScope("cust-1", "sugg-1", "fp-3-items");
     const newFiveItemScope = await resolveCurrentAttemptScope("cust-1", "sugg-1", "fp-5-items");
     expect(oldThreeItemScope).not.toBe(newFiveItemScope);
   });
 
   it("the SAME fingerprint always produces the SAME scope for the same attempt index — resumption still works", async () => {
-    mockCount().mockResolvedValue(1);
+    mockFindFirst().mockResolvedValue(step0Row(1));
     const first = await resolveCurrentAttemptScope("cust-1", "sugg-1", FP);
     const second = await resolveCurrentAttemptScope("cust-1", "sugg-1", FP);
     expect(first).toBe(second);

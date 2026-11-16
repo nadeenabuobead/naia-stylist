@@ -32,11 +32,15 @@ vi.mock("~/lib/ai/full-look-vto-orchestrator.server", () => ({
 vi.mock("~/lib/cloudinary-admin.server", () => ({
   getCloudinaryConfig: vi.fn(() => null),
 }));
+vi.mock("~/lib/plan/entitlement.server", () => ({
+  getEntitlementSummary: vi.fn(),
+}));
 
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import prisma from "~/db.server";
 import { checkFashnPredictionStatus } from "~/lib/ai/full-look-tryon-real.server";
 import { selectFullLookGarments, resolveCurrentAttemptScope } from "~/lib/ai/full-look-vto-orchestrator.server";
+import { getEntitlementSummary } from "~/lib/plan/entitlement.server";
 import { loader } from "./api.full-look-vto-diagnostic";
 
 const mockCustomer = () => getCurrentNaiaCustomer as ReturnType<typeof vi.fn>;
@@ -45,6 +49,14 @@ const mockFashnCheck = () => checkFashnPredictionStatus as ReturnType<typeof vi.
 const mockFindSuggestion = () => (prisma as any).outfitSuggestion.findUnique as ReturnType<typeof vi.fn>;
 const mockSelectGarments = () => selectFullLookGarments as ReturnType<typeof vi.fn>;
 const mockResolveScope = () => resolveCurrentAttemptScope as ReturnType<typeof vi.fn>;
+const mockEntitlementSummary = () => getEntitlementSummary as ReturnType<typeof vi.fn>;
+
+function makeEntitlementSummary(overrides: Record<string, unknown> = {}) {
+  return {
+    vto: { monthlyLimit: 5, monthlyCompleted: 0, monthlyInFlight: 0, resetDate: "2026-12-01" },
+    ...overrides,
+  };
+}
 
 function makeJob(overrides: Record<string, unknown> = {}) {
   return {
@@ -65,6 +77,7 @@ function makeJob(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockEntitlementSummary().mockResolvedValue(makeEntitlementSummary());
 });
 
 function makeRequest(url: string) {
@@ -140,18 +153,64 @@ describe("api.full-look-vto-diagnostic — loader behavior", () => {
     mockCustomer().mockResolvedValue({ id: "cust-1" });
     const jobs = [
       makeJob({ id: "job-0", productHandle: "fulllook-real:step1:Trousers", status: "COMPLETED", predictionId: "p0" }),
-      makeJob({ id: "job-final", productHandle: "fulllook-real:final:Blazer", status: "COMPLETED", predictionId: "pf", completedAt: new Date() }),
+      makeJob({
+        id: "job-final", productHandle: "fulllook-real:final:Blazer", status: "COMPLETED",
+        predictionId: "pf", completedAt: new Date(), isTest: false,
+      }),
     ];
     mockFindMany().mockResolvedValue(jobs);
+    mockEntitlementSummary().mockResolvedValue(
+      makeEntitlementSummary({ vto: { monthlyLimit: 5, monthlyCompleted: 1, monthlyInFlight: 0, resetDate: "2026-12-01" } }),
+    );
     const res: any = await loader(makeRequest("https://x.test/api/full-look-vto-diagnostic?suggestionId=sugg-1"));
     const body = res.data ?? res;
     expect(body.finalStepCompleted).toBe(true);
     expect(body.totalJobRows).toBe(2);
     expect(mockFashnCheck()).not.toHaveBeenCalled(); // nothing is PROCESSING, so no live check is made
-    // Even with the final step COMPLETED, this diagnostic must never claim
-    // to have verified credit consumption — it doesn't query
-    // entitlement.server.ts's actual counting logic.
-    expect(body.creditConsumptionVerified).toBe(false);
+    // REGRESSION — this now queries entitlement.server.ts's REAL counting
+    // function (getEntitlementSummary) instead of hardcoding false. A
+    // COMPLETED, non-test final step IS counted.
+    expect(body.realCreditAccounting).toEqual({
+      verified: true,
+      vtoMonthlyLimit: 5,
+      vtoMonthlyCompleted: 1,
+      vtoMonthlyInFlight: 0,
+      thisSuggestionsFinalStepStatus: "COMPLETED",
+      thisSuggestionsFinalStepIsTest: false,
+      thisAttemptsFinalStepWouldCountTowardEntitlement: true,
+      note: expect.stringContaining("A credit has been consumed"),
+    });
+  });
+
+  it("reports thisAttemptsFinalStepWouldCountTowardEntitlement: false when there is no final-step row at all — the real, calculated answer, not an assumption", async () => {
+    mockCustomer().mockResolvedValue({ id: "cust-1" });
+    const jobs = [makeJob({ id: "job-0", productHandle: "fulllook-real:step1:Trousers", status: "PROCESSING", predictionId: "p0" })];
+    mockFindMany().mockResolvedValue(jobs);
+    mockFashnCheck().mockResolvedValue({ ok: true, body: { status: "processing" } });
+
+    const res: any = await loader(makeRequest("https://x.test/api/full-look-vto-diagnostic?suggestionId=sugg-1"));
+    const body = res.data ?? res;
+
+    expect(body.realCreditAccounting.thisSuggestionsFinalStepStatus).toBe("no_final_step_row");
+    expect(body.realCreditAccounting.thisAttemptsFinalStepWouldCountTowardEntitlement).toBe(false);
+    expect(body.realCreditAccounting.note).toContain("No credit has been consumed");
+  });
+
+  it("a final step that IS completed but IS a test job does NOT count toward entitlement — isTest exclusion respected", async () => {
+    mockCustomer().mockResolvedValue({ id: "cust-1" });
+    const jobs = [
+      makeJob({
+        id: "job-final", productHandle: "fulllook-real:final:Blazer", status: "COMPLETED",
+        predictionId: "pf", completedAt: new Date(), isTest: true,
+      }),
+    ];
+    mockFindMany().mockResolvedValue(jobs);
+
+    const res: any = await loader(makeRequest("https://x.test/api/full-look-vto-diagnostic?suggestionId=sugg-1"));
+    const body = res.data ?? res;
+
+    expect(body.realCreditAccounting.thisSuggestionsFinalStepIsTest).toBe(true);
+    expect(body.realCreditAccounting.thisAttemptsFinalStepWouldCountTowardEntitlement).toBe(false);
   });
 
   it("performs exactly one live, read-only FASHN status check for a PROCESSING row with a predictionId — never more, never a submission", async () => {

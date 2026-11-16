@@ -149,7 +149,11 @@ async function defaultFindJobByIdempotencyKey(
 
 // ── Key namespaces — distinct from the mock chain's "fulllook-poc*" keys ────
 
-const REAL_RESERVATION_KEY_PREFIX = "fulllook-real-reservation:";
+// Exported (2026-11-15) so resolveCurrentAttemptScope (full-look-vto-
+// orchestrator.server.ts) can parse an attempt's own index directly off its
+// step-0 idempotencyKey, rather than inferring it from a row count — see
+// that function's own comment for the exact bug this closes.
+export const REAL_RESERVATION_KEY_PREFIX = "fulllook-real-reservation:";
 const REAL_STEP_KEY_PREFIX = "fulllook-real-step:";
 // REAL_PRODUCT_HANDLE_PREFIX / FULL_LOOK_INTERMEDIATE_HANDLE_PREFIXES live in
 // full-look-handle-constants.ts (pure, dependency-free) specifically so
