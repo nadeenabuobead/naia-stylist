@@ -47,6 +47,10 @@ const MAX_POLL_ATTEMPTS = 45; // 90s ceiling at 2s interval
 // failure already did, so it surfaces as the existing PROVIDER_FAILED path.
 const FASHN_REQUEST_TIMEOUT_MS = 15_000;
 
+function defaultSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // Logs only a classified failure — never the provider's raw `error` text,
 // never image data, never auth headers. customerId is one-way hashed.
 function logFashnFailure(
@@ -297,15 +301,38 @@ export async function runFashnTryOn(
 export interface SubmitToProviderOptions {
   _fetch?: FetchFn;
   _getApiKey?: GetApiKeyFn;
+  _sleep?: (ms: number) => Promise<void>;
 }
 
 export type SubmitToProviderResult =
   | { ok: true; predictionId: string }
   | { ok: false; code: VirtualTryOnErrorCode; customerMessage: string };
 
+// 2026-11-16 live incident — the first controlled Full-Look VTO test failed
+// on garment 2's submission with a bare HTTP 429 from FASHN, ~100ms after
+// garment 1's own status check reported COMPLETED (advanceFullLookChain
+// submits the next step immediately upon observing the current one finish —
+// see full-look-tryon-real.server.ts). The request was rejected before
+// FASHN ever created a prediction (confirmed: predictionId stayed null on
+// the FAILED row) — nothing was billed, but the whole chain stopped for a
+// single transient rate-limit response. A bounded retry on exactly 429 and
+// 5xx closes this, mirroring the identical, already-proven pattern
+// downloadIntermediateStepResult uses for transient Cloudinary failures
+// (full-look-tryon-real.server.ts's isTransientCloudinaryDownloadErrorCode).
+// Deliberately NOT applied to any other !runRes.ok status (400/401/413/...)
+// or to the runBody.error case below — those are the provider rejecting
+// the actual request content, not a transient capacity signal, and retrying
+// them would just repeat the same rejection for no benefit.
+const FASHN_SUBMIT_MAX_ATTEMPTS = 2;
+const FASHN_SUBMIT_RETRY_DELAY_MS = 500;
+
+function isTransientFashnSubmitStatus(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
 export async function submitTryOnToProvider(
   input: VirtualTryOnInput,
-  { _fetch = fetch, _getApiKey = () => process.env.FASHN_API_KEY }: SubmitToProviderOptions = {},
+  { _fetch = fetch, _getApiKey = () => process.env.FASHN_API_KEY, _sleep = defaultSleep }: SubmitToProviderOptions = {},
 ): Promise<SubmitToProviderResult> {
   const apiKey = _getApiKey();
   if (!apiKey) return submitErr("NOT_CONFIGURED");
@@ -314,46 +341,58 @@ export async function submitTryOnToProvider(
   if (!isValidModelImageDataUrl(input.modelImageDataUrl)) return submitErr("INVALID_MODEL_IMAGE");
   if (!isAllowedProductImageUrl(input.productImageUrl)) return submitErr("INVALID_PRODUCT_IMAGE");
 
-  try {
-    const runRes = await _fetch(`${BASE_URL}/v1/run`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model_name: "tryon-max",
-        inputs: {
-          model_image: input.modelImageDataUrl,
-          product_image: input.productImageUrl,
-          return_base64: true,
-          output_format: "png",
-          resolution: "1k",
-          generation_mode: input.generationMode ?? "fast",
-          num_images: 1,
-          // prompt omitted entirely (not sent as an empty string) when unset —
-          // every existing caller gets the exact previous request body.
-          ...(input.prompt ? { prompt: input.prompt } : {}),
+  for (let attempt = 1; attempt <= FASHN_SUBMIT_MAX_ATTEMPTS; attempt++) {
+    try {
+      const runRes = await _fetch(`${BASE_URL}/v1/run`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
         },
-      }),
-      signal: AbortSignal.timeout(FASHN_REQUEST_TIMEOUT_MS),
-    });
+        body: JSON.stringify({
+          model_name: "tryon-max",
+          inputs: {
+            model_image: input.modelImageDataUrl,
+            product_image: input.productImageUrl,
+            return_base64: true,
+            output_format: "png",
+            resolution: "1k",
+            generation_mode: input.generationMode ?? "fast",
+            num_images: 1,
+            // prompt omitted entirely (not sent as an empty string) when unset —
+            // every existing caller gets the exact previous request body.
+            ...(input.prompt ? { prompt: input.prompt } : {}),
+          },
+        }),
+        signal: AbortSignal.timeout(FASHN_REQUEST_TIMEOUT_MS),
+      });
 
-    if (!runRes.ok) {
-      logFashnFailure("submit", "PROVIDER_REJECTED", input.customerId, { httpStatus: runRes.status });
-      return submitErr("PROVIDER_REJECTED");
-    }
-    const runBody = (await runRes.json()) as FashnRunResponse;
-    if (runBody.error || !runBody.id) {
-      logFashnFailure("submit", "PROVIDER_REJECTED", input.customerId);
-      return submitErr("PROVIDER_REJECTED");
-    }
+      if (!runRes.ok) {
+        if (attempt < FASHN_SUBMIT_MAX_ATTEMPTS && isTransientFashnSubmitStatus(runRes.status)) {
+          await _sleep(FASHN_SUBMIT_RETRY_DELAY_MS);
+          continue;
+        }
+        logFashnFailure("submit", "PROVIDER_REJECTED", input.customerId, { httpStatus: runRes.status });
+        return submitErr("PROVIDER_REJECTED");
+      }
+      const runBody = (await runRes.json()) as FashnRunResponse;
+      if (runBody.error || !runBody.id) {
+        logFashnFailure("submit", "PROVIDER_REJECTED", input.customerId);
+        return submitErr("PROVIDER_REJECTED");
+      }
 
-    return { ok: true, predictionId: runBody.id };
-  } catch {
-    logFashnFailure("submit", "PROVIDER_FAILED", input.customerId);
-    return submitErr("PROVIDER_FAILED");
+      return { ok: true, predictionId: runBody.id };
+    } catch {
+      logFashnFailure("submit", "PROVIDER_FAILED", input.customerId);
+      return submitErr("PROVIDER_FAILED");
+    }
   }
+
+  // Unreachable — the loop always returns or continues, and the final
+  // iteration's `attempt < FASHN_SUBMIT_MAX_ATTEMPTS` is false so it always
+  // returns. Satisfies the compiler's control-flow analysis.
+  logFashnFailure("submit", "PROVIDER_REJECTED", input.customerId);
+  return submitErr("PROVIDER_REJECTED");
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

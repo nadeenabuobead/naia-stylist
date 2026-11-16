@@ -706,6 +706,124 @@ describe("submitTryOnToProvider — parameter selection", () => {
   });
 });
 
+// ── submitTryOnToProvider — bounded retry on transient 429/5xx (2026-11-16) ──
+// Live incident: garment 2's submission was rejected with a bare HTTP 429,
+// ~100ms after garment 1's own status check reported COMPLETED, stopping
+// the whole Full-Look chain on what was a transient rate-limit, not a real
+// rejection — predictionId stayed null, so nothing was billed, but the
+// customer saw a failure for no real reason. These tests pin the fix:
+// a bounded retry on exactly 429/5xx, nothing else.
+
+describe("submitTryOnToProvider — bounded retry on transient 429/5xx", () => {
+  it("RETRY.1 — a 429 on the first attempt succeeds on the second, without sleeping in tests", async () => {
+    let callCount = 0;
+    const _fetch = (async () => {
+      callCount++;
+      if (callCount === 1) return new Response("Too Many Requests", { status: 429 });
+      return makeRunResponse("pred-after-429");
+    }) as typeof fetch;
+    const result = await submitTryOnToProvider(makeInput(), { _fetch, _getApiKey: () => "k", _sleep: noSleep });
+    assert.equal(result.ok, true);
+    if (!result.ok) throw new Error("unreachable");
+    assert.equal(result.predictionId, "pred-after-429");
+    assert.equal(callCount, 2, "must retry exactly once, not resubmit indefinitely");
+  });
+
+  it("RETRY.2 — a 5xx on the first attempt also retries and can succeed on the second", async () => {
+    let callCount = 0;
+    const _fetch = (async () => {
+      callCount++;
+      if (callCount === 1) return new Response("Bad Gateway", { status: 502 });
+      return makeRunResponse("pred-after-502");
+    }) as typeof fetch;
+    const result = await submitTryOnToProvider(makeInput(), { _fetch, _getApiKey: () => "k", _sleep: noSleep });
+    assert.equal(result.ok, true);
+    if (!result.ok) throw new Error("unreachable");
+    assert.equal(result.predictionId, "pred-after-502");
+  });
+
+  it("RETRY.3 — exactly one retry (two total attempts) — a persistent 429 still fails, never retries a third time", async () => {
+    let callCount = 0;
+    const _fetch = (async () => {
+      callCount++;
+      return new Response("Too Many Requests", { status: 429 });
+    }) as typeof fetch;
+    const result = await submitTryOnToProvider(makeInput(), { _fetch, _getApiKey: () => "k", _sleep: noSleep });
+    assert.equal(result.ok, false);
+    if (result.ok) throw new Error("unreachable");
+    assert.equal(result.code, "PROVIDER_REJECTED");
+    assert.equal(callCount, 2, "must stop after the bounded max, not retry forever");
+  });
+
+  it("RETRY.4 — a permanent 4xx (e.g. 401) never retries — one call, immediate PROVIDER_REJECTED", async () => {
+    let callCount = 0;
+    const _fetch = (async () => {
+      callCount++;
+      return new Response("Unauthorized", { status: 401 });
+    }) as typeof fetch;
+    const result = await submitTryOnToProvider(makeInput(), { _fetch, _getApiKey: () => "k", _sleep: noSleep });
+    assert.equal(result.ok, false);
+    assert.equal(callCount, 1, "a non-transient rejection must never be retried");
+  });
+
+  it("RETRY.5 — a 413 (payload too large) never retries either — same non-transient treatment as 401", async () => {
+    let callCount = 0;
+    const _fetch = (async () => {
+      callCount++;
+      return new Response("Payload Too Large", { status: 413 });
+    }) as typeof fetch;
+    await submitTryOnToProvider(makeInput(), { _fetch, _getApiKey: () => "k", _sleep: noSleep });
+    assert.equal(callCount, 1);
+  });
+
+  it("RETRY.6 — a retried-and-successful submission never logs a failure for the transient first attempt", async () => {
+    let callCount = 0;
+    const _fetch = (async () => {
+      callCount++;
+      if (callCount === 1) return new Response("Too Many Requests", { status: 429 });
+      return makeRunResponse("pred-quiet-retry");
+    }) as typeof fetch;
+    const logs: string[] = [];
+    const originalError = console.error;
+    console.error = (msg: string) => logs.push(msg);
+    try {
+      await submitTryOnToProvider(makeInput(), { _fetch, _getApiKey: () => "k", _sleep: noSleep });
+    } finally {
+      console.error = originalError;
+    }
+    assert.equal(logs.length, 0, "a transient attempt that the retry recovers from must never surface as a logged failure");
+  });
+
+  it("RETRY.7 — a run-body error field (200 OK but FASHN reports an application error) is never retried — not a transient HTTP signal", async () => {
+    let callCount = 0;
+    const _fetch = (async () => {
+      callCount++;
+      return makeRunResponse("", "validation error");
+    }) as typeof fetch;
+    const result = await submitTryOnToProvider(makeInput(), { _fetch, _getApiKey: () => "k", _sleep: noSleep });
+    assert.equal(result.ok, false);
+    assert.equal(callCount, 1);
+  });
+
+  it("RETRY.8 — the retry delay is actually awaited via the injected _sleep, with the documented duration", async () => {
+    let callCount = 0;
+    const _fetch = (async () => {
+      callCount++;
+      if (callCount === 1) return new Response("Too Many Requests", { status: 429 });
+      return makeRunResponse("pred-timed");
+    }) as typeof fetch;
+    const sleptMs: number[] = [];
+    await submitTryOnToProvider(makeInput(), {
+      _fetch,
+      _getApiKey: () => "k",
+      _sleep: async (ms: number) => {
+        sleptMs.push(ms);
+      },
+    });
+    assert.deepEqual(sleptMs, [500]);
+  });
+});
+
 // ── Phase 1 ops: failure logging (safe) ──────────────────────────────────────
 //
 // Every failure path must now log something retrievable (prior behavior:
