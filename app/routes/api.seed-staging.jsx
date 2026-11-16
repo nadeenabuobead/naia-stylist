@@ -17,6 +17,10 @@ import { writeSourceEvidence, reconcileObservations } from "../lib/ai/taste-reco
 //                          ticket URL (GET /api/seed-staging?ticket=...) that logs
 //                          the browser in WITHOUT the secret ever appearing in that URL
 //   "createStylingSession" — create StylingSession for an existing customer
+//   "createSavedLookDetailed" — create a SavedLook from the customer's OWN
+//                          existing ClosetItem ids, no AI/provider call
+//   "getSavedLook"        — read-only fetch of one SavedLook by id
+//   "deleteSavedLook"     — delete one SavedLook by exact id
 //   "countRecords"       — return event/analysis counts scoped to a customerId
 //   "cleanup"            — delete all test records for a shopifyCustomerId
 //
@@ -779,6 +783,86 @@ export async function action({ request }) {
     }
     const deleted = await prisma.closetItem.deleteMany({
       where: { customerId: String(customerId), name: String(name) },
+    });
+    return Response.json({ ok: true, deletedCount: deleted.count });
+  }
+
+  // ── createSavedLookDetailed — QA fixture only ────────────────────────────
+  // Creates a SavedLook referencing the customer's OWN existing ClosetItem
+  // rows (never cross-customer — each closetItemId is independently
+  // ownership-checked, same discipline as createClosetItemDetailed above),
+  // so WI QA can exercise the create/view/edit/delete lifecycle without a
+  // real StyleMe session or any AI/provider call.
+  if (act === "createSavedLookDetailed") {
+    const { customerId, name, occasion, closetItemIds } = body ?? {};
+    if (!customerId || !Array.isArray(closetItemIds) || closetItemIds.length === 0) {
+      return Response.json({ error: "customerId and a non-empty closetItemIds array required" }, { status: 400 });
+    }
+    if (!(await requireTestCustomer(customerId))) {
+      return Response.json({ error: "customerId must belong to a test-batch1- fixture customer" }, { status: 403 });
+    }
+    const owned = await prisma.closetItem.findMany({
+      where: { id: { in: closetItemIds }, customerId: String(customerId) },
+      select: { id: true, category: true },
+    });
+    if (owned.length !== closetItemIds.length) {
+      return Response.json({ error: "one or more closetItemIds do not belong to this customer" }, { status: 403 });
+    }
+    // ClosetCategory (TOPS/BOTTOMS/...) -> OutfitItemType (TOP/BOTTOM/...) —
+    // direct categories only; ACTIVEWEAR/SWIMWEAR/LOUNGEWEAR/OTHER have no
+    // 1:1 OutfitItemType and are refused rather than guessed.
+    const CATEGORY_TO_ITEM_TYPE = {
+      TOPS: "TOP", BOTTOMS: "BOTTOM", DRESSES: "DRESS", OUTERWEAR: "OUTERWEAR",
+      SHOES: "SHOES", BAGS: "BAG", ACCESSORIES: "ACCESSORY", JEWELRY: "JEWELRY",
+    };
+    const unmapped = owned.find((item) => !CATEGORY_TO_ITEM_TYPE[item.category]);
+    if (unmapped) {
+      return Response.json({ error: `closetItem ${unmapped.id} has category ${unmapped.category}, which has no direct OutfitItemType mapping` }, { status: 400 });
+    }
+    const created = await prisma.savedLook.create({
+      data: {
+        customerId: String(customerId),
+        name: name ?? null,
+        occasion: occasion ?? null,
+        items: {
+          create: owned.map((item) => ({ itemType: CATEGORY_TO_ITEM_TYPE[item.category], closetItemId: item.id })),
+        },
+      },
+      select: { id: true, name: true, occasion: true, items: { select: { id: true, closetItemId: true } } },
+    });
+    return Response.json({ savedLookId: created.id, name: created.name, occasion: created.occasion, itemCount: created.items.length });
+  }
+
+  // ── getSavedLook — QA fixture only, read-only ────────────────────────────
+  if (act === "getSavedLook") {
+    const { customerId, savedLookId } = body ?? {};
+    if (!customerId || !savedLookId) {
+      return Response.json({ error: "customerId and savedLookId required" }, { status: 400 });
+    }
+    if (!(await requireTestCustomer(customerId))) {
+      return Response.json({ error: "customerId must belong to a test-batch1- fixture customer" }, { status: 403 });
+    }
+    const look = await prisma.savedLook.findFirst({
+      where: { id: String(savedLookId), customerId: String(customerId) },
+      select: { id: true, customerId: true, name: true, occasion: true, items: { select: { id: true, closetItemId: true, itemType: true } } },
+    });
+    if (!look) return Response.json({ notFound: true });
+    return Response.json({ savedLook: look });
+  }
+
+  // ── deleteSavedLook — QA fixture only ────────────────────────────────────
+  // Exact-id delete, scoped to the owning customer — never a sweep. Items
+  // cascade via the schema's onDelete: Cascade on SavedLookItem.
+  if (act === "deleteSavedLook") {
+    const { customerId, savedLookId } = body ?? {};
+    if (!customerId || !savedLookId) {
+      return Response.json({ error: "customerId and savedLookId required" }, { status: 400 });
+    }
+    if (!(await requireTestCustomer(customerId))) {
+      return Response.json({ error: "customerId must belong to a test-batch1- fixture customer" }, { status: 403 });
+    }
+    const deleted = await prisma.savedLook.deleteMany({
+      where: { id: String(savedLookId), customerId: String(customerId) },
     });
     return Response.json({ ok: true, deletedCount: deleted.count });
   }
