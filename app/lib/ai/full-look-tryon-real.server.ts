@@ -132,6 +132,14 @@ import {
 } from "../cloudinary-admin.server.js";
 import type { VirtualTryOnConsent, VirtualTryOnJobRecord } from "./virtual-try-on.types.js";
 import prisma from "../../db.server.js";
+import { createHash } from "node:crypto";
+
+// Same local convention as api-rate-limit.server.ts's own hashCustomerId —
+// duplicated rather than imported (that module's helper isn't exported,
+// and this is a different domain's logging). Never log the raw customerId.
+function hashCustomerId(customerId: string): string {
+  return createHash("sha256").update(customerId).digest("hex").slice(0, 12);
+}
 import {
   REAL_PRODUCT_HANDLE_PREFIX,
   FULL_LOOK_MAX_GARMENTS,
@@ -563,7 +571,27 @@ export async function pollFullLookRealStep(
       : await uploadIntermediateStepResult(ctx.customerId, job.id, outputDataUrl);
 
     if (!upload.ok) {
-      await markFailedBestEffort(job, "UPLOAD_FAILED");
+      // 2026-11-16 CONFIRMED ROOT-CAUSE GAP — this used to hardcode
+      // "UPLOAD_FAILED" regardless of what uploadTryOnResult/
+      // uploadIntermediateStepResult actually reported, discarding the
+      // real errorCode (which, as of bbd953e, includes the actual HTTP
+      // status — e.g. PROVIDER_ERROR_413, PROVIDER_ERROR_401,
+      // NETWORK_ERROR) before it ever reached the DB. Three real
+      // UPLOAD_FAILED occurrences investigated (two dead attempts plus one
+      // recovery attempt, all on the same garment image) were all equally
+      // undiagnosable after the fact because of exactly this — the detail
+      // existed for the length of this function call and was then thrown
+      // away. Now persisted, and logged once (customer-safe: hashed
+      // customerId, never the raw value, never image bytes) so a FUTURE
+      // occurrence is actually visible in runtime logs instead of silent.
+      console.error("[full-look-vto] intermediate/final upload failed", {
+        jobId: job.id,
+        customerIdHash: hashCustomerId(ctx.customerId),
+        stepIndex,
+        isFinal,
+        errorCode: upload.errorCode,
+      });
+      await markFailedBestEffort(job, upload.errorCode);
       return { status: "FAILED", job };
     }
 

@@ -386,6 +386,63 @@ describe("pollFullLookRealStep", () => {
     expect(mockUploadPrivate()).not.toHaveBeenCalled(); // never uses the intermediate namespace for the real deliverable
   });
 
+  // 2026-11-16 CONFIRMED ROOT-CAUSE FIX — three real UPLOAD_FAILED
+  // occurrences on the same garment image were all equally undiagnosable
+  // after the fact because this exact branch discarded the real
+  // errorCode uploadIntermediateStepResult/uploadTryOnResult already
+  // returned, replacing it with a hardcoded "UPLOAD_FAILED" string before
+  // it ever reached the DB. This had zero test coverage before this fix —
+  // confirmed by grep, no pre-existing test asserted on this branch's
+  // errorCode value at all.
+  it("FL.15b — an intermediate-step Cloudinary upload failure persists the REAL errorCode (not a hardcoded string), never resubmits anything, and logs once without the raw customerId", async () => {
+    const job = fakeJob("job-0", { status: "PROCESSING", predictionId: "pred-0" });
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(JSON.stringify({ status: "completed", output: [PNG_DATA_URL] }), { status: 200 }),
+    );
+    // Simulates bbd953e's own real detail — a 413 (payload too large) is
+    // exactly the kind of distinction the old hardcoded string erased.
+    mockUploadPrivate().mockResolvedValueOnce({ ok: false, errorCode: "PROVIDER_ERROR_413" });
+    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job, status: "FAILED", errorCode: "PROVIDER_ERROR_413" } });
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await pollFullLookRealStep(baseCtx(), job, 0); // stepIndex 0 of 3 — intermediate, not final
+
+    expect(result.status).toBe("FAILED");
+    expect(mockAdvance()).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "job-0" }), "FAILED", { errorCode: "PROVIDER_ERROR_413" },
+    );
+    expect(mockSubmitProvider()).not.toHaveBeenCalled(); // no new FASHN call, under any circumstance
+    expect(mockCreateOrFind()).not.toHaveBeenCalled();
+
+    expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
+    const loggedPayload = consoleErrorSpy.mock.calls[0][1] as Record<string, unknown>;
+    expect(loggedPayload.errorCode).toBe("PROVIDER_ERROR_413");
+    expect(loggedPayload.jobId).toBe("job-0");
+    expect(loggedPayload.isFinal).toBe(false);
+    expect(JSON.stringify(loggedPayload)).not.toContain("cust-1"); // hashed, never the raw customerId
+    consoleErrorSpy.mockRestore();
+  });
+
+  it("FL.16b — the FINAL step's own Cloudinary upload failure ALSO persists the real errorCode, not a hardcoded string", async () => {
+    const job = fakeJob("job-2", { status: "PROCESSING", predictionId: "pred-2" });
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(JSON.stringify({ status: "completed", output: [PNG_DATA_URL] }), { status: 200 }),
+    );
+    mockUploadResult().mockResolvedValueOnce({ ok: false, errorCode: "NETWORK_ERROR" });
+    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job, status: "FAILED", errorCode: "NETWORK_ERROR" } });
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await pollFullLookRealStep(baseCtx(), job, 2); // stepIndex 2 of 3 — final
+
+    expect(result.status).toBe("FAILED");
+    expect(mockAdvance()).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "job-2" }), "FAILED", { errorCode: "NETWORK_ERROR" },
+    );
+    const loggedPayload = consoleErrorSpy.mock.calls[0][1] as Record<string, unknown>;
+    expect(loggedPayload.isFinal).toBe(true);
+    consoleErrorSpy.mockRestore();
+  });
+
   it("FL.17 — FASHN-reported failure marks FAILED and is terminal — a later poll on the same job returns FAILED without any new FASHN call", async () => {
     const job = fakeJob("job-0", { status: "PROCESSING", predictionId: "pred-0" });
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
