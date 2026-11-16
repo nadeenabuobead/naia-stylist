@@ -1276,4 +1276,57 @@ describe("StyleMe Result — Virtual Try-On customer UI", () => {
     assert.ok(c.includes(".sm-vto-image"), "sm-vto-image must be defined");
     assert.ok(c.includes("align-self: stretch"), "mobile: sm-vto-cta must stretch full-width");
   });
+
+  // 2026-11-16 — the explicit continuation UI for AWAITING_AUTHORIZATION
+  // (full-look-vto-orchestrator.server.ts's own safe-advance fix, d609202).
+  // This is NOT wired to actually run yet (no live Preview serves this
+  // branch) — these are static-source checks proving the control exists,
+  // is gated behind an explicit click (never auto-fires), and discloses
+  // the real cost, same convention as every other VTO.* check in this file.
+  describe("VTO.13 — explicit continuation control for AWAITING_AUTHORIZATION (recovery vs. new-submission authorization)", () => {
+    it("a distinct awaiting_authorization branch exists, separate from loading/done/error", () => {
+      const text = src("result.tsx");
+      assert.ok(
+        text.includes(`fullLookQA.status === "awaiting_authorization"`),
+        "awaiting_authorization state branch must exist",
+      );
+    });
+
+    it("the continuation action is an explicit click — never rendered inside an effect or a poll handler", () => {
+      const text = src("result.tsx");
+      const branchStart = text.indexOf(`fullLookQA.status === "awaiting_authorization"`);
+      const branchEnd = text.indexOf("fullLookQA.status === \"done\"", branchStart);
+      const branch = text.slice(branchStart, branchEnd);
+      assert.ok(branch.includes("onClick={() => triggerFullLook(false)}"), "must be an explicit onClick, not automatic");
+      assert.ok(!branch.includes("useEffect"), "must not be wired to fire automatically on render/mount");
+    });
+
+    it("the copy discloses that continuing creates new, separate generations — not vague or silent about cost", () => {
+      const text = src("result.tsx");
+      const branchStart = text.indexOf(`fullLookQA.status === "awaiting_authorization"`);
+      const branchEnd = text.indexOf("fullLookQA.status === \"done\"", branchStart);
+      const branch = text.slice(branchStart, branchEnd);
+      assert.ok(
+        /generate|generation/i.test(branch) && /next garment|separate/i.test(branch),
+        "copy must make clear that proceeding creates additional generations",
+      );
+      assert.ok(!branch.includes("FASHN"), "provider name must never appear in customer-facing JSX");
+    });
+
+    it("the poll handler and the mount effect both recognize AWAITING_AUTHORIZATION — neither silently falls through as if it were still loading", () => {
+      const text = src("result.tsx");
+      const pollFnStart = text.indexOf("const pollFullLookOnce");
+      const pollFnEnd = text.indexOf("const startFullLookPolling", pollFnStart);
+      assert.ok(
+        text.slice(pollFnStart, pollFnEnd).includes('"AWAITING_AUTHORIZATION"'),
+        "pollFullLookOnce must handle AWAITING_AUTHORIZATION explicitly",
+      );
+      const mountEffectStart = text.indexOf("useEffect(() => {\n    const suggestionId = suggestion?.id;");
+      const mountEffectEnd = text.indexOf("}, [suggestion?.id, loaderData.naiaModelIsReady]);", mountEffectStart);
+      assert.ok(
+        text.slice(mountEffectStart, mountEffectEnd).includes('"AWAITING_AUTHORIZATION"'),
+        "the on-mount status check must also handle AWAITING_AUTHORIZATION explicitly",
+      );
+    });
+  });
 });
