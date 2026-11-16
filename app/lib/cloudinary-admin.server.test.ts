@@ -15,6 +15,7 @@
 // Run: npx vitest run app/lib/cloudinary-admin.server.test.ts
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import crypto from "node:crypto";
 import {
   buildPrivateDownloadUrl,
   deleteCloudinaryAsset,
@@ -259,9 +260,12 @@ describe("uploadCloudinaryPrivate — error detail", () => {
   });
 
   it("a different status code produces a different errorCode", async () => {
+    // 429 is now also a retried status (see the describe block below) — a
+    // no-op sleep keeps this test from taking a real 300ms, since it's not
+    // the retry behavior itself under test here.
     const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 429, json: async () => ({}) });
     const result = await uploadCloudinaryPrivate(
-      "naia-tryon/cust-1/job-1", "data:image/png;base64,abc", "private", fetchMock as any, () => CONFIG,
+      "naia-tryon/cust-1/job-1", "data:image/png;base64,abc", "private", fetchMock as any, () => CONFIG, async () => {},
     );
     expect(result).toEqual({ ok: false, errorCode: "PROVIDER_ERROR_429" });
   });
@@ -275,7 +279,87 @@ describe("uploadCloudinaryPrivate — error detail", () => {
     expect(notConfigured).toEqual({ ok: false, errorCode: "NOT_CONFIGURED" });
 
     const throwingFetch = vi.fn().mockRejectedValue(new Error("ECONNRESET"));
-    const networkError = await uploadCloudinaryPrivate("pub-1", "data:image/png;base64,x", "private", throwingFetch as any, () => CONFIG);
+    const networkError = await uploadCloudinaryPrivate("pub-1", "data:image/png;base64,x", "private", throwingFetch as any, () => CONFIG, async () => {});
     expect(networkError).toEqual({ ok: false, errorCode: "NETWORK_ERROR" });
+  });
+});
+
+// 2026-11-16 addition — confirmed gap: this call had no bounded timeout at
+// all (unlike submitTryOnToProvider's own), and no retry for a signature
+// that's plausibly transient. The chain's own full-look-tryon-real tests
+// mock this whole module, so this file is the only place these two
+// properties are actually exercised.
+describe("uploadCloudinaryPrivate — bounded timeout and idempotent transient-failure retry", () => {
+  it("sets an AbortSignal-based timeout on the request", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ public_id: "pub-1", format: "png", version: 1 }) });
+    await uploadCloudinaryPrivate("pub-1", "data:image/png;base64,x", "private", fetchMock as any, () => CONFIG);
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("retries once on a 5xx and succeeds on the second attempt — never a duplicate asset, since the publicId is identical both times", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 503, json: async () => ({}) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ public_id: "pub-1", format: "png", version: 2 }) });
+    const sleep = vi.fn(async () => {});
+
+    const result = await uploadCloudinaryPrivate("pub-1", "data:image/png;base64,x", "private", fetchMock as any, () => CONFIG, sleep);
+
+    expect(result).toEqual({ ok: true, publicId: "pub-1", format: "png", version: "2" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledTimes(1);
+    // Same publicId on both attempts.
+    expect(new URLSearchParams(fetchMock.mock.calls[0][1].body as any).get("public_id")).toBe("pub-1");
+    expect(new URLSearchParams(fetchMock.mock.calls[1][1].body as any).get("public_id")).toBe("pub-1");
+  });
+
+  it("retries at most once — two persistent 5xx failures return the error, never a third attempt", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 502, json: async () => ({}) });
+    const result = await uploadCloudinaryPrivate("pub-1", "data:image/png;base64,x", "private", fetchMock as any, () => CONFIG, async () => {});
+    expect(result).toEqual({ ok: false, errorCode: "PROVIDER_ERROR_502" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("recomputes a fresh signature/timestamp per attempt — never reuses the first attempt's signed body", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({}) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ public_id: "pub-1", format: "png", version: 1 }) });
+    await uploadCloudinaryPrivate("pub-1", "data:image/png;base64,x", "private", fetchMock as any, () => CONFIG, async () => {});
+
+    const sig1 = new URLSearchParams(fetchMock.mock.calls[0][1].body as any).get("signature");
+    const sig2 = new URLSearchParams(fetchMock.mock.calls[1][1].body as any).get("signature");
+    const ts1 = new URLSearchParams(fetchMock.mock.calls[0][1].body as any).get("timestamp");
+    const ts2 = new URLSearchParams(fetchMock.mock.calls[1][1].body as any).get("timestamp");
+    // Timestamps may coincide if both attempts land in the same second —
+    // what matters is that the signature is always freshly derived from
+    // whatever timestamp that attempt actually used, never copied.
+    expect(sig1).toBe(crypto.createHash("sha1").update(`public_id=pub-1&timestamp=${ts1}&type=private${CONFIG.apiSecret}`).digest("hex"));
+    expect(sig2).toBe(crypto.createHash("sha1").update(`public_id=pub-1&timestamp=${ts2}&type=private${CONFIG.apiSecret}`).digest("hex"));
+  });
+
+  it("never retries a non-transient failure — a 403 (bad credentials/signature) fails after exactly one attempt", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 403, json: async () => ({}) });
+    const result = await uploadCloudinaryPrivate("pub-1", "data:image/png;base64,x", "private", fetchMock as any, () => CONFIG, async () => {});
+    expect(result).toEqual({ ok: false, errorCode: "PROVIDER_ERROR_403" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("never retries PROVIDER_REJECTED — Cloudinary explicitly rejecting this exact content won't change on a retry", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ error: { message: "Invalid image file" } }) });
+    const result = await uploadCloudinaryPrivate("pub-1", "data:image/png;base64,x", "private", fetchMock as any, () => CONFIG, async () => {});
+    expect(result).toEqual({ ok: false, errorCode: "PROVIDER_REJECTED" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries once on NETWORK_ERROR (a timed-out/reset connection) and can still succeed on the second attempt", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("ECONNRESET"))
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ public_id: "pub-1", format: "png", version: 1 }) });
+    const result = await uploadCloudinaryPrivate("pub-1", "data:image/png;base64,x", "private", fetchMock as any, () => CONFIG, async () => {});
+    expect(result).toEqual({ ok: true, publicId: "pub-1", format: "png", version: "1" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

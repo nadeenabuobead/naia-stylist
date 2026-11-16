@@ -359,7 +359,33 @@ export async function deleteCloudinaryAsset(
 }
 
 // ── Server-side private asset upload ─────────────────────────────────────────
-//
+// 2026-11-16 CONFIRMED GAP — this call had no bounded timeout at all
+// (unlike submitTryOnToProvider's own AbortSignal.timeout), so a hung
+// connection to Cloudinary would ride all the way to the platform's own
+// function timeout instead of failing fast with a classification our own
+// code can act on. 20s is comfortably under a single garment step's share
+// of the request budget while still generous for a private image upload.
+const CLOUDINARY_UPLOAD_TIMEOUT_MS = 20_000;
+
+// A bounded, idempotent retry — same publicId every attempt, so a retry
+// can only ever overwrite the same asset, never create a duplicate or
+// charge anything twice. Only for signatures that are plausibly transient
+// (a timed-out/reset connection, a 5xx, or a 429 rate-limit — all
+// conventionally retry-safe); never for PROVIDER_REJECTED (Cloudinary
+// explicitly rejected this exact content — retrying identical content
+// changes nothing) or any other 4xx (a malformed request/signature that
+// retrying won't fix either).
+const CLOUDINARY_UPLOAD_MAX_ATTEMPTS = 2;
+const CLOUDINARY_UPLOAD_RETRY_DELAY_MS = 300;
+
+function isTransientCloudinaryErrorCode(errorCode: string): boolean {
+  if (errorCode === "NETWORK_ERROR") return true;
+  const statusMatch = /^PROVIDER_ERROR_(\d+)$/.exec(errorCode);
+  if (!statusMatch) return false;
+  const status = Number(statusMatch[1]);
+  return status === 429 || status >= 500;
+}
+
 // Uploads a base64 data URL to Cloudinary with delivery type "private".
 // Used for result ingestion (try-on output). base64 data must never appear in logs.
 //
@@ -371,6 +397,7 @@ export async function uploadCloudinaryPrivate(
   deliveryType: string = "private",
   _fetch: typeof fetch = fetch,
   _getConfig: () => CloudinaryConfig | null = getCloudinaryConfig,
+  _sleep: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 ): Promise<
   | { ok: true; publicId: string; format: string; version: string }
   | { ok: false; errorCode: string }
@@ -378,60 +405,80 @@ export async function uploadCloudinaryPrivate(
   const cfg = _getConfig();
   if (!cfg) return { ok: false, errorCode: "NOT_CONFIGURED" };
 
-  const timestamp = Math.floor(Date.now() / 1000);
+  let lastFailure: { ok: false; errorCode: string } = { ok: false, errorCode: "NETWORK_ERROR" };
 
-  // type is included in signature when it is not the default "upload"
-  const sigString =
-    `public_id=${publicId}` +
-    `&timestamp=${timestamp}` +
-    (deliveryType && deliveryType !== "upload" ? `&type=${deliveryType}` : "") +
-    cfg.apiSecret;
+  for (let attempt = 1; attempt <= CLOUDINARY_UPLOAD_MAX_ATTEMPTS; attempt++) {
+    // Timestamp (and therefore the signature) is recomputed every attempt
+    // — Cloudinary's signature is timestamp-bound, so a retry can never
+    // reuse the first attempt's signed body.
+    const timestamp = Math.floor(Date.now() / 1000);
 
-  const signature = crypto.createHash("sha1").update(sigString).digest("hex");
+    // type is included in signature when it is not the default "upload"
+    const sigString =
+      `public_id=${publicId}` +
+      `&timestamp=${timestamp}` +
+      (deliveryType && deliveryType !== "upload" ? `&type=${deliveryType}` : "") +
+      cfg.apiSecret;
 
-  const body = new URLSearchParams({
-    public_id: publicId,
-    api_key: cfg.apiKey,
-    timestamp: String(timestamp),
-    signature,
-  });
-  if (deliveryType && deliveryType !== "upload") {
-    body.append("type", deliveryType);
+    const signature = crypto.createHash("sha1").update(sigString).digest("hex");
+
+    const body = new URLSearchParams({
+      public_id: publicId,
+      api_key: cfg.apiKey,
+      timestamp: String(timestamp),
+      signature,
+    });
+    if (deliveryType && deliveryType !== "upload") {
+      body.append("type", deliveryType);
+    }
+    body.append("file", dataUrl);
+
+    try {
+      const res = await _fetch(`https://api.cloudinary.com/v1_1/${cfg.cloudName}/image/upload`, {
+        method: "POST",
+        body,
+        signal: AbortSignal.timeout(CLOUDINARY_UPLOAD_TIMEOUT_MS),
+      });
+
+      // Confirmed actionable gap (2026-11-16, from the real Attempt B
+      // investigation): see downloadIntermediateStepResult's identical fix
+      // (full-look-tryon-real.server.ts) for the full reasoning — a bare
+      // "PROVIDER_ERROR" with no HTTP status erased the one piece of
+      // information that would have distinguished a transient failure from
+      // a persistent one.
+      if (!res.ok) {
+        lastFailure = { ok: false, errorCode: `PROVIDER_ERROR_${res.status}` };
+      } else {
+        const json = (await res.json()) as {
+          public_id?: string;
+          format?: string;
+          version?: number;
+          error?: { message?: string };
+        };
+
+        if (json.error) {
+          lastFailure = { ok: false, errorCode: "PROVIDER_REJECTED" };
+        } else {
+          return {
+            ok: true,
+            publicId: json.public_id ?? publicId,
+            format: json.format ?? "png",
+            version: json.version != null ? String(json.version) : "",
+          };
+        }
+      }
+    } catch {
+      lastFailure = { ok: false, errorCode: "NETWORK_ERROR" };
+    }
+
+    if (attempt < CLOUDINARY_UPLOAD_MAX_ATTEMPTS && isTransientCloudinaryErrorCode(lastFailure.errorCode)) {
+      await _sleep(CLOUDINARY_UPLOAD_RETRY_DELAY_MS);
+      continue;
+    }
+    break;
   }
-  body.append("file", dataUrl);
 
-  try {
-    const res = await _fetch(
-      `https://api.cloudinary.com/v1_1/${cfg.cloudName}/image/upload`,
-      { method: "POST", body },
-    );
-
-    // Confirmed actionable gap (2026-11-16, from the real Attempt B
-    // investigation): see downloadIntermediateStepResult's identical fix
-    // (full-look-tryon-real.server.ts) for the full reasoning — a bare
-    // "PROVIDER_ERROR" with no HTTP status erased the one piece of
-    // information that would have distinguished a transient failure from
-    // a persistent one.
-    if (!res.ok) return { ok: false, errorCode: `PROVIDER_ERROR_${res.status}` };
-
-    const json = (await res.json()) as {
-      public_id?: string;
-      format?: string;
-      version?: number;
-      error?: { message?: string };
-    };
-
-    if (json.error) return { ok: false, errorCode: "PROVIDER_REJECTED" };
-
-    return {
-      ok: true,
-      publicId: json.public_id ?? publicId,
-      format: json.format ?? "png",
-      version: json.version != null ? String(json.version) : "",
-    };
-  } catch {
-    return { ok: false, errorCode: "NETWORK_ERROR" };
-  }
+  return lastFailure;
 }
 
 // ── Server-side private RAW-file upload ──────────────────────────────────────

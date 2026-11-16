@@ -59,6 +59,7 @@ import {
   getFullLookStepRecoveryIdempotencyKey,
   validateFashnOutputDataUrl,
   MAX_FASHN_OUTPUT_BYTES,
+  downloadIntermediateStepResult,
   type FullLookChainContext,
 } from "./full-look-tryon-real.server.js";
 import { FULL_LOOK_FINAL_STEP_HANDLE_PREFIX } from "./full-look-handle-constants.js";
@@ -239,6 +240,30 @@ describe("validateFashnOutputDataUrl", () => {
     expect(result).toEqual({ ok: true, normalizedDataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA" });
   });
 
+  // 2026-11-16 CONFIRMED — Attempt C's recovery output was exactly this,
+  // matching FASHN's own documented return_base64 60-minute retrieval
+  // window (docs.fashn.ai/api-overview/data-retention-privacy): the
+  // status endpoint keeps reporting "completed" after expiry, but the
+  // output string itself becomes this one literal 16-character sentinel.
+  // An EXACT match is evidence of expiry, not a guess — classified
+  // distinctly from the generic INVALID_OUTPUT_FORMAT so a caller can
+  // treat it as a safe, non-retryable "nothing left to recover" outcome
+  // rather than a format bug.
+  it("classifies FASHN's documented expired-output sentinel as PREDICTION_NO_LONGER_AVAILABLE, not INVALID_OUTPUT_FORMAT", () => {
+    expect(validateFashnOutputDataUrl("<base64>_expired")).toEqual({ ok: false, errorCode: "PREDICTION_NO_LONGER_AVAILABLE" });
+  });
+
+  it("trims whitespace before matching the expired sentinel too", () => {
+    expect(validateFashnOutputDataUrl("  <base64>_expired\n")).toEqual({ ok: false, errorCode: "PREDICTION_NO_LONGER_AVAILABLE" });
+  });
+
+  it("a string that merely CONTAINS the sentinel as a substring (not an exact match) is NOT assumed to be expired", () => {
+    // Guards the "do not label it expired without the specific documented
+    // evidence" rule — only an exact match counts.
+    const result = validateFashnOutputDataUrl("prefix-<base64>_expired-suffix");
+    expect(result).toEqual({ ok: false, errorCode: "INVALID_OUTPUT_FORMAT" });
+  });
+
   it("rejects a non-string value", () => {
     expect(validateFashnOutputDataUrl(123)).toEqual({ ok: false, errorCode: "INVALID_OUTPUT_FORMAT" });
     expect(validateFashnOutputDataUrl(null)).toEqual({ ok: false, errorCode: "INVALID_OUTPUT_FORMAT" });
@@ -390,7 +415,77 @@ describe("submitFullLookRealStep", () => {
     expect(mockSubmitProvider()).not.toHaveBeenCalled();
     expect(mockDownloadPhoto()).not.toHaveBeenCalled();
   });
+});
 
+// 2026-11-16 addition — the boots (step4) finding: this exact function,
+// under its OLD pre-c869360 form (a bare "PROVIDER_ERROR"), is what
+// Attempt C's boots step actually hit — a failed download of step3's own
+// stored intermediate result, before submitTryOnToProvider was ever
+// reached (hasPredictionId was false on that job). Unit-level coverage
+// for the timeout + bounded, idempotent retry added alongside
+// uploadCloudinaryPrivate's identical fix — this is a SEPARATE fetch call
+// in this same module, so it needed its own fix and its own tests.
+describe("downloadIntermediateStepResult — bounded timeout and idempotent transient-failure retry", () => {
+  const CFG = { cloudName: "test-cloud", apiKey: "k", apiSecret: "s" };
+  const getConfig = () => CFG;
+
+  it("sets an AbortSignal-based timeout on the request", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(new Uint8Array([1, 2, 3]).buffer, { status: 200 }));
+    await downloadIntermediateStepResult("cust-1", "job-1", fetchMock as any, getConfig);
+    const [, init] = fetchMock.mock.calls[0];
+    expect((init as any).signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("retries once on a 5xx and succeeds on the second attempt", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockResolvedValueOnce(new Response(new Uint8Array([1, 2, 3]).buffer, { status: 200 }));
+    const sleep = vi.fn(async () => {});
+
+    const result = await downloadIntermediateStepResult("cust-1", "job-1", fetchMock as any, getConfig, sleep);
+
+    expect(result.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries at most once — two persistent 5xx failures return the error, never a third attempt", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 502 }));
+    const result = await downloadIntermediateStepResult("cust-1", "job-1", fetchMock as any, getConfig, async () => {});
+    expect(result).toEqual({ ok: false, errorCode: "PROVIDER_ERROR_502" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries once on NETWORK_ERROR and can still succeed on the second attempt", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("ECONNRESET"))
+      .mockResolvedValueOnce(new Response(new Uint8Array([1, 2, 3]).buffer, { status: 200 }));
+    const result = await downloadIntermediateStepResult("cust-1", "job-1", fetchMock as any, getConfig, async () => {});
+    expect(result.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("never retries a non-transient failure — a 404 (asset expired/missing) fails after exactly one attempt", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 404 }));
+    const result = await downloadIntermediateStepResult("cust-1", "job-1", fetchMock as any, getConfig, async () => {});
+    expect(result).toEqual({ ok: false, errorCode: "PROVIDER_ERROR_404" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries 429 (rate limited) the same bounded way as a 5xx", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 429 }))
+      .mockResolvedValueOnce(new Response(new Uint8Array([1, 2, 3]).buffer, { status: 200 }));
+    const result = await downloadIntermediateStepResult("cust-1", "job-1", fetchMock as any, getConfig, async () => {});
+    expect(result.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("submitFullLookRealStep (continued)", () => {
   it("FL.12 — a provider rejection marks the job FAILED and never calls the provider again from this function", async () => {
     const job = fakeJob("job-0");
     mockCreateOrFind().mockResolvedValue({ ok: true, job, created: true });
@@ -485,6 +580,25 @@ describe("pollFullLookRealStep", () => {
     expect(result.status).toBe("FAILED");
     expect(mockAdvance()).toHaveBeenCalledWith(expect.anything(), "FAILED", { errorCode: "INVALID_OUTPUT_FORMAT" });
     expect(mockUploadPrivate()).not.toHaveBeenCalled(); // never reaches Cloudinary at all
+  });
+
+  // 2026-11-16 — the Attempt C finding: FASHN can report status
+  // "completed" while its output is the documented 60-minute expiry
+  // sentinel. A normal (non-recovery) poll that's delayed past that
+  // window must classify this distinctly and safely, never attempt the
+  // upload, and never treat it as a generic format bug.
+  it("a completed prediction whose output is FASHN's documented expiry sentinel is classified as PREDICTION_NO_LONGER_AVAILABLE, never uploaded", async () => {
+    const job = fakeJob("job-0", { status: "PROCESSING", predictionId: "pred-0" });
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(JSON.stringify({ status: "completed", output: ["<base64>_expired"] }), { status: 200 }),
+    );
+    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job, status: "FAILED", errorCode: "PREDICTION_NO_LONGER_AVAILABLE" } });
+
+    const result = await pollFullLookRealStep(baseCtx(), job, 0);
+
+    expect(result.status).toBe("FAILED");
+    expect(mockAdvance()).toHaveBeenCalledWith(expect.anything(), "FAILED", { errorCode: "PREDICTION_NO_LONGER_AVAILABLE" });
+    expect(mockUploadPrivate()).not.toHaveBeenCalled();
   });
 
   it("FL.15b — an intermediate-step Cloudinary upload failure persists the REAL errorCode (not a hardcoded string), never resubmits anything, and logs once without the raw customerId", async () => {
@@ -641,6 +755,30 @@ describe("recoverFailedUploadStep", () => {
     mockCreateOrFind().mockResolvedValueOnce({ ok: true, job: recoveryJob, created: true });
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
       new Response(JSON.stringify({ status: "processing" }), { status: 200 }), // no longer "completed"
+    );
+    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...recoveryJob, status: "FAILED", errorCode: "PREDICTION_NO_LONGER_AVAILABLE" } });
+
+    const result = await recoverFailedUploadStep(baseCtx(), failedJob);
+
+    expect(result).toEqual({ ok: false, reason: "PREDICTION_NO_LONGER_AVAILABLE" });
+    expect(mockAdvance()).toHaveBeenCalledWith(expect.anything(), "FAILED", { errorCode: "PREDICTION_NO_LONGER_AVAILABLE" });
+    expect(mockSubmitProvider()).not.toHaveBeenCalled();
+    expect(mockUploadPrivate()).not.toHaveBeenCalled();
+  });
+
+  // 2026-11-16 CONFIRMED LIVE — Attempt C's actual recovery attempt (job
+  // cmwhxjd0w0001l607s25kwvq1). Distinct from REC.5: the status endpoint
+  // keeps reporting "completed" even past the 60-minute return_base64
+  // window — only the output string itself turns into FASHN's documented
+  // sentinel. Must be classified the same safe, non-retryable way as
+  // REC.5 (same errorCode), never as the generic INVALID_OUTPUT_FORMAT,
+  // and never uploaded.
+  it("REC.5b — status still reports 'completed' but the output is FASHN's documented expiry sentinel — same safe PREDICTION_NO_LONGER_AVAILABLE outcome, never uploaded", async () => {
+    const failedJob = failedIntermediateJob();
+    const recoveryJob = fakeJob("job-recovery", { status: "CREATED", predictionId: null });
+    mockCreateOrFind().mockResolvedValueOnce({ ok: true, job: recoveryJob, created: true });
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(JSON.stringify({ status: "completed", output: ["<base64>_expired"] }), { status: 200 }),
     );
     mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...recoveryJob, status: "FAILED", errorCode: "PREDICTION_NO_LONGER_AVAILABLE" } });
 

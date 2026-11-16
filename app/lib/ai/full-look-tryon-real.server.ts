@@ -206,11 +206,27 @@ function decodedBytesStartWithPngSignature(base64: string): boolean {
   }
 }
 
+// 2026-11-16 CONFIRMED — the Attempt C recovery's 16-character,
+// non-image, non-URL output exactly matches FASHN's own documented
+// return_base64 retrieval-window sentinel (docs.fashn.ai/api-overview/
+// data-retention-privacy): output expires 60 minutes after completion,
+// after which the status endpoint returns this literal 16-character
+// string in place of the payload — the "status: completed" field itself
+// is unaffected, which is why this can't be caught by the status check
+// alone. An EXACT match against this one documented string is evidence,
+// not a guess — anything else unrecognized still falls through to the
+// generic INVALID_OUTPUT_FORMAT below, never claimed as "expired" without
+// this specific confirmation.
+const FASHN_EXPIRED_OUTPUT_SENTINEL = "<base64>_expired";
+
 export function validateFashnOutputDataUrl(value: unknown): ValidateFashnOutputResult {
   if (typeof value !== "string" || value.length === 0) {
     return { ok: false, errorCode: "INVALID_OUTPUT_FORMAT" };
   }
   const trimmed = value.trim();
+  if (trimmed === FASHN_EXPIRED_OUTPUT_SENTINEL) {
+    return { ok: false, errorCode: "PREDICTION_NO_LONGER_AVAILABLE" };
+  }
   let normalized: string;
   if (/^data:image\/(jpeg|jpg|png|webp);base64,[A-Za-z0-9+/]+=*$/i.test(trimmed)) {
     const commaIdx = trimmed.indexOf(",");
@@ -339,38 +355,80 @@ export function buildIntermediateStepResultUrl(
   return buildPrivateDownloadUrl(cfg, deriveIntermediateStepPublicId(customerId, jobId), "png", "private");
 }
 
+// 2026-11-16 CONFIRMED — this exact function, under its OLD pre-c869360
+// form (a bare "PROVIDER_ERROR" with no HTTP status), is what the boots
+// step (step4, Attempt C) actually hit: hasPredictionId was false on that
+// job because the failure happened HERE, downloading step3's own stored
+// intermediate result to feed step4 — before submitTryOnToProvider was
+// ever reached, so no FASHN prediction was ever created. Not a model-
+// capability gap (tryon-max's own docs confirm footwear support) and
+// unrelated to the separate expired-output/UPLOAD_FAILED findings above.
+// Same missing-timeout gap as uploadCloudinaryPrivate also existed here
+// independently (a different fetch call, same module) — fixed the same
+// way: a bounded timeout, and a bounded, idempotent retry (a GET for an
+// asset that doesn't change is safe to repeat) for signatures that are
+// plausibly transient.
+const CLOUDINARY_DOWNLOAD_TIMEOUT_MS = 20_000;
+const CLOUDINARY_DOWNLOAD_MAX_ATTEMPTS = 2;
+const CLOUDINARY_DOWNLOAD_RETRY_DELAY_MS = 300;
+
+function isTransientCloudinaryDownloadErrorCode(errorCode: string): boolean {
+  if (errorCode === "NETWORK_ERROR") return true;
+  const statusMatch = /^PROVIDER_ERROR_(\d+)$/.exec(errorCode);
+  if (!statusMatch) return false;
+  const status = Number(statusMatch[1]);
+  return status === 429 || status >= 500;
+}
+
 export async function downloadIntermediateStepResult(
   customerId: string,
   jobId: string,
   _fetch: typeof fetch = fetch,
   _getConfig: () => CloudinaryConfig | null = getCloudinaryConfig,
+  _sleep: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 ): Promise<{ ok: true; dataUrl: string } | { ok: false; errorCode: string }> {
   const cfg = _getConfig();
   if (!cfg) return { ok: false, errorCode: "NOT_CONFIGURED" };
   const publicId = deriveIntermediateStepPublicId(customerId, jobId);
   // Uploaded above via output_format:"png" (FASHN's own fixed output format).
   const downloadUrl = buildPrivateDownloadUrl(cfg, publicId, "png", "private");
-  try {
-    const res = await _fetch(downloadUrl);
-    // Confirmed actionable gap (2026-11-16, from the real Attempt A
-    // investigation): a bare "PROVIDER_ERROR" with no HTTP status recorded
-    // made it impossible to tell a 404 (asset expired/never uploaded) from
-    // a 401/403 (signature/auth problem) from a 429 (rate limited) from a
-    // 5xx (Cloudinary-side outage) after the fact — each needs a
-    // completely different fix, and none of that distinction survived
-    // past this one check. The status code is never sensitive (no
-    // signature or credential appears in it); appending it costs nothing
-    // and makes every future occurrence actually diagnosable from the DB
-    // row alone, without needing live Cloudinary access.
-    if (!res.ok) return { ok: false, errorCode: `PROVIDER_ERROR_${res.status}` };
-    const buffer = await res.arrayBuffer();
-    const base64 = Buffer.from(buffer).toString("base64");
-    const dataUrl = `data:image/png;base64,${base64}`;
-    if (!isValidModelImageDataUrl(dataUrl)) return { ok: false, errorCode: "INVALID_MODEL_IMAGE" };
-    return { ok: true, dataUrl };
-  } catch {
-    return { ok: false, errorCode: "NETWORK_ERROR" };
+
+  let lastFailure: { ok: false; errorCode: string } = { ok: false, errorCode: "NETWORK_ERROR" };
+
+  for (let attempt = 1; attempt <= CLOUDINARY_DOWNLOAD_MAX_ATTEMPTS; attempt++) {
+    try {
+      const res = await _fetch(downloadUrl, { signal: AbortSignal.timeout(CLOUDINARY_DOWNLOAD_TIMEOUT_MS) });
+      // Confirmed actionable gap (2026-11-16, from the real Attempt A
+      // investigation): a bare "PROVIDER_ERROR" with no HTTP status recorded
+      // made it impossible to tell a 404 (asset expired/never uploaded) from
+      // a 401/403 (signature/auth problem) from a 429 (rate limited) from a
+      // 5xx (Cloudinary-side outage) after the fact — each needs a
+      // completely different fix, and none of that distinction survived
+      // past this one check. The status code is never sensitive (no
+      // signature or credential appears in it); appending it costs nothing
+      // and makes every future occurrence actually diagnosable from the DB
+      // row alone, without needing live Cloudinary access.
+      if (!res.ok) {
+        lastFailure = { ok: false, errorCode: `PROVIDER_ERROR_${res.status}` };
+      } else {
+        const buffer = await res.arrayBuffer();
+        const base64 = Buffer.from(buffer).toString("base64");
+        const dataUrl = `data:image/png;base64,${base64}`;
+        if (!isValidModelImageDataUrl(dataUrl)) return { ok: false, errorCode: "INVALID_MODEL_IMAGE" };
+        return { ok: true, dataUrl };
+      }
+    } catch {
+      lastFailure = { ok: false, errorCode: "NETWORK_ERROR" };
+    }
+
+    if (attempt < CLOUDINARY_DOWNLOAD_MAX_ATTEMPTS && isTransientCloudinaryDownloadErrorCode(lastFailure.errorCode)) {
+      await _sleep(CLOUDINARY_DOWNLOAD_RETRY_DELAY_MS);
+      continue;
+    }
+    break;
   }
+
+  return lastFailure;
 }
 
 // ── FASHN status check — single call, no poll loop ──────────────────────────
