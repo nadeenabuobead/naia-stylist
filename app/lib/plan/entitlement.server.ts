@@ -845,7 +845,7 @@ const _runReservationTransaction: RunReservationFn = (fn) =>
 
 export type ReserveResult<T> =
   | { allowed: true; record: T }
-  | { allowed: false; reason: "quota_exceeded" | "at_capacity" | "asset_pending_deletion" };
+  | { allowed: false; reason: "quota_exceeded" | "at_capacity" | "asset_pending_deletion"; limit?: number };
 
 export async function reserveStyleMeSlot(
   customerId: string,
@@ -1021,7 +1021,12 @@ export async function reserveClosetSlot(
         // getEntitlementSummary's own count exactly).
         const used = await tx.closetItem.count({ where: { customerId } });
         if (used >= allowances.closetItems) {
-          return { allowed: false, reason: "at_capacity" };
+          // limit mirrors checkEntitlement's own "closet" case (see above) —
+          // without it, a caller on this atomic path can't distinguish a
+          // non-member (limit 0, needs to subscribe) from a genuinely full
+          // member (limit > 0, needs to remove an item), the exact
+          // distinction closet._index.tsx's early check already makes.
+          return { allowed: false, reason: "at_capacity", limit: allowances.closetItems };
         }
         // Must run LAST, inside this same Serializable transaction — see
         // cloudinary-deletion-claim.server.ts.

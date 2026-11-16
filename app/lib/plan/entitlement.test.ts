@@ -240,6 +240,81 @@ describe("ENT-14b — closet at-capacity message distinguishes 'no allowance at 
   });
 });
 
+// 2026-11-16, found during a live Persona A retest of ENT-14b: the fix above
+// only reached checkEntitlement's "closet" case and closet._index.tsx's
+// EARLY fast-fail check. Three other call sites independently hardcoded the
+// same "Your closet is full. Remove some items to add new ones." message
+// with no limit===0 branch at all — reserveClosetSlot's own at_capacity
+// return (the ATOMIC path every real upload actually goes through),
+// closet._index.tsx's atomic-path fallback, and api.closet.jsx's "add" and
+// "sync" actions (a separate, still-live legacy route). A non-member
+// hitting any of these four would still have seen the wrong message even
+// though ENT-14b "passed".
+describe("ENT-14c — the SAME limit===0 fix reaches every call site, not just checkEntitlement's direct caller", () => {
+  it("reserveClosetSlot's at_capacity return includes limit, same as checkEntitlement's closet case", () => {
+    const entSrc = readFileSync(join(__dirname, "entitlement.server.ts"), "utf8");
+    const fnIdx = entSrc.indexOf("export async function reserveClosetSlot");
+    const nextFnIdx = entSrc.indexOf("export async function", fnIdx + 1);
+    const fnBody = entSrc.slice(fnIdx, nextFnIdx);
+    assert.match(fnBody, /reason:\s*"at_capacity",\s*limit:\s*allowances\.closetItems/,
+      "reserveClosetSlot's at_capacity return must include limit: allowances.closetItems, not just reason");
+  });
+
+  it("ReserveResult's failure variant types limit as optional, without touching reserveStyleMeSlot/reserveBuySkipSlot's own shape", () => {
+    const entSrc = readFileSync(join(__dirname, "entitlement.server.ts"), "utf8");
+    assert.match(entSrc, /reason:\s*"quota_exceeded"\s*\|\s*"at_capacity"\s*\|\s*"asset_pending_deletion";\s*limit\?:\s*number/,
+      "ReserveResult's failure branch must add an optional limit field");
+  });
+
+  it("closet._index.tsx's ATOMIC reservation fallback (not just the early check) also branches on limit === 0", () => {
+    const fallbackIdx = closetRt.lastIndexOf("Your closet is full. Remove some items to add new ones.");
+    const precedingBlock = closetRt.slice(Math.max(0, fallbackIdx - 500), fallbackIdx + 100);
+    assert.match(precedingBlock, /reservation\.limit\s*===\s*0/,
+      "the atomic-path fallback message must branch on reservation.limit === 0, mirroring the early check");
+    assert.ok(/[Ss]ubscribe/.test(precedingBlock),
+      "the atomic path's limit-0 branch must also point toward subscribing, not just repeat the early check's wording in a comment");
+  });
+
+  it("api.closet.jsx's add action (shares reserveClosetSlot) branches on reservation.limit === 0", () => {
+    const addIdx = closetApi.indexOf('if (act === "add")');
+    const syncIdx = closetApi.indexOf('if (act === "sync")');
+    const addBlock = closetApi.slice(addIdx, syncIdx);
+    assert.match(addBlock, /reservation\.limit\s*===\s*0/,
+      "api.closet.jsx's add action must branch on reservation.limit === 0, not hardcode one message for every at_capacity case");
+    assert.ok(/[Ss]ubscribe/.test(addBlock), "must point a non-member toward subscribing");
+  });
+
+  it("api.closet.jsx's sync action (shares checkEntitlement) branches on capacityCheck.limit === 0", () => {
+    const syncIdx = closetApi.indexOf('if (act === "sync")');
+    const syncBlock = closetApi.slice(syncIdx, syncIdx + 1200);
+    assert.match(syncBlock, /capacityCheck\.limit\s*===\s*0/,
+      "api.closet.jsx's sync action must branch on capacityCheck.limit === 0");
+    assert.ok(/[Ss]ubscribe/.test(syncBlock), "must point a non-member toward subscribing");
+  });
+
+  it("every one of the 4 occurrences of the genuine-capacity message in these 2 files is reachable only through a limit!==0 branch", () => {
+    // A blunt but effective regression guard: count occurrences of the old
+    // literal string and confirm each one is preceded, within a short
+    // window, by a limit-branching condition — i.e. none of them stand
+    // alone as an unconditional fallback the way the original 4 bugs did.
+    for (const [label, src] of [["closet._index.tsx", closetRt], ["api.closet.jsx", closetApi]] as const) {
+      const literal = "Your closet is full. Remove some items to add new ones.";
+      let searchFrom = 0;
+      let count = 0;
+      for (;;) {
+        const idx = src.indexOf(literal, searchFrom);
+        if (idx === -1) break;
+        count++;
+        const window = src.slice(Math.max(0, idx - 400), idx);
+        assert.match(window, /limit\s*===\s*0/,
+          `${label}: occurrence #${count} of the genuine-capacity message at index ${idx} has no nearby limit===0 branch`);
+        searchFrom = idx + literal.length;
+      }
+      assert.ok(count >= 1, `${label}: expected at least one occurrence of the genuine-capacity message`);
+    }
+  });
+});
+
 describe("ENT-18 — closet enforcement is immediate (no flag)", () => {
   it("closet routes do not gate on ENTITLEMENT_ENFORCEMENT env var", () => {
     const closetRtGuardIdx = closetRt.indexOf("checkEntitlement");

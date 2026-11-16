@@ -110,7 +110,13 @@ export async function action({ request }) {
       imageUrl: null,
     });
     if (!reservation.allowed) {
-      return Response.json({ error: "Your closet is full. Remove some items to add new ones." }, { status: 403, headers: CORS });
+      // Same limit===0 vs genuinely-full distinction as the canonical
+      // closet._index.tsx path — this legacy route shares reserveClosetSlot,
+      // so it must not regress to the old, non-member-misleading message.
+      const addMessage = reservation.limit === 0
+        ? "Closet access is included with nAia Membership. Subscribe to start adding pieces."
+        : "Your closet is full. Remove some items to add new ones.";
+      return Response.json({ error: addMessage }, { status: 403, headers: CORS });
     }
     return Response.json({ item: reservation.record }, { headers: CORS });
   }
@@ -126,7 +132,12 @@ export async function action({ request }) {
     // capacity. Not atomic on its own; see the transaction below.
     const capacityCheck = await checkEntitlement(customer.id, customer.membershipStatus, "closet");
     if (!capacityCheck.allowed) {
-      return Response.json({ error: "Your closet is full. Remove some items to add new ones.", merged: 0 }, { status: 403, headers: CORS });
+      // Same limit===0 vs genuinely-full distinction as every other call
+      // site in this fix.
+      const syncMessage = capacityCheck.limit === 0
+        ? "Closet access is included with nAia Membership. Subscribe to start adding pieces."
+        : "Your closet is full. Remove some items to add new ones.";
+      return Response.json({ error: syncMessage, merged: 0 }, { status: 403, headers: CORS });
     }
 
     // Atomic: re-verify the count AND cap the batch to the customer's actual

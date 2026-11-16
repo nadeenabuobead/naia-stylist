@@ -611,8 +611,16 @@ export async function action({ request }: ActionFunctionArgs) {
       // A concurrent upload won the race since the early check above — this
       // asset was already verified/moderated but must not be kept orphaned.
       await deleteCloudinaryAsset(publicId, "private");
+      // Same limit===0 vs genuinely-full distinction as the early check
+      // above (capacityCheck.limit) — this is the atomic re-verification
+      // path, which can independently reach "at_capacity" (e.g. a second
+      // tab's upload won the race between the two checks), and must not
+      // regress to the old, non-member-misleading message.
+      const atomicMessage = reservation.limit === 0
+        ? "Closet access is included with nAia Membership. Subscribe to start adding pieces."
+        : "Your closet is full. Remove some items to add new ones.";
       return data(
-        { error: "Your closet is full. Remove some items to add new ones." },
+        { error: atomicMessage },
         { status: 403 },
       );
     }
