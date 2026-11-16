@@ -38,14 +38,21 @@ function makeActionRequest(body: object): { request: Request } {
   };
 }
 
+const FIXTURE_CUSTOMER_ID_2 = "cust_fixture_2_not_allowlisted";
+
 describe("§S5 seed-staging SavedLook fixture actions", () => {
   const originalVariant = process.env.NAIA_PROJECT_VARIANT;
   const originalSecret = process.env.STAGING_SEED_SECRET;
+  const originalAllowlist = process.env.SAVED_LOOKS_FIXTURE_CUSTOMER_IDS;
 
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.NAIA_PROJECT_VARIANT = "staging";
     process.env.STAGING_SEED_SECRET = STAGING_SECRET;
+    // The explicit allowlist, set for the positive-path tests below. Tests
+    // that specifically exercise the allowlist's own enforcement override
+    // or delete this within their own body.
+    process.env.SAVED_LOOKS_FIXTURE_CUSTOMER_IDS = FIXTURE_CUSTOMER_ID;
 
     (prisma.customer.findUnique as any).mockImplementation(({ where }: any) => {
       if (where.id === FIXTURE_CUSTOMER_ID) {
@@ -64,6 +71,14 @@ describe("§S5 seed-staging SavedLook fixture actions", () => {
         // not merely "some other string".
         return Promise.resolve({ id: REAL_CLERK_NATIVE_CUSTOMER_ID, shopifyCustomerId: null });
       }
+      if (where.id === FIXTURE_CUSTOMER_ID_2) {
+        // A SECOND, genuinely valid test-batch1- fixture customer — real
+        // prefix, would pass the old requireTestCustomer-only check — but
+        // deliberately never placed in SAVED_LOOKS_FIXTURE_CUSTOMER_IDS.
+        // Proves the allowlist is an independent, exact-id requirement, not
+        // "any test-batch1- customer is fine."
+        return Promise.resolve({ id: FIXTURE_CUSTOMER_ID_2, shopifyCustomerId: "test-batch1-wi-fixture-2" });
+      }
       // NONEXISTENT_CUSTOMER_ID and anything else: no row at all.
       return Promise.resolve(null);
     });
@@ -72,6 +87,8 @@ describe("§S5 seed-staging SavedLook fixture actions", () => {
   afterEach(() => {
     process.env.NAIA_PROJECT_VARIANT = originalVariant;
     process.env.STAGING_SEED_SECRET = originalSecret;
+    if (originalAllowlist === undefined) delete process.env.SAVED_LOOKS_FIXTURE_CUSTOMER_IDS;
+    else process.env.SAVED_LOOKS_FIXTURE_CUSTOMER_IDS = originalAllowlist;
   });
 
   it("S501 — createSavedLookDetailed refuses a customerId that is not a test-batch1- fixture", async () => {
@@ -247,5 +264,48 @@ describe("§S5 seed-staging SavedLook fixture actions", () => {
       expect(prisma.savedLook.deleteMany).not.toHaveBeenCalled();
     }
     process.env.NAIA_PROJECT_VARIANT = "staging";
+  });
+
+  // ── Explicit-allowlist defense-in-depth (requireAllowlistedSavedLooksFixtureCustomer) ──
+  // Added after an explicit follow-up concern: NAIA_PROJECT_VARIANT === "staging"
+  // alone does not fail closed if that exact value is ever accidentally
+  // configured on the real production project. These three tests exercise
+  // the ADDITIONAL, independent allowlist layer — not a re-test of the
+  // NAIA_PROJECT_VARIANT check itself (S513 already covers that).
+
+  it("S514 — simulates NAIA_PROJECT_VARIANT=staging on what is otherwise production (the allowlist unset/empty) — all three actions must still be refused, not just the ones that happen to also fail an unrelated check", async () => {
+    delete process.env.SAVED_LOOKS_FIXTURE_CUSTOMER_IDS; // the exact misconfiguration scenario: staging flag present, QA allowlist never provisioned
+    for (const _action of ["createSavedLookDetailed", "getSavedLook", "deleteSavedLook"]) {
+      const res: any = await action(
+        makeActionRequest({ _action, customerId: FIXTURE_CUSTOMER_ID, closetItemIds: ["item1"], savedLookId: "look1" }) as any,
+      );
+      expect((res as Response).status, `${_action} with NAIA_PROJECT_VARIANT=staging but no allowlist configured`).toBe(403);
+    }
+    expect(prisma.savedLook.create).not.toHaveBeenCalled();
+    expect(prisma.savedLook.findFirst).not.toHaveBeenCalled();
+    expect(prisma.savedLook.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("S515 — a genuinely valid test-batch1- fixture customer who is simply NOT in SAVED_LOOKS_FIXTURE_CUSTOMER_IDS is still refused — the allowlist is an independent, exact-id requirement, not merely re-deriving the prefix check", async () => {
+    // SAVED_LOOKS_FIXTURE_CUSTOMER_IDS is set to FIXTURE_CUSTOMER_ID only (see
+    // beforeEach) — FIXTURE_CUSTOMER_ID_2 would pass requireTestCustomer
+    // alone (real test-batch1- prefix) but is deliberately absent here.
+    for (const _action of ["createSavedLookDetailed", "getSavedLook", "deleteSavedLook"]) {
+      const res: any = await action(
+        makeActionRequest({ _action, customerId: FIXTURE_CUSTOMER_ID_2, closetItemIds: ["item1"], savedLookId: "look1" }) as any,
+      );
+      expect((res as Response).status, `${_action} for a non-allowlisted (but real-prefix) fixture customer`).toBe(403);
+    }
+    expect(prisma.savedLook.create).not.toHaveBeenCalled();
+  });
+
+  it("S516 — a customer whose id (not shopifyCustomerId) is the one listed in the allowlist is still accepted — matching either field is intentional, not a bug", async () => {
+    process.env.SAVED_LOOKS_FIXTURE_CUSTOMER_IDS = FIXTURE_CUSTOMER_ID; // matches .id, not shopifyCustomerId
+    (prisma.closetItem.findMany as any).mockResolvedValue([{ id: "item1", category: "TOPS" }]);
+    (prisma.savedLook.create as any).mockResolvedValue({ id: "look1", name: null, occasion: null, items: [{ id: "x", closetItemId: "item1" }] });
+    const res: any = await action(
+      makeActionRequest({ _action: "createSavedLookDetailed", customerId: FIXTURE_CUSTOMER_ID, closetItemIds: ["item1"] }) as any,
+    );
+    expect((res as Response).status).toBe(200);
   });
 });

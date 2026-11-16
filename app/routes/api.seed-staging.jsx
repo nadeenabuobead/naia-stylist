@@ -25,6 +25,14 @@ import { writeSourceEvidence, reconcileObservations } from "../lib/ai/taste-reco
 //   "cleanup"            — delete all test records for a shopifyCustomerId
 //
 // All test records use shopifyCustomerId prefix "test-batch1-" to isolate them.
+// The three SavedLook actions above additionally require the target
+// customer's id/shopifyCustomerId to appear in SAVED_LOOKS_FIXTURE_CUSTOMER_IDS
+// (comma-separated) — an independent, fail-closed-when-empty allowlist, same
+// pattern as FULL_LOOK_VTO_TEST_CUSTOMER_IDS in staging.full-look-vto-test.tsx.
+// This means even a misconfiguration that accidentally sets
+// NAIA_PROJECT_VARIANT=staging on the real production project still can't
+// reach these three actions unless that allowlist is ALSO set and ALSO
+// happens to list the exact id being targeted.
 
 function hashToken(raw) {
   return createHash("sha256").update(raw).digest("hex");
@@ -82,6 +90,41 @@ async function requireTestCustomer(customerId) {
     select: { id: true, shopifyCustomerId: true },
   });
   if (!customer || !customer.shopifyCustomerId?.startsWith(TEST_CUSTOMER_PREFIX)) {
+    return null;
+  }
+  return customer;
+}
+
+/**
+ * Stricter gate for the SavedLook fixture actions specifically — the
+ * test-batch1- prefix check above is the standing convention for every
+ * other action in this file, but a standalone prefix string is only as
+ * strong as "nobody else ever writes that prefix", which the rest of the
+ * codebase already structurally guarantees (see the security review for
+ * commit b547dee) but which a second, independent layer should not have
+ * to rely on as its ONLY protection. Follows the exact same pattern
+ * already established and trusted for this codebase's most sensitive
+ * staging-only surface (real-FASHN calls) —
+ * isAuthorizedStagingTestAccount in staging.full-look-vto-test.tsx:
+ * NAIA_PROJECT_VARIANT === "staging" (unchanged) PLUS an explicit,
+ * comma-separated customerId/shopifyCustomerId allowlist that FAILS
+ * CLOSED when unset or empty — never "falls back to allow everything
+ * test-batch1--shaped" the way requireTestCustomer alone does. A
+ * misconfiguration that accidentally sets NAIA_PROJECT_VARIANT=staging
+ * on the real production project still can't reach these three actions
+ * unless SAVED_LOOKS_FIXTURE_CUSTOMER_IDS also happens to be set AND
+ * happens to list the exact id being targeted — a categorically
+ * different, much narrower failure than a single accidental env var.
+ */
+async function requireAllowlistedSavedLooksFixtureCustomer(customerId) {
+  const customer = await requireTestCustomer(customerId);
+  if (!customer) return null;
+  const allowlist = (process.env.SAVED_LOOKS_FIXTURE_CUSTOMER_IDS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (allowlist.length === 0) return null;
+  if (!allowlist.includes(customer.id) && !allowlist.includes(customer.shopifyCustomerId ?? "")) {
     return null;
   }
   return customer;
@@ -787,19 +830,21 @@ export async function action({ request }) {
     return Response.json({ ok: true, deletedCount: deleted.count });
   }
 
-  // ── createSavedLookDetailed — QA fixture only ────────────────────────────
+  // ── createSavedLookDetailed — QA fixture only, explicit allowlist ────────
   // Creates a SavedLook referencing the customer's OWN existing ClosetItem
   // rows (never cross-customer — each closetItemId is independently
   // ownership-checked, same discipline as createClosetItemDetailed above),
   // so WI QA can exercise the create/view/edit/delete lifecycle without a
-  // real StyleMe session or any AI/provider call.
+  // real StyleMe session or any AI/provider call. Unlike the actions above,
+  // the target customer must ALSO be explicitly listed in
+  // SAVED_LOOKS_FIXTURE_CUSTOMER_IDS — see requireAllowlistedSavedLooksFixtureCustomer.
   if (act === "createSavedLookDetailed") {
     const { customerId, name, occasion, closetItemIds } = body ?? {};
     if (!customerId || !Array.isArray(closetItemIds) || closetItemIds.length === 0) {
       return Response.json({ error: "customerId and a non-empty closetItemIds array required" }, { status: 400 });
     }
-    if (!(await requireTestCustomer(customerId))) {
-      return Response.json({ error: "customerId must belong to a test-batch1- fixture customer" }, { status: 403 });
+    if (!(await requireAllowlistedSavedLooksFixtureCustomer(customerId))) {
+      return Response.json({ error: "customerId must be a test-batch1- fixture customer explicitly listed in SAVED_LOOKS_FIXTURE_CUSTOMER_IDS" }, { status: 403 });
     }
     const owned = await prisma.closetItem.findMany({
       where: { id: { in: closetItemIds }, customerId: String(customerId) },
@@ -839,8 +884,8 @@ export async function action({ request }) {
     if (!customerId || !savedLookId) {
       return Response.json({ error: "customerId and savedLookId required" }, { status: 400 });
     }
-    if (!(await requireTestCustomer(customerId))) {
-      return Response.json({ error: "customerId must belong to a test-batch1- fixture customer" }, { status: 403 });
+    if (!(await requireAllowlistedSavedLooksFixtureCustomer(customerId))) {
+      return Response.json({ error: "customerId must be a test-batch1- fixture customer explicitly listed in SAVED_LOOKS_FIXTURE_CUSTOMER_IDS" }, { status: 403 });
     }
     const look = await prisma.savedLook.findFirst({
       where: { id: String(savedLookId), customerId: String(customerId) },
@@ -858,8 +903,8 @@ export async function action({ request }) {
     if (!customerId || !savedLookId) {
       return Response.json({ error: "customerId and savedLookId required" }, { status: 400 });
     }
-    if (!(await requireTestCustomer(customerId))) {
-      return Response.json({ error: "customerId must belong to a test-batch1- fixture customer" }, { status: 403 });
+    if (!(await requireAllowlistedSavedLooksFixtureCustomer(customerId))) {
+      return Response.json({ error: "customerId must be a test-batch1- fixture customer explicitly listed in SAVED_LOOKS_FIXTURE_CUSTOMER_IDS" }, { status: 403 });
     }
     const deleted = await prisma.savedLook.deleteMany({
       where: { id: String(savedLookId), customerId: String(customerId) },
