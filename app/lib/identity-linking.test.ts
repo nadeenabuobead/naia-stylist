@@ -16,6 +16,13 @@ vi.mock("~/db.server", () => ({
       delete: vi.fn(),
       deleteMany: vi.fn(),
     },
+    // Not touched by any identity-linking code today — spied on, not
+    // called by the module under test, so the 2026-11-15 "data retention"
+    // tests below can assert these three relation tables are never
+    // written to or re-pointed during a link. See that describe block.
+    closetItem: { findMany: vi.fn(), updateMany: vi.fn() },
+    savedLook: { findMany: vi.fn(), updateMany: vi.fn() },
+    onboardingProfile: { findUnique: vi.fn(), update: vi.fn() },
     $transaction: vi.fn(),
   },
 }));
@@ -233,6 +240,78 @@ describe("confirmIdentityLink", () => {
     expect(mockTransaction()).toHaveBeenCalledTimes(1);
     const ops = mockTransaction().mock.calls[0][0];
     expect(ops).toHaveLength(2);
+  });
+});
+
+describe("confirmIdentityLink — existing account data survives the link untouched (2026-11-15)", () => {
+  // Closes a specific gap: prior tests proved "no new Customer row is
+  // created" (exactly 2 ops: customer.update + identityLinkRequest.delete)
+  // but nothing asserted that a customer's PRE-EXISTING closet items,
+  // saved looks, or Style Passport answers survive the link. The real
+  // guarantee is structural, not behavioral: confirmIdentityLink's own
+  // code (see identity-linking.server.ts) never references closetItem,
+  // savedLook, or onboardingProfile at all — it only ever re-points
+  // Customer.clerkUserId on the SAME existing row. These tests make that
+  // structural guarantee an explicit, enforced contract rather than
+  // something only true by not having been changed yet.
+
+  function pendingRequest(overrides: Partial<Record<string, any>> = {}) {
+    return {
+      id: "link-req-1",
+      clerkUserId: "clerk_claimant_1",
+      customerId: "cust-legacy-1",
+      codeHash: "4a8eec4925826f4b60526d7ac3c0a9b61ef54ac19233bafce2f4a13eb49395d2", // sha256("482913")
+      attemptCount: 0,
+      expiresAt: new Date(NOW.getTime() + LINK_REQUEST_TTL_MS),
+      confirmedAt: null,
+      customer: { identityLinkFailedAttempts: 0, identityLinkLockedUntil: null },
+      ...overrides,
+    };
+  }
+
+  it("a successful link never calls closetItem, savedLook, or onboardingProfile in any form — those tables are structurally untouched, not just untested", async () => {
+    mockFindRequest().mockResolvedValue(pendingRequest());
+
+    const result = await confirmIdentityLink({ clerkUserId: "clerk_claimant_1", code: "482913" }, { _now: () => NOW });
+
+    expect(result).toEqual({ status: "confirmed", customerId: "cust-legacy-1" });
+    expect((prisma as any).closetItem.findMany).not.toHaveBeenCalled();
+    expect((prisma as any).closetItem.updateMany).not.toHaveBeenCalled();
+    expect((prisma as any).savedLook.findMany).not.toHaveBeenCalled();
+    expect((prisma as any).savedLook.updateMany).not.toHaveBeenCalled();
+    expect((prisma as any).onboardingProfile.findUnique).not.toHaveBeenCalled();
+    expect((prisma as any).onboardingProfile.update).not.toHaveBeenCalled();
+  });
+
+  it("the Customer row that gets Clerk-linked is the SAME id the request was opened against — not a new row standing in for it", async () => {
+    mockFindRequest().mockResolvedValue(pendingRequest({ customerId: "cust-with-12-closet-items-and-a-passport" }));
+
+    const result = await confirmIdentityLink({ clerkUserId: "clerk_claimant_1", code: "482913" }, { _now: () => NOW });
+
+    expect(result).toEqual({ status: "confirmed", customerId: "cust-with-12-closet-items-and-a-passport" });
+    expect(mockUpdateCustomer()).toHaveBeenCalledWith({
+      where: { id: "cust-with-12-closet-items-and-a-passport" },
+      data: { clerkUserId: "clerk_claimant_1", identityLinkFailedAttempts: 0, identityLinkLockedUntil: null },
+    });
+    // No model anywhere is ever asked to re-point a foreign key from an
+    // old id to a new one — because there is no new id. ClosetItem.
+    // customerId, SavedLook.customerId, and OnboardingProfile.customerId
+    // all keep pointing at "cust-with-12-closet-items-and-a-passport"
+    // simply because nothing here ever had reason to change them.
+    expect((prisma as any).closetItem.updateMany).not.toHaveBeenCalled();
+    expect((prisma as any).savedLook.updateMany).not.toHaveBeenCalled();
+    expect((prisma as any).onboardingProfile.update).not.toHaveBeenCalled();
+  });
+
+  it("a REJECTED link attempt (incorrect code) also never touches the related tables — a failed guess can't corrupt or orphan existing data either", async () => {
+    mockFindRequest().mockResolvedValue(pendingRequest({ customer: { identityLinkFailedAttempts: 3, identityLinkLockedUntil: null } }));
+
+    const result = await confirmIdentityLink({ clerkUserId: "clerk_claimant_1", code: "000000" }, { _now: () => NOW });
+
+    expect(result).toEqual({ status: "incorrect-code" });
+    expect((prisma as any).closetItem.updateMany).not.toHaveBeenCalled();
+    expect((prisma as any).savedLook.updateMany).not.toHaveBeenCalled();
+    expect((prisma as any).onboardingProfile.update).not.toHaveBeenCalled();
   });
 });
 
