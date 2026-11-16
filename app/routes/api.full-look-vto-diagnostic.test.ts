@@ -443,3 +443,114 @@ describe("cloudinaryAssetCheck — narrowly-scoped, read-only, one asset only", 
     expect(body.cloudinaryAssetCheck).toEqual({ attempted: false });
   });
 });
+
+// 2026-11-16 addition — built after Attempt C's one approved recovery
+// attempt (job cmwhxjd0w0001l607s25kwvq1) was rejected as
+// INVALID_OUTPUT_FORMAT against a prediction FASHN itself reported as
+// "completed". The raw output is never logged, so the real shape is
+// unconfirmed; this targets the SAME single job the Cloudinary check
+// above already targets, with one more read-only status GET, reporting
+// only structural flags — never the string, a URL, or any byte content.
+describe("outputShapeCheck — content-free FASHN output-shape inspection, same single job as cloudinaryAssetCheck", () => {
+  function uploadFailedFixture(overrides: Record<string, unknown> = {}) {
+    return makeJob({ id: "job-1", productHandle: "fulllook-real:step1:Trousers", status: "FAILED", errorCode: "UPLOAD_FAILED", predictionId: "pred-xyz", ...overrides });
+  }
+
+  it("classifies a full data-URI output correctly, and targets the job via its own predictionId", async () => {
+    mockCustomer().mockResolvedValue({ id: "cust-1" });
+    mockFindMany().mockResolvedValue([uploadFailedFixture()]);
+    mockFashnCheck().mockResolvedValueOnce({ ok: true, body: { status: "completed", output: ["data:image/png;base64,AAAA"] } });
+
+    const res: any = await loader(makeRequest("https://x.test/api/full-look-vto-diagnostic?suggestionId=sugg-1"));
+    const body = res.data ?? res;
+
+    expect(mockFashnCheck()).toHaveBeenCalledWith("pred-xyz");
+    expect(body.outputShapeCheck).toEqual({
+      attempted: true,
+      jobId: "job-1",
+      checkSucceeded: true,
+      liveFashnStatus: "completed",
+      outputArrayLength: 1,
+      firstEntryIsString: true,
+      looksLikeDataUri: true,
+      looksLikeBareBase64: false,
+      looksLikeUrl: false,
+      dataUriMimeSubtype: "png",
+      stringLength: "data:image/png;base64,AAAA".length,
+    });
+  });
+
+  it("classifies a bare base64 payload (no data: prefix) correctly", async () => {
+    mockCustomer().mockResolvedValue({ id: "cust-1" });
+    mockFindMany().mockResolvedValue([uploadFailedFixture()]);
+    mockFashnCheck().mockResolvedValueOnce({ ok: true, body: { status: "completed", output: ["AAAA=="] } });
+
+    const res: any = await loader(makeRequest("https://x.test/api/full-look-vto-diagnostic?suggestionId=sugg-1"));
+    const body = res.data ?? res;
+
+    expect(body.outputShapeCheck).toMatchObject({ looksLikeDataUri: false, looksLikeBareBase64: true, looksLikeUrl: false, dataUriMimeSubtype: null });
+  });
+
+  it("classifies a plain URL output correctly", async () => {
+    mockCustomer().mockResolvedValue({ id: "cust-1" });
+    mockFindMany().mockResolvedValue([uploadFailedFixture()]);
+    mockFashnCheck().mockResolvedValueOnce({ ok: true, body: { status: "completed", output: ["https://cdn.fashn.ai/out/abc123.png"] } });
+
+    const res: any = await loader(makeRequest("https://x.test/api/full-look-vto-diagnostic?suggestionId=sugg-1"));
+    const body = res.data ?? res;
+
+    expect(body.outputShapeCheck).toMatchObject({ looksLikeDataUri: false, looksLikeBareBase64: false, looksLikeUrl: true });
+  });
+
+  it("never includes the raw output string, URL, or any byte content anywhere in the response", async () => {
+    mockCustomer().mockResolvedValue({ id: "cust-1" });
+    mockFindMany().mockResolvedValue([uploadFailedFixture()]);
+    const secretUrl = "https://cdn.fashn.ai/out/super-secret-path-abc123.png";
+    mockFashnCheck().mockResolvedValueOnce({ ok: true, body: { status: "completed", output: [secretUrl] } });
+
+    const res: any = await loader(makeRequest("https://x.test/api/full-look-vto-diagnostic?suggestionId=sugg-1"));
+    const body = JSON.stringify(res.data ?? res);
+
+    expect(body).not.toContain(secretUrl);
+    expect(body).not.toContain("super-secret-path-abc123");
+  });
+
+  it("reports the live status directly, with no shape analysis, when the prediction no longer reports completed", async () => {
+    mockCustomer().mockResolvedValue({ id: "cust-1" });
+    mockFindMany().mockResolvedValue([uploadFailedFixture()]);
+    mockFashnCheck().mockResolvedValueOnce({ ok: true, body: { status: "failed" } });
+
+    const res: any = await loader(makeRequest("https://x.test/api/full-look-vto-diagnostic?suggestionId=sugg-1"));
+    const body = res.data ?? res;
+
+    expect(body.outputShapeCheck).toEqual({
+      attempted: true,
+      jobId: "job-1",
+      checkSucceeded: true,
+      liveFashnStatus: "failed",
+      note: expect.stringContaining("nothing to inspect the shape of"),
+    });
+  });
+
+  it("reports checkSucceeded: false, honestly, when the status check itself fails", async () => {
+    mockCustomer().mockResolvedValue({ id: "cust-1" });
+    mockFindMany().mockResolvedValue([uploadFailedFixture()]);
+    mockFashnCheck().mockResolvedValueOnce({ ok: false });
+
+    const res: any = await loader(makeRequest("https://x.test/api/full-look-vto-diagnostic?suggestionId=sugg-1"));
+    const body = res.data ?? res;
+
+    expect(body.outputShapeCheck).toEqual({ attempted: true, jobId: "job-1", checkSucceeded: false });
+  });
+
+  it("never attempts the shape check when no job has errorCode UPLOAD_FAILED — same targeting as cloudinaryAssetCheck", async () => {
+    mockCustomer().mockResolvedValue({ id: "cust-1" });
+    mockFindMany().mockResolvedValue([makeJob({ id: "job-1", status: "COMPLETED", errorCode: null })]);
+
+    const res: any = await loader(makeRequest("https://x.test/api/full-look-vto-diagnostic?suggestionId=sugg-1"));
+    const body = res.data ?? res;
+
+    expect(mockFashnCheck()).not.toHaveBeenCalled();
+    expect(body.outputShapeCheck).toEqual({ attempted: false });
+  });
+});

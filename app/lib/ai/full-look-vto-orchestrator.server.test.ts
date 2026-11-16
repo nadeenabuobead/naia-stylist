@@ -249,22 +249,64 @@ describe("resolveCurrentAttemptScope / startNewAttemptScope — retry-safe idemp
     expect(await startNewAttemptScope("cust-1", "sugg-1", FP)).toBe(`sugg-1:a2:${FP}`);
   });
 
-  it("resolveCurrentAttemptScope reads the most-recently-created step1 row directly, scoped to this customer+suggestion, ordered by createdAt desc", async () => {
+  it("resolveCurrentAttemptScope reads the most-recently-created TRUE step-0 reservation row directly, scoped to this customer+suggestion, ordered by createdAt desc", async () => {
     mockFindFirst().mockResolvedValue(null);
     await resolveCurrentAttemptScope("cust-1", "sugg-1", FP);
     expect(mockFindFirst()).toHaveBeenCalledWith({
-      where: { customerId: "cust-1", outfitSuggestionId: "sugg-1", productHandle: { startsWith: "fulllook-real:step1:" } },
+      where: {
+        customerId: "cust-1",
+        outfitSuggestionId: "sugg-1",
+        productHandle: { startsWith: "fulllook-real:step1:" },
+        idempotencyKey: { startsWith: "fulllook-real-reservation:" },
+      },
       orderBy: [{ createdAt: "desc" }],
       select: { idempotencyKey: true },
     });
   });
 
-  it("startNewAttemptScope still counts step1 rows (unchanged) — a genuinely new index must never collide with any existing one", async () => {
+  it("startNewAttemptScope still counts TRUE step-0 reservation rows only — a genuinely new index must never collide with any existing one", async () => {
     mockCount().mockResolvedValue(3);
     await startNewAttemptScope("cust-1", "sugg-1", FP);
     expect(mockCount()).toHaveBeenCalledWith({
-      where: { customerId: "cust-1", outfitSuggestionId: "sugg-1", productHandle: { startsWith: "fulllook-real:step1:" } },
+      where: {
+        customerId: "cust-1",
+        outfitSuggestionId: "sugg-1",
+        productHandle: { startsWith: "fulllook-real:step1:" },
+        idempotencyKey: { startsWith: "fulllook-real-reservation:" },
+      },
     });
+  });
+
+  // 2026-11-16 CONFIRMED LIVE BUG — Attempt C's one approved recovery of
+  // its step1 (sweater) row created job cmwizuix40001jv087d9fni05, which
+  // reuses step1's own productHandle (recoverFailedUploadStep: "same
+  // garment, same role") but under a completely different idempotencyKey
+  // namespace (getFullLookStepRecoveryIdempotencyKey's
+  // "fulllook-real-recovery:...", never "fulllook-real-reservation:...").
+  // Before the fix, findLatestAttemptIndex's query filtered by
+  // productHandle alone, so it picked up this recovery row as "the latest
+  // step1 row" (correct by createdAt) but then failed to parse an attempt
+  // index from its non-reservation key, silently falling back to 0 —
+  // reproduced live: a1 before recovery, a0 after. The fix must keep
+  // resolving a1 regardless of a later step1-role recovery row's presence.
+  it("REGRESSION — a step1 recovery row (same productHandle, different idempotencyKey namespace, created most recently) never displaces the true latest attempt", async () => {
+    // A faithful-enough fake of Prisma's own findFirst: applies the real
+    // where clause's startsWith filters against a small candidate set,
+    // then returns the most recent match — this is what actually proves
+    // the fix, not just that resolveCurrentAttemptScope trusts whatever
+    // findFirst hands it (already true before the fix).
+    const candidates = [
+      { idempotencyKey: "fulllook-real-reservation:cust-1:sugg-1:a1:fingerprintABC", createdAt: 1 }, // the true latest attempt (a1)
+      { idempotencyKey: `fulllook-real-recovery:cust-1:cmwhxjd0w0001l607s25kwvq1`, createdAt: 2 }, // step1 recovery row — same productHandle, newer, wrong namespace
+    ];
+    mockFindFirst().mockImplementation(async ({ where }: any) => {
+      const matches = candidates.filter((c) => c.idempotencyKey.startsWith(where.idempotencyKey.startsWith));
+      if (matches.length === 0) return null;
+      return matches.sort((a, b) => b.createdAt - a.createdAt)[0];
+    });
+
+    const scope = await resolveCurrentAttemptScope("cust-1", "sugg-1", FP);
+    expect(scope).toBe(`sugg-1:a1:${FP}`); // NOT a0 — the recovery row must never be selected at all
   });
 
   // 2026-11-15 — THE CONFIRMED LIVE BUG. The old count-based formula

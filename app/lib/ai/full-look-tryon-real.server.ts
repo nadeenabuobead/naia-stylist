@@ -164,25 +164,51 @@ function hashCustomerId(customerId: string): string {
 // catches a genuinely anomalous payload, never a normal one.
 export const MAX_FASHN_OUTPUT_BYTES = 25 * 1024 * 1024;
 
-export type ValidateFashnOutputResult = { ok: true } | { ok: false; errorCode: string };
+export type ValidateFashnOutputResult =
+  | { ok: true; normalizedDataUrl: string }
+  | { ok: false; errorCode: string };
+
+// 2026-11-16 ADDENDUM — a live recovery attempt (Attempt C, job
+// cmwhxjd0w0001l607s25kwvq1) against a prediction that had genuinely
+// reported "completed" was rejected right here as INVALID_OUTPUT_FORMAT.
+// The raw output string is never persisted or logged (deliberately — it's
+// provider image data), so the exact real-world shape that triggered this
+// could not be inspected after the fact; the next safe step is the
+// content-free shape diagnostic in api.full-look-vto-diagnostic.tsx, not
+// yet deployed. Pending that confirmation, this hardens against the two
+// most plausible, undocumented provider deviations from the documented
+// return_base64 contract (a case-different mime subtype; a bare base64
+// payload with no "data:" wrapper at all) without widening what's accepted
+// in any way that matters for security — a bare payload is only ever
+// re-wrapped using "png", the exact output_format WE requested at
+// submission (submitTryOnToProvider), never inferred from provider input.
+const BARE_BASE64_RE = /^[A-Za-z0-9+/]+=*$/;
+const FASHN_REQUESTED_OUTPUT_FORMAT = "png";
 
 export function validateFashnOutputDataUrl(value: unknown): ValidateFashnOutputResult {
   if (typeof value !== "string" || value.length === 0) {
     return { ok: false, errorCode: "INVALID_OUTPUT_FORMAT" };
   }
-  if (!isValidModelImageDataUrl(value)) {
+  const trimmed = value.trim();
+  let normalized: string;
+  if (/^data:image\/(jpeg|jpg|png|webp);base64,[A-Za-z0-9+/]+=*$/i.test(trimmed)) {
+    const commaIdx = trimmed.indexOf(",");
+    normalized = `${trimmed.slice(0, commaIdx).toLowerCase()},${trimmed.slice(commaIdx + 1)}`;
+  } else if (BARE_BASE64_RE.test(trimmed)) {
+    normalized = `data:image/${FASHN_REQUESTED_OUTPUT_FORMAT};base64,${trimmed}`;
+  } else {
     return { ok: false, errorCode: "INVALID_OUTPUT_FORMAT" };
   }
   // Decoded byte size from the base64 payload's own length — no need to
   // actually decode it to check this (4 base64 chars encode 3 bytes,
   // minus 1-2 for trailing '=' padding).
-  const base64 = value.slice(value.indexOf(",") + 1);
+  const base64 = normalized.slice(normalized.indexOf(",") + 1);
   const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
   const decodedBytes = Math.floor((base64.length * 3) / 4) - padding;
   if (decodedBytes > MAX_FASHN_OUTPUT_BYTES) {
     return { ok: false, errorCode: "OUTPUT_TOO_LARGE" };
   }
-  return { ok: true };
+  return { ok: true, normalizedDataUrl: normalized };
 }
 import {
   REAL_PRODUCT_HANDLE_PREFIX,
@@ -612,7 +638,7 @@ export async function pollFullLookRealStep(
       await markFailedBestEffort(job, outputValidation.errorCode);
       return { status: "FAILED", job };
     }
-    const outputDataUrl = outputs[0];
+    const outputDataUrl = outputValidation.normalizedDataUrl;
 
     const isFinal = stepIndex === ctx.garments.length - 1;
     const upload = isFinal
@@ -801,7 +827,7 @@ export async function recoverFailedUploadStep(
     await markFailedBestEffort(recoveryJob, outputValidation.errorCode);
     return { ok: false, reason: outputValidation.errorCode };
   }
-  const outputDataUrl = outputs[0];
+  const outputDataUrl = outputValidation.normalizedDataUrl;
 
   // CREATED -> SUBMITTED, stamping the REUSED predictionId directly —
   // never a freshly submitted one.

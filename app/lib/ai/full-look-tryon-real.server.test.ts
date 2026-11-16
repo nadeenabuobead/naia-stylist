@@ -201,7 +201,31 @@ describe("checkFashnPredictionStatus", () => {
 // never validated as a real image data URI, never size-checked.
 describe("validateFashnOutputDataUrl", () => {
   it("accepts a well-formed image data URI within the size ceiling", () => {
-    expect(validateFashnOutputDataUrl("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA")).toEqual({ ok: true });
+    expect(validateFashnOutputDataUrl("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA")).toEqual({
+      ok: true,
+      normalizedDataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA",
+    });
+  });
+
+  // 2026-11-16 ADDENDUM — Attempt C's one approved recovery attempt (job
+  // cmwhxjd0w0001l607s25kwvq1) rejected a genuinely-"completed" prediction's
+  // output right here. The raw value was never logged, so the exact real
+  // shape is unconfirmed, but these three cover the most plausible
+  // undocumented provider deviations from the documented return_base64
+  // contract.
+  it("is tolerant of a different-cased MIME subtype, normalizing it to lowercase", () => {
+    const result = validateFashnOutputDataUrl("data:image/PNG;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA");
+    expect(result).toEqual({ ok: true, normalizedDataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA" });
+  });
+
+  it("wraps a bare base64 payload (no data: prefix at all) using the exact output_format we requested at submission (png)", () => {
+    const result = validateFashnOutputDataUrl("iVBORw0KGgoAAAANSUhEUgAAAAUA");
+    expect(result).toEqual({ ok: true, normalizedDataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA" });
+  });
+
+  it("trims surrounding whitespace before classifying the shape", () => {
+    const result = validateFashnOutputDataUrl("  data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA\n");
+    expect(result).toEqual({ ok: true, normalizedDataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA" });
   });
 
   it("rejects a non-string value", () => {
@@ -226,7 +250,7 @@ describe("validateFashnOutputDataUrl", () => {
   it("rejects a decoded payload over MAX_FASHN_OUTPUT_BYTES, while staying well under it for a normal-sized image", () => {
     // ~1KB of real base64 — comfortably under the ceiling.
     const smallPayload = "data:image/png;base64," + "A".repeat(1024);
-    expect(validateFashnOutputDataUrl(smallPayload)).toEqual({ ok: true });
+    expect(validateFashnOutputDataUrl(smallPayload)).toEqual({ ok: true, normalizedDataUrl: smallPayload });
 
     // Oversized: base64 length chosen so the decoded size exceeds the ceiling.
     const oversizedBase64Length = Math.ceil((MAX_FASHN_OUTPUT_BYTES + 1024) * 4 / 3);

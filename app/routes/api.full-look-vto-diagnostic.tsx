@@ -179,6 +179,50 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
   }
 
+  // ── Content-free FASHN output-SHAPE check (2026-11-16 addition) — one
+  // more read-only status GET against the SAME existing predictionId as
+  // the Cloudinary check above (same job, same category of call the
+  // diagnostic already makes for PROCESSING rows, same thing
+  // recoverFailedUploadStep itself does — nothing billable, no new
+  // prediction). Built to answer, without another live recovery attempt,
+  // why a genuinely "completed" prediction's output was rejected as
+  // INVALID_OUTPUT_FORMAT during Attempt C's one approved recovery.
+  // Reports structural flags only (does the string look like a data URI /
+  // bare base64 / URL, its length, its mime subtype if a data URI) — never
+  // the string itself, never a URL, never any byte content.
+  let outputShapeCheck: Record<string, unknown> = { attempted: false };
+  if (uploadFailedIntermediate?.predictionId) {
+    const shapeStatusCheck = await checkFashnPredictionStatus(uploadFailedIntermediate.predictionId);
+    if (!shapeStatusCheck.ok) {
+      outputShapeCheck = { attempted: true, jobId: uploadFailedIntermediate.id, checkSucceeded: false };
+    } else if (shapeStatusCheck.body.status !== "completed") {
+      outputShapeCheck = {
+        attempted: true,
+        jobId: uploadFailedIntermediate.id,
+        checkSucceeded: true,
+        liveFashnStatus: shapeStatusCheck.body.status,
+        note: "The prediction no longer reports completed — nothing to inspect the shape of.",
+      };
+    } else {
+      const output = shapeStatusCheck.body.output;
+      const first = Array.isArray(output) && typeof output[0] === "string" ? output[0].trim() : null;
+      const dataUriMatch = first != null ? /^data:image\/([a-zA-Z0-9.+-]+);/i.exec(first) : null;
+      outputShapeCheck = {
+        attempted: true,
+        jobId: uploadFailedIntermediate.id,
+        checkSucceeded: true,
+        liveFashnStatus: "completed",
+        outputArrayLength: Array.isArray(output) ? output.length : null,
+        firstEntryIsString: first != null,
+        looksLikeDataUri: first != null ? /^data:image\//i.test(first) : null,
+        looksLikeBareBase64: first != null ? /^[A-Za-z0-9+/]+=*$/.test(first) : null,
+        looksLikeUrl: first != null ? /^https?:\/\//i.test(first) : null,
+        dataUriMimeSubtype: dataUriMatch ? dataUriMatch[1].toLowerCase() : null,
+        stringLength: first != null ? first.length : null,
+      };
+    }
+  }
+
   const finalStep = jobs.find((j) => j.productHandle.startsWith(FULL_LOOK_FINAL_STEP_HANDLE_PREFIX));
   const finalStepCompleted = finalStep?.status === "COMPLETED";
 
@@ -269,6 +313,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       finalStepCompleted,
       realCreditAccounting,
       cloudinaryAssetCheck,
+      outputShapeCheck,
     },
     { headers: { "Cache-Control": "no-store" } },
   );

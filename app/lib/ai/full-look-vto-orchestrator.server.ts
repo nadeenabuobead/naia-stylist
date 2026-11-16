@@ -189,9 +189,29 @@ export function selectFullLookGarments(
 // resume or replay, that old, incompatible chain's data. It simply
 // computes a fresh scope and starts fresh, with no special-case
 // comparison logic required.
+// 2026-11-16 BUG FIX — both this and findLatestAttemptIndex (below) used to
+// filter ONLY by productHandle's step1 prefix. recoverFullLookStep can
+// recover step1 specifically (confirmed live: Attempt C, job
+// cmwhxjd0w0001l607s25kwvq1), and its recovery row reuses that SAME step1
+// productHandle (by design — same garment, same role) while using a
+// completely different idempotencyKey namespace
+// (getFullLookStepRecoveryIdempotencyKey's "fulllook-real-recovery:...",
+// never "fulllook-real-reservation:..."). That row is therefore NOT a true
+// step-0 reservation and must never be mistaken for one — the added
+// idempotencyKey filter is the only thing that distinguishes them, since
+// productHandle alone cannot.
+function step0ReservationWhere(customerId: string, outfitSuggestionId: string) {
+  return {
+    customerId,
+    outfitSuggestionId,
+    productHandle: { startsWith: STEP1_HANDLE_PREFIX },
+    idempotencyKey: { startsWith: REAL_RESERVATION_KEY_PREFIX },
+  };
+}
+
 async function countAttempts(customerId: string, outfitSuggestionId: string): Promise<number> {
   return prisma.virtualTryOnJob.count({
-    where: { customerId, outfitSuggestionId, productHandle: { startsWith: STEP1_HANDLE_PREFIX } },
+    where: step0ReservationWhere(customerId, outfitSuggestionId),
   });
 }
 
@@ -232,7 +252,7 @@ function parseAttemptIndexFromStep0Key(
 // count that shifts the moment that very row comes into existence.
 async function findLatestAttemptIndex(customerId: string, outfitSuggestionId: string): Promise<number> {
   const latest = await prisma.virtualTryOnJob.findFirst({
-    where: { customerId, outfitSuggestionId, productHandle: { startsWith: STEP1_HANDLE_PREFIX } },
+    where: step0ReservationWhere(customerId, outfitSuggestionId),
     orderBy: [{ createdAt: "desc" }],
     select: { idempotencyKey: true },
   });
