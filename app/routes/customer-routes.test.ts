@@ -161,17 +161,19 @@ describe("C — no alert() in customer-facing routes", () => {
 // ── D. Canonical catalog ──────────────────────────────────────────────────────
 
 describe("D — canonical catalog: api routes use naia-catalog as single source of truth", () => {
-  it("api.wishlist.jsx imports getAllCatalogProducts from naia-catalog", () => {
+  // api.wishlist.jsx was rewritten into the Buy/Skip evidence engine by the
+  // 2026-09-03 "V1 Alignment Batch" (56dfa58) — "Remove NADINE catalogue
+  // entirely" — which dropped its catalog-product dependency along with the
+  // NADINE-match feature itself (see the naiaMatch tests below). This file
+  // genuinely has no product-catalog responsibility anymore; the SSOT pattern
+  // these tests were guarding is still enforced elsewhere (api.naia-products.jsx,
+  // tested directly below). Kept as a regression guard against the catalog
+  // dependency silently creeping back in, rather than deleted outright.
+  it("api.wishlist.jsx has no product-catalog dependency — that responsibility left with the 2026-09-03 NADINE removal", () => {
     const src = route("api.wishlist.jsx");
-    assert.ok(src.includes("getAllCatalogProducts"), "imports getAllCatalogProducts");
-    assert.ok(src.includes("naia-catalog"), "from naia-catalog module");
-  });
-
-  it("api.wishlist.jsx builds NAIA_PRODUCTS from canonical catalog, not a hardcoded array", () => {
-    const src = route("api.wishlist.jsx");
-    assert.ok(src.includes("NAIA_PRODUCTS = getAllCatalogProducts()"), "NAIA_PRODUCTS derived from catalog");
-    // Ensure the old static hardcoded list (with specific product handles) is gone
-    assert.ok(!src.includes('"naia-by-nadine-silk"'), "no hardcoded product handles");
+    assert.ok(!src.includes("getAllCatalogProducts"), "no getAllCatalogProducts import");
+    assert.ok(!src.includes("naia-catalog"), "no naia-catalog import");
+    assert.ok(!src.includes("NAIA_PRODUCTS"), "no NAIA_PRODUCTS array");
   });
 
   it("api.naia-products.jsx imports getAllCatalogProducts from naia-catalog", () => {
@@ -354,17 +356,26 @@ describe("G — dashboard hygiene: no /quick-style links in main dashboard", () 
     assert.ok(!src.includes('href="/quick-style"'), 'no href="/quick-style" links');
   });
 
-  it("_index.tsx (dashboard) links to /style-me for styling actions", () => {
-    const src = route("_index.tsx");
+  // The customer dashboard moved to /my-naia; app/routes/_index.tsx is now a
+  // documented 13-line redirect stub to it ("superseded by /my-naia and no
+  // longer linked from customer-facing navigation" per its own comment,
+  // pending the Lovable public-site integration). Checking the real file.
+  it("my-naia._index.tsx (dashboard) links to /style-me for styling actions", () => {
+    const src = route("my-naia._index.tsx");
     assert.ok(src.includes('"/style-me"') || src.includes("'/style-me'"), "links to /style-me");
   });
 
-  it("_index.tsx (dashboard) has post-wear review entry point", () => {
-    const src = route("_index.tsx");
+  it("my-naia._index.tsx (dashboard) has post-wear review entry point", () => {
+    const src = route("my-naia._index.tsx");
     assert.ok(
       src.includes("post-wear-review") || src.includes("HOW DID IT GO"),
       "has post-wear review entry point"
     );
+  });
+
+  it("_index.tsx is the documented redirect stub to /my-naia, not a dead dashboard reference", () => {
+    const src = route("_index.tsx");
+    assert.ok(src.includes('redirect(`/my-naia'), "redirects to /my-naia");
   });
 
   it("my-naia._index.tsx has no broken /my-naia/styleme/looks links", () => {
@@ -509,21 +520,32 @@ describe("I — BUG-5 (updated): saved look items resolve images via private Clo
     );
   });
 
+  // Loosened from an exact-substring match on the closetItem select object:
+  // that literal block gained a `category: true` field since this test was
+  // written, which broke the match even though the join itself (the thing
+  // this test actually cares about) never changed. Checking required-field
+  // presence individually survives future field additions the same way.
   it("my-naia._index.tsx loader selects productImageUrl and closetItem.imageUrl on SavedLook items", () => {
     const src = route("my-naia._index.tsx");
     assert.ok(src.includes("productImageUrl: true"), "selects productImageUrl from SavedLookItem");
-    assert.ok(
-      src.includes("closetItem: { select: { name: true, imageUrl: true, imagePublicId: true, imageFormat: true } }"),
-      "joins closetItem with private image fields for overview thumbnails"
-    );
+    const closetItemSelectIdx = src.indexOf("closetItem: { select:");
+    assert.ok(closetItemSelectIdx > -1, "joins closetItem for overview thumbnails");
+    const closetItemSelectBlock = src.slice(closetItemSelectIdx, src.indexOf("}", closetItemSelectIdx) + 1);
+    for (const field of ["name: true", "imageUrl: true", "imagePublicId: true", "imageFormat: true"]) {
+      assert.ok(closetItemSelectBlock.includes(field), `closetItem select includes ${field}`);
+    }
   });
 
-  it("my-naia._index.tsx overview thumbnail waterfall includes closetItem.imageUrl as final fallback", () => {
-    const src = route("my-naia._index.tsx");
-    assert.ok(
-      src.includes("closetItem?.imageUrl"),
-      "thumbnail rendering includes closetItem?.imageUrl fallback"
-    );
+  // The waterfall itself was extracted into a shared helper
+  // (resolveCollageImages in app/lib/styleme/look-image-resolution.server.ts)
+  // sometime after this test was written to check it inline here — the
+  // fallback chain (signed Cloudinary URL -> productImageUrl -> closetItem
+  // .imageUrl) is unchanged, just centralized for reuse across result/collage
+  // views instead of duplicated per-route.
+  it("look-image-resolution.server.ts's collage resolver includes closetItem.imageUrl as final fallback", () => {
+    const src = lib("styleme/look-image-resolution.server.ts");
+    assert.ok(src.includes("item.productImageUrl"), "checks productImageUrl before the closetItem fallback");
+    assert.ok(src.includes("ci?.imageUrl"), "falls back to closetItem.imageUrl as the last resort");
   });
 });
 
@@ -696,7 +718,10 @@ describe("K — Buy or Skip: save, persist, ownership, navigation", () => {
     const src = route("api.wishlist.jsx");
     assert.ok(src.includes("closetPairings"), "fullAnalysis includes closetPairings");
     assert.ok(src.includes("occasions"), "fullAnalysis includes occasions");
-    assert.ok(src.includes("naiaMatch"), "fullAnalysis includes naiaMatch");
+    // naiaMatch was removed 2026-09-03 (56dfa58, "Remove NADINE catalogue
+    // entirely") and replaced with productSnapshot — see the dedicated
+    // removal-regression-guard test below.
+    assert.ok(src.includes("productSnapshot"), "fullAnalysis includes productSnapshot");
     assert.ok(src.includes("detailedAnalysis"), "fullAnalysis includes detailedAnalysis");
     assert.ok(src.includes("styleDNAMatch"), "fullAnalysis includes styleDNAMatch");
     assert.ok(src.includes("finalThought"), "fullAnalysis includes finalThought");
@@ -754,11 +779,16 @@ describe("K — Buy or Skip: save, persist, ownership, navigation", () => {
     assert.ok(src.includes('to={`/buyskip/${d.id}`}'), "card links to individual result page");
   });
 
-  it("my-naia.buying-decisions.tsx shows verdict, confidence and date on each card", () => {
+  // Confidence was deliberately hidden from this card by the 2026-09-03 V1
+  // Alignment Batch ("Hide numeric confidence from verdict display and
+  // decisions list — stored internally only") — the field stays in the data
+  // model (my-naia._index.tsx's loader still selects it), it just isn't
+  // rendered here anymore. Verdict/category/outcome/date are.
+  it("my-naia.buying-decisions.tsx shows verdict and date on each card; confidence stays hidden per the 2026-09-03 decision", () => {
     const src = route("my-naia.buying-decisions.tsx");
     assert.ok(src.includes("d.verdict"), "renders verdict");
-    assert.ok(src.includes("d.confidence"), "renders confidence");
     assert.ok(src.includes("d.createdAt"), "renders date");
+    assert.ok(!src.includes("d.confidence"), "confidence stays hidden from the card — 56dfa58 holds");
   });
 
   it("routes.js registers both new routes", () => {
@@ -856,11 +886,17 @@ describe("K — Buy or Skip: save, persist, ownership, navigation", () => {
   });
 
   // ── K3. New content structure (Why It Works / Before You Buy / Final Condition) ─
-  it("buyskip.$id.tsx renders match percentage with 'MATCH' label — not 'confidence'", () => {
+  // The MATCH-percentage badge this test expected was itself removed by the
+  // same 2026-09-03 decision that hid confidence — the hero now shows only
+  // the qualitative verdict (bos-verdict) and a written summary, no numeric
+  // badge of any kind. "Match"/"MATCH" still appears elsewhere in the file
+  // (unrelated prose), so this checks for the absence of the specific badge
+  // class and percentage text, not the words themselves.
+  it("buyskip.$id.tsx shows no match-percentage badge — removed along with confidence, 2026-09-03", () => {
     const src = route("buyskip.$id.tsx");
-    assert.ok(src.includes("MATCH") || src.includes("Match"), "uses MATCH label for percentage");
-    assert.ok(src.includes("bos-verdict-match"), "uses bos-verdict-match class for the percentage span");
+    assert.ok(!src.includes("bos-verdict-match"), "no bos-verdict-match percentage-badge class");
     assert.ok(!src.includes("% confidence"), "does not render '% confidence' text");
+    assert.ok(src.includes("bos-verdict"), "the plain verdict display is still present");
   });
 
   it("buyskip.$id.tsx renders Why It Works section with style match and occasion", () => {
@@ -893,14 +929,10 @@ describe("K — Buy or Skip: save, persist, ownership, navigation", () => {
     assert.ok(src.includes("skipIf:"), "fullAnalysis persists skipIf");
   });
 
-  it("api.wishlist.jsx naiaMatch is stored separately from closetPairings in fullAnalysis", () => {
+  it("api.wishlist.jsx never writes naiaMatch to fullAnalysis — removed 2026-09-03, stays removed", () => {
     const src = route("api.wishlist.jsx");
-    assert.ok(src.includes("naiaMatch:"), "naiaMatch stored in fullAnalysis blob");
-    assert.ok(src.includes("closetPairings:"), "closetPairings stored in fullAnalysis blob");
-    // They must be at different character positions — confirming they are separate fields
-    const naiaIdx = src.indexOf("naiaMatch:");
-    const closetIdx = src.indexOf("closetPairings:");
-    assert.ok(naiaIdx !== closetIdx, "naiaMatch and closetPairings are distinct fields in the blob");
+    assert.ok(!src.includes("naiaMatch:"), "naiaMatch is not persisted — NADINE removal (56dfa58) holds");
+    assert.ok(src.includes("closetPairings:"), "closetPairings is still stored in fullAnalysis blob");
   });
 
   it("api.wishlist.jsx only uses eligible closet candidates — invented items are blocked server-side", () => {
@@ -965,9 +997,11 @@ describe("K — Buy or Skip: save, persist, ownership, navigation", () => {
     assert.ok(src.includes("if (analyzing) return;"), "handleAnalyze returns early if already analyzing");
   });
 
+  // Section header renamed FIT & BODY -> FIT, SILHOUETTE & BODY when
+  // silhouette preferences were added to it — same block, more content.
   it("api.wishlist.jsx prompt includes CUSTOMER FIT DATA block from Passport for size check", () => {
     const src = route("api.wishlist.jsx");
-    assert.ok(src.includes("FIT & BODY"), "fit data block present in prompt");
+    assert.ok(src.includes("FIT, SILHOUETTE & BODY"), "fit data block present in prompt");
     assert.ok(src.includes("topSize"), "topSize forwarded to AI");
     assert.ok(src.includes("bottomSize"), "bottomSize forwarded to AI");
     assert.ok(src.includes("dressSize"), "dressSize forwarded to AI");
@@ -976,12 +1010,21 @@ describe("K — Buy or Skip: save, persist, ownership, navigation", () => {
     assert.ok(src.includes("bodyAvoidAreas"), "bodyAvoidAreas forwarded to AI");
   });
 
+  // The missing-data instruction was inverted at some point after this test
+  // was written: the prompt no longer tells the AI to FALL BACK to a "Fit
+  // cannot be confirmed" disclaimer opener — it now explicitly FORBIDS that
+  // exact opening line, instructing the AI to lead with whatever Passport
+  // data IS on record instead. A deliberate prompt-quality change, not a
+  // missing feature.
   it("api.wishlist.jsx BEFORE YOU BUY prompt generates 2 AI points — fit+solution and wearability", () => {
     const src = route("api.wishlist.jsx");
     assert.ok(src.includes("FIT & PRACTICAL SOLUTION"), "fit & practical solution point in prompt");
     assert.ok(src.includes("WEARABILITY"), "wearability point in BEFORE YOU BUY prompt");
     assert.ok(src.includes("No brand-sizing claims"), "no brand-sizing claims rule present");
-    assert.ok(src.includes("Fit cannot be confirmed from your current Passport"), "missing-data fallback statement in prompt");
+    assert.ok(
+      src.includes('Never open with "Fit cannot be confirmed."'),
+      "prompt now forbids the disclaimer-style opener, leading with known Passport data instead",
+    );
   });
 
   it("api.wishlist.jsx beforeYouBuy schema is a 2-item array — fit+solution and wearability", () => {
@@ -1007,10 +1050,13 @@ describe("K — Buy or Skip: save, persist, ownership, navigation", () => {
     assert.ok(src.includes("if (!navigated) setAnalyzing(false)"), "analyzing only reset when not navigating");
   });
 
+  // The exact distinguishing phrase changed; the distinction itself (SKIP
+  // FOR NOW is conditional, not a definitive rejection) is still explicit in
+  // the verdict-severity rule, just worded differently and at more length.
   it("api.wishlist.jsx verdict prompt defines SKIP FOR NOW as conditional — not same as definitive SKIP", () => {
     const src = route("api.wishlist.jsx");
     assert.ok(src.includes("SKIP FOR NOW"), "SKIP FOR NOW verdict defined in prompt");
-    assert.ok(src.includes("not definitively unsuitable"), "SKIP FOR NOW distinguished from definitive SKIP");
+    assert.ok(src.includes("SKIP FOR NOW, not SKIP"), "SKIP FOR NOW distinguished from definitive SKIP");
   });
 
   it("api.wishlist.jsx verdictMap maps SKIP FOR NOW to SKIP DB enum — no migration needed", () => {
@@ -1018,10 +1064,12 @@ describe("K — Buy or Skip: save, persist, ownership, navigation", () => {
     assert.ok(src.includes('"SKIP FOR NOW": "SKIP"'), "SKIP FOR NOW persisted as SKIP in DB enum");
   });
 
-  it("api.wishlist.jsx persists detectedColor and naiaMatchRelationship in fullAnalysis", () => {
+  // naiaMatchRelationship was removed alongside naiaMatch itself on
+  // 2026-09-03 (56dfa58) — detectedColor is unrelated and still persisted.
+  it("api.wishlist.jsx persists detectedColor; naiaMatchRelationship stays removed per the 2026-09-03 decision", () => {
     const src = route("api.wishlist.jsx");
     assert.ok(src.includes("detectedColor:"), "detectedColor stored in fullAnalysis");
-    assert.ok(src.includes("naiaMatchRelationship:"), "naiaMatchRelationship stored in fullAnalysis");
+    assert.ok(!src.includes("naiaMatchRelationship:"), "naiaMatchRelationship is not persisted — 56dfa58 holds");
   });
 
   it("api.wishlist.jsx prompt includes COLOUR PREFERENCE RULE — neutrals not rejected for preference mismatch", () => {
@@ -1074,9 +1122,13 @@ describe("K — Buy or Skip: save, persist, ownership, navigation", () => {
     assert.ok(src.includes("bos-result-item-tag--detected"), "detected tag modifier class applied");
   });
 
-  it("buyskip.$id.tsx NADINE section uses single 'Pair It With NADINE' heading for all pairings", () => {
+  // NADINE branding was removed by the same 2026-09-03 decision; the closet-
+  // pairings section survived under its own heading, "Wear It With" — closet
+  // items only, no NADINE/catalog product recommendation mixed in.
+  it("buyskip.$id.tsx closet-pairings section uses 'Wear It With' heading — no NADINE branding, removed 2026-09-03", () => {
     const src = route("buyskip.$id.tsx");
-    assert.ok(src.includes("Pair It With NADINE"), "NADINE heading present");
+    assert.ok(src.includes("Wear It With"), "closet-pairings heading present");
+    assert.ok(!src.includes("NADINE"), "no NADINE branding anywhere in this route — 56dfa58 holds");
   });
 
   it("buyskip.$id.tsx renders concern solutions as a list below the concern evaluation", () => {
