@@ -2,6 +2,7 @@
 import { Form, Link, useLoaderData, useFetcher } from "react-router";
 import { data, redirect, type LoaderFunctionArgs, type ActionFunctionArgs, type ShouldRevalidateFunctionArgs, type LinksFunction } from "react-router";
 import { useState, useEffect, useRef } from "react";
+import { createFullLookDriver, type FullLookDriver } from "./full-look-client-driver";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import {
   STYLEME_STATE_LABELS,
@@ -1421,50 +1422,42 @@ export default function StyleMeResult() {
     | { status: "done"; resultUrl: string; omittedLabels?: string[] }
     | { status: "error"; message: string };
   const [fullLookQA, setFullLookQA] = useState<FullLookQAState>({ status: "idle" });
-  const fullLookPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const stopFullLookPolling = () => {
-    if (fullLookPollRef.current) {
-      clearInterval(fullLookPollRef.current);
-      fullLookPollRef.current = null;
-    }
-  };
+  // 2026-11-16 FIX — confirmed defect: GET /api/full-look-vto is fail-closed
+  // by design (allowSubmitNext: false — see full-look-vto-orchestrator.
+  // server.ts), so it can observe a garment finish but can never submit the
+  // next one. GET-only polling therefore stalled forever after the first
+  // garment, with no way for the customer to recover short of knowing to
+  // reload and re-click. This driver re-sends the SAME authorized POST the
+  // explicit click below sends, on the same cadence, until the chain
+  // reaches a terminal state — see full-look-client-driver.ts for the full
+  // rationale and the safety properties that stay enforced server-side
+  // regardless of how many times it ticks (max 5 garments, atomic leases,
+  // idempotent resume, no auto-retry of a failed prediction).
+  const fullLookDriverRef = useRef<FullLookDriver | null>(null);
+  if (!fullLookDriverRef.current) {
+    fullLookDriverRef.current = createFullLookDriver();
+  }
 
-  const pollFullLookOnce = async (suggestionId: string) => {
-    try {
-      const res = await fetch(`/api/full-look-vto?suggestionId=${encodeURIComponent(suggestionId)}`);
-      const json = await res.json();
-      if (!json.ok) return;
-      if (json.status === "COMPLETED") {
-        stopFullLookPolling();
-        setFullLookQA({ status: "done", resultUrl: json.resultUrl, omittedLabels: json.omittedLabels });
-      } else if (json.status === "FAILED") {
-        stopFullLookPolling();
-        setFullLookQA({ status: "error", message: json.errorCode ?? "unknown" });
-      } else if (json.status === "PROCESSING") {
-        setFullLookQA({ status: "loading", stepIndex: json.stepIndex, totalSteps: json.totalSteps });
-      } else if (json.status === "AWAITING_AUTHORIZATION") {
-        // Nothing is in flight with the provider right now and nothing will change
-        // on its own — stop polling every 3s for no reason. The explicit
-        // Continue button (triggerFullLook) is what moves this forward.
-        stopFullLookPolling();
-        setFullLookQA({ status: "awaiting_authorization", stepIndex: json.stepIndex, totalSteps: json.totalSteps });
-      }
-      // NOT_STARTED — keep polling, stay idle.
-    } catch {
-      // One poll failing is not fatal — the interval tries again shortly.
-    }
-  };
-
-  const startFullLookPolling = (suggestionId: string) => {
-    if (fullLookPollRef.current) return;
-    fullLookPollRef.current = setInterval(() => pollFullLookOnce(suggestionId), 3000);
+  const driverCallbacks = {
+    onProgress: (stepIndex: number | undefined, totalSteps: number | undefined) =>
+      setFullLookQA({ status: "loading", stepIndex, totalSteps }),
+    onDone: (resultUrl: string, omittedLabels: string[] | undefined) =>
+      setFullLookQA({ status: "done", resultUrl, omittedLabels }),
+    onError: (message: string) => setFullLookQA({ status: "error", message }),
   };
 
   // On mount: a customer revisiting this look must see an already-completed
-  // (or still-processing) result immediately — never a bare "try this look
+  // (or still-progressing) result immediately — never a bare "try this look
   // on" button that would let them re-trigger and waste/re-charge a
-  // generation that already exists. A brand-new suggestion with no chain
+  // generation that already exists. This first check is a plain, read-only
+  // GET (pollFullLookOutfit) — it can never submit anything, so a page load
+  // alone is always free. AWAITING_AUTHORIZATION means the browser was
+  // closed mid-chain while a garment finished and the next was never
+  // submitted (see the driver's own header comment) — resuming the
+  // authorized driver here, not another bare GET, is what actually
+  // advances it, still within the original click's consent and the
+  // server-enforced 5-garment budget. A brand-new suggestion with no chain
   // yet simply stays idle (NOT_STARTED is a no-op here).
   useEffect(() => {
     const suggestionId = suggestion?.id;
@@ -1477,12 +1470,11 @@ export default function StyleMeResult() {
         if (cancelled || !json.ok) return;
         if (json.status === "COMPLETED") {
           setFullLookQA({ status: "done", resultUrl: json.resultUrl, omittedLabels: json.omittedLabels });
-        } else if (json.status === "PROCESSING") {
+        } else if (json.status === "PROCESSING" || json.status === "AWAITING_AUTHORIZATION") {
           setFullLookQA({ status: "loading", stepIndex: json.stepIndex, totalSteps: json.totalSteps });
-          startFullLookPolling(suggestionId);
-        } else if (json.status === "AWAITING_AUTHORIZATION") {
-          setFullLookQA({ status: "awaiting_authorization", stepIndex: json.stepIndex, totalSteps: json.totalSteps });
+          fullLookDriverRef.current?.start(suggestionId, driverCallbacks, { retry: false });
         }
+        // NOT_STARTED / FAILED — stay idle; the button remains the way to start or retry.
       } catch {
         // Silent — the button remains available as a fallback.
       }
@@ -1493,41 +1485,16 @@ export default function StyleMeResult() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [suggestion?.id, loaderData.naiaModelIsReady]);
 
-  useEffect(() => stopFullLookPolling, []);
+  useEffect(() => () => fullLookDriverRef.current?.stop(), []);
 
-  const triggerFullLook = async (retry: boolean) => {
+  // The one explicit, consent-gated action a customer takes. Authorizes the
+  // driver above to progress this chain through every garment (up to the
+  // server-enforced 5-garment ceiling) without any further click or reload.
+  const triggerFullLook = (retry: boolean) => {
     const suggestionId = suggestion?.id;
     if (!suggestionId) return;
     setFullLookQA({ status: "loading" });
-    try {
-      const res = await fetch("/api/full-look-vto", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          outfitSuggestionId: suggestionId,
-          virtualTryOnConsentAt: new Date().toISOString(),
-          retry,
-        }),
-      });
-      const json = await res.json();
-      if (!json.ok) {
-        setFullLookQA({ status: "error", message: json.code ?? "unknown" });
-        return;
-      }
-      if (json.status === "COMPLETED") {
-        setFullLookQA({ status: "done", resultUrl: json.resultUrl, omittedLabels: json.omittedLabels });
-      } else if (json.status === "FAILED") {
-        setFullLookQA({ status: "error", message: json.errorCode ?? "unknown" });
-      } else {
-        // Founder decision: automatically progress through all garment
-        // steps — the client only ever sees PROCESSING until COMPLETED/
-        // FAILED, never an intermediate-step state to manage.
-        setFullLookQA({ status: "loading", stepIndex: json.stepIndex, totalSteps: json.totalSteps });
-        startFullLookPolling(suggestionId);
-      }
-    } catch {
-      setFullLookQA({ status: "error", message: "network" });
-    }
+    fullLookDriverRef.current?.start(suggestionId, driverCallbacks, { retry });
   };
 
   // ── New Look, Same Vibe: scroll to the new result once it actually arrives ────
@@ -2151,6 +2118,9 @@ export default function StyleMeResult() {
                 >
                   TRY THIS LOOK ON
                 </button>
+                <p className="sm-vto-body-note">
+                  This generates up to 5 try-on images, one per piece in this look — just this once, right here.
+                </p>
               </>
             )}
 

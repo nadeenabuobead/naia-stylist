@@ -1194,11 +1194,25 @@ describe("StyleMe Result — Virtual Try-On customer UI", () => {
     // never persisted anything — see that route's own header) was replaced
     // as the customer trigger by the real, persisted chain's orchestration
     // route. api.staging-full-look-vto.tsx itself is untouched (VTO.10,
-    // below, still proves that) — this test only covers what result.tsx calls.
-    const text = src("result.tsx");
-    assert.ok(text.includes('"/api/full-look-vto"'), "must call the real, persisted VTO route");
-    assert.ok(text.includes("outfitSuggestionId: suggestionId"), "must pass the persisted suggestionId");
-    assert.ok(text.includes("virtualTryOnConsentAt: new Date().toISOString()"), "must include consent timestamp");
+    // below, still proves that).
+    //
+    // 2026-11-16: the actual fetch call moved out of result.tsx into
+    // full-look-client-driver.ts (the fix for the confirmed defect where
+    // GET-only polling could never submit garments 2-5 — see that file's
+    // header comment). result.tsx now authorizes the driver with the
+    // suggestion id instead of calling fetch directly; the driver is what
+    // must call the real, persisted route with a fresh consent timestamp.
+    const driverText = src("full-look-client-driver.ts");
+    assert.ok(driverText.includes('"/api/full-look-vto"'), "driver must call the real, persisted VTO route");
+    assert.ok(driverText.includes("outfitSuggestionId: suggestionId"), "driver must pass the persisted suggestionId");
+    assert.ok(driverText.includes("virtualTryOnConsentAt: nowIso()"), "driver must include a fresh consent timestamp");
+
+    const resultText = src("result.tsx");
+    assert.ok(
+      resultText.includes("fullLookDriverRef.current?.start(suggestionId"),
+      "result.tsx must authorize the driver with the real, persisted suggestionId",
+    );
+    assert.ok(!resultText.includes('fetch("/api/full-look-vto"'), "result.tsx must not call the VTO route directly anymore");
   });
 
   it("VTO.6 — loading state prevents repeat submissions (status: loading replaces the CTA)", () => {
@@ -1277,56 +1291,47 @@ describe("StyleMe Result — Virtual Try-On customer UI", () => {
     assert.ok(c.includes("align-self: stretch"), "mobile: sm-vto-cta must stretch full-width");
   });
 
-  // 2026-11-16 — the explicit continuation UI for AWAITING_AUTHORIZATION
-  // (full-look-vto-orchestrator.server.ts's own safe-advance fix, d609202).
-  // This is NOT wired to actually run yet (no live Preview serves this
-  // branch) — these are static-source checks proving the control exists,
-  // is gated behind an explicit click (never auto-fires), and discloses
-  // the real cost, same convention as every other VTO.* check in this file.
-  describe("VTO.13 — explicit continuation control for AWAITING_AUTHORIZATION (recovery vs. new-submission authorization)", () => {
-    it("a distinct awaiting_authorization branch exists, separate from loading/done/error", () => {
-      const text = src("result.tsx");
-      assert.ok(
-        text.includes(`fullLookQA.status === "awaiting_authorization"`),
-        "awaiting_authorization state branch must exist",
-      );
-    });
+  // 2026-11-16 — confirmed defect: GET /api/full-look-vto is fail-closed by
+  // design (allowSubmitNext: false), so GET-only polling could observe a
+  // garment finish but never submit the next one — the chain stalled for
+  // good after garment 1. VTO.13-16 pin the fix: the explicit click
+  // authorizes a driver that re-sends the same authorized request on its
+  // own, the GET endpoint is never asked to do more than it safely can, and
+  // a browser reopened mid-chain resumes instead of staying stuck.
 
-    it("the continuation action is an explicit click — never rendered inside an effect or a poll handler", () => {
-      const text = src("result.tsx");
-      const branchStart = text.indexOf(`fullLookQA.status === "awaiting_authorization"`);
-      const branchEnd = text.indexOf("fullLookQA.status === \"done\"", branchStart);
-      const branch = text.slice(branchStart, branchEnd);
-      assert.ok(branch.includes("onClick={() => triggerFullLook(false)}"), "must be an explicit onClick, not automatic");
-      assert.ok(!branch.includes("useEffect"), "must not be wired to fire automatically on render/mount");
-    });
+  it("VTO.13 — the explicit click confirms it authorizes up to 5 garment submissions", () => {
+    const text = src("result.tsx");
+    assert.ok(
+      /up to 5 try-on images/.test(text),
+      "the idle CTA must disclose the up-to-5-submission scope before the customer clicks",
+    );
+  });
 
-    it("the copy discloses that continuing creates new, separate generations — not vague or silent about cost", () => {
-      const text = src("result.tsx");
-      const branchStart = text.indexOf(`fullLookQA.status === "awaiting_authorization"`);
-      const branchEnd = text.indexOf("fullLookQA.status === \"done\"", branchStart);
-      const branch = text.slice(branchStart, branchEnd);
-      assert.ok(
-        /generate|generation/i.test(branch) && /next garment|separate/i.test(branch),
-        "copy must make clear that proceeding creates additional generations",
-      );
-      assert.ok(!branch.includes("FASHN"), "provider name must never appear in customer-facing JSX");
-    });
+  it("VTO.14 — the mount effect resumes the authorized driver on AWAITING_AUTHORIZATION, not just PROCESSING", () => {
+    const text = src("result.tsx");
+    assert.ok(
+      text.includes('json.status === "PROCESSING" || json.status === "AWAITING_AUTHORIZATION"'),
+      "reopening mid-chain (AWAITING_AUTHORIZATION) must resume progress, not silently fall back to idle",
+    );
+    assert.ok(
+      text.includes("fullLookDriverRef.current?.start(suggestionId, driverCallbacks, { retry: false })"),
+      "resuming on mount must be a plain (non-retry) authorized call — it continues the existing chain, never starts a new attempt",
+    );
+  });
 
-    it("the poll handler and the mount effect both recognize AWAITING_AUTHORIZATION — neither silently falls through as if it were still loading", () => {
-      const text = src("result.tsx");
-      const pollFnStart = text.indexOf("const pollFullLookOnce");
-      const pollFnEnd = text.indexOf("const startFullLookPolling", pollFnStart);
-      assert.ok(
-        text.slice(pollFnStart, pollFnEnd).includes('"AWAITING_AUTHORIZATION"'),
-        "pollFullLookOnce must handle AWAITING_AUTHORIZATION explicitly",
-      );
-      const mountEffectStart = text.indexOf("useEffect(() => {\n    const suggestionId = suggestion?.id;");
-      const mountEffectEnd = text.indexOf("}, [suggestion?.id, loaderData.naiaModelIsReady]);", mountEffectStart);
-      assert.ok(
-        text.slice(mountEffectStart, mountEffectEnd).includes('"AWAITING_AUTHORIZATION"'),
-        "the on-mount status check must also handle AWAITING_AUTHORIZATION explicitly",
-      );
-    });
+  it("VTO.15 — the driver is stopped on unmount, not left running against a closed page", () => {
+    const text = src("result.tsx");
+    assert.ok(
+      text.includes("useEffect(() => () => fullLookDriverRef.current?.stop(), [])"),
+      "unmount must stop the driver (no further automatic requests once the component is gone)",
+    );
+  });
+
+  it("VTO.16 — the explicit click only ever passes the caller's own retry flag through to the driver, never hardcoding true", () => {
+    const text = src("result.tsx");
+    assert.ok(
+      text.includes("fullLookDriverRef.current?.start(suggestionId, driverCallbacks, { retry });"),
+      "triggerFullLook must forward retry exactly as called — 'Try This Look On' passes false, 'Try Again' passes true, and nothing else fabricates true",
+    );
   });
 });
