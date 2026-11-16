@@ -33,10 +33,13 @@
 //     instead of dropping the event — a prior version of this handler
 //     silently dropped this case, permanently losing the event's data
 //     since Stripe does not redeliver an event we 200'd.
-//   - invoice.paid with billing_reason "subscription_cycle": a renewal
-//     charge — records SUBSCRIPTION_RENEWAL (SUCCEEDED). Any other
-//     billing_reason is ignored here; the initial charge is recorded by
-//     checkout.session.completed / .async_payment_succeeded, not here.
+//   - invoice.paid with billing_reason "subscription_cycle" (an ordinary
+//     renewal) OR "subscription_update" (a mid-cycle plan-change proration,
+//     e.g. the monthly<->annual Billing Portal switch) — both record
+//     SUBSCRIPTION_RENEWAL (SUCCEEDED); see isNonInitialInvoiceCharge's own
+//     comment. Every other billing_reason is ignored here; the initial
+//     charge is recorded by checkout.session.completed /
+//     .async_payment_succeeded, not here.
 //   - invoice.payment_failed: records a FAILED BillingTransaction ledger
 //     entry (SUBSCRIPTION_INITIAL or _RENEWAL depending on billing_reason)
 //     for billing-history/support visibility. Deliberately does NOT itself
@@ -783,6 +786,29 @@ export function derivePeriodTimestampFromAuthoritative(
   return new Date(raw * 1000);
 }
 
+// ── Non-initial invoice charges (billing-reliability fix, 2026-11-16) ─────
+//
+// Stripe's documented billing_reason values: subscription_create,
+// subscription_cycle, subscription_update, subscription_threshold, manual,
+// upcoming, quote_accept, automatic_pending_invoice_item_invoice. Only two
+// of these are real charges this product's lifecycle can actually produce
+// against an EXISTING subscription — an ordinary renewal (subscription_cycle)
+// and a mid-cycle plan-change proration (subscription_update, e.g. the
+// monthly<->annual Billing Portal switch WH.6c already covers on the
+// Subscription-sync side). "subscription_create" is deliberately excluded
+// here in both the success and failure branches below — that one and only
+// that one is already captured via checkout.session.completed/
+// .async_payment_succeeded (success) or already correctly mapped to
+// SUBSCRIPTION_INITIAL (failure, see the invoice.payment_failed case),
+// so including it here would double-count a succeeded charge or mislabel a
+// renewal-class failure as an initial one. subscription_threshold (metered
+// usage) and the rest are not reachable by this product (fixed-price,
+// non-metered) and are intentionally never recorded, not silently ignored
+// by accident.
+function isNonInitialInvoiceCharge(billingReason: unknown): boolean {
+  return billingReason === "subscription_cycle" || billingReason === "subscription_update";
+}
+
 // Reads the service period directly off an Invoice object's own first line
 // item (Invoice.lines.data[0].period.start/end) — verified live against
 // Stripe's current InvoiceLineItem API reference
@@ -1296,7 +1322,22 @@ export async function processStripeWebhookEvent(
     }
 
     case "invoice.paid": {
-      if (obj.billing_reason !== "subscription_cycle") break; // initial invoice already recorded above
+      // Billing-reliability fix (2026-11-16): "subscription_cycle" (an
+      // ordinary renewal) was the only billing_reason ever recorded here —
+      // "subscription_update" (a mid-cycle plan change, e.g. monthly<->annual
+      // via the Billing Portal — see WH.6c's own coverage of the resulting
+      // Subscription sync) was silently falling through this guard and into
+      // "initial invoice already recorded above," which is only true for
+      // "subscription_create". A real, successfully-paid proration charge
+      // from a plan switch was being dropped from BillingTransaction
+      // entirely — a genuine gap against requirement 8 (every real payment
+      // reconciles against the billing-history ledger). Both billing_reasons
+      // represent money collected against an ALREADY-EXISTING subscription
+      // (as opposed to "subscription_create", captured via
+      // checkout.session.completed/.async_payment_succeeded instead, never
+      // here, so there is no double-count risk) — see isNonInitialInvoice's
+      // own comment for why no other billing_reason belongs in this ledger.
+      if (!isNonInitialInvoiceCharge(obj.billing_reason)) break;
       const providerSubscriptionId: string | undefined = obj.subscription;
       if (!providerSubscriptionId) break;
       const existing = await _findSubscriptionByProviderSubscriptionId(providerSubscriptionId);
@@ -1326,11 +1367,22 @@ export async function processStripeWebhookEvent(
         // live currentPeriodStart/End before or after this event — using
         // THAT here would risk tagging this renewal with the wrong period
         // depending on delivery order; the invoice's own line period has
-        // no such dependency).
+        // no such dependency). CAVEAT for "subscription_update" specifically
+        // (not applicable to the proven "subscription_cycle" case, which is
+        // always single-line): Stripe can emit a plan-switch proration
+        // invoice with MULTIPLE line items (an unused-time credit on the old
+        // price plus the new price's prorated charge) and this codebase has
+        // never observed one live — lines.data[0] is used for consistency
+        // with the rest of this function, but which line Stripe orders
+        // first is UNVERIFIED against a real event. If it turns out to be
+        // the wrong line, the result is a wrong-but-non-null fundedPeriod
+        // (same fail-safe shape reconcileNullFundedPeriods/the refund-period
+        // matching above already handle for a merely ABSENT one) — flagged
+        // in the staging-verification handoff rather than guessed past here.
         fundedPeriodStart: derivePeriodFromInvoiceLine(obj, "start"),
         fundedPeriodEnd: derivePeriodFromInvoiceLine(obj, "end"),
       });
-      action = "renewal_recorded";
+      action = obj.billing_reason === "subscription_update" ? "plan_change_charge_recorded" : "renewal_recorded";
       break;
     }
 
@@ -1346,7 +1398,15 @@ export async function processStripeWebhookEvent(
       await _createBillingTransaction({
         customerId: existing.customerId,
         subscriptionId: existing.id,
-        type: obj.billing_reason === "subscription_cycle" ? "SUBSCRIPTION_RENEWAL" : "SUBSCRIPTION_INITIAL",
+        // Billing-reliability fix (2026-11-16): previously only
+        // "subscription_cycle" mapped to RENEWAL — a failed plan-change
+        // proration charge ("subscription_update") was mislabeled as
+        // SUBSCRIPTION_INITIAL (wrong: it is neither the first payment nor,
+        // per isNonInitialInvoiceCharge's own comment, ever double-counted
+        // against the real initial charge). Same shared classification the
+        // success branch above now uses, so the two can never drift apart
+        // again the way they just did.
+        type: isNonInitialInvoiceCharge(obj.billing_reason) ? "SUBSCRIPTION_RENEWAL" : "SUBSCRIPTION_INITIAL",
         status: "FAILED",
         amount: typeof obj.amount_due === "number" ? obj.amount_due : 0,
         currency: (obj.currency ?? "aed").toUpperCase(),

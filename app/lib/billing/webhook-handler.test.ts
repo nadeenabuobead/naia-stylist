@@ -1300,6 +1300,28 @@ describe("processStripeWebhookEvent — invoice.paid renewals", () => {
     assert.equal(transaction.subscriptionId, "sub-row-1");
   });
 
+  it("WH.12d — billing_reason 'subscription_update' (a mid-cycle plan-change proration, e.g. monthly<->annual via the Billing Portal) ALSO records a SUCCEEDED SUBSCRIPTION_RENEWAL transaction — billing-reliability fix, 2026-11-16: this used to be silently dropped", async () => {
+    let transaction: any = null;
+    const existing = baseSubscription();
+    const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
+      findProcessedEvent: async () => null,
+      findSubscriptionByProviderSubscriptionId: async () => existing,
+      createBillingTransaction: async (input) => { transaction = input; },
+      recordProcessedEvent: async () => {},
+    };
+    const event = makeEvent({
+      type: "invoice.paid",
+      data: { object: { subscription: "sub_stripe_1", billing_reason: "subscription_update", amount_paid: 26000, currency: "aed" } },
+    });
+    const result = await processStripeWebhookEvent(event, deps);
+    assert.ok(transaction, "a plan-change proration charge must be recorded, not silently dropped");
+    assert.equal(transaction.type, "SUBSCRIPTION_RENEWAL");
+    assert.equal(transaction.status, "SUCCEEDED");
+    assert.equal(transaction.amount, 26000);
+    assert.deepEqual(result, { ok: true, deduped: false, action: "plan_change_charge_recorded" });
+  });
+
   it("WH.13 — a non-renewal billing_reason (e.g. the very first invoice) records nothing — checkout.session.completed already recorded the initial charge", async () => {
     let transactionCalls = 0;
     const deps: WebhookHandlerDeps = {
@@ -1452,6 +1474,25 @@ describe("processStripeWebhookEvent — invoice.payment_failed", () => {
     });
     await processStripeWebhookEvent(event, deps);
     assert.equal(transaction.type, "SUBSCRIPTION_INITIAL");
+    assert.equal(transaction.status, "FAILED");
+  });
+
+  it("WH.23b — a FAILED plan-change proration charge (billing_reason subscription_update) records SUBSCRIPTION_RENEWAL, not _INITIAL — billing-reliability fix, 2026-11-16: this used to be mislabeled", async () => {
+    let transaction: any = null;
+    const existing = baseSubscription();
+    const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
+      findProcessedEvent: async () => null,
+      findSubscriptionByProviderSubscriptionId: async () => existing,
+      createBillingTransaction: async (input) => { transaction = input; },
+      recordProcessedEvent: async () => {},
+    };
+    const event = makeEvent({
+      type: "invoice.payment_failed",
+      data: { object: { subscription: "sub_stripe_1", billing_reason: "subscription_update", amount_due: 26000 } },
+    });
+    await processStripeWebhookEvent(event, deps);
+    assert.equal(transaction.type, "SUBSCRIPTION_RENEWAL", "a plan-change charge is never the subscription's first payment");
     assert.equal(transaction.status, "FAILED");
   });
 
