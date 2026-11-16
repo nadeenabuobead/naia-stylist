@@ -24,6 +24,11 @@ vi.mock("~/db.server", () => ({
 vi.mock("~/lib/ai/full-look-tryon-real.server", () => ({
   checkFashnPredictionStatus: vi.fn(),
   REAL_PRODUCT_HANDLE_PREFIX: "fulllook-real",
+  // Same derivation as the real function (naia-tryon-fulllook-intermediate/
+  // {customerId}/{jobId}) — mocked rather than imported from importOriginal
+  // since this module is otherwise fully replaced here; kept in sync by
+  // the dedicated "matches the real derivation" test below.
+  deriveIntermediateStepPublicId: vi.fn((customerId: string, jobId: string) => `naia-tryon-fulllook-intermediate/${customerId}/${jobId}`),
 }));
 vi.mock("~/lib/ai/full-look-vto-orchestrator.server", () => ({
   selectFullLookGarments: vi.fn(() => null), // default: no suggestion/selection — keeps existing tests unaffected
@@ -31,6 +36,7 @@ vi.mock("~/lib/ai/full-look-vto-orchestrator.server", () => ({
 }));
 vi.mock("~/lib/cloudinary-admin.server", () => ({
   getCloudinaryConfig: vi.fn(() => null),
+  listCloudinaryAssetsByPrefix: vi.fn(),
 }));
 vi.mock("~/lib/plan/entitlement.server", () => ({
   getEntitlementSummary: vi.fn(),
@@ -41,7 +47,10 @@ import prisma from "~/db.server";
 import { checkFashnPredictionStatus } from "~/lib/ai/full-look-tryon-real.server";
 import { selectFullLookGarments, resolveCurrentAttemptScope } from "~/lib/ai/full-look-vto-orchestrator.server";
 import { getEntitlementSummary } from "~/lib/plan/entitlement.server";
+import { listCloudinaryAssetsByPrefix } from "~/lib/cloudinary-admin.server";
 import { loader } from "./api.full-look-vto-diagnostic";
+
+const mockListAssets = () => listCloudinaryAssetsByPrefix as ReturnType<typeof vi.fn>;
 
 const mockCustomer = () => getCurrentNaiaCustomer as ReturnType<typeof vi.fn>;
 const mockFindMany = () => (prisma as any).virtualTryOnJob.findMany as ReturnType<typeof vi.fn>;
@@ -78,6 +87,7 @@ function makeJob(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   mockEntitlementSummary().mockResolvedValue(makeEntitlementSummary());
+  mockListAssets().mockResolvedValue({ ok: true, assets: [], nextCursor: null, rateLimitRemaining: null });
 });
 
 function makeRequest(url: string) {
@@ -322,5 +332,114 @@ describe("api.full-look-vto-diagnostic — scopeCheck (empirical scope-resolutio
     expect(body.scopeCheck.attempted).toBe(true);
     expect(body.scopeCheck.error).toBeDefined();
     expect(mockResolveScope()).not.toHaveBeenCalled();
+  });
+});
+
+// 2026-11-16 — the one narrowly-scoped, explicitly authorized, read-only
+// Cloudinary metadata check for the exact UPLOAD_FAILED asset.
+describe("cloudinaryAssetCheck — narrowly-scoped, read-only, one asset only", () => {
+  it("checks exactly the single most recent UPLOAD_FAILED intermediate job's own asset — never a broader prefix, never the whole customer's folder", async () => {
+    mockCustomer().mockResolvedValue({ id: "cust-1" });
+    const jobs = [
+      makeJob({ id: "job-older", productHandle: "fulllook-real:step1:Trousers", status: "FAILED", errorCode: "UPLOAD_FAILED", createdAt: new Date("2026-11-14T00:00:00.000Z") }),
+      makeJob({ id: "job-newer", productHandle: "fulllook-real:step1:Trousers", status: "FAILED", errorCode: "UPLOAD_FAILED", createdAt: new Date("2026-11-15T00:00:00.000Z") }),
+    ];
+    mockFindMany().mockResolvedValue(jobs);
+    mockListAssets().mockResolvedValueOnce({
+      ok: true,
+      assets: [{ publicId: "naia-tryon-fulllook-intermediate/cust-1/job-newer", resourceType: "image", type: "private", format: "png", createdAt: "2026-11-16T06:55:40.000Z" }],
+      nextCursor: null,
+      rateLimitRemaining: 95,
+    });
+
+    const res: any = await loader(makeRequest("https://x.test/api/full-look-vto-diagnostic?suggestionId=sugg-1"));
+    const body = res.data ?? res;
+
+    expect(mockListAssets()).toHaveBeenCalledTimes(1);
+    const [prefixArg, deliveryTypeArg, optsArg] = mockListAssets().mock.calls[0];
+    expect(prefixArg).toBe("naia-tryon-fulllook-intermediate/cust-1/job-newer"); // the NEWER one, never job-older
+    expect(deliveryTypeArg).toBe("private");
+    expect(optsArg).toMatchObject({ maxResults: 1 });
+    expect(body.cloudinaryAssetCheck).toEqual({
+      attempted: true,
+      jobId: "job-newer",
+      checkSucceeded: true,
+      assetExistsInCloudinary: true,
+      format: "png",
+      cloudinaryCreatedAt: "2026-11-16T06:55:40.000Z",
+      note: expect.stringContaining("may have actually succeeded"),
+    });
+  });
+
+  it("never includes the raw public_id (which embeds the customer's own id) anywhere in the response", async () => {
+    mockCustomer().mockResolvedValue({ id: "cust-1" });
+    mockFindMany().mockResolvedValue([
+      makeJob({ id: "job-1", productHandle: "fulllook-real:step1:Trousers", status: "FAILED", errorCode: "UPLOAD_FAILED" }),
+    ]);
+    mockListAssets().mockResolvedValueOnce({
+      ok: true,
+      assets: [{ publicId: "naia-tryon-fulllook-intermediate/cust-1/job-1", resourceType: "image", type: "private", format: "png", createdAt: "x" }],
+      nextCursor: null,
+      rateLimitRemaining: null,
+    });
+
+    const res: any = await loader(makeRequest("https://x.test/api/full-look-vto-diagnostic?suggestionId=sugg-1"));
+    const body = JSON.stringify(res.data ?? res);
+
+    expect(body).not.toContain("naia-tryon-fulllook-intermediate/cust-1/job-1");
+  });
+
+  it("reports assetExistsInCloudinary: false when the asset genuinely doesn't exist — distinguishing a real upload failure from an app-side response-handling bug", async () => {
+    mockCustomer().mockResolvedValue({ id: "cust-1" });
+    mockFindMany().mockResolvedValue([
+      makeJob({ id: "job-1", productHandle: "fulllook-real:step1:Trousers", status: "FAILED", errorCode: "UPLOAD_FAILED" }),
+    ]);
+    mockListAssets().mockResolvedValueOnce({ ok: true, assets: [], nextCursor: null, rateLimitRemaining: 99 });
+
+    const res: any = await loader(makeRequest("https://x.test/api/full-look-vto-diagnostic?suggestionId=sugg-1"));
+    const body = res.data ?? res;
+
+    expect(body.cloudinaryAssetCheck).toMatchObject({ assetExistsInCloudinary: false });
+    expect(body.cloudinaryAssetCheck.note).toContain("never completing at Cloudinary");
+  });
+
+  it("surfaces a failed metadata check itself honestly, without claiming anything about the original upload", async () => {
+    mockCustomer().mockResolvedValue({ id: "cust-1" });
+    mockFindMany().mockResolvedValue([
+      makeJob({ id: "job-1", productHandle: "fulllook-real:step1:Trousers", status: "FAILED", errorCode: "UPLOAD_FAILED" }),
+    ]);
+    mockListAssets().mockResolvedValueOnce({ ok: false, assets: [], nextCursor: null, rateLimitRemaining: null, errorCode: "RATE_LIMITED" });
+
+    const res: any = await loader(makeRequest("https://x.test/api/full-look-vto-diagnostic?suggestionId=sugg-1"));
+    const body = res.data ?? res;
+
+    expect(body.cloudinaryAssetCheck).toMatchObject({ checkSucceeded: false, checkErrorCode: "RATE_LIMITED" });
+  });
+
+  it("never calls the Cloudinary check at all when no job has errorCode UPLOAD_FAILED", async () => {
+    mockCustomer().mockResolvedValue({ id: "cust-1" });
+    mockFindMany().mockResolvedValue([
+      makeJob({ id: "job-1", status: "COMPLETED", errorCode: null }),
+      makeJob({ id: "job-2", status: "FAILED", errorCode: "PROVIDER_FAILED" }),
+    ]);
+
+    const res: any = await loader(makeRequest("https://x.test/api/full-look-vto-diagnostic?suggestionId=sugg-1"));
+    const body = res.data ?? res;
+
+    expect(mockListAssets()).not.toHaveBeenCalled();
+    expect(body.cloudinaryAssetCheck).toEqual({ attempted: false });
+  });
+
+  it("never checks a FINAL step's own UPLOAD_FAILED job — only intermediate steps are in scope", async () => {
+    mockCustomer().mockResolvedValue({ id: "cust-1" });
+    mockFindMany().mockResolvedValue([
+      makeJob({ id: "job-final", productHandle: "fulllook-real:final:Blazer", status: "FAILED", errorCode: "UPLOAD_FAILED" }),
+    ]);
+
+    const res: any = await loader(makeRequest("https://x.test/api/full-look-vto-diagnostic?suggestionId=sugg-1"));
+    const body = res.data ?? res;
+
+    expect(mockListAssets()).not.toHaveBeenCalled();
+    expect(body.cloudinaryAssetCheck).toEqual({ attempted: false });
   });
 });

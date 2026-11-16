@@ -21,6 +21,16 @@
 // of read every normal customer poll already performs, never a new
 // prediction.
 //
+// 2026-11-16 addition — ONE narrowly-scoped, explicitly authorized, read-
+// only Cloudinary metadata check (listCloudinaryAssetsByPrefix), targeting
+// only the single most recent intermediate job with errorCode
+// UPLOAD_FAILED for this customer+suggestion. A pure GET against
+// Cloudinary's resources-by-prefix admin endpoint: no download, no byte
+// content, no modification, no deletion, and the response never includes
+// the raw public_id (which embeds this customer's own id) — only
+// Cloudinary's own reported format/createdAt metadata, or nothing if the
+// asset doesn't exist.
+//
 // PRIVACY: scoped by the authenticated session's own customerId on every
 // query — there is no code path here that can return another customer's
 // rows, regardless of what suggestionId is supplied. No raw SQL, no
@@ -36,7 +46,11 @@ import type { LoaderFunctionArgs } from "react-router";
 import { data } from "react-router";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import prisma from "~/db.server";
-import { checkFashnPredictionStatus, REAL_PRODUCT_HANDLE_PREFIX } from "~/lib/ai/full-look-tryon-real.server";
+import {
+  checkFashnPredictionStatus,
+  REAL_PRODUCT_HANDLE_PREFIX,
+  deriveIntermediateStepPublicId,
+} from "~/lib/ai/full-look-tryon-real.server";
 import { FULL_LOOK_FINAL_STEP_HANDLE_PREFIX } from "~/lib/ai/full-look-handle-constants";
 import type { VirtualTryOnJobRecord } from "~/lib/ai/virtual-try-on.types";
 
@@ -50,7 +64,7 @@ import {
   resolveCurrentAttemptScope,
   type SelectableOutfitItem,
 } from "~/lib/ai/full-look-vto-orchestrator.server";
-import { getCloudinaryConfig } from "~/lib/cloudinary-admin.server";
+import { getCloudinaryConfig, listCloudinaryAssetsByPrefix } from "~/lib/cloudinary-admin.server";
 import { getEntitlementSummary } from "~/lib/plan/entitlement.server";
 import type { MembershipStatus } from "@prisma/client";
 
@@ -121,6 +135,49 @@ export async function loader({ request }: LoaderFunctionArgs) {
       };
     }),
   );
+
+  // ── Narrowly-scoped, read-only Cloudinary metadata check (2026-11-16) —
+  // explicitly authorized, one asset only. Targets ONLY the single most
+  // recent non-final (intermediate) job with errorCode UPLOAD_FAILED for
+  // THIS customer+suggestion — never iterates every failed job, never
+  // lists a broader prefix, never touches a final-step or unrelated asset.
+  // listCloudinaryAssetsByPrefix (cloudinary-admin.server.ts) is a pure
+  // GET against Cloudinary's resources-by-prefix admin endpoint — no
+  // download, no byte content, no modification, no deletion. The exact
+  // publicId (which embeds this customer's own id) is never included in
+  // the response; only metadata Cloudinary itself reports back.
+  let cloudinaryAssetCheck: Record<string, unknown> = { attempted: false };
+  const uploadFailedIntermediate = jobs
+    .filter((j) => j.errorCode === "UPLOAD_FAILED" && !j.productHandle.startsWith(FULL_LOOK_FINAL_STEP_HANDLE_PREFIX))
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
+  if (uploadFailedIntermediate) {
+    const targetPublicId = deriveIntermediateStepPublicId(customer.id, uploadFailedIntermediate.id);
+    const listResult = await listCloudinaryAssetsByPrefix(targetPublicId, "private", { maxResults: 1 });
+    if (!listResult.ok) {
+      cloudinaryAssetCheck = {
+        attempted: true,
+        jobId: uploadFailedIntermediate.id,
+        checkSucceeded: false,
+        checkErrorCode: listResult.errorCode,
+        note: "The metadata check itself failed — this says nothing about whether the original upload succeeded or failed.",
+      };
+    } else {
+      const match = listResult.assets.find((a) => a.publicId === targetPublicId);
+      cloudinaryAssetCheck = {
+        attempted: true,
+        jobId: uploadFailedIntermediate.id,
+        checkSucceeded: true,
+        assetExistsInCloudinary: match != null,
+        // Metadata only — never a URL, never bytes, never the raw public_id
+        // (which embeds this customer's own id).
+        format: match?.format ?? null,
+        cloudinaryCreatedAt: match?.createdAt ?? null,
+        note: match
+          ? "An asset already exists at this job's own intermediate path — the upload may have actually succeeded (or partially succeeded) upstream, with the failure occurring in this app's own response handling afterward, not at Cloudinary. Worth reconciling: the DB still says UPLOAD_FAILED."
+          : "No asset exists at this job's own intermediate path — consistent with the upload genuinely never completing at Cloudinary (rejected before storage, or never reaching Cloudinary at all), not a response-handling bug on our side.",
+      };
+    }
+  }
 
   const finalStep = jobs.find((j) => j.productHandle.startsWith(FULL_LOOK_FINAL_STEP_HANDLE_PREFIX));
   const finalStepCompleted = finalStep?.status === "COMPLETED";
@@ -211,6 +268,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       scopeCheck,
       finalStepCompleted,
       realCreditAccounting,
+      cloudinaryAssetCheck,
     },
     { headers: { "Cache-Control": "no-store" } },
   );
