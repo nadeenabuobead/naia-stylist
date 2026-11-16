@@ -221,6 +221,7 @@ describe("api.vto-qa-fixture action — eligibility and creation", () => {
     const json = res.data as any;
 
     expect(json.ok).toBe(true);
+    expect(json.sessionId).toBe("session-1");
     expect(json.suggestionId).toBe("suggestion-1");
     expect(mockSessionCreate).toHaveBeenCalledWith({ data: { customerId: QA_ID }, select: { id: true } });
     expect(mockSuggestionCreate).toHaveBeenCalledWith({ data: { sessionId: "session-1" }, select: { id: true } });

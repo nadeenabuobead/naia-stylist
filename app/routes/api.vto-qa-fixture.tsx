@@ -152,7 +152,7 @@ export async function action({ request }: ActionFunctionArgs) {
     );
   }
 
-  const suggestionId = await prisma.$transaction(async (tx) => {
+  const { sessionId, suggestionId } = await prisma.$transaction(async (tx) => {
     const session = await tx.stylingSession.create({ data: { customerId }, select: { id: true } });
     const suggestion = await tx.outfitSuggestion.create({ data: { sessionId: session.id }, select: { id: true } });
     for (const { slot, item } of chosen) {
@@ -164,11 +164,12 @@ export async function action({ request }: ActionFunctionArgs) {
         },
       });
     }
-    return suggestion.id;
+    return { sessionId: session.id, suggestionId: suggestion.id };
   });
 
   return data({
     ok: true,
+    sessionId,
     suggestionId,
     chosenItems: chosen.map(({ slot, item }) => ({ slot, closetItemId: item.id, name: item.name })),
     totalEligibleCategoriesAvailable: chosen.length,
