@@ -216,6 +216,30 @@ describe("ENT-14 — closet guard uses getMembershipAllowances, not hardcoded nu
   });
 });
 
+describe("ENT-14b — closet at-capacity message distinguishes 'no allowance at all' (limit 0) from 'genuinely full' (real limit reached)", () => {
+  it("checkEntitlement's closet case returns the resolved limit on both the allowed and not-allowed paths", () => {
+    const entSrc = readFileSync(join(__dirname, "entitlement.server.ts"), "utf8");
+    const closetCaseIdx = entSrc.indexOf('case "closet":');
+    const nextCaseIdx = entSrc.indexOf('case "styleMe":');
+    const closetCase = entSrc.slice(closetCaseIdx, nextCaseIdx);
+    assert.match(closetCase, /reason:\s*"at_capacity",\s*limit:\s*allowances\.closetItems/,
+      "not-allowed return must include limit: allowances.closetItems");
+    assert.match(closetCase, /return\s*\{\s*allowed:\s*true,\s*limit:\s*allowances\.closetItems\s*\}/,
+      "allowed return must also include limit: allowances.closetItems");
+  });
+
+  it("closet._index.tsx's at_capacity branch shows an upgrade message at limit 0, not the 'remove some items' copy that would be actively wrong there", () => {
+    const capacityBlockIdx = closetRt.indexOf("capacityCheck.allowed");
+    const capacityBlock = closetRt.slice(capacityBlockIdx, capacityBlockIdx + 1400);
+    assert.match(capacityBlock, /capacityCheck\.limit\s*===\s*0/,
+      "must branch specifically on limit === 0, not just show one message for every at_capacity case");
+    assert.ok(/[Ss]ubscribe/.test(capacityBlock) || /[Mm]embership/.test(capacityBlock),
+      "the limit-0 branch must point the customer toward subscribing, not toward deleting items");
+    assert.ok(capacityBlock.includes("Your closet is full. Remove some items to add new ones."),
+      "the genuine-capacity (non-zero limit) branch must keep its original, still-correct message");
+  });
+});
+
 describe("ENT-18 — closet enforcement is immediate (no flag)", () => {
   it("closet routes do not gate on ENTITLEMENT_ENFORCEMENT env var", () => {
     const closetRtGuardIdx = closetRt.indexOf("checkEntitlement");
