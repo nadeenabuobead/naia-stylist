@@ -23,7 +23,7 @@ describe("sign-in.tsx — existing-customer transition", () => {
   });
 
   it("the sign-up half of the combined flow routes through the same provisioning callback as the standalone sign-up page", () => {
-    assert.match(SRC, /signUpForceRedirectUrl="\/auth\/clerk-callback"/);
+    assert.match(SRC, /signUpForceRedirectUrl=\{callbackUrl\}/);
   });
 
   it("the sign-in half still routes through auth.clerk-callback.tsx, forwarding return_to", () => {
@@ -34,5 +34,31 @@ describe("sign-in.tsx — existing-customer transition", () => {
   it("surfaces email_in_use and verification_email_failed error states from auth.clerk-callback.tsx's own redirects", () => {
     assert.match(SRC, /email_in_use/);
     assert.match(SRC, /verification_email_failed/);
+  });
+});
+
+describe("sign-in.tsx — return_to continuity for the combined sign-up branch (2026-11-16 fix)", () => {
+  // Root cause: signUpForceRedirectUrl used to be a bare "/auth/clerk-callback"
+  // string literal, independent of callbackUrl — so a signed-out visitor
+  // deep-linked here with a return_to who created their account INLINE
+  // (via withSignUp) rather than navigating to the separate /sign-up page
+  // lost return_to silently and landed on the generic /my-naia default
+  // instead of back on the page they actually came from.
+
+  it("forceRedirectUrl and signUpForceRedirectUrl are the exact same expression — one source of truth, not two props that can drift apart", () => {
+    const forceRedirect = SRC.match(/forceRedirectUrl=\{([^}]+)\}/);
+    const signUpForceRedirect = SRC.match(/signUpForceRedirectUrl=\{([^}]+)\}/);
+    assert.ok(forceRedirect, "forceRedirectUrl is a JSX expression");
+    assert.ok(signUpForceRedirect, "signUpForceRedirectUrl is a JSX expression, not a hardcoded string");
+    assert.strictEqual(forceRedirect[1], signUpForceRedirect[1], "both props must reference the identical expression");
+  });
+
+  it("neither redirect prop is ever a bare, return_to-blind string literal", () => {
+    assert.doesNotMatch(SRC, /signUpForceRedirectUrl="\/auth\/clerk-callback"/);
+    assert.doesNotMatch(SRC, /forceRedirectUrl="\/auth\/clerk-callback"/);
+  });
+
+  it("callbackUrl itself still builds from the same return_to param either branch would rely on", () => {
+    assert.match(SRC, /const callbackUrl = returnTo \? `\/auth\/clerk-callback\?return_to=\$\{encodeURIComponent\(returnTo\)\}` : "\/auth\/clerk-callback";/);
   });
 });

@@ -17,6 +17,16 @@
 // callback sign-up.tsx already uses, so a brand-new account created via
 // this combined form is provisioned identically either way.
 //
+// 2026-11-16 fix: signUpForceRedirectUrl now reuses callbackUrl (carrying
+// return_to), not a bare "/auth/clerk-callback" literal. Previously, a
+// signed-out visitor bounced here from a deep link (e.g. /passport ->
+// /sign-in?return_to=%2Fpassport) who chose to create an account INLINE
+// via this combined form — rather than navigating to the separate
+// /sign-up page, which already forwarded return_to correctly — had their
+// return_to silently dropped and landed on /my-naia instead of back on
+// the page they came from. Both halves of this form now forward it
+// identically.
+//
 // ── DESIGN INTEGRATION POINTS (visual design is being handled separately —
 // this file intentionally renders Clerk's UNSTYLED default appearance, no
 // layout/branding decisions made here) ──────────────────────────────────────
@@ -75,7 +85,7 @@ export default function SignInPage() {
         signUpUrl="/sign-up"
         withSignUp
         forceRedirectUrl={callbackUrl}
-        signUpForceRedirectUrl="/auth/clerk-callback"
+        signUpForceRedirectUrl={callbackUrl}
       />
     </>
   );
