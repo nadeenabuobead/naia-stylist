@@ -225,6 +225,18 @@ describe("checkFashnPredictionStatus", () => {
     const result2 = await checkFashnPredictionStatus("pred-1", fetchMock as unknown as typeof fetch, () => undefined);
     expect(result2).toEqual({ ok: false });
   });
+
+  // 2026-11-16 — the third of this module's network calls found with no
+  // bounded timeout at all, found while building the reconciliation
+  // sweep (which can call this up to RECONCILIATION_BATCH_LIMIT times per
+  // invocation — one hung call could otherwise consume the whole batch's
+  // time budget).
+  it("sets an AbortSignal-based timeout on the request", async () => {
+    const fetchMock = vi.fn((_url: string, _init?: RequestInit) => Promise.resolve(new Response(JSON.stringify({ status: "processing" }), { status: 200 })));
+    await checkFashnPredictionStatus("pred-1", fetchMock as unknown as typeof fetch, () => "key");
+    const init = fetchMock.mock.calls[0][1];
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
+  });
 });
 
 // 2026-11-16 CONFIRMED GAP CLOSED — FASHN's own output was only ever
