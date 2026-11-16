@@ -474,6 +474,64 @@ describe("advanceFullLookChain", () => {
     expect(mockCreateOrFind()).not.toHaveBeenCalled();
   });
 
+  // 2026-11-16 — the EXACT real shape of the live Attempt C investigation:
+  // a 5-garment chain, ONLY the first garment (index 0) ever submitted, its
+  // job locally PROCESSING with a real predictionId FASHN now reports
+  // "completed". Written to give a test-verified, precise answer to
+  // "exactly what will reconciliation do to this job, the DB, and
+  // Cloudinary" before anyone runs it live — not just a narrative
+  // description of the code.
+  it("FL.20d — PRECISE RECONCILIATION TRACE (Attempt C's real shape): recovers+persists step 1 with exactly one free FASHN status check, exactly one Cloudinary upload scoped to this job, exactly one DB status transition, and NOTHING else — no new submission, no cleanup, no deletion", async () => {
+    const ctx = ctxWithGarmentCount(5);
+    const attemptCJob = fakeJob("cmwhxjd0w0001l607s25kwvq1", {
+      customerId: "cust-1",
+      status: "PROCESSING",
+      predictionId: "pred-real-attempt-c",
+    });
+    const _findJobFn = vi.fn(async (where: { idempotencyKey: string }) =>
+      where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 0, null) ? attemptCJob : null,
+    );
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ status: "completed", output: [PNG_DATA_URL] }), { status: 200 }),
+    );
+    mockUploadPrivate().mockResolvedValue({ ok: true, publicId: "x", format: "png", version: "1" });
+    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...attemptCJob, status: "COMPLETED" } });
+
+    const result = await advanceFullLookChain(ctx, { _findJobFn }, undefined, { allowSubmitNext: false });
+
+    // The one FASHN call: a plain status GET against the EXISTING
+    // predictionId — documented elsewhere in this file as free/non-billable.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // The one Cloudinary write: uploads the already-generated result,
+    // scoped by construction to THIS job id and customer only — no other
+    // customer's or job's assets are touched, and the deterministic
+    // public_id means a retry would overwrite the same asset, never
+    // accumulate duplicates.
+    expect(mockUploadPrivate()).toHaveBeenCalledTimes(1);
+    const [publicIdArg, , deliveryTypeArg] = mockUploadPrivate().mock.calls[0];
+    expect(publicIdArg).toBe("naia-tryon-fulllook-intermediate/cust-1/cmwhxjd0w0001l607s25kwvq1");
+    expect(deliveryTypeArg).toBe("private");
+
+    // The one DB write: this exact job, PROCESSING -> COMPLETED. No other
+    // row is ever touched by this call.
+    expect(mockAdvance()).toHaveBeenCalledTimes(1);
+    expect(mockAdvance()).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "cmwhxjd0w0001l607s25kwvq1" }), "COMPLETED", expect.anything(),
+    );
+
+    // Nothing else: no new FASHN prediction, no job creation, no asset
+    // deletion/cleanup of any kind.
+    expect(mockSubmitProvider()).not.toHaveBeenCalled();
+    expect(mockCreateOrFind()).not.toHaveBeenCalled();
+    expect(mockDeleteAsset()).not.toHaveBeenCalled();
+
+    // The reported outcome: step 1 done and persisted, step 2 explicitly
+    // NOT submitted, awaiting a separate authorized call.
+    expect(result).toEqual({ status: "STEP_COMPLETE_AWAITING_AUTHORIZATION", completedStepIndex: 0, nextStepIndex: 1 });
+  });
+
   it("FL.20c — allowSubmitNext defaults to true when omitted — every existing caller that doesn't pass it keeps today's behavior unchanged", async () => {
     const job0 = fakeJob("job-0", { status: "PROCESSING", predictionId: "pred-0" });
     const _findJobFn = vi.fn(async (where: { idempotencyKey: string }) =>
