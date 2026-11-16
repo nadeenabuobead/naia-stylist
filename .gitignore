@@ -45,3 +45,7 @@ database.sqlite
 scripts/adhoc/
 # QA harness output — contains live customer wardrobe data
 wardrobe-intelligence-qa-report.txt
+
+# Load-test fixtures (session cookies) and run reports — never committed
+scripts/load-test/fixtures/*.json
+scripts/load-test/results/
