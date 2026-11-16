@@ -334,36 +334,59 @@ export type SubmitToProviderResult =
 // the FAILED row) — nothing was billed, but the whole chain stopped for a
 // single transient rate-limit response.
 //
-// A bounded retry closes this — but the original fix (retry on bare HTTP
-// 429/5xx) was too coarse: FASHN's own docs (docs.fashn.ai/api-overview/
-// error-handling) distinguish THREE distinct 429 sub-types in the response
-// body's `error` field, and only two of them are actually worth retrying.
-// classifyFashnSubmitRejection below reads that field when present;
-// OutOfCredits is excluded from retry entirely (waiting does not help —
-// the account has no credits until it's topped up), and an unrecognized or
-// absent error field falls back to the bare HTTP status (429/5xx), the
-// same posture downloadIntermediateStepResult already uses for transient
-// Cloudinary failures (isTransientCloudinaryDownloadErrorCode). Deliberately
-// NOT applied to any other !runRes.ok status (400/401/413/...) — those are
-// the provider rejecting the actual request content, not a capacity signal.
+// A bounded retry closes this. FASHN's own docs (docs.fashn.ai/api-overview/
+// error-handling) distinguish THREE 429 sub-types in the response body's
+// `error` field, and only two of them are worth retrying: OutOfCredits is
+// excluded entirely (waiting does not help — the account has no credits
+// until it's topped up). An unrecognized or absent error field on a 429
+// falls back to the bare status.
 //
-// Retry-After: not documented by FASHN today, but read and honored if ever
-// present (standard HTTP practice for 429/503) — capped so a large or
-// malformed value can never stall a serverless invocation anywhere close
-// to its own timeout.
+// 2026-11-17 CORRECTION — two things narrowed from the first pass of this
+// fix, both requested before authorizing a second live test:
+//
+// (a) 5xx removed from retry eligibility entirely. FASHN's docs give 429
+//     an explicit "no prediction ID was issued" guarantee, which is what
+//     makes retrying it provably safe from a double-submission standpoint
+//     — but the docs do NOT extend that same guarantee to 500 (confirmed
+//     by re-reading the page specifically for this). A 500 could
+//     theoretically mean FASHN accepted the work and only the response
+//     delivery failed; retrying that is a real, undocumented risk of a
+//     second prediction. Retrying only ever applies to 429 now.
+//
+// (b) Retry-After exceeding a safe serverless ceiling no longer gets
+//     capped-and-retried-early — it fails closed instead, with no retry
+//     attempt at all. Waiting only part of what FASHN asked for and then
+//     retrying anyway defeats the point of a rate-limit signal and can
+//     make the underlying limit worse. The chain's own normal resume path
+//     (a later poll, or an explicit "Try Again") is what actually retries
+//     this step after a real cooldown — not a truncated wait inside one
+//     synchronous call.
 const FASHN_SUBMIT_MAX_ATTEMPTS = 2;
 const FASHN_SUBMIT_DEFAULT_RETRY_DELAY_MS = 500;
-const FASHN_SUBMIT_MAX_RETRY_DELAY_MS = 5_000;
+// The longest delay this function will ever actually wait out inside one
+// invocation — not a cap applied to a longer value, a hard ceiling above
+// which it refuses to retry at all (see (b) above).
+const FASHN_SUBMIT_MAX_SAFE_RETRY_DELAY_MS = 5_000;
 
 type FashnSubmitRetryDecision = { retry: true; delayMs: number } | { retry: false; errorName?: Fashn429ErrorName };
 
-function parseRetryAfterMs(headerValue: string | null): number | null {
-  if (!headerValue) return null;
+type RetryAfterReading =
+  | { present: false }
+  | { present: true; safe: true; delayMs: number }
+  | { present: true; safe: false };
+
+function readRetryAfter(res: Response): RetryAfterReading {
+  const headerValue = res.headers.get("Retry-After");
+  if (!headerValue) return { present: false };
   // Retry-After is either an integer number of seconds, or an HTTP-date —
-  // only the (overwhelmingly common) seconds form is worth supporting here.
+  // only the (overwhelmingly common) seconds form is worth supporting
+  // here; a malformed value is treated as absent, not as "unsafe", so it
+  // falls back to the default delay rather than refusing to retry at all.
   const seconds = Number(headerValue);
-  if (!Number.isFinite(seconds) || seconds < 0) return null;
-  return Math.min(seconds * 1000, FASHN_SUBMIT_MAX_RETRY_DELAY_MS);
+  if (!Number.isFinite(seconds) || seconds < 0) return { present: false };
+  const ms = seconds * 1000;
+  if (ms > FASHN_SUBMIT_MAX_SAFE_RETRY_DELAY_MS) return { present: true, safe: false };
+  return { present: true, safe: true, delayMs: ms };
 }
 
 function classifyFashnSubmitRejection(res: Response, errorField: string | undefined): FashnSubmitRetryDecision {
@@ -374,18 +397,21 @@ function classifyFashnSubmitRejection(res: Response, errorField: string | undefi
     // Retry-After. Waiting cannot fix an empty credit balance.
     return { retry: false, errorName };
   }
-  if (errorName === "RateLimitExceeded" || errorName === "ConcurrencyLimitExceeded") {
-    const retryAfterMs = parseRetryAfterMs(res.headers.get("Retry-After"));
-    return { retry: true, delayMs: retryAfterMs ?? FASHN_SUBMIT_DEFAULT_RETRY_DELAY_MS };
+
+  // Retry-eligible only on 429 — classified as RateLimitExceeded/
+  // ConcurrencyLimitExceeded, or an unclassified/absent error field on a
+  // bare 429. 5xx is deliberately never retry-eligible — see (a) above.
+  const isRetryEligible =
+    errorName === "RateLimitExceeded" || errorName === "ConcurrencyLimitExceeded" || (!errorName && res.status === 429);
+  if (!isRetryEligible) return { retry: false };
+
+  const retryAfter = readRetryAfter(res);
+  if (retryAfter.present && !retryAfter.safe) {
+    // FASHN asked us to wait longer than is safe inside one serverless
+    // invocation — fail closed rather than retrying early. See (b) above.
+    return { retry: false };
   }
-  // No recognized error field — fall back to the bare HTTP status. A
-  // genuine permanent rejection (400/401/413/...) never reaches here as
-  // "transient"; only 429 (unclassified) or 5xx do.
-  if (res.status === 429 || res.status >= 500) {
-    const retryAfterMs = parseRetryAfterMs(res.headers.get("Retry-After"));
-    return { retry: true, delayMs: retryAfterMs ?? FASHN_SUBMIT_DEFAULT_RETRY_DELAY_MS };
-  }
-  return { retry: false };
+  return { retry: true, delayMs: retryAfter.present ? retryAfter.delayMs : FASHN_SUBMIT_DEFAULT_RETRY_DELAY_MS };
 }
 
 export async function submitTryOnToProvider(

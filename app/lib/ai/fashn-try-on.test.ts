@@ -729,17 +729,15 @@ describe("submitTryOnToProvider — bounded retry on transient 429/5xx", () => {
     assert.equal(callCount, 2, "must retry exactly once, not resubmit indefinitely");
   });
 
-  it("RETRY.2 — a 5xx on the first attempt also retries and can succeed on the second", async () => {
+  it("RETRY.2 — a 5xx is NEVER retried (2026-11-17 correction) — FASHN's docs give 429 an explicit no-prediction-issued guarantee that is not extended to 500, so retrying a 5xx is an undocumented double-submission risk", async () => {
     let callCount = 0;
     const _fetch = (async () => {
       callCount++;
-      if (callCount === 1) return new Response("Bad Gateway", { status: 502 });
-      return makeRunResponse("pred-after-502");
+      return new Response("Bad Gateway", { status: 502 });
     }) as typeof fetch;
     const result = await submitTryOnToProvider(makeInput(), { _fetch, _getApiKey: () => "k", _sleep: noSleep });
-    assert.equal(result.ok, true);
-    if (!result.ok) throw new Error("unreachable");
-    assert.equal(result.predictionId, "pred-after-502");
+    assert.equal(result.ok, false);
+    assert.equal(callCount, 1, "a 5xx must fail immediately, never retried");
   });
 
   it("RETRY.3 — exactly one retry (two total attempts) — a persistent 429 still fails, never retries a third time", async () => {
@@ -952,28 +950,64 @@ describe("submitTryOnToProvider — Retry-After header", () => {
     assert.deepEqual(sleptMs, [2000]);
   });
 
-  it("RETRY-AFTER.2 — a Retry-After value larger than the cap is clamped, never awaited in full", async () => {
+  it("RETRY-AFTER.2 — a Retry-After value exceeding the safe ceiling fails closed — NEVER retries early, never resubmits (2026-11-17 correction)", async () => {
     let callCount = 0;
     const _fetch = (async () => {
       callCount++;
-      if (callCount === 1) {
-        return new Response(JSON.stringify({ error: "ConcurrencyLimitExceeded" }), {
-          status: 429,
-          headers: { "Content-Type": "application/json", "Retry-After": "3600" },
-        });
-      }
-      return makeRunResponse("pred-capped");
+      return new Response(JSON.stringify({ error: "ConcurrencyLimitExceeded" }), {
+        status: 429,
+        headers: { "Content-Type": "application/json", "Retry-After": "3600" },
+      });
     }) as typeof fetch;
     const sleptMs: number[] = [];
-    await submitTryOnToProvider(makeInput(), {
+    const result = await submitTryOnToProvider(makeInput(), {
       _fetch,
       _getApiKey: () => "k",
       _sleep: async (ms: number) => {
         sleptMs.push(ms);
       },
     });
-    assert.equal(sleptMs.length, 1);
-    assert.ok(sleptMs[0] <= 5000, `Retry-After must be capped, got ${sleptMs[0]}ms`);
+    assert.equal(result.ok, false);
+    assert.equal(callCount, 1, "must not retry within this invocation when Retry-After exceeds the safe ceiling");
+    assert.equal(sleptMs.length, 0, "must never wait even a truncated/capped amount — failing closed means no wait at all");
+  });
+
+  it("RETRY-AFTER.2b — a Retry-After value exactly at the safe ceiling still retries (boundary is inclusive)", async () => {
+    let callCount = 0;
+    const _fetch = (async () => {
+      callCount++;
+      if (callCount === 1) {
+        return new Response(JSON.stringify({ error: "RateLimitExceeded" }), {
+          status: 429,
+          headers: { "Content-Type": "application/json", "Retry-After": "5" },
+        });
+      }
+      return makeRunResponse("pred-at-ceiling");
+    }) as typeof fetch;
+    const sleptMs: number[] = [];
+    const result = await submitTryOnToProvider(makeInput(), {
+      _fetch,
+      _getApiKey: () => "k",
+      _sleep: async (ms: number) => {
+        sleptMs.push(ms);
+      },
+    });
+    assert.equal(result.ok, true);
+    assert.deepEqual(sleptMs, [5000]);
+  });
+
+  it("RETRY-AFTER.2c — a Retry-After value just over the safe ceiling (5.001s) fails closed, never retries", async () => {
+    let callCount = 0;
+    const _fetch = (async () => {
+      callCount++;
+      return new Response(JSON.stringify({ error: "RateLimitExceeded" }), {
+        status: 429,
+        headers: { "Content-Type": "application/json", "Retry-After": "5.001" },
+      });
+    }) as typeof fetch;
+    const result = await submitTryOnToProvider(makeInput(), { _fetch, _getApiKey: () => "k", _sleep: noSleep });
+    assert.equal(result.ok, false);
+    assert.equal(callCount, 1);
   });
 
   it("RETRY-AFTER.3 — a missing Retry-After header falls back to the default delay", async () => {
