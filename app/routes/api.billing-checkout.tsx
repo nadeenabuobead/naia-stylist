@@ -33,6 +33,39 @@ import prisma from "~/db.server";
 import { MEMBERSHIP_PRICING } from "~/lib/plan/plan-limits.server";
 import { createCheckoutSession, StripeNotConfiguredError, StripeLiveModeBlockedError } from "~/lib/billing/stripe-client.server";
 import { reserveCheckoutAttempt, releaseCheckoutReservation, attachCheckoutSessionId } from "~/lib/billing/checkout-reservation.server";
+import { checkRateLimit, rateLimitResponse } from "~/lib/api-rate-limit.server";
+
+// 2026-11-17 (H2) — velocity limit on checkout.
+//
+// The two duplicate-subscription layers documented in the module header
+// above are correctness controls, not abuse controls: both are about never
+// minting two billed subscriptions for one customer. Neither bounds how
+// many times a customer can drive the route, and one path is explicitly
+// unbounded by design — when the Stripe call throws, the catch block calls
+// releaseCheckoutReservation so the customer isn't locked out for the full
+// reservation TTL. That is the right behaviour for a genuine provider
+// blip, but it means a client looping on a persistent Stripe error can
+// re-enter createCheckoutSession immediately and indefinitely, each
+// iteration a real outbound call against a paid provider.
+//
+// Shadow mode first, matching this codebase's established rollout
+// discipline for every rate limit introduced so far (api.cloudinary-
+// signature.jsx, api.export-zip.ts, api.analyze-item) — a brand-new limit
+// never starts out blocking real customers, and this one sits in the
+// payment path where a false positive is especially costly.
+//
+// 10/hour: a real customer reaches checkout once, or a handful of times
+// across plan changes and abandoned attempts. 10 leaves generous headroom
+// over any legitimate pattern while still bounding a retry loop. Looser
+// than export-zip's 5/hour (a full data export is far more expensive per
+// call) and tighter than the Cloudinary signature's 20/minute (a
+// per-upload operation).
+const CHECKOUT_RATE_LIMIT = {
+  routeKey: "billing-checkout",
+  limit: 10,
+  windowSeconds: 3600,
+  mode: "shadow" as const,
+};
 
 function authRequired() {
   return data({ ok: false, code: "auth_required" }, { status: 401 });
@@ -49,6 +82,16 @@ export async function loader() {
 export async function action({ request }: ActionFunctionArgs) {
   const customer = await getCurrentNaiaCustomer(request);
   if (!customer) return authRequired();
+
+  // Keyed on the authenticated customer id, so it is checked after auth and
+  // before any DB read, any reservation, and above all before the outbound
+  // Stripe call — a limit applied after the expensive step would protect
+  // nothing. Fails open on a limiter DB error by construction (see
+  // api-rate-limit.server.ts), which is the correct trade here: the two
+  // duplicate-subscription layers below are independent and still hold, so
+  // a limiter outage must not take down the payment path.
+  const rl = await checkRateLimit(customer.id, CHECKOUT_RATE_LIMIT);
+  if (!rl.allowed) return rateLimitResponse(rl);
 
   let body: unknown;
   try {
