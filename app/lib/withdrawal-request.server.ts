@@ -48,6 +48,24 @@ export interface SubmittedWithdrawalRequest {
   id: string;
   reference: string;
   submittedAt: Date;
+  // true only when this call actually created a new row. A duplicate
+  // submission (see the open-request guard below) returns the EXISTING
+  // request instead, with this set to false — the customer still sees a
+  // confirmation and their real reference, they just don't get a second,
+  // confusing one for the same unresolved request.
+  isNewSubmission: boolean;
+}
+
+// Returns an existing not-yet-CLOSED request for this customer, if one
+// exists. Deliberately a separate, narrow query — not folded into
+// submitWithdrawalRequest's own logic — so it can be unit-tested and
+// reasoned about on its own.
+async function findOpenRequest(customerId: string) {
+  return prisma.withdrawalRequest.findFirst({
+    where: { customerId, status: { not: "CLOSED" } },
+    orderBy: { submittedAt: "desc" },
+    select: { id: true, reference: true, submittedAt: true },
+  });
 }
 
 // Looks up the customer's most recent Subscription row, if any, purely to
@@ -68,6 +86,17 @@ export async function submitWithdrawalRequest(
 ): Promise<SubmittedWithdrawalRequest> {
   const now = deps._now ?? (() => new Date());
   const generateSuffix = deps._generateReferenceSuffix ?? generateReferenceSuffix;
+
+  // Duplicate-submission guard (2026-11-17, Revision 16/17 follow-up): a
+  // customer with an already-open (SUBMITTED or ACKNOWLEDGED) request gets
+  // that SAME request back, not a second row for the same unresolved
+  // intent. A genuinely new request is still possible once the prior one
+  // is marked CLOSED — this only collapses accidental double-submits
+  // (double-click, retried form post) of an unresolved one.
+  const existingOpen = await findOpenRequest(input.customerId);
+  if (existingOpen) {
+    return { ...existingOpen, isNewSubmission: false };
+  }
 
   const subscriptionId = await findMostRecentSubscriptionId(input.customerId);
 
@@ -91,13 +120,33 @@ export async function submitWithdrawalRequest(
         },
         select: { id: true, reference: true, submittedAt: true },
       });
-      return created;
+      return { ...created, isNewSubmission: true };
     } catch (err) {
       lastError = err;
-      // P2002 = unique constraint violation (the reference collided) —
-      // anything else is a real failure, don't mask it with a retry.
       const isUniqueViolation = typeof err === "object" && err !== null && "code" in err && (err as { code?: string }).code === "P2002";
       if (!isUniqueViolation) throw err;
+
+      // Two distinct unique constraints can produce a P2002 here, and they
+      // need different responses:
+      //  - the "reference" collision (vanishingly unlikely, truly
+      //    random) -> loop again with a fresh reference, handled below.
+      //  - the DB-level one-open-request-per-customer partial index
+      //    (see the migration) tripping because a genuinely concurrent
+      //    submission won the race between our own findOpenRequest()
+      //    read and this create -> there IS now an open request, so
+      //    return that, not a retry.
+      // Prisma's P2002 reports the violated column(s)/index in
+      // err.meta.target; treat anything that doesn't clearly name
+      // "reference" as the customer-scoped race, the safer default.
+      const target = (err as { meta?: { target?: unknown } }).meta?.target;
+      const targetMentionsReference = Array.isArray(target) && target.some((t) => String(t).toLowerCase().includes("reference"));
+      if (!targetMentionsReference) {
+        const nowOpen = await findOpenRequest(input.customerId);
+        if (nowOpen) return { ...nowOpen, isNewSubmission: false };
+        // Could not find it (replica lag, or a status changed between the
+        // conflict and this read) — fall through to a genuine retry
+        // rather than silently losing the submission.
+      }
     }
   }
   throw lastError;

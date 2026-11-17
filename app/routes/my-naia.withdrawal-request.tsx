@@ -59,7 +59,12 @@ export async function action({ request }: Route.ActionArgs) {
     customerNameAtRequest: [customer.firstName, customer.lastName].filter(Boolean).join(" ") || null,
   });
 
-  return { ok: true as const, reference: created.reference, submittedAt: created.submittedAt.toISOString() };
+  return {
+    ok: true as const,
+    reference: created.reference,
+    submittedAt: created.submittedAt.toISOString(),
+    isNewSubmission: created.isNewSubmission,
+  };
 }
 
 export default function WithdrawalRequestPage() {
@@ -80,12 +85,16 @@ export default function WithdrawalRequestPage() {
 
         {actionData?.ok ? (
           <div className="wr-confirmation" role="status">
-            <h2>Request received.</h2>
+            <h2>{actionData.isNewSubmission ? "Request received." : "You already have an open request."}</h2>
             <p>
               Reference <strong>{actionData.reference}</strong>, submitted{" "}
               {new Date(actionData.submittedAt).toLocaleString()}.
             </p>
-            <p>Keep this reference — it's your durable record that this request was made.</p>
+            {actionData.isNewSubmission ? (
+              <p>Keep this reference — it's your durable record that this request was made.</p>
+            ) : (
+              <p>This is your existing request, still open — submitting again doesn't create a second one.</p>
+            )}
           </div>
         ) : (
           <Form method="post" className="wr-form">

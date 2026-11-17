@@ -599,6 +599,14 @@ model WithdrawalRequest {
   // this is NOT a cancellation or refund state machine. SUBMITTED is the
   // only status this model's own route ever writes; ACKNOWLEDGED/CLOSED
   // are for whoever manually processes the request to record progress.
+  //
+  // DB-level constraint NOT expressible here (2026-11-17, duplicate-
+  // submission follow-up): the migration adds a partial unique index —
+  // at most one row per customerId where status != 'CLOSED' — enforced
+  // by Postgres itself, since Prisma's schema language has no partial-
+  // index syntax. withdrawal-request.server.ts's application-level check
+  // (findOpenRequest) is the normal path; this index is the backstop for
+  // two truly concurrent submissions racing past that check together.
   status WithdrawalRequestStatus @default(SUBMITTED)
 
   createdAt DateTime @default(now())

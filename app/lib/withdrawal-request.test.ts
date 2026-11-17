@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("~/db.server", () => ({
   default: {
     subscription: { findFirst: vi.fn() },
-    withdrawalRequest: { create: vi.fn(), findMany: vi.fn() },
+    withdrawalRequest: { create: vi.fn(), findMany: vi.fn(), findFirst: vi.fn() },
   },
 }));
 
@@ -18,11 +18,19 @@ import { submitWithdrawalRequest, getWithdrawalRequestsForCustomer } from "./wit
 const mockFindSubscription = () => (prisma as any).subscription.findFirst as ReturnType<typeof vi.fn>;
 const mockCreateRequest = () => (prisma as any).withdrawalRequest.create as ReturnType<typeof vi.fn>;
 const mockFindManyRequests = () => (prisma as any).withdrawalRequest.findMany as ReturnType<typeof vi.fn>;
+const mockFindOpenRequest = () => (prisma as any).withdrawalRequest.findFirst as ReturnType<typeof vi.fn>;
+
+function referenceCollision() {
+  return Object.assign(new Error("Unique constraint failed"), { code: "P2002", meta: { target: ["reference"] } });
+}
 
 const NOW = new Date("2026-11-17T09:30:00.000Z");
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Default: no pre-existing open request, so the duplicate-guard path is
+  // opt-in per test rather than silently active everywhere.
+  mockFindOpenRequest().mockResolvedValue(null);
 });
 
 describe("submitWithdrawalRequest", () => {
@@ -35,7 +43,7 @@ describe("submitWithdrawalRequest", () => {
       { _now: () => NOW, _generateReferenceSuffix: () => "ABC123" },
     );
 
-    expect(result).toEqual({ id: "wr-1", reference: "WD-20261117-ABC123", submittedAt: NOW });
+    expect(result).toEqual({ id: "wr-1", reference: "WD-20261117-ABC123", submittedAt: NOW, isNewSubmission: true });
     expect(mockCreateRequest()).toHaveBeenCalledTimes(1);
     const createArgs = mockCreateRequest().mock.calls[0][0];
     expect(createArgs.data).toEqual({
@@ -84,11 +92,10 @@ describe("submitWithdrawalRequest", () => {
     expect(result.reference).toBe("WD-20261117-QQQQQQ");
   });
 
-  it("retries on a reference collision (P2002) rather than failing the whole submission", async () => {
+  it("retries on a reference collision (P2002 on the reference index) rather than failing the whole submission", async () => {
     mockFindSubscription().mockResolvedValue(null);
-    const collision = Object.assign(new Error("Unique constraint failed"), { code: "P2002" });
     mockCreateRequest()
-      .mockRejectedValueOnce(collision)
+      .mockRejectedValueOnce(referenceCollision())
       .mockResolvedValueOnce({ id: "wr-4", reference: "WD-20261117-RETRY2", submittedAt: NOW });
 
     const suffixes = ["RETRY1", "RETRY2"];
@@ -99,7 +106,7 @@ describe("submitWithdrawalRequest", () => {
     );
 
     expect(mockCreateRequest()).toHaveBeenCalledTimes(2);
-    expect(result.reference).toBe("WD-20261117-RETRY2");
+    expect(result).toEqual({ id: "wr-4", reference: "WD-20261117-RETRY2", submittedAt: NOW, isNewSubmission: true });
   });
 
   it("a non-collision error propagates immediately — never silently swallowed by the retry loop", async () => {
@@ -110,6 +117,57 @@ describe("submitWithdrawalRequest", () => {
       submitWithdrawalRequest({ customerId: "cust-5", customerEmailAtRequest: "e@example.com" }, { _now: () => NOW }),
     ).rejects.toThrow("DB is down");
     expect(mockCreateRequest()).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("submitWithdrawalRequest — duplicate-submission guard (2026-11-17 follow-up)", () => {
+  it("an already-open request is returned as-is — no new row created, isNewSubmission: false", async () => {
+    mockFindOpenRequest().mockResolvedValue({ id: "wr-open-1", reference: "WD-20261117-OPEN01", submittedAt: NOW });
+
+    const result = await submitWithdrawalRequest(
+      { customerId: "cust-dup-1", customerEmailAtRequest: "f@example.com" },
+      { _now: () => NOW },
+    );
+
+    expect(result).toEqual({ id: "wr-open-1", reference: "WD-20261117-OPEN01", submittedAt: NOW, isNewSubmission: false });
+    expect(mockCreateRequest()).not.toHaveBeenCalled();
+    // Doesn't even bother looking up a subscription for a request it's not creating.
+    expect(mockFindSubscription()).not.toHaveBeenCalled();
+  });
+
+  it("the open-request lookup is scoped to this customer and excludes CLOSED requests (via the server's own query, asserted on getWithdrawalRequestsForCustomer's sibling call shape)", async () => {
+    mockFindOpenRequest().mockResolvedValue(null);
+    mockFindSubscription().mockResolvedValue(null);
+    mockCreateRequest().mockResolvedValue({ id: "wr-5", reference: "WD-20261117-NEWONE", submittedAt: NOW });
+
+    await submitWithdrawalRequest({ customerId: "cust-dup-2", customerEmailAtRequest: "g@example.com" }, { _now: () => NOW });
+
+    expect(mockFindOpenRequest()).toHaveBeenCalledWith({
+      where: { customerId: "cust-dup-2", status: { not: "CLOSED" } },
+      orderBy: { submittedAt: "desc" },
+      select: { id: true, reference: true, submittedAt: true },
+    });
+  });
+
+  it("a true concurrent-race P2002 (the DB-level partial unique index, not the reference index) re-fetches and returns the now-existing open request instead of retrying blindly", async () => {
+    mockFindSubscription().mockResolvedValue(null);
+    const raceCollision = Object.assign(new Error("Unique constraint failed"), {
+      code: "P2002",
+      meta: { target: ["customerId"] }, // the one-open-per-customer partial index, not "reference"
+    });
+    mockCreateRequest().mockRejectedValueOnce(raceCollision);
+    // The concurrent submission that won the race is now visible on re-read.
+    mockFindOpenRequest()
+      .mockResolvedValueOnce(null) // first check, before our own create attempt
+      .mockResolvedValueOnce({ id: "wr-won-race", reference: "WD-20261117-RACE01", submittedAt: NOW }); // re-check after the P2002
+
+    const result = await submitWithdrawalRequest(
+      { customerId: "cust-dup-3", customerEmailAtRequest: "h@example.com" },
+      { _now: () => NOW },
+    );
+
+    expect(result).toEqual({ id: "wr-won-race", reference: "WD-20261117-RACE01", submittedAt: NOW, isNewSubmission: false });
+    expect(mockCreateRequest()).toHaveBeenCalledTimes(1); // never blindly retried the create
   });
 });
 

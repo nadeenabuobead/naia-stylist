@@ -42,3 +42,15 @@ CREATE INDEX "WithdrawalRequest_submittedAt_idx" ON "WithdrawalRequest"("submitt
 
 -- AddForeignKey
 ALTER TABLE "WithdrawalRequest" ADD CONSTRAINT "WithdrawalRequest_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- Partial unique index (2026-11-17, duplicate-submission follow-up): at
+-- most one non-CLOSED request per customer, enforced by the database
+-- itself, not just the application's check-then-create logic — closes
+-- the race a pure application-level check can't (two truly concurrent
+-- submissions both passing the "is there an open one?" read before
+-- either writes). Prisma's schema language has no syntax for a partial
+-- index, so this exists only here, not mirrored in schema.prisma;
+-- withdrawal-request.server.ts handles the resulting unique-violation by
+-- re-reading and returning the now-existing open request, the same
+-- pattern already used for the reference-collision retry above.
+CREATE UNIQUE INDEX "WithdrawalRequest_one_open_per_customer_key" ON "WithdrawalRequest"("customerId") WHERE "status" != 'CLOSED';
