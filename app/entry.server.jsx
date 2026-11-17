@@ -77,3 +77,50 @@ export default async function handleRequest(
     setTimeout(abort, streamTimeout + 1000);
   });
 }
+
+// ---------------------------------------------------------------------------
+// 2026-11-17 (H3) — React Router's server-side error hook.
+//
+// Nov 12 audit finding H3 ("zero monitoring/alerting of any kind") is still
+// substantially TRUE and mostly out of scope here: no error ever leaves this
+// process, so Vercel's function logs remain the only sink. Wiring a real
+// provider is tracked in docs/runbooks/error-tracking-provider-setup.md.
+//
+// What WAS cheaply fixable is the coverage of the existing capture seam.
+// Before this, the only capture call on the request path was
+// onError(...) → captureError("ssr-render") inside renderToPipeableStream
+// above, which fires only for errors thrown during React's render stream.
+// Every unhandled error thrown by a server LOADER or ACTION — by far the
+// larger and more interesting surface, since that is where DB, provider and
+// auth failures live — reached the ErrorBoundary and was never captured at
+// all. handleError is React Router's documented hook for exactly those, and
+// it runs on the server, so it can use the server-only capture module.
+//
+// Note on why this could not instead be done in the ErrorBoundary: root.jsx's
+// ErrorBoundary is a client component (useRouteError). Importing a .server
+// module from a route's component graph breaks the production build while
+// still typechecking cleanly, so route-level capture is not an option — this
+// server hook is.
+//
+// Logged metadata is deliberately minimal and PII-free, per
+// error-tracking.server.ts's contract that callers pre-sanitize: method and
+// pathname only. The query string is excluded on purpose — it can carry
+// customer-identifying values, and this must never be the thing that writes
+// them to a log.
+// ---------------------------------------------------------------------------
+export function handleError(error, { request }) {
+  // A client that goes away mid-flight aborts the request, which surfaces
+  // here as an error that is not an application fault. Capturing these would
+  // bury real failures in noise, and React Router's own guidance is to skip
+  // them.
+  if (request.signal.aborted) return;
+
+  let pathname = "unknown";
+  try {
+    pathname = new URL(request.url).pathname;
+  } catch {
+    // A malformed URL must not turn error reporting into a second error.
+  }
+
+  captureError("request-handler", error, { method: request.method, pathname });
+}
