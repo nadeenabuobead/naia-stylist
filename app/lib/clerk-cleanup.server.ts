@@ -13,6 +13,7 @@
 
 import prisma from "../db.server";
 import { createClerkClient } from "@clerk/backend";
+import { captureFailure } from "./error-tracking.server";
 
 // Raw @clerk/backend client, not @clerk/react-router/server's clerkClient()
 // wrapper — that one requires a real inbound request's args (route-scoped);
@@ -163,8 +164,23 @@ export async function sweepPendingClerkCleanups(
   let failed = 0;
   for (const row of batch) {
     const result = await retryPendingClerkCleanup(row.id, deps);
-    if (result.status === "resolved") resolved++;
-    else if (result.status === "failed-again") failed++;
+    if (result.status === "resolved") {
+      resolved++;
+    } else if (result.status === "failed-again") {
+      failed++;
+      // 2026-11-17 (launch-readiness audit): this is this app's single
+      // central error-capture seam's first real caller — see
+      // error-tracking.server.ts's own header; today it only writes a
+      // structured console.error, but every call site funnels through
+      // here so wiring in a real provider later is a one-file change.
+      // Never includes clerkUserId/customerId (PII-adjacent identifiers) —
+      // only the row id and attempt count, matching this module's own
+      // existing meta-sanitization contract.
+      captureFailure("clerk-cleanup-sweep", "Clerk user deletion failed again during sweep", {
+        pendingClerkCleanupId: row.id,
+        attemptCount: row.attemptCount + 1,
+      });
+    }
     // "not-found" / "already-resolved" can't happen here (we just read
     // these exact unresolved rows), but aren't counted as failed either
     // way if some other process resolved one between the read and here.

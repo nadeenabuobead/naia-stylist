@@ -17,7 +17,12 @@ vi.mock("../db.server", () => ({
   },
 }));
 
+vi.mock("./error-tracking.server", () => ({
+  captureFailure: vi.fn(),
+}));
+
 import prisma from "../db.server";
+import { captureFailure } from "./error-tracking.server";
 import { recordPendingClerkCleanup, listPendingClerkCleanups, retryPendingClerkCleanup, sweepPendingClerkCleanups, CLERK_CLEANUP_SWEEP_BATCH_SIZE } from "./clerk-cleanup.server";
 
 const mockUpsert = () => (prisma as any).pendingClerkCleanup.upsert as ReturnType<typeof vi.fn>;
@@ -120,17 +125,17 @@ describe("sweepPendingClerkCleanups (2026-11-17, launch-readiness audit)", () =>
 
   it("resolves every row it can, counts a per-row failure without aborting the rest of the batch", async () => {
     mockFindMany().mockResolvedValue([
-      { id: "row-1", clerkUserId: "clerk_1", resolvedAt: null },
-      { id: "row-2", clerkUserId: "clerk_2", resolvedAt: null },
-      { id: "row-3", clerkUserId: "clerk_3", resolvedAt: null },
+      { id: "row-1", clerkUserId: "clerk_1", resolvedAt: null, attemptCount: 0 },
+      { id: "row-2", clerkUserId: "clerk_2", resolvedAt: null, attemptCount: 0 },
+      { id: "row-3", clerkUserId: "clerk_3", resolvedAt: null, attemptCount: 0 },
     ]);
     // retryPendingClerkCleanup looks the row up again by id internally —
     // mock findUnique to return each row in turn, matching what a real DB
     // would (the sweep's own findMany result isn't re-used directly).
-    const rowsById: Record<string, { id: string; clerkUserId: string; resolvedAt: null }> = {
-      "row-1": { id: "row-1", clerkUserId: "clerk_1", resolvedAt: null },
-      "row-2": { id: "row-2", clerkUserId: "clerk_2", resolvedAt: null },
-      "row-3": { id: "row-3", clerkUserId: "clerk_3", resolvedAt: null },
+    const rowsById: Record<string, { id: string; clerkUserId: string; resolvedAt: null; attemptCount: number }> = {
+      "row-1": { id: "row-1", clerkUserId: "clerk_1", resolvedAt: null, attemptCount: 0 },
+      "row-2": { id: "row-2", clerkUserId: "clerk_2", resolvedAt: null, attemptCount: 0 },
+      "row-3": { id: "row-3", clerkUserId: "clerk_3", resolvedAt: null, attemptCount: 0 },
     };
     mockFindUnique().mockImplementation(async ({ where: { id } }: any) => rowsById[id] ?? null);
     const deleteUser = vi.fn()
@@ -143,6 +148,19 @@ describe("sweepPendingClerkCleanups (2026-11-17, launch-readiness audit)", () =>
 
     expect(deleteUser).toHaveBeenCalledTimes(3);
     expect(result).toEqual({ checked: 3, resolved: 2, failed: 1, more: false });
+
+    // 2026-11-17: a sweep failure now reaches this app's central
+    // error-capture seam — exactly once, for the one row that failed, and
+    // never carrying clerkUserId/customerId.
+    expect(captureFailure).toHaveBeenCalledTimes(1);
+    expect(captureFailure).toHaveBeenCalledWith(
+      "clerk-cleanup-sweep",
+      expect.any(String),
+      expect.objectContaining({ pendingClerkCleanupId: "row-2" }),
+    );
+    const meta = (captureFailure as any).mock.calls[0][2];
+    expect(meta).not.toHaveProperty("clerkUserId");
+    expect(meta).not.toHaveProperty("customerId");
   });
 
   it("is bounded per call and reports more:true when a backlog exceeds one batch", async () => {
