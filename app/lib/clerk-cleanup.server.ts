@@ -90,11 +90,13 @@ export interface RetryClerkCleanupDeps {
 }
 
 /**
- * Operator-triggered only — see admin.maintenance.tsx. Deliberately not an
- * automatic background retry: an unattended retry loop against a third-party
- * API has its own failure modes (hammering a persistently-misconfigured
- * key, for one) that a human clicking a button in response to a visible,
- * logged failure does not.
+ * Single-row retry — see admin.maintenance.tsx for the manual, per-click
+ * caller, and sweepPendingClerkCleanups below for the bounded-batch one.
+ * Neither this app nor this function decides on its own to retry something
+ * on a schedule — an unattended retry loop against a third-party API has
+ * its own failure modes (hammering a persistently-misconfigured key, for
+ * one) that a human clicking a button, or an operator's own external
+ * scheduler explicitly opting in, does not.
  */
 export async function retryPendingClerkCleanup(
   id: string,
@@ -118,4 +120,55 @@ export async function retryPendingClerkCleanup(
     });
     return { status: "failed-again", error: lastError };
   }
+}
+
+// 2026-11-17 (launch-readiness audit): before this, the ONLY way a pending
+// row ever got retried was a human manually opening /admin/maintenance and
+// clicking it — there was no automated path at all, so a Clerk deletion
+// that failed during an unattended customers/redact or shop/redact webhook
+// could sit unresolved indefinitely with nothing surfacing it (this app
+// has no centralized alerting either — see error-tracking.server.ts's own
+// header). This gives operators an actual automated option without this
+// app deciding on its own to run one: see api.clerk-cleanup-sweep.ts,
+// which requires an external caller (a scheduled GitHub Actions workflow,
+// matching this codebase's established pattern — see
+// api.export-zip-sweep.ts / api.staging-full-look-vto-sweep.ts) to opt in
+// and trigger it, exactly the same bounded-batch, secret-gated shape as
+// those two already-reviewed sweeps.
+export const CLERK_CLEANUP_SWEEP_BATCH_SIZE = 25;
+
+export interface SweepPendingClerkCleanupsResult {
+  checked: number;
+  resolved: number;
+  failed: number;
+  /** true when more unresolved rows exist beyond this batch. */
+  more: boolean;
+}
+
+export async function sweepPendingClerkCleanups(
+  deps: RetryClerkCleanupDeps = {},
+): Promise<SweepPendingClerkCleanupsResult> {
+  // +1 purely to detect "more remain" without a second count query — same
+  // technique already established in customer-export-zip-large.server.ts's
+  // sweepExpiredExportJobs.
+  const rows = await prisma.pendingClerkCleanup.findMany({
+    where: { resolvedAt: null },
+    orderBy: { createdAt: "asc" },
+    take: CLERK_CLEANUP_SWEEP_BATCH_SIZE + 1,
+  });
+  const more = rows.length > CLERK_CLEANUP_SWEEP_BATCH_SIZE;
+  const batch = more ? rows.slice(0, CLERK_CLEANUP_SWEEP_BATCH_SIZE) : rows;
+
+  let resolved = 0;
+  let failed = 0;
+  for (const row of batch) {
+    const result = await retryPendingClerkCleanup(row.id, deps);
+    if (result.status === "resolved") resolved++;
+    else if (result.status === "failed-again") failed++;
+    // "not-found" / "already-resolved" can't happen here (we just read
+    // these exact unresolved rows), but aren't counted as failed either
+    // way if some other process resolved one between the read and here.
+  }
+
+  return { checked: batch.length, resolved, failed, more };
 }
