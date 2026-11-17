@@ -156,13 +156,16 @@ beforeEach(() => {
 });
 
 describe("H2 — checkout is rate limited", () => {
-  it("checks the limit, keyed on the authenticated customer id", async () => {
+  it("checks BOTH the shadow velocity limit and the enforced burst limit, each keyed on the authenticated customer id", async () => {
     await action({ request: makeRequest({ planType: "MONTHLY" }), params: {}, context: {} } as never);
 
-    expect(checkRateLimitMock).toHaveBeenCalledTimes(1);
-    const [customerId, config] = checkRateLimitMock.mock.calls[0];
-    expect(customerId).toBe(CUSTOMER.id);
-    expect(config).toMatchObject({ routeKey: "billing-checkout" });
+    expect(checkRateLimitMock).toHaveBeenCalledTimes(2);
+    const [firstCustomerId, firstConfig] = checkRateLimitMock.mock.calls[0];
+    const [secondCustomerId, secondConfig] = checkRateLimitMock.mock.calls[1];
+    expect(firstCustomerId).toBe(CUSTOMER.id);
+    expect(secondCustomerId).toBe(CUSTOMER.id);
+    expect(firstConfig).toMatchObject({ routeKey: "billing-checkout" });
+    expect(secondConfig).toMatchObject({ routeKey: "billing-checkout-burst" });
   });
 
   it("an enforced block returns 429 and never reaches Stripe or the reservation", async () => {
@@ -202,7 +205,7 @@ describe("H2 — checkout is rate limited", () => {
     expect(createCheckoutSessionMock).toHaveBeenCalledTimes(1);
   });
 
-  it("the limit is checked BEFORE the reservation and BEFORE the Stripe call", async () => {
+  it("both rate-limit checks are checked BEFORE the reservation and BEFORE the Stripe call", async () => {
     const order: string[] = [];
     checkRateLimitMock.mockImplementation(async () => {
       order.push("rate-limit");
@@ -219,7 +222,7 @@ describe("H2 — checkout is rate limited", () => {
 
     await action({ request: makeRequest({ planType: "MONTHLY" }), params: {}, context: {} } as never);
 
-    expect(order).toEqual(["rate-limit", "reserve", "stripe"]);
+    expect(order).toEqual(["rate-limit", "rate-limit", "reserve", "stripe"]);
   });
 
   it("an unauthenticated request is rejected without touching the limiter", async () => {
@@ -273,15 +276,18 @@ describe("H2 — checkout is rate limited", () => {
   });
 });
 
-describe("H2 — the configured limit is a shadow-mode rollout", () => {
+describe("H2 — the broad velocity limit stays shadow-mode pending real telemetry; the burst limit is enforced from the start", () => {
   const src = fs.readFileSync(
     path.resolve("app/routes/api.billing-checkout.tsx"),
     "utf8",
   );
 
-  it("starts in shadow mode, per this codebase's rollout discipline", () => {
+  it("the broad 10/hour velocity limit starts in shadow mode, per this codebase's rollout discipline", () => {
     // Asserted on source because the config object is module-private; the
     // behavioural consequence (shadow never blocks) is covered above.
+    // Deliberately NOT flipped to enforce without real shadow-mode
+    // telemetry proving 10/hour is never legitimately reached — see the
+    // config's own comment.
     const idx = src.indexOf("const CHECKOUT_RATE_LIMIT");
     expect(idx).toBeGreaterThan(-1);
     const block = src.slice(idx, idx + 260);
@@ -289,9 +295,66 @@ describe("H2 — the configured limit is a shadow-mode rollout", () => {
     expect(block).toContain('mode: "shadow" as const');
   });
 
+  it("the narrow 3/60s burst limit is enforced unconditionally — it only ever catches a machine-speed retry loop, never a real customer", () => {
+    const idx = src.indexOf("const CHECKOUT_BURST_LIMIT");
+    expect(idx).toBeGreaterThan(-1);
+    const block = src.slice(idx, idx + 260);
+    expect(block).toContain('routeKey: "billing-checkout-burst"');
+    expect(block).toContain("limit: 3");
+    expect(block).toContain("windowSeconds: 60");
+    expect(block).toContain('mode: "enforce" as const');
+  });
+
   it("imports the shared limiter rather than hand-rolling one", () => {
     expect(src).toMatch(
       /import\s*\{[^}]*checkRateLimit[^}]*\}\s*from\s*["']~\/lib\/api-rate-limit\.server["']/,
     );
+  });
+});
+
+describe("H2 — the enforced burst limit actually blocks, independent of the shadow velocity limit's own result", () => {
+  it("a burst block returns 429 and never reaches Stripe or the reservation, even though the velocity check passed", async () => {
+    checkRateLimitMock
+      .mockResolvedValueOnce(allowed())  // broad velocity limit: under its own threshold
+      .mockResolvedValueOnce(blocked()); // burst limit: tripped
+
+    const res = await action({
+      request: makeRequest({ planType: "MONTHLY" }),
+      params: {},
+      context: {},
+    } as never);
+
+    expect(statusOf(res)).toBe(429);
+    expect((res as Response).headers.get("Retry-After")).toBe("42");
+    expect(createCheckoutSessionMock).not.toHaveBeenCalled();
+    expect(reserveCheckoutAttemptMock).not.toHaveBeenCalled();
+  });
+
+  it("the burst limit is checked SECOND — after the velocity limit, still before the reservation and Stripe", async () => {
+    const order: string[] = [];
+    checkRateLimitMock
+      .mockImplementationOnce(async () => { order.push("velocity"); return allowed(); })
+      .mockImplementationOnce(async () => { order.push("burst"); return allowed(); });
+    reserveCheckoutAttemptMock.mockImplementation(async () => {
+      order.push("reserve");
+      return { allowed: true, expiresAt: new Date("2026-11-17T13:00:00.000Z") };
+    });
+    createCheckoutSessionMock.mockImplementation(async () => {
+      order.push("stripe");
+      return { id: "cs_test_1", url: "https://checkout.stripe.com/cs_test_1" };
+    });
+
+    await action({ request: makeRequest({ planType: "MONTHLY" }), params: {}, context: {} } as never);
+
+    expect(order).toEqual(["velocity", "burst", "reserve", "stripe"]);
+  });
+
+  it("both limiters allowing the request proceeds normally", async () => {
+    checkRateLimitMock.mockResolvedValue(allowed());
+
+    const res = await action({ request: makeRequest({ planType: "MONTHLY" }), params: {}, context: {} } as never);
+
+    expect(statusOf(res)).not.toBe(429);
+    expect(await payloadOf(res)).toMatchObject({ ok: true, url: "https://checkout.stripe.com/cs_test_1" });
   });
 });

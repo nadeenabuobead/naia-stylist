@@ -76,6 +76,29 @@ const CHECKOUT_RATE_LIMIT = {
   mode: "shadow" as const,
 };
 
+// 2026-11-17 (H2 continuation) — a SECOND, narrower limit, in enforce mode
+// from the start. The broad hourly limit above stays in shadow: there is no
+// real shadow-mode telemetry yet confirming 10/hour is never legitimately
+// reached (a customer retrying with a different card after declines, or
+// fixing a billing-address typo, could plausibly land in the high single
+// digits within an hour), and this route's own rollout discipline is
+// explicit that a false positive here is especially costly — flipping it to
+// enforce without that evidence would be guessing, not verifying.
+//
+// But the actual named risk in this route (a client looping on a persistent
+// Stripe error, each iteration a real outbound paid-provider call) is a
+// machine-speed pattern, not a human one: no legitimate customer submits
+// this form more than a couple of times within one minute. 3 attempts per
+// 60 seconds is enforced unconditionally — it cannot catch a real person,
+// only a tight retry loop — and closes the specific unbounded-retry gap
+// without waiting on telemetry the broader limit still needs.
+const CHECKOUT_BURST_LIMIT = {
+  routeKey: "billing-checkout-burst",
+  limit: 3,
+  windowSeconds: 60,
+  mode: "enforce" as const,
+};
+
 function authRequired() {
   return data({ ok: false, code: "auth_required" }, { status: 401 });
 }
@@ -102,8 +125,14 @@ export async function action({ request }: ActionFunctionArgs) {
   const rl = await checkRateLimit(customer.id, CHECKOUT_RATE_LIMIT);
   if (!rl.allowed) return rateLimitResponse(rl);
 
+  // Enforced burst check — see CHECKOUT_BURST_LIMIT's own comment. Checked
+  // immediately after the shadow velocity limit, still before any DB read,
+  // reservation, or Stripe call.
+  const burst = await checkRateLimit(customer.id, CHECKOUT_BURST_LIMIT);
+  if (!burst.allowed) return rateLimitResponse(burst);
+
   // Legal handoff W1 follow-up (2026-11-17, correctness review) — fail
-  // closed, before anything else past the rate limit above.
+  // closed, before anything else past both rate limits above.
   // CURRENT_TERMS_VERSION is null today because no real Terms of Service
   // document exists yet — a checkbox reading "I accept the Terms of
   // Service" cannot be valid legal acceptance of a document that doesn't
