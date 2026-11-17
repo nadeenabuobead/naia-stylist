@@ -18,7 +18,11 @@ import {
   type ActionFunctionArgs,
 } from "react-router";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
-import { prisma } from "~/lib/prisma.server";
+import type { PrismaClient } from "@prisma/client";
+// db.server.js is untyped JS — annotate here so query-result inference
+// (e.g. .map callbacks below) doesn't silently degrade to implicit any.
+import dbServer from "~/db.server";
+const prisma: PrismaClient = dbServer;
 import { occasionDisplayFor } from "~/lib/styleme/occasion-display";
 import {
   upsertPostWearReview,

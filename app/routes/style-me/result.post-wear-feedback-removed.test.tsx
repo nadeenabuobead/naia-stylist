@@ -47,7 +47,7 @@ vi.mock("~/lib/ai/my-naia-model.server", () => ({
   loadNaiaModel: vi.fn(),
   computeModelReadinessFromRecord: vi.fn(() => ({ isReadyForTryOn: false })),
 }));
-vi.mock("~/lib/prisma.server", () => ({ prisma: {} }));
+vi.mock("~/db.server", () => ({ default: {} }));
 vi.mock("~/lib/session.server", () => ({
   getSession: vi.fn(),
   commitSession: vi.fn(),

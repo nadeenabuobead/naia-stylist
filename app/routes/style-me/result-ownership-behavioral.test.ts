@@ -35,8 +35,12 @@ const {
 
 vi.mock("~/lib/naia-session.server", () => ({ getCurrentNaiaCustomer }));
 
-vi.mock("~/lib/prisma.server", () => ({
-  prisma: {
+// Was "~/lib/prisma.server" (a separate, uncapped PrismaClient) until the
+// 2026-11-17 fix retargeted result.tsx at the shared, connection-capped
+// db.server client instead — see app/db.server.js's own header for why that
+// cap matters in production.
+vi.mock("~/db.server", () => ({
+  default: {
     stylingSession: { findUnique: stylingSessionFindUnique },
     // findFirst added after the reroll-anchor-diversity feature landed —
     // "regenerate" reads the most-recent suggestion to penalize repeats.

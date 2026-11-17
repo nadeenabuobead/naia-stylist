@@ -2,7 +2,11 @@ import { Form, Link, useLoaderData } from "react-router";
 import { data, redirect, type ActionFunctionArgs, type LoaderFunctionArgs, type LinksFunction } from "react-router";
 import { clearStyleMeSession } from "~/lib/session.server";
 import { getCurrentNaiaCustomer, requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
-import { prisma } from "~/lib/prisma.server";
+import type { PrismaClient } from "@prisma/client";
+// db.server.js is untyped JS — annotate here so query-result inference
+// (e.g. .map callbacks below) doesn't silently degrade to implicit any.
+import dbServer from "~/db.server";
+const prisma: PrismaClient = dbServer;
 import { writeSourceEvidence } from "~/lib/ai/taste-reconcile.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";

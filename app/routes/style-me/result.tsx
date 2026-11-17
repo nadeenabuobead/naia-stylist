@@ -14,7 +14,11 @@ import {
   buildPrivateDownloadUrl,
 } from "~/lib/cloudinary-admin.server";
 import { loadNaiaModel, computeModelReadinessFromRecord } from "~/lib/ai/my-naia-model.server";
-import { prisma } from "~/lib/prisma.server";
+import type { PrismaClient } from "@prisma/client";
+// db.server.js is untyped JS — annotate here so query-result inference
+// doesn't silently degrade to implicit any.
+import dbServer from "~/db.server";
+const prisma: PrismaClient = dbServer;
 import { getSession, commitSession, clearStyleMeSession, parseClosetCompanionIds } from "~/lib/session.server";
 import { CANONICAL_STYLEME_ENTRY } from "~/lib/styleme/handoff";
 import { readPendingSave, writePendingSave, clearPendingSave } from "~/lib/pending-save.server";

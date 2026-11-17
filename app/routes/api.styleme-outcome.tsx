@@ -17,7 +17,11 @@
 
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { data } from "react-router";
-import { prisma } from "~/lib/prisma.server";
+import type { PrismaClient } from "@prisma/client";
+// db.server.js is untyped JS — annotate here so query-result inference
+// doesn't silently degrade to implicit any.
+import dbServer from "~/db.server";
+const prisma: PrismaClient = dbServer;
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { parseSuggestionMetadata } from "~/lib/ai/styleme-result.types";
 import {

@@ -4,7 +4,11 @@ import type { LoaderFunctionArgs } from "react-router";
 import type { OnboardingAnswers } from "~/lib/onboarding/quiz-data";
 import { quizQuestions, LEGACY_QUESTIONS } from "~/lib/onboarding/quiz-data";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
-import { prisma } from "~/lib/prisma.server";
+import type { PrismaClient } from "@prisma/client";
+// db.server.js is untyped JS — annotate here so query-result inference
+// doesn't silently degrade to implicit any.
+import dbServer from "~/db.server";
+const prisma: PrismaClient = dbServer;
 import { readPendingSave, clearPendingSave } from "~/lib/pending-save.server";
 import { computeNaiaFirstRead } from "~/lib/ai/first-naia-read";
 import type { NaiaFirstReadObservation } from "~/lib/ai/first-naia-read";
