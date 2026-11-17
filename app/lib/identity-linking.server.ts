@@ -57,6 +57,7 @@
 import { createHash, randomInt } from "crypto";
 import prisma from "~/db.server";
 import { sendVerificationEmailViaResend } from "./email/resend-email.server";
+import { CUSTOMER_PENDING_MIGRATION_OMIT } from "./prisma-customer-safe-select.server";
 
 export const LINK_REQUEST_TTL_MS = 15 * 60 * 1000; // 15 minutes
 export const MAX_LINK_ATTEMPTS = 5;
@@ -93,7 +94,7 @@ export async function startIdentityLink(
   const generateCode = deps._generateCode ?? generateVerificationCode;
   const sendVerificationEmail = deps._sendVerificationEmail ?? sendVerificationEmailViaResend;
 
-  const existing = await prisma.customer.findUnique({ where: { email: input.email } });
+  const existing = await prisma.customer.findUnique({ where: { email: input.email }, omit: CUSTOMER_PENDING_MIGRATION_OMIT });
   if (!existing) return { status: "no-collision" };
   if (existing.clerkUserId) {
     // Already linked to a DIFFERENT Clerk identity than the one signing up
@@ -203,6 +204,7 @@ export async function confirmIdentityLink(
           identityLinkFailedAttempts: locking ? 0 : newFailedTotal,
           identityLinkLockedUntil: locking ? new Date(now().getTime() + CUSTOMER_LOCKOUT_MS) : undefined,
         },
+        omit: CUSTOMER_PENDING_MIGRATION_OMIT,
       }),
     ]);
     return locking ? { status: "locked" } : { status: "incorrect-code" };
@@ -217,6 +219,7 @@ export async function confirmIdentityLink(
     prisma.customer.update({
       where: { id: customerId },
       data: { clerkUserId: input.clerkUserId, identityLinkFailedAttempts: 0, identityLinkLockedUntil: null },
+      omit: CUSTOMER_PENDING_MIGRATION_OMIT,
     }),
     prisma.identityLinkRequest.delete({ where: { id: request.id } }),
   ]);
@@ -247,7 +250,7 @@ export async function resolveCustomerForClerkSignUp(
   input: { clerkUserId: string; email: string; firstName?: string | null; lastName?: string | null },
   deps: IdentityLinkingDeps = {},
 ): Promise<ResolveCustomerForClerkSignUpResult> {
-  const already = await prisma.customer.findUnique({ where: { clerkUserId: input.clerkUserId } });
+  const already = await prisma.customer.findUnique({ where: { clerkUserId: input.clerkUserId }, omit: CUSTOMER_PENDING_MIGRATION_OMIT });
   if (already) return { status: "already-linked", customerId: already.id };
 
   const linkResult = await startIdentityLink(input, deps);
@@ -266,6 +269,7 @@ export async function resolveCustomerForClerkSignUp(
       firstName: input.firstName ?? null,
       lastName: input.lastName ?? null,
     },
+    omit: CUSTOMER_PENDING_MIGRATION_OMIT,
   });
   return { status: "created", customerId: created.id };
 }

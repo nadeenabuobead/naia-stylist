@@ -28,6 +28,7 @@ import { createClerkClient } from "@clerk/backend";
 import { redirect } from "react-router";
 import prisma from "~/db.server";
 import { DatabaseUnavailableError, withTransientRetry } from "./prisma-transient-retry.server";
+import { CUSTOMER_PENDING_MIGRATION_OMIT } from "./prisma-customer-safe-select.server";
 
 // Re-exported for every existing caller/test that imports
 // DatabaseUnavailableError from this file directly — same class reference
@@ -160,6 +161,7 @@ function lookupCustomerByClerkUserId(clerkUserId: string) {
   return prisma.customer.findUnique({
     where: { clerkUserId },
     include: { onboardingProfile: true },
+    omit: CUSTOMER_PENDING_MIGRATION_OMIT,
   });
 }
 

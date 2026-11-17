@@ -217,6 +217,7 @@ describe("confirmIdentityLink", () => {
     expect(mockUpdateCustomer()).toHaveBeenCalledWith({
       where: { id: "cust-legacy-1" },
       data: { identityLinkFailedAttempts: 4, identityLinkLockedUntil: undefined },
+      omit: { termsAcceptedAt: true, termsAcceptedVersion: true },
     });
     expect(mockDeleteRequest()).not.toHaveBeenCalled();
   });
@@ -230,6 +231,7 @@ describe("confirmIdentityLink", () => {
     expect(mockUpdateCustomer()).toHaveBeenCalledWith({
       where: { id: "cust-legacy-1" },
       data: { identityLinkFailedAttempts: 0, identityLinkLockedUntil: new Date(NOW.getTime() + CUSTOMER_LOCKOUT_MS) },
+      omit: { termsAcceptedAt: true, termsAcceptedVersion: true },
     });
   });
 
@@ -292,6 +294,7 @@ describe("confirmIdentityLink — existing account data survives the link untouc
     expect(mockUpdateCustomer()).toHaveBeenCalledWith({
       where: { id: "cust-with-12-closet-items-and-a-passport" },
       data: { clerkUserId: "clerk_claimant_1", identityLinkFailedAttempts: 0, identityLinkLockedUntil: null },
+      omit: { termsAcceptedAt: true, termsAcceptedVersion: true },
     });
     // No model anywhere is ever asked to re-point a foreign key from an
     // old id to a new one — because there is no new id. ClosetItem.

@@ -75,7 +75,7 @@ describe("getCurrentNaiaCustomer — no Clerk session vs. unlinked vs. database 
     findUniqueMock.mockResolvedValue(null);
     const result = await getCurrentNaiaCustomer(new Request("https://naia.example/closet"), { _clerkClient: client });
     expect(result).toBeNull();
-    expect(findUniqueMock).toHaveBeenCalledWith({ where: { clerkUserId: "clerk_new_1" }, include: { onboardingProfile: true } });
+    expect(findUniqueMock).toHaveBeenCalledWith({ where: { clerkUserId: "clerk_new_1" }, include: { onboardingProfile: true }, omit: { termsAcceptedAt: true, termsAcceptedVersion: true } });
   });
 
   it("authenticated with Clerk and linked — returns the Customer row", async () => {
