@@ -14,8 +14,12 @@ vi.mock("~/db.server", () => ({
       findFirst: vi.fn(),
       findMany: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
       delete: vi.fn(),
     },
+    // H7 (2026-11-17) — a failed Cloudinary deletion is now recorded here
+    // instead of being discarded.
+    pendingCloudinaryDeletion: { upsert: vi.fn().mockResolvedValue({}) },
   },
 }));
 
@@ -30,11 +34,19 @@ vi.mock("~/lib/cloudinary-admin.server", async (importOriginal) => {
 
 import prisma from "~/db.server";
 import { deleteCloudinaryAsset } from "~/lib/cloudinary-admin.server";
-import { deleteOneBosImage, deleteOneBosDecision, listCustomerBosImages } from "./buy-or-skip-privacy.server";
+import {
+  deleteOneBosImage,
+  deleteOneBosDecision,
+  deleteCustomerBosImages,
+  listCustomerBosImages,
+} from "./buy-or-skip-privacy.server";
+
+const pendingUpsert = () => (prisma as any).pendingCloudinaryDeletion.upsert;
 
 beforeEach(() => {
   vi.clearAllMocks();
   (deleteCloudinaryAsset as any).mockResolvedValue({ ok: true });
+  pendingUpsert().mockResolvedValue({});
 });
 
 describe("deleteOneBosImage() — single-item image removal", () => {
@@ -161,5 +173,145 @@ describe("listCustomerBosImages() — Settings gallery read", () => {
     ]);
     const result = await listCustomerBosImages("cust-A");
     expect(result[0].thumbnailUrl).toBeNull();
+  });
+});
+
+// ── H7 (2026-11-17): failed Buy-or-Skip image deletions are recorded ────────
+//
+// Nov 12 privacy audit finding H7. All three deletion helpers in this module
+// clear or delete the DB image reference regardless of the Cloudinary
+// outcome, so a dropped failure left the asset unreferenced with nothing
+// recording that it still needed deleting — and the only net, the bounded
+// orphan sweep, has no scheduled trigger (runBoundedSweep is reachable only
+// from a human clicking /admin/maintenance).
+//
+// The subtlety pinned here: deleteCloudinaryAsset does NOT throw on a
+// provider rejection, it returns { ok:false, errorCode }. A try/catch around
+// the call would still have dropped the common case.
+describe("H7 — failed Buy-or-Skip deletions are recorded for the retry sweep", () => {
+  const PUBLIC_ID = "naia-wardrobe/cust-A/analysis-1";
+
+  it("deleteOneBosImage records an unresolved row when the provider REJECTS (ok:false, no throw)", async () => {
+    (prisma.buyOrSkipAnalysis.findFirst as any).mockResolvedValue({ id: "analysis-1", imagePublicId: PUBLIC_ID });
+    (deleteCloudinaryAsset as any).mockResolvedValue({ ok: false, errorCode: "PROVIDER_ERROR" });
+
+    await deleteOneBosImage("analysis-1", "cust-A");
+
+    expect(pendingUpsert()).toHaveBeenCalledTimes(1);
+    const arg = pendingUpsert().mock.calls[0][0];
+    expect(arg.where).toEqual({ publicId: PUBLIC_ID });
+    expect(arg.create.customerId).toBe("cust-A");
+    expect(arg.create.deliveryType).toBe("private");
+    expect(arg.create.lastError).toBe("PROVIDER_ERROR");
+    expect(arg.create.resolvedAt).toBeUndefined();
+  });
+
+  it("deleteOneBosImage still clears the image fields and preserves the verdict after a failure", async () => {
+    (prisma.buyOrSkipAnalysis.findFirst as any).mockResolvedValue({ id: "analysis-1", imagePublicId: PUBLIC_ID });
+    (deleteCloudinaryAsset as any).mockResolvedValue({ ok: false, errorCode: "PROVIDER_ERROR" });
+
+    const result = await deleteOneBosImage("analysis-1", "cust-A");
+
+    expect(result).toEqual({ deleted: true });
+    expect(prisma.buyOrSkipAnalysis.update).toHaveBeenCalledWith({
+      where: { id: "analysis-1" },
+      data: { imagePublicId: null, imageFormat: null, imageUrl: null },
+    });
+  });
+
+  it("deleteOneBosImage records a THROWN deletion error too, without propagating it", async () => {
+    (prisma.buyOrSkipAnalysis.findFirst as any).mockResolvedValue({ id: "analysis-1", imagePublicId: PUBLIC_ID });
+    (deleteCloudinaryAsset as any).mockRejectedValue(new Error("socket hang up"));
+
+    await expect(deleteOneBosImage("analysis-1", "cust-A")).resolves.toEqual({ deleted: true });
+    expect(pendingUpsert().mock.calls[0][0].create.lastError).toBe("socket hang up");
+  });
+
+  it("deleteOneBosDecision records the failure and still deletes the decision row", async () => {
+    (prisma.buyOrSkipAnalysis.findFirst as any).mockResolvedValue({ id: "analysis-1", imagePublicId: PUBLIC_ID });
+    (deleteCloudinaryAsset as any).mockResolvedValue({ ok: false, errorCode: "PROVIDER_ERROR" });
+
+    const result = await deleteOneBosDecision("analysis-1", "cust-A");
+
+    expect(result).toEqual({ deleted: true });
+    expect(prisma.buyOrSkipAnalysis.delete).toHaveBeenCalledWith({ where: { id: "analysis-1" } });
+    expect(pendingUpsert()).toHaveBeenCalledTimes(1);
+    expect(pendingUpsert().mock.calls[0][0].where).toEqual({ publicId: PUBLIC_ID });
+  });
+
+  it("records nothing on success, for either single-item helper", async () => {
+    (prisma.buyOrSkipAnalysis.findFirst as any).mockResolvedValue({ id: "analysis-1", imagePublicId: PUBLIC_ID });
+
+    await deleteOneBosImage("analysis-1", "cust-A");
+    await deleteOneBosDecision("analysis-1", "cust-A");
+
+    expect(pendingUpsert()).not.toHaveBeenCalled();
+  });
+
+  it("deleteCustomerBosImages records one row per failed asset and none for the ones that succeeded", async () => {
+    (prisma.buyOrSkipAnalysis.findMany as any)
+      .mockResolvedValueOnce([
+        { id: "a1", imagePublicId: "naia-wardrobe/cust-A/a1" },
+        { id: "a2", imagePublicId: "naia-wardrobe/cust-A/a2" },
+      ])
+      .mockResolvedValueOnce([]); // the legacy imageUrl-only query
+    (deleteCloudinaryAsset as any)
+      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ ok: false, errorCode: "RATE_LIMITED" });
+
+    const result = await deleteCustomerBosImages("cust-A");
+
+    expect(result.deletedCount).toBe(1);
+    expect(result.failedAssets).toEqual(["naia-wardrobe/cust-A/a2"]);
+    // Both rows still had their image references cleared.
+    expect(result.clearedCount).toBe(2);
+    expect(pendingUpsert()).toHaveBeenCalledTimes(1);
+    expect(pendingUpsert().mock.calls[0][0].where).toEqual({ publicId: "naia-wardrobe/cust-A/a2" });
+    expect(pendingUpsert().mock.calls[0][0].create.lastError).toBe("RATE_LIMITED");
+  });
+
+  it("deleteCustomerBosImages records the failure even though its own caller discards failedAssets", async () => {
+    // settings.tsx:191 calls this as a bare `await deleteCustomerBosImages(id)`
+    // and ignores the return value — which is exactly why recording happens
+    // inside the loop rather than being left to the caller.
+    (prisma.buyOrSkipAnalysis.findMany as any)
+      .mockResolvedValueOnce([{ id: "a1", imagePublicId: "naia-wardrobe/cust-A/a1" }])
+      .mockResolvedValueOnce([]);
+    (deleteCloudinaryAsset as any).mockResolvedValue({ ok: false, errorCode: "PROVIDER_ERROR" });
+
+    // Discard the result exactly as the real caller does.
+    await deleteCustomerBosImages("cust-A");
+
+    expect(pendingUpsert()).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not throw when the recorder's own DB write fails", async () => {
+    (prisma.buyOrSkipAnalysis.findFirst as any).mockResolvedValue({ id: "analysis-1", imagePublicId: PUBLIC_ID });
+    (deleteCloudinaryAsset as any).mockResolvedValue({ ok: false, errorCode: "PROVIDER_ERROR" });
+    pendingUpsert().mockRejectedValue(new Error("db down"));
+
+    await expect(deleteOneBosImage("analysis-1", "cust-A")).resolves.toEqual({ deleted: true });
+  });
+
+  it("records a row the retry sweep can act on — publicId-keyed, concrete type, not the reserved VTO context", async () => {
+    (prisma.buyOrSkipAnalysis.findFirst as any).mockResolvedValue({ id: "analysis-1", imagePublicId: PUBLIC_ID });
+    (deleteCloudinaryAsset as any).mockResolvedValue({ ok: false, errorCode: "PROVIDER_ERROR" });
+
+    await deleteOneBosImage("analysis-1", "cust-A");
+
+    const arg = pendingUpsert().mock.calls[0][0];
+    expect(arg.where).toEqual({ publicId: PUBLIC_ID });
+    expect(arg.update.attemptCount).toEqual({ increment: 1 });
+    expect(arg.create.deliveryType).toBe("private");
+    expect(arg.create.context).not.toBe("vto-sweep-obligation");
+  });
+
+  it("never records for an analysis with no imagePublicId", async () => {
+    (prisma.buyOrSkipAnalysis.findFirst as any).mockResolvedValue({ id: "analysis-1", imagePublicId: null });
+
+    await deleteOneBosImage("analysis-1", "cust-A");
+
+    expect(deleteCloudinaryAsset).not.toHaveBeenCalled();
+    expect(pendingUpsert()).not.toHaveBeenCalled();
   });
 });

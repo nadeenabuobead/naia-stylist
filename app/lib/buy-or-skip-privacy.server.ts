@@ -11,6 +11,13 @@
 //   - DB image references are cleared regardless of Cloudinary outcome.
 //   - Analysis verdict, reasoning, fullAnalysis, and outcome are untouched.
 //   - "not found" from Cloudinary is treated as ok (idempotent).
+//   - 2026-11-17 (H7): a Cloudinary deletion that FAILS is durably recorded
+//     for the pending-deletion retry sweep instead of being discarded. Every
+//     function here clears or deletes the DB image reference regardless of
+//     the Cloudinary outcome, which is exactly what made a dropped failure
+//     unrecoverable without enumerating the customer's whole folder: the
+//     asset is left unreferenced, so nothing points at it any more and
+//     nothing records that it still needs deleting.
 
 import prisma from "../db.server.js";
 import {
@@ -20,6 +27,7 @@ import {
   buildPrivateDownloadUrl,
   type DeleteAssetFn,
 } from "./cloudinary-admin.server.js";
+import { deleteCloudinaryAssetOrRecord } from "./cloudinary-deletion-record.server.js";
 
 // ── Individual-item deletion ("Remove photo" on one Buy or Skip item) ─────────
 
@@ -40,9 +48,20 @@ export async function deleteOneBosImage(
   if (!analysis) return { deleted: false, errorCode: "NOT_FOUND" };
 
   if (analysis.imagePublicId) {
-    await _deleteAsset(analysis.imagePublicId, "private");
     // Non-blocking: the DB fields are cleared regardless so the item never
-    // renders a reference to a deleted/unreachable asset.
+    // renders a reference to a deleted/unreachable asset. A failure is now
+    // recorded (H7) — this is the customer's own "remove photo" control, so a
+    // dropped failure meant reporting the photo as gone while it was still
+    // in storage.
+    await deleteCloudinaryAssetOrRecord(
+      {
+        customerId,
+        publicId: analysis.imagePublicId,
+        deliveryType: "private",
+        context: "bos-photo-deletion-failed",
+      },
+      _deleteAsset,
+    );
   }
 
   // Verdict, reasoning, fullAnalysis, outcome, and every other field are
@@ -81,8 +100,19 @@ export async function deleteOneBosDecision(
   if (!analysis) return { deleted: false, errorCode: "NOT_FOUND" };
 
   if (analysis.imagePublicId) {
-    await _deleteAsset(analysis.imagePublicId, "private");
     // Non-blocking: the record is deleted regardless of Cloudinary outcome.
+    // A failure is recorded (H7) — the BuyOrSkipAnalysis row is deleted on
+    // the next line, so after a dropped failure nothing referenced the asset
+    // and nothing knew it still needed deleting.
+    await deleteCloudinaryAssetOrRecord(
+      {
+        customerId,
+        publicId: analysis.imagePublicId,
+        deliveryType: "private",
+        context: "bos-decision-deletion-failed",
+      },
+      _deleteAsset,
+    );
   }
 
   await prisma.buyOrSkipAnalysis.delete({ where: { id: analysis.id } });
@@ -114,7 +144,20 @@ export async function deleteCustomerBosImages(
   for (const analysis of analyses) {
     if (!analysis.imagePublicId) continue; // TypeScript narrowing (filter above ensures non-null)
 
-    const result = await _deleteAsset(analysis.imagePublicId, "private");
+    // Records each failure at the point of failure, not just in the returned
+    // failedAssets array (H7). Same reasoning as deleteCustomerVtoResults in
+    // fashn-tryon-service.server.ts: callers discard failedAssets. Confirmed
+    // for this function too — settings.tsx:191 calls it as a bare
+    // `await deleteCustomerBosImages(customer.id)` and ignores the result.
+    const result = await deleteCloudinaryAssetOrRecord(
+      {
+        customerId,
+        publicId: analysis.imagePublicId,
+        deliveryType: "private",
+        context: "bos-photo-bulk-deletion-failed",
+      },
+      _deleteAsset,
+    );
 
     if (result.ok) {
       deletedCount++;
