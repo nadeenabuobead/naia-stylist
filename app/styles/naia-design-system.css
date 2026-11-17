@@ -3226,3 +3226,34 @@ button.mn-sidebar-nav-link.mn-nav-button-reset { padding: 0; }
 .mn-look-action-link { text-decoration: underline; text-underline-offset: 4px; color: var(--fg-85); transition: color 0.15s; }
 .mn-look-action-link:hover { color: var(--lipstick); }
 .mn-look-dot { color: var(--fg-25); }
+
+/* ── Checkout consent checkboxes (Legal handoff W1, 2026-11-17) ──────────
+   TermsAcceptanceCheckbox / EarlyServiceConsentCheckbox. Both unwired —
+   this styling only affects the day they're actually dropped into a
+   checkout form, nothing today. */
+.terms-acceptance-checkbox,
+.early-service-consent-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  font-family: var(--naia-ff-body);
+  color: var(--naia-ink);
+  cursor: pointer;
+}
+.terms-acceptance-checkbox input,
+.early-service-consent-checkbox input {
+  margin-top: 0.2rem;
+  min-width: 20px;
+  min-height: 20px;
+  accent-color: var(--naia-accent);
+}
+.early-service-consent { display: flex; flex-direction: column; gap: 0.5rem; }
+.early-service-consent-explanation {
+  font-size: 0.85rem;
+  color: var(--naia-muted);
+  line-height: 1.5;
+  margin: 0 0 0 1.85rem; /* aligns under the checkbox label text, not the box itself */
+}
+@media (max-width: 640px) {
+  .early-service-consent-explanation { margin-left: 0; }
+}

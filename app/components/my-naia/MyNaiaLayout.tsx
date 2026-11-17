@@ -31,6 +31,12 @@ const MY_NAIA_NAV: NavGroup[] = [
     title: "Account",
     items: [
       { to: "/my-naia/plan-usage", label: "Plan & Usage" },
+      // Legal handoff W2/Decision 2 (2026-11-17): the EU withdrawal-request
+      // mechanism (my-naia.withdrawal-request.tsx) had no discoverable link
+      // anywhere in the app — a customer would need to already know the
+      // exact URL. "Clearly accessible during the withdrawal period" is an
+      // explicit requirement; this is that access point.
+      { to: "/my-naia/withdrawal-request", label: "Withdrawal Request" },
       { to: "/settings", label: "Settings & Privacy" },
       { to: "/auth/logout", label: "Sign Out", logout: true },
     ],

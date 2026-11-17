@@ -109,6 +109,11 @@ export default function WithdrawalRequestPage() {
           Submitting a cancellation instead? That's handled from{" "}
           <a href="/my-naia/plan-usage">Plans &amp; usage</a>, not here.
         </p>
+        <p className="wr-alt-channels">
+          This online form is one way to exercise this right, not the only one — you can also withdraw by
+          email to <a href="mailto:privacy@naiabynadine.com">privacy@naiabynadine.com</a> or by any other
+          clear statement, including the standard model withdrawal form where applicable.
+        </p>
 
         {actionData?.ok ? (
           <div className="wr-confirmation" role="status">

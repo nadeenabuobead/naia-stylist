@@ -27,9 +27,30 @@ describe("A — Sign Out lives in the Account nav group", () => {
   it("the Account group's items include a Sign Out entry", () => {
     const accountIdx = SRC.indexOf('title: "Account"');
     assert.ok(accountIdx !== -1, "Account group present");
-    const accountBlock = SRC.slice(accountIdx, accountIdx + 400);
+    // Bounded by the group's own closing "]," rather than a fixed char
+    // count — a hardcoded window silently breaks every time an item (like
+    // the 2026-11-17 Withdrawal Request entry, Decision 2) gets added.
+    const accountEnd = SRC.indexOf("],", accountIdx);
+    const accountBlock = SRC.slice(accountIdx, accountEnd !== -1 ? accountEnd : accountIdx + 600);
     assert.ok(accountBlock.includes('label: "Sign Out"'), "Sign Out item present in the Account group");
     assert.ok(accountBlock.includes("logout: true"), "Sign Out item is flagged as a logout action, not a plain link");
+  });
+});
+
+describe("Withdrawal Request is discoverable from the Account nav group (2026-11-17, Decision 2)", () => {
+  it("links to the real withdrawal-request route, in the Account group, not buried or omitted", () => {
+    const accountIdx = SRC.indexOf('title: "Account"');
+    const accountEnd = SRC.indexOf("],", accountIdx);
+    const accountBlock = SRC.slice(accountIdx, accountEnd !== -1 ? accountEnd : accountIdx + 600);
+    assert.ok(accountBlock.includes('to: "/my-naia/withdrawal-request"'), "Withdrawal Request item present in the Account group");
+    assert.ok(accountBlock.includes('label: "Withdrawal Request"'));
+  });
+
+  it("is a plain nav Link, not flagged as a logout action or otherwise special-cased", () => {
+    const itemIdx = SRC.indexOf('to: "/my-naia/withdrawal-request"');
+    const itemEnd = SRC.indexOf("}", itemIdx);
+    const itemBlock = SRC.slice(itemIdx, itemEnd);
+    assert.doesNotMatch(itemBlock, /logout/);
   });
 });
 
