@@ -23,6 +23,9 @@ import { writeSourceEvidence, reconcileObservations } from "../lib/ai/taste-reco
 //   "deleteSavedLook"     — delete one SavedLook by exact id
 //   "countRecords"       — return event/analysis counts scoped to a customerId
 //   "cleanup"            — delete all test records for a shopifyCustomerId
+//   "createDuplicateMonthTrendEditFixture" — see its own comment below; creates
+//                          2 EditorialTrendReport rows sharing one editionMonth
+//   "deleteDuplicateMonthTrendEditFixture" — deletes exactly those 2 rows
 //
 // All test records use shopifyCustomerId prefix "test-batch1-" to isolate them.
 // The three SavedLook actions above additionally require the target
@@ -476,6 +479,61 @@ export async function action({ request }) {
   const secret = request.headers.get("x-seed-secret");
   if (!isValidSeedSecret(secret)) {
     return new Response("Forbidden", { status: 403 });
+  }
+
+  // ── createDuplicateMonthTrendEditFixture / deleteDuplicateMonthTrendEditFixture ──
+  // Unlike every other action in this file, EditorialTrendReport is NOT
+  // customer-scoped — it is global, publicly-visible content on /trends and
+  // /trends/my-edits for every real customer on this staging environment,
+  // not just test-batch1- fixtures. That is a materially bigger blast
+  // radius than this file's usual "wrong customerId can only ever touch a
+  // test-batch1- row" guarantee, so it gets an extra, independent gate on
+  // top of the standard staging-only + x-seed-secret checks every other
+  // action already requires: TREND_EDIT_FIXTURE_ENABLED must be the exact
+  // string "true", fail-closed when unset — same pattern as
+  // SAVED_LOOKS_FIXTURE_CUSTOMER_IDS above, applied to the axis that
+  // actually matters here (existence of ANY such content at all, not which
+  // customer it's scoped to, since there is no customer to scope to).
+  //
+  // No caller-supplied input of any kind — both the two fixture slugs and
+  // the editionMonth they share are hardcoded below, so this can never
+  // become a general "create arbitrary editorial content" primitive no
+  // matter what a caller sends. editionMonth is deliberately a far-future,
+  // never-real value (2030-01) so it can never collide with or be mistaken
+  // for genuine editorial content, and is trivially greppable for cleanup
+  // verification. Both rows are clearly marked in their own title/summary
+  // text as QA-only. Idempotent (upsert, not create) — re-running this
+  // action is always safe and never creates a 3rd/4th row.
+  if (act === "createDuplicateMonthTrendEditFixture" || act === "deleteDuplicateMonthTrendEditFixture") {
+    if (process.env.TREND_EDIT_FIXTURE_ENABLED !== "true") {
+      return Response.json({ error: "TREND_EDIT_FIXTURE_ENABLED must be \"true\" on this environment" }, { status: 403 });
+    }
+
+    const SLUGS = ["test-batch1-trend-edit-samemonth-a", "test-batch1-trend-edit-samemonth-b"];
+    const EDITION_MONTH = "2030-01";
+
+    if (act === "deleteDuplicateMonthTrendEditFixture") {
+      const deleted = await prisma.editorialTrendReport.deleteMany({ where: { slug: { in: SLUGS } } });
+      return Response.json({ deletedCount: deleted.count });
+    }
+
+    const base = {
+      season: "QA Fixture — not a real season",
+      status: "PUBLISHED",
+      editionMonth: EDITION_MONTH,
+      summary: "QA fixture — safe to ignore. Exercises the same-editionMonth grouping path only.",
+      editorialIntro: "QA fixture — safe to ignore. Exercises the same-editionMonth grouping path only.",
+    };
+    const created = [];
+    for (const [i, slug] of SLUGS.entries()) {
+      const row = await prisma.editorialTrendReport.upsert({
+        where: { slug },
+        create: { slug, title: `[QA TEST] Same-month edit ${i === 0 ? "A" : "B"}`, ...base },
+        update: base,
+      });
+      created.push({ id: row.id, slug: row.slug });
+    }
+    return Response.json({ created, editionMonth: EDITION_MONTH });
   }
 
   // ── createCustomer ────────────────────────────────────────────────────────
