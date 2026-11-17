@@ -130,7 +130,15 @@ export async function downloadModelPhotoAsDataUrl(
   const cfg = _getConfig();
   if (!cfg) return { ok: false, errorCode: "NOT_CONFIGURED" };
 
-  const format = bodyFormat ?? "jpg";
+  // bodyFormat (NaiaModel.bodyFormat) is nullable — a null/missing format must
+  // never be guessed at "jpg". Cloudinary's /image/download endpoint performs
+  // a real format conversion whenever the requested format differs from what's
+  // actually stored, and that conversion is cached as a derived resource
+  // regardless of Strict Transformations (which only gates new *unsigned* CDN
+  // transformation requests, not this authenticated Admin API call). Matches
+  // the fail-closed precedent in buildModelPreviewUrl (b5f01ed).
+  if (!bodyFormat) return { ok: false, errorCode: "MISSING_MODEL_FORMAT" };
+  const format = bodyFormat;
   // downloadUrl contains signed credentials — must not be logged
   const downloadUrl = buildPrivateDownloadUrl(cfg, bodyPublicId, format, deliveryType);
 

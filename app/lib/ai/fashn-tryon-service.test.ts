@@ -559,6 +559,52 @@ describe("§4 Model photo download", () => {
     assert.ok(result.ok);
     assert.ok(result.ok && isValidModelImageDataUrl(result.dataUrl), "data URL must pass adapter validation");
   });
+
+  it("DL06 — QA #36: a null bodyFormat never guesses \"jpg\" — fails closed with MISSING_MODEL_FORMAT, no download attempted", async () => {
+    let fetchCalls = 0;
+    const spyFetch: typeof fetch = async (...args) => {
+      fetchCalls++;
+      return makePhotoFetch(true)(...args);
+    };
+
+    const result = await downloadModelPhotoAsDataUrl(
+      "naia-wardrobe/cust/body",
+      null, // e.g. a legacy NaiaModel row saved before format tracking existed
+      "private",
+      spyFetch,
+      () => MOCK_CONFIG,
+    );
+
+    assert.ok(!result.ok);
+    assert.ok(!result.ok && result.errorCode === "MISSING_MODEL_FORMAT");
+    assert.equal(
+      fetchCalls,
+      0,
+      "must never attempt a download when format is unknown — requesting the wrong format from " +
+        "Cloudinary's authenticated /image/download endpoint forces a real conversion that gets " +
+        "cached as a derived resource regardless of Strict Transformations",
+    );
+  });
+
+  it("DL07 — a real format is used verbatim, never silently coerced to jpg", async () => {
+    let requestedUrl = "";
+    const spyFetch: typeof fetch = async (url) => {
+      requestedUrl = String(url);
+      return makePhotoFetch(true)(url);
+    };
+
+    const result = await downloadModelPhotoAsDataUrl(
+      "naia-wardrobe/cust/body",
+      "webp",
+      "private",
+      spyFetch,
+      () => MOCK_CONFIG,
+    );
+
+    assert.ok(result.ok, "must still succeed when format is present");
+    assert.ok(requestedUrl.includes("format=webp"), "must request the real stored format, not jpg");
+    assert.ok(result.ok && result.dataUrl.startsWith("data:image/webp;base64,"));
+  });
 });
 
 // ── §5 executeTryOn lifecycle ─────────────────────────────────────────────────

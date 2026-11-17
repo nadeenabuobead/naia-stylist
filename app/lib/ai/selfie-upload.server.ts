@@ -253,10 +253,21 @@ export async function uploadSelfieToCloudinary(
 
     if (json.error) return { ok: false, errorCode: "PROVIDER_REJECTED" };
 
+    // A missing format in Cloudinary's own upload response must never be
+    // guessed at "jpg" — this value is persisted as SelfieAnalysis.photoFormat
+    // and reused for every later reanalysis/retry (buildSelfieAnalysisUrl ->
+    // buildPrivateDownloadUrl). A wrong guess here would silently force a real
+    // format conversion on every one of those downloads, cached as a derived
+    // resource regardless of Strict Transformations — the same mechanism
+    // already fixed for NaiaModel/ClosetItem formats (b5f01ed). The caller
+    // already has an established cleanup path for every other upload failure
+    // (failSelfieAnalysis, DB-status-only, no Cloudinary delete).
+    if (!json.format) return { ok: false, errorCode: "MISSING_UPLOAD_FORMAT" };
+
     return {
       ok: true,
       publicId: json.public_id ?? publicId,
-      format: json.format ?? "jpg",
+      format: json.format,
     };
   } catch {
     return { ok: false, errorCode: "NETWORK_ERROR" };
