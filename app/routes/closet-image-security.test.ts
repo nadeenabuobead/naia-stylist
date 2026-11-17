@@ -517,15 +517,17 @@ describe("T24: preview endpoint returns requiresReupload on asset-deleting failu
   it("SAFETY_REJECT branch sets requiresReupload:true", () => {
     const rejectIdx = preview.indexOf("SAFETY_REJECT");
     assert.ok(rejectIdx !== -1, "SAFETY_REJECT must be handled");
-    const block = preview.slice(rejectIdx, rejectIdx + 300);
+    // 209031f (H7) grew this branch; window widened from 300 to keep margin.
+    const block = preview.slice(rejectIdx, rejectIdx + 500);
     assert.ok(block.includes("requiresReupload: true"), "SAFETY_REJECT must return requiresReupload:true");
   });
 
   it("RETRY_IMAGE branch sets requiresReupload:true", () => {
     const retryIdx = preview.indexOf("RETRY_IMAGE");
     assert.ok(retryIdx !== -1, "RETRY_IMAGE must be handled");
-    // RETRY_IMAGE block includes a PREVIEW_GUIDANCE dictionary — 1000 chars to reach the return.
-    const block = preview.slice(retryIdx, retryIdx + 1000);
+    // RETRY_IMAGE block includes a PREVIEW_GUIDANCE dictionary — 1000 chars to
+    // reach the return; 209031f (H7) grew it further, window widened to 1300.
+    const block = preview.slice(retryIdx, retryIdx + 1300);
     assert.ok(block.includes("requiresReupload: true"), "RETRY_IMAGE must return requiresReupload:true");
   });
 
