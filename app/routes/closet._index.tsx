@@ -9,7 +9,11 @@ import { assessClosetEligibility, CLOSET_ELIGIBILITY_DISPLAY, isVtoCategoryAllow
 import { emitClosetItemAdded, recordJourneyEventAwaited } from "~/lib/ai/journey-events.server";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import naiaStyles from "~/styles/naia-design-system.css?url";
-import { verifyCloudinaryAsset, deleteCloudinaryAsset, buildPrivateDownloadUrl, getCloudinaryConfig, validatePublicIdOwnership } from "~/lib/cloudinary-admin.server";
+import { verifyCloudinaryAsset, buildPrivateDownloadUrl, getCloudinaryConfig, validatePublicIdOwnership } from "~/lib/cloudinary-admin.server";
+// H7: this route no longer calls deleteCloudinaryAsset directly — every
+// discard goes through the record-on-failure wrapper via discardUpload below,
+// so the bare deleter is deliberately no longer imported here.
+import { deleteCloudinaryAssetOrRecord } from "~/lib/cloudinary-deletion-record.server";
 import { deleteClosetItemWithImage } from "~/lib/closet-item-deletion.server";
 import { analyzeClosetGarment } from "~/lib/ai/closet-garment-analysis.server";
 import { computeClosetInsights, type ClosetInsightProfile } from "~/lib/ai/closet-insights";
@@ -263,6 +267,44 @@ export async function action({ request }: ActionFunctionArgs) {
   const customer = await prisma.customer.findUnique({ where: { id: naiaCustomer.id } });
   if (!customer) return data({ error: "Not authenticated" }, { status: 401 });
 
+  // ── H7 (2026-11-17, Nov 12 privacy audit) ──────────────────────────────────
+  //
+  // This action discards a rejected or superseded Cloudinary upload in 35
+  // places: every server-side validation, moderation, suitability and
+  // capacity rejection in the add and edit flows, plus the old-asset cleanup
+  // when a photo is replaced. All 35 called deleteCloudinaryAsset and threw
+  // the result away — and because deleteCloudinaryAsset does NOT throw on a
+  // provider rejection (it returns { ok:false, errorCode }), a failed delete
+  // left no trace whatsoever.
+  //
+  // In every one of these cases no DB row references the asset: a rejection
+  // returns before any ClosetItem is written, and the replacement path has
+  // already repointed the row at the new publicId. So a dropped failure left
+  // an unreferenced private photo of the customer's own garment in storage.
+  //
+  // The only thing that would ever have reclaimed it is the bounded orphan
+  // sweep (cloudinary-orphan-sweep.server.ts), which enumerates the whole
+  // naia-wardrobe/{customerId}/ folder. That sweep has no scheduled trigger:
+  // vercel.json defines no crons and runBoundedSweep's only caller is
+  // admin.maintenance.tsx's action — a human clicking a button. Recording the
+  // failure instead hands the specific publicId to the pending-deletion retry
+  // sweep (H6) and surfaces it on /admin/maintenance with its error code, so
+  // the obligation survives the request without a folder enumeration to
+  // rediscover it.
+  //
+  // Never throws, so a rejection path still returns its own customer-facing
+  // error rather than becoming a 500.
+  const discardUpload = (
+    uploadPublicId: string,
+    context: string = "closet-upload-rejected",
+  ) =>
+    deleteCloudinaryAssetOrRecord({
+      customerId: customer.id,
+      publicId: uploadPublicId,
+      deliveryType: "private",
+      context,
+    });
+
   const formData = await request.formData();
   const intent = formData.get("intent") as string;
 
@@ -312,7 +354,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // here on rejection, same as every other pre-DB-write check in this action.
     const consentGiven = extractConsentGiven({ photoConsentGiven: formData.get("photoConsentGiven") === "true" });
     if (!consentGiven) {
-      await deleteCloudinaryAsset(publicId, "private");
+      await discardUpload(publicId);
       return data({ error: "Photo consent is required to add an item." }, { status: 400 });
     }
 
@@ -353,7 +395,7 @@ export async function action({ request }: ActionFunctionArgs) {
           // Fresh request: a replace target that doesn't resolve to an item this
           // customer owns is not something to silently ignore — fail clearly
           // rather than guess at intent, and clean up the orphaned upload.
-          await deleteCloudinaryAsset(publicId, "private");
+          await discardUpload(publicId);
           return data({ error: "The item to replace could not be found." }, { status: 404 });
         }
         // Retry of an already-processed request: the new item exists and the old
@@ -406,7 +448,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // 2. Verify via Cloudinary Admin API — authoritative format/bytes/dimensions.
     const verify = await verifyCloudinaryAsset(publicId, "private");
     if (!verify.ok) {
-      await deleteCloudinaryAsset(publicId, "private");
+      await discardUpload(publicId);
       return data({ error: "Image could not be verified. Please upload again." }, { status: 400 });
     }
 
@@ -416,25 +458,25 @@ export async function action({ request }: ActionFunctionArgs) {
     const serverHeight = verify.asset.height;
 
     if (verify.asset.type !== "private") {
-      await deleteCloudinaryAsset(publicId, "private");
+      await discardUpload(publicId);
       return data({ error: "Image must be uploaded via the app." }, { status: 400 });
     }
     if (verify.asset.resourceType !== "image") {
-      await deleteCloudinaryAsset(publicId, "private");
+      await discardUpload(publicId);
       return data({ error: "Uploaded file must be an image." }, { status: 400 });
     }
 
     // 3. Format allowlist — derived from Admin API, not client-provided value.
     const ALLOWED_FORMATS = new Set(["jpg", "jpeg", "png", "webp", "heic", "heif"]);
     if (!ALLOWED_FORMATS.has(serverFormat)) {
-      await deleteCloudinaryAsset(publicId, "private");
+      await discardUpload(publicId);
       return data({ error: `File type "${serverFormat}" is not accepted. Use JPG, PNG, WEBP, or HEIC.` }, { status: 400 });
     }
 
     // 4. File-size cap — from Admin API, not client-reported bytes.
     const SERVER_MAX_BYTES = 5 * 1024 * 1024;
     if (serverBytes > SERVER_MAX_BYTES) {
-      await deleteCloudinaryAsset(publicId, "private");
+      await discardUpload(publicId);
       return data({ error: `Image is too large (${(serverBytes / 1024 / 1024).toFixed(1)} MB). Maximum is 5 MB.` }, { status: 400 });
     }
 
@@ -442,26 +484,26 @@ export async function action({ request }: ActionFunctionArgs) {
     const MIN_DIM = 200;
     const MAX_DIM = 8000;
     if (serverWidth !== null && serverWidth < MIN_DIM) {
-      await deleteCloudinaryAsset(publicId, "private");
+      await discardUpload(publicId);
       return data({ error: `Image width (${serverWidth} px) is below the minimum of ${MIN_DIM} px.` }, { status: 400 });
     }
     if (serverHeight !== null && serverHeight < MIN_DIM) {
-      await deleteCloudinaryAsset(publicId, "private");
+      await discardUpload(publicId);
       return data({ error: `Image height (${serverHeight} px) is below the minimum of ${MIN_DIM} px.` }, { status: 400 });
     }
     if (serverWidth !== null && serverWidth > MAX_DIM) {
-      await deleteCloudinaryAsset(publicId, "private");
+      await discardUpload(publicId);
       return data({ error: `Image width (${serverWidth} px) exceeds the maximum of ${MAX_DIM} px.` }, { status: 400 });
     }
     if (serverHeight !== null && serverHeight > MAX_DIM) {
-      await deleteCloudinaryAsset(publicId, "private");
+      await discardUpload(publicId);
       return data({ error: `Image height (${serverHeight} px) exceeds the maximum of ${MAX_DIM} px.` }, { status: 400 });
     }
 
     // 6. Server-side magic-byte check.
     const cfg = getCloudinaryConfig();
     if (!cfg) {
-      await deleteCloudinaryAsset(publicId, "private");
+      await discardUpload(publicId);
       return data({ error: "Image service is not configured. Please try again." }, { status: 503 });
     }
     const downloadUrl = buildPrivateDownloadUrl(cfg, publicId, serverFormat, "private");
@@ -474,19 +516,19 @@ export async function action({ request }: ActionFunctionArgs) {
         const buf = await byteRes.arrayBuffer();
         const header = new Uint8Array(buf);
         if (!detectImageFormatFromBytes(header)) {
-          await deleteCloudinaryAsset(publicId, "private");
+          await discardUpload(publicId);
           return data({ error: "File signature does not match a supported image format." }, { status: 400 });
         }
       }
     } catch {
-      await deleteCloudinaryAsset(publicId, "private");
+      await discardUpload(publicId);
       return data({ error: "Image verification timed out. Please try again." }, { status: 400 });
     }
 
     // ── Layer 2: Global content safety moderation ──────────────────────────
     const moderation = await moderateImageContent(downloadUrl);
     if (moderation.status === "MODERATION_UNAVAILABLE") {
-      await deleteCloudinaryAsset(publicId, "private");
+      await discardUpload(publicId);
       // Minimal audit log — no publicId, no URL, no image data.
       try {
         await prisma.journeyEvent.create({
@@ -502,7 +544,7 @@ export async function action({ request }: ActionFunctionArgs) {
       return data({ error: "Image review is temporarily unavailable. Please try again." }, { status: 503 });
     }
     if (moderation.status === "SAFETY_REJECT") {
-      await deleteCloudinaryAsset(publicId, "private");
+      await discardUpload(publicId);
       // Minimal audit log — no publicId, no URL, no image data.
       try {
         await prisma.journeyEvent.create({
@@ -531,7 +573,7 @@ export async function action({ request }: ActionFunctionArgs) {
       assessment_failed: "Image assessment is temporarily unavailable. Please try again.",
     };
     if (suitability.status === "RETRY_IMAGE") {
-      await deleteCloudinaryAsset(publicId, "private");
+      await discardUpload(publicId);
       const msg = GARMENT_GUIDANCE[(suitability as { status: "RETRY_IMAGE"; subCode: string }).subCode]
         ?? "Please upload a clearer photo of a single fashion item.";
       return data({ error: msg, retryImage: true }, { status: 422 });
@@ -610,7 +652,7 @@ export async function action({ request }: ActionFunctionArgs) {
       }
       // A concurrent upload won the race since the early check above — this
       // asset was already verified/moderated but must not be kept orphaned.
-      await deleteCloudinaryAsset(publicId, "private");
+      await discardUpload(publicId);
       // Same limit===0 vs genuinely-full distinction as the early check
       // above (capacityCheck.limit) — this is the atomic re-verification
       // path, which can independently reach "at_capacity" (e.g. a second
@@ -807,14 +849,14 @@ export async function action({ request }: ActionFunctionArgs) {
     //    completely untouched.
     const editConsentGiven = extractConsentGiven({ photoConsentGiven: formData.get("photoConsentGiven") === "true" });
     if (!editConsentGiven) {
-      await deleteCloudinaryAsset(newPublicId, "private");
+      await discardUpload(newPublicId, "closet-edit-upload-rejected");
       return data({ error: "Photo consent is required to replace this item's photo." }, { status: 400 });
     }
 
     // 3. Verify via Cloudinary Admin API.
     const verify = await verifyCloudinaryAsset(newPublicId, "private");
     if (!verify.ok) {
-      await deleteCloudinaryAsset(newPublicId, "private");
+      await discardUpload(newPublicId, "closet-edit-upload-rejected");
       return data({ error: "Image could not be verified. Please upload again." }, { status: 400 });
     }
 
@@ -825,50 +867,50 @@ export async function action({ request }: ActionFunctionArgs) {
     const editHeight  = editAsset.height;
 
     if (editAsset.type !== "private") {
-      await deleteCloudinaryAsset(newPublicId, "private");
+      await discardUpload(newPublicId, "closet-edit-upload-rejected");
       return data({ error: "Image must be uploaded via the app." }, { status: 400 });
     }
     if (editAsset.resourceType !== "image") {
-      await deleteCloudinaryAsset(newPublicId, "private");
+      await discardUpload(newPublicId, "closet-edit-upload-rejected");
       return data({ error: "Uploaded file must be an image." }, { status: 400 });
     }
 
     // 4. Format allowlist.
     const EDIT_ALLOWED_FORMATS = new Set(["jpg", "jpeg", "png", "webp", "heic", "heif"]);
     if (!EDIT_ALLOWED_FORMATS.has(editFormat)) {
-      await deleteCloudinaryAsset(newPublicId, "private");
+      await discardUpload(newPublicId, "closet-edit-upload-rejected");
       return data({ error: `File type "${editFormat}" is not accepted. Use JPG, PNG, WEBP, or HEIC.` }, { status: 400 });
     }
 
     // 5. File-size cap.
     if (editBytes > 5 * 1024 * 1024) {
-      await deleteCloudinaryAsset(newPublicId, "private");
+      await discardUpload(newPublicId, "closet-edit-upload-rejected");
       return data({ error: `Image is too large (${(editBytes / 1024 / 1024).toFixed(1)} MB). Maximum is 5 MB.` }, { status: 400 });
     }
 
     // 6. Dimension bounds.
     const EDIT_MIN_DIM = 200, EDIT_MAX_DIM = 8000;
     if (editWidth !== null && editWidth < EDIT_MIN_DIM) {
-      await deleteCloudinaryAsset(newPublicId, "private");
+      await discardUpload(newPublicId, "closet-edit-upload-rejected");
       return data({ error: `Image width (${editWidth} px) is below the minimum of ${EDIT_MIN_DIM} px.` }, { status: 400 });
     }
     if (editHeight !== null && editHeight < EDIT_MIN_DIM) {
-      await deleteCloudinaryAsset(newPublicId, "private");
+      await discardUpload(newPublicId, "closet-edit-upload-rejected");
       return data({ error: `Image height (${editHeight} px) is below the minimum of ${EDIT_MIN_DIM} px.` }, { status: 400 });
     }
     if (editWidth !== null && editWidth > EDIT_MAX_DIM) {
-      await deleteCloudinaryAsset(newPublicId, "private");
+      await discardUpload(newPublicId, "closet-edit-upload-rejected");
       return data({ error: `Image width (${editWidth} px) exceeds the maximum of ${EDIT_MAX_DIM} px.` }, { status: 400 });
     }
     if (editHeight !== null && editHeight > EDIT_MAX_DIM) {
-      await deleteCloudinaryAsset(newPublicId, "private");
+      await discardUpload(newPublicId, "closet-edit-upload-rejected");
       return data({ error: `Image height (${editHeight} px) exceeds the maximum of ${EDIT_MAX_DIM} px.` }, { status: 400 });
     }
 
     // 7. Magic-byte check.
     const editCfg = getCloudinaryConfig();
     if (!editCfg) {
-      await deleteCloudinaryAsset(newPublicId, "private");
+      await discardUpload(newPublicId, "closet-edit-upload-rejected");
       return data({ error: "Image service is not configured. Please try again." }, { status: 503 });
     }
     const editDownloadUrl = buildPrivateDownloadUrl(editCfg, newPublicId, editFormat, "private");
@@ -881,19 +923,19 @@ export async function action({ request }: ActionFunctionArgs) {
         const buf = await byteRes.arrayBuffer();
         const header = new Uint8Array(buf);
         if (!detectImageFormatFromBytes(header)) {
-          await deleteCloudinaryAsset(newPublicId, "private");
+          await discardUpload(newPublicId, "closet-edit-upload-rejected");
           return data({ error: "File signature does not match a supported image format." }, { status: 400 });
         }
       }
     } catch {
-      await deleteCloudinaryAsset(newPublicId, "private");
+      await discardUpload(newPublicId, "closet-edit-upload-rejected");
       return data({ error: "Image verification timed out. Please try again." }, { status: 400 });
     }
 
     // ── Layer 2: Global content safety moderation ─────────────────────────────
     const editModeration = await moderateImageContent(editDownloadUrl);
     if (editModeration.status === "MODERATION_UNAVAILABLE") {
-      await deleteCloudinaryAsset(newPublicId, "private");
+      await discardUpload(newPublicId, "closet-edit-upload-rejected");
       try {
         await prisma.journeyEvent.create({
           data: {
@@ -908,7 +950,7 @@ export async function action({ request }: ActionFunctionArgs) {
       return data({ error: "Image review is temporarily unavailable. Please try again." }, { status: 503 });
     }
     if (editModeration.status === "SAFETY_REJECT") {
-      await deleteCloudinaryAsset(newPublicId, "private");
+      await discardUpload(newPublicId, "closet-edit-upload-rejected");
       try {
         await prisma.journeyEvent.create({
           data: {
@@ -936,7 +978,7 @@ export async function action({ request }: ActionFunctionArgs) {
       assessment_failed:           "Image assessment is temporarily unavailable. Please try again.",
     };
     if (editSuitability.status === "RETRY_IMAGE") {
-      await deleteCloudinaryAsset(newPublicId, "private");
+      await discardUpload(newPublicId, "closet-edit-upload-rejected");
       const msg = EDIT_GARMENT_GUIDANCE[(editSuitability as { status: "RETRY_IMAGE"; subCode: string }).subCode]
         ?? "Please upload a clearer photo of a single fashion item.";
       return data({ error: msg }, { status: 422 });
@@ -1048,7 +1090,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // Delete old Cloudinary asset ONLY after the DB update succeeds.
     if (oldPublicId && oldPublicId !== newPublicId) {
-      await deleteCloudinaryAsset(oldPublicId, "private");
+      await discardUpload(oldPublicId, "closet-photo-replaced-old-asset");
     }
 
     // Rerun garment intelligence on the new image. The customer's REVIEWED

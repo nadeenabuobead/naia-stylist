@@ -51,7 +51,15 @@ describe("closet._index.tsx action — server-side consent enforcement on final 
       closetIndex.indexOf("extractConsentGiven({ photoConsentGiven:") + 400,
     );
     assert.ok(consentBlock.includes('if (!consentGiven)'));
-    assert.ok(consentBlock.includes('deleteCloudinaryAsset(publicId, "private")'));
+    // 2026-11-17 (H7): the discard is now discardUpload(publicId) — it still
+    // deletes the asset, and additionally records a failed deletion into
+    // PendingCloudinaryDeletion so the retry sweep can drain it. The
+    // invariant here (a consent rejection never leaves the upload behind) is
+    // unchanged; only the call's name is.
+    assert.ok(
+      /discardUpload\(publicId\)|deleteCloudinaryAsset\(publicId, "private"\)/.test(consentBlock),
+      "a consent rejection must discard the already-uploaded asset",
+    );
     assert.ok(consentBlock.includes("status: 400"));
   });
 

@@ -131,9 +131,13 @@ describe("T6: MODERATION_UNAVAILABLE → delete asset", () => {
     const idx = closet.indexOf("MODERATION_UNAVAILABLE");
     assert.ok(idx !== -1, "route must handle MODERATION_UNAVAILABLE");
     const block = closet.slice(idx, idx + 600);
+    // 2026-11-17 (H7): the call is now discardUpload(publicId), which
+    // still deletes the asset but additionally records a failure into
+    // PendingCloudinaryDeletion for the retry sweep. The invariant this
+    // test exists for — a rejected upload is cleaned up — is unchanged.
     assert.ok(
-      block.includes("deleteCloudinaryAsset"),
-      "MODERATION_UNAVAILABLE block must call deleteCloudinaryAsset",
+      /discardUpload\(|deleteCloudinaryAsset/.test(block),
+      "MODERATION_UNAVAILABLE block must discard the uploaded asset",
     );
   });
 });
@@ -145,9 +149,13 @@ describe("T7: SAFETY_REJECT → delete asset", () => {
     const idx = closet.indexOf("SAFETY_REJECT");
     assert.ok(idx !== -1, "route must handle SAFETY_REJECT");
     const block = closet.slice(idx, idx + 600);
+    // 2026-11-17 (H7): the call is now discardUpload(publicId), which
+    // still deletes the asset but additionally records a failure into
+    // PendingCloudinaryDeletion for the retry sweep. The invariant this
+    // test exists for — a rejected upload is cleaned up — is unchanged.
     assert.ok(
-      block.includes("deleteCloudinaryAsset"),
-      "SAFETY_REJECT block must call deleteCloudinaryAsset",
+      /discardUpload\(|deleteCloudinaryAsset/.test(block),
+      "SAFETY_REJECT block must discard the uploaded asset",
     );
   });
 });
@@ -178,9 +186,13 @@ describe("T9: garment RETRY_IMAGE → delete asset", () => {
     const idx = closet.indexOf("RETRY_IMAGE");
     assert.ok(idx !== -1, "route must handle RETRY_IMAGE");
     const block = closet.slice(idx, idx + 400);
+    // 2026-11-17 (H7): the call is now discardUpload(publicId), which
+    // still deletes the asset but additionally records a failure into
+    // PendingCloudinaryDeletion for the retry sweep. The invariant this
+    // test exists for — a rejected upload is cleaned up — is unchanged.
     assert.ok(
-      block.includes("deleteCloudinaryAsset"),
-      "RETRY_IMAGE block must call deleteCloudinaryAsset",
+      /discardUpload\(|deleteCloudinaryAsset/.test(block),
+      "RETRY_IMAGE block must discard the uploaded asset",
     );
   });
 });
@@ -311,7 +323,7 @@ describe("T16: edit deletes new (failed) asset before DB update on pipeline fail
     const pipelineStart = block.indexOf("validatePublicIdOwnership(newPublicId");
     assert.ok(pipelineStart !== -1, "edit block must call validatePublicIdOwnership(newPublicId, ...) to start the photo pipeline");
     // Within the photo pipeline: delete-new must appear before the photo update
-    const deleteNewIdx = block.indexOf("deleteCloudinaryAsset(newPublicId", pipelineStart);
+    const deleteNewIdx = block.search(/discardUpload\(newPublicId|deleteCloudinaryAsset\(newPublicId/);
     const photoUpdateIdx = block.indexOf("closetItem.update(", pipelineStart);
     assert.ok(deleteNewIdx !== -1, "edit photo pipeline must call deleteCloudinaryAsset(newPublicId, ...) on pipeline failure");
     assert.ok(photoUpdateIdx !== -1, "edit photo pipeline must call prisma.closetItem.update");
@@ -335,7 +347,7 @@ describe("T17: edit deletes old asset only after DB update succeeds", () => {
     const pipelineStart = block.indexOf("validatePublicIdOwnership(newPublicId");
     assert.ok(pipelineStart !== -1, "photo pipeline anchor must exist");
     const photoUpdateIdx = block.indexOf("closetItem.update(", pipelineStart);
-    const deleteOldIdx = block.indexOf("deleteCloudinaryAsset(oldPublicId", pipelineStart);
+    const deleteOldIdx = block.search(/discardUpload\(oldPublicId|deleteCloudinaryAsset\(oldPublicId/);
     assert.ok(photoUpdateIdx !== -1, "edit block must have a photo-replacement DB update call");
     assert.ok(deleteOldIdx !== -1, "edit block must call deleteCloudinaryAsset(oldPublicId, ...) for old-asset cleanup");
     assert.ok(photoUpdateIdx < deleteOldIdx, "old-asset deleteCloudinaryAsset must appear AFTER the DB update");
@@ -354,7 +366,8 @@ describe("T26: photo replacement stamps the NEW photo's own consent, never the o
     const block = closet.slice(editIdx, actionEndIdx > editIdx ? actionEndIdx : editIdx + 18000);
     const pipelineStart = block.indexOf("validatePublicIdOwnership(newPublicId");
     const updateIdx = block.indexOf("closetItem.update(", pipelineStart);
-    const nextDeleteIdx = block.indexOf("deleteCloudinaryAsset(oldPublicId", updateIdx);
+    const nextDeleteRel = block.slice(updateIdx).search(/discardUpload\(oldPublicId|deleteCloudinaryAsset\(oldPublicId/);
+    const nextDeleteIdx = nextDeleteRel === -1 ? -1 : updateIdx + nextDeleteRel;
     const updateBlock = block.slice(updateIdx, nextDeleteIdx > updateIdx ? nextDeleteIdx : updateIdx + 2000);
     assert.ok(
       /buildConsentStamp\(\s*editConsentGiven\s*\)/.test(updateBlock),
@@ -386,10 +399,14 @@ describe("T27: edit photo replacement rejects without consent, before verificati
 
   it("a missing-consent rejection deletes only the new asset and returns before the photo-replacement closetItem.update call", () => {
     const rejectBlock = closet.slice(consentIdx, consentIdx + 400);
+    // 2026-11-17 (H7): the discard is now discardUpload(newPublicId, ...),
+    // which still deletes the asset and additionally records a failure for
+    // the pending-deletion retry sweep. Matches either call shape so the
+    // invariant survives the rename.
     assert.ok(
-      /deleteCloudinaryAsset\(newPublicId/.test(rejectBlock) &&
+      /(?:discardUpload|deleteCloudinaryAsset)\(newPublicId/.test(rejectBlock) &&
       /status:\s*400/.test(rejectBlock),
-      "withheld consent must delete the newly uploaded asset and reject with 400, before touching the existing item",
+      "withheld consent must discard the newly uploaded asset and reject with 400, before touching the existing item",
     );
     const rejectReturnIdx = closet.indexOf("return data(", consentIdx);
     assert.ok(

@@ -614,11 +614,18 @@ describe("J — upload security: client magic-byte validation + server-side Admi
 
   it("closet._index.tsx server action deletes Cloudinary asset on any validation failure", () => {
     const src = route("closet._index.tsx");
-    assert.ok(src.includes("deleteCloudinaryAsset"), "calls deleteCloudinaryAsset on rejection");
-    const deleteCount = (src.match(/deleteCloudinaryAsset/g) ?? []).length;
+    // 2026-11-17 (H7): every discard in this route now goes through
+    // discardUpload(...), a local wrapper that deletes the asset AND records
+    // a failure into PendingCloudinaryDeletion for the retry sweep.
+    //
+    // Counting bare occurrences of the substring "deleteCloudinaryAsset" is
+    // deliberately NOT used any more: it matches prose in comments, so after
+    // the rename this assertion still passed while zero actual calls
+    // remained. Count real call expressions instead.
+    const deleteCount = (src.match(/\b(?:discardUpload|deleteCloudinaryAsset)\(/g) ?? []).length;
     assert.ok(
       deleteCount >= 2,
-      `expected deleteCloudinaryAsset on multiple rejection paths; found ${deleteCount}`
+      `expected an asset discard on multiple rejection paths; found ${deleteCount}`
     );
   });
 
