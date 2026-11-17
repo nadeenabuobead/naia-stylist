@@ -157,6 +157,12 @@ function render(
   summary: Summary,
   addonCatalog = CUSTOMER_FACING_ADDONS,
   checkoutOutcome: "success" | "cancelled" | null = null,
+  // Defaults to true: every pre-existing test in this file was written
+  // assuming a fully activated checkout flow (CURRENT_TERMS_VERSION
+  // configured), before the 2026-11-17 fail-closed correctness review
+  // added this gate — overriding it to false is what the dedicated
+  // "checkout not yet available" describe block below does instead.
+  termsConfigured = true,
 ): string {
   // Defaults to the filtered list the real loader actually returns — not the
   // full ADDON_CATALOG — so component tests reflect what customers see.
@@ -165,6 +171,7 @@ function render(
     membershipPricing: MEMBERSHIP_PRICING,
     addonCatalog,
     checkoutOutcome,
+    termsConfigured,
   });
   return renderToString(<PlanUsagePage />);
 }
@@ -690,5 +697,52 @@ describe("stripCheckoutParamFromUrl — removes only the checkout param after it
 
   it("is a safe no-op when there is no checkout param to remove", () => {
     expect(stripCheckoutParamFromUrl("http://localhost/my-naia/plan-usage?foo=bar")).toBe("/my-naia/plan-usage?foo=bar");
+  });
+});
+
+describe("plan-usage component — checkout not yet available (no approved Terms version)", () => {
+  // Correctness review, 2026-11-17: api.billing-checkout.tsx now fails
+  // closed (503 terms_not_configured) whenever CURRENT_TERMS_VERSION is
+  // null — this page must not show a working-looking disclosure,
+  // checkboxes, or enabled buttons that would walk the customer straight
+  // into that wall, and must not present the placeholder consent wording
+  // as if it were an activated checkout flow.
+  it("shows the 'pending Terms approval' notice instead of the disclosure, checkboxes, or Subscribe/Choose Annual buttons", () => {
+    const html = render(
+      baseSummary({ membershipStatus: "NONE", effectiveMembershipStatus: "NONE", hasBillingAccount: false }),
+      CUSTOMER_FACING_ADDONS,
+      null,
+      /* termsConfigured */ false,
+    );
+    expect(html).toContain("aren&#x27;t open yet");
+    expect(html).toContain("pending");
+    expect(html).not.toContain("Subscribe Monthly");
+    expect(html).not.toContain("Choose Annual");
+    expect(html).not.toContain("terms-acceptance-checkbox");
+    expect(html).not.toContain("early-service-consent-checkbox");
+    expect(html).not.toContain("includes any applicable tax");
+  });
+
+  it("shows the normal disclosure, both checkboxes, and both buttons once Terms are configured (regression guard — this is the default for every other test in this file)", () => {
+    const html = render(
+      baseSummary({ membershipStatus: "NONE", effectiveMembershipStatus: "NONE", hasBillingAccount: false }),
+      CUSTOMER_FACING_ADDONS,
+      null,
+      /* termsConfigured */ true,
+    );
+    expect(html).toContain("Subscribe Monthly");
+    expect(html).toContain("terms-acceptance-checkbox");
+    expect(html).toContain("early-service-consent-checkbox");
+    expect(html).not.toContain("aren&#x27;t open yet");
+  });
+
+  it("never shows the pending notice and the real flow at the same time, in either state", () => {
+    const pending = render(baseSummary({ hasBillingAccount: false }), CUSTOMER_FACING_ADDONS, null, false);
+    expect(pending).toContain("aren&#x27;t open yet");
+    expect(pending).not.toContain("terms-acceptance-checkbox");
+
+    const active = render(baseSummary({ hasBillingAccount: false }), CUSTOMER_FACING_ADDONS, null, true);
+    expect(active).toContain("terms-acceptance-checkbox");
+    expect(active).not.toContain("aren&#x27;t open yet");
   });
 });

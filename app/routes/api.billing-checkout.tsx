@@ -25,6 +25,14 @@
 //        each mint a separate, independently-billed Stripe subscription.
 //        A database-level unique constraint on customerId, not a read-then-
 //        write check, is what makes this one actually race-safe.
+//   - Terms-acceptance gate (Legal handoff W1, 2026-11-17): fails closed
+//     with 503 "terms_not_configured" whenever CURRENT_TERMS_VERSION is
+//     null (no approved Terms document exists) — a checked box cannot be
+//     valid acceptance of a nonexistent document, so nothing past that
+//     point (not even reading the request body) may run. Once a real
+//     version exists, acceptance must be checked, successfully recorded,
+//     and only then does checkout proceed — a failed recording write
+//     blocks checkout exactly like an unchecked box would.
 
 import type { ActionFunctionArgs } from "react-router";
 import { data } from "react-router";
@@ -94,6 +102,25 @@ export async function action({ request }: ActionFunctionArgs) {
   const rl = await checkRateLimit(customer.id, CHECKOUT_RATE_LIMIT);
   if (!rl.allowed) return rateLimitResponse(rl);
 
+  // Legal handoff W1 follow-up (2026-11-17, correctness review) — fail
+  // closed, before anything else past the rate limit above.
+  // CURRENT_TERMS_VERSION is null today because no real Terms of Service
+  // document exists yet — a checkbox reading "I accept the Terms of
+  // Service" cannot be valid legal acceptance of a document that doesn't
+  // exist, no matter what value a client sends for it. The original
+  // version of this check only skipped RECORDING acceptance when the
+  // version was null and otherwise let checkout proceed anyway — that was
+  // a gap: a customer could be charged real money while never having
+  // validly agreed to anything. This runs before body-parsing/planType
+  // validation on purpose: "the service isn't available yet" outranks any
+  // input-shape error, and nothing past this point — not the reservation,
+  // not the Stripe call — may run while it's true. The day Legal publishes
+  // real Terms and this constant is updated, this branch stops firing with
+  // no other code change required.
+  if (CURRENT_TERMS_VERSION === null) {
+    return data({ ok: false, code: "terms_not_configured" }, { status: 503 });
+  }
+
   let body: unknown;
   try {
     body = await request.json();
@@ -106,13 +133,11 @@ export async function action({ request }: ActionFunctionArgs) {
     return badRequest("invalid_plan_type");
   }
 
-  // Legal handoff W1 (2026-11-17) — required Terms acceptance, enforced
-  // here because a client-side `required` attribute on the checkbox is
-  // trivially bypassed by anyone calling this endpoint directly. Checked
-  // as a strict `=== true`, never a truthy coercion, so a malformed or
-  // missing value fails closed rather than silently passing. This check
-  // runs before any Stripe call or reservation, same "cheapest check
-  // first" ordering as the planType validation above.
+  // Required Terms acceptance, enforced here because a client-side
+  // `required` attribute on the checkbox is trivially bypassed by
+  // anyone calling this endpoint directly. Checked as a strict
+  // `=== true`, never a truthy coercion, so a malformed or missing
+  // value fails closed rather than silently passing.
   const termsAccepted = (body as any)?.termsAccepted === true;
   if (!termsAccepted) {
     return badRequest("terms_not_accepted");
@@ -131,16 +156,19 @@ export async function action({ request }: ActionFunctionArgs) {
   const earlyServiceConsent = (body as any)?.earlyServiceConsent === true;
   void earlyServiceConsent; // deliberately inert — see comment above
 
-  // Recording acceptance is itself gated on a real Terms version existing
-  // — see terms-acceptance.server.ts's own header. CURRENT_TERMS_VERSION
-  // is null today, so this never runs; the moment Legal publishes a real
-  // version and this constant is updated, acceptance starts being
-  // recorded with no further wiring needed here. Recorded regardless of
-  // whether this specific checkout attempt goes on to succeed below —
-  // accepting Terms is a fact about the customer, not about this one
-  // attempt's outcome.
-  if (CURRENT_TERMS_VERSION !== null) {
+  // Reaching this line means CURRENT_TERMS_VERSION is a real, approved
+  // version (the null case already returned above) and the customer
+  // checked the box — record it BEFORE any reservation or Stripe call,
+  // and require the write to actually succeed: a failed acceptance
+  // record must block checkout exactly like an unchecked box would,
+  // never silently let payment proceed on an unrecorded acceptance.
+  // recordTermsAcceptance's own update is idempotent (it sets the same
+  // two scalar fields to the same values), so a retried submission after
+  // a transient failure is safe to record again, not a duplicate.
+  try {
     await recordTermsAcceptance(customer.id, CURRENT_TERMS_VERSION);
+  } catch {
+    return data({ ok: false, code: "terms_acceptance_record_failed" }, { status: 500 });
   }
 
   const existing = await prisma.subscription.findFirst({

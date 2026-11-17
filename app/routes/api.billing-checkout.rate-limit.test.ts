@@ -55,6 +55,17 @@ vi.mock("~/lib/naia-session.server", () => ({
   getCurrentNaiaCustomer: getCurrentNaiaCustomerMock,
 }));
 
+// 2026-11-17 (Legal handoff W1 follow-up) — this file tests rate limiting,
+// not the Terms-acceptance gate (see api.billing-checkout.test.ts for that
+// coverage). With the real CURRENT_TERMS_VERSION (null today), the route's
+// fail-closed 503 would fire before any request here ever reached the
+// rate-limit logic under test — mocked non-null here for the same reason
+// api.billing-checkout.test.ts's own base mock is non-null.
+vi.mock("~/lib/terms-acceptance.server", () => ({
+  CURRENT_TERMS_VERSION: "2026-TEST-1",
+  recordTermsAcceptance: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("~/lib/billing/stripe-client.server", () => ({
   createCheckoutSession: createCheckoutSessionMock,
   StripeNotConfiguredError: class StripeNotConfiguredError extends Error {},

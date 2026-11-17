@@ -31,15 +31,20 @@ vi.mock("~/db.server", () => ({
   default: { subscription: { findFirst: findFirstMock } },
 }));
 
-// CURRENT_TERMS_VERSION: null mirrors today's real value exactly (Legal
-// handoff W1 — no real Terms document exists yet). Mocked rather than
-// left to the real module so (a) this file never depends on whether a
-// real db.server.customer.update call would be reachable, and (b) a
-// dedicated test below can flip it to a real version via vi.doMock to
-// prove the "once a real version exists" path works, without that
-// assertion depending on every OTHER test in this file.
+// CURRENT_TERMS_VERSION: a non-null stand-in version is the BASE mock for
+// this file, deliberately NOT today's real null value — every BC.* test
+// below (duplicate-subscription handling) and TC.1/2/3/4/5/7 (terms-
+// checkbox validation) test behavior that sits AFTER the fail-closed
+// "is Terms even configured" gate api.billing-checkout.tsx now applies
+// first (correctness review, 2026-11-17). With CURRENT_TERMS_VERSION
+// mocked null, none of them could ever reach that code. The null-today
+// reality is its own dedicated scope below ("fail-closed when no Terms
+// version is configured"), isolated via vi.doMock + a dynamic re-import,
+// exactly the same technique the "once a real version exists" block
+// already used — so flipping the version in either direction never
+// affects the other tests in this file.
 vi.mock("~/lib/terms-acceptance.server", () => ({
-  CURRENT_TERMS_VERSION: null,
+  CURRENT_TERMS_VERSION: "2026-TEST-1",
   recordTermsAcceptance: recordTermsAcceptanceMock,
 }));
 
@@ -87,6 +92,7 @@ describe("POST /api/billing-checkout", () => {
     vi.clearAllMocks();
     createCheckoutSessionMock.mockResolvedValue({ id: "cs_test_1", url: "https://checkout.stripe.com/cs_test_1" });
     reserveCheckoutAttemptMock.mockResolvedValue({ allowed: true, expiresAt: new Date("2026-11-12T13:00:00.000Z") });
+    recordTermsAcceptanceMock.mockResolvedValue(undefined);
   });
 
   it("BC.1 — unauthenticated request is rejected before any DB lookup", async () => {
@@ -178,6 +184,7 @@ describe("POST /api/billing-checkout — concurrent-checkout protection (Layer 2
     getCurrentNaiaCustomerMock.mockResolvedValue(CUSTOMER);
     findFirstMock.mockResolvedValue(null);
     createCheckoutSessionMock.mockResolvedValue({ id: "cs_test_1", url: "https://checkout.stripe.com/cs_test_1" });
+    recordTermsAcceptanceMock.mockResolvedValue(undefined);
   });
 
   it("BC.11 — reserveCheckoutAttempt is called with the resolved customer and plan type, BEFORE createCheckoutSession", async () => {
@@ -244,6 +251,7 @@ describe("POST /api/billing-checkout — Terms-acceptance gate", () => {
     findFirstMock.mockResolvedValue(null);
     createCheckoutSessionMock.mockResolvedValue({ id: "cs_test_1", url: "https://checkout.stripe.com/cs_test_1" });
     reserveCheckoutAttemptMock.mockResolvedValue({ allowed: true, expiresAt: new Date("2026-11-12T13:00:00.000Z") });
+    recordTermsAcceptanceMock.mockResolvedValue(undefined);
   });
 
   it("TC.1 — incomplete submission (termsAccepted field missing entirely) is rejected with terms_not_accepted", async () => {
@@ -289,8 +297,12 @@ describe("POST /api/billing-checkout — Terms-acceptance gate", () => {
     expect((second.data ?? second).code).toBe("subscription_already_exists");
   });
 
-  it("TC.6 — recordTermsAcceptance is never called while CURRENT_TERMS_VERSION is null, across every scenario above — the core 'never record acceptance of nonexistent Terms' guarantee", async () => {
+  it("TC.6 — recordTermsAcceptance is called with the authenticated customer and the exact configured version, for an accepted submission", async () => {
     await action({ request: makeRequest({ planType: "MONTHLY", termsAccepted: true }) } as any);
+    expect(recordTermsAcceptanceMock).toHaveBeenCalledWith(CUSTOMER.id, "2026-TEST-1");
+  });
+
+  it("TC.6b — recordTermsAcceptance is NOT called for any rejected submission (unchecked or invalid) — only a cleared gate records anything", async () => {
     await action({ request: makeRequest({ planType: "MONTHLY", termsAccepted: false }) } as any);
     await action({ request: makeRequest({ planType: "MONTHLY", termsAccepted: "true" }) } as any);
     expect(recordTermsAcceptanceMock).not.toHaveBeenCalled();
@@ -340,6 +352,122 @@ describe("POST /api/billing-checkout — once CURRENT_TERMS_VERSION is a real ve
     const res: any = await futureAction({ request: makeRequest({ planType: "MONTHLY", termsAccepted: true }) } as any);
     expect(res.init?.status ?? res.status ?? 200).toBe(200);
     expect(futureRecordMock).toHaveBeenCalledWith(CUSTOMER.id, "2027-01-01");
+
+    vi.doUnmock("~/lib/terms-acceptance.server");
+    vi.resetModules();
+  });
+});
+
+// ── Fail-closed: no approved Terms version configured (today's real state)
+// Correctness review, 2026-11-17 — the original version of this gate only
+// skipped RECORDING acceptance when CURRENT_TERMS_VERSION was null and
+// otherwise let checkout proceed anyway, which meant a customer could be
+// charged real money while never having validly agreed to anything. This
+// scope proves the fix: the whole flow refuses to run, independent of
+// what the client sends, whenever no real Terms version exists.
+describe("POST /api/billing-checkout — fail-closed when no Terms version is configured", () => {
+  async function withNullVersion() {
+    vi.resetModules();
+    const nullVersionRecordMock = vi.fn();
+    vi.doMock("~/lib/terms-acceptance.server", () => ({
+      CURRENT_TERMS_VERSION: null,
+      recordTermsAcceptance: nullVersionRecordMock,
+    }));
+    const { action: nullVersionAction } = await import("./api.billing-checkout");
+    return { nullVersionAction, nullVersionRecordMock };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getCurrentNaiaCustomerMock.mockResolvedValue(CUSTOMER);
+    findFirstMock.mockResolvedValue(null);
+    createCheckoutSessionMock.mockResolvedValue({ id: "cs_test_1", url: "https://checkout.stripe.com/cs_test_1" });
+    reserveCheckoutAttemptMock.mockResolvedValue({ allowed: true, expiresAt: new Date("2026-11-12T13:00:00.000Z") });
+  });
+
+  it("TC.9 — returns 503 terms_not_configured, even for an otherwise-valid, fully-accepted submission", async () => {
+    const { nullVersionAction } = await withNullVersion();
+    const res: any = await nullVersionAction({ request: makeRequest({ planType: "MONTHLY", termsAccepted: true }) } as any);
+    expect(res.init?.status ?? res.status).toBe(503);
+    expect((res.data ?? res).code).toBe("terms_not_configured");
+    vi.doUnmock("~/lib/terms-acceptance.server");
+    vi.resetModules();
+  });
+
+  it("TC.10 — a bypass attempt (termsAccepted: true sent directly, skipping the UI) does NOT help — still 503, nothing downstream runs", async () => {
+    const { nullVersionAction, nullVersionRecordMock } = await withNullVersion();
+    await nullVersionAction({ request: makeRequest({ planType: "MONTHLY", termsAccepted: true }) } as any);
+    expect(nullVersionRecordMock).not.toHaveBeenCalled();
+    expect(reserveCheckoutAttemptMock).not.toHaveBeenCalled();
+    expect(createCheckoutSessionMock).not.toHaveBeenCalled();
+    vi.doUnmock("~/lib/terms-acceptance.server");
+    vi.resetModules();
+  });
+
+  it("TC.11 — fails closed even before the request body is read — a malformed/unparseable body still gets 503, not invalid_json", async () => {
+    const { nullVersionAction } = await withNullVersion();
+    const garbledRequest = new Request("http://localhost/api/billing-checkout", {
+      method: "POST",
+      body: "{not valid json",
+      headers: { "Content-Type": "application/json" },
+    });
+    const res: any = await nullVersionAction({ request: garbledRequest } as any);
+    expect(res.init?.status ?? res.status).toBe(503);
+    expect((res.data ?? res).code).toBe("terms_not_configured");
+    vi.doUnmock("~/lib/terms-acceptance.server");
+    vi.resetModules();
+  });
+});
+
+// ── Recording failure blocks checkout (Terms IS configured, the write itself fails)
+describe("POST /api/billing-checkout — a failed Terms-acceptance recording blocks checkout", () => {
+  it("TC.12 — recordTermsAcceptance rejecting returns 500 terms_acceptance_record_failed, and reservation/Stripe never run", async () => {
+    vi.resetModules();
+    const failingRecordMock = vi.fn().mockRejectedValue(new Error("write failed"));
+    vi.doMock("~/lib/terms-acceptance.server", () => ({
+      CURRENT_TERMS_VERSION: "2026-TEST-1",
+      recordTermsAcceptance: failingRecordMock,
+    }));
+    const { action: failingAction } = await import("./api.billing-checkout");
+
+    getCurrentNaiaCustomerMock.mockResolvedValue(CUSTOMER);
+    findFirstMock.mockResolvedValue(null);
+    createCheckoutSessionMock.mockResolvedValue({ id: "cs_test_1", url: "https://checkout.stripe.com/cs_test_1" });
+    reserveCheckoutAttemptMock.mockResolvedValue({ allowed: true, expiresAt: new Date("2026-11-12T13:00:00.000Z") });
+
+    const res: any = await failingAction({ request: makeRequest({ planType: "MONTHLY", termsAccepted: true }) } as any);
+    expect(res.init?.status ?? res.status).toBe(500);
+    expect((res.data ?? res).code).toBe("terms_acceptance_record_failed");
+    expect(reserveCheckoutAttemptMock).not.toHaveBeenCalled();
+    expect(createCheckoutSessionMock).not.toHaveBeenCalled();
+
+    vi.doUnmock("~/lib/terms-acceptance.server");
+    vi.resetModules();
+  });
+
+  it("TC.13 — a RETRY after a recording failure succeeds normally once the write itself succeeds — the failure isn't sticky", async () => {
+    vi.resetModules();
+    const flakyRecordMock = vi.fn()
+      .mockRejectedValueOnce(new Error("transient write failure"))
+      .mockResolvedValueOnce(undefined);
+    vi.doMock("~/lib/terms-acceptance.server", () => ({
+      CURRENT_TERMS_VERSION: "2026-TEST-1",
+      recordTermsAcceptance: flakyRecordMock,
+    }));
+    const { action: flakyAction } = await import("./api.billing-checkout");
+
+    getCurrentNaiaCustomerMock.mockResolvedValue(CUSTOMER);
+    findFirstMock.mockResolvedValue(null);
+    createCheckoutSessionMock.mockResolvedValue({ id: "cs_test_1", url: "https://checkout.stripe.com/cs_test_1" });
+    reserveCheckoutAttemptMock.mockResolvedValue({ allowed: true, expiresAt: new Date("2026-11-12T13:00:00.000Z") });
+
+    const first: any = await flakyAction({ request: makeRequest({ planType: "MONTHLY", termsAccepted: true }) } as any);
+    expect(first.init?.status ?? first.status).toBe(500);
+    expect(createCheckoutSessionMock).not.toHaveBeenCalled();
+
+    const second: any = await flakyAction({ request: makeRequest({ planType: "MONTHLY", termsAccepted: true }) } as any);
+    expect(second.init?.status ?? second.status ?? 200).toBe(200);
+    expect(createCheckoutSessionMock).toHaveBeenCalledOnce();
 
     vi.doUnmock("~/lib/terms-acceptance.server");
     vi.resetModules();

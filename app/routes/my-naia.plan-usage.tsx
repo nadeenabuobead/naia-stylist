@@ -14,6 +14,7 @@ import { MEMBERSHIP_PRICING, ADDON_CATALOG } from "~/lib/plan/plan-limits.server
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import TermsAcceptanceCheckbox from "~/components/checkout/TermsAcceptanceCheckbox";
 import EarlyServiceConsentCheckbox from "~/components/checkout/EarlyServiceConsentCheckbox";
+import { CURRENT_TERMS_VERSION } from "~/lib/terms-acceptance.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 
 // The only two values api.billing-checkout.tsx ever puts in this param
@@ -62,7 +63,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const summary = await getEntitlementSummary(customer.id, customer.membershipStatus);
   const addonCatalog = ADDON_CATALOG.filter((addon) => CUSTOMER_FACING_ADDON_LABELS.has(addon.label));
   const checkoutOutcome = parseCheckoutOutcome(new URL(request.url).searchParams.get("checkout"));
-  return { summary, membershipPricing: MEMBERSHIP_PRICING, addonCatalog, checkoutOutcome };
+  // Mirrors api.billing-checkout.tsx's own fail-closed gate exactly — if
+  // that route would 503 "terms_not_configured" right now, this page must
+  // not show a working-looking Subscribe flow that leads straight into
+  // that wall. See the "Membership checkout" section below.
+  const termsConfigured = CURRENT_TERMS_VERSION !== null;
+  return { summary, membershipPricing: MEMBERSHIP_PRICING, addonCatalog, checkoutOutcome, termsConfigured };
 }
 
 // ── Display helpers ────────────────────────────────────────────────────────────
@@ -136,7 +142,7 @@ function usageLabel(used: number, limit: number, unit: string): string {
 // ── Page component ─────────────────────────────────────────────────────────────
 
 export default function PlanUsagePage() {
-  const { summary, membershipPricing, addonCatalog, checkoutOutcome } = useLoaderData<typeof loader>();
+  const { summary, membershipPricing, addonCatalog, checkoutOutcome, termsConfigured } = useLoaderData<typeof loader>();
   // checkoutOutcome came from a ?checkout=success|cancelled query param on
   // THIS page load, read once by the loader and never re-read afterward —
   // so leaving it in the URL has no further effect on this render, but it
@@ -365,7 +371,24 @@ export default function PlanUsagePage() {
             <div style={{ marginTop: "0.4rem", fontSize: "0.72rem", color: "var(--fg-55)", letterSpacing: "0.08em" }}>
               {pricing}
             </div>
-            {showSubscribeButtons && (
+            {/* ── Checkout not yet available (no approved Terms version) ──
+                Correctness review, 2026-11-17: api.billing-checkout.tsx
+                now fails closed (503 terms_not_configured) whenever
+                CURRENT_TERMS_VERSION is null — showing a working-looking
+                disclosure, checkboxes, and enabled buttons here would
+                walk the customer straight into that wall, and would make
+                the placeholder consent wording look like an effective,
+                activated checkout flow rather than what it actually is:
+                prepared, but not yet legally approved. This notice is
+                the explicit, honest alternative — distinct from the
+                normal flow below, never shown at the same time as it. */}
+            {showSubscribeButtons && !termsConfigured && (
+              <div style={{ marginTop: "1rem", fontSize: "0.78rem", color: "var(--fg-55)", letterSpacing: "0.03em", lineHeight: 1.6, maxWidth: "32rem" }}>
+                Membership subscriptions aren&apos;t open yet — final Terms of Service approval is pending. Check
+                back soon.
+              </div>
+            )}
+            {showSubscribeButtons && termsConfigured && (
               <>
                 {/* ── Price, tax, recurring-billing, cancellation and
                     payment-obligation disclosure — shown before either
@@ -373,7 +396,18 @@ export default function PlanUsagePage() {
                     identically to both. Figures (AED 39/299) are read
                     from membershipPricing above, never hardcoded here, so
                     this can never drift from what Stripe actually
-                    charges. */}
+                    charges. Cancellation wording describes this app's own
+                    tracked cancelAtPeriodEnd behaviour (entitlement.
+                    server.ts) — the live Stripe Customer Portal's own
+                    cancellation default is a Dashboard configuration this
+                    code has never set or verified; if that configuration
+                    ever diverges from "cancel at period end," this copy
+                    needs updating to match. Tax wording states the
+                    tax-inclusive pricing mechanism (tax_behavior:
+                    "inclusive" + automatic_tax, already configured) —
+                    it is not a claim of registered compliance in every
+                    jurisdiction; UK VAT/Ireland OSS registration remains
+                    pending and separate, per Founder Decision 18. */}
                 <div style={{ marginTop: "1rem", fontSize: "0.72rem", color: "var(--fg-55)", letterSpacing: "0.03em", lineHeight: 1.6, maxWidth: "32rem" }}>
                   The price shown already includes any applicable tax. Whichever plan you choose below renews
                   automatically at that price every billing period until you cancel. You can cancel anytime from
@@ -386,7 +420,7 @@ export default function PlanUsagePage() {
                 </div>
               </>
             )}
-            {showSubscribeButtons && (
+            {showSubscribeButtons && termsConfigured && (
               <div style={{ marginTop: "1rem", display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
                 <button
                   type="button"
