@@ -60,7 +60,7 @@ type LoaderData = {
 export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderData> {
   const customer = await requireCurrentNaiaCustomer(request);
 
-  const reports = (await getPublishedEditorialReportsForQaPreview(request))
+  const reports = (await getPublishedEditorialReportsForQaPreview(request, customer.id))
     .slice()
     .sort((a, b) => {
       const pa = getEffectiveEditionPeriod(a) ?? "";

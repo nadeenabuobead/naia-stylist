@@ -1,4 +1,5 @@
 import prisma from "../db.server";
+import { timingSafeStringEqual } from "./timing-safe-equal.server";
 import {
   trendReports,
   type TrendReportData,
@@ -81,16 +82,24 @@ export async function getPublishedEditorialReports(): Promise<TrendReportData[]>
 // Every real customer, and every other route in this app, keeps calling
 // getPublishedEditorialReports() above completely unmodified. This wrapper
 // is wired into exactly one route (trends.my-edits.tsx) and only changes
-// behaviour when BOTH conditions hold on the SAME request:
+// behaviour when ALL THREE conditions hold on the SAME request:
 //   1. TREND_EDIT_FIXTURE_ENABLED === "true" (already required to create
-//      the fixture rows in the first place), and
-//   2. the request's x-trend-edit-fixture-preview header exactly matches
-//      TREND_EDIT_FIXTURE_PREVIEW_SECRET (a second, independent secret —
-//      never logged, never returned in any response body).
-// Without an exact match on both, this returns byte-for-byte the same
+//      the fixture rows in the first place);
+//   2. the request's x-trend-edit-fixture-preview header matches
+//      TREND_EDIT_FIXTURE_PREVIEW_SECRET — constant-time comparison
+//      (timingSafeStringEqual), not a plain `!==`, since this guards a
+//      real secret and a byte-by-byte early-exit compare leaks how many
+//      leading characters a guess got right; and
+//   3. the authenticated customer calling this is the one specific,
+//      founder-authorized QA customer (TREND_EDIT_FIXTURE_QA_CUSTOMER_ID)
+//      — a plain identity check, not a secret comparison, so no timing
+//      concern applies here. Fails closed (no match) whenever this env
+//      var is unset, exactly like the other two gates.
+// Without an exact match on all three, this returns byte-for-byte the same
 // result as getPublishedEditorialReports() — i.e. the fixture rows (status:
 // DRAFT) stay invisible, same as they are to every other customer and
-// every other page.
+// every other page, INCLUDING a customer who has the right secret but is
+// not the one authorized QA identity.
 const QA_FIXTURE_SLUGS = [
   "test-batch1-trend-edit-samemonth-a",
   "test-batch1-trend-edit-samemonth-b",
@@ -98,15 +107,19 @@ const QA_FIXTURE_SLUGS = [
 
 export async function getPublishedEditorialReportsForQaPreview(
   request: Request,
+  customerId: string | null | undefined,
 ): Promise<TrendReportData[]> {
   const published = await getPublishedEditorialReports();
 
   const flagOn = process.env.TREND_EDIT_FIXTURE_ENABLED === "true";
   const secret = process.env.TREND_EDIT_FIXTURE_PREVIEW_SECRET;
-  if (!flagOn || !secret) return published;
+  const authorizedCustomerId = process.env.TREND_EDIT_FIXTURE_QA_CUSTOMER_ID;
+  if (!flagOn || !secret || !authorizedCustomerId) return published;
 
   const provided = request.headers.get("x-trend-edit-fixture-preview");
-  if (!provided || provided !== secret) return published;
+  if (!timingSafeStringEqual(provided, secret)) return published;
+
+  if (!customerId || customerId !== authorizedCustomerId) return published;
 
   const fixtureRows = await prisma.editorialTrendReport.findMany({
     where: { slug: { in: QA_FIXTURE_SLUGS }, status: "DRAFT" },
