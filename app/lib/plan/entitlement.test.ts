@@ -632,7 +632,13 @@ describe("ENT-36 — Closet's atomic reservation stays unconditional, same postu
     const concurrentRaceIdx = closetRt.indexOf("A concurrent upload won the race", notAllowedIdx);
     const blockEnd = closetRt.indexOf("return data(", concurrentRaceIdx);
     const block = closetRt.slice(concurrentRaceIdx, blockEnd);
-    assert.match(block, /deleteCloudinaryAsset\(publicId,\s*"private"\)/);
+    // 2026-11-17 (H7): the discard is now discardUpload(publicId) — a local
+    // wrapper that still deletes the asset and additionally records a failed
+    // deletion into PendingCloudinaryDeletion for the retry sweep. The
+    // invariant here (a reservation lost to a concurrent upload must never
+    // leave the asset orphaned) is unchanged, and now actually holds even
+    // when the delete call itself fails.
+    assert.match(block, /discardUpload\(publicId\)|deleteCloudinaryAsset\(publicId,\s*"private"\)/);
   });
 
   it("closet._index.tsx does NOT delete the Cloudinary asset when the abandoned-upload sweep has already claimed it — the sweep owns that asset's cleanup, not this route", () => {
@@ -641,7 +647,14 @@ describe("ENT-36 — Closet's atomic reservation stays unconditional, same postu
     const pendingDeletionIdx = closetRt.indexOf('"asset_pending_deletion"', notAllowedIdx);
     const concurrentRaceIdx = closetRt.indexOf("A concurrent upload won the race", notAllowedIdx);
     const block = closetRt.slice(pendingDeletionIdx, concurrentRaceIdx);
-    assert.doesNotMatch(block, /deleteCloudinaryAsset\(/);
+    // 2026-11-17 (H7): must also exclude discardUpload(), the local wrapper
+    // every discard in this route now goes through. Checking only for
+    // deleteCloudinaryAsset( here would have become a vacuous pass after the
+    // rename — this branch deliberately performs NO discard at all, because
+    // the sweep already owns that asset's cleanup and a second destroy call
+    // would race it. Recording a pending row here would be wrong too: the
+    // sweep's own claim row already exists.
+    assert.doesNotMatch(block, /deleteCloudinaryAsset\(|discardUpload\(/);
     assert.match(block, /status:\s*409/);
   });
 
