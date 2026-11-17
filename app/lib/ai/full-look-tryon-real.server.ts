@@ -691,17 +691,91 @@ function buildIntermediatePreviews(
 // terminal one — the only steps that could ever have an intermediate asset
 // (the terminal step's own output either became the real result, via
 // uploadTryOnResult, or was never produced at all).
+// 2026-11-17 (H7) — this cleanup is no longer fire-and-forget.
+//
+// Previously both failure modes here evaporated silently: a thrown error was
+// swallowed by a bare `catch {}`, and — the easier one to miss —
+// deleteCloudinaryAsset does NOT throw on a provider rejection, it returns
+// { ok: false, errorCode }, and that return value was discarded entirely.
+//
+// For most per-feature deletion paths a dropped failure is recoverable,
+// because the asset is left unreferenced under `naia-wardrobe/` and the
+// bounded orphan sweep (cloudinary-orphan-sweep.server.ts) eventually
+// reclaims it. That safety net does not cover this path: intermediate step
+// assets live under `naia-tryon-fulllook-intermediate/`, a prefix the sweep
+// never lists. Combined with the fact that this function is called exactly
+// once per chain at the terminal transition — never retried — a failure here
+// produced a permanently orphaned derivative of a customer's body image,
+// with no reference, no pending row, and no sweep that would ever find it.
+//
+// Recording a PendingCloudinaryDeletion row instead hands the asset to the
+// existing retry sweep (sweepPendingCloudinaryDeletions), which is exactly
+// the mechanism H6 added for this class of failure. Same upsert shape as
+// deleteCustomerVtoResults in fashn-tryon-service.server.ts; publicId is
+// @unique, so this is dedup-safe.
+//
+// Still never throws: a chain reaching its terminal state must not be
+// derailed by a cleanup problem. The difference is that the failure is now
+// durable rather than invisible.
 async function cleanupIntermediateStepResults(
   customerId: string,
   jobIds: readonly string[],
   _deleteAsset: DeleteAssetFn = deleteCloudinaryAsset,
 ): Promise<void> {
   for (const jobId of jobIds) {
+    const publicId = deriveIntermediateStepPublicId(customerId, jobId);
     try {
-      await _deleteAsset(deriveIntermediateStepPublicId(customerId, jobId), "private");
-    } catch {
-      // Best-effort only — see this module's own RETENTION comment above.
+      const result = await _deleteAsset(publicId, "private");
+      if (!result?.ok) {
+        await recordIntermediateCleanupFailure(
+          customerId,
+          publicId,
+          result?.errorCode ?? "full-look intermediate Cloudinary deletion failed",
+        );
+      }
+    } catch (err) {
+      await recordIntermediateCleanupFailure(
+        customerId,
+        publicId,
+        err instanceof Error ? err.message : "full-look intermediate cleanup threw",
+      );
     }
+  }
+}
+
+/** Durably records a failed intermediate-asset deletion so the pending-
+ *  deletion retry sweep can drain it. Deliberately swallows its own errors:
+ *  if even this write fails there is nothing further this code path can do,
+ *  and it must not turn a cleanup problem into a failed try-on chain. */
+async function recordIntermediateCleanupFailure(
+  customerId: string,
+  publicId: string,
+  lastError: string,
+): Promise<void> {
+  try {
+    await prisma.pendingCloudinaryDeletion.upsert({
+      where: { publicId },
+      create: {
+        customerId,
+        publicId,
+        resourceType: "image",
+        deliveryType: "private",
+        context: "full-look-intermediate-cleanup-failed",
+        attemptCount: 1,
+        lastAttemptAt: new Date(),
+        lastError,
+      },
+      update: {
+        attemptCount: { increment: 1 },
+        lastAttemptAt: new Date(),
+        lastError,
+      },
+    });
+  } catch (err) {
+    console.error(
+      "[full-look] failed to record pending Cloudinary deletion for intermediate asset",
+      err,
+    );
   }
 }
 

@@ -316,8 +316,16 @@ model PendingCloudinaryDeletion {
   publicId      String    @unique
   resourceType  String    @default("image")
   deliveryType  String
-  /// "abandoned-upload-sweep" | "account-erasure" — which caller discovered
-  /// this asset needed deleting, for operator triage.
+  /// Which caller discovered this asset needed deleting, for operator
+  /// triage. Comment-only enumeration, not a DB constraint — the column is
+  /// a free String and new writers are expected. Known values as of
+  /// 2026-11-17: "abandoned-upload-sweep", "account-erasure",
+  /// "vto-result-deletion-failed", "vto-race-condition-cleanup",
+  /// "full-look-intermediate-cleanup-failed", and the sentinel
+  /// "vto-sweep-obligation" — the ONE value retryPendingCloudinaryDeletion
+  /// dispatches on specially (it enumerates a customer's VTO results rather
+  /// than deleting one concrete asset), so do not reuse that string for a
+  /// row that names a real publicId.
   context       String
   attemptCount  Int       @default(0)
   lastAttemptAt DateTime?
