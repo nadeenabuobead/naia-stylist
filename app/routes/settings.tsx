@@ -502,10 +502,10 @@ export default function Settings() {
         <p className="sp-shell-desc" style={{ marginBottom: "20px" }}>
           Download a copy of your data instantly, or permanently delete your account below, in accordance with our Privacy Policy. For other queries, contact{" "}
           <a
-            href="mailto:privacy@naiabynadine.com"
+            href="mailto:support@naiabynadine.com"
             style={{ color: "var(--naia-accent)" }}
           >
-            privacy@naiabynadine.com
+            support@naiabynadine.com
           </a>
           .
         </p>

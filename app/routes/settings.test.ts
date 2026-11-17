@@ -240,8 +240,9 @@ describe("G — no fake request-success behavior", () => {
 // "other queries" only — see section N below for the real mechanism checks.
 
 describe("H — privacy contact email remains for other queries only", () => {
-  it("still offers privacy@naiabynadine.com for queries outside export/deletion", () => {
-    assert.ok(src.includes("mailto:privacy@naiabynadine.com"), "uses correct privacy email");
+  it("offers support@naiabynadine.com for queries outside export/deletion — 2026-11-17: privacy@ was never a real mailbox and none is planned; support@ is the confirmed, founder-tested operational address", () => {
+    assert.ok(src.includes("mailto:support@naiabynadine.com"), "uses the confirmed operational support email");
+    assert.ok(!src.includes("privacy@naiabynadine.com"), "the non-existent privacy@ mailbox must not be offered to customers");
   });
 
   it("does not fabricate a fake success message independent of the real action result", () => {
