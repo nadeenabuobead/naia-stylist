@@ -60,6 +60,31 @@ export function isNadineEntryOrigin(session: Pick<Session, "get">): boolean {
 /** Where /api/styleme-handoff sends the customer: the canonical Rev 3 entry. */
 export const HANDOFF_ENTRY_PATH = "/style-me/state";
 
+// 2026-11-17 — QA finding: both handoff routes hardcoded a single-origin
+// `!==` check against only the production storefront, so a legitimate
+// cross-origin POST from the staging Shopify test store's own equivalent
+// page was rejected with the same 403 a real CSRF attempt would get —
+// indistinguishable from a real attack in staging, and untestable there.
+//
+// Narrow allowance, not a loosened check: this is still a strict allowlist
+// membership test (fails closed on anything not listed, exactly as the
+// single-string `!==` did), and the staging origin added is the one
+// documented, already-trusted staging test store used elsewhere in this
+// app's own CORS allowlist (storefront-cors.server.ts) — not a new guess,
+// not a wildcard, not an env-conditional relaxation that could silently
+// widen in production. Production enforcement is unchanged: an
+// unrecognised Origin — including null/missing, which browsers always set
+// on a cross-origin form POST — still gets a 403, in every environment.
+const ALLOWED_HANDOFF_ORIGINS: ReadonlySet<string> = new Set([
+  "https://naiabynadine.com", // production Shopify storefront
+  "https://naia-test-store.myshopify.com", // staging Shopify test store
+]);
+
+/** True for the production storefront or the documented staging test store; false otherwise (including null/missing Origin). */
+export function isAllowedHandoffOrigin(origin: string | null): boolean {
+  return origin !== null && ALLOWED_HANDOFF_ORIGINS.has(origin);
+}
+
 /** The canonical Rev 3 entry point. Every legacy fallback resolves here. */
 export const CANONICAL_STYLEME_ENTRY = "/style-me/state";
 

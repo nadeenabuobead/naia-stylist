@@ -16,19 +16,19 @@ import { redirect, type ActionFunctionArgs } from "react-router";
 import { getSession, commitSession } from "~/lib/session.server";
 import {
   isValidNadineHandle,
+  isAllowedHandoffOrigin,
   STYLEME_HANDOFF_ORIGIN_KEY,
   HANDOFF_ORIGIN_NADINE_PDP,
   HANDOFF_ENTRY_PATH,
   clearLegacyQuestionnaireKeys,
 } from "~/lib/styleme/handoff";
 
-const ALLOWED_ORIGIN = "https://naiabynadine.com";
-
 export async function action({ request }: ActionFunctionArgs) {
-  // Origin guard — rejects CSRF from any page other than the Shopify storefront.
-  // Browsers always set Origin on cross-origin form POSTs; null/missing is also rejected.
+  // Origin guard — rejects CSRF from any page other than the Shopify storefront
+  // (production) or the documented staging test store. Browsers always set
+  // Origin on cross-origin form POSTs; null/missing is also rejected.
   const origin = request.headers.get("Origin");
-  if (origin !== ALLOWED_ORIGIN) {
+  if (!isAllowedHandoffOrigin(origin)) {
     return new Response("Forbidden", { status: 403 });
   }
 

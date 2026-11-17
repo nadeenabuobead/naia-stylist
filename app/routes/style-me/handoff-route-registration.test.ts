@@ -77,7 +77,12 @@ describe("HR-A — the PDP handoff route is reachable", () => {
 
   test("HR-A.5 the origin guard and allowlist are untouched", () => {
     const src = read(ROUTE_FILE);
-    assert.match(src, /const ALLOWED_ORIGIN = "https:\/\/naiabynadine\.com"/);
+    // 2026-11-17 — the single hardcoded-origin `!==` check was replaced by
+    // a narrow, shared allowlist (isAllowedHandoffOrigin) covering
+    // production + the documented staging test store; see
+    // app/lib/styleme/handoff.ts and api.styleme-handoff.origin.test.ts for
+    // the actual fail-closed behavior, exercised against real Requests.
+    assert.match(src, /isAllowedHandoffOrigin/, "must use the shared origin allowlist helper");
     assert.match(src, /status: 403/, "a foreign origin must still be refused");
     assert.match(src, /isValidNadineHandle|HANDOFF_RESOLVABLE_HANDLES/,
       "the handle allowlist must still gate what can anchor");
