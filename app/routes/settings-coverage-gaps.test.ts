@@ -74,11 +74,19 @@ describe("P — NADINE design-pattern sharing has no customer-facing toggle", ()
     assert.ok(schema.includes("designResearchConsent "), "field remains declared in schema.prisma");
   });
 
-  it("design-signal.server.ts's eligibility no longer gates on per-customer consent", () => {
+  it("design-signal.server.ts's eligibility requires designResearchConsent again, as a 2026-11-17 fail-closed containment (reverses the prior assertion here) pending a Founder/Legal lawful-basis decision", () => {
+    // This test previously asserted the OPPOSITE: that ELIGIBLE_WHERE
+    // deliberately excluded designResearchConsent, since removing the
+    // customer-facing toggle (above, in this same describe block) was
+    // read as removing the gate entirely. No Founder/Legal decision
+    // establishing a lawful basis for that was ever on record, so the
+    // query layer now fails closed again — independent of whether the
+    // customer-facing toggle itself is ever restored, which is a separate,
+    // not-yet-decided product/copy question.
     const src = read("app/lib/ai/design-signal.server.ts");
     const whereIdx = src.indexOf("export const ELIGIBLE_WHERE");
     const whereBlock = src.slice(whereIdx, src.indexOf("} as const", whereIdx));
-    assert.ok(!whereBlock.includes("designResearchConsent"), "ELIGIBLE_WHERE no longer requires consent");
+    assert.ok(whereBlock.includes("designResearchConsent: true"), "ELIGIBLE_WHERE requires consent again (fail-closed containment)");
     assert.ok(whereBlock.includes('accountType: "CUSTOMER"'), "still excludes test/demo/QA accounts");
   });
 });

@@ -173,11 +173,16 @@ describe("§DS-2 counting people, not rows", () => {
 
 // ── §DS-3 — eligibility at the query layer ────────────────────────────────────
 
-describe("§DS-3 eligibility", () => {
-  it("§DS-3a eligibility requires only a real account — aggregated design-pattern contribution is normal nAia operation, not a per-customer opt-in", () => {
+describe("§DS-3 eligibility — 2026-11-17 fail-closed containment", () => {
+  it("§DS-3a eligibility requires a real account AND explicit designResearchConsent: true — not accountType alone", () => {
+    // Reversed 2026-11-17: this used to assert the OPPOSITE — that
+    // designResearchConsent was deliberately excluded, since contribution
+    // was treated as normal operation rather than an opt-in. No
+    // Founder/Legal decision establishing a lawful basis for that is on
+    // record, so the query layer now fails closed until one exists and a
+    // real consent mechanism sets this field true for someone.
     assert.equal(ELIGIBLE_WHERE.accountType, "CUSTOMER");
-    assert.ok(!("designResearchConsent" in ELIGIBLE_WHERE));
-    assert.ok(!("designResearchConsentVersion" in ELIGIBLE_WHERE));
+    assert.equal((ELIGIBLE_WHERE as Record<string, unknown>).designResearchConsent, true);
   });
 
   it("§DS-3b the filter is a query clause, so non-consenting rows are never read", () => {
