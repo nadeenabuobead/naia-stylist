@@ -51,10 +51,12 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { data } from "react-router";
 import { timingSafeEqual } from "crypto";
-import { prisma } from "~/lib/prisma.server";
+import dbServer from "~/db.server";
 import { closetItemToSlot } from "~/lib/ai/closet-slot";
 import type { OutfitSlot } from "~/lib/ai/styleme-recommendation.types";
-import type { OutfitItemType } from "@prisma/client";
+import type { OutfitItemType, PrismaClient } from "@prisma/client";
+
+const prisma: PrismaClient = dbServer;
 import { getCloudinaryConfig } from "~/lib/cloudinary-admin.server";
 import { selectFullLookGarments, type SelectableOutfitItem } from "~/lib/ai/full-look-vto-orchestrator.server";
 import { loadNaiaModel, computeModelReadinessFromRecord } from "~/lib/ai/my-naia-model.server";
