@@ -13,6 +13,7 @@
 
 import { randomBytes } from "crypto";
 import prisma from "~/db.server";
+import { recordAdminAction } from "./admin-audit-log.server";
 
 export interface SubmitWithdrawalRequestInput {
   customerId: string;
@@ -157,4 +158,84 @@ export async function getWithdrawalRequestsForCustomer(customerId: string) {
     where: { customerId },
     orderBy: { submittedAt: "desc" },
   });
+}
+
+// ── 2026-11-17 Operations follow-up: restricted case access for whoever ──
+// manually processes these (Legal handoff W2 itself: "manual refund
+// processing... happens entirely outside this module, by whoever reviews
+// submitted requests"). Everything below is read/triage only — it never
+// touches Subscription, BillingTransaction, or Stripe, matching this
+// module's own existing boundary exactly. The route that calls these
+// (app/routes/admin.withdrawal-requests.tsx) is owner-gated, the same as
+// every other admin route in this codebase.
+
+export interface OpenWithdrawalRequestEntry {
+  id: string;
+  reference: string;
+  customerId: string;
+  customerEmailAtRequest: string;
+  customerNameAtRequest: string | null;
+  subscriptionId: string | null;
+  submittedAt: Date;
+  status: "SUBMITTED" | "ACKNOWLEDGED" | "CLOSED";
+}
+
+/** Oldest-first — this is a triage queue, not an activity feed. */
+export async function listOpenWithdrawalRequests(limit: number = 50): Promise<OpenWithdrawalRequestEntry[]> {
+  return prisma.withdrawalRequest.findMany({
+    where: { status: { not: "CLOSED" } },
+    orderBy: { submittedAt: "asc" },
+    take: limit,
+  });
+}
+
+export type WithdrawalRequestStatusChangeResult =
+  | { status: "acknowledged" }
+  | { status: "closed" }
+  | { status: "not-found" }
+  | { status: "already-closed" };
+
+/**
+ * SUBMITTED -> ACKNOWLEDGED. Idempotent on an already-ACKNOWLEDGED row
+ * (returns "acknowledged" again, not an error) — a handler re-opening the
+ * same case shouldn't get a confusing failure. Only a CLOSED row refuses,
+ * since reopening a closed statutory request is a decision this function
+ * deliberately doesn't make silently.
+ */
+export async function acknowledgeWithdrawalRequest(
+  id: string,
+  performedBy: string,
+): Promise<WithdrawalRequestStatusChangeResult> {
+  const existing = await prisma.withdrawalRequest.findUnique({ where: { id }, select: { status: true, reference: true } });
+  if (!existing) return { status: "not-found" };
+  if (existing.status === "CLOSED") return { status: "already-closed" };
+  if (existing.status !== "ACKNOWLEDGED") {
+    await prisma.withdrawalRequest.update({ where: { id }, data: { status: "ACKNOWLEDGED" } });
+  }
+  await recordAdminAction(performedBy, "acknowledge-withdrawal-request", { withdrawalRequestId: id, reference: existing.reference });
+  return { status: "acknowledged" };
+}
+
+/**
+ * Any non-CLOSED status -> CLOSED, once the handler has finished manually
+ * processing the request (refund issued or declined, customer notified —
+ * see docs/ops/refund-operations-sop.md and
+ * docs/ops/support-response-templates.md). A reason/note is required so
+ * the audit record says why, matching the same discipline Decision 16's
+ * administrative-override rule already requires for billing overrides.
+ */
+export async function closeWithdrawalRequest(
+  id: string,
+  performedBy: string,
+  note: string,
+): Promise<WithdrawalRequestStatusChangeResult> {
+  if (!note || !note.trim()) {
+    throw new Error("closeWithdrawalRequest requires a non-blank note — an unexplained closure defeats the audit trail.");
+  }
+  const existing = await prisma.withdrawalRequest.findUnique({ where: { id }, select: { status: true, reference: true } });
+  if (!existing) return { status: "not-found" };
+  if (existing.status === "CLOSED") return { status: "already-closed" };
+  await prisma.withdrawalRequest.update({ where: { id }, data: { status: "CLOSED" } });
+  await recordAdminAction(performedBy, "close-withdrawal-request", { withdrawalRequestId: id, reference: existing.reference, note });
+  return { status: "closed" };
 }

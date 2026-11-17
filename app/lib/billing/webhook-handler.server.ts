@@ -92,10 +92,36 @@ import prisma from "~/db.server";
 import { retrieveSubscription as stripeRetrieveSubscription, type StripeSubscriptionSnapshot } from "./stripe-client.server";
 import { releaseCheckoutReservation as defaultReleaseCheckoutReservation } from "./checkout-reservation.server";
 import { captureFailure } from "../error-tracking.server";
+import { sendOpsAlert } from "../ops-alert.server";
 import {
   recordManualReviewObligation as defaultRecordManualReviewObligation,
   resolveManualReviewFlagsFor as defaultResolveManualReviewFlagsFor,
 } from "./manual-review.server";
+
+// Founder Decision 16 row 3 ("pending dispute... must generate an
+// actionable notification and a documented human review") — the Dispute
+// row itself satisfies "documented"; this is the "actionable notification"
+// half. sendOpsAlert is OFF by default (no OPS_ALERT_WEBHOOK_URL anywhere
+// in this repo's config) — see ops-alert.server.ts's own header. Injected
+// via deps, like every other side effect in this file, so a test can
+// observe it without needing module mocking.
+async function defaultSendDisputeAlert(input: {
+  providerDisputeId: string;
+  subscriptionId: string | null;
+  status: string;
+}): Promise<void> {
+  // Context is keyed by disputeId, not a flat "stripe-dispute:created"
+  // string — sendOpsAlert's cooldown is per-context, and two DIFFERENT
+  // disputes opening minutes apart must never suppress each other's
+  // alert. A status wobble on the SAME dispute within the cooldown window
+  // (e.g. needs_response -> under_review, both still PENDING) correctly
+  // produces only one alert, not a second redundant one.
+  await sendOpsAlert(
+    `stripe-dispute:created:${input.providerDisputeId}`,
+    `A Stripe dispute (${input.status}) was opened and needs human review.`,
+    { providerDisputeId: input.providerDisputeId, subscriptionId: input.subscriptionId ?? "unknown" },
+  );
+}
 
 export function isUniqueConstraintViolation(err: unknown, field?: string): boolean {
   if (!err || typeof err !== "object" || (err as any).code !== "P2002") return false;
@@ -245,6 +271,12 @@ export interface WebhookHandlerDeps {
     lastEventAt: Date;
     lastEventFinalityRank: number;
   }) => Promise<{ id: string }>;
+  // 2026-11-17 Operations follow-up — fires once per newly-recorded PENDING
+  // dispute (never for a stale/duplicate event). Defaults to a real but
+  // off-by-default sink (see defaultSendDisputeAlert above) — overridden
+  // in tests to assert it fires on the right branch without a real network
+  // call.
+  sendDisputeAlert?: (input: { providerDisputeId: string; subscriptionId: string | null; status: string }) => Promise<void>;
   hasActiveRevocation?: (subscriptionId: string) => Promise<boolean>;
   createAccessRevocation?: (input: {
     subscriptionId: string;
@@ -921,6 +953,7 @@ export async function processStripeWebhookEvent(
   const _findSubscriptionById = deps.findSubscriptionById ?? defaultFindSubscriptionById;
   const _findDisputeByProviderDisputeId = deps.findDisputeByProviderDisputeId ?? defaultFindDisputeByProviderDisputeId;
   const _upsertDispute = deps.upsertDispute ?? defaultUpsertDispute;
+  const _sendDisputeAlert = deps.sendDisputeAlert ?? defaultSendDisputeAlert;
   const _hasActiveRevocation = deps.hasActiveRevocation ?? defaultHasActiveRevocation;
   const _createAccessRevocation = deps.createAccessRevocation ?? defaultCreateAccessRevocation;
   const _resolveAccessRevocationsByDispute = deps.resolveAccessRevocationsByDispute ?? defaultResolveAccessRevocationsByDispute;
@@ -1698,7 +1731,11 @@ export async function processStripeWebhookEvent(
       } else {
         // PENDING (needs_response/under_review/appeal_*) — Founder Decision
         // 16: human review, no automatic revocation. The Dispute row above
-        // is what makes it visible for that review.
+        // is what makes it visible for that review; this alert is the
+        // "actionable notification" half of the same decision — see
+        // defaultSendDisputeAlert's own comment for why it's keyed by
+        // disputeId and why it's a no-op by default.
+        await _sendDisputeAlert({ providerDisputeId, subscriptionId, status: mappedStatus });
         action = "dispute_pending_recorded";
       }
       break;

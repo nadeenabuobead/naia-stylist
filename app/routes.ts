@@ -199,6 +199,10 @@ export default [
     // (admin-revocation-override.server.ts), which previously had zero
     // callers anywhere in the app.
     route("billing-overrides", "routes/admin.billing-overrides.tsx"),
+    // 2026-11-17 Operations follow-up — restricted case access for EU
+    // withdrawal requests (withdrawal-request.server.ts), which previously
+    // had zero admin-facing visibility at all.
+    route("withdrawal-requests", "routes/admin.withdrawal-requests.tsx"),
     route("naia", "routes/admin.naia.tsx", [
       index("routes/admin.naia._index.tsx"),
       route("closet", "routes/admin.naia.closet._index.tsx"),

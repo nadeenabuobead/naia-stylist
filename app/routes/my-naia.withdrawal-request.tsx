@@ -19,6 +19,8 @@ import { Form, useLoaderData, useActionData } from "react-router";
 import type { Route } from "./+types/my-naia.withdrawal-request";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { submitWithdrawalRequest, getWithdrawalRequestsForCustomer } from "~/lib/withdrawal-request.server";
+import { captureFailure } from "~/lib/error-tracking.server";
+import { sendOpsAlert } from "~/lib/ops-alert.server";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 
@@ -53,11 +55,36 @@ export async function action({ request }: Route.ActionArgs) {
     return { ok: false as const, error: "A valid email is required to identify this request." };
   }
 
-  const created = await submitWithdrawalRequest({
-    customerId: customer.id,
-    customerEmailAtRequest: email,
-    customerNameAtRequest: [customer.firstName, customer.lastName].filter(Boolean).join(" ") || null,
-  });
+  // 2026-11-17 Operations follow-up: before this, a thrown error here had
+  // ZERO durable trace anywhere — no captureFailure call, no case-log
+  // entry, nothing an operator could ever discover short of the customer
+  // re-reporting it. A statutory request that silently fails to persist
+  // is the exact failure mode "failure alerts" exists to close.
+  let created;
+  try {
+    created = await submitWithdrawalRequest({
+      customerId: customer.id,
+      customerEmailAtRequest: email,
+      customerNameAtRequest: [customer.firstName, customer.lastName].filter(Boolean).join(" ") || null,
+    });
+  } catch (err) {
+    // No customerId/email in the capture — matches this app's existing
+    // sanitization contract (see clerk-cleanup.server.ts's own test for
+    // the same discipline). The admin case-access route (listed by status,
+    // not by failure) is a separate, deliberate visibility surface; this
+    // is the "something went wrong at intake" signal, not a case record.
+    captureFailure("withdrawal-request:submit-failed", err instanceof Error ? err.message : String(err));
+    void sendOpsAlert("withdrawal-request:submit-failed", "A withdrawal-request submission failed to persist.");
+    return { ok: false as const, error: "We couldn't record your request just now — please try again in a moment." };
+  }
+
+  // Fire-and-forget: a webhook outage must never block or fail the
+  // customer's own confirmation. Off by default — see ops-alert.server.ts.
+  if (created.isNewSubmission) {
+    void sendOpsAlert("withdrawal-request:submitted", "A new EU withdrawal request was submitted.", {
+      reference: created.reference,
+    });
+  }
 
   return {
     ok: true as const,

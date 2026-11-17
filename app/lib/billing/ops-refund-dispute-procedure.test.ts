@@ -139,6 +139,50 @@ describe("Ops SOP step: an opened dispute never auto-revokes access — it alway
     assert.equal(revocationCalls, 0, "opening a dispute must never by itself revoke access — Decision 16, row 3");
     assert.deepEqual(result, { ok: true, deduped: false, action: "dispute_pending_recorded" });
   });
+
+  it("OPS.3b — the pending-dispute branch fires the ops alert hook with the dispute/subscription references, never the other branches' data", async () => {
+    let alertInput: any = null;
+    const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
+      findProcessedEvent: async () => null,
+      findBillingTransactionByProviderTransactionId: async () => originalTransaction(),
+      findDisputeByProviderDisputeId: async () => null,
+      upsertDispute: async () => ({ id: "dispute-ops-1b" }),
+      createAccessRevocation: async () => {},
+      sendDisputeAlert: async (input) => { alertInput = input; },
+      recordProcessedEvent: async () => {},
+    };
+    const event = makeEvent({
+      type: "charge.dispute.created",
+      data: { object: { id: "dp_ops_1b", status: "under_review", amount: 3900, currency: "aed", payment_intent: "pi_ops_1b" } },
+    });
+    await processStripeWebhookEvent(event, deps);
+    assert.deepEqual(alertInput, { providerDisputeId: "dp_ops_1b", subscriptionId: "sub-ops-1", status: "PENDING" });
+  });
+
+  it("OPS.3c — by default (no sendDisputeAlert injected, no OPS_ALERT_WEBHOOK_URL set) this never makes a network call — off by default, confirmed at the wiring level, not just inside ops-alert.server.ts's own tests", async () => {
+    const originalEnv = process.env.OPS_ALERT_WEBHOOK_URL;
+    delete process.env.OPS_ALERT_WEBHOOK_URL;
+    try {
+      const deps: WebhookHandlerDeps = {
+        findNullFundedPeriodTransactions: async () => [],
+        findProcessedEvent: async () => null,
+        findBillingTransactionByProviderTransactionId: async () => originalTransaction(),
+        findDisputeByProviderDisputeId: async () => null,
+        upsertDispute: async () => ({ id: "dispute-ops-1c" }),
+        createAccessRevocation: async () => {},
+        recordProcessedEvent: async () => {},
+      };
+      const event = makeEvent({
+        type: "charge.dispute.created",
+        data: { object: { id: "dp_ops_1c", status: "needs_response", amount: 3900, currency: "aed", payment_intent: "pi_ops_1c" } },
+      });
+      const result = await processStripeWebhookEvent(event, deps);
+      assert.deepEqual(result, { ok: true, deduped: false, action: "dispute_pending_recorded" });
+    } finally {
+      if (originalEnv !== undefined) process.env.OPS_ALERT_WEBHOOK_URL = originalEnv;
+    }
+  });
 });
 
 describe("Ops SOP step: a lost chargeback is the default-revoke outcome", () => {

@@ -21,6 +21,7 @@ const steps = [
   "test:taste-evidence-deletion",
   "test:taste-v1-completion",
   "test:styleme-ui",
+  "test:legal-ops",
 ];
 
 const results: { script: string; exitCode: number }[] = [];
