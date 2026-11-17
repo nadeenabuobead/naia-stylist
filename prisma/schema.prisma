@@ -178,6 +178,22 @@ model Customer {
   // on the record rather than filtered by email pattern, which silently breaks.
   accountType AccountType @default(CUSTOMER)
 
+  // ── Terms of Service acceptance ─────────────────────────────────────────
+  //
+  // Legal handoff W1 (2026-11-17): no mechanism anywhere previously recorded
+  // a customer accepting a specific version of Terms of Service — same gap
+  // pattern, same fix shape, as ageConfirmedAt/designResearchConsentAt
+  // above. Fields only for now; NOT yet wired into checkout or any request
+  // path, same deliberate split as those two: the real ToS document is
+  // still pending Legal's own sign-off (see MyNaiaLayout's "Terms of
+  // Service" footer entry, still marked pending), and wiring this into the
+  // checkout flow is Stripe + Clerk Claude's file to own, not this one's.
+  // Presence of termsAcceptedAt is the "yes" signal; absence is simply "not
+  // asked/accepted yet."
+  termsAcceptedAt      DateTime?
+  /// Which Terms-of-Service wording/version was accepted. A new version requires asking again.
+  termsAcceptedVersion String?
+
   withdrawalRequests WithdrawalRequest[]
 }
 
