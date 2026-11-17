@@ -193,6 +193,7 @@ export default [
   route("admin", "routes/admin.tsx", [
     index("routes/admin._index.tsx"),
     route("maintenance", "routes/admin.maintenance.tsx"),
+    route("migration-status", "routes/admin.migration-status.tsx"),
     // Founder Decision 16 admin overrides + funded-period manual-review
     // triage (correctness review, 2026-11-13) — the smallest operational
     // surface to exercise applyAdminRestoreOverride/applyAdminRevokeOverride
