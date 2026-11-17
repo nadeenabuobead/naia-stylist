@@ -1705,3 +1705,306 @@ describe("saveNaiaModelPhoto face quality gate", () => {
     assert.equal(qualityCalled, false, "face quality gate must not run for body slot");
   });
 });
+
+// ── H7.1-12: failed Cloudinary deletions are durably recorded ─────────────────
+//
+// 2026-11-17 — Nov 12 privacy/breach audit finding H7: "Abandoned-upload
+// orphan risk (Cloudinary assets orphaned on incomplete uploads/deletions) —
+// confirmed to apply structurally across every per-feature deletion helper."
+//
+// This module had three classes of real gap, all now recorded into
+// PendingCloudinaryDeletion so the existing retry sweep
+// (sweepPendingCloudinaryDeletions) can drain them:
+//
+//   1. saveNaiaModelPhoto's 14 compensation deletes of the just-uploaded
+//      newPublicId (every validation/moderation rejection plus the
+//      DB-write-failure compensation). No DB row ever referenced the asset,
+//      so a dropped failure left an unreferenced derivative of the
+//      customer's FACE or BODY photo with nothing tracking it.
+//   2. saveNaiaModelPhoto's old-asset replacement delete, and
+//      saveSelfieAsModelFace's equivalent. Both already had their result
+//      inspected, but the only consumer of the resulting orphanPublicId
+//      (my-naia-model.tsx:110-113) just console.warn'd it, and no sweep
+//      reads logs.
+//   3. withdrawSaveModelConsent's attemptDelete, whose failedAssets array is
+//      persisted by the account-erasure caller but NOT by the two
+//      customer-facing ones.
+//
+// And one deliberate NON-gap, pinned here so it is not "fixed" later by
+// mistake: deleteNaiaModelPhoto must never record, because on failure it
+// leaves the DB reference in place, so the asset is still live and still
+// referenced. Recording it would make assertPublicIdAvailable refuse to let
+// any new row reference a photo the customer still owns.
+//
+// Recorder is injected (last positional parameter, matching this module's own
+// DI contract) — no DB, no network.
+
+interface RecordedDeletion {
+  customerId: string;
+  publicId: string;
+  deliveryType: string;
+  context: string;
+  lastError: string;
+  resourceType?: string;
+}
+
+function makeRecorder() {
+  const recorded: RecordedDeletion[] = [];
+  const fn = async (input: RecordedDeletion) => { recorded.push(input); };
+  return { recorded, fn };
+}
+
+// A stored model.deliveryType makes the Admin API probe unnecessary, so
+// reaching this at all is itself a bug — fail loudly rather than quietly
+// returning something plausible.
+const verifyNeverCalled = async (): Promise<
+  { ok: true; asset: { type: string } } | { ok: false; errorCode: string }
+> => {
+  assert.fail("delivery-type probe must not run when model.deliveryType is already known");
+};
+
+describe("H7 — failed Cloudinary deletions are recorded for the retry sweep", () => {
+  it("H7.1 — a rejected upload whose compensation delete FAILS is recorded (ok:false, which does not throw)", async () => {
+    // The dominant H7 failure mode: deleteCloudinaryAsset returns
+    // { ok:false, errorCode } rather than throwing, so a try/catch would
+    // still have dropped this.
+    const rec = makeRecorder();
+    const result = await saveNaiaModelPhoto(
+      CUST, "face", VALID_PUBLIC_ID, null, null, "private",
+      async () => null,
+      async () => { throw new Error("DB error"); },
+      async () => ({ ok: false, errorCode: "NETWORK_ERROR" }),
+      mockVerifyOk, mockModerationPass, mockSuitabilityPass, mockGetCfg, mockFaceQualityPass,
+      rec.fn,
+    );
+
+    assert.equal(result.ok, false, "the rejection itself is still reported to the customer");
+    assert.equal(rec.recorded.length, 1, "the failed compensation delete must be recorded");
+    assert.equal(rec.recorded[0].publicId, VALID_PUBLIC_ID);
+    assert.equal(rec.recorded[0].customerId, CUST);
+    assert.equal(rec.recorded[0].deliveryType, "private");
+    assert.equal(rec.recorded[0].lastError, "NETWORK_ERROR");
+  });
+
+  it("H7.2 — a compensation delete that THROWS is recorded too, and does not escape", async () => {
+    const rec = makeRecorder();
+    const result = await saveNaiaModelPhoto(
+      CUST, "face", VALID_PUBLIC_ID, null, null, "private",
+      async () => null,
+      async () => { throw new Error("DB error"); },
+      async () => { throw new Error("socket hang up"); },
+      mockVerifyOk, mockModerationPass, mockSuitabilityPass, mockGetCfg, mockFaceQualityPass,
+      rec.fn,
+    );
+
+    assert.equal(result.ok, false);
+    assert.equal(rec.recorded.length, 1);
+    assert.equal(rec.recorded[0].lastError, "socket hang up");
+  });
+
+  it("H7.3 — nothing is recorded when the compensation delete succeeds", async () => {
+    const rec = makeRecorder();
+    await saveNaiaModelPhoto(
+      CUST, "face", VALID_PUBLIC_ID, null, null, "private",
+      async () => null,
+      async () => { throw new Error("DB error"); },
+      async () => ({ ok: true }),
+      mockVerifyOk, mockModerationPass, mockSuitabilityPass, mockGetCfg, mockFaceQualityPass,
+      rec.fn,
+    );
+    assert.equal(rec.recorded.length, 0, "a successful deletion must never leave a pending row");
+  });
+
+  it("H7.4 — nothing is recorded on a fully successful save", async () => {
+    const rec = makeRecorder();
+    const result = await saveNaiaModelPhoto(
+      CUST, "face", VALID_PUBLIC_ID, null, null, "private",
+      async () => null,
+      async (_cid, data) => makeModel(data),
+      async () => ({ ok: true }),
+      mockVerifyOk, mockModerationPass, mockSuitabilityPass, mockGetCfg, mockFaceQualityPass,
+      rec.fn,
+    );
+    assert.equal(result.ok, true);
+    assert.equal(rec.recorded.length, 0);
+  });
+
+  it("H7.5 — a moderation/quality rejection records its compensation failure under the rejected-upload context", async () => {
+    const rec = makeRecorder();
+    const failingQuality: CheckFaceQualityFn = async () => ({
+      pass: false, issues: ["no_face"], guidance: "Please use a clearer photo.",
+    });
+
+    const result = await saveNaiaModelPhoto(
+      CUST, "face", VALID_PUBLIC_ID, null, null, "private",
+      async () => null,
+      async (_cid, data) => makeModel(data),
+      async () => ({ ok: false, errorCode: "PROVIDER_ERROR" }),
+      mockVerifyOk, mockModerationPass, mockSuitabilityPass, mockGetCfg, failingQuality,
+      rec.fn,
+    );
+
+    assert.equal(result.ok, false, "the photo must still be rejected");
+    assert.equal(rec.recorded.length, 1, "the orphaned rejected upload must be recorded");
+    assert.equal(rec.recorded[0].publicId, VALID_PUBLIC_ID);
+    assert.equal(rec.recorded[0].context, "model-photo-upload-rejected");
+  });
+
+  it("H7.6 — the OLD asset's failed replacement delete is recorded, not just returned as orphanPublicId", async () => {
+    // orphanPublicId is preserved, but it was only ever as durable as its
+    // consumer — and the sole consumer merely console.warn'd it.
+    const rec = makeRecorder();
+    const oldId = `naia-wardrobe/${CUST}/old-face`;
+    const existing = makeModel({ facePublicId: oldId, deliveryType: "private" });
+
+    const result = await saveNaiaModelPhoto(
+      CUST, "face", VALID_PUBLIC_ID, null, null, "private",
+      async () => existing,
+      async (_cid, data) => makeModel(data),
+      async (pid) => (pid === oldId ? { ok: false, errorCode: "NETWORK_ERROR" } : { ok: true }),
+      mockVerifyOk, mockModerationPass, mockSuitabilityPass, mockGetCfg, mockFaceQualityPass,
+      rec.fn,
+    );
+
+    assert.equal(result.ok, true, "the new photo saved successfully");
+    assert.equal((result as { orphanPublicId?: string }).orphanPublicId, oldId, "typed partial success is preserved");
+    assert.equal(rec.recorded.length, 1, "the old asset must also be durably recorded");
+    assert.equal(rec.recorded[0].publicId, oldId);
+    assert.equal(rec.recorded[0].context, "model-photo-replaced-old-asset");
+  });
+
+  it("H7.7 — the old asset's recorded delivery type is the stored one, never defaulted to 'private'", async () => {
+    const rec = makeRecorder();
+    const oldId = `naia-wardrobe/${CUST}/old-face`;
+    const existing = makeModel({ facePublicId: oldId, deliveryType: "authenticated" });
+
+    await saveNaiaModelPhoto(
+      CUST, "face", VALID_PUBLIC_ID, null, null, "private",
+      async () => existing,
+      async (_cid, data) => makeModel(data),
+      async (pid) => (pid === oldId ? { ok: false, errorCode: "NETWORK_ERROR" } : { ok: true }),
+      mockVerifyOk, mockModerationPass, mockSuitabilityPass, mockGetCfg, mockFaceQualityPass,
+      rec.fn,
+    );
+
+    assert.equal(rec.recorded.length, 1);
+    // A wrong type here would make the retry delete against the wrong asset.
+    assert.equal(rec.recorded[0].deliveryType, "authenticated");
+  });
+
+  it("H7.8 — saveSelfieAsModelFace records the replaced face photo instead of leaving 'an orphan at worst'", async () => {
+    const rec = makeRecorder();
+    const oldFaceId = `naia-wardrobe/${CUST}/old-face`;
+    const selfieId = `naia-wardrobe/${CUST}/selfie`;
+    const existing = makeModel({ facePublicId: oldFaceId, deliveryType: "private" });
+
+    const result = await saveSelfieAsModelFace(
+      CUST, selfieId, "jpg",
+      async () => existing,
+      async (_cid, data) => makeModel(data),
+      async () => ({ ok: false, errorCode: "PROVIDER_ERROR" }),
+      rec.fn,
+    );
+
+    assert.equal(result.ok, true, "the selfie is already saved as the model face — must not block");
+    assert.equal(rec.recorded.length, 1);
+    assert.equal(rec.recorded[0].publicId, oldFaceId);
+    assert.equal(rec.recorded[0].context, "model-face-replaced-by-selfie");
+  });
+
+  it("H7.9 — withdrawSaveModelConsent records each failed asset, independently of the returned failedAssets", async () => {
+    const rec = makeRecorder();
+    const faceId = `naia-wardrobe/${CUST}/face`;
+    const bodyId = `naia-wardrobe/${CUST}/body`;
+    const model = makeModel({ facePublicId: faceId, bodyPublicId: bodyId, saveModelConsentAt: new Date() });
+
+    const result = await withdrawSaveModelConsent(
+      CUST,
+      async (_cid, data) => makeModel(data),
+      async () => model,
+      async (pid) => (pid === faceId ? { ok: false, errorCode: "NETWORK_ERROR" } : { ok: true }),
+      verifyNeverCalled,
+      rec.fn,
+    );
+
+    // Pre-existing return contract unchanged.
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.deletedAssets, [bodyId]);
+    assert.deepEqual(result.failedAssets, [{ publicId: faceId, deliveryType: "private", errorCode: "NETWORK_ERROR" }]);
+    // And the failure is now durable regardless of what the caller does.
+    assert.equal(rec.recorded.length, 1, "only the FAILED asset is recorded");
+    assert.equal(rec.recorded[0].publicId, faceId);
+    assert.equal(rec.recorded[0].context, "model-consent-withdrawn-deletion-failed");
+  });
+
+  it("H7.10 — an unresolvable delivery type is recorded with the 'unknown' sentinel, never a guess", async () => {
+    // retryPendingCloudinaryDeletion re-resolves "unknown" via the Admin API.
+    // Recording a guessed concrete type would delete against the wrong type.
+    const rec = makeRecorder();
+    const faceId = `naia-wardrobe/${CUST}/face`;
+    const model = makeModel({ facePublicId: faceId, deliveryType: null as unknown as string });
+    let deleteAttempted = false;
+
+    const result = await withdrawSaveModelConsent(
+      CUST,
+      async (_cid, data) => makeModel(data),
+      async () => model,
+      async () => { deleteAttempted = true; return { ok: true }; },
+      async () => ({ ok: false, errorCode: "NOT_FOUND" }), // neither candidate type resolves
+      rec.fn,
+    );
+
+    assert.equal(deleteAttempted, false, "must never delete against a guessed delivery type");
+    assert.equal(result.ok, false);
+    assert.equal(rec.recorded.length, 1);
+    assert.equal(rec.recorded[0].deliveryType, "unknown");
+    assert.equal(rec.recorded[0].lastError, "DELIVERY_TYPE_UNKNOWN");
+  });
+
+  it("H7.11 — deleteNaiaModelPhoto deliberately records NOTHING: it keeps the DB reference, so the asset is still owned", async () => {
+    // Recording here would be actively wrong — an unresolved
+    // PendingCloudinaryDeletion row makes assertPublicIdAvailable refuse to
+    // let any new row reference that publicId, so a transient Cloudinary
+    // error would permanently claim a photo the customer still has.
+    const faceId = `naia-wardrobe/${CUST}/face`;
+    const model = makeModel({ facePublicId: faceId });
+    let upsertCalled = false;
+
+    const result = await deleteNaiaModelPhoto(
+      CUST, "face",
+      async () => model,
+      async (_cid, data) => { upsertCalled = true; return makeModel(data); },
+      async () => ({ ok: false, errorCode: "NETWORK_ERROR" }),
+    );
+
+    assert.equal(result.ok, false, "the customer is told the deletion failed");
+    assert.equal(result.cloudinaryOk, false);
+    assert.equal(result.dbCleared, false, "the DB reference must still point at the live asset");
+    assert.equal(upsertCalled, false, "nothing is cleared, so nothing is orphaned");
+  });
+
+  it("H7.12 — recorded rows are retry-sweep compatible: concrete context, never the reserved VTO sentinel", async () => {
+    // "vto-sweep-obligation" makes retryPendingCloudinaryDeletion re-run a
+    // per-customer VTO enumeration instead of deleting the named publicId.
+    const rec = makeRecorder();
+    const oldId = `naia-wardrobe/${CUST}/old-face`;
+    const existing = makeModel({ facePublicId: oldId });
+
+    await saveNaiaModelPhoto(
+      CUST, "face", VALID_PUBLIC_ID, null, null, "private",
+      async () => existing,
+      async (_cid, data) => makeModel(data),
+      async (pid) => (pid === oldId ? { ok: false, errorCode: "NETWORK_ERROR" } : { ok: true }),
+      mockVerifyOk, mockModerationPass, mockSuitabilityPass, mockGetCfg, mockFaceQualityPass,
+      rec.fn,
+    );
+
+    assert.equal(rec.recorded.length, 1);
+    for (const r of rec.recorded) {
+      assert.notEqual(r.context, "vto-sweep-obligation");
+      assert.ok(r.context.length > 0, "context must be set for operator triage");
+      assert.ok(r.lastError.length > 0, "lastError must be set — it is what an operator triages from");
+      assert.equal(r.customerId, CUST);
+    }
+  });
+});

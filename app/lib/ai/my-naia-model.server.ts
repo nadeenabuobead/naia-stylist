@@ -6,6 +6,10 @@
 //   - Signed delivery URLs are generated per-request; never persisted.
 //   - Deletion is Cloudinary-first (asset gone before DB reference clears).
 //   - Compensation: DB failure after upload → delete the newly uploaded asset.
+//   - 2026-11-17 (H7): every compensation/replacement deletion whose failure
+//     used to be DISCARDED now records a PendingCloudinaryDeletion row so the
+//     retry sweep can drain it. See the H7 note above saveNaiaModelPhoto for
+//     which sites were real gaps and which deliberately are not.
 //
 // Concurrency contract:
 //   - Active-job-check and job-create are wrapped in a Serializable transaction.
@@ -42,6 +46,10 @@ import {
   type VerifyAssetFn,
   type CloudinaryConfig,
 } from "../cloudinary-admin.server.js";
+import {
+  deleteCloudinaryAssetOrRecord,
+  recordFailedCloudinaryDeletion,
+} from "../cloudinary-deletion-record.server.js";
 import {
   moderateImageContent,
   type ModerationResult,
@@ -226,6 +234,53 @@ export type ModerateFn = (imageUrl: string, _analyze?: AnalyzeForModerationFn) =
 export type ScreenBodyFn = (imageUrl: string, _analyze?: AnalyzeForSuitabilityFn) => Promise<VtoSuitabilityResult>;
 export type CheckFaceQualityFn = typeof checkSelfieQuality;
 
+// 2026-11-17 (H7) — injectable so the node:test suite can assert that a
+// failed deletion is recorded, without a DB. Same DI contract as every other
+// seam in this module ("All DB operations accept optional injected functions
+// for testability"). Always the LAST parameter, so existing positional calls
+// are unaffected.
+export type RecordFailedDeletionFn = typeof recordFailedCloudinaryDeletion;
+
+// ── H7 (Nov 12 privacy audit) — which deletions here were real gaps ──────────
+//
+// This module performs model face/body photo deletions in four places. Three
+// discarded their failures and are fixed; one deliberately does not record
+// and must not start.
+//
+//   FIXED — saveNaiaModelPhoto's compensation deletes (14 sites below). Every
+//     validation/moderation rejection, and the DB-write-failure compensation,
+//     deletes the just-uploaded newPublicId. No DB row ever referenced it, so
+//     a dropped failure left an unreferenced asset — a derivative of the
+//     customer's FACE or BODY photo — with nothing recording that it still
+//     needed deleting.
+//
+//   FIXED — saveNaiaModelPhoto's old-asset replacement delete. Its result was
+//     already checked and surfaced as a typed partial success
+//     (orphanPublicId), but the only consumer, my-naia-model.tsx:110-113,
+//     merely console.warn'd it. A log line is not a durable obligation and no
+//     sweep reads logs.
+//
+//   FIXED — withdrawSaveModelConsent's attemptDelete. It collects failures in
+//     failedAssets and returns them; the account-erasure caller
+//     (customer-privacy.server.ts:344) records them, but the two
+//     customer-facing callers do not. withdrawSaveModelConsentAndVtoResults
+//     passes them straight through in its return value, and its VTO-sweep
+//     obligation covers only the derived VTO RESULT assets, never the model
+//     photos themselves.
+//
+//   DELIBERATELY NOT RECORDED — deleteNaiaModelPhoto. On a Cloudinary failure
+//     it returns ok:false and leaves the DB reference IN PLACE, so the asset
+//     is still live and still referenced, and the customer sees an error and
+//     can retry. Recording it would be actively wrong: while a
+//     PendingCloudinaryDeletion row is unresolved, assertPublicIdAvailable
+//     refuses to let any new DB row reference that publicId, so recording
+//     here would claim an asset the customer still legitimately owns.
+//
+// Why these mattered despite the orphan sweep existing: unreferenced assets
+// under naia-wardrobe/ are reclaimable by cloudinary-orphan-sweep.server.ts,
+// but runBoundedSweep has no scheduled trigger — vercel.json defines no crons
+// and its only caller is admin.maintenance.tsx's action. Recovery depended on
+// a human enumerating a customer's whole Cloudinary folder.
 export async function saveNaiaModelPhoto(
   customerId: string,
   slot: "face" | "body",
@@ -241,10 +296,29 @@ export async function saveNaiaModelPhoto(
   _screenBodyPhoto: ScreenBodyFn = screenVtoBodyPhoto,
   _getConfig: () => CloudinaryConfig | null = getCloudinaryConfig,
   _checkFaceQuality: CheckFaceQualityFn = checkSelfieQuality,
+  _recordFailure: RecordFailedDeletionFn = recordFailedCloudinaryDeletion,
 ): Promise<
   | { ok: true; model: NaiaModelRecord; orphanPublicId?: string }
   | { ok: false; error: string }
 > {
+  // H7 — every compensation delete below goes through this instead of calling
+  // _deleteAsset directly and dropping the result. The injected _deleteAsset
+  // is passed straight through, so the existing DI seam is unchanged; the only
+  // difference is that a failure now lands in PendingCloudinaryDeletion for
+  // the retry sweep. Never throws, so a rejection path still returns its own
+  // customer-facing error rather than a 500.
+  const deleteRejectedUpload = (publicId: string, assetDeliveryType: string) =>
+    deleteCloudinaryAssetOrRecord(
+      {
+        customerId,
+        publicId,
+        deliveryType: assetDeliveryType,
+        context: "model-photo-upload-rejected",
+      },
+      _deleteAsset,
+      _recordFailure,
+    );
+
   // Fast early rejection of obviously public delivery types (before any network call).
   if (!PERMITTED_DELIVERY_TYPES.has(deliveryType)) {
     return { ok: false, error: "Public delivery type is not permitted for model photos." };
@@ -271,12 +345,12 @@ export async function saveNaiaModelPhoto(
 
   if (asset.resourceType !== "image") {
     // Non-image asset — delete as compensation and reject.
-    await _deleteAsset(newPublicId, asset.type || "private");
+    await deleteRejectedUpload(newPublicId, asset.type || "private");
     return { ok: false, error: "Only image uploads are permitted for model photos." };
   }
   if (asset.type !== "private") {
     // Public or non-private asset — delete as compensation and reject.
-    await _deleteAsset(newPublicId, asset.type || "upload");
+    await deleteRejectedUpload(newPublicId, asset.type || "upload");
     return { ok: false, error: "Public delivery type is not permitted for model photos." };
   }
 
@@ -287,47 +361,47 @@ export async function saveNaiaModelPhoto(
   // ── Layer 1: format allowlist, size cap, dimension bounds (Admin API only) ──
   const ALLOWED_FORMATS = new Set(["jpg", "jpeg", "png", "webp", "heic", "heif"]);
   if (verifiedFormat && !ALLOWED_FORMATS.has(verifiedFormat)) {
-    await _deleteAsset(newPublicId, "private");
+    await deleteRejectedUpload(newPublicId, "private");
     return { ok: false, error: `File type "${verifiedFormat}" is not accepted. Use JPG, PNG, WEBP, or HEIC.` };
   }
   const MAX_BYTES = 5 * 1024 * 1024;
   if (asset.bytes && asset.bytes > MAX_BYTES) {
-    await _deleteAsset(newPublicId, "private");
+    await deleteRejectedUpload(newPublicId, "private");
     return { ok: false, error: "Photo is too large. Maximum size is 5 MB." };
   }
   const MIN_DIM = 200;
   const MAX_DIM = 8000;
   if (asset.width !== null && asset.width < MIN_DIM) {
-    await _deleteAsset(newPublicId, "private");
+    await deleteRejectedUpload(newPublicId, "private");
     return { ok: false, error: `Photo width (${asset.width}px) is below the minimum of ${MIN_DIM}px.` };
   }
   if (asset.height !== null && asset.height < MIN_DIM) {
-    await _deleteAsset(newPublicId, "private");
+    await deleteRejectedUpload(newPublicId, "private");
     return { ok: false, error: `Photo height (${asset.height}px) is below the minimum of ${MIN_DIM}px.` };
   }
   if (asset.width !== null && asset.width > MAX_DIM) {
-    await _deleteAsset(newPublicId, "private");
+    await deleteRejectedUpload(newPublicId, "private");
     return { ok: false, error: `Photo width (${asset.width}px) exceeds the maximum of ${MAX_DIM}px.` };
   }
   if (asset.height !== null && asset.height > MAX_DIM) {
-    await _deleteAsset(newPublicId, "private");
+    await deleteRejectedUpload(newPublicId, "private");
     return { ok: false, error: `Photo height (${asset.height}px) exceeds the maximum of ${MAX_DIM}px.` };
   }
 
   // ── Layer 2: global content safety moderation (both slots) ───────────────
   const cfg = _getConfig();
   if (!cfg) {
-    await _deleteAsset(newPublicId, "private");
+    await deleteRejectedUpload(newPublicId, "private");
     return { ok: false, error: "Image service is not configured. Please try again." };
   }
   const moderationUrl = buildPrivateDownloadUrl(cfg, newPublicId, verifiedFormat ?? "jpg", "private");
   const moderation = await _moderateContent(moderationUrl);
   if (moderation.status === "MODERATION_UNAVAILABLE") {
-    await _deleteAsset(newPublicId, "private");
+    await deleteRejectedUpload(newPublicId, "private");
     return { ok: false, error: "Image review is temporarily unavailable. Please try again." };
   }
   if (moderation.status === "SAFETY_REJECT") {
-    await _deleteAsset(newPublicId, "private");
+    await deleteRejectedUpload(newPublicId, "private");
     return { ok: false, error: "Photo could not be accepted. Please use a different image." };
   }
 
@@ -338,7 +412,7 @@ export async function saveNaiaModelPhoto(
     const faceQualityUrl = buildPrivateDownloadUrl(cfg, newPublicId, verifiedFormat ?? "jpg", "private");
     const faceQuality = await _checkFaceQuality({ imageUrl: faceQualityUrl });
     if (!faceQuality.pass) {
-      await _deleteAsset(newPublicId, "private");
+      await deleteRejectedUpload(newPublicId, "private");
       const msg = faceQuality.guidance
         ?? "Photo doesn't show a clear, forward-facing face. Please try a different photo.";
       return { ok: false, error: msg };
@@ -350,7 +424,7 @@ export async function saveNaiaModelPhoto(
   if (slot === "body") {
     const suitability = await _screenBodyPhoto(moderationUrl);
     if (suitability.status !== "PASS") {
-      await _deleteAsset(newPublicId, "private");
+      await deleteRejectedUpload(newPublicId, "private");
       const VTO_GUIDANCE: Record<string, string> = {
         no_person: "No person detected. Please upload a clear full-body photo.",
         multiple_people: "Only one person should be visible in the photo.",
@@ -388,13 +462,28 @@ export async function saveNaiaModelPhoto(
     model = await _upsertModelFn(customerId, slotData);
   } catch {
     // DB failed — compensate by deleting the newly uploaded (orphaned) asset.
-    await _deleteAsset(newPublicId, "private");
+    await deleteRejectedUpload(newPublicId, "private");
     return { ok: false, error: "Failed to save photo reference. Your upload has been removed." };
   }
 
   // DB persisted. Now delete the old asset (different from new).
   if (oldPublicId && oldPublicId !== newPublicId) {
-    const del = await _deleteAsset(oldPublicId, existing?.deliveryType ?? "private");
+    // H7 — the typed partial success below is preserved exactly, but the
+    // failure is now ALSO recorded durably. The orphanPublicId contract was
+    // only ever as strong as its consumer, and the sole consumer
+    // (my-naia-model.tsx:110-113) just console.warn'd it: the DB row now
+    // points at newPublicId, so oldPublicId is unreferenced, and no sweep
+    // reads log lines.
+    const del = await deleteCloudinaryAssetOrRecord(
+      {
+        customerId,
+        publicId: oldPublicId,
+        deliveryType: existing?.deliveryType ?? "private",
+        context: "model-photo-replaced-old-asset",
+      },
+      _deleteAsset,
+      _recordFailure,
+    );
     if (!del.ok) {
       // Old asset not deleted — return a typed partial-success so the caller can retry cleanup.
       return { ok: true, model, orphanPublicId: oldPublicId };
@@ -444,6 +533,18 @@ export async function deleteNaiaModelPhoto(
   }
 
   // Step 1: Delete Cloudinary asset FIRST (privacy-first).
+  //
+  // H7 — deliberately NOT routed through deleteCloudinaryAssetOrRecord, and
+  // this is not an oversight. On failure this returns ok:false and leaves the
+  // DB reference IN PLACE (dbCleared:false), so the asset is still live and
+  // still referenced, and the customer gets an error they can retry. Nothing
+  // is orphaned, so there is nothing for the retry sweep to reclaim.
+  //
+  // Recording here would be actively harmful: while a
+  // PendingCloudinaryDeletion row is unresolved, assertPublicIdAvailable
+  // refuses to let any new DB row reference that publicId — so a transient
+  // Cloudinary error would permanently claim a photo the customer still owns
+  // and still has referenced.
   const delResult = await _deleteAsset(publicId, model.deliveryType ?? "private");
   if (!delResult.ok) {
     return {
@@ -499,6 +600,7 @@ export async function saveSelfieAsModelFace(
   _findModelFn: FindModelFn = _findModel,
   _upsertModelFn: UpsertModelFn = _upsertModel,
   _deleteAsset: DeleteAssetFn = deleteCloudinaryAsset,
+  _recordFailure: RecordFailedDeletionFn = recordFailedCloudinaryDeletion,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const existing = await _findModelFn(customerId);
   const oldFacePublicId = existing?.facePublicId ?? null;
@@ -515,8 +617,21 @@ export async function saveSelfieAsModelFace(
   }
 
   if (oldFacePublicId && oldFacePublicId !== selfiePublicId) {
-    await _deleteAsset(oldFacePublicId, existing?.deliveryType ?? "private");
-    // Ignore deletion errors — old asset becomes an orphan at worst.
+    // H7 — "an orphan at worst" was the whole problem. The DB row above now
+    // points at selfiePublicId, so a failure here leaves the customer's
+    // previous FACE photo in storage, unreferenced, with nothing recording
+    // that it still needs deleting. Recorded for the retry sweep instead.
+    // Still never blocks: the selfie is already saved as the model face.
+    await deleteCloudinaryAssetOrRecord(
+      {
+        customerId,
+        publicId: oldFacePublicId,
+        deliveryType: existing?.deliveryType ?? "private",
+        context: "model-face-replaced-by-selfie",
+      },
+      _deleteAsset,
+      _recordFailure,
+    );
   }
 
   return { ok: true };
@@ -624,6 +739,7 @@ export async function withdrawSaveModelConsent(
     publicId: string,
     deliveryType: string,
   ) => Promise<{ ok: true; asset: { type: string } } | { ok: false; errorCode: string }> = verifyCloudinaryAsset,
+  _recordFailure: RecordFailedDeletionFn = recordFailedCloudinaryDeletion,
 ): Promise<{ ok: boolean; deletedAssets: string[]; failedAssets: FailedModelAsset[] }> {
   const model = await _findModelFn(customerId);
   const deletedAssets: string[] = [];
@@ -638,10 +754,41 @@ export async function withdrawSaveModelConsent(
       // Delivery type could not be established — do not attempt a delete
       // against a guessed type. Durable unresolved record (deliveryType:
       // "unknown"), not a reported success.
+      //
+      // H7 — "durable" now actually means durable. The DB references are
+      // cleared unconditionally below, so returning this only in failedAssets
+      // left the asset unreferenced and untracked for every caller that did
+      // not persist the array. The "unknown" sentinel is recorded verbatim:
+      // retryPendingCloudinaryDeletion re-resolves it via the Admin API
+      // rather than deleting against a guess.
       failedAssets.push({ publicId, deliveryType: "unknown", errorCode: "DELIVERY_TYPE_UNKNOWN" });
+      await _recordFailure({
+        customerId,
+        publicId,
+        deliveryType: "unknown",
+        context: "model-consent-withdrawn-deletion-failed",
+        lastError: "DELIVERY_TYPE_UNKNOWN",
+      });
       return;
     }
-    const r = await _deleteAsset(publicId, deliveryType);
+    // H7 — recorded at the point of failure, not left to the caller. The
+    // account-erasure caller (customer-privacy.server.ts:344) does persist
+    // failedAssets, but the two customer-facing callers do not:
+    // withdrawSaveModelConsentAndVtoResults passes them straight through in
+    // its return value, and its VTO-sweep obligation covers only the derived
+    // VTO RESULT assets, never these model photos. A repeat record for the
+    // erasure path is harmless — publicId is @unique, so the upsert bumps
+    // attemptCount rather than duplicating the row.
+    const r = await deleteCloudinaryAssetOrRecord(
+      {
+        customerId,
+        publicId,
+        deliveryType,
+        context: "model-consent-withdrawn-deletion-failed",
+      },
+      _deleteAsset,
+      _recordFailure,
+    );
     if (r.ok) deletedAssets.push(publicId);
     else failedAssets.push({ publicId, deliveryType, errorCode: r.errorCode ?? "UNKNOWN" });
   }

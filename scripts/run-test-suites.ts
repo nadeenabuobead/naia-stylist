@@ -17,6 +17,14 @@ const steps = [
   // pass, which would have made this suite look broken while telling us
   // nothing. It gets its own `node --test` script instead.
   "test:nadine-security",
+  // 2026-11-17 (H7): app/lib/ai/my-naia-model.test.ts had the exact same
+  // unreachability problem C7 found above — tests covering the My nAia Model
+  // face/body photo service (upload validation, moderation gates,
+  // compensation deletes, consent withdrawal) appeared in NO npm script, so
+  // nothing ever ran them. Same reason it gets its own `node --test` script
+  // rather than being appended to "test:security": it is a node:test file,
+  // which vitest would report as a failure regardless of its assertions.
+  "test:my-naia-model",
   "test:billing",
   "test:taste-evidence-deletion",
   "test:taste-v1-completion",
