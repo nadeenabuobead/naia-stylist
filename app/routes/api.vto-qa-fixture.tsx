@@ -45,8 +45,11 @@
 // existing shared seed-staging fixture tooling (and vice versa) — this
 // keeps Five-Persona QA's own fixture secret completely uninvolved.
 //
-// POST only. Never creates a ClosetItem, never creates a Customer, never
-// touches any customer other than the one named by QA_OVERRIDE_CUSTOMER_ID.
+// POST creates; GET verifies (read-only); DELETE removes exactly the
+// StylingSession + OutfitSuggestion this POST created (see that handler's
+// own comment for its narrow scoping) — see deleteFixtureSuggestion below.
+// Never creates a ClosetItem, never creates a Customer, never touches any
+// customer other than the one named by QA_OVERRIDE_CUSTOMER_ID.
 
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { data } from "react-router";
@@ -103,6 +106,9 @@ function isAuthorized(request: Request, customerId: unknown): customerId is stri
 }
 
 export async function action({ request }: ActionFunctionArgs) {
+  if (request.method === "DELETE") {
+    return deleteFixtureSuggestion(request);
+  }
   if (request.method !== "POST") {
     return data({ ok: false, code: "method_not_allowed" }, { status: 405 });
   }
@@ -179,6 +185,88 @@ export async function action({ request }: ActionFunctionArgs) {
     chosenItems: chosen.map(({ slot, item }) => ({ slot, closetItemId: item.id, name: item.name })),
     totalEligibleCategoriesAvailable: chosen.length,
   });
+}
+
+// ── Cleanup — delete exactly one fixture-created suggestion (2026-11-17) ───
+//
+// DELETE /api/vto-qa-fixture, body: { customerId, suggestionId }
+//
+// Narrowly scoped on purpose: this only ever deletes what THIS fixture's
+// own POST action creates (one StylingSession + one OutfitSuggestion + its
+// OutfitItem rows), never anything a real StyleMe session produced. Three
+// independent guards, each refusing rather than guessing:
+//   1. Same four-check authorization as every other action in this file —
+//      wrong secret, wrong environment, or wrong customerId all refuse
+//      before the suggestion is even looked up.
+//   2. Ownership, same not-found-not-403 convention as the GET loader
+//      above — a suggestionId belonging to a different customer (fixture
+//      or real) is indistinguishable from one that doesn't exist.
+//   3. moodDescription must be null. This fixture's own POST action never
+//      sets it (see that action's own comment on why) — a real StyleMe
+//      suggestion always has one. Refusing to delete a non-null-mood
+//      suggestion means this action can never be turned into a generic
+//      "delete any suggestion" primitive, even by a caller who already
+//      has the secret and the right customerId.
+//   4. The suggestion's own session must have exactly one suggestion (this
+//      one) and zero VirtualTryOnJob rows referencing it. This fixture
+//      always creates a session 1:1 with its suggestion (see the POST
+//      action), so a session with more than one suggestion, or a
+//      suggestion with a real VTO job against it, is a state this action
+//      was never scoped to touch — it refuses rather than silently
+//      cascading into tables this cleanup path was not asked to manage.
+// onDelete behaviour for these foreign keys isn't established anywhere in
+// this codebase's migrations (same caution closet._index.tsx's own delete
+// path documents) — so OutfitItem is deleted explicitly, never assumed to
+// cascade.
+async function deleteFixtureSuggestion(request: Request) {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return data({ ok: false, code: "invalid_request" }, { status: 400 });
+  }
+  const parsed = body as Record<string, unknown> | null;
+  const customerId = parsed?.customerId;
+  const suggestionId = parsed?.suggestionId;
+
+  if (!isAuthorized(request, customerId)) {
+    return data({ ok: false, code: "forbidden" }, { status: 403 });
+  }
+  if (typeof suggestionId !== "string" || !suggestionId) {
+    return data({ ok: false, code: "invalid_request", message: "suggestionId required" }, { status: 400 });
+  }
+
+  const suggestion = await prisma.outfitSuggestion.findUnique({
+    where: { id: suggestionId },
+    select: { id: true, moodDescription: true, sessionId: true, session: { select: { customerId: true } } },
+  });
+
+  if (!suggestion || suggestion.session.customerId !== customerId) {
+    return data({ ok: false, code: "not_found" }, { status: 404 });
+  }
+
+  if (suggestion.moodDescription !== null) {
+    return data({ ok: false, code: "not_a_fixture_suggestion" }, { status: 403 });
+  }
+
+  const [suggestionsOnSession, dependentJobs] = await Promise.all([
+    prisma.outfitSuggestion.count({ where: { sessionId: suggestion.sessionId } }),
+    prisma.virtualTryOnJob.count({ where: { outfitSuggestionId: suggestion.id } }),
+  ]);
+  if (suggestionsOnSession !== 1) {
+    return data({ ok: false, code: "session_not_isolated", suggestionsOnSession }, { status: 409 });
+  }
+  if (dependentJobs > 0) {
+    return data({ ok: false, code: "has_dependent_jobs", dependentJobs }, { status: 409 });
+  }
+
+  await prisma.$transaction([
+    prisma.outfitItem.deleteMany({ where: { suggestionId: suggestion.id } }),
+    prisma.outfitSuggestion.delete({ where: { id: suggestion.id } }),
+    prisma.stylingSession.delete({ where: { id: suggestion.sessionId } }),
+  ]);
+
+  return data({ ok: true, deletedSuggestionId: suggestion.id, deletedSessionId: suggestion.sessionId });
 }
 
 // ── Read-only FASHN credits check (2026-11-17) ──────────────────────────────

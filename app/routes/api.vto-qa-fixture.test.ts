@@ -18,18 +18,44 @@ const mockItemCreate = vi.fn();
 const mockSuggestionFindUnique = vi.fn();
 const mockVtoJobCount = vi.fn();
 const mockVtoJobFindMany = vi.fn();
+const mockSuggestionCount = vi.fn();
+const mockItemDeleteMany = vi.fn();
+const mockSuggestionDelete = vi.fn();
+const mockSessionDelete = vi.fn();
 
-vi.mock("~/lib/prisma.server", () => ({
-  prisma: {
+// 2026-11-17: this previously mocked "~/lib/prisma.server", a module that
+// does not exist in this codebase — the real route imports its default
+// export from "~/db.server" (db.server.js, a direct `new PrismaClient()`,
+// confirmed by reading it). That mismatch meant NONE of this file's actual
+// business-logic assertions were ever exercised against the mock; every
+// test that touched a real Prisma call silently fell through to the real
+// client and failed with a datasource-validation error (confirmed via a
+// clean `npx vitest run` on the unmodified file: 13 of 32 tests failed —
+// every one that wasn't a pure authorization-gate check returning before
+// any Prisma call). The commit history's claimed pass counts for this file
+// were never actually reproduced. Fixed here, not just worked around.
+vi.mock("~/db.server", () => ({
+  default: {
     closetItem: { findMany: (...args: unknown[]) => mockFindMany(...args) },
-    outfitSuggestion: { findUnique: (...args: unknown[]) => mockSuggestionFindUnique(...args) },
+    outfitSuggestion: {
+      findUnique: (...args: unknown[]) => mockSuggestionFindUnique(...args),
+      count: (...args: unknown[]) => mockSuggestionCount(...args),
+      delete: (...args: unknown[]) => mockSuggestionDelete(...args),
+    },
+    outfitItem: { deleteMany: (...args: unknown[]) => mockItemDeleteMany(...args) },
+    stylingSession: { delete: (...args: unknown[]) => mockSessionDelete(...args) },
     virtualTryOnJob: { count: (...args: unknown[]) => mockVtoJobCount(...args), findMany: (...args: unknown[]) => mockVtoJobFindMany(...args) },
-    $transaction: async (fn: (tx: unknown) => unknown) =>
-      fn({
+    // $transaction has two call shapes in the real code: a callback (the
+    // POST action, creation) and a plain array of promises (the DELETE
+    // cleanup action below) — mirrors both, same as the real Prisma client.
+    $transaction: async (arg: unknown) => {
+      if (Array.isArray(arg)) return Promise.all(arg);
+      return (arg as (tx: unknown) => unknown)({
         stylingSession: { create: (...args: unknown[]) => mockSessionCreate(...args) },
         outfitSuggestion: { create: (...args: unknown[]) => mockSuggestionCreate(...args) },
         outfitItem: { create: (...args: unknown[]) => mockItemCreate(...args) },
-      }),
+      });
+    },
   },
 }));
 
@@ -78,6 +104,24 @@ function req(body: unknown, headers: Record<string, string> = {}) {
   } as unknown as Request;
 }
 
+function deleteReq(body: unknown, headers: Record<string, string> = {}) {
+  return {
+    method: "DELETE",
+    headers: new Headers(headers),
+    json: async () => body,
+  } as unknown as Request;
+}
+
+function fixtureSuggestion(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: "suggestion-1",
+    moodDescription: null,
+    sessionId: "session-1",
+    session: { customerId: QA_ID },
+    ...overrides,
+  };
+}
+
 function setAuthorizedEnv() {
   process.env.VERCEL_ENV = "preview";
   process.env.NAIA_PROJECT_VARIANT = "staging";
@@ -96,6 +140,10 @@ beforeEach(() => {
   mockItemCreate.mockResolvedValue({ id: "outfititem-1" });
   mockVtoJobCount.mockResolvedValue(0);
   mockVtoJobFindMany.mockResolvedValue([]);
+  mockSuggestionCount.mockResolvedValue(1);
+  mockItemDeleteMany.mockResolvedValue({ count: 1 });
+  mockSuggestionDelete.mockResolvedValue({ id: "suggestion-1" });
+  mockSessionDelete.mockResolvedValue({ id: "session-1" });
   mockLoadNaiaModel.mockResolvedValue({ bodyPublicId: "p", bodyFormat: "jpg", saveModelConsentAt: new Date() });
 });
 
@@ -602,5 +650,99 @@ describe("api.vto-qa-fixture loader — mode=credits routing", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+// ── DELETE — cleanup of exactly one fixture-created suggestion ─────────────
+describe("api.vto-qa-fixture action — DELETE cleanup", () => {
+  const AUTH_HEADERS = { "x-vto-qa-fixture-secret": "the-real-secret" };
+
+  it("rejects the same four-check authorization gate as POST — wrong secret", async () => {
+    setAuthorizedEnv();
+    const res = await action({
+      request: deleteReq({ customerId: QA_ID, suggestionId: "s1" }, { "x-vto-qa-fixture-secret": "wrong" }),
+    } as any);
+    expect(res.init?.status).toBe(403);
+    expect(mockSuggestionFindUnique).not.toHaveBeenCalled();
+  });
+
+  it("rejects a missing suggestionId before ever looking anything up", async () => {
+    setAuthorizedEnv();
+    const res = await action({ request: deleteReq({ customerId: QA_ID }, AUTH_HEADERS) } as any);
+    expect(res.init?.status).toBe(400);
+    expect(mockSuggestionFindUnique).not.toHaveBeenCalled();
+  });
+
+  it("not-found and wrong-customer are indistinguishable — same convention as the GET loader", async () => {
+    setAuthorizedEnv();
+    mockSuggestionFindUnique.mockResolvedValueOnce(null);
+    const res1 = await action({
+      request: deleteReq({ customerId: QA_ID, suggestionId: "does-not-exist" }, AUTH_HEADERS),
+    } as any);
+    expect(res1.init?.status).toBe(404);
+
+    mockSuggestionFindUnique.mockResolvedValueOnce(fixtureSuggestion({ session: { customerId: "someone-else" } }));
+    const res2 = await action({
+      request: deleteReq({ customerId: QA_ID, suggestionId: "suggestion-1" }, AUTH_HEADERS),
+    } as any);
+    expect(res2.init?.status).toBe(404);
+    expect(mockSuggestionDelete).not.toHaveBeenCalled();
+  });
+
+  it("refuses a real (non-null moodDescription) suggestion — can never become a generic delete primitive", async () => {
+    setAuthorizedEnv();
+    mockSuggestionFindUnique.mockResolvedValueOnce(fixtureSuggestion({ moodDescription: "cozy and considered" }));
+    const res = await action({
+      request: deleteReq({ customerId: QA_ID, suggestionId: "suggestion-1" }, AUTH_HEADERS),
+    } as any);
+    expect(res.init?.status).toBe(403);
+    expect((res.data as any).code).toBe("not_a_fixture_suggestion");
+    expect(mockSuggestionDelete).not.toHaveBeenCalled();
+  });
+
+  it("refuses when the session has more than this one suggestion — never touches a session it didn't exclusively create", async () => {
+    setAuthorizedEnv();
+    mockSuggestionFindUnique.mockResolvedValueOnce(fixtureSuggestion());
+    mockSuggestionCount.mockResolvedValueOnce(2);
+    const res = await action({
+      request: deleteReq({ customerId: QA_ID, suggestionId: "suggestion-1" }, AUTH_HEADERS),
+    } as any);
+    expect(res.init?.status).toBe(409);
+    expect((res.data as any).code).toBe("session_not_isolated");
+    expect(mockSessionDelete).not.toHaveBeenCalled();
+  });
+
+  it("refuses when a real VirtualTryOnJob references this suggestion — never cascades into a table it wasn't asked to manage", async () => {
+    setAuthorizedEnv();
+    mockSuggestionFindUnique.mockResolvedValueOnce(fixtureSuggestion());
+    mockVtoJobCount.mockResolvedValueOnce(1);
+    const res = await action({
+      request: deleteReq({ customerId: QA_ID, suggestionId: "suggestion-1" }, AUTH_HEADERS),
+    } as any);
+    expect(res.init?.status).toBe(409);
+    expect((res.data as any).code).toBe("has_dependent_jobs");
+    expect(mockSuggestionDelete).not.toHaveBeenCalled();
+    expect(mockSessionDelete).not.toHaveBeenCalled();
+  });
+
+  it("happy path — deletes OutfitItem rows, the OutfitSuggestion, and the StylingSession, in that order, nothing else", async () => {
+    setAuthorizedEnv();
+    mockSuggestionFindUnique.mockResolvedValueOnce(fixtureSuggestion());
+    const res = await action({
+      request: deleteReq({ customerId: QA_ID, suggestionId: "suggestion-1" }, AUTH_HEADERS),
+    } as any);
+    expect(res.data).toEqual({ ok: true, deletedSuggestionId: "suggestion-1", deletedSessionId: "session-1" });
+    expect(mockItemDeleteMany).toHaveBeenCalledWith({ where: { suggestionId: "suggestion-1" } });
+    expect(mockSuggestionDelete).toHaveBeenCalledWith({ where: { id: "suggestion-1" } });
+    expect(mockSessionDelete).toHaveBeenCalledWith({ where: { id: "session-1" } });
+  });
+
+  it("never touches a customer other than QA_OVERRIDE_CUSTOMER_ID, even with a correct secret", async () => {
+    setAuthorizedEnv();
+    const res = await action({
+      request: deleteReq({ customerId: "some-other-customer", suggestionId: "suggestion-1" }, AUTH_HEADERS),
+    } as any);
+    expect(res.init?.status).toBe(403);
+    expect(mockSuggestionFindUnique).not.toHaveBeenCalled();
   });
 });
