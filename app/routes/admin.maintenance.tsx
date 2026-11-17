@@ -37,6 +37,7 @@ import {
   purgeResolvedCloudinaryDeletions,
 } from "~/lib/cloudinary-deletion-claim.server";
 import { runBoundedSweep } from "~/lib/cloudinary-orphan-sweep.server";
+import { revokeAllSessionsForCustomer } from "~/lib/naia-session.server";
 
 async function requireOwner(request: Request) {
   const session = await requireAdminSession(request);
@@ -157,6 +158,43 @@ export async function action({ request }: ActionFunctionArgs) {
     return { ok: true as const, intent, message: `Purged ${result.count} resolved Cloudinary deletion record(s) past retention.` };
   }
 
+  // 2026-11-17 (H4) — incident response: end every live nAia session for one
+  // customer, for a reported/suspected compromise. Requires the exact
+  // confirmation value as well as the intent, same discipline as the
+  // Cloudinary execute path above.
+  //
+  // Deliberately NOT described to the operator as locking the account: it
+  // revokes nAia's own sessions only, not the upstream Clerk or Shopify
+  // identity session, so someone holding the customer's credentials can sign
+  // in again. See revokeAllSessionsForCustomer's own header.
+  if (intent === "revoke-customer-sessions") {
+    const customerId = String(form.get("customerId") ?? "").trim();
+    if (!customerId) {
+      return { ok: false as const, error: "Customer ID is required." };
+    }
+    if (form.get("confirmRevoke") !== "REVOKE") {
+      return { ok: false as const, error: "Confirmation value missing — nothing was revoked." };
+    }
+
+    const result = await revokeAllSessionsForCustomer(customerId);
+    await recordAdminAction(identity.email, "revoke-customer-sessions", {
+      customerId,
+      revokedCount: result.revokedCount,
+    });
+
+    // 0 is reported honestly rather than as a bland success: for an
+    // incident-response action, "nothing was there to revoke" and "sessions
+    // were revoked" must not look the same to the operator — the former
+    // usually means a wrong customer ID was pasted.
+    return {
+      ok: true as const,
+      intent,
+      message: result.revokedCount === 0
+        ? `No active nAia sessions found for ${customerId} — nothing to revoke. Check the customer ID is correct.`
+        : `Revoked ${result.revokedCount} active nAia session(s) for ${customerId}. This does NOT end their Clerk/Shopify identity session — they can sign in again with their credentials.`,
+    };
+  }
+
   return { ok: false as const, error: "Invalid request." };
 }
 
@@ -217,6 +255,55 @@ export default function AdminMaintenance() {
         )}
         {actionData && "error" in actionData && (
           <p style={{ fontSize: "13px", color: "#b3261e" }}>{actionData.error}</p>
+        )}
+      </div>
+
+      {/* ── H4 — incident response: revoke one customer's live sessions ──── */}
+      <h2 className="adm-page-heading" style={{ fontSize: "16px", marginTop: "2rem" }}>
+        Revoke a customer&rsquo;s sessions
+      </h2>
+      <p className="adm-page-sub" style={{ marginBottom: "0.75rem" }}>
+        For a reported or suspected account compromise: immediately ends every active nAia session
+        for one customer, signing them out on all devices. Use this when a stolen session token or
+        an unauthorised sign-in is suspected.
+      </p>
+      <p className="adm-page-sub" style={{ marginBottom: "0.75rem", color: "#b3261e" }}>
+        <strong>This is not an account lockout.</strong> It revokes nAia&rsquo;s own sessions only
+        &mdash; it does not end the customer&rsquo;s Clerk or Shopify identity session, so anyone
+        holding their credentials can sign in again and get a new session. Treat it as containment
+        of a stolen session, and follow it with a credential reset on the identity provider.
+      </p>
+      <div className="adm-card" style={{ padding: "1.5rem", display: "flex", flexDirection: "column", gap: "1rem" }}>
+        <form
+          method="post"
+          style={{ display: "flex", alignItems: "center", gap: "1rem", flexWrap: "wrap" }}
+          onSubmit={e => {
+            if (!window.confirm("Revoke ALL active nAia sessions for this customer? They will be signed out on every device.")) {
+              e.preventDefault();
+            }
+          }}
+        >
+          <input type="hidden" name="intent" value="revoke-customer-sessions" />
+          <input type="hidden" name="confirmRevoke" value="REVOKE" />
+          <input
+            type="text"
+            name="customerId"
+            placeholder="Customer ID"
+            required
+            style={{
+              padding: "0.5rem 0.75rem",
+              border: "1px solid #d1d5db",
+              borderRadius: "4px",
+              fontSize: "13px",
+              minWidth: "280px",
+            }}
+          />
+          <button type="submit" style={{ ...maintenanceButtonStyle, background: "#b3261e" }}>
+            Revoke all sessions
+          </button>
+        </form>
+        {actionData && "message" in actionData && actionData.intent === "revoke-customer-sessions" && (
+          <p style={{ fontSize: "13px", color: "#16213e" }}>{actionData.message}</p>
         )}
       </div>
 

@@ -52,6 +52,12 @@ vi.mock("~/lib/cloudinary-orphan-sweep.server", () => ({
   runBoundedSweep: vi.fn(),
 }));
 
+// 2026-11-17 (H4) — admin-facing session revocation for a suspected
+// compromised customer account.
+vi.mock("~/lib/naia-session.server", () => ({
+  revokeAllSessionsForCustomer: vi.fn(),
+}));
+
 import { requireAdminSession } from "~/lib/internal-auth.server";
 import { purgeExpiredJourneyEvents, purgeExpiredNaiaSessions, purgeUnconfirmedSelfiePhotos } from "~/lib/data-retention.server";
 import { recordAdminAction, listRecentAdminActions } from "~/lib/admin-audit-log.server";
@@ -59,6 +65,7 @@ import { listPendingClerkCleanups, retryPendingClerkCleanup } from "~/lib/clerk-
 import { listPendingCustomerErasureFailures, retryPendingCustomerErasureFailure } from "~/lib/customer-erasure-failures.server";
 import { listPendingCloudinaryDeletions, retryPendingCloudinaryDeletion, purgeResolvedCloudinaryDeletions } from "~/lib/cloudinary-deletion-claim.server";
 import { runBoundedSweep } from "~/lib/cloudinary-orphan-sweep.server";
+import { revokeAllSessionsForCustomer } from "~/lib/naia-session.server";
 
 const mockRequireAdmin = () => requireAdminSession as ReturnType<typeof vi.fn>;
 const mockPurgeJourney = () => purgeExpiredJourneyEvents as ReturnType<typeof vi.fn>;
@@ -74,6 +81,7 @@ const mockListPendingCloudinaryDeletions = () => listPendingCloudinaryDeletions 
 const mockRetryCloudinaryDeletion = () => retryPendingCloudinaryDeletion as ReturnType<typeof vi.fn>;
 const mockPurgeResolvedCloudinaryDeletions = () => purgeResolvedCloudinaryDeletions as ReturnType<typeof vi.fn>;
 const mockRunBoundedSweep = () => runBoundedSweep as ReturnType<typeof vi.fn>;
+const mockRevokeSessions = () => revokeAllSessionsForCustomer as ReturnType<typeof vi.fn>;
 
 function actionRequest(intent: string) {
   const body = new URLSearchParams({ intent });
@@ -383,5 +391,143 @@ describe("admin.maintenance — purge-resolved-cloudinary-deletions action", () 
 
     expect((result as any).message).toMatch(/7/);
     expect(mockRecordAction()).toHaveBeenCalledWith("owner@naiabynadine.com", "purge-resolved-cloudinary-deletions", { count: 7 });
+  });
+});
+
+// ── H4 — revoke-customer-sessions ───────────────────────────────────────────
+//
+// Nov 12 audit finding H4: "No admin-facing session-revocation for a
+// suspected-compromised customer account." Every pre-existing teardown was
+// scoped to the caller's own request cookie (deleteNaiaSession,
+// destroySessionAndGetHint) or to expiry (purgeExpiredNaiaSessions), so an
+// operator responding to a reported compromise could only wait the
+// attacker's session out.
+
+function revokeRequest(fields: Record<string, string>) {
+  const body = new URLSearchParams({ intent: "revoke-customer-sessions", ...fields });
+  return new Request("http://localhost/admin/maintenance", {
+    method: "POST",
+    body,
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+  });
+}
+
+describe("admin.maintenance — revoke-customer-sessions action (H4)", () => {
+  it("revokes every session for the named customer and records it", async () => {
+    mockRevokeSessions().mockResolvedValueOnce({ revokedCount: 3 });
+    const { action } = await import("./admin.maintenance");
+
+    const result = await action({
+      request: revokeRequest({ customerId: "cust-1", confirmRevoke: "REVOKE" }),
+    } as any);
+
+    expect(mockRevokeSessions()).toHaveBeenCalledWith("cust-1");
+    expect((result as any).ok).toBe(true);
+    expect((result as any).message).toMatch(/3/);
+    expect(mockRecordAction()).toHaveBeenCalledWith(
+      "owner@naiabynadine.com",
+      "revoke-customer-sessions",
+      { customerId: "cust-1", revokedCount: 3 },
+    );
+  });
+
+  it("attributes the action to the admin session, never to request input", async () => {
+    mockRevokeSessions().mockResolvedValueOnce({ revokedCount: 1 });
+    const { action } = await import("./admin.maintenance");
+
+    await action({
+      request: revokeRequest({
+        customerId: "cust-1",
+        confirmRevoke: "REVOKE",
+        performedBy: "attacker@evil.test",
+      }),
+    } as any);
+
+    expect(mockRecordAction().mock.calls[0][0]).toBe("owner@naiabynadine.com");
+  });
+
+  it("refuses without the exact confirmation value, and revokes nothing", async () => {
+    const { action } = await import("./admin.maintenance");
+
+    const result = await action({
+      request: revokeRequest({ customerId: "cust-1", confirmRevoke: "yes" }),
+    } as any);
+
+    expect((result as any).ok).toBe(false);
+    expect(mockRevokeSessions()).not.toHaveBeenCalled();
+    expect(mockRecordAction()).not.toHaveBeenCalled();
+  });
+
+  it("refuses a missing confirmation value entirely (a replayed/mis-wired form)", async () => {
+    const { action } = await import("./admin.maintenance");
+
+    const result = await action({ request: revokeRequest({ customerId: "cust-1" }) } as any);
+
+    expect((result as any).ok).toBe(false);
+    expect(mockRevokeSessions()).not.toHaveBeenCalled();
+  });
+
+  it("refuses a missing or blank customerId rather than revoking broadly", async () => {
+    const { action } = await import("./admin.maintenance");
+
+    for (const customerId of ["", "   "]) {
+      vi.clearAllMocks();
+      const result = await action({
+        request: revokeRequest({ customerId, confirmRevoke: "REVOKE" }),
+      } as any);
+
+      expect((result as any).ok).toBe(false);
+      // The dangerous failure mode would be a falsy id reaching a
+      // deleteMany; it must never get that far.
+      expect(mockRevokeSessions()).not.toHaveBeenCalled();
+    }
+  });
+
+  it("reports a zero-revocation result honestly instead of as a bland success", async () => {
+    // For an incident-response control, "nothing was there to revoke" and
+    // "sessions were revoked" must not read the same — a 0 usually means a
+    // wrong customer ID was pasted.
+    mockRevokeSessions().mockResolvedValueOnce({ revokedCount: 0 });
+    const { action } = await import("./admin.maintenance");
+
+    const result = await action({
+      request: revokeRequest({ customerId: "typo-id", confirmRevoke: "REVOKE" }),
+    } as any);
+
+    expect((result as any).message).toMatch(/No active nAia sessions/i);
+    expect((result as any).message).toMatch(/customer ID is correct/i);
+    // Still audited — an attempted revocation against a wrong id is itself
+    // worth a record.
+    expect(mockRecordAction()).toHaveBeenCalledWith(
+      "owner@naiabynadine.com",
+      "revoke-customer-sessions",
+      { customerId: "typo-id", revokedCount: 0 },
+    );
+  });
+
+  it("does not overstate its effect — the success message says the identity session survives", async () => {
+    // Guards against this control being presented as an account lockout. It
+    // ends nAia sessions only; Clerk/Shopify identity sessions are untouched,
+    // so the operator must know to follow up with a credential reset.
+    mockRevokeSessions().mockResolvedValueOnce({ revokedCount: 2 });
+    const { action } = await import("./admin.maintenance");
+
+    const result = await action({
+      request: revokeRequest({ customerId: "cust-1", confirmRevoke: "REVOKE" }),
+    } as any);
+
+    expect((result as any).message).toMatch(/Clerk\/Shopify/);
+    expect((result as any).message).toMatch(/sign in again/i);
+  });
+
+  it("a revocation DB failure is not swallowed as success", async () => {
+    mockRevokeSessions().mockRejectedValueOnce(new Error("db down"));
+    const { action } = await import("./admin.maintenance");
+
+    await expect(
+      action({ request: revokeRequest({ customerId: "cust-1", confirmRevoke: "REVOKE" }) } as any),
+    ).rejects.toThrow("db down");
+
+    expect(mockRecordAction()).not.toHaveBeenCalled();
   });
 });

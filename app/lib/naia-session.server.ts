@@ -247,6 +247,39 @@ export async function deleteNaiaSession(request: Request): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// 2026-11-17 (H4) — revoke EVERY nAia session belonging to one customer.
+//
+// Nov 12 audit finding H4: there was no admin-facing session revocation for
+// a suspected-compromised customer account. Every existing teardown is
+// scoped to the caller's OWN request cookie (deleteNaiaSession,
+// destroySessionAndGetHint) or to expiry (purgeExpiredNaiaSessions), so an
+// operator responding to a reported compromise had no way to end the
+// attacker's live sessions — only to wait for them to expire.
+//
+// SCOPE — read this before relying on it as a containment control. This
+// ends nAia's own sessions, and nothing more. It does NOT revoke the
+// upstream identity-provider session (Clerk) or Shopify's, so a caller who
+// still holds the customer's credentials can simply sign in again and mint
+// a new NaiaSession. It is the standard "sign out of all devices" control:
+// genuine containment of stolen session tokens, NOT an account lockout.
+// Revoking the Clerk-side session is a separate, provider-mutating change
+// and is deliberately not attempted here.
+//
+// Returns the number of rows deleted so the caller can record it. Unlike
+// destroySessionAndGetHint this does NOT swallow errors: it is an operator
+// action whose whole value is knowing whether it actually took effect, and
+// a silent no-op reported as success is the worst possible outcome for an
+// incident-response control.
+// ---------------------------------------------------------------------------
+
+export async function revokeAllSessionsForCustomer(
+  customerId: string,
+): Promise<{ revokedCount: number }> {
+  const result = await prisma.naiaSession.deleteMany({ where: { customerId } });
+  return { revokedCount: result.count };
+}
+
+// ---------------------------------------------------------------------------
 // Logout's own entry point: destroy the session and hand back its stored
 // Shopify id_token_hint in a single round trip — Prisma's delete() with a
 // select returns the deleted row's fields, so there is no separate read
