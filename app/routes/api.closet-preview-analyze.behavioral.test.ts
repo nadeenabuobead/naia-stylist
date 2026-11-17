@@ -35,9 +35,18 @@ vi.mock("~/lib/cloudinary-admin.server", async () => {
     getCloudinaryConfig: vi.fn().mockReturnValue({ cloudName: "test", apiKey: "test", apiSecret: "test" }),
     verifyCloudinaryAsset: vi.fn(),
     buildPrivateDownloadUrl: vi.fn().mockReturnValue("https://example.invalid/download"),
-    deleteCloudinaryAsset: vi.fn().mockResolvedValue(undefined),
   };
 });
+
+// 2026-11-17 (H7 completion) — the route's 5 cleanup-deletion sites now go
+// through the shared H7 recorder, not deleteCloudinaryAsset directly. Mocked
+// as one unit here (its own success/failure/recording branches are already
+// covered at the unit level by cloudinary-deletion-record.server.test.ts's
+// 13 tests) — these tests only need to prove the ROUTE calls it with the
+// right input at each site, not re-verify the wrapper's own internals.
+vi.mock("~/lib/cloudinary-deletion-record.server", () => ({
+  deleteCloudinaryAssetOrRecord: vi.fn().mockResolvedValue({ ok: true }),
+}));
 
 vi.mock("~/lib/image-moderation.server", () => ({
   moderateImageContent: vi.fn(),
@@ -56,10 +65,8 @@ vi.mock("~/lib/plan/entitlement.server", () => ({
 }));
 
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
-import {
-  verifyCloudinaryAsset,
-  deleteCloudinaryAsset,
-} from "~/lib/cloudinary-admin.server";
+import { verifyCloudinaryAsset } from "~/lib/cloudinary-admin.server";
+import { deleteCloudinaryAssetOrRecord } from "~/lib/cloudinary-deletion-record.server";
 import { moderateImageContent } from "~/lib/image-moderation.server";
 import { screenGarmentSuitability } from "~/lib/image-suitability.server";
 import { previewAnalyzeGarment } from "~/lib/ai/closet-preview-analysis.server";
@@ -68,7 +75,7 @@ import { action } from "./api.closet-preview-analyze";
 
 const mockGetCustomer = () => getCurrentNaiaCustomer as ReturnType<typeof vi.fn>;
 const mockVerify = () => verifyCloudinaryAsset as ReturnType<typeof vi.fn>;
-const mockDelete = () => deleteCloudinaryAsset as ReturnType<typeof vi.fn>;
+const mockDelete = () => deleteCloudinaryAssetOrRecord as ReturnType<typeof vi.fn>;
 const mockModerate = () => moderateImageContent as ReturnType<typeof vi.fn>;
 const mockSuitability = () => screenGarmentSuitability as ReturnType<typeof vi.fn>;
 const mockPreview = () => previewAnalyzeGarment as ReturnType<typeof vi.fn>;
@@ -148,7 +155,12 @@ describe("api.closet-preview-analyze action — consent enforced server-side, no
     } as any);
     expect(res.init.status).toBe(400);
     expect(res.data.error).toBe("Photo consent is required before analysis.");
-    expect(mockDelete()).toHaveBeenCalledWith(ownId, "private");
+    expect(mockDelete()).toHaveBeenCalledWith({
+      customerId: CUSTOMER_A.id,
+      publicId: ownId,
+      deliveryType: "private",
+      context: "closet-preview-analyze-rejected",
+    });
     // Never reaches moderation/suitability/AI — consent is the gate, not advisory.
     expect(mockVerify()).not.toHaveBeenCalled();
     expect(mockModerate()).not.toHaveBeenCalled();
@@ -217,7 +229,12 @@ describe("api.closet-preview-analyze action — entitlement enforced BEFORE eith
     expect(res.data.requiresReupload).toBe(true);
     // The asset the client already uploaded before calling this endpoint must
     // not be left orphaned.
-    expect(mockDelete()).toHaveBeenCalledWith(ownId, "private");
+    expect(mockDelete()).toHaveBeenCalledWith({
+      customerId: CUSTOMER_A.id,
+      publicId: ownId,
+      deliveryType: "private",
+      context: "closet-preview-analyze-rejected",
+    });
     // The actual defect: neither paid Claude call may ever run for a
     // zero-allowance customer, no matter what the image contains.
     expect(mockModerate()).not.toHaveBeenCalled();
@@ -240,7 +257,12 @@ describe("api.closet-preview-analyze action — entitlement enforced BEFORE eith
     expect(res.init.status).toBe(403);
     expect(res.data.error).toBe("Your closet is full. Remove some items to add new ones.");
     expect(res.data.requiresReupload).toBe(true);
-    expect(mockDelete()).toHaveBeenCalledWith(ownId, "private");
+    expect(mockDelete()).toHaveBeenCalledWith({
+      customerId: CUSTOMER_A.id,
+      publicId: ownId,
+      deliveryType: "private",
+      context: "closet-preview-analyze-rejected",
+    });
     expect(mockModerate()).not.toHaveBeenCalled();
     expect(mockSuitability()).not.toHaveBeenCalled();
   });
@@ -299,7 +321,12 @@ describe("api.closet-preview-analyze action — failure paths, no real provider 
 
     expect(res.init.status).toBe(422);
     expect(res.data.requiresReupload).toBe(true);
-    expect(mockDelete()).toHaveBeenCalledWith(ownId, "private");
+    expect(mockDelete()).toHaveBeenCalledWith({
+      customerId: CUSTOMER_A.id,
+      publicId: ownId,
+      deliveryType: "private",
+      context: "closet-preview-analyze-rejected",
+    });
   });
 
   it("moderation-service-unavailable deletes the asset and returns 503, never calls the AI analyzer", async () => {
@@ -315,6 +342,53 @@ describe("api.closet-preview-analyze action — failure paths, no real provider 
 
     expect(res.init.status).toBe(503);
     expect(mockPreview()).not.toHaveBeenCalled();
+  });
+
+  it("H7 completion — a RETRY_IMAGE suitability rejection deletes the (owned) asset with the shared recorder, same as the other 4 cleanup sites", async () => {
+    const ownId = ownPublicId(CUSTOMER_A);
+    mockVerify().mockResolvedValue({ ok: true, asset: { type: "private", format: "jpg" } });
+    mockModerate().mockResolvedValue({ status: "SAFETY_PASS" });
+    mockSuitability().mockResolvedValue({ status: "RETRY_IMAGE", subCode: "image_too_blurry" });
+
+    const res: any = await action({
+      request: postAs(CUSTOMER_A, { publicId: ownId, photoConsentGiven: true }),
+      params: {},
+      context: {},
+    } as any);
+
+    expect(res.init.status).toBe(422);
+    expect(res.data.requiresReupload).toBe(true);
+    expect(mockDelete()).toHaveBeenCalledWith({
+      customerId: CUSTOMER_A.id,
+      publicId: ownId,
+      deliveryType: "private",
+      context: "closet-preview-analyze-rejected",
+    });
+  });
+
+  it("H7 completion — a failed/recorded cleanup deletion never surfaces to the customer: the rejection response is identical whether cleanup succeeded or failed", async () => {
+    // deleteCloudinaryAssetOrRecord already records the failure durably on
+    // its own (covered at the unit level by cloudinary-deletion-record.
+    // server.test.ts) — this route never awaits that outcome to decide its
+    // response, so a provider-side cleanup failure must be invisible to the
+    // customer, not surfaced as a 500 or a different error.
+    const ownId = ownPublicId(CUSTOMER_A);
+    mockDelete().mockResolvedValueOnce({ ok: false, errorCode: "PROVIDER_ERROR" });
+
+    const res: any = await action({
+      request: postAs(CUSTOMER_A, { publicId: ownId, photoConsentGiven: false }),
+      params: {},
+      context: {},
+    } as any);
+
+    expect(res.init.status).toBe(400);
+    expect(res.data.error).toBe("Photo consent is required before analysis.");
+    expect(mockDelete()).toHaveBeenCalledWith({
+      customerId: CUSTOMER_A.id,
+      publicId: ownId,
+      deliveryType: "private",
+      context: "closet-preview-analyze-rejected",
+    });
   });
 
   it("an asset that fails Cloudinary verification is rejected without calling moderation", async () => {

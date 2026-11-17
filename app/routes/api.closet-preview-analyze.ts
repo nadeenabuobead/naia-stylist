@@ -40,13 +40,27 @@ import {
   validatePublicIdOwnership,
   verifyCloudinaryAsset,
   buildPrivateDownloadUrl,
-  deleteCloudinaryAsset,
 } from "~/lib/cloudinary-admin.server";
+import { deleteCloudinaryAssetOrRecord } from "~/lib/cloudinary-deletion-record.server";
 import { checkEntitlement } from "~/lib/plan/entitlement.server";
 import { moderateImageContent } from "~/lib/image-moderation.server";
 import { screenGarmentSuitability } from "~/lib/image-suitability.server";
 import { previewAnalyzeGarment } from "~/lib/ai/closet-preview-analysis.server";
 import { extractConsentGiven } from "~/lib/photo-consent.server";
+
+// 2026-11-17 (H7 completion) — all 5 cleanup-deletion sites below used to
+// call deleteCloudinaryAsset directly and discard its result. deleteCloudinaryAsset
+// does not throw on a provider rejection (it returns { ok: false, errorCode }),
+// so a failed cleanup here previously vanished silently: the asset was never
+// referenced by any DB row (ownership was already confirmed before each of
+// these calls, and none of them persist a reference afterward), so nothing
+// else would ever find or retry it — it was simply an orphan with no record
+// anywhere. deleteCloudinaryAssetOrRecord (cloudinary-deletion-record.server.ts,
+// the shared H7 recorder) durably records a failure for the existing retry
+// sweep instead. Customer-facing behavior at every site below is unchanged:
+// none of these branches ever awaited the deletion's success before deciding
+// its response in the first place.
+const CLOSET_PREVIEW_REJECTED_CONTEXT = "closet-preview-analyze-rejected";
 
 export async function loader() {
   return data({ error: "Method not allowed" }, { status: 405 });
@@ -111,7 +125,12 @@ export async function action({ request }: ActionFunctionArgs) {
   //    Matches the Layer 2/3 rejection responses below, which already set it.
   const capacityCheck = await checkEntitlement(naiaCustomer.id, naiaCustomer.membershipStatus, "closet");
   if (!capacityCheck.allowed) {
-    await deleteCloudinaryAsset(publicId, "private");
+    await deleteCloudinaryAssetOrRecord({
+      customerId: naiaCustomer.id,
+      publicId,
+      deliveryType: "private",
+      context: CLOSET_PREVIEW_REJECTED_CONTEXT,
+    });
     const message = capacityCheck.limit === 0
       ? "Closet access is included with nAia Membership. Subscribe to start adding pieces."
       : "Your closet is full. Remove some items to add new ones.";
@@ -122,7 +141,12 @@ export async function action({ request }: ActionFunctionArgs) {
   //    photo runs. Ownership is already confirmed above, so it is safe to
   //    delete this customer's own asset here rather than leave it orphaned.
   if (!extractConsentGiven(body)) {
-    await deleteCloudinaryAsset(publicId, "private");
+    await deleteCloudinaryAssetOrRecord({
+      customerId: naiaCustomer.id,
+      publicId,
+      deliveryType: "private",
+      context: CLOSET_PREVIEW_REJECTED_CONTEXT,
+    });
     return data({ error: "Photo consent is required before analysis." }, { status: 400 });
   }
 
@@ -146,14 +170,24 @@ export async function action({ request }: ActionFunctionArgs) {
   //    Matches the order enforced at final submission in the /closet action.
   const moderation = await moderateImageContent(downloadUrl);
   if (moderation.status === "MODERATION_UNAVAILABLE") {
-    await deleteCloudinaryAsset(publicId, "private");
+    await deleteCloudinaryAssetOrRecord({
+      customerId: naiaCustomer.id,
+      publicId,
+      deliveryType: "private",
+      context: CLOSET_PREVIEW_REJECTED_CONTEXT,
+    });
     return data(
       { error: "Image review is temporarily unavailable. Please try a different photo.", requiresReupload: true },
       { status: 503 },
     );
   }
   if (moderation.status === "SAFETY_REJECT") {
-    await deleteCloudinaryAsset(publicId, "private");
+    await deleteCloudinaryAssetOrRecord({
+      customerId: naiaCustomer.id,
+      publicId,
+      deliveryType: "private",
+      context: CLOSET_PREVIEW_REJECTED_CONTEXT,
+    });
     return data(
       { error: "This image does not meet our content standards. Please upload a different photo.", requiresReupload: true },
       { status: 422 },
@@ -164,7 +198,12 @@ export async function action({ request }: ActionFunctionArgs) {
   //    (customer hasn't confirmed category yet; category_mismatch cannot fire).
   const suitability = await screenGarmentSuitability(downloadUrl);
   if (suitability.status === "RETRY_IMAGE") {
-    await deleteCloudinaryAsset(publicId, "private");
+    await deleteCloudinaryAssetOrRecord({
+      customerId: naiaCustomer.id,
+      publicId,
+      deliveryType: "private",
+      context: CLOSET_PREVIEW_REJECTED_CONTEXT,
+    });
     const subCode = (suitability as { status: "RETRY_IMAGE"; subCode: string }).subCode;
     const PREVIEW_GUIDANCE: Record<string, string> = {
       no_garment_visible: "No fashion item was detected. Please upload a photo of a single clothing item, accessory, or piece of jewellery.",
