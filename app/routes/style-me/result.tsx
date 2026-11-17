@@ -46,6 +46,7 @@ import {
 } from "~/lib/styleme/commerce-cta";
 import { issueImageToken } from "~/lib/dev-tryon-image-tokens.server";
 import { isTryOnEligible } from "~/lib/ai/tryon-product-eligibility";
+import { PROVIDER_DISCLAIMER } from "~/lib/ai/virtual-try-on.types";
 import { TryOnPanel } from "~/components/TryOnPanel";
 import { VtoExperience } from "~/components/VtoExperience";
 import { RecommendationFeedbackWidget } from "~/components/RecommendationFeedbackWidget";
@@ -2202,6 +2203,15 @@ export default function StyleMeResult() {
                   alt="Your StyleMe outfit on your nAia Model"
                   className="sm-vto-image"
                 />
+                {/* Legal handoff W4 (2026-11-17), Full-Look VTO eight-gate review:
+                    this result image had no AI-generated disclosure anywhere near
+                    it — the pre-generation consent screen is a separate moment and
+                    isn't a substitute for a disclosure on the actual result. Reuses
+                    PROVIDER_DISCLAIMER verbatim (virtual-try-on.types.ts) rather than
+                    writing new copy: it's the existing, already-approved wording for
+                    exactly this category of content, already shown adjacent to the
+                    generated image in VtoExperience.tsx and TryOnPanel.tsx. */}
+                <p className="sm-vto-body-note sm-vto-ai-disclaimer">{PROVIDER_DISCLAIMER}</p>
                 {fullLookQA.omittedLabels && fullLookQA.omittedLabels.length > 0 && (
                   <p className="sm-vto-body-note">
                     Shown without: {fullLookQA.omittedLabels.join(", ")}.
