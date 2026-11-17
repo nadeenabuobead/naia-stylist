@@ -179,6 +179,38 @@ export async function action({ request }: ActionFunctionArgs) {
   });
 }
 
+// ── Read-only FASHN credits check (2026-11-17) ──────────────────────────────
+//
+// GET /api/vto-qa-fixture?customerId=...&mode=credits
+//
+// GET https://api.fashn.ai/v1/credits using the exact same FASHN_API_KEY the
+// real submission path reads (fashn-try-on.server.ts's _getApiKey default)
+// — confirms the server-side key this app would actually use belongs to the
+// now-credited account, without ever revealing the key itself. Purely a
+// balance check per FASHN's own docs (docs.fashn.ai/utility-endpoints/
+// credits) — never submits, never creates a prediction, never costs
+// anything. Same authorization gate as every other action in this file.
+export async function checkFashnCredits(_fetch: typeof fetch = fetch) {
+  const apiKey = process.env.FASHN_API_KEY;
+  if (!apiKey) {
+    return data({ ok: false, code: "not_configured", message: "FASHN_API_KEY is not set on this deployment." }, { status: 200 });
+  }
+  try {
+    const res = await _fetch("https://api.fashn.ai/v1/credits", {
+      method: "GET",
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) {
+      return data({ ok: false, code: "fashn_error", httpStatus: res.status }, { status: 200 });
+    }
+    const body = (await res.json()) as { credits?: { total?: number; subscription?: number; on_demand?: number } };
+    return data({ ok: true, credits: body.credits ?? null });
+  } catch {
+    return data({ ok: false, code: "network_error" }, { status: 200 });
+  }
+}
+
 // ── Read-only verification of an existing fixture (or any) suggestion ──────
 //
 // GET /api/vto-qa-fixture?customerId=...&suggestionId=...
@@ -194,8 +226,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url);
   const customerId = url.searchParams.get("customerId") ?? undefined;
   const suggestionId = url.searchParams.get("suggestionId");
+  const mode = url.searchParams.get("mode");
 
-  if (!isAuthorized(request, customerId) || !suggestionId) {
+  if (!isAuthorized(request, customerId)) {
+    return data({ ok: false, code: "forbidden" }, { status: 403 });
+  }
+
+  if (mode === "credits") {
+    return checkFashnCredits();
+  }
+
+  if (!suggestionId) {
     return data({ ok: false, code: "forbidden" }, { status: 403 });
   }
 

@@ -52,7 +52,7 @@ vi.mock("~/lib/cloudinary-admin.server", async (importOriginal) => {
   return { ...actual, getCloudinaryConfig: () => null };
 });
 
-import { action, loader } from "./api.vto-qa-fixture";
+import { action, loader, checkFashnCredits } from "./api.vto-qa-fixture";
 
 const QA_ID = "qa-disposable-customer-1";
 const ORIGINAL_ENV = { ...process.env };
@@ -459,5 +459,148 @@ describe("api.vto-qa-fixture loader (GET) — read-only verification, no duplica
     expect(json.ok).toBe(true);
     expect(json.fullLookEligible).toBe(false);
     expect(json.eligibleGarmentCount).toBe(0);
+  });
+});
+
+// ── checkFashnCredits — read-only balance check (2026-11-17) ───────────────
+// GET https://api.fashn.ai/v1/credits using the real FASHN_API_KEY, never
+// submits anything, never costs anything. Verified directly here with an
+// injected _fetch; the loader-level tests below prove the auth gate and
+// mode=credits routing without needing a real network call either.
+
+describe("checkFashnCredits — direct unit tests", () => {
+  const ORIGINAL_KEY = process.env.FASHN_API_KEY;
+  afterEach(() => {
+    if (ORIGINAL_KEY === undefined) delete process.env.FASHN_API_KEY;
+    else process.env.FASHN_API_KEY = ORIGINAL_KEY;
+  });
+
+  it("returns the credits object on a successful response, using the real Bearer-token request shape", async () => {
+    process.env.FASHN_API_KEY = "real-fashn-key";
+    let capturedUrl = "";
+    let capturedAuth = "";
+    const _fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      capturedUrl = url.toString();
+      capturedAuth = (init?.headers as Record<string, string>)?.Authorization ?? "";
+      return new Response(JSON.stringify({ credits: { total: 100, subscription: 0, on_demand: 100 } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const res = await checkFashnCredits(_fetch);
+    const json = res.data as any;
+
+    expect(capturedUrl).toBe("https://api.fashn.ai/v1/credits");
+    expect(capturedAuth).toBe("Bearer real-fashn-key");
+    expect(json.ok).toBe(true);
+    expect(json.credits).toEqual({ total: 100, subscription: 0, on_demand: 100 });
+  });
+
+  it("never reveals the API key itself anywhere in the response", async () => {
+    process.env.FASHN_API_KEY = "super-secret-key-value";
+    const _fetch = (async () =>
+      new Response(JSON.stringify({ credits: { total: 5, subscription: 0, on_demand: 5 } }), { status: 200 })) as typeof fetch;
+    const res = await checkFashnCredits(_fetch);
+    const serialized = JSON.stringify(res.data);
+    expect(serialized).not.toContain("super-secret-key-value");
+  });
+
+  it("reports not_configured when FASHN_API_KEY is unset, without attempting a network call", async () => {
+    delete process.env.FASHN_API_KEY;
+    const _fetch = vi.fn();
+    const res = await checkFashnCredits(_fetch as unknown as typeof fetch);
+    const json = res.data as any;
+    expect(json.ok).toBe(false);
+    expect(json.code).toBe("not_configured");
+    expect(_fetch).not.toHaveBeenCalled();
+  });
+
+  it("reports fashn_error with the status code when FASHN itself rejects the check (e.g. invalid key)", async () => {
+    process.env.FASHN_API_KEY = "some-key";
+    const _fetch = (async () => new Response("Unauthorized", { status: 401 })) as typeof fetch;
+    const res = await checkFashnCredits(_fetch);
+    const json = res.data as any;
+    expect(json.ok).toBe(false);
+    expect(json.code).toBe("fashn_error");
+    expect(json.httpStatus).toBe(401);
+  });
+
+  it("reports network_error on a thrown fetch failure, never crashes", async () => {
+    process.env.FASHN_API_KEY = "some-key";
+    const _fetch = (async () => {
+      throw new Error("ECONNRESET");
+    }) as typeof fetch;
+    const res = await checkFashnCredits(_fetch);
+    const json = res.data as any;
+    expect(json.ok).toBe(false);
+    expect(json.code).toBe("network_error");
+  });
+});
+
+describe("api.vto-qa-fixture loader — mode=credits routing", () => {
+  const ORIGINAL_KEY = process.env.FASHN_API_KEY;
+  afterEach(() => {
+    if (ORIGINAL_KEY === undefined) delete process.env.FASHN_API_KEY;
+    else process.env.FASHN_API_KEY = ORIGINAL_KEY;
+  });
+
+  function creditsReq(params: Record<string, string>, headers: Record<string, string> = {}) {
+    const url = new URL("https://example.test/api/vto-qa-fixture");
+    for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+    return { url: url.toString(), headers: new Headers(headers) } as unknown as Request;
+  }
+
+  it("rejects an unauthorized request for mode=credits exactly like every other action — never calls fetch", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    try {
+      const res = await loader({
+        request: creditsReq({ customerId: QA_ID, mode: "credits" }, { "x-vto-qa-fixture-secret": "wrong" }),
+      } as any);
+      expect(res.init?.status).toBe(403);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("an authorized mode=credits request reaches FASHN's real credits endpoint and returns the balance, never touching the DB", async () => {
+    setAuthorizedEnv();
+    process.env.FASHN_API_KEY = "real-key";
+    const fetchSpy = vi.fn(async () =>
+      new Response(JSON.stringify({ credits: { total: 100, subscription: 0, on_demand: 100 } }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+    try {
+      const res = await loader({
+        request: creditsReq({ customerId: QA_ID, mode: "credits" }, { "x-vto-qa-fixture-secret": "the-real-secret" }),
+      } as any);
+      const json = res.data as any;
+      expect(json.ok).toBe(true);
+      expect(json.credits.total).toBe(100);
+      expect(fetchSpy).toHaveBeenCalledWith("https://api.fashn.ai/v1/credits", expect.any(Object));
+      expect(mockSuggestionFindUnique).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("mode=credits does not require a suggestionId — unlike the normal suggestion-lookup mode", async () => {
+    setAuthorizedEnv();
+    process.env.FASHN_API_KEY = "real-key";
+    const fetchSpy = vi.fn(async () =>
+      new Response(JSON.stringify({ credits: { total: 1, subscription: 0, on_demand: 1 } }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+    try {
+      const res = await loader({
+        request: creditsReq({ customerId: QA_ID, mode: "credits" }, { "x-vto-qa-fixture-secret": "the-real-secret" }),
+      } as any);
+      const json = res.data as any;
+      expect(json.ok).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
