@@ -84,6 +84,24 @@ export async function action({ request }: ActionFunctionArgs) {
       return data({ ok: false, error: "Missing required fields." }, { status: 400 });
     }
 
+    // V1 face-photo upload containment (2026-11-17, launch-readiness audit, C6):
+    // the loader above already omits the face slot from this page's own UI, and
+    // NaiaModelPhotoUpload never renders a face-upload control — but neither of
+    // those stopped a direct POST from setting slot="face" here, which reached
+    // saveNaiaModelPhoto's face-quality-check path (checkSelfieQuality, which
+    // sends the photo to Anthropic's vision API) with no server-side gate at
+    // all. Pending Legal-approved subprocessor disclosure for that call, reject
+    // it server-side too, not just omit it from the UI — the same enforcement
+    // passport.selfie.tsx already has for its own face-analysis entry point.
+    // Deleting an existing face photo (the delete-photo intent below) is
+    // untouched: this blocks a NEW analysis call, never a withdrawal.
+    if (slot === "face") {
+      return data(
+        { ok: false, error: "Face-photo upload is not available in this release." },
+        { status: 403 },
+      );
+    }
+
     const result = await saveNaiaModelPhoto(customer.id, slot, publicId, version, format, deliveryType);
     if (!result.ok) {
       return data({ ok: false, error: result.error }, { status: 422 });
