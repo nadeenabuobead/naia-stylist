@@ -181,6 +181,52 @@ describe("closet._index action (add) — consent enforced server-side, not just 
     expect(res.init.status).toBe(403);
     expect(mockDelete()).not.toHaveBeenCalled();
   });
+
+  // Behavioral coverage for dd67ed9's FINAL atomic-upload path specifically —
+  // distinct from cb10c6c/397dc37's earlier preview-analyze checkpoint
+  // (see api.closet-preview-analyze.behavioral.test.ts), which is a
+  // different file on a different code path. entitlement.test.ts's ENT-14c
+  // already proves the limit===0 branch exists in this file's SOURCE TEXT;
+  // these two tests prove it behaviorally, by actually invoking the real
+  // action — still with no live HTTP request, no real database, no real
+  // Cloudinary/AI call. Live-HTTP verification of this exact path remains
+  // open (see the launch checklist) — these tests strengthen local
+  // confidence while that stays unexercised.
+  it("limit===0 (zero Closet allowance) gets the upgrade-oriented message, and the asset is NOT deleted — dd67ed9's final path, behaviorally", async () => {
+    const ownId = ownPublicId(CUSTOMER_A);
+    mockEntitlement().mockResolvedValue({ allowed: false, reason: "at_capacity", limit: 0 });
+
+    const res: any = await action({
+      request: addRequestAs(CUSTOMER_A, { publicId: ownId, photoConsentGiven: "true" }),
+      params: {},
+      context: {},
+    } as any);
+
+    expect(res.init.status).toBe(403);
+    expect(res.data.error).toBe("Closet access is included with nAia Membership. Subscribe to start adding pieces.");
+    // Intentional asymmetry with the early preview-analyze checkpoint, which
+    // DOES delete on rejection (see its own header comment) — this final
+    // path deliberately preserves the asset so the customer can free
+    // capacity and resubmit without re-uploading. A regression here would
+    // silently break that resubmit flow.
+    expect(mockDelete()).not.toHaveBeenCalled();
+    expect(mockVerify()).not.toHaveBeenCalled();
+  });
+
+  it("a genuinely full (non-zero limit) member gets the distinct 'closet is full' message, not the upgrade message — same branch as the early checkpoint", async () => {
+    const ownId = ownPublicId(CUSTOMER_A);
+    mockEntitlement().mockResolvedValue({ allowed: false, reason: "at_capacity", limit: 250 });
+
+    const res: any = await action({
+      request: addRequestAs(CUSTOMER_A, { publicId: ownId, photoConsentGiven: "true" }),
+      params: {},
+      context: {},
+    } as any);
+
+    expect(res.init.status).toBe(403);
+    expect(res.data.error).toBe("Your closet is full. Remove some items to add new ones.");
+    expect(mockDelete()).not.toHaveBeenCalled();
+  });
 });
 
 describe("closet._index action (add) — failure paths, no real database or image provider contacted", () => {
