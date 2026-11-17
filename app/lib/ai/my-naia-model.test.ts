@@ -1832,7 +1832,7 @@ describe("H7 — failed Cloudinary deletions are recorded for the retry sweep", 
   it("H7.5 — a moderation/quality rejection records its compensation failure under the rejected-upload context", async () => {
     const rec = makeRecorder();
     const failingQuality: CheckFaceQualityFn = async () => ({
-      pass: false, issues: ["no_face"], guidance: "Please use a clearer photo.",
+      pass: false, issues: ["not-a-selfie"], guidance: "Please use a clearer photo.",
     });
 
     const result = await saveNaiaModelPhoto(

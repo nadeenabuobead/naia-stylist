@@ -116,6 +116,20 @@ describe("VTO result deletion helper", () => {
 
 // ─── Group B: BOS deletion helper ────────────────────────────────────────────
 
+// 2026-11-17 (H7): these assertions used fixed-length slices (1000/1500/2000
+// chars) of deleteCustomerBosImages's body. The H7 change added a rationale
+// comment and routed the deletion through deleteCloudinaryAssetOrRecord,
+// which pushed real code past those windows and made three assertions fail on
+// a comment rather than on a behaviour change. Anchored to the function's
+// actual end instead — same fix, and same reasoning, as T16/T17 in
+// closet-image-security.test.ts.
+function bosFnBody(): string {
+  const fnIdx = bosPrivacySrc.indexOf("async function deleteCustomerBosImages(");
+  if (fnIdx === -1) return "";
+  const nextExport = bosPrivacySrc.indexOf("\nexport ", fnIdx);
+  return bosPrivacySrc.slice(fnIdx, nextExport === -1 ? bosPrivacySrc.length : nextExport);
+}
+
 describe("BOS image deletion helper", () => {
   it("exports deleteCustomerBosImages", () => {
     assert.ok(
@@ -141,25 +155,30 @@ describe("BOS image deletion helper", () => {
   });
 
   it("deletes imagePublicId from Cloudinary", () => {
-    const fnIdx = bosPrivacySrc.indexOf("async function deleteCustomerBosImages(");
-    const fnBody = bosPrivacySrc.slice(fnIdx, fnIdx + 1000);
+    const fnBody = bosFnBody();
+    // The injected deleter is now passed THROUGH
+    // deleteCloudinaryAssetOrRecord, which records a failure for the retry
+    // sweep rather than discarding it. Both the deletion and the injection
+    // seam are intact, so match either shape.
     assert.ok(
-      fnBody.includes("_deleteAsset(analysis.imagePublicId"),
-      "must call _deleteAsset with imagePublicId",
+      /_deleteAsset\(analysis\.imagePublicId|publicId: analysis\.imagePublicId/.test(fnBody),
+      "must attempt deletion of analysis.imagePublicId",
+    );
+    assert.ok(
+      fnBody.includes("_deleteAsset"),
+      "the injectable deleter must still be the thing that performs the delete",
     );
   });
 
   it("clears imagePublicId, imageFormat, imageUrl in DB", () => {
-    const fnIdx = bosPrivacySrc.indexOf("async function deleteCustomerBosImages(");
-    const fnBody = bosPrivacySrc.slice(fnIdx, fnIdx + 1500);
+    const fnBody = bosFnBody();
     assert.ok(fnBody.includes("imagePublicId: null"), "must clear imagePublicId");
     assert.ok(fnBody.includes("imageFormat:   null") || fnBody.includes("imageFormat: null"), "must clear imageFormat");
     assert.ok(fnBody.includes("imageUrl:      null") || fnBody.includes("imageUrl: null"), "must clear imageUrl");
   });
 
   it("does NOT clear verdict, reasoning, fullAnalysis, or outcome fields", () => {
-    const fnIdx = bosPrivacySrc.indexOf("async function deleteCustomerBosImages(");
-    const fnBody = bosPrivacySrc.slice(fnIdx, fnIdx + 1500);
+    const fnBody = bosFnBody();
     assert.ok(!fnBody.includes("verdict: null"), "must NOT clear verdict");
     assert.ok(!fnBody.includes("reasoning: null"), "must NOT clear reasoning");
     assert.ok(!fnBody.includes("fullAnalysis: null"), "must NOT clear fullAnalysis");
@@ -167,8 +186,7 @@ describe("BOS image deletion helper", () => {
   });
 
   it("handles legacy imageUrl-only records (no imagePublicId)", () => {
-    const fnIdx = bosPrivacySrc.indexOf("async function deleteCustomerBosImages(");
-    const fnBody = bosPrivacySrc.slice(fnIdx, fnIdx + 2000);
+    const fnBody = bosFnBody();
     assert.ok(
       fnBody.includes("imagePublicId: null, imageUrl: { not: null }"),
       "must handle legacy records that only have imageUrl",
