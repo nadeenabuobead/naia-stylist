@@ -23,13 +23,17 @@ const {
   getCurrentNaiaCustomer,
   stylingSessionFindUnique,
   outfitSuggestionCreate,
+  outfitSuggestionFindUnique,
   postOutfitReviewUpsert,
+  savedLookCreate,
   resolveActionAnchor,
 } = vi.hoisted(() => ({
   getCurrentNaiaCustomer: vi.fn(),
   stylingSessionFindUnique: vi.fn(),
   outfitSuggestionCreate: vi.fn(),
+  outfitSuggestionFindUnique: vi.fn(),
   postOutfitReviewUpsert: vi.fn(),
+  savedLookCreate: vi.fn(),
   resolveActionAnchor: vi.fn(),
 }));
 
@@ -44,9 +48,11 @@ vi.mock("~/db.server", () => ({
     stylingSession: { findUnique: stylingSessionFindUnique },
     // findFirst added after the reroll-anchor-diversity feature landed —
     // "regenerate" reads the most-recent suggestion to penalize repeats.
-    outfitSuggestion: { create: outfitSuggestionCreate, findUnique: vi.fn(), findFirst: vi.fn().mockResolvedValue(null) },
+    outfitSuggestion: { create: outfitSuggestionCreate, findUnique: outfitSuggestionFindUnique, findFirst: vi.fn().mockResolvedValue(null) },
     postOutfitReview: { upsert: postOutfitReviewUpsert },
     customer: { upsert: vi.fn(), findUnique: vi.fn() },
+    // 2026-11-18 — added for "save" (Case 1: completed-Passport immediate save).
+    savedLook: { create: savedLookCreate },
   },
 }));
 
@@ -269,6 +275,97 @@ describe('"review" — behavioral, real action(), mocked dependencies', () => {
     expect(postOutfitReviewUpsert).toHaveBeenCalledTimes(1);
     expect(postOutfitReviewUpsert).toHaveBeenCalledWith(
       expect.objectContaining({ where: { sessionId: SESSION_OWNED_BY_A.id } }),
+    );
+  });
+});
+
+// 2026-11-18 — Saved Looks: "save" (Case 1, completed-Passport immediate
+// save) gets the same cross-customer-IDOR coverage as generate/regenerate/
+// review above. The ownership check here is one level removed from a
+// session id: it checks suggestion.session.customerId, since a suggestion
+// (not a session) is what gets saved.
+describe('"save" — behavioral, real action(), mocked dependencies', () => {
+  const SUGGESTION_OWNED_BY_A = {
+    id: "suggestion-owned-by-A",
+    outfitName: "Weekend Brunch Look",
+    items: [{ itemType: "TOP", closetItemId: "closet-1", shopifyProductId: null, productImageUrl: null }],
+    session: { customerId: "customer-A" },
+  };
+
+  it("unauthenticated request is rejected before any save occurs", async () => {
+    getCurrentNaiaCustomer.mockResolvedValueOnce(null);
+    // Deliberately NOT queuing a mockResolvedValueOnce for
+    // outfitSuggestionFindUnique here: an unauthenticated customer fails
+    // the `naiaCustomer?.onboardingProfile?.completed` check in Case 1 (and
+    // Case 2's `if (naiaCustomer)`) before the suggestion lookup is ever
+    // reached. A leftover queued value here was previously consumed by a
+    // LATER test instead (vi.clearAllMocks() does not drain unconsumed
+    // mockResolvedValueOnce queues), silently shifting every subsequent
+    // test's mock return by one and producing two tests that looked like
+    // their expectations had been swapped. Asserting the call count below
+    // is what actually caught it.
+
+    const res = unwrap(
+      await action(makeRequest({ intent: "save", suggestionId: SUGGESTION_OWNED_BY_A.id, sessionId: "s1" })),
+    );
+
+    expect(res.status).toBe(404);
+    expect(outfitSuggestionFindUnique).not.toHaveBeenCalled();
+    expect(savedLookCreate).not.toHaveBeenCalled();
+  });
+
+  it("an authenticated customer cannot save a suggestion belonging to a DIFFERENT customer's session", async () => {
+    getCurrentNaiaCustomer.mockResolvedValueOnce(CUSTOMER_B);
+    outfitSuggestionFindUnique.mockResolvedValueOnce(SUGGESTION_OWNED_BY_A);
+
+    const res = unwrap(
+      await action(makeRequest({ intent: "save", suggestionId: SUGGESTION_OWNED_BY_A.id, sessionId: "s1" })),
+    );
+
+    expect(res.status).toBe(404);
+    expect(savedLookCreate).not.toHaveBeenCalled();
+  });
+
+  it("customer B's cross-customer attempt never creates a SavedLook attributed to customer A — not just a 404 response, the write itself never happens", async () => {
+    getCurrentNaiaCustomer.mockResolvedValueOnce(CUSTOMER_B);
+    outfitSuggestionFindUnique.mockResolvedValueOnce(SUGGESTION_OWNED_BY_A);
+
+    await action(makeRequest({ intent: "save", suggestionId: SUGGESTION_OWNED_BY_A.id, sessionId: "s1" }));
+
+    expect(savedLookCreate).toHaveBeenCalledTimes(0);
+  });
+
+  it("a nonexistent suggestionId is indistinguishable from a cross-customer one — 404 either way, never leaking existence", async () => {
+    getCurrentNaiaCustomer.mockResolvedValueOnce(CUSTOMER_A);
+    outfitSuggestionFindUnique.mockResolvedValueOnce(null);
+
+    const res = unwrap(
+      await action(makeRequest({ intent: "save", suggestionId: "does-not-exist", sessionId: "s1" })),
+    );
+
+    expect(res.status).toBe(404);
+    expect(savedLookCreate).not.toHaveBeenCalled();
+  });
+
+  it("the legitimate owner CAN save their own suggestion, correctly attributed to their own customerId", async () => {
+    getCurrentNaiaCustomer.mockResolvedValueOnce(CUSTOMER_A);
+    outfitSuggestionFindUnique.mockResolvedValueOnce(SUGGESTION_OWNED_BY_A);
+    savedLookCreate.mockResolvedValueOnce({ id: "saved-look-1" });
+
+    const res = unwrap(
+      await action(makeRequest({ intent: "save", suggestionId: SUGGESTION_OWNED_BY_A.id, sessionId: "s1" })),
+    );
+
+    expect(res.status).toBeUndefined();
+    expect(res.data).toEqual({ saved: true, error: null });
+    expect(savedLookCreate).toHaveBeenCalledTimes(1);
+    expect(savedLookCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          customerId: "customer-A",
+          fromSuggestionId: SUGGESTION_OWNED_BY_A.id,
+        }),
+      }),
     );
   });
 });
