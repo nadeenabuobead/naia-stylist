@@ -25,17 +25,18 @@ describe("§A identity remediation — static code guarantees", () => {
     ).toBe(false);
   });
 
-  it("A02 — api.analyze-item.jsx does not import from auth.server", () => {
-    const src = fs.readFileSync(path.join(ROUTES, "api.analyze-item.jsx"), "utf8");
-    expect(src, "must not import auth.server").not.toContain("auth.server");
-    expect(src, "must not call getCustomer").not.toContain("getCustomer(");
-    expect(src, "must not call getCustomerId").not.toContain("getCustomerId(");
+  it("A02 — api.analyze-item.jsx is retired (2026-11-17, launch-readiness audit) — must not be reintroduced", () => {
+    expect(
+      fs.existsSync(path.join(ROUTES, "api.analyze-item.jsx")),
+      "retired route file must not be reintroduced — grepped the entire app/ tree and theme extensions before removal: zero callers anywhere, a publicly-discoverable orphaned paid-AI endpoint",
+    ).toBe(false);
   });
 
-  it("A03 — api.analyze-item.jsx uses getCurrentNaiaCustomer from naia-session.server", () => {
-    const src = fs.readFileSync(path.join(ROUTES, "api.analyze-item.jsx"), "utf8");
-    expect(src, "must import naia-session.server").toContain("naia-session.server");
-    expect(src, "must call getCurrentNaiaCustomer").toContain("getCurrentNaiaCustomer(");
+  it("A03 — the retired api.analyze-item route is not registered", () => {
+    const routes = fs.readFileSync(path.resolve("app/routes.ts"), "utf8");
+    expect(routes, "route registry must not reference the retired endpoint").not.toContain(
+      "api.analyze-item",
+    );
   });
 
   it("A04 — style-me/_index.tsx does not import from auth.server", () => {
@@ -56,11 +57,6 @@ describe("§A identity remediation — static code guarantees", () => {
       .not.toContain(".upsert(");
   });
 
-  it("A07 — api.analyze-item.jsx does not call prisma.customer.upsert", () => {
-    const src = fs.readFileSync(path.join(ROUTES, "api.analyze-item.jsx"), "utf8");
-    expect(src, "must not call customer.upsert — no DB record creation from request data")
-      .not.toContain(".upsert(");
-  });
 
   it("A08 — root.jsx no longer writes a positive-lifetime naia_customer_data cookie", () => {
     const src = fs.readFileSync(path.resolve("app/root.jsx"), "utf8");
@@ -237,17 +233,14 @@ describe("§B NaiaSession unit behaviour", () => {
 
 describe("§C route behaviour guarantees", () => {
 
-  it("C01 — api.analyze-item.jsx handles null customer without crash (no personalization path)", () => {
-    // The route guards data access with: if (customerId) { ... }
-    // A null NaiaSession customer means customerId is null → profile/closet skipped.
-    const src = fs.readFileSync(
-      path.resolve("app/routes/api.analyze-item.jsx"),
-      "utf8",
-    );
-    expect(src).toContain("if (customerId)");
-    // The route does not throw or return 401 for unauthenticated requests —
-    // it falls through to unauthenticated analysis (without personalization).
-    expect(src).not.toContain('status: 401');
+  it("C01 — api.analyze-item.jsx is retired, superseding its old guest-personalization-free design (2026-11-17)", () => {
+    // Previously intentional: this route was deliberately open to guests
+    // (no 401, falls through to unauthenticated analysis). Superseded —
+    // a thorough caller search found zero legitimate callers anywhere in
+    // the product, meaning the ONLY thing that design property actually
+    // did was let a publicly-discoverable, real paid Anthropic call run
+    // for anyone who found the URL. Retired rather than re-gated.
+    expect(fs.existsSync(path.resolve("app/routes/api.analyze-item.jsx"))).toBe(false);
   });
 
   it("C02 — style-me/_index.tsx returns guest state for null customer (no upsert)", () => {
@@ -272,15 +265,6 @@ describe("§C route behaviour guarantees", () => {
     expect(src).not.toContain("naia_customer_data");
   });
 
-  it("C04 — api.analyze-item.jsx never reads naia_token or naia_customer_data", () => {
-    const src = fs.readFileSync(
-      path.resolve("app/routes/api.analyze-item.jsx"),
-      "utf8",
-    );
-    expect(src).not.toContain("naia_token");
-    expect(src).not.toContain("naia_customer_data");
-  });
-
   it("C05 — NaiaSession reads only __naia_tok; naia_customer_data is not in the extractor regex", () => {
     const src = fs.readFileSync(
       path.resolve("app/lib/naia-session.server.ts"),
@@ -292,24 +276,6 @@ describe("§C route behaviour guarantees", () => {
     expect(src).not.toContain("naia_customer_data");
     // naia_token URL param must not appear in naia-session.server.ts.
     expect(src).not.toContain("naia_token");
-  });
-
-  it("C06 — analyze-item guest path: null customer means no Prisma read, prompt falls through to general analysis", () => {
-    const src = fs.readFileSync(
-      path.resolve("app/routes/api.analyze-item.jsx"),
-      "utf8",
-    );
-    // The guard must gate all Prisma access.
-    expect(src).toContain("if (customerId)");
-    // Default values before the guard — safe empty state.
-    expect(src).toContain("let styleProfile = null");
-    expect(src).toContain("let closetItems = []");
-    // Guest prompt fallback text.
-    expect(src).toContain("No style profile — general analysis.");
-    // No 401 for unauthenticated — route is intentionally open to guests.
-    expect(src).not.toContain("status: 401");
-    // No upsert — guest path never creates a Customer record.
-    expect(src).not.toContain(".upsert(");
   });
 
 });
@@ -400,15 +366,15 @@ describe("§E repository-wide legacy token scan", () => {
   }
 
   const SERVER_ROUTES = [
-    "app/routes/api.analyze-item.jsx",
     "app/routes/style-me/_index.tsx",
     "app/routes/my-naia._index.tsx",
     "app/routes/api.closet.jsx",
     "app/routes/api.customer-profile.jsx",
     "app/routes/api.outfit-history.jsx",
     "app/routes/api.save-look.jsx",
-    // api.style.jsx retired 2026-11-02 (security remediation) — removed from
-    // this list because the file no longer exists; see app/routes.ts.
+    // api.style.jsx retired 2026-11-02 (security remediation), api.analyze-item.jsx
+    // retired 2026-11-17 (launch-readiness audit, orphaned paid-AI endpoint) —
+    // both removed from this list because the files no longer exist; see app/routes.ts.
     "app/routes/api.track_event.jsx",
   ];
 

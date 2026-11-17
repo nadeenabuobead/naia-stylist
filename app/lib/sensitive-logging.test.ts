@@ -16,7 +16,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -26,9 +26,16 @@ const read = (relPath: string) => readFileSync(join(__dirname, relPath), "utf8")
 describe("claude.server.ts — no raw AI payload in error logs", () => {
   const src = read("ai/claude.server.ts");
 
-  it("API error log no longer prints the full raw response body", () => {
+  // 2026-11-17 (launch-readiness audit): the original "Claude API Error"
+  // raw-HTTP-error log this test protected against no longer exists in
+  // this file at all — grepped the whole app/ tree, confirmed it doesn't
+  // exist anywhere, meaning that code path was refactored away, not
+  // silently regressed back to logging raw content under cover of a
+  // passing test. Replaced with an assertion against what this file
+  // actually does today.
+  it("does not log a raw HTTP error-response body anywhere in this file", () => {
     assert.ok(!src.includes('console.error("Claude API Error:", data)'));
-    assert.ok(src.includes('console.error("Claude API Error:", { status: response.status, errorType: data?.error?.type })'));
+    assert.ok(!src.includes("Claude API Error"), "the raw-HTTP-error log path no longer exists in this file");
   });
 
   it("JSON-parse-failure log no longer prints the full raw response text", () => {
@@ -37,23 +44,26 @@ describe("claude.server.ts — no raw AI payload in error logs", () => {
   });
 });
 
-describe("api.style.jsx — no raw Anthropic payload in error log", () => {
-  const src = read("../routes/api.style.jsx");
-
-  it("logs status/error-type only, not the full anthropicData object", () => {
-    assert.ok(!src.includes('console.error("Anthropic API Error:", anthropicData)'));
-    assert.ok(src.includes("errorType: anthropicData?.error?.type"));
+describe("api.style.jsx — retired 2026-11-02 (security remediation), confirmed not reintroduced", () => {
+  // 2026-11-17 (launch-readiness audit): this describe block previously
+  // called read("../routes/api.style.jsx") unconditionally at suite-setup
+  // time — that file was retired 2026-11-02, well before this session, so
+  // every test run since then has thrown ENOENT constructing the suite
+  // itself rather than genuinely failing a logging-hygiene check. Fixed to
+  // assert the actual current, intended state instead of crashing on a
+  // stale path.
+  it("api.style.jsx does not exist and is not registered", () => {
+    assert.ok(!existsSync(join(__dirname, "../routes/api.style.jsx")), "retired route file must not be reintroduced");
+    const routes = readFileSync(join(__dirname, "../routes.ts"), "utf8");
+    assert.ok(!routes.includes("api.style.jsx"), "route registry must not reference the retired endpoint");
   });
 });
 
-describe("api.analyze-item.jsx — no raw Claude payload in error log", () => {
-  const src = read("../routes/api.analyze-item.jsx");
-
-  it("logs status/error-type only, not the full analysisData object", () => {
-    assert.ok(!src.includes('console.error("Claude error:", analysisData)'));
-    assert.ok(src.includes("errorType: analysisData?.error?.type"));
-  });
-});
+// api.analyze-item.jsx retired 2026-11-17 (launch-readiness audit) — a
+// publicly-discoverable, orphaned paid-AI endpoint with zero callers
+// anywhere in the product. Its logging-hygiene coverage above is moot
+// now that the file no longer exists; see naia-identity-security.test.ts's
+// A02/A03/C01 for the retirement itself.
 
 describe("api.wishlist.jsx — no raw AI payload snippet in the unexpected-shape log", () => {
   const src = read("../routes/api.wishlist.jsx");

@@ -149,7 +149,6 @@ export default [
   route("api/recommendation-feedback", "routes/api.recommendation-feedback.tsx"),
   route("api/naia-observation-feedback", "routes/api.naia-observation-feedback.tsx"),
   route("api/post-wear-review", "routes/api.post-wear-review.tsx"),
-  route("api/analyze-item", "routes/api.analyze-item.jsx"),
   route("api/cloudinary-signature", "routes/api.cloudinary-signature.jsx"),
   route("api/save-style-profile", "routes/api.save-style-profile.jsx"),
   route("api/save-about-you", "routes/api.save-about-you.jsx"),
