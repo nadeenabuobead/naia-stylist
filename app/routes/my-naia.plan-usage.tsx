@@ -14,6 +14,9 @@ import { MEMBERSHIP_PRICING, ADDON_CATALOG } from "~/lib/plan/plan-limits.server
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import TermsAcceptanceCheckbox from "~/components/checkout/TermsAcceptanceCheckbox";
 import EarlyServiceConsentCheckbox from "~/components/checkout/EarlyServiceConsentCheckbox";
+import ServicePerformanceAcknowledgement from "~/components/checkout/ServicePerformanceAcknowledgement";
+import DelayedStartNotice from "~/components/checkout/DelayedStartNotice";
+import { computeDelayedStart } from "~/lib/delayed-start";
 import { CURRENT_TERMS_VERSION } from "~/lib/terms-acceptance.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 
@@ -417,6 +420,16 @@ export default function PlanUsagePage() {
                 <div style={{ marginTop: "0.85rem", display: "flex", flexDirection: "column", gap: "0.5rem", fontSize: "0.78rem" }}>
                   <TermsAcceptanceCheckbox checked={termsAccepted} onChange={setTermsAccepted} />
                   <EarlyServiceConsentCheckbox checked={earlyServiceConsent} onChange={setEarlyServiceConsent} />
+                  {/* Decision 2 (2026-11-17) — "if early start is not
+                      requested, do not activate paid service silently."
+                      Unchecked is the DelayedStartNotice branch: plain
+                      service-start/first-billing dates, computed fresh on
+                      every render (today's date, never stale), so
+                      unchecking never reads as "nothing happens." Checked
+                      is the existing immediate-activation path above —
+                      unchanged. */}
+                  {!earlyServiceConsent && <DelayedStartNotice dates={computeDelayedStart(new Date())} />}
+                  <ServicePerformanceAcknowledgement />
                 </div>
               </>
             )}

@@ -345,6 +345,30 @@ describe("plan-usage component — membership Subscribe buttons", () => {
     expect(html).not.toContain("Subscribe Monthly");
     expect(html).not.toContain("Choose Annual");
   });
+
+  // 2026-11-17 — Decision 2 wiring: the EarlyServiceConsentCheckbox
+  // defaults to unchecked (useState(false) above it), so a fresh NONE
+  // customer's first render is the delayed-start branch by default —
+  // "unchecked never silently activates paid service today" only holds
+  // if that is genuinely what renders without the customer touching
+  // anything.
+  it("DelayedStartNotice renders by default (early-service-consent starts unchecked) — states real dates, never a vague 'later'", () => {
+    const html = render(baseSummary({ membershipStatus: "NONE" }));
+    expect(html).toContain("delayed-start-notice");
+    expect(html).toContain("Service begins on");
+  });
+
+  it("ServicePerformanceAcknowledgement always renders alongside the consent checkboxes, checked or not", () => {
+    const html = render(baseSummary({ membershipStatus: "NONE" }));
+    expect(html).toContain("service-performance-acknowledgement");
+    expect(html).toContain("does not waive your statutory digital-content withdrawal right");
+  });
+
+  it("neither new component renders at all once Terms isn't configured — the fail-closed pending-approval branch stays the ONLY thing shown", () => {
+    const html = render(baseSummary({ membershipStatus: "NONE" }), undefined, null, /* termsConfigured */ false);
+    expect(html).not.toContain("delayed-start-notice");
+    expect(html).not.toContain("service-performance-acknowledgement");
+  });
 });
 
 describe("plan-usage component — Manage Membership (billing portal)", () => {
