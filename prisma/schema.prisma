@@ -177,6 +177,8 @@ model Customer {
   // Our own test and demo accounts must never reach customer insight. Marked
   // on the record rather than filtered by email pattern, which silently breaks.
   accountType AccountType @default(CUSTOMER)
+
+  withdrawalRequests WithdrawalRequest[]
 }
 
 /// Real customers are the only accounts eligible for aggregated insight.
@@ -545,6 +547,71 @@ model Subscription {
   @@index([customerId])
   @@index([providerSubscriptionId])
   @@index([providerCustomerId])
+}
+
+// EU statutory right-of-withdrawal REQUEST capture only — explicitly not a
+// refund mechanism and not ordinary cancellation. Legal handoff W2
+// (2026-11-17): the withdrawal window is a separate statutory right from
+// "I want to cancel my subscription," so this model and its route never
+// touch Subscription.cancelAtPeriodEnd or any cancellation field — a
+// withdrawal request existing says nothing about whether the customer also
+// cancelled, and vice versa. Manual refund processing (explicitly approved
+// as acceptable by the legal handoff) happens outside this model, by
+// whoever reviews submitted requests — this table is the durable,
+// timestamped record that a request was made and acknowledged, not a
+// workflow engine for resolving it.
+model WithdrawalRequest {
+  id         String   @id @default(cuid())
+  customerId String
+  // Restrict, matching Subscription/BillingTransaction above — a
+  // statutory request record must survive a customer-erasure flow the same
+  // way a financial record does; an erasure path that needs to delete a
+  // Customer with open withdrawal requests must handle them deliberately,
+  // not silently lose the record of the request itself.
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+
+  // Links the request to a specific contract when one exists. Nullable:
+  // the statutory right attaches to a purchase, and a customer could in
+  // principle submit this before any Subscription row exists yet (e.g.
+  // immediately after an express-early-service checkout, before the first
+  // webhook lands) — never force a request to wait on billing state.
+  subscriptionId String?
+
+  // Identification snapshot AT THE TIME OF REQUEST (W2: "customer/contract
+  // identification") — deliberately captured here, not just joined via
+  // customerId, because a customer's name/email can change later and the
+  // statutory record should reflect who actually submitted it, not who the
+  // account currently belongs to.
+  customerEmailAtRequest     String
+  customerNameAtRequest      String?
+
+  // Durable, human-readable acknowledgement reference (W2: "durable
+  // acknowledgement") — shown to the customer immediately and safe to
+  // quote in correspondence. Format decided at the route layer, not here;
+  // this column only guarantees it is unique and permanent once issued.
+  reference String @unique
+
+  // W2: "timestamped submission." Never updated after creation — this is
+  // the one fact this table exists to prove.
+  submittedAt DateTime @default(now())
+
+  // Manual-processing status only (W2 explicitly allows manual refunds) —
+  // this is NOT a cancellation or refund state machine. SUBMITTED is the
+  // only status this model's own route ever writes; ACKNOWLEDGED/CLOSED
+  // are for whoever manually processes the request to record progress.
+  status WithdrawalRequestStatus @default(SUBMITTED)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([customerId])
+  @@index([submittedAt])
+}
+
+enum WithdrawalRequestStatus {
+  SUBMITTED
+  ACKNOWLEDGED
+  CLOSED
 }
 
 enum BillingTransactionType {

@@ -1,0 +1,125 @@
+// app/lib/withdrawal-request.test.ts
+//
+// EU statutory right-of-withdrawal REQUEST capture — Legal handoff W2.
+// Run: npx vitest run app/lib/withdrawal-request.test.ts
+
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+vi.mock("~/db.server", () => ({
+  default: {
+    subscription: { findFirst: vi.fn() },
+    withdrawalRequest: { create: vi.fn(), findMany: vi.fn() },
+  },
+}));
+
+import prisma from "~/db.server";
+import { submitWithdrawalRequest, getWithdrawalRequestsForCustomer } from "./withdrawal-request.server";
+
+const mockFindSubscription = () => (prisma as any).subscription.findFirst as ReturnType<typeof vi.fn>;
+const mockCreateRequest = () => (prisma as any).withdrawalRequest.create as ReturnType<typeof vi.fn>;
+const mockFindManyRequests = () => (prisma as any).withdrawalRequest.findMany as ReturnType<typeof vi.fn>;
+
+const NOW = new Date("2026-11-17T09:30:00.000Z");
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
+describe("submitWithdrawalRequest", () => {
+  it("creates exactly one WithdrawalRequest row, nothing else — never touches Subscription", async () => {
+    mockFindSubscription().mockResolvedValue({ id: "sub-1" });
+    mockCreateRequest().mockResolvedValue({ id: "wr-1", reference: "WD-20261117-ABC123", submittedAt: NOW });
+
+    const result = await submitWithdrawalRequest(
+      { customerId: "cust-1", customerEmailAtRequest: "a@example.com", customerNameAtRequest: "A Customer" },
+      { _now: () => NOW, _generateReferenceSuffix: () => "ABC123" },
+    );
+
+    expect(result).toEqual({ id: "wr-1", reference: "WD-20261117-ABC123", submittedAt: NOW });
+    expect(mockCreateRequest()).toHaveBeenCalledTimes(1);
+    const createArgs = mockCreateRequest().mock.calls[0][0];
+    expect(createArgs.data).toEqual({
+      customerId: "cust-1",
+      subscriptionId: "sub-1",
+      customerEmailAtRequest: "a@example.com",
+      customerNameAtRequest: "A Customer",
+      reference: "WD-20261117-ABC123",
+      submittedAt: NOW,
+    });
+    // No Subscription field is ever written — only read, via findFirst.
+    expect((prisma as any).subscription.findFirst).toHaveBeenCalledWith({
+      where: { customerId: "cust-1" },
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+    });
+    expect(Object.keys((prisma as any).subscription)).not.toContain("update");
+  });
+
+  it("links to no subscription (null) when the customer has never had one — does not fail or fabricate an id", async () => {
+    mockFindSubscription().mockResolvedValue(null);
+    mockCreateRequest().mockResolvedValue({ id: "wr-2", reference: "WD-20261117-XYZ999", submittedAt: NOW });
+
+    await submitWithdrawalRequest(
+      { customerId: "cust-2", customerEmailAtRequest: "b@example.com" },
+      { _now: () => NOW, _generateReferenceSuffix: () => "XYZ999" },
+    );
+
+    const createArgs = mockCreateRequest().mock.calls[0][0];
+    expect(createArgs.data.subscriptionId).toBeNull();
+  });
+
+  it("the reference follows the WD-YYYYMMDD-XXXXXX shape, built from the real submission date", async () => {
+    mockFindSubscription().mockResolvedValue(null);
+    mockCreateRequest().mockImplementation(async ({ data }: any) => ({
+      id: "wr-3",
+      reference: data.reference,
+      submittedAt: data.submittedAt,
+    }));
+
+    const result = await submitWithdrawalRequest(
+      { customerId: "cust-3", customerEmailAtRequest: "c@example.com" },
+      { _now: () => NOW, _generateReferenceSuffix: () => "QQQQQQ" },
+    );
+
+    expect(result.reference).toBe("WD-20261117-QQQQQQ");
+  });
+
+  it("retries on a reference collision (P2002) rather than failing the whole submission", async () => {
+    mockFindSubscription().mockResolvedValue(null);
+    const collision = Object.assign(new Error("Unique constraint failed"), { code: "P2002" });
+    mockCreateRequest()
+      .mockRejectedValueOnce(collision)
+      .mockResolvedValueOnce({ id: "wr-4", reference: "WD-20261117-RETRY2", submittedAt: NOW });
+
+    const suffixes = ["RETRY1", "RETRY2"];
+    let i = 0;
+    const result = await submitWithdrawalRequest(
+      { customerId: "cust-4", customerEmailAtRequest: "d@example.com" },
+      { _now: () => NOW, _generateReferenceSuffix: () => suffixes[i++] },
+    );
+
+    expect(mockCreateRequest()).toHaveBeenCalledTimes(2);
+    expect(result.reference).toBe("WD-20261117-RETRY2");
+  });
+
+  it("a non-collision error propagates immediately — never silently swallowed by the retry loop", async () => {
+    mockFindSubscription().mockResolvedValue(null);
+    mockCreateRequest().mockRejectedValue(new Error("DB is down"));
+
+    await expect(
+      submitWithdrawalRequest({ customerId: "cust-5", customerEmailAtRequest: "e@example.com" }, { _now: () => NOW }),
+    ).rejects.toThrow("DB is down");
+    expect(mockCreateRequest()).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("getWithdrawalRequestsForCustomer", () => {
+  it("queries by customerId only, newest first", async () => {
+    mockFindManyRequests().mockResolvedValue([]);
+    await getWithdrawalRequestsForCustomer("cust-6");
+    expect(mockFindManyRequests()).toHaveBeenCalledWith({
+      where: { customerId: "cust-6" },
+      orderBy: { submittedAt: "desc" },
+    });
+  });
+});

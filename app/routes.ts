@@ -91,6 +91,7 @@ export default [
   route("my-naia", "routes/my-naia._index.tsx"),
   route("my-naia/what-naia-notices", "routes/my-naia.what-naia-notices.tsx"),
   route("my-naia/plan-usage", "routes/my-naia.plan-usage.tsx"),
+  route("my-naia/withdrawal-request", "routes/my-naia.withdrawal-request.tsx"),
   route("my-naia/saved", "routes/my-naia.saved.tsx"),
   route("my-naia/buying-decisions", "routes/my-naia.buying-decisions.tsx"),
   route("my-naia-model", "routes/my-naia-model.tsx"),
