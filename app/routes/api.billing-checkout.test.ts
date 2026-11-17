@@ -308,11 +308,12 @@ describe("POST /api/billing-checkout — Terms-acceptance gate", () => {
     expect(recordTermsAcceptanceMock).not.toHaveBeenCalled();
   });
 
-  it("TC.7 — earlyServiceConsent has no effect on the outcome, whether true, false, or absent — it is accepted and discarded, not yet wired to any behavior", async () => {
+  it("TC.7 — earlyServiceConsent never changes THIS checkout's own outcome, whether true, false, or absent — it only now gets forwarded as a snapshot for a later withdrawal-eligibility check (2026-11-17)", async () => {
     const withTrue: any = await action({ request: makeRequest({ planType: "MONTHLY", termsAccepted: true, earlyServiceConsent: true }) } as any);
     expect(withTrue.init?.status ?? withTrue.status ?? 200).toBe(200);
     expect(createCheckoutSessionMock).toHaveBeenCalledOnce();
     const createCheckoutArgsWithConsent = createCheckoutSessionMock.mock.calls[0][0];
+    expect(createCheckoutArgsWithConsent.earlyServiceConsent).toBe(true);
 
     vi.clearAllMocks();
     getCurrentNaiaCustomerMock.mockResolvedValue(CUSTOMER);
@@ -323,10 +324,16 @@ describe("POST /api/billing-checkout — Terms-acceptance gate", () => {
     const withoutField: any = await action({ request: makeRequest({ planType: "MONTHLY", termsAccepted: true }) } as any);
     expect(withoutField.init?.status ?? withoutField.status ?? 200).toBe(200);
     const createCheckoutArgsWithoutConsent = createCheckoutSessionMock.mock.calls[0][0];
+    expect(createCheckoutArgsWithoutConsent.earlyServiceConsent).toBe(false);
 
-    // Identical Stripe-facing call either way — earlyServiceConsent never
-    // reaches createCheckoutSession's own params.
-    expect(createCheckoutArgsWithConsent).toEqual(createCheckoutArgsWithoutConsent);
+    // The two calls differ in EXACTLY the one field that is supposed to
+    // differ — everything else (plan, amount, urls, reservation expiry) is
+    // identical, proving the consent value changes nothing about what gets
+    // charged or how.
+    expect({ ...createCheckoutArgsWithConsent, earlyServiceConsent: undefined }).toEqual({
+      ...createCheckoutArgsWithoutConsent,
+      earlyServiceConsent: undefined,
+    });
   });
 });
 

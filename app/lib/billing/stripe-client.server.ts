@@ -166,6 +166,22 @@ export interface CreateCheckoutSessionInput {
   // before or after. Optional only so existing callers/tests without a
   // reservation still work — Stripe defaults to 24 hours when omitted.
   expiresAtUnixSeconds?: number;
+  // EU statutory withdrawal (2026-11-17) — carried through Stripe metadata
+  // purely so checkout.session.completed can snapshot them onto the
+  // Subscription row it creates (Subscription.earlyServiceConsentedAt/
+  // termsVersionAtCheckout) — see that handler and the two fields' own
+  // schema comments for why this must be captured AT CHECKOUT, not
+  // reconstructed later from Customer's own (mutable, overwritten-on-every-
+  // acceptance) fields. Still has NO effect on whether this checkout itself
+  // succeeds or what it charges — purely a record for later reference.
+  // Optional/defaulted (false/null), not required: every pre-existing
+  // caller/test in this file predates this field and is testing unrelated
+  // behavior (the test-mode guard, idempotency, Customer reuse, ...) —
+  // forcing each to specify it would be busywork with no safety value,
+  // unlike e.g. api.billing-checkout.tsx's termsAccepted, which really is
+  // enforcement logic every caller must consciously decide.
+  earlyServiceConsent?: boolean;
+  termsVersion?: string | null;
 }
 
 export interface StripeCheckoutSession {
@@ -268,9 +284,27 @@ export async function createCheckoutSession(
       // taxed the same way automatically — not just this first charge.
       automatic_tax: { enabled: true },
       subscription_data: {
-        metadata: { customerId: input.customerId, planType: input.planType },
+        metadata: {
+          customerId: input.customerId,
+          planType: input.planType,
+          earlyServiceConsent: String(input.earlyServiceConsent === true),
+          termsVersion: input.termsVersion ?? "",
+        },
       },
-      metadata: { customerId: input.customerId, planType: input.planType },
+      // Duplicated onto the Checkout Session's OWN top-level metadata too,
+      // not just subscription_data.metadata above: checkout.session.
+      // completed's webhook handler reads obj.metadata directly off the
+      // Session object it's handed — subscription_data.metadata is
+      // write-only input for the Subscription Stripe creates, not something
+      // the Session event payload echoes back. Both must carry the same
+      // values for the snapshot to actually reach Subscription.
+      // earlyServiceConsentedAt/termsVersionAtCheckout at creation time.
+      metadata: {
+        customerId: input.customerId,
+        planType: input.planType,
+        earlyServiceConsent: String(input.earlyServiceConsent === true),
+        termsVersion: input.termsVersion ?? "",
+      },
     },
     requestDeps,
     idempotencyKey,
@@ -355,5 +389,53 @@ export async function createBillingPortalSession(
     "/billing_portal/sessions",
     { customer: input.providerCustomerId, return_url: input.returnUrl },
     deps,
+  );
+}
+
+// ── Refunds (2026-11-17, manual full-refund withdrawal path) ──────────────
+//
+// No function in this file has ever called Stripe's /v1/refunds endpoint
+// before this — every refund/dispute outcome webhook-handler.server.ts
+// already handles assumes the refund was issued some OTHER way (Dashboard,
+// per the manual SOP). This is the first code path that actually initiates
+// one, specifically for the EU-withdrawal full-refund case.
+//
+// Deliberately NO partial/amount parameter: this function only ever issues
+// a FULL refund of the exact amount paid on the given payment_intent. A
+// partial/pro-rata refund (the early-service-consent case) is explicitly a
+// separate, not-yet-built action — this function must never be reused for
+// that without a conscious decision to add an amount parameter back.
+//
+// Goes through stripeRequest like every other call here, so it inherits
+// assertTestModeKey for free — this can never run against a live key by
+// accident, same guarantee as createCheckoutSession.
+
+export interface CreateRefundInput {
+  paymentIntentId: string; // BillingTransaction.providerTransactionId for the original payment
+  reason?: "requested_by_customer" | "duplicate" | "fraudulent";
+}
+
+export interface StripeRefund {
+  id: string;
+  status: string; // "pending" | "succeeded" | "failed" | "canceled" — Stripe's documented values
+  amount: number;
+  currency: string;
+  payment_intent: string;
+}
+
+export async function createRefund(
+  input: CreateRefundInput,
+  idempotencyKey: string,
+  deps: StripeRequestDeps = {},
+): Promise<StripeRefund> {
+  return stripeRequest(
+    "POST",
+    "/refunds",
+    {
+      payment_intent: input.paymentIntentId,
+      reason: input.reason ?? "requested_by_customer",
+    },
+    deps,
+    idempotencyKey,
   );
 }

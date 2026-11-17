@@ -13,6 +13,7 @@ import {
   createBillingPortalSession,
   retrieveSubscription,
   cancelSubscriptionImmediately,
+  createRefund,
   toStripeFormBody,
   computeCheckoutIdempotencyKey,
   StripeNotConfiguredError,
@@ -378,6 +379,100 @@ describe("createBillingPortalSession", () => {
           { _fetch: fn, _getSecretKey: () => "sk_live_x" },
         ),
       StripeLiveModeBlockedError,
+    );
+  });
+});
+
+// ── earlyServiceConsent / termsVersion metadata pass-through (2026-11-17, ──
+// manual full-refund withdrawal path) ───────────────────────────────────────
+describe("createCheckoutSession — EU-withdrawal metadata snapshot", () => {
+  it("SC.34 — earlyServiceConsent:true and a real termsVersion are sent on BOTH the session's own metadata and subscription_data.metadata", async () => {
+    const { fn, calls } = fakeFetch({ id: "cs_test_1", url: "https://checkout.stripe.com/x" });
+    await createCheckoutSession(
+      {
+        customerId: "c", planType: "MONTHLY", amountMinorUnits: 3900, currency: "aed",
+        successUrl: "https://x", cancelUrl: "https://y",
+        earlyServiceConsent: true, termsVersion: "2026-11-01",
+      },
+      { _fetch: fn, _getSecretKey: () => "sk_test_abc" },
+    );
+    const parsed = new URLSearchParams((calls[0].init.body as URLSearchParams).toString());
+    assert.equal(parsed.get("metadata[earlyServiceConsent]"), "true");
+    assert.equal(parsed.get("metadata[termsVersion]"), "2026-11-01");
+    assert.equal(parsed.get("subscription_data[metadata][earlyServiceConsent]"), "true");
+    assert.equal(parsed.get("subscription_data[metadata][termsVersion]"), "2026-11-01");
+  });
+
+  it("SC.35 — omitting earlyServiceConsent/termsVersion defaults to false/empty-string, never undefined/missing — checkout.session.completed must always find a definite value to snapshot", async () => {
+    const { fn, calls } = fakeFetch({ id: "cs_test_1", url: "https://checkout.stripe.com/x" });
+    await createCheckoutSession(
+      { customerId: "c", planType: "MONTHLY", amountMinorUnits: 3900, currency: "aed", successUrl: "https://x", cancelUrl: "https://y" },
+      { _fetch: fn, _getSecretKey: () => "sk_test_abc" },
+    );
+    const parsed = new URLSearchParams((calls[0].init.body as URLSearchParams).toString());
+    assert.equal(parsed.get("metadata[earlyServiceConsent]"), "false");
+    assert.equal(parsed.get("metadata[termsVersion]"), "");
+  });
+
+  it("SC.36 — a falsy-but-explicit earlyServiceConsent:false is sent as the literal string 'false', never coerced to anything else", async () => {
+    const { fn, calls } = fakeFetch({ id: "cs_test_1", url: "https://checkout.stripe.com/x" });
+    await createCheckoutSession(
+      {
+        customerId: "c", planType: "MONTHLY", amountMinorUnits: 3900, currency: "aed",
+        successUrl: "https://x", cancelUrl: "https://y", earlyServiceConsent: false, termsVersion: null,
+      },
+      { _fetch: fn, _getSecretKey: () => "sk_test_abc" },
+    );
+    const parsed = new URLSearchParams((calls[0].init.body as URLSearchParams).toString());
+    assert.equal(parsed.get("metadata[earlyServiceConsent]"), "false");
+    assert.equal(parsed.get("metadata[termsVersion]"), "");
+  });
+});
+
+// ── createRefund (2026-11-17, manual full-refund withdrawal path) ─────────
+// First code path in this file that actually calls POST /v1/refunds — every
+// other refund/dispute outcome webhook-handler.server.ts handles assumes
+// the refund was issued some OTHER way. No real network call: _fetch always
+// injected, same convention as every test above.
+describe("createRefund", () => {
+  it("SC.37 — sends payment_intent and a default reason of requested_by_customer", async () => {
+    const { fn, calls } = fakeFetch({ id: "re_test_1", status: "pending", amount: 3900, currency: "aed", payment_intent: "pi_123" });
+    const refund = await createRefund({ paymentIntentId: "pi_123" }, "wrc-1", { _fetch: fn, _getSecretKey: () => "sk_test_abc" });
+    assert.equal(refund.id, "re_test_1");
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, "https://api.stripe.com/v1/refunds");
+    const parsed = new URLSearchParams((calls[0].init.body as URLSearchParams).toString());
+    assert.equal(parsed.get("payment_intent"), "pi_123");
+    assert.equal(parsed.get("reason"), "requested_by_customer");
+  });
+
+  it("SC.38 — sends the idempotency key as the Idempotency-Key header — a retried admin action collapses to the SAME Stripe refund, never a second one", async () => {
+    const { fn, calls } = fakeFetch({ id: "re_test_1", status: "pending", amount: 3900, currency: "aed", payment_intent: "pi_123" });
+    await createRefund({ paymentIntentId: "pi_123" }, "withdrawal-refund:case-abc", { _fetch: fn, _getSecretKey: () => "sk_test_abc" });
+    const headers = calls[0].init.headers as Record<string, string>;
+    assert.equal(headers["Idempotency-Key"], "withdrawal-refund:case-abc");
+  });
+
+  it("SC.39 — never accepts an amount parameter — this function only ever issues a full refund, by construction, never partial/pro-rata", async () => {
+    const { fn, calls } = fakeFetch({ id: "re_test_1", status: "pending", amount: 3900, currency: "aed", payment_intent: "pi_123" });
+    await createRefund({ paymentIntentId: "pi_123" }, "wrc-1", { _fetch: fn, _getSecretKey: () => "sk_test_abc" });
+    const parsed = new URLSearchParams((calls[0].init.body as URLSearchParams).toString());
+    assert.equal(parsed.has("amount"), false);
+  });
+
+  it("SC.40 — refuses a live key, same structural guard as every other call in this file", async () => {
+    const { fn } = fakeFetch({});
+    await assert.rejects(
+      () => createRefund({ paymentIntentId: "pi_123" }, "wrc-1", { _fetch: fn, _getSecretKey: () => "sk_live_realkey" }),
+      StripeLiveModeBlockedError,
+    );
+  });
+
+  it("SC.41 — a non-2xx Stripe response (e.g. already fully refunded) surfaces as StripeApiError with status/body preserved", async () => {
+    const { fn } = fakeFetch({ error: { message: "Charge has already been fully refunded" } }, 400);
+    await assert.rejects(
+      () => createRefund({ paymentIntentId: "pi_123" }, "wrc-1", { _fetch: fn, _getSecretKey: () => "sk_test_abc" }),
+      (err: unknown) => err instanceof StripeApiError && err.status === 400,
     );
   });
 });

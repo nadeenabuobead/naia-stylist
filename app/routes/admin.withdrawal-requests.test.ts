@@ -24,18 +24,38 @@ vi.mock("~/lib/withdrawal-request.server", () => ({
   closeWithdrawalRequest: vi.fn(),
 }));
 
+// 2026-11-17 — the read-only eligibility display in the loader queries
+// WithdrawalRefundCase directly; mocked here so this file never needs a
+// real DB, same convention as every mock above.
+vi.mock("~/db.server", () => ({
+  default: { withdrawalRefundCase: { findMany: vi.fn().mockResolvedValue([]) } },
+}));
+
+vi.mock("~/lib/billing/withdrawal-refund.server", () => ({
+  evaluateWithdrawalRefundEligibility: vi.fn(),
+  processWithdrawalFullRefund: vi.fn(),
+}));
+
 import { requireRole } from "~/lib/internal-auth.server";
 import {
   listOpenWithdrawalRequests,
   acknowledgeWithdrawalRequest,
   closeWithdrawalRequest,
 } from "~/lib/withdrawal-request.server";
+import {
+  evaluateWithdrawalRefundEligibility,
+  processWithdrawalFullRefund,
+} from "~/lib/billing/withdrawal-refund.server";
+import dbServer from "~/db.server";
 import { loader, action } from "./admin.withdrawal-requests";
 
 const mockRequireRole = () => requireRole as ReturnType<typeof vi.fn>;
 const mockList = () => listOpenWithdrawalRequests as ReturnType<typeof vi.fn>;
 const mockAck = () => acknowledgeWithdrawalRequest as ReturnType<typeof vi.fn>;
 const mockClose = () => closeWithdrawalRequest as ReturnType<typeof vi.fn>;
+const mockEvaluate = () => evaluateWithdrawalRefundEligibility as ReturnType<typeof vi.fn>;
+const mockProcess = () => processWithdrawalFullRefund as ReturnType<typeof vi.fn>;
+const mockFindManyCases = () => (dbServer as any).withdrawalRefundCase.findMany as ReturnType<typeof vi.fn>;
 
 function actionRequest(fields: Record<string, string>) {
   const body = new URLSearchParams(fields);
@@ -52,16 +72,28 @@ describe("admin.withdrawal-requests — session and role requirements (owner OR 
   it("loader requires a session with the right role and lists open requests", async () => {
     mockRequireRole().mockResolvedValueOnce({ authenticated: true, identity: { id: "owner", email: "owner@naiabynadine.com", role: "owner" } });
     mockList().mockResolvedValue([{ id: "wr-1", reference: "WD-20261117-ABC123" }]);
+    mockFindManyCases().mockResolvedValue([]);
     const result = await loader({ request: new Request("http://localhost/admin/withdrawal-requests") } as any);
     expect(mockRequireRole()).toHaveBeenCalledWith(expect.anything(), ["owner", "staff"]);
-    expect(result).toEqual({ openRequests: [{ id: "wr-1", reference: "WD-20261117-ABC123" }] });
+    expect(result).toEqual({ openRequests: [{ id: "wr-1", reference: "WD-20261117-ABC123" }], caseByRequestId: {} });
   });
 
   it("a STAFF session is accepted, not rejected — the point of this being a least-privilege route, not an owner-only one", async () => {
     mockRequireRole().mockResolvedValueOnce({ authenticated: true, identity: { id: "staff", email: "staff@naiabynadine.com", role: "staff" } });
     mockList().mockResolvedValue([]);
+    mockFindManyCases().mockResolvedValue([]);
     const result = await loader({ request: new Request("http://localhost/admin/withdrawal-requests") } as any);
-    expect(result).toEqual({ openRequests: [] });
+    expect(result).toEqual({ openRequests: [], caseByRequestId: {} });
+  });
+
+  it("the loader attaches each open request's refund-case outcome by withdrawalRequestId, for display only", async () => {
+    mockList().mockResolvedValue([{ id: "wr-1" }, { id: "wr-2" }]);
+    mockFindManyCases().mockResolvedValue([
+      { withdrawalRequestId: "wr-1", outcome: "ELIGIBLE_PENDING" },
+    ]);
+    const result = await loader({ request: new Request("http://localhost/admin/withdrawal-requests") } as any);
+    expect((result as any).caseByRequestId["wr-1"].outcome).toBe("ELIGIBLE_PENDING");
+    expect((result as any).caseByRequestId["wr-2"]).toBeUndefined();
   });
 
   it("loader propagates a 403 from requireRole (e.g. no session, or a role outside owner/staff) without listing anything", async () => {
@@ -118,6 +150,43 @@ describe("admin.withdrawal-requests — close", () => {
     const result = await action({ request } as any);
     expect(result.ok).toBe(false);
     expect((result as any).error).toMatch(/non-blank note/);
+  });
+});
+
+describe("admin.withdrawal-requests — check-eligibility (read-only, owner OR staff)", () => {
+  it("calls evaluateWithdrawalRefundEligibility and reports the outcome, available to a staff session too", async () => {
+    mockRequireRole().mockResolvedValueOnce({ authenticated: true, identity: { id: "staff", email: "staff@naiabynadine.com", role: "staff" } });
+    mockEvaluate().mockResolvedValue({ outcome: "BLOCKED_EARLY_SERVICE_CONSENT" });
+    const request = actionRequest({ intent: "check-eligibility", id: "wr-1" });
+    const result = await action({ request } as any);
+    expect(mockEvaluate()).toHaveBeenCalledWith("wr-1");
+    expect(mockProcess()).not.toHaveBeenCalled();
+    expect(result).toEqual({ ok: true, intent: "check-eligibility", message: "Eligibility: BLOCKED_EARLY_SERVICE_CONSENT.", outcome: "BLOCKED_EARLY_SERVICE_CONSENT" });
+  });
+});
+
+describe("admin.withdrawal-requests — process-full-refund (moves real money, OWNER ONLY)", () => {
+  it("a STAFF session is rejected with 403 — never reaches processWithdrawalFullRefund", async () => {
+    mockRequireRole().mockResolvedValueOnce({ authenticated: true, identity: { id: "staff", email: "staff@naiabynadine.com", role: "staff" } });
+    const request = actionRequest({ intent: "process-full-refund", id: "wr-1" });
+    await expect(action({ request } as any)).rejects.toMatchObject({ status: 403 });
+    expect(mockProcess()).not.toHaveBeenCalled();
+  });
+
+  it("an OWNER session succeeds, calling processWithdrawalFullRefund with the session's own email, never from form input", async () => {
+    mockProcess().mockResolvedValue({ ok: true, case: { providerRefundId: "re_abc123" } });
+    const request = actionRequest({ intent: "process-full-refund", id: "wr-1", performedBy: "attacker@evil.com" });
+    const result = await action({ request } as any);
+    expect(mockProcess()).toHaveBeenCalledWith("wr-1", "owner@naiabynadine.com");
+    expect(result.ok).toBe(true);
+    expect((result as any).message).toMatch(/re_abc123/);
+  });
+
+  it("a blocked/failed outcome surfaces as an error, naming the reason, never a thrown exception", async () => {
+    mockProcess().mockResolvedValue({ ok: false, case: {}, reason: "BLOCKED_OPEN_DISPUTE" });
+    const request = actionRequest({ intent: "process-full-refund", id: "wr-1" });
+    const result = await action({ request } as any);
+    expect(result).toEqual({ ok: false, error: "Not processed — BLOCKED_OPEN_DISPUTE." });
   });
 });
 

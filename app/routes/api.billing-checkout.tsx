@@ -173,17 +173,17 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   // Early-service-consent (Legal handoff W1's "separate, initially
-  // unchecked" checkbox) is read and validated for shape only — its value
-  // has NO effect anywhere in this action. What checking it would mean
-  // (immediate vs. delayed activation, and the exact statutory
-  // consequence) is still pending Legal/founder sign-off; until that
-  // exists, this endpoint must not behave any differently based on it.
-  // Accepting and discarding it here (rather than ignoring the field
-  // entirely) means the full submission path is already wired and
-  // tested end-to-end — the day a real behavior is approved, only the
-  // decision logic needs to be added, not new plumbing.
+  // unchecked" checkbox). Still has NO effect on THIS checkout's outcome —
+  // checking it never changes whether checkout succeeds, what it charges,
+  // or when access activates (still gated on the payment-confirmed webhook
+  // alone, per the module header above). What changed 2026-11-17 (EU
+  // statutory withdrawal path): the value now gets passed through to
+  // createCheckoutSession so checkout.session.completed can snapshot it
+  // onto Subscription.earlyServiceConsentedAt — a later full-refund
+  // withdrawal request needs to be able to tell whether evidence of this
+  // consent exists for THIS specific subscription, which was previously
+  // impossible since the value was discarded outright.
   const earlyServiceConsent = (body as any)?.earlyServiceConsent === true;
-  void earlyServiceConsent; // deliberately inert — see comment above
 
   // Reaching this line means CURRENT_TERMS_VERSION is a real, approved
   // version (the null case already returned above) and the customer
@@ -231,6 +231,8 @@ export async function action({ request }: ActionFunctionArgs) {
       cancelUrl: `${origin}/my-naia/plan-usage?checkout=cancelled`,
       existingProviderCustomerId: existing?.providerCustomerId ?? null,
       expiresAtUnixSeconds: Math.floor(reservation.expiresAt.getTime() / 1000),
+      earlyServiceConsent,
+      termsVersion: CURRENT_TERMS_VERSION,
     });
     await attachCheckoutSessionId(customer.id, session.id);
     return data({ ok: true, url: session.url });

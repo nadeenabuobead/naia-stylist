@@ -202,6 +202,67 @@ describe("processStripeWebhookEvent — checkout.session.completed (synchronous 
     assert.deepEqual(result, { ok: true, deduped: false, action: "subscription_activated" });
   });
 
+  it("WH.3e — EU statutory withdrawal (2026-11-17): earlyServiceConsent:'true' + a real termsVersion in metadata are snapshotted onto the new Subscription row", async () => {
+    let created: any = null;
+    const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
+      findProcessedEvent: async () => null,
+      findSubscriptionByProviderSubscriptionId: async () => null,
+      createSubscription: async (input) => { created = input; return { ...baseSubscription(), ...input, id: "sub-new" }; },
+      createBillingTransaction: async () => {},
+      recordProcessedEvent: async () => {},
+      updateCustomerMembershipStatus: async () => {},
+    };
+    const event = makeEvent({
+      data: {
+        object: {
+          client_reference_id: CUSTOMER_ID,
+          metadata: { planType: "MONTHLY", earlyServiceConsent: "true", termsVersion: "2026-11-01" },
+          payment_status: "paid",
+          customer: "cus_1",
+          subscription: "sub_1",
+          amount_total: 3900,
+          currency: "aed",
+        },
+      },
+    });
+    await processStripeWebhookEvent(event, deps);
+    assert.equal(created.earlyServiceConsentedAt instanceof Date, true, "a real timestamp, not just a truthy value");
+    assert.equal(created.termsVersionAtCheckout, "2026-11-01");
+  });
+
+  it("WH.3f — earlyServiceConsent absent, 'false', or anything other than the literal string 'true' snapshots null — never assume consent from an unexpected value", async () => {
+    for (const metadata of [{}, { earlyServiceConsent: "false" }, { earlyServiceConsent: "TRUE" }, { earlyServiceConsent: "1" }]) {
+      let created: any = null;
+      const deps: WebhookHandlerDeps = {
+        findNullFundedPeriodTransactions: async () => [],
+        findProcessedEvent: async () => null,
+        findSubscriptionByProviderSubscriptionId: async () => null,
+        createSubscription: async (input) => { created = input; return { ...baseSubscription(), ...input, id: "sub-new" }; },
+        createBillingTransaction: async () => {},
+        recordProcessedEvent: async () => {},
+        updateCustomerMembershipStatus: async () => {},
+      };
+      const event = makeEvent({
+        id: `evt_${JSON.stringify(metadata)}`,
+        data: {
+          object: {
+            client_reference_id: CUSTOMER_ID,
+            metadata,
+            payment_status: "paid",
+            customer: "cus_1",
+            subscription: `sub_${JSON.stringify(metadata)}`,
+            amount_total: 3900,
+            currency: "aed",
+          },
+        },
+      });
+      await processStripeWebhookEvent(event, deps);
+      assert.equal(created.earlyServiceConsentedAt, null, `metadata ${JSON.stringify(metadata)} must never be read as consent`);
+      assert.equal(created.termsVersionAtCheckout, null);
+    }
+  });
+
   it("WH.3c — when payment_intent is absent, providerTransactionId falls back to the Checkout Session's OWN id (obj.id), never a bare event id and never null", async () => {
     let transaction: any = null;
     const deps: WebhookHandlerDeps = {
@@ -1612,6 +1673,32 @@ describe("processStripeWebhookEvent — refund.created / refund.updated", () => 
     const result = await processStripeWebhookEvent(event, deps);
     assert.deepEqual(revocation, { subscriptionId: "sub-row-1", reason: "REFUND", sourceTransactionId: "txn-original-1" });
     assert.deepEqual(membershipCall, { customerId: CUSTOMER_ID, status: "NONE" });
+    assert.deepEqual(result, { ok: true, deduped: false, action: "refund_full_current_period_access_revoked" });
+  });
+
+  it("WH.33b — EU statutory withdrawal closure (2026-11-17): the succeeded-refund hook fires with the real refund id, regardless of full/partial/old-period outcome, and never blocks the response if it throws", async () => {
+    let hookCalledWith: string | null = null;
+    const deps: WebhookHandlerDeps = {
+      findNullFundedPeriodTransactions: async () => [],
+      findProcessedEvent: async () => null,
+      findBillingTransactionByProviderTransactionId: async () => originalTransaction(),
+      recordSucceededRefundAndDecideFull: async () => ({ isFullRefund: true, cumulativeRefunded: 3900 }),
+      findSubscriptionById: async () => baseSubscription(),
+      hasActiveRevocation: async () => true,
+      createAccessRevocation: async () => {},
+      updateCustomerMembershipStatus: async () => {},
+      recordProcessedEvent: async () => {},
+      onRefundSucceededForWithdrawal: async (refundId) => {
+        hookCalledWith = refundId;
+        throw new Error("simulated DB blip — must not fail the whole webhook response");
+      },
+    };
+    const event = makeEvent({
+      type: "refund.updated",
+      data: { object: { id: "re_hook_test", payment_intent: "pi_1", status: "succeeded", amount: 3900, currency: "aed" } },
+    });
+    const result = await processStripeWebhookEvent(event, deps);
+    assert.equal(hookCalledWith, "re_hook_test");
     assert.deepEqual(result, { ok: true, deduped: false, action: "refund_full_current_period_access_revoked" });
   });
 

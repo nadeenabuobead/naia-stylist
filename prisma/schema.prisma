@@ -522,6 +522,32 @@ model Subscription {
   status   SubscriptionStatus
   planType BillingPlanType
 
+  // EU statutory withdrawal (Legal handoff W2/W1) — captured ONCE, at the
+  // checkout that created this row, never touched again afterward. Both
+  // fields answer "what did we actually tell this customer, and what did
+  // they actually agree to, at THIS specific checkout" — Customer.
+  // termsAcceptedAt/termsAcceptedVersion are single mutable fields,
+  // overwritten on every later acceptance, so they cannot answer that
+  // question for an old subscription once a customer re-accepts a newer
+  // Terms version. Sourced from the Stripe Checkout Session's own metadata
+  // (set in createCheckoutSession, read back in the checkout.session.
+  // completed handler) — never a live re-read of Customer at withdrawal-
+  // processing time, which could have moved on since.
+  //
+  // earlyServiceConsentedAt null means exactly what it says: no evidence
+  // this customer ever consented to early service start for THIS
+  // subscription. That is the "full refund, no pro-rata deduction"
+  // branch. Non-null is evidence consent existed — any pro-rata handling
+  // for that case is deliberately a separate, not-yet-built action; this
+  // schema only records the fact so a later feature or a human reviewer
+  // can tell the two cases apart, never infers behavior from it beyond
+  // "full-refund eligibility" gating.
+  earlyServiceConsentedAt DateTime?
+  // The literal CURRENT_TERMS_VERSION value in effect at this checkout —
+  // "" / null before any real Terms document exists, same convention as
+  // terms-acceptance.server.ts's own placeholder.
+  termsVersionAtCheckout String?
+
   provider               String  // "stripe" — named explicitly; not assumed to be the only provider forever.
   providerCustomerId     String? // Null until the provider-side customer object exists (created at first checkout).
   providerSubscriptionId String? @unique // Null until the provider confirms the subscription object.
@@ -636,6 +662,12 @@ model WithdrawalRequest {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // 2026-11-17 — the manual full-refund processing record for this
+  // request, if any has been started. See WithdrawalRefundCase's own
+  // header for why this is a separate table rather than new columns
+  // here.
+  refundCase WithdrawalRefundCase?
+
   @@index([customerId])
   @@index([submittedAt])
 }
@@ -644,6 +676,108 @@ enum WithdrawalRequestStatus {
   SUBMITTED
   ACKNOWLEDGED
   CLOSED
+}
+
+// 2026-11-17 — the manual full-refund processing record for one
+// WithdrawalRequest. Deliberately a SEPARATE table, not new columns on
+// WithdrawalRequest itself: that model's own header is explicit that it
+// is intake/triage only and "never touches Subscription.cancelAtPeriodEnd
+// or any cancellation field... manual refund processing happens outside
+// this model" — this table IS that outside processing, kept structurally
+// apart so WithdrawalRequest stays the simple, audit-stable intake record
+// it was designed to be.
+//
+// Reuses the existing Decision-16 machinery rather than duplicating it:
+// issuing the Stripe refund here lets the ALREADY-PROVEN refund.updated
+// webhook handler (webhook-handler.server.ts) create the AccessRevocation
+// row and sync Customer.membershipStatus exactly as it already does for
+// every other full refund — this table does not create its own
+// AccessRevocation and does not duplicate that logic. What this table
+// adds on top: the eligibility gate specific to a STATUTORY WITHDRAWAL
+// (no early-service-consent evidence, no existing refund/dispute on the
+// same payment), explicitly stopping future billing (which a refund
+// alone does not do), and an audit trail that distinguishes "this refund
+// happened because of a statutory withdrawal" from an ordinary goodwill
+// refund — without needing a new AccessRevocationReason value, since the
+// underlying access-control fact (full refund of the current period)
+// really is the same mechanism either way.
+model WithdrawalRefundCase {
+  id String @id @default(cuid())
+
+  // One case per request. Restrict: this processing record must not be
+  // silently orphaned by anything that might delete a WithdrawalRequest
+  // (nothing does today, but the same retention discipline as every
+  // other financial-adjacent model in this schema applies here too).
+  withdrawalRequestId String             @unique
+  withdrawalRequest    WithdrawalRequest @relation(fields: [withdrawalRequestId], references: [id], onDelete: Restrict)
+
+  // Denormalized for query convenience only — always re-derivable from
+  // withdrawalRequest.subscriptionId. Nullable for the same reason that
+  // field is nullable upstream.
+  subscriptionId String?
+
+  // The specific BillingTransaction this case would refund/did refund —
+  // loose reference (same convention as AccessRevocation.
+  // sourceTransactionId above), set once eligibility evaluation finds a
+  // qualifying payment. Null until then, or permanently null if no
+  // qualifying payment was ever found.
+  originalTransactionId String?
+
+  // The last evaluation/processing outcome. Re-evaluated (never assumed
+  // stale) every time processWithdrawalFullRefund runs, immediately
+  // before the Stripe call — see that function's own header for why a
+  // cached ELIGIBLE must never be trusted at the moment of an actual
+  // financial action.
+  outcome WithdrawalRefundOutcome @default(ELIGIBLE_PENDING)
+
+  // Free-form, append-only evaluation detail for audit/support use —
+  // which checks ran, what each one found, never used to DRIVE behavior
+  // (outcome is the one field anything downstream branches on).
+  detail Json?
+
+  // Set once Stripe confirms the refund request was accepted (the Stripe
+  // Refund object's own id) — @unique so a retried admin action can
+  // detect "this case already has a Stripe refund in flight" before
+  // attempting a second one, independent of the idempotency key Stripe
+  // itself also enforces.
+  providerRefundId String? @unique
+
+  // Set only after a SUCCEEDED refund — never before, and never on a
+  // failed/pending refund. Stopping future billing before the refund is
+  // confirmed would leave a subscription canceled with nothing actually
+  // refunded if the Stripe call then failed.
+  subscriptionCanceledAt DateTime?
+
+  // A confirmation record was generated (content composed and stored in
+  // `detail`) — explicitly NOT a claim that an email was sent. No
+  // customer-facing billing-email send path exists anywhere in this
+  // codebase today (see resend-email.server.ts's own scope, identity-
+  // linking only); building and wiring a real send is separate, later
+  // work requiring its own founder/legal sign-off on wording.
+  confirmationRecordedAt DateTime?
+
+  // Who authorized this (Founder Decision 16's override-record
+  // requirement — authorization + reason + timestamp). Loose reference
+  // to AdminAuditLog, same pattern as AccessRevocation.overrideAuditLogId.
+  performedByEmail String?
+  auditLogId       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([subscriptionId])
+  @@index([originalTransactionId])
+}
+
+enum WithdrawalRefundOutcome {
+  ELIGIBLE_PENDING // Evaluated, no blocker found, not yet actioned.
+  BLOCKED_EARLY_SERVICE_CONSENT // Subscription.earlyServiceConsentedAt is set — full-refund-without-deduction does not apply; a separate pro-rata action (not built) would be needed.
+  BLOCKED_NO_QUALIFYING_PAYMENT // No subscription, or no succeeded payment transaction funding the current period.
+  BLOCKED_ALREADY_REFUNDED // The qualifying transaction already has a succeeded (or in-flight) refund against it.
+  BLOCKED_OPEN_DISPUTE // An unresolved Dispute exists against this subscription — refuses to act until that resolves, matching the manual SOP's own check.
+  REFUND_REQUESTED // Stripe refund call made, awaiting the provider's own confirmation via webhook.
+  REFUND_SUCCEEDED // Confirmed via this app's own refund.updated webhook processing (the same ledger the existing Decision-16 logic already trusts), not assumed from the initial API response alone.
+  PROVIDER_FAILED // The Stripe call itself failed (network/4xx/5xx) — safe to re-run; nothing financial happened.
 }
 
 enum BillingTransactionType {

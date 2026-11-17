@@ -97,6 +97,10 @@ import {
   recordManualReviewObligation as defaultRecordManualReviewObligation,
   resolveManualReviewFlagsFor as defaultResolveManualReviewFlagsFor,
 } from "./manual-review.server";
+import {
+  onRefundSucceededForWithdrawal as defaultOnRefundSucceededForWithdrawal,
+  onRefundFailedForWithdrawal as defaultOnRefundFailedForWithdrawal,
+} from "./withdrawal-refund.server";
 
 // Founder Decision 16 row 3 ("pending dispute... must generate an
 // actionable notification and a documented human review") — the Dispute
@@ -166,6 +170,8 @@ export interface WebhookHandlerDeps {
     status: SubscriptionStatus;
     providerCustomerId: string | null;
     providerSubscriptionId: string | null;
+    earlyServiceConsentedAt?: Date | null;
+    termsVersionAtCheckout?: string | null;
   }) => Promise<SubscriptionRecord>;
   updateSubscriptionById?: (
     id: string,
@@ -318,6 +324,21 @@ export interface WebhookHandlerDeps {
     category: string,
     refs: { transactionId?: string | null; disputeId?: string | null },
   ) => Promise<number>;
+
+  // ── EU statutory withdrawal full-refund closure (2026-11-17) ───────────
+  // Fired unconditionally for EVERY succeeded/failed refund this handler
+  // processes — ordinary goodwill refund or a withdrawal-triggered one,
+  // this handler has no way to tell which without looking, and it is not
+  // this handler's job to know. The function behind this hook (withdrawal-
+  // refund.server.ts) does its own lookup by providerRefundId and no-ops
+  // if no WithdrawalRefundCase used that refund id — same "ask, don't
+  // assume" discipline as sendDisputeAlert above. Deliberately NOT given
+  // the isFullRefund/fundsCurrentPeriod decision this file already made —
+  // that decision (and the resulting AccessRevocation) is NOT duplicated
+  // here; this hook only closes the loop on the SEPARATE withdrawal-
+  // tracking record, never re-decides access.
+  onRefundSucceededForWithdrawal?: (refundId: string) => Promise<void>;
+  onRefundFailedForWithdrawal?: (refundId: string) => Promise<void>;
 }
 
 async function defaultFindProcessedEvent(provider: string, providerEventId: string) {
@@ -369,6 +390,12 @@ async function defaultCreateSubscription(input: {
   status: SubscriptionStatus;
   providerCustomerId: string | null;
   providerSubscriptionId: string | null;
+  // EU statutory withdrawal (2026-11-17) — captured ONCE at creation, never
+  // touched again. See Subscription.earlyServiceConsentedAt/
+  // termsVersionAtCheckout's own schema comments for why this must happen
+  // here, not reconstructed later.
+  earlyServiceConsentedAt?: Date | null;
+  termsVersionAtCheckout?: string | null;
 }) {
   try {
     return await prisma.subscription.create({
@@ -379,6 +406,8 @@ async function defaultCreateSubscription(input: {
         provider: "stripe",
         providerCustomerId: input.providerCustomerId,
         providerSubscriptionId: input.providerSubscriptionId,
+        earlyServiceConsentedAt: input.earlyServiceConsentedAt ?? null,
+        termsVersionAtCheckout: input.termsVersionAtCheckout ?? null,
       },
     });
   } catch (err) {
@@ -961,6 +990,8 @@ export async function processStripeWebhookEvent(
   const _backfillFundedPeriod = deps.backfillFundedPeriod ?? defaultBackfillFundedPeriod;
   const _recordManualReviewObligation = deps.recordManualReviewObligation ?? defaultRecordManualReviewObligation;
   const _resolveManualReviewFlagsFor = deps.resolveManualReviewFlagsFor ?? defaultResolveManualReviewFlagsFor;
+  const _onRefundSucceededForWithdrawal = deps.onRefundSucceededForWithdrawal ?? defaultOnRefundSucceededForWithdrawal;
+  const _onRefundFailedForWithdrawal = deps.onRefundFailedForWithdrawal ?? defaultOnRefundFailedForWithdrawal;
 
   // Applies/lifts an access revocation and keeps Customer.membershipStatus
   // in lockstep — the SAME pattern customer.subscription.updated's own
@@ -1053,6 +1084,13 @@ export async function processStripeWebhookEvent(
     // block activation itself.
     await _releaseCheckoutReservation(customerId).catch(() => {});
     const planType: BillingPlanType = obj.metadata?.planType === "ANNUAL" ? "ANNUAL" : "MONTHLY";
+    // EU statutory withdrawal (2026-11-17) — read once, here, from the
+    // Checkout Session's own metadata (set in createCheckoutSession).
+    // "true" is the only string that means consent; anything else
+    // (absent, "false", malformed) means null — fail closed on ambiguity,
+    // never assume consent from an unexpected value.
+    const earlyServiceConsentedAt = obj.metadata?.earlyServiceConsent === "true" ? eventCreatedAt : null;
+    const termsVersionAtCheckout: string | null = obj.metadata?.termsVersion || null;
 
     let sub = obj.subscription
       ? await _findSubscriptionByProviderSubscriptionId(obj.subscription)
@@ -1067,6 +1105,8 @@ export async function processStripeWebhookEvent(
         status: "ACTIVE",
         providerCustomerId: obj.customer ?? null,
         providerSubscriptionId: obj.subscription ?? null,
+        earlyServiceConsentedAt,
+        termsVersionAtCheckout,
       });
     } else if (sub.status === "INCOMPLETE" || sub.status === "ACTIVE") {
       if (!wasAlreadyActive) {
@@ -1156,6 +1196,13 @@ export async function processStripeWebhookEvent(
               status: "INCOMPLETE",
               providerCustomerId: obj.customer ?? null,
               providerSubscriptionId: obj.subscription ?? null,
+              // Same snapshot as the synchronous-payment path above — this
+              // is the same Checkout Session, just a deferred payment
+              // method; the consent/version facts are already known now,
+              // not something activateFromCheckoutSession should have to
+              // re-derive later from a second metadata read.
+              earlyServiceConsentedAt: obj.metadata?.earlyServiceConsent === "true" ? eventCreatedAt : null,
+              termsVersionAtCheckout: obj.metadata?.termsVersion || null,
             });
           }
           // An INCOMPLETE Subscription row now exists either way — the
@@ -1260,6 +1307,13 @@ export async function processStripeWebhookEvent(
           status: mapStripeSubscriptionStatus(authoritative.status, null),
           providerCustomerId: typeof authoritative.customer === "string" ? authoritative.customer : null,
           providerSubscriptionId,
+          // obj here IS the Subscription object itself (this is a
+          // customer.subscription.* event) — its own metadata is exactly
+          // what createCheckoutSession's subscription_data.metadata wrote
+          // at creation. Same snapshot rule as the checkout.session.*
+          // paths above, read from the other side of the same data.
+          earlyServiceConsentedAt: obj.metadata?.earlyServiceConsent === "true" ? eventCreatedAt : null,
+          termsVersionAtCheckout: obj.metadata?.termsVersion || null,
         });
         const createdPeriodStart = derivePeriodTimestampFromAuthoritative(authoritative, "current_period_start");
         const createdPeriodEnd = derivePeriodTimestampFromAuthoritative(authoritative, "current_period_end");
@@ -1507,6 +1561,9 @@ export async function processStripeWebhookEvent(
           currency: (obj.currency ?? "aed").toUpperCase(),
           occurredAt: eventCreatedAt,
         });
+        await _onRefundFailedForWithdrawal(refundId).catch((err) => {
+          captureFailure("stripe-webhook:withdrawal-refund-closure", "refund_failed_closure_error", { refundId, err: String(err) });
+        });
         action = "refund_failed_recorded";
         break;
       }
@@ -1529,6 +1586,16 @@ export async function processStripeWebhookEvent(
         currency: (obj.currency ?? "aed").toUpperCase(),
         occurredAt: eventCreatedAt,
         originalAmount: original.amount,
+      });
+
+      // EU statutory withdrawal closure (2026-11-17) — the refund itself is
+      // unambiguously confirmed succeeded at this point, regardless of
+      // which branch below runs next. No-ops unless THIS refund id is one
+      // withdrawal-refund.server.ts's processWithdrawalFullRefund actually
+      // requested — see that hook's own header for why it is never given
+      // the isFullRefund decision made here.
+      await _onRefundSucceededForWithdrawal(refundId).catch((err) => {
+        captureFailure("stripe-webhook:withdrawal-refund-closure", "refund_succeeded_closure_error", { refundId, err: String(err) });
       });
 
       if (!isFullRefund) {
@@ -1607,6 +1674,9 @@ export async function processStripeWebhookEvent(
         amount: typeof obj.amount === "number" ? obj.amount : 0,
         currency: (obj.currency ?? "aed").toUpperCase(),
         occurredAt: eventCreatedAt,
+      });
+      await _onRefundFailedForWithdrawal(refundId).catch((err) => {
+        captureFailure("stripe-webhook:withdrawal-refund-closure", "refund_failed_closure_error", { refundId, err: String(err) });
       });
       action = "refund_failed_recorded";
       break;

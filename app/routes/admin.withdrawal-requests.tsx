@@ -29,12 +29,23 @@
 
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { useActionData, useLoaderData } from "react-router";
+import type { PrismaClient } from "@prisma/client";
+import dbServer from "~/db.server";
 import { requireRole } from "~/lib/internal-auth.server";
+
+// db.server.js is untyped JS — without this, query-result inference
+// (the .findMany below) silently degrades to implicit any, same gap
+// fixed the same way in several other routes this cycle.
+const prisma: PrismaClient = dbServer;
 import {
   listOpenWithdrawalRequests,
   acknowledgeWithdrawalRequest,
   closeWithdrawalRequest,
 } from "~/lib/withdrawal-request.server";
+import {
+  evaluateWithdrawalRefundEligibility,
+  processWithdrawalFullRefund,
+} from "~/lib/billing/withdrawal-refund.server";
 
 async function requireOwnerOrStaff(request: Request) {
   return requireRole(request, ["owner", "staff"]);
@@ -43,7 +54,17 @@ async function requireOwnerOrStaff(request: Request) {
 export async function loader({ request }: LoaderFunctionArgs) {
   await requireOwnerOrStaff(request);
   const openRequests = await listOpenWithdrawalRequests();
-  return { openRequests };
+  // Read-only display only — never mutates, never calls Stripe. Shows
+  // whoever's triaging whether a prior evaluation/refund attempt exists
+  // for this case, without them having to click "Check eligibility" just
+  // to see that. A genuinely fresh evaluation still always re-runs before
+  // any actual refund action — see processWithdrawalFullRefund's own
+  // header for why a displayed outcome here is never trusted as current.
+  const cases = await prisma.withdrawalRefundCase.findMany({
+    where: { withdrawalRequestId: { in: openRequests.map((r) => r.id) } },
+  });
+  const caseByRequestId = new Map(cases.map((c) => [c.withdrawalRequestId, c]));
+  return { openRequests, caseByRequestId: Object.fromEntries(caseByRequestId) };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -71,20 +92,49 @@ export async function action({ request }: ActionFunctionArgs) {
     }
   }
 
+  // 2026-11-17 — read-only: available to owner or staff, same as the
+  // triage actions above. Never issues a refund, never calls Stripe.
+  if (intent === "check-eligibility") {
+    const result = await evaluateWithdrawalRefundEligibility(id);
+    return { ok: true as const, intent, message: `Eligibility: ${result.outcome}.`, outcome: result.outcome };
+  }
+
+  // Owner-only below this line — moves real money. identity is already
+  // resolved above (requireOwnerOrStaff) — checked directly rather than
+  // re-parsing the session a second time.
+  if (intent === "process-full-refund") {
+    if (identity.role !== "owner") {
+      throw new Response("Forbidden", { status: 403 });
+    }
+    const result = await processWithdrawalFullRefund(id, identity.email);
+    if (!result.ok) {
+      return { ok: false as const, error: `Not processed — ${result.reason}.` };
+    }
+    return {
+      ok: true as const,
+      intent,
+      message: `Refund requested (Stripe refund ${result.case.providerRefundId}). Access will be revoked and billing stopped automatically once Stripe confirms — this does not happen immediately.`,
+    };
+  }
+
   return { ok: false as const, error: "Invalid request." };
 }
 
 export default function AdminWithdrawalRequests() {
   const actionData = useActionData<typeof action>();
-  const { openRequests } = useLoaderData<typeof loader>();
+  const { openRequests, caseByRequestId } = useLoaderData<typeof loader>();
 
   return (
     <div className="adm-page">
       <h1 className="adm-page-heading">EU Withdrawal Requests</h1>
       <p className="adm-page-sub">
-        Statutory right-of-withdrawal requests (Legal handoff W2). This is a case-triage view only —
-        it never issues a refund or changes membership access. Follow docs/ops/refund-operations-sop.md
-        for the actual manual refund/cancellation steps, then close the case here once done.
+        Statutory right-of-withdrawal requests (Legal handoff W2). "Check eligibility" is read-only —
+        it never issues a refund. "Issue full refund" (owner-only) is the one action that moves real
+        money: it only ever requests a FULL refund (no pro-rata deduction) and only when evidence of
+        early-service consent is absent for this subscription — an eligible case with such evidence
+        is a separate, not-yet-built action, never this one. Access revocation and stopping future
+        billing both happen automatically, once Stripe confirms the refund succeeded — not immediately
+        on this click. Close the case here once actually resolved.
       </p>
 
       {actionData && "message" in actionData && <p style={{ fontSize: "13px", color: "#16213e" }}>{actionData.message}</p>}
@@ -101,6 +151,7 @@ export default function AdminWithdrawalRequests() {
                 <th style={{ padding: "0.6rem 1rem" }}>Reference</th>
                 <th style={{ padding: "0.6rem 1rem" }}>Customer</th>
                 <th style={{ padding: "0.6rem 1rem" }}>Status</th>
+                <th style={{ padding: "0.6rem 1rem" }}>Refund eligibility</th>
                 <th style={{ padding: "0.6rem 1rem" }}></th>
               </tr>
             </thead>
@@ -113,8 +164,11 @@ export default function AdminWithdrawalRequests() {
                     {r.customerNameAtRequest ?? "—"} ({r.customerEmailAtRequest})
                   </td>
                   <td style={{ padding: "0.6rem 1rem" }}>{r.status}</td>
+                  <td style={{ padding: "0.6rem 1rem", fontSize: "11px", color: "#6b7280" }}>
+                    {caseByRequestId[r.id]?.outcome ?? "not evaluated"}
+                  </td>
                   <td style={{ padding: "0.6rem 1rem" }}>
-                    <div style={{ display: "flex", gap: "0.5rem" }}>
+                    <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
                       {r.status === "SUBMITTED" && (
                         <form method="post">
                           <input type="hidden" name="intent" value="acknowledge" />
@@ -122,6 +176,23 @@ export default function AdminWithdrawalRequests() {
                           <button type="submit" style={maintenanceButtonStyle}>Acknowledge</button>
                         </form>
                       )}
+                      <form method="post">
+                        <input type="hidden" name="intent" value="check-eligibility" />
+                        <input type="hidden" name="id" value={r.id} />
+                        <button type="submit" style={maintenanceButtonStyle}>Check eligibility</button>
+                      </form>
+                      <form
+                        method="post"
+                        onSubmit={(e) => {
+                          if (!window.confirm("Issue a FULL Stripe refund for this withdrawal request? This moves real money (test-mode only) and will stop future billing once Stripe confirms. Only proceed if eligibility shows ELIGIBLE_PENDING.")) e.preventDefault();
+                        }}
+                      >
+                        <input type="hidden" name="intent" value="process-full-refund" />
+                        <input type="hidden" name="id" value={r.id} />
+                        <button type="submit" style={{ ...maintenanceButtonStyle, background: "#b3261e" }}>
+                          Issue full refund
+                        </button>
+                      </form>
                       <form
                         method="post"
                         style={{ display: "flex", gap: "0.3rem" }}
