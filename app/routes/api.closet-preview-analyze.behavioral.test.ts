@@ -211,6 +211,10 @@ describe("api.closet-preview-analyze action — entitlement enforced BEFORE eith
 
     expect(res.init.status).toBe(403);
     expect(res.data.error).toBe("Closet access is included with nAia Membership. Subscribe to start adding pieces.");
+    // Found live, 2026-11-17: without this flag, the client's
+    // fetchPreviewAnalysis falls through to the generic "couldn't read this
+    // piece" fallback instead of showing this message at all.
+    expect(res.data.requiresReupload).toBe(true);
     // The asset the client already uploaded before calling this endpoint must
     // not be left orphaned.
     expect(mockDelete()).toHaveBeenCalledWith(ownId, "private");
@@ -235,6 +239,7 @@ describe("api.closet-preview-analyze action — entitlement enforced BEFORE eith
 
     expect(res.init.status).toBe(403);
     expect(res.data.error).toBe("Your closet is full. Remove some items to add new ones.");
+    expect(res.data.requiresReupload).toBe(true);
     expect(mockDelete()).toHaveBeenCalledWith(ownId, "private");
     expect(mockModerate()).not.toHaveBeenCalled();
     expect(mockSuitability()).not.toHaveBeenCalled();

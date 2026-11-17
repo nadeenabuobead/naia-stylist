@@ -101,13 +101,21 @@ export async function action({ request }: ActionFunctionArgs) {
   //    zero-allowance customer never triggers either paid Claude call below.
   //    Ownership is already confirmed above, so it is safe to delete this
   //    customer's own asset here rather than leave it orphaned.
+  //
+  //    requiresReupload:true is REQUIRED here, not optional — found live,
+  //    2026-11-17: the client (closet._index.tsx's fetchPreviewAnalysis)
+  //    only shows a rejection's error text and resets to idle when this flag
+  //    is present; without it, a non-ok response falls through to the
+  //    generic "couldn't read this piece, fill in manually" fallback,
+  //    silently swallowing the upgrade message this check exists to show.
+  //    Matches the Layer 2/3 rejection responses below, which already set it.
   const capacityCheck = await checkEntitlement(naiaCustomer.id, naiaCustomer.membershipStatus, "closet");
   if (!capacityCheck.allowed) {
     await deleteCloudinaryAsset(publicId, "private");
     const message = capacityCheck.limit === 0
       ? "Closet access is included with nAia Membership. Subscribe to start adding pieces."
       : "Your closet is full. Remove some items to add new ones.";
-    return data({ error: message }, { status: 403 });
+    return data({ error: message, requiresReupload: true }, { status: 403 });
   }
 
   // 5. Photo consent (2026-10-19) — required before any AI analysis of the
