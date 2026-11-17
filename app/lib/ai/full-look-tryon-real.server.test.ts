@@ -1693,6 +1693,57 @@ describe("startOrResumeFullLookChain", () => {
     expect(mockCooldown()).toHaveBeenCalledTimes(1);
   });
 
+  // 2026-11-17 — live incident #2: a brand-new "Try Again" attempt's very
+  // first submission (step 0) was rejected by FASHN with OutOfCredits.
+  // Unlike the earlier incident (a later step, mid-chain, with prior
+  // completed garments to worry about cleaning up), this fails before
+  // anything else in the chain ever exists — no intermediate asset, no
+  // prior job, nothing to clean up. The only things that matter: zero
+  // retry (confirmed: submitTryOnToProvider already refuses to retry
+  // OutOfCredits on its own, exercised here through the real call chain
+  // this incident actually used), the job is left in a genuinely terminal
+  // FAILED state (not stuck PROCESSING), and a subsequent call on the
+  // same scope sees that FAILED job and resumes/reports it rather than
+  // submitting a second, silently duplicate step 0.
+  it("FL.24b — step 0 rejected with OutOfCredits: fails cleanly, zero retry, zero cost, and a second call on the same scope never resubmits", async () => {
+    const _findJobFn = vi.fn(async () => null);
+    const _reconcileStale = vi.fn(async () => ({ reconciled: false }));
+    mockCooldown().mockResolvedValue({ ok: true });
+    const job = fakeJob("job-0");
+    mockCreateOrFind().mockResolvedValue({ ok: true, job, created: true });
+    mockAdvance().mockResolvedValueOnce({ ok: true, job: { ...job, status: "SUBMITTED" } });
+    mockDownloadPhoto().mockResolvedValue({ ok: true, dataUrl: PNG_DATA_URL });
+    // The real, unmocked submitTryOnToProvider classification logic is what
+    // actually decided this (fashn-try-on.test.ts's own CLASSIFY.3 proves
+    // OutOfCredits never retries) — this mock stands in for that already-
+    // tested decision having been reached, so this test is about THIS
+    // file's own handling of the result, not re-proving the classification.
+    mockSubmitProvider().mockResolvedValue({
+      ok: false,
+      code: "PROVIDER_REJECTED",
+      customerMessage: "We couldn't create your try-on this time.",
+    });
+
+    const result = await startOrResumeFullLookChain(baseCtx(), { _findJobFn }, _reconcileStale);
+
+    expect(result).toEqual({ ok: false, reason: "PROVIDER_REJECTED" });
+    expect(mockSubmitProvider()).toHaveBeenCalledTimes(1); // exactly one attempt — no retry at this layer either
+    expect(mockDeleteAsset()).not.toHaveBeenCalled(); // nothing existed yet to clean up
+
+    // A second call against the SAME scope must find the now-FAILED job0
+    // and resume/report it, never attempt a second, duplicate submission.
+    const failedJob0 = fakeJob("job-0", { status: "FAILED", errorCode: "PROVIDER_REJECTED" });
+    const _findJobFnSecondCall = vi.fn(async (where: { idempotencyKey: string }) =>
+      where.idempotencyKey === getFullLookStepIdempotencyKey("cust-1", 0, null) ? failedJob0 : null,
+    );
+    mockSubmitProvider().mockClear();
+    mockCreateOrFind().mockClear();
+    const secondResult = await startOrResumeFullLookChain(baseCtx(), { _findJobFn: _findJobFnSecondCall }, _reconcileStale);
+    expect(secondResult).toEqual({ ok: true, stepIndex: 0 }); // resumes/reports, does not re-create
+    expect(mockSubmitProvider()).not.toHaveBeenCalled();
+    expect(mockCreateOrFind()).not.toHaveBeenCalled();
+  });
+
   it("FL.25 — a chain already in progress resumes without re-checking cooldown, reconciling, or resubmitting step 0 (duplicate-request safe)", async () => {
     const job0 = fakeJob("job-0", { status: "PROCESSING", predictionId: "pred-0" });
     const _findJobFn = vi.fn(async (where: { idempotencyKey: string }) =>
