@@ -16,6 +16,7 @@ const {
   reserveCheckoutAttemptMock,
   releaseCheckoutReservationMock,
   attachCheckoutSessionIdMock,
+  recordTermsAcceptanceMock,
 } = vi.hoisted(() => ({
   findFirstMock: vi.fn(),
   getCurrentNaiaCustomerMock: vi.fn(),
@@ -23,10 +24,23 @@ const {
   reserveCheckoutAttemptMock: vi.fn(),
   releaseCheckoutReservationMock: vi.fn(),
   attachCheckoutSessionIdMock: vi.fn(),
+  recordTermsAcceptanceMock: vi.fn(),
 }));
 
 vi.mock("~/db.server", () => ({
   default: { subscription: { findFirst: findFirstMock } },
+}));
+
+// CURRENT_TERMS_VERSION: null mirrors today's real value exactly (Legal
+// handoff W1 — no real Terms document exists yet). Mocked rather than
+// left to the real module so (a) this file never depends on whether a
+// real db.server.customer.update call would be reachable, and (b) a
+// dedicated test below can flip it to a real version via vi.doMock to
+// prove the "once a real version exists" path works, without that
+// assertion depending on every OTHER test in this file.
+vi.mock("~/lib/terms-acceptance.server", () => ({
+  CURRENT_TERMS_VERSION: null,
+  recordTermsAcceptance: recordTermsAcceptanceMock,
 }));
 
 vi.mock("~/lib/naia-session.server", () => ({
@@ -53,10 +67,17 @@ import { action } from "./api.billing-checkout";
 
 const CUSTOMER = { id: "cust-1", membershipStatus: "MEMBER" };
 
-function makeRequest(body: unknown): Request {
+// termsAccepted: true is the default for every call site below — every
+// one of these pre-existing tests exercises behavior that happens AFTER
+// the terms-acceptance gate (reservation, the Stripe call, duplicate-
+// subscription handling, etc.), none of them are testing that gate
+// itself. Pass termsAccepted explicitly to override this default; see
+// the dedicated "Terms acceptance gate" describe block below for that
+// coverage.
+function makeRequest(body: Record<string, unknown>): Request {
   return new Request("http://localhost/api/billing-checkout", {
     method: "POST",
-    body: JSON.stringify(body),
+    body: JSON.stringify({ termsAccepted: true, ...body }),
     headers: { "Content-Type": "application/json" },
   });
 }
@@ -209,5 +230,118 @@ describe("POST /api/billing-checkout — concurrent-checkout protection (Layer 2
     reserveCheckoutAttemptMock.mockResolvedValue({ allowed: true, expiresAt: new Date("2026-11-12T13:00:00.000Z") });
     await action({ request: makeRequest({ planType: "MONTHLY" }) } as any);
     expect(releaseCheckoutReservationMock).not.toHaveBeenCalled();
+  });
+});
+
+// ── Terms-acceptance gate (Legal handoff W1, 2026-11-17) ───────────────────
+// A client-side `required` checkbox attribute is trivially bypassed by
+// anyone calling this endpoint directly — these tests prove the server
+// itself refuses to proceed without it, independent of what the UI sends.
+describe("POST /api/billing-checkout — Terms-acceptance gate", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getCurrentNaiaCustomerMock.mockResolvedValue(CUSTOMER);
+    findFirstMock.mockResolvedValue(null);
+    createCheckoutSessionMock.mockResolvedValue({ id: "cs_test_1", url: "https://checkout.stripe.com/cs_test_1" });
+    reserveCheckoutAttemptMock.mockResolvedValue({ allowed: true, expiresAt: new Date("2026-11-12T13:00:00.000Z") });
+  });
+
+  it("TC.1 — incomplete submission (termsAccepted field missing entirely) is rejected with terms_not_accepted", async () => {
+    const res: any = await action({ request: makeRequest({ planType: "MONTHLY", termsAccepted: undefined }) } as any);
+    expect(res.init?.status ?? res.status).toBe(400);
+    expect(res.data ?? res).toEqual({ ok: false, code: "terms_not_accepted" });
+    expect(createCheckoutSessionMock).not.toHaveBeenCalled();
+    expect(reserveCheckoutAttemptMock).not.toHaveBeenCalled();
+  });
+
+  it("TC.2 — unchecked submission (termsAccepted: false) is rejected the same way", async () => {
+    const res: any = await action({ request: makeRequest({ planType: "MONTHLY", termsAccepted: false }) } as any);
+    expect(res.init?.status ?? res.status).toBe(400);
+    expect(createCheckoutSessionMock).not.toHaveBeenCalled();
+  });
+
+  it("TC.3 — invalid submission (a truthy-but-non-boolean value) is rejected, not loosely coerced to accepted", async () => {
+    for (const malformed of ["true", 1, "yes", {}]) {
+      vi.clearAllMocks();
+      getCurrentNaiaCustomerMock.mockResolvedValue(CUSTOMER);
+      const res: any = await action({ request: makeRequest({ planType: "MONTHLY", termsAccepted: malformed }) } as any);
+      expect(res.init?.status ?? res.status, `termsAccepted: ${JSON.stringify(malformed)} must not pass`).toBe(400);
+      expect(createCheckoutSessionMock).not.toHaveBeenCalled();
+    }
+  });
+
+  it("TC.4 — a valid, explicit termsAccepted: true clears the gate and reaches checkout-session creation", async () => {
+    const res: any = await action({ request: makeRequest({ planType: "MONTHLY", termsAccepted: true }) } as any);
+    expect((res.data ?? res).ok).toBe(true);
+    expect(createCheckoutSessionMock).toHaveBeenCalledOnce();
+  });
+
+  it("TC.5 — duplicate submissions (two consecutive accepted requests) are each evaluated independently by the terms gate — not blocked by any cross-request terms state", async () => {
+    const first: any = await action({ request: makeRequest({ planType: "MONTHLY", termsAccepted: true }) } as any);
+    expect(first.init?.status ?? first.status ?? 200).toBe(200);
+    // Second attempt now finds an existing (non-terminal) subscription row —
+    // this IS the pre-existing, already-tested subscription_already_exists
+    // guard (BC.* above), proving the terms gate itself isn't what's
+    // blocking the second call; it already cleared independently.
+    findFirstMock.mockResolvedValue({ status: "ACTIVE", providerCustomerId: "cus_123" });
+    const second: any = await action({ request: makeRequest({ planType: "MONTHLY", termsAccepted: true }) } as any);
+    expect(second.init?.status ?? second.status).toBe(409);
+    expect((second.data ?? second).code).toBe("subscription_already_exists");
+  });
+
+  it("TC.6 — recordTermsAcceptance is never called while CURRENT_TERMS_VERSION is null, across every scenario above — the core 'never record acceptance of nonexistent Terms' guarantee", async () => {
+    await action({ request: makeRequest({ planType: "MONTHLY", termsAccepted: true }) } as any);
+    await action({ request: makeRequest({ planType: "MONTHLY", termsAccepted: false }) } as any);
+    await action({ request: makeRequest({ planType: "MONTHLY", termsAccepted: "true" }) } as any);
+    expect(recordTermsAcceptanceMock).not.toHaveBeenCalled();
+  });
+
+  it("TC.7 — earlyServiceConsent has no effect on the outcome, whether true, false, or absent — it is accepted and discarded, not yet wired to any behavior", async () => {
+    const withTrue: any = await action({ request: makeRequest({ planType: "MONTHLY", termsAccepted: true, earlyServiceConsent: true }) } as any);
+    expect(withTrue.init?.status ?? withTrue.status ?? 200).toBe(200);
+    expect(createCheckoutSessionMock).toHaveBeenCalledOnce();
+    const createCheckoutArgsWithConsent = createCheckoutSessionMock.mock.calls[0][0];
+
+    vi.clearAllMocks();
+    getCurrentNaiaCustomerMock.mockResolvedValue(CUSTOMER);
+    findFirstMock.mockResolvedValue(null);
+    createCheckoutSessionMock.mockResolvedValue({ id: "cs_test_1", url: "https://checkout.stripe.com/cs_test_1" });
+    reserveCheckoutAttemptMock.mockResolvedValue({ allowed: true, expiresAt: new Date("2026-11-12T13:00:00.000Z") });
+
+    const withoutField: any = await action({ request: makeRequest({ planType: "MONTHLY", termsAccepted: true }) } as any);
+    expect(withoutField.init?.status ?? withoutField.status ?? 200).toBe(200);
+    const createCheckoutArgsWithoutConsent = createCheckoutSessionMock.mock.calls[0][0];
+
+    // Identical Stripe-facing call either way — earlyServiceConsent never
+    // reaches createCheckoutSession's own params.
+    expect(createCheckoutArgsWithConsent).toEqual(createCheckoutArgsWithoutConsent);
+  });
+});
+
+// ── Forward-correctness: once a real Terms version exists ──────────────────
+// Verifies the OTHER branch of `if (CURRENT_TERMS_VERSION !== null)` —
+// isolated into its own module-mock scope via vi.doMock + a dynamic
+// re-import, so flipping the version doesn't affect any test above.
+describe("POST /api/billing-checkout — once CURRENT_TERMS_VERSION is a real version (forward-correctness)", () => {
+  it("TC.8 — recordTermsAcceptance is called with the real version, for an accepted submission", async () => {
+    vi.resetModules();
+    const futureRecordMock = vi.fn();
+    vi.doMock("~/lib/terms-acceptance.server", () => ({
+      CURRENT_TERMS_VERSION: "2027-01-01",
+      recordTermsAcceptance: futureRecordMock,
+    }));
+    const { action: futureAction } = await import("./api.billing-checkout");
+
+    getCurrentNaiaCustomerMock.mockResolvedValue(CUSTOMER);
+    findFirstMock.mockResolvedValue(null);
+    createCheckoutSessionMock.mockResolvedValue({ id: "cs_test_1", url: "https://checkout.stripe.com/cs_test_1" });
+    reserveCheckoutAttemptMock.mockResolvedValue({ allowed: true, expiresAt: new Date("2026-11-12T13:00:00.000Z") });
+
+    const res: any = await futureAction({ request: makeRequest({ planType: "MONTHLY", termsAccepted: true }) } as any);
+    expect(res.init?.status ?? res.status ?? 200).toBe(200);
+    expect(futureRecordMock).toHaveBeenCalledWith(CUSTOMER.id, "2027-01-01");
+
+    vi.doUnmock("~/lib/terms-acceptance.server");
+    vi.resetModules();
   });
 });

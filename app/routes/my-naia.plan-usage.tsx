@@ -12,6 +12,8 @@ import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import { getEntitlementSummary } from "~/lib/plan/entitlement.server";
 import { MEMBERSHIP_PRICING, ADDON_CATALOG } from "~/lib/plan/plan-limits.server";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
+import TermsAcceptanceCheckbox from "~/components/checkout/TermsAcceptanceCheckbox";
+import EarlyServiceConsentCheckbox from "~/components/checkout/EarlyServiceConsentCheckbox";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 
 // The only two values api.billing-checkout.tsx ever puts in this param
@@ -173,6 +175,16 @@ export default function PlanUsagePage() {
 
   const [subscribing, setSubscribing] = useState<"MONTHLY" | "ANNUAL" | null>(null);
   const [subscribeError, setSubscribeError] = useState<string | null>(null);
+  // Required — see TermsAcceptanceCheckbox's own default. Gates the
+  // Subscribe/Choose Annual buttons below, but that's a courtesy, not
+  // the real enforcement: api.billing-checkout.tsx rejects the same
+  // request server-side if this were ever bypassed.
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  // Starts unchecked, as required (Legal handoff W1) — EarlyServiceConsentCheckbox's
+  // own default. Sent to the server below for completeness of the
+  // submission path, but has no effect anywhere yet; see
+  // api.billing-checkout.tsx's own comment on why.
+  const [earlyServiceConsent, setEarlyServiceConsent] = useState(false);
 
   async function handleSubscribe(planType: "MONTHLY" | "ANNUAL") {
     setSubscribing(planType);
@@ -181,7 +193,7 @@ export default function PlanUsagePage() {
       const res = await fetch("/api/billing-checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ planType }),
+        body: JSON.stringify({ planType, termsAccepted, earlyServiceConsent }),
       });
       const data = await res.json();
       if (data.ok && data.url) {
@@ -193,6 +205,8 @@ export default function PlanUsagePage() {
           ? "You already have a membership in progress — check your email or try again shortly."
           : data.code === "auth_required"
           ? "Your session expired — please sign in again."
+          : data.code === "terms_not_accepted"
+          ? "Please accept the Terms of Service to continue."
           : "Could not start checkout. Please try again.",
       );
     } catch {
@@ -352,11 +366,32 @@ export default function PlanUsagePage() {
               {pricing}
             </div>
             {showSubscribeButtons && (
+              <>
+                {/* ── Price, tax, recurring-billing, cancellation and
+                    payment-obligation disclosure — shown before either
+                    plan button, not after choosing one, since it applies
+                    identically to both. Figures (AED 39/299) are read
+                    from membershipPricing above, never hardcoded here, so
+                    this can never drift from what Stripe actually
+                    charges. */}
+                <div style={{ marginTop: "1rem", fontSize: "0.72rem", color: "var(--fg-55)", letterSpacing: "0.03em", lineHeight: 1.6, maxWidth: "32rem" }}>
+                  The price shown already includes any applicable tax. Whichever plan you choose below renews
+                  automatically at that price every billing period until you cancel. You can cancel anytime from
+                  your account&apos;s billing settings — access continues until the end of the period you&apos;ve
+                  already paid for. Your payment method is charged when you confirm.
+                </div>
+                <div style={{ marginTop: "0.85rem", display: "flex", flexDirection: "column", gap: "0.5rem", fontSize: "0.78rem" }}>
+                  <TermsAcceptanceCheckbox checked={termsAccepted} onChange={setTermsAccepted} />
+                  <EarlyServiceConsentCheckbox checked={earlyServiceConsent} onChange={setEarlyServiceConsent} />
+                </div>
+              </>
+            )}
+            {showSubscribeButtons && (
               <div style={{ marginTop: "1rem", display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
                 <button
                   type="button"
                   onClick={() => handleSubscribe("MONTHLY")}
-                  disabled={subscribing !== null}
+                  disabled={subscribing !== null || !termsAccepted}
                   style={{
                     padding: "0.65rem 1.4rem",
                     fontSize: "0.72rem",
@@ -375,7 +410,7 @@ export default function PlanUsagePage() {
                 <button
                   type="button"
                   onClick={() => handleSubscribe("ANNUAL")}
-                  disabled={subscribing !== null}
+                  disabled={subscribing !== null || !termsAccepted}
                   style={{
                     padding: "0.65rem 1.4rem",
                     fontSize: "0.72rem",

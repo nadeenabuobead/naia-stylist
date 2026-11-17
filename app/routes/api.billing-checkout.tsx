@@ -34,6 +34,7 @@ import { MEMBERSHIP_PRICING } from "~/lib/plan/plan-limits.server";
 import { createCheckoutSession, StripeNotConfiguredError, StripeLiveModeBlockedError } from "~/lib/billing/stripe-client.server";
 import { reserveCheckoutAttempt, releaseCheckoutReservation, attachCheckoutSessionId } from "~/lib/billing/checkout-reservation.server";
 import { checkRateLimit, rateLimitResponse } from "~/lib/api-rate-limit.server";
+import { CURRENT_TERMS_VERSION, recordTermsAcceptance } from "~/lib/terms-acceptance.server";
 
 // 2026-11-17 (H2) — velocity limit on checkout.
 //
@@ -103,6 +104,43 @@ export async function action({ request }: ActionFunctionArgs) {
   const planType = (body as any)?.planType;
   if (planType !== "MONTHLY" && planType !== "ANNUAL") {
     return badRequest("invalid_plan_type");
+  }
+
+  // Legal handoff W1 (2026-11-17) — required Terms acceptance, enforced
+  // here because a client-side `required` attribute on the checkbox is
+  // trivially bypassed by anyone calling this endpoint directly. Checked
+  // as a strict `=== true`, never a truthy coercion, so a malformed or
+  // missing value fails closed rather than silently passing. This check
+  // runs before any Stripe call or reservation, same "cheapest check
+  // first" ordering as the planType validation above.
+  const termsAccepted = (body as any)?.termsAccepted === true;
+  if (!termsAccepted) {
+    return badRequest("terms_not_accepted");
+  }
+
+  // Early-service-consent (Legal handoff W1's "separate, initially
+  // unchecked" checkbox) is read and validated for shape only — its value
+  // has NO effect anywhere in this action. What checking it would mean
+  // (immediate vs. delayed activation, and the exact statutory
+  // consequence) is still pending Legal/founder sign-off; until that
+  // exists, this endpoint must not behave any differently based on it.
+  // Accepting and discarding it here (rather than ignoring the field
+  // entirely) means the full submission path is already wired and
+  // tested end-to-end — the day a real behavior is approved, only the
+  // decision logic needs to be added, not new plumbing.
+  const earlyServiceConsent = (body as any)?.earlyServiceConsent === true;
+  void earlyServiceConsent; // deliberately inert — see comment above
+
+  // Recording acceptance is itself gated on a real Terms version existing
+  // — see terms-acceptance.server.ts's own header. CURRENT_TERMS_VERSION
+  // is null today, so this never runs; the moment Legal publishes a real
+  // version and this constant is updated, acceptance starts being
+  // recorded with no further wiring needed here. Recorded regardless of
+  // whether this specific checkout attempt goes on to succeed below —
+  // accepting Terms is a fact about the customer, not about this one
+  // attempt's outcome.
+  if (CURRENT_TERMS_VERSION !== null) {
+    await recordTermsAcceptance(customer.id, CURRENT_TERMS_VERSION);
   }
 
   const existing = await prisma.subscription.findFirst({

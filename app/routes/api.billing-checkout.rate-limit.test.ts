@@ -78,10 +78,16 @@ import { action } from "./api.billing-checkout";
 
 const CUSTOMER = { id: "cust-1", membershipStatus: "MEMBER" };
 
-function makeRequest(body: unknown): Request {
+// termsAccepted: true is the default for every call site below — this file
+// predates the Legal handoff W1 Terms-acceptance gate and tests rate
+// limiting, not that gate, so every call site must pass it by default
+// rather than tripping a 400 terms_not_accepted before reaching the
+// behavior actually under test. Same convention as api.billing-checkout.
+// test.ts's own makeRequest.
+function makeRequest(body: Record<string, unknown>): Request {
   return new Request("http://localhost/api/billing-checkout", {
     method: "POST",
-    body: JSON.stringify(body),
+    body: JSON.stringify({ termsAccepted: true, ...body }),
     headers: { "Content-Type": "application/json" },
   });
 }
