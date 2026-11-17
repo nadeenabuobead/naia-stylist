@@ -1,16 +1,18 @@
 // app/routes/admin.withdrawal-requests.test.ts
 //
 // 2026-11-17 Operations follow-up — restricted case access for EU
-// withdrawal requests. Mirrors admin.billing-overrides.test.ts's own
-// conventions exactly: mocked internal-auth.server and the library
-// module — no real admin session, no real DB.
+// withdrawal requests, built as a least-privilege (owner-OR-staff) proof
+// of concept via the shared requireRole gate. Mirrors
+// admin.billing-overrides.test.ts's own conventions: mocked
+// internal-auth.server and the library module — no real admin session, no
+// real DB, no real INTERNAL_STAFF_SECRET anywhere.
 //
 // Run: npx vitest run app/routes/admin.withdrawal-requests.test.ts
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("~/lib/internal-auth.server", () => ({
-  requireAdminSession: vi.fn().mockResolvedValue({
+  requireRole: vi.fn().mockResolvedValue({
     authenticated: true,
     identity: { id: "owner", email: "owner@naiabynadine.com", role: "owner" },
   }),
@@ -22,7 +24,7 @@ vi.mock("~/lib/withdrawal-request.server", () => ({
   closeWithdrawalRequest: vi.fn(),
 }));
 
-import { requireAdminSession } from "~/lib/internal-auth.server";
+import { requireRole } from "~/lib/internal-auth.server";
 import {
   listOpenWithdrawalRequests,
   acknowledgeWithdrawalRequest,
@@ -30,7 +32,7 @@ import {
 } from "~/lib/withdrawal-request.server";
 import { loader, action } from "./admin.withdrawal-requests";
 
-const mockRequireAdmin = () => requireAdminSession as ReturnType<typeof vi.fn>;
+const mockRequireRole = () => requireRole as ReturnType<typeof vi.fn>;
 const mockList = () => listOpenWithdrawalRequests as ReturnType<typeof vi.fn>;
 const mockAck = () => acknowledgeWithdrawalRequest as ReturnType<typeof vi.fn>;
 const mockClose = () => closeWithdrawalRequest as ReturnType<typeof vi.fn>;
@@ -46,22 +48,30 @@ function actionRequest(fields: Record<string, string>) {
 
 beforeEach(() => vi.clearAllMocks());
 
-describe("admin.withdrawal-requests — session and role requirements", () => {
-  it("loader requires an admin session and lists open requests", async () => {
+describe("admin.withdrawal-requests — session and role requirements (owner OR staff)", () => {
+  it("loader requires a session with the right role and lists open requests", async () => {
+    mockRequireRole().mockResolvedValueOnce({ authenticated: true, identity: { id: "owner", email: "owner@naiabynadine.com", role: "owner" } });
     mockList().mockResolvedValue([{ id: "wr-1", reference: "WD-20261117-ABC123" }]);
     const result = await loader({ request: new Request("http://localhost/admin/withdrawal-requests") } as any);
-    expect(mockRequireAdmin()).toHaveBeenCalled();
+    expect(mockRequireRole()).toHaveBeenCalledWith(expect.anything(), ["owner", "staff"]);
     expect(result).toEqual({ openRequests: [{ id: "wr-1", reference: "WD-20261117-ABC123" }] });
   });
 
-  it("loader rejects a non-owner session with 403, never listing anything — the whole point of restricted case access", async () => {
-    mockRequireAdmin().mockResolvedValueOnce({ authenticated: true, identity: { id: "staff-1", email: "staff@x.com", role: "staff" } });
+  it("a STAFF session is accepted, not rejected — the point of this being a least-privilege route, not an owner-only one", async () => {
+    mockRequireRole().mockResolvedValueOnce({ authenticated: true, identity: { id: "staff", email: "staff@naiabynadine.com", role: "staff" } });
+    mockList().mockResolvedValue([]);
+    const result = await loader({ request: new Request("http://localhost/admin/withdrawal-requests") } as any);
+    expect(result).toEqual({ openRequests: [] });
+  });
+
+  it("loader propagates a 403 from requireRole (e.g. no session, or a role outside owner/staff) without listing anything", async () => {
+    mockRequireRole().mockRejectedValueOnce(new Response("Forbidden", { status: 403 }));
     await expect(loader({ request: new Request("http://localhost/admin/withdrawal-requests") } as any)).rejects.toMatchObject({ status: 403 });
     expect(mockList()).not.toHaveBeenCalled();
   });
 
-  it("action rejects a non-owner session with 403, never calling acknowledge or close", async () => {
-    mockRequireAdmin().mockResolvedValueOnce({ authenticated: true, identity: { id: "staff-1", email: "staff@x.com", role: "staff" } });
+  it("action propagates a 403 from requireRole without calling acknowledge or close", async () => {
+    mockRequireRole().mockRejectedValueOnce(new Response("Forbidden", { status: 403 }));
     const request = actionRequest({ intent: "close", id: "wr-1", note: "resolved" });
     await expect(action({ request } as any)).rejects.toMatchObject({ status: 403 });
     expect(mockClose()).not.toHaveBeenCalled();
@@ -75,6 +85,14 @@ describe("admin.withdrawal-requests — acknowledge", () => {
     const result = await action({ request } as any);
     expect(mockAck()).toHaveBeenCalledWith("wr-1", "owner@naiabynadine.com");
     expect(result).toEqual({ ok: true, intent: "acknowledge", message: "Marked acknowledged." });
+  });
+
+  it("a STAFF session's own email is used as performedBy too — the audit trail always reflects who actually acted", async () => {
+    mockRequireRole().mockResolvedValueOnce({ authenticated: true, identity: { id: "staff", email: "staff@naiabynadine.com", role: "staff" } });
+    mockAck().mockResolvedValue({ status: "acknowledged" });
+    const request = actionRequest({ intent: "acknowledge", id: "wr-1" });
+    await action({ request } as any);
+    expect(mockAck()).toHaveBeenCalledWith("wr-1", "staff@naiabynadine.com");
   });
 
   it("surfaces a not-found case as an error, not a thrown exception", async () => {

@@ -10,37 +10,44 @@
 // in docs/ops/refund-operations-sop.md, which this route's handler uses
 // alongside it, not instead of it.
 //
-// Auth: requireAdminSession + "owner" role, same convention as
-// admin.billing-overrides.tsx and admin.maintenance.tsx — a statutory
-// legal request record is at least as restricted as billing overrides.
+// Auth: owner OR staff, via the shared requireRole gate
+// (internal-auth.server.ts). This is the first admin route in this
+// codebase built as a least-privilege proof of concept: triaging a
+// withdrawal-request case (acknowledge/close with a note, both fully
+// audited via AdminAuditLog) is a reasonable task to delegate to a
+// designated staff member without also handing them access to
+// /admin/billing-overrides or /admin/maintenance, which remain
+// owner-only, UNCHANGED by this file. See
+// docs/ops/staff-role-and-dispute-alerting.md for why this one route was
+// chosen first and what would need to be true before extending the same
+// treatment to billing-overrides. Practically inert today regardless:
+// INTERNAL_STAFF_SECRET is unset everywhere, so no staff session can
+// actually be created yet (verifyStaffSecret fails closed) — see that
+// function's own comment.
 //
 // URL: /admin/withdrawal-requests
 
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { useActionData, useLoaderData } from "react-router";
-import { requireAdminSession } from "~/lib/internal-auth.server";
+import { requireRole } from "~/lib/internal-auth.server";
 import {
   listOpenWithdrawalRequests,
   acknowledgeWithdrawalRequest,
   closeWithdrawalRequest,
 } from "~/lib/withdrawal-request.server";
 
-async function requireOwner(request: Request) {
-  const session = await requireAdminSession(request);
-  if (session.identity.role !== "owner") {
-    throw new Response("Forbidden", { status: 403 });
-  }
-  return session;
+async function requireOwnerOrStaff(request: Request) {
+  return requireRole(request, ["owner", "staff"]);
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requireOwner(request);
+  await requireOwnerOrStaff(request);
   const openRequests = await listOpenWithdrawalRequests();
   return { openRequests };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  const { identity } = await requireOwner(request);
+  const { identity } = await requireOwnerOrStaff(request);
   const form = await request.formData();
   const intent = form.get("intent");
   const id = String(form.get("id") ?? "");

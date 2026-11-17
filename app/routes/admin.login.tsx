@@ -9,7 +9,7 @@
 
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { redirect, useActionData } from "react-router";
-import { verifyAdminSecret, createAdminSession, requireAdminSession } from "~/lib/internal-auth.server";
+import { verifyAdminSecret, verifyStaffSecret, createAdminSession, requireAdminSession } from "~/lib/internal-auth.server";
 import {
   checkAdminLoginLockout,
   recordAdminLoginAttempt,
@@ -39,17 +39,25 @@ export async function action({ request }: ActionFunctionArgs) {
   const form = await request.formData();
   const password = String(form.get("password") ?? "");
 
+  // 2026-11-17: owner secret checked first, staff secret only as a
+  // fallback — a plaintext password equal to BOTH secrets is the
+  // operator's own misconfiguration to avoid, not something this code
+  // can detect or should guess around. verifyStaffSecret fails closed
+  // (false) unconditionally today since INTERNAL_STAFF_SECRET is unset
+  // everywhere — see that function's own comment. Until a human
+  // provisions it, this `okStaff` branch can never actually be reached.
   const ok = verifyAdminSecret(password);
-  await recordAdminLoginAttempt(ip, ok);
+  const okStaff = !ok && verifyStaffSecret(password);
+  await recordAdminLoginAttempt(ip, ok || okStaff);
 
-  if (!ok) {
+  if (!ok && !okStaff) {
     // Lightweight delay on top of the durable lockout above — slows a
     // single fast-retrying client even before it hits MAX_FAILED_ATTEMPTS.
     await new Promise<void>((resolve) => setTimeout(resolve, 350));
     return { error: "Incorrect password." };
   }
 
-  const cookie = await createAdminSession();
+  const cookie = await createAdminSession(ok ? "owner" : "staff");
   return redirect("/admin", { headers: { "Set-Cookie": cookie } });
 }
 
