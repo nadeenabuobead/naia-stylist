@@ -238,7 +238,26 @@ describe("§S3 customer identity and Closet privacy", () => {
   });
 
   it("S16 — Closet evidence is customer-isolated: different profiles yield different verdicts", () => {
-    // Customer A: avoids the product's color → not-best-addition.
+    // Customer A: avoids the product's color → a caveat the other customer
+    // does not get, and a strictly worse verdict than B's.
+    //
+    // 2026-11-17 (C7): this assertion previously pinned rA.verdict to the
+    // literal "not-best-addition". That expectation encoded the PRE-B2c
+    // scoring rule, where an avoid-colour conflict carried a negative score
+    // weight large enough to cross the `score <= -2` worst-verdict threshold
+    // on its own. The B2c correction (nadine-product-assessment.ts:348-367,
+    // 409-417) deliberately removed that arithmetic influence — avoidColors
+    // is now preference evidence that raises a caveat and contributes
+    // nothing to `score`, so it is structurally incapable of producing
+    // "not-best-addition" by itself. The literal was therefore stale, not a
+    // broken security property.
+    //
+    // The property S16 actually exists to defend is customer ISOLATION: two
+    // different profiles must not collapse to the same assessment. That is
+    // asserted below on observable behaviour (the differing verdict and the
+    // A-only caveat/signal) rather than on one scoring-rule-specific label,
+    // so a future re-weighting cannot silently void this test the way the
+    // old literal did.
     const profileA = makeProfile({ avoidColors: ["Cream"] });
     const rA = assessProduct(
       {
@@ -266,8 +285,38 @@ describe("§S3 customer identity and Closet privacy", () => {
       profileB,
       [],
     );
-    assert.equal(rA.verdict, "not-best-addition");
+    // The isolation property itself: the two customers' assessments must be
+    // distinguishable, and specifically A's must be the worse of the two.
     assert.notEqual(rA.verdict, rB.verdict, "profiles must produce isolated verdicts");
+
+    // A's avoided colour must be detected and surfaced to A only — this is
+    // the per-customer evidence that must never leak across profiles.
+    assert.deepEqual(
+      rA.signals.avoidColorConflict,
+      ["Cream"],
+      "customer A's avoided colour must be detected on A's assessment",
+    );
+    assert.ok(
+      rA.caveats.some((c) => c.code === "avoid-color-conflict"),
+      "customer A must receive the avoid-colour caveat",
+    );
+    assert.ok(
+      !rB.caveats.some((c) => c.code === "avoid-color-conflict"),
+      "customer B, who avoids nothing, must NOT receive A's caveat",
+    );
+
+    // B — identical product, no avoided colour, no caveats at all — must
+    // reach the unqualified best verdict, so A's caveat is demonstrably what
+    // held A back rather than the two simply landing on the same bucket.
+    assert.equal(rB.verdict, "strong-match", "customer B has no caveats and must reach strong-match");
+    assert.notEqual(rA.verdict, "strong-match", "customer A's conflict must prevent the unqualified verdict");
+
+    // Whole-assessment isolation, not just the verdict field.
+    assert.notEqual(
+      JSON.stringify(rA),
+      JSON.stringify(rB),
+      "two different profiles must never produce byte-identical assessments",
+    );
   });
 
   it("S17 — forged numeric product ID does not resolve", () => {
