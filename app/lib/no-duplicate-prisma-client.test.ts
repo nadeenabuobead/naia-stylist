@@ -89,3 +89,43 @@ describe("no-duplicate-prisma-client — app/lib/prisma.server.ts must stay dele
     assert.match(src, /connection_limit=2/, "db.server.js must keep its connection_limit=2 cap — this fix must not touch it");
   });
 });
+
+// Broader guard, added 2026-11-17 after app/api/stats/routes.js — a second,
+// independent, DEAD-CODE example of exactly this mistake (unreachable from
+// routes.ts, no Vercel convention serves app/api/**, confirmed by zero
+// imports anywhere) — was found constructing its own uncapped PrismaClient.
+// The file-path check above only catches a re-import of the one already-
+// deleted module; it says nothing about a DIFFERENT new file doing the same
+// thing a different way. This scans for the construction itself.
+//
+// Deliberately excludes *.test.* files: app/lib/ai/taste-reconcile.journeys.test.ts
+// and app/lib/ai/wardrobe-journeys.test.ts both construct their own
+// PrismaClient too, but legitimately — gated behind `if (skip) return`,
+// pointed at an explicitly separate, dedicated test database (never the
+// shared pooled connection), and skipped entirely when that database isn't
+// configured. That is a different risk category from production/route code
+// silently bypassing the shared, connection-capped client — not what this
+// guard exists to catch.
+describe("no-duplicate-prisma-client — no direct `new PrismaClient(` construction anywhere in app/ except db.server.js", () => {
+  const NON_TEST_APP_FILES = ALL_APP_FILES.filter((f) => !/\.test\.(ts|tsx|js|jsx)$/.test(f));
+
+  it("app/db.server.js is the only non-test file under app/ that constructs a PrismaClient directly", () => {
+    const offenders = NON_TEST_APP_FILES.filter((f) => {
+      if (f === join(REPO_ROOT, "app/db.server.js")) return false;
+      const src = readFileSync(f, "utf8");
+      return /new\s+PrismaClient\s*\(/.test(src);
+    });
+    assert.deepEqual(
+      offenders.map((f) => f.slice(REPO_ROOT.length + 1)),
+      [],
+      "found non-test file(s) under app/ constructing their own PrismaClient instead of importing the shared client from ~/db.server — each one bypasses the connection_limit=2 cap and risks the same pool-exhaustion incident db.server.js's own header documents",
+    );
+  });
+
+  it("the dead app/api/stats/routes.js file (2026-11-17 finding) stays deleted", () => {
+    assert.ok(
+      !existsSync(join(REPO_ROOT, "app/api/stats/routes.js")),
+      "app/api/stats/routes.js was removed as unreachable dead code constructing its own uncapped PrismaClient — confirmed zero references anywhere (not in routes.ts, no Vercel api/ convention applies to a nested app/api/ path, no vercel.json rewrite, no import anywhere in app/) — it must not be re-added",
+    );
+  });
+});
