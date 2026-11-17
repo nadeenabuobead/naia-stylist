@@ -497,7 +497,19 @@ describe("§D — no remaining unauthenticated fetch to a paid AI/scan provider"
       if (!entry.isFile()) continue;
       if (!/\.(jsx?|tsx?)$/.test(entry.name)) continue;
       if (entry.name.includes(".test.")) continue;
-      const allowed = ["api.trigger-tryon.tsx", "api.tryon-status.$jobId.tsx", "api.staging-full-look-vto.tsx"];
+      const allowed = [
+        "api.trigger-tryon.tsx",
+        "api.tryon-status.$jobId.tsx",
+        "api.staging-full-look-vto.tsx",
+        // 2026-11-16 — checkFashnCredits() is a read-only GET /v1/credits
+        // balance check (FASHN's own docs: never billable, submits nothing).
+        // isAuthorized() in this same file fail-closes on four independent
+        // checks before any FASHN call is reachable: VERCEL_ENV must be
+        // preview/development (never production), NAIA_PROJECT_VARIANT must
+        // be "staging", a dedicated secret header, and an exact allowlisted
+        // QA customer ID.
+        "api.vto-qa-fixture.tsx",
+      ];
       if (allowed.includes(entry.name)) continue;
       const src = readFileSync(join(routesDir, entry.name), "utf8");
       // Strip full-line `//` comments before scanning: a route documenting,
