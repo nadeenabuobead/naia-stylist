@@ -390,8 +390,16 @@ export async function revertOverrideField(
 // ── Deletion ──────────────────────────────────────────────────────────────────
 
 /** Permanently deletes a single ClosetItem and its cascade children
- *  (ClosetItemAdminReview, ClosetAnalysisSnapshot). OutfitItem refs are set to null. */
-export async function deleteClosetItem(itemId: string): Promise<void> {
+ *  (ClosetItemAdminReview, ClosetAnalysisSnapshot). OutfitItem refs are set to null.
+ *
+ *  Returns the owning customerId (null if the item did not exist). 2026-11-17
+ *  (C3): the caller needs this to write a forensically useful audit record —
+ *  "which admin deleted whose data" is the question an audit log has to be
+ *  able to answer, and an itemId alone cannot answer it once the row is gone.
+ *  This value is read here rather than re-queried by the caller because the
+ *  row is already being fetched for the evidence cleanup below, and after the
+ *  delete there is nothing left to look it up from. */
+export async function deleteClosetItem(itemId: string): Promise<{ customerId: string | null }> {
   const item = await prisma.closetItem.findUnique({
     where: { id: itemId },
     select: { customerId: true },
@@ -408,11 +416,27 @@ export async function deleteClosetItem(itemId: string): Promise<void> {
       console.error("taste-evidence: failed to clean up evidence after admin closet item delete", err);
     }
   }
+
+  return { customerId: item?.customerId ?? null };
 }
 
-/** Permanently deletes multiple ClosetItems. Returns the count actually deleted. */
-export async function deleteClosetItems(itemIds: string[]): Promise<number> {
-  const items = await prisma.closetItem.findMany({
+/** Permanently deletes multiple ClosetItems.
+ *
+ *  Returns the count actually deleted plus the distinct set of affected
+ *  customerIds — see deleteClosetItem above for why the caller needs the
+ *  latter (C3 audit record). The count and the id set are reported
+ *  separately on purpose: they can legitimately disagree (a requested id
+ *  that no longer exists is counted by neither, and one customer can own
+ *  several of the deleted items), and a bulk cross-customer delete is
+ *  exactly the case where collapsing them would hide the blast radius. */
+export async function deleteClosetItems(
+  itemIds: string[],
+): Promise<{ count: number; customerIds: string[] }> {
+  // Explicitly annotated: this module's `prisma` import does not carry a
+  // narrow enough type for `select` to be inferred here, so without this the
+  // map below degrades to unknown[] and silently loses the string[] contract
+  // this function promises its caller.
+  const items: Array<{ id: string; customerId: string }> = await prisma.closetItem.findMany({
     where: { id: { in: itemIds } },
     select: { id: true, customerId: true },
   });
@@ -427,7 +451,10 @@ export async function deleteClosetItems(itemIds: string[]): Promise<number> {
     }
   }
 
-  return result.count;
+  return {
+    count: result.count,
+    customerIds: [...new Set(items.map((i) => i.customerId))],
+  };
 }
 
 // ── Stored classification fetcher ────────────────────────────────────────────

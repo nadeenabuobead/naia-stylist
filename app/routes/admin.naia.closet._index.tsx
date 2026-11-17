@@ -23,6 +23,13 @@ import {
   type NewIntentionReviewSummary,
 } from "~/lib/admin/closet-intelligence.server";
 import { markItemReviewed, deleteClosetItem, deleteClosetItems } from "~/lib/admin/closet-review.server";
+// 2026-11-17 (C3): these two intents are cross-customer, irreversible hard
+// deletes of another person's wardrobe data, and until now they were the
+// only destructive admin actions in the portal that wrote no audit record
+// at all — admin.maintenance.tsx already records every one of its own
+// (bulk) purges. performedBy must come from the authenticated session's
+// identity.email, never from request input (see admin-audit-log.server.ts).
+import { recordAdminAction } from "~/lib/admin-audit-log.server";
 
 const PAGE_SIZE = 25;
 import type { ClosetCategory } from "@prisma/client";
@@ -81,7 +88,16 @@ export async function action({ request }: ActionFunctionArgs) {
     if (typeof itemId !== "string" || !itemId.trim()) {
       return Response.json({ error: "Missing itemId" }, { status: 400 });
     }
-    await deleteClosetItem(itemId);
+    const { customerId } = await deleteClosetItem(itemId);
+    // Audit AFTER the delete succeeded, not before: a record saying an item
+    // was deleted when the delete actually threw would be worse than no
+    // record. If the audit write itself fails the delete still stands, so
+    // this must not be swallowed — it propagates as a 500 so the gap is
+    // visible rather than silent.
+    await recordAdminAction(reviewedBy, "closet-item-hard-delete", {
+      itemId,
+      customerId,
+    });
     return Response.json({ ok: true, deleted: 1 });
   }
 
@@ -91,8 +107,17 @@ export async function action({ request }: ActionFunctionArgs) {
     if (ids.length === 0) {
       return Response.json({ error: "No items selected" }, { status: 400 });
     }
-    const deleted = await deleteClosetItems(ids);
-    return Response.json({ ok: true, deleted });
+    const { count, customerIds } = await deleteClosetItems(ids);
+    // requestedCount is recorded alongside count because they can disagree
+    // (an id that no longer exists), and that discrepancy is itself worth
+    // keeping for a cross-customer bulk delete.
+    await recordAdminAction(reviewedBy, "closet-item-bulk-hard-delete", {
+      requestedCount: ids.length,
+      deletedCount: count,
+      itemIds: ids,
+      customerIds,
+    });
+    return Response.json({ ok: true, deleted: count });
   }
 
   throw new Response("Bad request", { status: 400 });
