@@ -55,8 +55,21 @@ describe("retryPendingCloudinaryDeletion — known delivery type (the common cas
     const result = await retryPendingCloudinaryDeletion("pcd-1");
 
     expect(mockVerify()).not.toHaveBeenCalled();
-    expect(mockDelete()).toHaveBeenCalledWith("naia-wardrobe/c/x", "authenticated");
+    expect(mockDelete()).toHaveBeenCalledWith("naia-wardrobe/c/x", "authenticated", undefined, undefined, undefined);
     expect(result).toEqual({ status: "resolved" });
+  });
+
+  it("H7 completion — passes the row's own resourceType through, not the deleteCloudinaryAsset default ('image')", async () => {
+    // Regression target: a recorded row for a non-image asset (e.g. the
+    // export-zip sweep's 'raw' ZIP archives) must retry against its real
+    // resource_type, or Cloudinary's Admin API will never find it to delete
+    // and the row would retry forever without ever resolving.
+    mockFindUnique().mockResolvedValue({ id: "pcd-raw-1", publicId: "naia-data-export/job-1", deliveryType: "private", resourceType: "raw", resolvedAt: null });
+    mockDelete().mockResolvedValue({ ok: true });
+
+    await retryPendingCloudinaryDeletion("pcd-raw-1");
+
+    expect(mockDelete()).toHaveBeenCalledWith("naia-data-export/job-1", "private", undefined, undefined, "raw");
   });
 
   it("not-found and already-resolved rows never reach deleteCloudinaryAsset", async () => {
@@ -148,7 +161,7 @@ describe("retryPendingCloudinaryDeletion — deliveryType: 'unknown' (the correc
 
     const result = await retryPendingCloudinaryDeletion("pcd-3");
 
-    expect(mockDelete()).toHaveBeenCalledWith("naia-wardrobe/c/y", "private");
+    expect(mockDelete()).toHaveBeenCalledWith("naia-wardrobe/c/y", "private", undefined, undefined, undefined);
     expect(mockDelete()).not.toHaveBeenCalledWith("naia-wardrobe/c/y", "unknown");
     expect(result).toEqual({ status: "resolved" });
   });

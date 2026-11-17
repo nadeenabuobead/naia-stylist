@@ -232,7 +232,15 @@ export async function retryPendingCloudinaryDeletion(id: string): Promise<RetryC
     await prisma.pendingCloudinaryDeletion.update({ where: { id }, data: { deliveryType } });
   }
 
-  const result = await deleteCloudinaryAsset(row.publicId, deliveryType);
+  // 2026-11-17 (H7 completion) — row.resourceType was being silently
+  // dropped here: deleteCloudinaryAsset's 5th parameter defaults to
+  // "image", so a recorded row for a non-image asset (e.g. the export-zip
+  // sweep's "raw" ZIP archives, the first real caller to record one) would
+  // retry forever against the wrong resource_type and never actually
+  // resolve. resourceType is a plain default-valued column (no "unknown"
+  // sentinel the way deliveryType has), so it is always safe to pass
+  // through directly.
+  const result = await deleteCloudinaryAsset(row.publicId, deliveryType, undefined, undefined, row.resourceType);
   if (result.ok) {
     await prisma.pendingCloudinaryDeletion.update({ where: { id }, data: { resolvedAt: new Date() } });
     return { status: "resolved" };

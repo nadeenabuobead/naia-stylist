@@ -94,6 +94,7 @@ import {
   createChunkedRawUploader,
   type CloudinaryConfig,
 } from "./cloudinary-admin.server";
+import { recordFailedCloudinaryDeletion } from "./cloudinary-deletion-record.server";
 
 const EXPORT_EXPIRY_HOURS = 24;
 const EXPORT_RESOURCE_TYPE = "raw";
@@ -504,6 +505,7 @@ export const SWEEP_BATCH_SIZE = 50;
 export async function sweepExpiredExportJobs(
   _deleteAsset: typeof deleteCloudinaryAsset = deleteCloudinaryAsset,
   nowFn: () => number = Date.now,
+  _record: typeof recordFailedCloudinaryDeletion = recordFailedCloudinaryDeletion,
 ): Promise<SweepExpiredExportJobsResult> {
   const expired = await prisma.customerExportJob.findMany({
     where: { status: "COMPLETED", expiresAt: { lte: new Date(nowFn()) }, publicId: { not: null } },
@@ -521,6 +523,23 @@ export async function sweepExpiredExportJobs(
       deleted++;
     } else {
       failed++;
+      // 2026-11-17 (H7 completion) — this used to just increment `failed`
+      // and move on. The job row stays COMPLETED with its expired publicId
+      // still set (the DB update above only runs in the result.ok branch),
+      // so the sweep's own return value was the only trace of the failure —
+      // nothing durable, nothing the retry sweep or /admin/maintenance could
+      // ever pick up. resourceType is explicitly "raw" (not the recorder's
+      // "image" default): this is a ZIP archive, and the retry path must
+      // destroy it under the same resource_type it was uploaded as, or
+      // Cloudinary's Admin API will not find it.
+      await _record({
+        customerId: job.customerId,
+        publicId: job.publicId as string,
+        deliveryType: EXPORT_DELIVERY_TYPE,
+        resourceType: EXPORT_RESOURCE_TYPE,
+        context: "export-zip-sweep-expired",
+        lastError: result.errorCode ?? "Cloudinary deletion failed",
+      });
     }
   }
 

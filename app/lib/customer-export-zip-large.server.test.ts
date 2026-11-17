@@ -24,6 +24,13 @@ vi.mock("../db.server", () => {
       findFirst: vi.fn(),
       findMany: vi.fn(),
     },
+    // 2026-11-17 (H7 completion) — sweepExpiredExportJobs now durably
+    // records a failed deletion via the real (unmocked)
+    // recordFailedCloudinaryDeletion, which writes here. Mocked at the DB
+    // boundary, same as the rest of this file's own stated philosophy —
+    // the recorder's own logic is already unit-tested in
+    // cloudinary-deletion-record.server.test.ts.
+    pendingCloudinaryDeletion: { upsert: vi.fn().mockResolvedValue({}) },
   };
   // A straight passthrough — real $transaction isolation semantics are
   // exercised in reserveExportJobSlot's own dedicated tests below via an
@@ -550,7 +557,7 @@ describe("sweepExpiredExportJobs — admin-triggered cleanup", () => {
 
   it("a per-asset Cloudinary failure is counted but does not stop the rest of the sweep, and leaves that job COMPLETED for the next run to retry", async () => {
     (prisma as any).customerExportJob.findMany.mockResolvedValueOnce([
-      { id: "job-1", publicId: "naia-exports/cust-1/job-1.zip" },
+      { id: "job-1", publicId: "naia-exports/cust-1/job-1.zip", customerId: "cust-1" },
     ]);
     vi.mocked(deleteCloudinaryAsset).mockResolvedValueOnce({ ok: false, errorCode: "PROVIDER_ERROR" });
 
@@ -558,6 +565,43 @@ describe("sweepExpiredExportJobs — admin-triggered cleanup", () => {
 
     expect(result).toEqual({ checked: 1, deleted: 0, failed: 1, more: false });
     expect((prisma as any).customerExportJob.update).not.toHaveBeenCalled();
+  });
+
+  it("H7 completion — a per-asset Cloudinary failure is now durably recorded for the retry sweep, not just counted and dropped", async () => {
+    (prisma as any).customerExportJob.findMany.mockResolvedValueOnce([
+      { id: "job-1", publicId: "naia-exports/cust-1/job-1.zip", customerId: "cust-1" },
+    ]);
+    vi.mocked(deleteCloudinaryAsset).mockResolvedValueOnce({ ok: false, errorCode: "PROVIDER_ERROR" });
+
+    await sweepExpiredExportJobs();
+
+    expect((prisma as any).pendingCloudinaryDeletion.upsert).toHaveBeenCalledWith({
+      where: { publicId: "naia-exports/cust-1/job-1.zip" },
+      create: expect.objectContaining({
+        customerId: "cust-1",
+        publicId: "naia-exports/cust-1/job-1.zip",
+        // Must be "raw", never the recorder's "image" default — this is a
+        // ZIP archive, and the retry path must destroy it under its real
+        // resource_type or Cloudinary's Admin API will not find it.
+        resourceType: "raw",
+        deliveryType: "private",
+        context: "export-zip-sweep-expired",
+        attemptCount: 1,
+        lastError: "PROVIDER_ERROR",
+      }),
+      update: expect.any(Object),
+    });
+  });
+
+  it("H7 completion — a successful deletion never writes a PendingCloudinaryDeletion row", async () => {
+    (prisma as any).customerExportJob.findMany.mockResolvedValueOnce([
+      { id: "job-1", publicId: "naia-exports/cust-1/job-1.zip", customerId: "cust-1" },
+    ]);
+    vi.mocked(deleteCloudinaryAsset).mockResolvedValueOnce({ ok: true });
+
+    await sweepExpiredExportJobs();
+
+    expect((prisma as any).pendingCloudinaryDeletion.upsert).not.toHaveBeenCalled();
   });
 
   it("nothing expired — a clean no-op, not an error", async () => {
