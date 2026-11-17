@@ -483,17 +483,21 @@ export async function action({ request }) {
 
   // ── createDuplicateMonthTrendEditFixture / deleteDuplicateMonthTrendEditFixture ──
   // Unlike every other action in this file, EditorialTrendReport is NOT
-  // customer-scoped — it is global, publicly-visible content on /trends and
-  // /trends/my-edits for every real customer on this staging environment,
-  // not just test-batch1- fixtures. That is a materially bigger blast
-  // radius than this file's usual "wrong customerId can only ever touch a
-  // test-batch1- row" guarantee, so it gets an extra, independent gate on
-  // top of the standard staging-only + x-seed-secret checks every other
-  // action already requires: TREND_EDIT_FIXTURE_ENABLED must be the exact
-  // string "true", fail-closed when unset — same pattern as
-  // SAVED_LOOKS_FIXTURE_CUSTOMER_IDS above, applied to the axis that
-  // actually matters here (existence of ANY such content at all, not which
-  // customer it's scoped to, since there is no customer to scope to).
+  // customer-scoped — it is global content with no customerId at all. The
+  // standard getPublishedEditorialReports() query (used by /trends,
+  // /trends/:slug and every lens page) only ever selects status: PUBLISHED,
+  // so these rows are created as status: DRAFT specifically to stay
+  // structurally invisible to that query and therefore to every real
+  // customer, with no reliance on a convention that could be bypassed by a
+  // future change to this file. The ONLY path that can ever surface them is
+  // getPublishedEditorialReportsForQaPreview() in editorial-reports.server.ts,
+  // which requires BOTH TREND_EDIT_FIXTURE_ENABLED === "true" AND an exact
+  // x-trend-edit-fixture-preview header match against
+  // TREND_EDIT_FIXTURE_PREVIEW_SECRET — two independent secrets/flags, not
+  // one. /trends/my-edits is the only route wired to call that preview
+  // function; every other route keeps calling the unmodified
+  // getPublishedEditorialReports(), so this change cannot leak the fixture
+  // rows into any other page even for the QA session itself.
   //
   // No caller-supplied input of any kind — both the two fixture slugs and
   // the editionMonth they share are hardcoded below, so this can never
@@ -501,7 +505,9 @@ export async function action({ request }) {
   // matter what a caller sends. editionMonth is deliberately a far-future,
   // never-real value (2030-01) so it can never collide with or be mistaken
   // for genuine editorial content, and is trivially greppable for cleanup
-  // verification. Both rows are clearly marked in their own title/summary
+  // verification — this is now safe regardless of the loader's sort order,
+  // since DRAFT status (not editionMonth) is what keeps it off every real
+  // customer's page. Both rows are clearly marked in their own title/summary
   // text as QA-only. Idempotent (upsert, not create) — re-running this
   // action is always safe and never creates a 3rd/4th row.
   if (act === "createDuplicateMonthTrendEditFixture" || act === "deleteDuplicateMonthTrendEditFixture") {
@@ -519,7 +525,7 @@ export async function action({ request }) {
 
     const base = {
       season: "QA Fixture — not a real season",
-      status: "PUBLISHED",
+      status: "DRAFT",
       editionMonth: EDITION_MONTH,
       summary: "QA fixture — safe to ignore. Exercises the same-editionMonth grouping path only.",
       editorialIntro: "QA fixture — safe to ignore. Exercises the same-editionMonth grouping path only.",

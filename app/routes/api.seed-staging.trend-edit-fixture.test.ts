@@ -101,14 +101,20 @@ describe("§S7 seed-staging duplicate-month Trend Edit fixture", () => {
     expect(json.editionMonth).toBe("2030-01");
   });
 
-  it("S704 — both rows are status PUBLISHED and clearly marked as QA-only in title/summary", async () => {
+  it("S704 — both rows are status DRAFT (invisible to the standard published query) and clearly marked as QA-only in title/summary", async () => {
     (prisma.editorialTrendReport.upsert as any).mockImplementation(({ create }: any) =>
       Promise.resolve({ id: `fixture_${create.slug}`, slug: create.slug }),
     );
     await action(makeActionRequest({ _action: "createDuplicateMonthTrendEditFixture" }) as any);
 
     for (const call of (prisma.editorialTrendReport.upsert as any).mock.calls) {
-      expect(call[0].create.status).toBe("PUBLISHED");
+      // DRAFT, not PUBLISHED: getPublishedEditorialReports() only ever
+      // selects status: PUBLISHED, so this is what keeps the fixture rows
+      // off /trends, /trends/:slug and every real customer's page by
+      // construction — not by convention. See
+      // getPublishedEditorialReportsForQaPreview in
+      // editorial-reports.server.ts for the one gated exception.
+      expect(call[0].create.status).toBe("DRAFT");
       expect(call[0].create.title).toMatch(/^\[QA TEST\]/);
       expect(call[0].create.summary).toMatch(/QA fixture/i);
     }

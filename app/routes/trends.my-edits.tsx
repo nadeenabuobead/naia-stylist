@@ -1,7 +1,7 @@
 import type { LinksFunction, LoaderFunctionArgs } from "react-router";
 import { Link, useLoaderData } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
-import { getPublishedEditorialReports } from "~/lib/editorial-reports.server";
+import { getPublishedEditorialReportsForQaPreview } from "~/lib/editorial-reports.server";
 import {
   getEffectiveEditionPeriod,
   formatEditionMonthLabel,
@@ -60,7 +60,7 @@ type LoaderData = {
 export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderData> {
   const customer = await requireCurrentNaiaCustomer(request);
 
-  const reports = (await getPublishedEditorialReports())
+  const reports = (await getPublishedEditorialReportsForQaPreview(request))
     .slice()
     .sort((a, b) => {
       const pa = getEffectiveEditionPeriod(a) ?? "";

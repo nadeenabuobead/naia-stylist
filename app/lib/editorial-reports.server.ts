@@ -76,6 +76,45 @@ export async function getPublishedEditorialReports(): Promise<TrendReportData[]>
   return rows.map(dbToTrendReportData);
 }
 
+// #23 QA fixture only — see api.seed-staging.jsx's
+// createDuplicateMonthTrendEditFixture comment for the full rationale.
+// Every real customer, and every other route in this app, keeps calling
+// getPublishedEditorialReports() above completely unmodified. This wrapper
+// is wired into exactly one route (trends.my-edits.tsx) and only changes
+// behaviour when BOTH conditions hold on the SAME request:
+//   1. TREND_EDIT_FIXTURE_ENABLED === "true" (already required to create
+//      the fixture rows in the first place), and
+//   2. the request's x-trend-edit-fixture-preview header exactly matches
+//      TREND_EDIT_FIXTURE_PREVIEW_SECRET (a second, independent secret —
+//      never logged, never returned in any response body).
+// Without an exact match on both, this returns byte-for-byte the same
+// result as getPublishedEditorialReports() — i.e. the fixture rows (status:
+// DRAFT) stay invisible, same as they are to every other customer and
+// every other page.
+const QA_FIXTURE_SLUGS = [
+  "test-batch1-trend-edit-samemonth-a",
+  "test-batch1-trend-edit-samemonth-b",
+];
+
+export async function getPublishedEditorialReportsForQaPreview(
+  request: Request,
+): Promise<TrendReportData[]> {
+  const published = await getPublishedEditorialReports();
+
+  const flagOn = process.env.TREND_EDIT_FIXTURE_ENABLED === "true";
+  const secret = process.env.TREND_EDIT_FIXTURE_PREVIEW_SECRET;
+  if (!flagOn || !secret) return published;
+
+  const provided = request.headers.get("x-trend-edit-fixture-preview");
+  if (!provided || provided !== secret) return published;
+
+  const fixtureRows = await prisma.editorialTrendReport.findMany({
+    where: { slug: { in: QA_FIXTURE_SLUGS }, status: "DRAFT" },
+    orderBy: [{ order: "asc" }, { publishedAt: "desc" }],
+  });
+  return [...published, ...fixtureRows.map(dbToTrendReportData)];
+}
+
 export async function getEditorialReportBySlug(slug: string): Promise<TrendReportData | null> {
   // Check if ANY DB record exists for this slug (regardless of status).
   // If it does, the admin publishing status is authoritative — return null for

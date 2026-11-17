@@ -31,8 +31,8 @@ vi.mock("~/lib/naia-session.server", () => ({
   requireCurrentNaiaCustomer: vi.fn(),
 }));
 
-vi.mock("~/lib/editorial-reports.server", () => ({
-  getPublishedEditorialReports: vi.fn().mockResolvedValue([
+vi.mock("~/lib/editorial-reports.server", () => {
+  const getPublishedEditorialReports = vi.fn().mockResolvedValue([
     {
       slug: "spring-2026-soft-structure",
       title: "Spring 2026 Soft Structure",
@@ -49,8 +49,18 @@ vi.mock("~/lib/editorial-reports.server", () => ({
       summary: "Tailoring becomes more fluid.",
       published: true,
     },
-  ]),
-}));
+  ]);
+  return {
+    getPublishedEditorialReports,
+    // trends.my-edits.tsx calls the QA-preview wrapper, not the plain
+    // getter directly (see #23's customer-restricted fixture design in
+    // editorial-reports.server.ts). Every test in this file drives the
+    // result via getPublishedEditorialReports's own mock, so this just
+    // delegates to the same mock rather than needing its own.
+    getPublishedEditorialReportsForQaPreview: (..._args: unknown[]) =>
+      getPublishedEditorialReports(),
+  };
+});
 
 vi.mock("~/lib/trend-evidence.server", () => ({
   getShopperEvidence: vi.fn(),
