@@ -51,6 +51,10 @@ vi.mock("~/lib/ai/closet-preview-analysis.server", () => ({
   previewAnalyzeGarment: vi.fn(),
 }));
 
+vi.mock("~/lib/plan/entitlement.server", () => ({
+  checkEntitlement: vi.fn(),
+}));
+
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
 import {
   verifyCloudinaryAsset,
@@ -59,6 +63,7 @@ import {
 import { moderateImageContent } from "~/lib/image-moderation.server";
 import { screenGarmentSuitability } from "~/lib/image-suitability.server";
 import { previewAnalyzeGarment } from "~/lib/ai/closet-preview-analysis.server";
+import { checkEntitlement } from "~/lib/plan/entitlement.server";
 import { action } from "./api.closet-preview-analyze";
 
 const mockGetCustomer = () => getCurrentNaiaCustomer as ReturnType<typeof vi.fn>;
@@ -67,9 +72,10 @@ const mockDelete = () => deleteCloudinaryAsset as ReturnType<typeof vi.fn>;
 const mockModerate = () => moderateImageContent as ReturnType<typeof vi.fn>;
 const mockSuitability = () => screenGarmentSuitability as ReturnType<typeof vi.fn>;
 const mockPreview = () => previewAnalyzeGarment as ReturnType<typeof vi.fn>;
+const mockEntitlement = () => checkEntitlement as ReturnType<typeof vi.fn>;
 
-const CUSTOMER_A = { id: "customer-A" };
-const CUSTOMER_B = { id: "customer-B" };
+const CUSTOMER_A = { id: "customer-A", membershipStatus: "MEMBER" };
+const CUSTOMER_B = { id: "customer-B", membershipStatus: "MEMBER" };
 
 function ownPublicId(customer: typeof CUSTOMER_A) {
   return `naia-wardrobe/${customer.id}/synthetic-asset.jpg`;
@@ -85,6 +91,11 @@ function postAs(customer: typeof CUSTOMER_A | null, body: Record<string, unknown
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Default: entitled with room, so every pre-existing test below (none of
+  // which is about entitlement) exercises the SAME behaviour it did before
+  // the 2026-11-17 fix. Tests below that care about entitlement override
+  // this per-case.
+  mockEntitlement().mockResolvedValue({ allowed: true, limit: 250 });
 });
 
 describe("api.closet-preview-analyze action — authentication", () => {
@@ -109,6 +120,9 @@ describe("api.closet-preview-analyze action — ownership enforced before any de
     // The critical regression assertion: customer A's asset must never be
     // deleted as a side effect of customer B's request, consent or not.
     expect(mockDelete()).not.toHaveBeenCalled();
+    // Ownership is checked before entitlement too — a forged id never gets
+    // far enough to ask "does the REQUESTING customer have room?"
+    expect(mockEntitlement()).not.toHaveBeenCalled();
   });
 
   it("a forged publicId is rejected even when consent IS given — ownership still comes first", async () => {
@@ -176,6 +190,93 @@ describe("api.closet-preview-analyze action — consent enforced server-side, no
     expect(mockVerify()).toHaveBeenCalledWith(ownId, "private");
     expect(mockDelete()).not.toHaveBeenCalled();
     expect(res.data).toEqual({ category: "TOPS" });
+  });
+});
+
+// Regression coverage for the 2026-11-17 fix: before this, a zero-allowance
+// customer's upload reached BOTH moderateImageContent and
+// screenGarmentSuitability (two real, paid Claude calls) on every attempt,
+// because this endpoint had no entitlement gate of its own — only the FINAL
+// /closet add action (dd67ed9) checked capacity, far too late to save the cost.
+describe("api.closet-preview-analyze action — entitlement enforced BEFORE either paid Claude call", () => {
+  it("a customer with zero Closet allowance (limit===0) is rejected with the upgrade message, asset deleted, no paid calls made", async () => {
+    const ownId = ownPublicId(CUSTOMER_A);
+    mockEntitlement().mockResolvedValueOnce({ allowed: false, reason: "at_capacity", limit: 0 });
+
+    const res: any = await action({
+      request: postAs(CUSTOMER_A, { publicId: ownId, photoConsentGiven: true }),
+      params: {},
+      context: {},
+    } as any);
+
+    expect(res.init.status).toBe(403);
+    expect(res.data.error).toBe("Closet access is included with nAia Membership. Subscribe to start adding pieces.");
+    // The asset the client already uploaded before calling this endpoint must
+    // not be left orphaned.
+    expect(mockDelete()).toHaveBeenCalledWith(ownId, "private");
+    // The actual defect: neither paid Claude call may ever run for a
+    // zero-allowance customer, no matter what the image contains.
+    expect(mockModerate()).not.toHaveBeenCalled();
+    expect(mockSuitability()).not.toHaveBeenCalled();
+    expect(mockPreview()).not.toHaveBeenCalled();
+    // Nor the (cheaper, but still unnecessary) Cloudinary Admin verification call.
+    expect(mockVerify()).not.toHaveBeenCalled();
+  });
+
+  it("a genuinely full (non-zero limit) member gets the distinct 'closet is full' message, not the upgrade message — same branch as dd67ed9", async () => {
+    const ownId = ownPublicId(CUSTOMER_A);
+    mockEntitlement().mockResolvedValueOnce({ allowed: false, reason: "at_capacity", limit: 250 });
+
+    const res: any = await action({
+      request: postAs(CUSTOMER_A, { publicId: ownId, photoConsentGiven: true }),
+      params: {},
+      context: {},
+    } as any);
+
+    expect(res.init.status).toBe(403);
+    expect(res.data.error).toBe("Your closet is full. Remove some items to add new ones.");
+    expect(mockDelete()).toHaveBeenCalledWith(ownId, "private");
+    expect(mockModerate()).not.toHaveBeenCalled();
+    expect(mockSuitability()).not.toHaveBeenCalled();
+  });
+
+  it("checkEntitlement is called with this request's OWN authenticated customer id and membershipStatus — never client-supplied", async () => {
+    const ownId = ownPublicId(CUSTOMER_A);
+    mockEntitlement().mockResolvedValueOnce({ allowed: false, reason: "at_capacity", limit: 0 });
+
+    // A direct-call attempt that tries to smuggle a different customerId/
+    // membershipStatus/entitlement override in the body — none of it can
+    // reach checkEntitlement, which only ever sees the session's own values.
+    await action({
+      request: postAs(CUSTOMER_A, {
+        publicId: ownId,
+        photoConsentGiven: true,
+        customerId: "someone-else",
+        membershipStatus: "MEMBER",
+        allowed: true,
+        limit: 999,
+      }),
+      params: {},
+      context: {},
+    } as any);
+
+    expect(mockEntitlement()).toHaveBeenCalledWith(CUSTOMER_A.id, CUSTOMER_A.membershipStatus, "closet");
+  });
+
+  it("an entitled customer (allowed:true) proceeds past the gate to the consent check — entitlement alone never approves anything", async () => {
+    const ownId = ownPublicId(CUSTOMER_A);
+    mockEntitlement().mockResolvedValueOnce({ allowed: true, limit: 250 });
+
+    const res: any = await action({
+      request: postAs(CUSTOMER_A, { publicId: ownId, photoConsentGiven: false }),
+      params: {},
+      context: {},
+    } as any);
+
+    // Entitlement passed, but consent was withheld — still rejected, just on
+    // a different, later gate. Proves the new check is additive, not a
+    // replacement for the existing consent/moderation/suitability chain.
+    expect(res.data.error).toBe("Photo consent is required before analysis.");
   });
 });
 

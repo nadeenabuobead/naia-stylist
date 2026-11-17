@@ -7,15 +7,31 @@
 // Security contract:
 //   1. NaiaSession auth required (same as all customer-facing routes).
 //   2. publicId ownership validated — must start with naia-wardrobe/{customerId}/.
-//   3. Asset verified via Cloudinary Admin API — must exist and be type=private.
-//   4. Layer 2 content moderation (moderateImageContent) must PASS before analysis.
-//   5. Layer 3 garment suitability (screenGarmentSuitability) must PASS before analysis.
-//   6. Only POST accepted — loader returns 405.
+//   3. Closet entitlement checked — a customer with zero/no remaining Closet
+//      allowance is refused here, before either paid Claude call below ever
+//      runs. Found 2026-11-17: this endpoint had no entitlement gate at all,
+//      so a zero-allowance customer's upload triggered a real moderation call
+//      AND a real suitability call every time, for an item that could never
+//      actually be saved (closet._index.tsx's own capacity check, further
+//      downstream, would always reject it afterwards anyway). Uses the exact
+//      same checkEntitlement("closet") call and the exact same limit===0
+//      upgrade-message text as closet._index.tsx/api.closet.jsx (dd67ed9) —
+//      this is a second, EARLIER checkpoint on the same authoritative source
+//      of truth, not a separate rule that could drift from it. The final
+//      atomic reserveClosetSlot in closet._index.tsx is unchanged and remains
+//      the real race-safe enforcement point — this early check is purely a
+//      cost/latency fast-fail, never the only thing standing between a
+//      zero-allowance customer and a saved item.
+//   4. Asset verified via Cloudinary Admin API — must exist and be type=private.
+//   5. Layer 2 content moderation (moderateImageContent) must PASS before analysis.
+//   6. Layer 3 garment suitability (screenGarmentSuitability) must PASS before analysis.
+//   7. Only POST accepted — loader returns 405.
 //
-// On Layer 2 or Layer 3 failure the asset is deleted (matching the final-submit
-// pipeline) and requiresReupload:true is returned so the client can clear state.
-// NEEDS_CLARIFICATION (Layer 3) preserves the asset — the customer can fill in
-// details manually in the fallback form and resubmit.
+// On entitlement, Layer 2, or Layer 3 failure the asset is deleted (matching
+// the final-submit pipeline) and (for Layer 2/3) requiresReupload:true is
+// returned so the client can clear state. NEEDS_CLARIFICATION (Layer 3)
+// preserves the asset — the customer can fill in details manually in the
+// fallback form and resubmit.
 
 import { data, type ActionFunctionArgs } from "react-router";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
@@ -26,6 +42,7 @@ import {
   buildPrivateDownloadUrl,
   deleteCloudinaryAsset,
 } from "~/lib/cloudinary-admin.server";
+import { checkEntitlement } from "~/lib/plan/entitlement.server";
 import { moderateImageContent } from "~/lib/image-moderation.server";
 import { screenGarmentSuitability } from "~/lib/image-suitability.server";
 import { previewAnalyzeGarment } from "~/lib/ai/closet-preview-analysis.server";
@@ -78,7 +95,22 @@ export async function action({ request }: ActionFunctionArgs) {
     return data({ error: ownership.error }, { status: 400 });
   }
 
-  // 4. Photo consent (2026-10-19) — required before any AI analysis of the
+  // 4. Closet entitlement — same authoritative check and same limit===0
+  //    upgrade-message text as closet._index.tsx's final capacity check
+  //    (dd67ed9). Runs before consent/moderation/suitability so a
+  //    zero-allowance customer never triggers either paid Claude call below.
+  //    Ownership is already confirmed above, so it is safe to delete this
+  //    customer's own asset here rather than leave it orphaned.
+  const capacityCheck = await checkEntitlement(naiaCustomer.id, naiaCustomer.membershipStatus, "closet");
+  if (!capacityCheck.allowed) {
+    await deleteCloudinaryAsset(publicId, "private");
+    const message = capacityCheck.limit === 0
+      ? "Closet access is included with nAia Membership. Subscribe to start adding pieces."
+      : "Your closet is full. Remove some items to add new ones.";
+    return data({ error: message }, { status: 403 });
+  }
+
+  // 5. Photo consent (2026-10-19) — required before any AI analysis of the
   //    photo runs. Ownership is already confirmed above, so it is safe to
   //    delete this customer's own asset here rather than leave it orphaned.
   if (!extractConsentGiven(body)) {
@@ -86,7 +118,7 @@ export async function action({ request }: ActionFunctionArgs) {
     return data({ error: "Photo consent is required before analysis." }, { status: 400 });
   }
 
-  // 5. Asset verification — must exist and be private delivery type.
+  // 6. Asset verification — must exist and be private delivery type.
   const verify = await verifyCloudinaryAsset(publicId, "private");
   if (!verify.ok) {
     return data({ error: "Asset not found or could not be verified" }, { status: 400 });
@@ -95,14 +127,14 @@ export async function action({ request }: ActionFunctionArgs) {
     return data({ error: "Asset must be a private upload" }, { status: 400 });
   }
 
-  // 6. Build server-side download URL — required for safety checks (never trust client URLs).
+  // 7. Build server-side download URL — required for safety checks (never trust client URLs).
   const cfg = getCloudinaryConfig();
   if (!cfg) {
     return data({ error: "Service unavailable" }, { status: 503 });
   }
   const downloadUrl = buildPrivateDownloadUrl(cfg, publicId, verify.asset.format, "private");
 
-  // 7. Layer 2: content moderation — must run before any AI garment analysis.
+  // 8. Layer 2: content moderation — must run before any AI garment analysis.
   //    Matches the order enforced at final submission in the /closet action.
   const moderation = await moderateImageContent(downloadUrl);
   if (moderation.status === "MODERATION_UNAVAILABLE") {
@@ -120,7 +152,7 @@ export async function action({ request }: ActionFunctionArgs) {
     );
   }
 
-  // 8. Layer 3: garment suitability — no declaredCategory at preview stage
+  // 9. Layer 3: garment suitability — no declaredCategory at preview stage
   //    (customer hasn't confirmed category yet; category_mismatch cannot fire).
   const suitability = await screenGarmentSuitability(downloadUrl);
   if (suitability.status === "RETRY_IMAGE") {
@@ -147,7 +179,7 @@ export async function action({ request }: ActionFunctionArgs) {
     );
   }
 
-  // 9. Preview analysis — non-blocking timeout internal to previewAnalyzeGarment.
+  // 10. Preview analysis — non-blocking timeout internal to previewAnalyzeGarment.
   //    Pass the already-verified downloadUrl so Claude can fetch the private asset
   //    via the authenticated download API (CDN delivery does not serve private assets).
   const preview = await previewAnalyzeGarment(downloadUrl);
