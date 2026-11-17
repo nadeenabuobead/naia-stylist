@@ -15,9 +15,16 @@
 //   - DB image references are cleared regardless of Cloudinary outcome, so the
 //     UI never ends up pointing at a deleted asset.
 //   - "not found" from Cloudinary is treated as ok (idempotent).
+//   - 2026-11-17 (H7): a Cloudinary deletion that FAILS is durably recorded
+//     for the pending-deletion retry sweep instead of being discarded. This
+//     matters more here than almost anywhere else in the codebase: these two
+//     functions are the customer's own "delete my photo" privacy control, so
+//     a silently-dropped failure means the app told the customer their photo
+//     was gone while it was still sitting in storage.
 
 import prisma from "../db.server.js";
 import { deleteCloudinaryAsset, getCloudinaryConfig, type DeleteAssetFn } from "./cloudinary-admin.server.js";
+import { deleteCloudinaryAssetOrRecord } from "./cloudinary-deletion-record.server.js";
 import { resolveItemImage } from "./styleme/look-image-resolution.server.js";
 
 export type DeleteClosetPhotoResult =
@@ -37,9 +44,19 @@ export async function deleteClosetItemPhoto(
   if (!item) return { deleted: false, errorCode: "NOT_FOUND" };
 
   if (item.imagePublicId) {
-    await _deleteAsset(item.imagePublicId, "private");
     // Non-blocking: the DB fields are cleared regardless so the garment never
-    // renders a reference to a deleted/unreachable asset.
+    // renders a reference to a deleted/unreachable asset. But a failure is
+    // recorded (H7) — clearing the reference on the next line is exactly what
+    // makes a dropped failure unrecoverable without a full folder sweep.
+    await deleteCloudinaryAssetOrRecord(
+      {
+        customerId,
+        publicId: item.imagePublicId,
+        deliveryType: "private",
+        context: "closet-photo-deletion-failed",
+      },
+      _deleteAsset,
+    );
   }
 
   await prisma.closetItem.update({
@@ -73,7 +90,23 @@ export async function deleteAllClosetPhotos(
 
   for (const item of items) {
     if (!item.imagePublicId) continue;
-    const result = await _deleteAsset(item.imagePublicId, "private");
+    // Records each failure at the point of failure, not just in the returned
+    // failedAssets array (H7). Same reasoning as deleteCustomerVtoResults in
+    // fashn-tryon-service.server.ts, which already does this for the same
+    // reason: callers historically discarded failedAssets entirely — this
+    // function's own caller, settings.tsx's "remove all closet photos"
+    // action, calls it as a bare `await deleteAllClosetPhotos(customer.id)`
+    // and ignores the result. Recording inside the loop makes the obligation
+    // durable regardless of what any caller does with the return value.
+    const result = await deleteCloudinaryAssetOrRecord(
+      {
+        customerId,
+        publicId: item.imagePublicId,
+        deliveryType: "private",
+        context: "closet-photo-bulk-deletion-failed",
+      },
+      _deleteAsset,
+    );
     if (result.ok) deletedCount++;
     else failedAssets.push(item.imagePublicId);
   }

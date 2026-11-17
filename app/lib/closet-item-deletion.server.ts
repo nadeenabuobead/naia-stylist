@@ -14,9 +14,12 @@
 //     trades a potential orphaned asset for a blocked delete action, which is the
 //     correct tradeoff for a customer-initiated UI delete (not a self-service
 //     privacy deletion where retrying is expected).
+//   - 2026-11-17 (H7): "can be cleaned up separately" is now a concrete,
+//     durable obligation rather than an aspiration — see the call site below.
 
 import prisma from "../db.server.js";
 import { deleteCloudinaryAsset, type DeleteAssetFn } from "./cloudinary-admin.server.js";
+import { deleteCloudinaryAssetOrRecord } from "./cloudinary-deletion-record.server.js";
 import { writeSourceEvidence } from "./ai/taste-reconcile.server.js";
 
 export type DeleteClosetItemResult =
@@ -39,9 +42,37 @@ export async function deleteClosetItemWithImage(
   // Attempt Cloudinary deletion first. "not found" is already treated as ok by
   // deleteCloudinaryAsset, so re-deleting a previously-deleted asset is safe.
   if (item.imagePublicId) {
-    await _deleteAsset(item.imagePublicId, "private");
-    // Intentionally not blocking on failure: the DB record is removed regardless so
-    // the customer's closet is clean. Any orphaned Cloudinary asset can be audited.
+    // Intentionally still not blocking on failure: the DB record is removed
+    // regardless so the customer's closet is clean.
+    //
+    // 2026-11-17 (H7) — but the failure is no longer discarded. The old code
+    // dropped the return value entirely, and because deleteCloudinaryAsset
+    // does NOT throw on a provider rejection (it returns
+    // { ok:false, errorCode }), a failed delete left no trace anywhere: the
+    // ClosetItem row is deleted on the next line, so the asset becomes
+    // unreferenced, and nothing recorded that it still needs deleting.
+    //
+    // The only thing that would ever have reclaimed it is the bounded orphan
+    // sweep (cloudinary-orphan-sweep.server.ts), which enumerates the whole
+    // naia-wardrobe/{customerId}/ folder — and that sweep has no scheduled
+    // trigger: runBoundedSweep is reachable only from a human clicking
+    // /admin/maintenance. So "can be audited" meant, in practice, that a
+    // customer-initiated deletion of their own garment photo could silently
+    // fail to remove the image from storage with no record of it at all.
+    //
+    // Recording it hands the asset to the pending-deletion retry sweep (H6)
+    // and puts it on /admin/maintenance with its error code, so the
+    // obligation survives this request without needing a folder enumeration
+    // to rediscover it.
+    await deleteCloudinaryAssetOrRecord(
+      {
+        customerId,
+        publicId: item.imagePublicId,
+        deliveryType: "private",
+        context: "closet-item-deletion-failed",
+      },
+      _deleteAsset,
+    );
   }
 
   await prisma.closetItem.delete({ where: { id: item.id } });

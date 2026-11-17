@@ -209,13 +209,40 @@ describe("Closet item deletion — shared helper", () => {
   });
 
   it("helper deletes Cloudinary asset before DB record", () => {
+    // 2026-11-17 (H7): the deletion call is now
+    // `deleteCloudinaryAssetOrRecord({...}, _deleteAsset)` — the injected
+    // deleter is passed THROUGH a wrapper that durably records a failure for
+    // the pending-deletion retry sweep, rather than being invoked directly
+    // and having its result dropped. Both the invariant this test exists for
+    // (Cloudinary before DB) and the injection seam are unchanged, so this
+    // matches either call shape instead of the old literal "_deleteAsset(".
+    // The window is no longer a fixed 1000 chars: the H7 rationale comment
+    // inside the function is longer than that, and a text proxy must not
+    // break on a comment. Ordering is also now covered behaviourally in
+    // app/lib/closet-item-deletion.test.ts, which is the stronger check.
     const fnIdx = closetHelperSrc.indexOf("async function deleteClosetItemWithImage(");
-    const fnBody = closetHelperSrc.slice(fnIdx, fnIdx + 1000);
-    const cloudIdx = fnBody.indexOf("_deleteAsset(");
+    assert.ok(fnIdx > -1, "deleteClosetItemWithImage must exist");
+    const fnBody = closetHelperSrc.slice(fnIdx);
+    const cloudIdx = fnBody.search(/deleteCloudinaryAssetOrRecord\(|_deleteAsset\(/);
     const dbIdx    = fnBody.indexOf("prisma.closetItem.delete(");
-    assert.ok(cloudIdx > -1, "must call _deleteAsset");
+    assert.ok(cloudIdx > -1, "must attempt the Cloudinary deletion (directly or via the record-on-failure wrapper)");
     assert.ok(dbIdx > -1, "must call prisma.closetItem.delete");
     assert.ok(cloudIdx < dbIdx, "Cloudinary deletion must happen before DB deletion");
+  });
+
+  it("helper records a failed Cloudinary deletion instead of discarding it (H7)", () => {
+    // Nov 12 privacy audit H7. The ClosetItem row is deleted immediately
+    // after the Cloudinary call, so a dropped failure leaves the asset
+    // unreferenced with nothing recording that it still needs deleting — and
+    // the only net, the bounded orphan sweep, has no scheduled trigger.
+    assert.ok(
+      closetHelperSrc.includes("deleteCloudinaryAssetOrRecord"),
+      "must route the deletion through the record-on-failure wrapper",
+    );
+    assert.ok(
+      closetHelperSrc.includes("cloudinary-deletion-record.server"),
+      "must import the shared pending-deletion recorder",
+    );
   });
 
   it("helper accepts injectable _deleteAsset parameter", () => {
