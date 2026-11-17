@@ -1,0 +1,61 @@
+# .github/workflows/cloudinary-deletion-sweep.yml
+#
+# Independent trigger for the pending-Cloudinary-deletion retry sweep —
+# app/routes/api.cloudinary-deletion-sweep.ts, which processes a bounded
+# batch (25) of PendingCloudinaryDeletion rows via the exact same
+# retryPendingCloudinaryDeletion call /admin/maintenance's manual button
+# already uses. Before this, the ONLY way a failed Cloudinary asset
+# deletion (from account erasure or a standalone Settings "remove" action)
+# ever got retried was a human manually clicking it.
+#
+# Mirrors clerk-cleanup-sweep.yml's and the other two sweep workflows'
+# already-reviewed pattern exactly. NOT ACTIVE YET, same reason as those:
+# GitHub only honors a `schedule` trigger from the copy of this file that
+# exists on the repository's DEFAULT branch — this file sits on an
+# isolated audit branch, so nothing fires until a human explicitly pushes
+# and merges it to `main`, an action not taken here.
+#
+# Requires a repository secret named CLOUDINARY_DELETION_SWEEP_SECRET,
+# which does NOT exist yet and was not created by this change. Its value
+# must equal the target Vercel project's own CLOUDINARY_DELETION_SWEEP_SECRET
+# — a secret dedicated to this one endpoint's one capability (retrying an
+# already-recorded, already-intended Cloudinary deletion), never a
+# broader-access secret. Add it via GitHub → this repo → Settings →
+# Secrets and variables → Actions → New repository secret — a step for a
+# human with repo-admin access, not taken here.
+#
+# Target URL: naia-stylist-staging.vercel.app, matching the other sweeps'
+# current target. Update once this feature's real deployment target is
+# confirmed — do not assume staging is correct without checking at that
+# time. This sweep DOES make real Cloudinary Admin API calls once active
+# (retrying an already-queued deletion, never a new one) — confirm that is
+# acceptable for the target environment before enabling.
+
+name: Pending Cloudinary deletion retry sweep
+
+on:
+  schedule:
+    # Every 30 minutes — matching clerk-cleanup-sweep.yml's own cadence for
+    # the same reason: this retries an already-durably-recorded failure,
+    # not a time-sensitive cleanup, so a slower cadence than the VTO
+    # sweep's 10 minutes is appropriate.
+    - cron: "*/30 * * * *"
+  # Lets a human fire one sweep on demand from the Actions tab, without
+  # waiting for the schedule — zero cost, no new auth surface.
+  workflow_dispatch: {}
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Invoke the Cloudinary deletion sweep endpoint
+        run: |
+          status=$(curl -s -o /tmp/response.json -w "%{http_code}" \
+            "https://naia-stylist-staging.vercel.app/api/cloudinary-deletion-sweep" \
+            -H "x-cloudinary-deletion-sweep-secret: ${{ secrets.CLOUDINARY_DELETION_SWEEP_SECRET }}")
+          echo "HTTP status: $status"
+          cat /tmp/response.json
+          if [ "$status" != "200" ]; then
+            echo "Sweep request failed (HTTP $status)" >&2
+            exit 1
+          fi

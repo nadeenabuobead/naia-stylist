@@ -16,6 +16,7 @@ export default [
   route("api/export-zip-download/:jobId", "routes/api.export-zip-download.$jobId.ts"),
   route("api/export-zip-sweep", "routes/api.export-zip-sweep.ts"),
   route("api/clerk-cleanup-sweep", "routes/api.clerk-cleanup-sweep.ts"),
+  route("api/cloudinary-deletion-sweep", "routes/api.cloudinary-deletion-sweep.ts"),
   route("onboarding/step/:step", "routes/onboarding/step.$step.tsx"),
   route("onboarding/age-confirm", "routes/onboarding.age-confirm.tsx"),
   route("onboarding/complete", "routes/onboarding/complete.tsx"),

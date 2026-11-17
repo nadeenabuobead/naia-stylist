@@ -31,6 +31,7 @@ import type { Prisma } from "@prisma/client";
 import prisma from "../db.server";
 import { deleteCloudinaryAsset, verifyCloudinaryAsset } from "./cloudinary-admin.server";
 import { deleteCustomerVtoResults } from "./ai/fashn-tryon-service.server";
+import { captureFailure } from "./error-tracking.server";
 
 // Narrowed to only the one model these functions touch — matches this
 // codebase's own convention (entitlement.server.ts's RunReservationFn) of
@@ -242,6 +243,69 @@ export async function retryPendingCloudinaryDeletion(id: string): Promise<RetryC
     data: { attemptCount: { increment: 1 }, lastAttemptAt: new Date(), lastError: error },
   });
   return { status: "failed-again", error };
+}
+
+// 2026-11-17 (launch-readiness audit, H6): before this, the only way a
+// PendingCloudinaryDeletion row ever got retried was a human manually
+// opening /admin/maintenance and clicking it — see retryPendingCloudinaryDeletion
+// above, called from admin.maintenance.tsx's action, with no automated
+// path at all. Same exact gap as the one found and fixed for
+// PendingClerkCleanup (clerk-cleanup.server.ts's sweepPendingClerkCleanups),
+// closed here the identical way: a bounded-batch sweep calling the exact
+// same per-row retry, exposed via a secret-gated route for an external
+// scheduler to opt into — see api.cloudinary-deletion-sweep.ts.
+export const CLOUDINARY_DELETION_SWEEP_BATCH_SIZE = 25;
+
+export interface SweepPendingCloudinaryDeletionsResult {
+  checked: number;
+  resolved: number;
+  failed: number;
+  /** true when more unresolved rows exist beyond this batch. */
+  more: boolean;
+}
+
+export async function sweepPendingCloudinaryDeletions(): Promise<SweepPendingCloudinaryDeletionsResult> {
+  // +1 purely to detect "more remain" without a second count query — same
+  // technique already established in customer-export-zip-large.server.ts's
+  // sweepExpiredExportJobs and clerk-cleanup.server.ts's
+  // sweepPendingClerkCleanups.
+  const rows = await prisma.pendingCloudinaryDeletion.findMany({
+    where: { resolvedAt: null },
+    orderBy: { createdAt: "asc" },
+    take: CLOUDINARY_DELETION_SWEEP_BATCH_SIZE + 1,
+  });
+  const more = rows.length > CLOUDINARY_DELETION_SWEEP_BATCH_SIZE;
+  const batch = more ? rows.slice(0, CLOUDINARY_DELETION_SWEEP_BATCH_SIZE) : rows;
+
+  let resolved = 0;
+  let failed = 0;
+  for (const row of batch) {
+    // retryPendingCloudinaryDeletion re-reads the row by id itself and is
+    // already fully idempotent (not-found / already-resolved / resolved /
+    // failed-again) — reused verbatim, no new retry logic here.
+    const result = await retryPendingCloudinaryDeletion(row.id);
+    if (result.status === "resolved") {
+      resolved++;
+    } else if (result.status === "failed-again") {
+      failed++;
+      // This app's single central error-capture seam (see
+      // error-tracking.server.ts's own header) — never includes publicId
+      // or customerId, only the row id and the classified error code,
+      // matching this module's own existing log-safety contract (every
+      // other log site in this file logs errorCode, never a raw provider
+      // response or the asset's own identifiers).
+      captureFailure("cloudinary-deletion-sweep", "Cloudinary asset deletion failed again during sweep", {
+        pendingCloudinaryDeletionId: row.id,
+        errorCode: result.error,
+        attemptCount: row.attemptCount + 1,
+      });
+    }
+    // "not-found" / "already-resolved" can't happen here (we just read
+    // these exact unresolved rows), but aren't counted as failed either
+    // way if some other process resolved one between the read and here.
+  }
+
+  return { checked: batch.length, resolved, failed, more };
 }
 
 // Retention/minimization — resolved rows are only ever useful as a recent

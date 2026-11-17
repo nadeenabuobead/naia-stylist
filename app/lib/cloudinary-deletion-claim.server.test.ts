@@ -11,7 +11,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("~/db.server", () => ({
   default: {
-    pendingCloudinaryDeletion: { findUnique: vi.fn(), update: vi.fn().mockResolvedValue({}) },
+    pendingCloudinaryDeletion: { findUnique: vi.fn(), findMany: vi.fn(), update: vi.fn().mockResolvedValue({}) },
   },
 }));
 
@@ -24,12 +24,22 @@ vi.mock("./ai/fashn-tryon-service.server", () => ({
   deleteCustomerVtoResults: vi.fn(),
 }));
 
+vi.mock("./error-tracking.server", () => ({
+  captureFailure: vi.fn(),
+}));
+
 import prisma from "~/db.server";
 import { deleteCloudinaryAsset, verifyCloudinaryAsset } from "~/lib/cloudinary-admin.server";
 import { deleteCustomerVtoResults } from "./ai/fashn-tryon-service.server";
-import { retryPendingCloudinaryDeletion } from "./cloudinary-deletion-claim.server";
+import { captureFailure } from "./error-tracking.server";
+import {
+  retryPendingCloudinaryDeletion,
+  sweepPendingCloudinaryDeletions,
+  CLOUDINARY_DELETION_SWEEP_BATCH_SIZE,
+} from "./cloudinary-deletion-claim.server";
 
 const mockFindUnique = () => (prisma as any).pendingCloudinaryDeletion.findUnique as ReturnType<typeof vi.fn>;
+const mockFindMany = () => (prisma as any).pendingCloudinaryDeletion.findMany as ReturnType<typeof vi.fn>;
 const mockUpdate = () => (prisma as any).pendingCloudinaryDeletion.update as ReturnType<typeof vi.fn>;
 const mockDelete = () => deleteCloudinaryAsset as ReturnType<typeof vi.fn>;
 const mockVerify = () => verifyCloudinaryAsset as ReturnType<typeof vi.fn>;
@@ -187,5 +197,100 @@ describe("retryPendingCloudinaryDeletion — deliveryType: 'unknown' (the correc
 
     expect(result).toEqual({ status: "failed-again", error: "PROVIDER_ERROR" });
     expect(mockUpdate()).toHaveBeenCalledWith({ where: { id: "pcd-7" }, data: { deliveryType: "private" } });
+  });
+});
+
+describe("sweepPendingCloudinaryDeletions (2026-11-17, launch-readiness audit, H6)", () => {
+  // Before this existed, the ONLY path that ever retried a pending row was
+  // a human manually clicking it on /admin/maintenance — there was no
+  // automated option at all. See api.cloudinary-deletion-sweep.ts for the
+  // actual external trigger this function is meant to be called from.
+
+  it("a clean sweep with nothing pending checks zero rows, never calls deleteCloudinaryAsset", async () => {
+    mockFindMany().mockResolvedValue([]);
+
+    const result = await sweepPendingCloudinaryDeletions();
+
+    expect(mockFindMany()).toHaveBeenCalledWith({
+      where: { resolvedAt: null },
+      orderBy: { createdAt: "asc" },
+      take: CLOUDINARY_DELETION_SWEEP_BATCH_SIZE + 1,
+    });
+    expect(mockDelete()).not.toHaveBeenCalled();
+    expect(result).toEqual({ checked: 0, resolved: 0, failed: 0, more: false });
+  });
+
+  it("resolves every row it can, counts a per-row failure without aborting the rest of the batch, and reports it via captureFailure", async () => {
+    const rows = [
+      { id: "row-1", publicId: "naia-wardrobe/c1/v1", deliveryType: "private", resolvedAt: null, attemptCount: 0 },
+      { id: "row-2", publicId: "naia-wardrobe/c2/v2", deliveryType: "private", resolvedAt: null, attemptCount: 0 },
+      { id: "row-3", publicId: "naia-wardrobe/c3/v3", deliveryType: "private", resolvedAt: null, attemptCount: 0 },
+    ];
+    mockFindMany().mockResolvedValue(rows);
+    mockFindUnique().mockImplementation(async ({ where: { id } }: any) => rows.find((r) => r.id === id) ?? null);
+    mockDelete()
+      .mockResolvedValueOnce({ ok: true })                              // row-1 succeeds
+      .mockResolvedValueOnce({ ok: false, errorCode: "PROVIDER_ERROR" }) // row-2 fails
+      .mockResolvedValueOnce({ ok: true });                             // row-3 succeeds
+
+    const result = await sweepPendingCloudinaryDeletions();
+
+    expect(mockDelete()).toHaveBeenCalledTimes(3);
+    expect(result).toEqual({ checked: 3, resolved: 2, failed: 1, more: false });
+
+    // Reaches this app's central error-capture seam exactly once, for the
+    // one row that failed, never carrying publicId or customerId.
+    expect(captureFailure).toHaveBeenCalledTimes(1);
+    expect(captureFailure).toHaveBeenCalledWith(
+      "cloudinary-deletion-sweep",
+      expect.any(String),
+      expect.objectContaining({ pendingCloudinaryDeletionId: "row-2", errorCode: "PROVIDER_ERROR" }),
+    );
+    const meta = (captureFailure as any).mock.calls[0][2];
+    expect(meta).not.toHaveProperty("publicId");
+    expect(meta).not.toHaveProperty("customerId");
+  });
+
+  it("is bounded per call and reports more:true when a backlog exceeds one batch", async () => {
+    const oversized = Array.from({ length: CLOUDINARY_DELETION_SWEEP_BATCH_SIZE + 1 }, (_, i) => ({
+      id: `row-${i}`,
+      publicId: `naia-wardrobe/c${i}/v${i}`,
+      deliveryType: "private",
+      resolvedAt: null,
+      attemptCount: 0,
+    }));
+    mockFindMany().mockResolvedValue(oversized);
+    mockFindUnique().mockImplementation(async ({ where: { id } }: any) =>
+      oversized.find((r) => r.id === id) ?? null,
+    );
+    mockDelete().mockResolvedValue({ ok: true });
+
+    const result = await sweepPendingCloudinaryDeletions();
+
+    // Only the batch-sized slice is actually processed, even though the
+    // mock returned one more than that.
+    expect(mockDelete()).toHaveBeenCalledTimes(CLOUDINARY_DELETION_SWEEP_BATCH_SIZE);
+    expect(result).toEqual({
+      checked: CLOUDINARY_DELETION_SWEEP_BATCH_SIZE,
+      resolved: CLOUDINARY_DELETION_SWEEP_BATCH_SIZE,
+      failed: 0,
+      more: true,
+    });
+  });
+
+  it("reuses retryPendingCloudinaryDeletion's own idempotent per-row logic verbatim — including the vto-sweep-obligation and unknown-deliveryType paths — no parallel retry logic exists in the sweep itself", async () => {
+    mockFindMany().mockResolvedValue([
+      { id: "row-vto", publicId: "vto-sweep-obligation:cust-1", deliveryType: "private", context: "vto-sweep-obligation", resolvedAt: null, attemptCount: 0, customerId: "cust-1" },
+    ]);
+    mockFindUnique().mockResolvedValue({
+      id: "row-vto", customerId: "cust-1", context: "vto-sweep-obligation", resolvedAt: null, attemptCount: 0,
+    });
+    (deleteCustomerVtoResults as any).mockResolvedValue({ failedAssets: [] });
+
+    const result = await sweepPendingCloudinaryDeletions();
+
+    expect(deleteCustomerVtoResults).toHaveBeenCalledWith("cust-1");
+    expect(mockDelete()).not.toHaveBeenCalled(); // the sentinel row never calls deleteCloudinaryAsset directly
+    expect(result).toEqual({ checked: 1, resolved: 1, failed: 0, more: false });
   });
 });
