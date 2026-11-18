@@ -139,6 +139,53 @@ describe("buildCustomerExportZip", () => {
     expect(result.filename).toMatch(/^naia-data-export-\d{4}-\d{2}-\d{2}\.zip$/);
   });
 
+  // 2026-11-18 — archiver 7->8 migration (ZipArchive class, ESM-only):
+  // the test above confirms filenames and data.json content survive a
+  // real unzip round-trip, but never checks that an appended image's
+  // actual BYTES come back unchanged — compression/decompression is
+  // exactly where a broken archiver integration could silently corrupt
+  // binary content while leaving filenames/JSON untouched. This closes
+  // that gap with synthetic (non-real) binary data standing in for a
+  // customer photo.
+  it("an appended image's bytes round-trip exactly through real zip compression and extraction", async () => {
+    // Deterministic pseudo-random bytes, not a real photo — large enough
+    // (16 KiB) that a truncation or corruption bug would reliably differ,
+    // small enough to stay fast.
+    const syntheticImageBytes = Buffer.alloc(16 * 1024);
+    for (let i = 0; i < syntheticImageBytes.length; i++) {
+      syntheticImageBytes[i] = (i * 2654435761) % 256;
+    }
+
+    vi.mocked(compileCustomerExport).mockResolvedValueOnce(
+      baseExport({
+        closet: [
+          { id: "closet-1", imageFormat: "jpg", downloadUrl: "https://cdn.example/closet-1" } as any,
+        ],
+      }) as any,
+    );
+    const _fetch = vi.fn(async () => ({
+      ok: true,
+      arrayBuffer: async () => syntheticImageBytes.buffer.slice(
+        syntheticImageBytes.byteOffset,
+        syntheticImageBytes.byteOffset + syntheticImageBytes.byteLength,
+      ),
+    })) as unknown as typeof fetch;
+
+    const result = await buildCustomerExportZip("cust-1", { _fetch });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected ok result");
+
+    const zipBuffer = await streamToBuffer(result.stream);
+    const zipPath = writeZipToTmp(zipBuffer);
+
+    const extractedBuffer = execFileSync("unzip", ["-p", zipPath, "images/closet/closet-1.jpg"], {
+      maxBuffer: 1024 * 1024,
+    });
+
+    expect(extractedBuffer.length).toBe(syntheticImageBytes.length);
+    expect(Buffer.compare(extractedBuffer, syntheticImageBytes)).toBe(0);
+  });
+
   it("skips an image whose fetch fails, records it, and still completes the archive", async () => {
     vi.mocked(compileCustomerExport).mockResolvedValueOnce(
       baseExport({

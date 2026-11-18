@@ -52,7 +52,7 @@
     "@shopify/shopify-app-react-router": "^1.1.0",
     "@shopify/shopify-app-session-storage-prisma": "^8.0.0",
     "@vercel/react-router": "^1.2.6",
-    "archiver": "^7.0.1",
+    "archiver": "^8.0.0",
     "canvas": "^3.2.3",
     "isbot": "^5.1.31",
     "jsonwebtoken": "^9.0.3",
@@ -67,7 +67,7 @@
   "devDependencies": {
     "@shopify/api-codegen-preset": "^1.2.0",
     "@shopify/polaris-types": "^1.0.1",
-    "@types/archiver": "^6.0.3",
+    "@types/archiver": "^8.0.0",
     "@types/eslint": "^9.6.1",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^22.18.8",
@@ -95,7 +95,10 @@
     "@shopify/plugin-cloudflare"
   ],
   "overrides": {
-    "p-map": "^4.0.0"
+    "p-map": "^4.0.0",
+    "archiver": {
+      "readdir-glob": "^4.0.0"
+    }
   },
   "author": "nadeenabuobead"
 }

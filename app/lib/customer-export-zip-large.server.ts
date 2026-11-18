@@ -83,7 +83,7 @@
 // for this change. Confirm it against the actual Cloudinary account before
 // relying on this path for a genuinely large (multi-hundred-MB+) export.
 
-import archiver from "archiver";
+import { ZipArchive } from "archiver";
 import prisma from "../db.server";
 import { compileCustomerExport } from "./customer-privacy.server";
 import { planImages, ZIP_NOTE } from "./customer-export-zip.server";
@@ -269,7 +269,10 @@ export async function buildLargeCustomerExportZip(
   const job = reservation.job;
 
   const { data, images } = planImages(exportData);
-  const archive = archiver("zip", { zlib: { level: 6 } });
+  // archiver 8.0.0 is ESM-only and replaced the old archiver(format, opts)
+  // factory-function default export with named per-format classes — same
+  // underlying zlib options, same .append()/.pipe()/.finalize() stream API.
+  const archive = new ZipArchive({ zlib: { level: 6 } });
   const publicId = exportPublicId(customerId, job.id);
   const uploader = _createUploader(publicId, `naia-data-export-${job.id}.zip`, EXPORT_DELIVERY_TYPE, { _fetch });
 

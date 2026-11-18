@@ -17,7 +17,7 @@
 // fetched or zipped here either. See compileCustomerExport's own comment
 // for why (tracked separately as its own open question).
 
-import archiver from "archiver";
+import { ZipArchive } from "archiver";
 import type { Readable } from "node:stream";
 import { compileCustomerExport, type CustomerExport } from "./customer-privacy.server";
 
@@ -194,7 +194,10 @@ export async function buildCustomerExportZip(
 
   const { data, images } = planImages(exportData);
 
-  const archive = archiver("zip", { zlib: { level: 6 } });
+  // archiver 8.0.0 is ESM-only and replaced the old archiver(format, opts)
+  // factory-function default export with named per-format classes — same
+  // underlying zlib options, same .append()/.pipe()/.finalize() stream API.
+  const archive = new ZipArchive({ zlib: { level: 6 } });
   const imageFetchFailures: string[] = [];
 
   // Sequential, not parallel — the simplest implementation that stays
