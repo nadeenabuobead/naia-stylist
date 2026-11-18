@@ -16,6 +16,7 @@ import {
   getCloudinaryConfig,
   buildPrivateDownloadUrl,
   validatePublicIdOwnership,
+  validateImageUrlOwnership,
 } from "../cloudinary-admin.server";
 
 const THUMBNAIL_TRANSFORMATION = "w_160,h_160,c_fill,q_60";
@@ -65,7 +66,7 @@ function resolveImageUrl(
     if (!ownership.ok) return null; // malformed/mismatched reference — fail closed to a fallback, not a broken image
     return buildPrivateDownloadUrl(cfg, row.imagePublicId, row.imageFormat, "private", undefined, undefined, transformation);
   }
-  if (row.imageUrl) return row.imageUrl;
+  if (row.imageUrl && validateImageUrlOwnership(row.imageUrl, customerId)) return row.imageUrl;
   return null;
 }
 

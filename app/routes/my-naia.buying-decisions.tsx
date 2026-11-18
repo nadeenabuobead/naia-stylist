@@ -15,6 +15,7 @@ import prisma from "~/db.server";
 import {
   getCloudinaryConfig,
   validatePublicIdOwnership,
+  validateImageUrlOwnership,
   buildPrivateDownloadUrl,
 } from "~/lib/cloudinary-admin.server";
 import { deleteOneBosDecision } from "~/lib/buy-or-skip-privacy.server";
@@ -107,7 +108,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
           );
         }
       }
-      if (!resolvedImageUrl && a.imageUrl) resolvedImageUrl = a.imageUrl;
+      if (!resolvedImageUrl && a.imageUrl && validateImageUrlOwnership(a.imageUrl, naiaCustomer.id)) {
+        resolvedImageUrl = a.imageUrl;
+      }
 
       return {
         id: a.id,

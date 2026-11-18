@@ -220,10 +220,19 @@ export async function getShopperEvidence(customerId: string): Promise<ShopperEvi
     closetItems: customer.closetItems.map((item) => ({
       id: item.id,
       name: item.name,
-      imageUrl: (item.imageUrl && validateImageUrlOwnership(item.imageUrl, customerId) ? item.imageUrl : null)
-        ?? (item.imagePublicId && item.imageFormat && cloudinaryCfg
-            ? buildPrivateDownloadUrl(cloudinaryCfg, item.imagePublicId, item.imageFormat, "private")
-            : null),
+      // 2026-11-18 — priority order fixed to match every other call site in
+      // the codebase (look-image-resolution.server.ts, customer-360.server.ts,
+      // closet._index.tsx, buyskip-admin.server.ts, etc.): try the signed,
+      // time-limited private-delivery URL first, and fall back to the
+      // ownership-checked legacy public URL only when no signed path exists.
+      // Previously this site tried the legacy URL FIRST, which meant a closet
+      // item with both fields populated was served its permanent public
+      // imageUrl even though a stronger signed URL was available — inverted
+      // from every sibling site, not a deliberate design choice.
+      imageUrl: (item.imagePublicId && item.imageFormat && cloudinaryCfg
+          ? buildPrivateDownloadUrl(cloudinaryCfg, item.imagePublicId, item.imageFormat, "private")
+          : null)
+        ?? (item.imageUrl && validateImageUrlOwnership(item.imageUrl, customerId) ? item.imageUrl : null),
       category: item.category,
       subcategory: item.subcategory ?? null,
       primaryColor: item.primaryColor ?? null,

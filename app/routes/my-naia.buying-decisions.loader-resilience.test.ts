@@ -16,6 +16,7 @@ vi.mock("~/db.server", () => ({
 vi.mock("~/lib/cloudinary-admin.server", () => ({
   getCloudinaryConfig: vi.fn(() => null),
   validatePublicIdOwnership: vi.fn(() => ({ ok: false })),
+  validateImageUrlOwnership: vi.fn(() => true),
   buildPrivateDownloadUrl: vi.fn(() => null),
 }));
 

@@ -14,6 +14,7 @@ import { getEntitlementSummary } from "~/lib/plan/entitlement.server";
 import {
   getCloudinaryConfig,
   validatePublicIdOwnership,
+  validateImageUrlOwnership,
   buildPrivateDownloadUrl,
 } from "~/lib/cloudinary-admin.server";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
@@ -433,7 +434,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       if (ownership.ok) {
         itemImageUrl = buildPrivateDownloadUrl(cloudinaryConfig, a.imagePublicId, a.imageFormat, "private");
       }
-    } else if (a.imageUrl) {
+    } else if (a.imageUrl && validateImageUrlOwnership(a.imageUrl, customerId)) {
       itemImageUrl = a.imageUrl;
     }
 

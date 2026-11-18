@@ -9,7 +9,7 @@
 import { getAllCatalogProducts } from "./naia-catalog.js";
 import type { NadineAnchorInput, ClosetAnchorInput, AnchorInput } from "./styleme-recommendation.types.js";
 import prisma from "../../db.server.js";
-import { buildPrivateDownloadUrl, getCloudinaryConfig } from "../../lib/cloudinary-admin.server.js";
+import { buildPrivateDownloadUrl, getCloudinaryConfig, validateImageUrlOwnership } from "../../lib/cloudinary-admin.server.js";
 import { matchesSessionOccasion } from "./styleme-occasion-tokens.js";
 import { passesDressingRequirements, evaluateAnchorEligibility, canSlotAnchorOutfit, getTargetFormalityRange, FORMALITY_CONDITIONAL_ADJUSTMENTS, profileOccasionRating } from "./styleme-profile-gate.js";
 import { closetItemToSlot } from "./closet-slot.js";
@@ -129,7 +129,7 @@ export async function resolveClosetAnchor(
   if (!item) return null;
 
   // Resolve image URL: prefer signed private URL for private-upload items.
-  let imageUrl = item.imageUrl;
+  let imageUrl = item.imageUrl && validateImageUrlOwnership(item.imageUrl, customerId) ? item.imageUrl : null;
   if (item.imagePublicId && item.imageFormat) {
     const cfg = getCloudinaryConfig();
     if (cfg) {
@@ -393,7 +393,7 @@ export async function loadAllClosetItemsForEngine(
   type ClosetDbItem = (typeof items)[number];
   const cfg = getCloudinaryConfig();
   return items.map((item: ClosetDbItem) => {
-    let imageUrl = item.imageUrl;
+    let imageUrl = item.imageUrl && validateImageUrlOwnership(item.imageUrl, customerId) ? item.imageUrl : null;
     if (cfg && item.imagePublicId && item.imageFormat) {
       imageUrl = buildPrivateDownloadUrl(cfg, item.imagePublicId, item.imageFormat, "private");
     }

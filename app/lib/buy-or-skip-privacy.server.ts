@@ -24,6 +24,7 @@ import {
   deleteCloudinaryAsset,
   getCloudinaryConfig,
   validatePublicIdOwnership,
+  validateImageUrlOwnership,
   buildPrivateDownloadUrl,
   type DeleteAssetFn,
 } from "./cloudinary-admin.server.js";
@@ -232,7 +233,7 @@ export async function listCustomerBosImages(customerId: string): Promise<BosPhot
       if (ownership.ok) {
         thumbnailUrl = buildPrivateDownloadUrl(cloudinaryConfig, analysis.imagePublicId, analysis.imageFormat, "private");
       }
-    } else if (analysis.imageUrl) {
+    } else if (analysis.imageUrl && validateImageUrlOwnership(analysis.imageUrl, customerId)) {
       thumbnailUrl = analysis.imageUrl;
     }
     return { id: analysis.id, productName: analysis.productName, thumbnailUrl };

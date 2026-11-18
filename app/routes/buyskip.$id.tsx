@@ -9,6 +9,7 @@ import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import {
   getCloudinaryConfig,
   validatePublicIdOwnership,
+  validateImageUrlOwnership,
   buildPrivateDownloadUrl,
 } from "~/lib/cloudinary-admin.server";
 import { loadNaiaModel, computeModelReadinessFromRecord } from "~/lib/ai/my-naia-model.server";
@@ -94,7 +95,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         itemImageUrl = buildPrivateDownloadUrl(cfg, analysis.imagePublicId, analysis.imageFormat, "private");
       }
     }
-  } else if (analysis.imageUrl) {
+  } else if (analysis.imageUrl && validateImageUrlOwnership(analysis.imageUrl, naiaCustomer.id)) {
     // Legacy record — imageUrl was persisted before S0; use it for backward compatibility.
     itemImageUrl = analysis.imageUrl;
   }

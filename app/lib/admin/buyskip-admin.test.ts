@@ -183,6 +183,21 @@ describe("§BSA.5 image resolution — legacy fallback", () => {
     const { items: [upload] } = await getAdminCustomerBuySkipUploads("cust-A");
     expect(upload.thumbnailUrl).toBe("https://legacy.example.com/old.jpg");
   });
+
+  // 2026-11-18 — QA #36 follow-up: BuyOrSkipAnalysis.imageUrl was never
+  // covered by the ClosetItem-only validateImageUrlOwnership fix (b907e0a).
+  // Same pattern, same fix, same actual risk.
+  it("rejects a legacy imageUrl naming a DIFFERENT customer's naia-wardrobe folder", async () => {
+    (prisma.buyOrSkipAnalysis.findMany as any).mockResolvedValue([
+      makeRow({
+        imagePublicId: null,
+        imageFormat: null,
+        imageUrl: "https://res.cloudinary.com/demo/image/upload/naia-wardrobe/cust-B/bos-1.jpg",
+      }),
+    ]);
+    const { items: [upload] } = await getAdminCustomerBuySkipUploads("cust-A");
+    expect(upload.thumbnailUrl).toBeNull();
+  });
 });
 
 describe("§BSA.6 image resolution — missing/deleted image graceful fallback", () => {

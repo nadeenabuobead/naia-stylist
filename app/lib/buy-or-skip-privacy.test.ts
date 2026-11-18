@@ -174,6 +174,23 @@ describe("listCustomerBosImages() — Settings gallery read", () => {
     const result = await listCustomerBosImages("cust-A");
     expect(result[0].thumbnailUrl).toBeNull();
   });
+
+  // 2026-11-18 — QA #36 follow-up: same ownership gap as the imagePublicId
+  // case above, but on the legacy imageUrl fallback branch, which had no
+  // equivalent check until this fix.
+  it("rejects a legacy imageUrl naming a DIFFERENT customer's naia-wardrobe folder", async () => {
+    (prisma.buyOrSkipAnalysis.findMany as any).mockResolvedValue([
+      {
+        id: "analysis-2",
+        productName: null,
+        imageUrl: "https://res.cloudinary.com/demo/image/upload/naia-wardrobe/cust-OTHER/analysis-2.jpg",
+        imagePublicId: null,
+        imageFormat: null,
+      },
+    ]);
+    const result = await listCustomerBosImages("cust-A");
+    expect(result[0].thumbnailUrl).toBeNull();
+  });
 });
 
 // ── H7 (2026-11-17): failed Buy-or-Skip image deletions are recorded ────────

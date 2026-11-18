@@ -16,7 +16,7 @@ import { evaluateAnchorEligibility } from "~/lib/ai/styleme-profile-gate";
 import type { ClosetAnchorInput } from "~/lib/ai/styleme-recommendation.types";
 import { occasionDisplayFor } from "~/lib/styleme/occasion-display";
 import { resolveLockedAnchorOutcome } from "~/lib/styleme/locked-anchor-outcome";
-import { buildPrivateDownloadUrl, getCloudinaryConfig } from "~/lib/cloudinary-admin.server";
+import { buildPrivateDownloadUrl, getCloudinaryConfig, validateImageUrlOwnership } from "~/lib/cloudinary-admin.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 
 export const links: LinksFunction = () => [
@@ -313,7 +313,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       let imageUrl: string | null = null;
       if (item.imagePublicId && item.imageFormat && cfg) {
         imageUrl = buildPrivateDownloadUrl(cfg, item.imagePublicId, item.imageFormat, "private");
-      } else if (item.imageUrl) {
+      } else if (item.imageUrl && validateImageUrlOwnership(item.imageUrl, naiaCustomer.id)) {
         imageUrl = item.imageUrl;
       }
       return { id: item.id, name: item.name, category: item.category, imageUrl };
