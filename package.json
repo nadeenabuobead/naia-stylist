@@ -113,7 +113,8 @@
     "lodash": "^4.18.1",
     "@vercel/static-config": {
       "ajv": "^8.20.0"
-    }
+    },
+    "qs": "^6.17.1"
   },
   "author": "nadeenabuobead"
 }
