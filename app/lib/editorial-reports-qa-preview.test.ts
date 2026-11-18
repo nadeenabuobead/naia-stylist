@@ -10,12 +10,18 @@
 // non-customer-scoped EditorialTrendReport rows from ever appearing to a
 // real customer: they are created as status: DRAFT (invisible to the
 // standard getPublishedEditorialReports() query used by every other route),
-// and this wrapper is the ONLY path that can ever surface them — gated on
-// THREE independent, all-fail-closed conditions: the feature flag, a
-// constant-time-compared header secret, and (added per Security's review
-// of 5060b0d) the authenticated caller being the one specific, founder-
-// authorized QA customer. A correct secret from the WRONG customer must
-// still see nothing — that's the gap this revision closes.
+// and this wrapper is the ONLY path that can ever surface them.
+//
+// 2026-11-18 — rewritten for the session-based redesign (was: a shared
+// secret header, never actually usable by Five-Persona QA for the same
+// reason the StyleMe fixture hit the same wall — see editorial-reports.server.ts's
+// own comment). customerId is now ALWAYS the real, session-derived id from
+// the one real caller (trends.my-edits.tsx's own requireCurrentNaiaCustomer)
+// — never attacker-suppliable — so these tests pass it directly rather than
+// constructing a Request/header at all. Gated on FOUR independent,
+// all-fail-closed conditions: VERCEL_ENV, NAIA_PROJECT_VARIANT, the feature
+// flag, and the authenticated caller being the one specific, founder-
+// authorized QA customer.
 //
 // Run: npx vitest run app/lib/editorial-reports-qa-preview.test.ts
 
@@ -64,15 +70,11 @@ function makeRow(slug: string) {
   };
 }
 
-function makeRequest(headers: Record<string, string> = {}): Request {
-  return new Request("https://example.com/my-naia/trends/my-edits", { headers });
-}
-
-describe("getPublishedEditorialReportsForQaPreview — #23 customer-restricted fixture viewing", () => {
+describe("getPublishedEditorialReportsForQaPreview — #23 customer-restricted fixture viewing (session-based, no shared secret)", () => {
+  const originalEnv = process.env.VERCEL_ENV;
+  const originalVariant = process.env.NAIA_PROJECT_VARIANT;
   const originalFlag = process.env.TREND_EDIT_FIXTURE_ENABLED;
-  const originalSecret = process.env.TREND_EDIT_FIXTURE_PREVIEW_SECRET;
   const originalCustomerId = process.env.TREND_EDIT_FIXTURE_QA_CUSTOMER_ID;
-  const PREVIEW_SECRET = "qa-preview-secret-xyz";
   const AUTHORIZED_CUSTOMER_ID = "cust_qa_authorized_abc123";
   const OTHER_CUSTOMER_ID = "cust_some_other_real_customer";
 
@@ -80,25 +82,25 @@ describe("getPublishedEditorialReportsForQaPreview — #23 customer-restricted f
     vi.clearAllMocks();
     (prisma.editorialTrendReport.count as any).mockResolvedValue(3);
     (prisma.editorialTrendReport.findMany as any).mockResolvedValue([]);
+    process.env.VERCEL_ENV = "preview";
+    process.env.NAIA_PROJECT_VARIANT = "staging";
   });
 
   afterEach(() => {
+    if (originalEnv === undefined) delete process.env.VERCEL_ENV;
+    else process.env.VERCEL_ENV = originalEnv;
+    if (originalVariant === undefined) delete process.env.NAIA_PROJECT_VARIANT;
+    else process.env.NAIA_PROJECT_VARIANT = originalVariant;
     if (originalFlag === undefined) delete process.env.TREND_EDIT_FIXTURE_ENABLED;
     else process.env.TREND_EDIT_FIXTURE_ENABLED = originalFlag;
-    if (originalSecret === undefined) delete process.env.TREND_EDIT_FIXTURE_PREVIEW_SECRET;
-    else process.env.TREND_EDIT_FIXTURE_PREVIEW_SECRET = originalSecret;
     if (originalCustomerId === undefined) delete process.env.TREND_EDIT_FIXTURE_QA_CUSTOMER_ID;
     else process.env.TREND_EDIT_FIXTURE_QA_CUSTOMER_ID = originalCustomerId;
   });
 
-  it("QA1 — with the flag unset, never queries for fixture rows regardless of any header or customer sent", async () => {
+  it("QA1 — with the flag unset, never queries for fixture rows even for the authorized customer", async () => {
     delete process.env.TREND_EDIT_FIXTURE_ENABLED;
-    delete process.env.TREND_EDIT_FIXTURE_PREVIEW_SECRET;
     delete process.env.TREND_EDIT_FIXTURE_QA_CUSTOMER_ID;
-    await getPublishedEditorialReportsForQaPreview(
-      makeRequest({ "x-trend-edit-fixture-preview": "anything" }),
-      AUTHORIZED_CUSTOMER_ID,
-    );
+    await getPublishedEditorialReportsForQaPreview(AUTHORIZED_CUSTOMER_ID);
     // Exactly one findMany call: the standard PUBLISHED query. No second
     // call for the fixture slugs.
     expect(prisma.editorialTrendReport.findMany).toHaveBeenCalledTimes(1);
@@ -108,86 +110,55 @@ describe("getPublishedEditorialReportsForQaPreview — #23 customer-restricted f
     });
   });
 
-  it("QA2 — with the flag on but no preview secret configured, fails closed even for the authorized customer", async () => {
+  it("QA2 — production environment rejects even the correctly authorized customer", async () => {
+    process.env.VERCEL_ENV = "production";
     process.env.TREND_EDIT_FIXTURE_ENABLED = "true";
-    delete process.env.TREND_EDIT_FIXTURE_PREVIEW_SECRET;
     process.env.TREND_EDIT_FIXTURE_QA_CUSTOMER_ID = AUTHORIZED_CUSTOMER_ID;
-    await getPublishedEditorialReportsForQaPreview(
-      makeRequest({ "x-trend-edit-fixture-preview": "anything" }),
-      AUTHORIZED_CUSTOMER_ID,
-    );
-    expect(prisma.editorialTrendReport.findMany).toHaveBeenCalledTimes(1);
-  });
-
-  it("QA3 — with the flag and secret both configured but no header sent, fails closed", async () => {
-    process.env.TREND_EDIT_FIXTURE_ENABLED = "true";
-    process.env.TREND_EDIT_FIXTURE_PREVIEW_SECRET = PREVIEW_SECRET;
-    process.env.TREND_EDIT_FIXTURE_QA_CUSTOMER_ID = AUTHORIZED_CUSTOMER_ID;
-    await getPublishedEditorialReportsForQaPreview(makeRequest(), AUTHORIZED_CUSTOMER_ID);
-    expect(prisma.editorialTrendReport.findMany).toHaveBeenCalledTimes(1);
-  });
-
-  it("QA4 — with a header present but not matching the configured secret, fails closed", async () => {
-    process.env.TREND_EDIT_FIXTURE_ENABLED = "true";
-    process.env.TREND_EDIT_FIXTURE_PREVIEW_SECRET = PREVIEW_SECRET;
-    process.env.TREND_EDIT_FIXTURE_QA_CUSTOMER_ID = AUTHORIZED_CUSTOMER_ID;
-    await getPublishedEditorialReportsForQaPreview(
-      makeRequest({ "x-trend-edit-fixture-preview": "wrong-value" }),
-      AUTHORIZED_CUSTOMER_ID,
-    );
-    expect(prisma.editorialTrendReport.findMany).toHaveBeenCalledTimes(1);
-  });
-
-  it("QA5 — a CORRECT secret from the WRONG customer still fails closed (the gap this revision closes)", async () => {
-    process.env.TREND_EDIT_FIXTURE_ENABLED = "true";
-    process.env.TREND_EDIT_FIXTURE_PREVIEW_SECRET = PREVIEW_SECRET;
-    process.env.TREND_EDIT_FIXTURE_QA_CUSTOMER_ID = AUTHORIZED_CUSTOMER_ID;
-    const result = await getPublishedEditorialReportsForQaPreview(
-      makeRequest({ "x-trend-edit-fixture-preview": PREVIEW_SECRET }),
-      OTHER_CUSTOMER_ID,
-    );
+    const result = await getPublishedEditorialReportsForQaPreview(AUTHORIZED_CUSTOMER_ID);
     expect(prisma.editorialTrendReport.findMany).toHaveBeenCalledTimes(1);
     expect(result).toEqual([]);
   });
 
-  it("QA6 — a correct secret with no customerId at all (null/undefined) fails closed, never throws", async () => {
+  it("QA2b — a non-staging NAIA_PROJECT_VARIANT rejects even on a preview VERCEL_ENV", async () => {
+    process.env.NAIA_PROJECT_VARIANT = "not-staging";
     process.env.TREND_EDIT_FIXTURE_ENABLED = "true";
-    process.env.TREND_EDIT_FIXTURE_PREVIEW_SECRET = PREVIEW_SECRET;
+    process.env.TREND_EDIT_FIXTURE_QA_CUSTOMER_ID = AUTHORIZED_CUSTOMER_ID;
+    const result = await getPublishedEditorialReportsForQaPreview(AUTHORIZED_CUSTOMER_ID);
+    expect(prisma.editorialTrendReport.findMany).toHaveBeenCalledTimes(1);
+    expect(result).toEqual([]);
+  });
+
+  it("QA3 — with the flag on but TREND_EDIT_FIXTURE_QA_CUSTOMER_ID unset, fails closed even for a plausible customer id", async () => {
+    process.env.TREND_EDIT_FIXTURE_ENABLED = "true";
+    delete process.env.TREND_EDIT_FIXTURE_QA_CUSTOMER_ID;
+    await getPublishedEditorialReportsForQaPreview(AUTHORIZED_CUSTOMER_ID);
+    expect(prisma.editorialTrendReport.findMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("QA5 — the WRONG (genuinely real, genuinely authenticated) customer still fails closed", async () => {
+    process.env.TREND_EDIT_FIXTURE_ENABLED = "true";
+    process.env.TREND_EDIT_FIXTURE_QA_CUSTOMER_ID = AUTHORIZED_CUSTOMER_ID;
+    const result = await getPublishedEditorialReportsForQaPreview(OTHER_CUSTOMER_ID);
+    expect(prisma.editorialTrendReport.findMany).toHaveBeenCalledTimes(1);
+    expect(result).toEqual([]);
+  });
+
+  it("QA6 — no customerId at all (null/undefined) fails closed, never throws", async () => {
+    process.env.TREND_EDIT_FIXTURE_ENABLED = "true";
     process.env.TREND_EDIT_FIXTURE_QA_CUSTOMER_ID = AUTHORIZED_CUSTOMER_ID;
     for (const missing of [null, undefined]) {
-      await expect(
-        getPublishedEditorialReportsForQaPreview(
-          makeRequest({ "x-trend-edit-fixture-preview": PREVIEW_SECRET }),
-          missing,
-        ),
-      ).resolves.toEqual([]);
+      await expect(getPublishedEditorialReportsForQaPreview(missing)).resolves.toEqual([]);
     }
   });
 
-  it("QA7 — correct secret and correct customer, but TREND_EDIT_FIXTURE_QA_CUSTOMER_ID itself unset, fails closed", async () => {
+  it("QA8 — POSITIVE: preview + staging + flag on + the authorized customer — queries for the two fixed fixture slugs, scoped to status: DRAFT", async () => {
     process.env.TREND_EDIT_FIXTURE_ENABLED = "true";
-    process.env.TREND_EDIT_FIXTURE_PREVIEW_SECRET = PREVIEW_SECRET;
-    delete process.env.TREND_EDIT_FIXTURE_QA_CUSTOMER_ID;
-    const result = await getPublishedEditorialReportsForQaPreview(
-      makeRequest({ "x-trend-edit-fixture-preview": PREVIEW_SECRET }),
-      AUTHORIZED_CUSTOMER_ID,
-    );
-    expect(prisma.editorialTrendReport.findMany).toHaveBeenCalledTimes(1);
-    expect(result).toEqual([]);
-  });
-
-  it("QA8 — POSITIVE: flag on, exact secret match, AND the authorized customer — queries for the two fixed fixture slugs, scoped to status: DRAFT", async () => {
-    process.env.TREND_EDIT_FIXTURE_ENABLED = "true";
-    process.env.TREND_EDIT_FIXTURE_PREVIEW_SECRET = PREVIEW_SECRET;
     process.env.TREND_EDIT_FIXTURE_QA_CUSTOMER_ID = AUTHORIZED_CUSTOMER_ID;
     (prisma.editorialTrendReport.findMany as any)
       .mockResolvedValueOnce([]) // the standard PUBLISHED query
       .mockResolvedValueOnce(FIXTURE_SLUGS.map(makeRow)); // the gated fixture query
 
-    const result = await getPublishedEditorialReportsForQaPreview(
-      makeRequest({ "x-trend-edit-fixture-preview": PREVIEW_SECRET }),
-      AUTHORIZED_CUSTOMER_ID,
-    );
+    const result = await getPublishedEditorialReportsForQaPreview(AUTHORIZED_CUSTOMER_ID);
 
     expect(prisma.editorialTrendReport.findMany).toHaveBeenCalledTimes(2);
     expect((prisma.editorialTrendReport.findMany as any).mock.calls[1][0]).toEqual({
@@ -197,18 +168,14 @@ describe("getPublishedEditorialReportsForQaPreview — #23 customer-restricted f
     expect(result.map((r) => r.slug).sort()).toEqual([...FIXTURE_SLUGS].sort());
   });
 
-  it("QA9 — merged result never includes the matched secret value anywhere in its data", async () => {
+  it("QA10 — development VERCEL_ENV is accepted (same convention as the StyleMe fixture's resolver)", async () => {
+    process.env.VERCEL_ENV = "development";
     process.env.TREND_EDIT_FIXTURE_ENABLED = "true";
-    process.env.TREND_EDIT_FIXTURE_PREVIEW_SECRET = PREVIEW_SECRET;
     process.env.TREND_EDIT_FIXTURE_QA_CUSTOMER_ID = AUTHORIZED_CUSTOMER_ID;
     (prisma.editorialTrendReport.findMany as any)
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce(FIXTURE_SLUGS.map(makeRow));
-
-    const result = await getPublishedEditorialReportsForQaPreview(
-      makeRequest({ "x-trend-edit-fixture-preview": PREVIEW_SECRET }),
-      AUTHORIZED_CUSTOMER_ID,
-    );
-    expect(JSON.stringify(result)).not.toContain(PREVIEW_SECRET);
+    const result = await getPublishedEditorialReportsForQaPreview(AUTHORIZED_CUSTOMER_ID);
+    expect(result.map((r) => r.slug).sort()).toEqual([...FIXTURE_SLUGS].sort());
   });
 });

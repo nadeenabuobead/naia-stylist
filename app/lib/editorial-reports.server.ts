@@ -1,5 +1,4 @@
 import prisma from "../db.server";
-import { timingSafeStringEqual } from "./timing-safe-equal.server";
 import {
   trendReports,
   type TrendReportData,
@@ -81,43 +80,63 @@ export async function getPublishedEditorialReports(): Promise<TrendReportData[]>
 // createDuplicateMonthTrendEditFixture comment for the full rationale.
 // Every real customer, and every other route in this app, keeps calling
 // getPublishedEditorialReports() above completely unmodified. This wrapper
-// is wired into exactly one route (trends.my-edits.tsx) and only changes
-// behaviour when ALL THREE conditions hold on the SAME request:
-//   1. TREND_EDIT_FIXTURE_ENABLED === "true" (already required to create
+// is wired into exactly one route (trends.my-edits.tsx), which ALWAYS
+// resolves `customerId` by calling requireCurrentNaiaCustomer(request)
+// first (confirmed by reading that route directly) — so customerId here
+// is never attacker-supplied, it is always the real, Clerk-verified
+// session's own id, or the caller never reaches this function at all
+// (requireCurrentNaiaCustomer redirects to sign-in otherwise).
+//
+// 2026-11-18 — redesigned away from a shared secret (was: a THIRD
+// condition requiring the caller to present TREND_EDIT_FIXTURE_PREVIEW_SECRET
+// via an x-trend-edit-fixture-preview header). That secret would have had
+// to be rotated into and held by whoever runs this code — but it was
+// never actually usable by the one party who needs to invoke this (Five-
+// Persona QA), for the exact reason the StyleMe fixture hit the same wall:
+// there was never an actual channel to hand them a shared secret. The
+// secret was also provably redundant given the one real caller's own
+// session requirement above — it added no security the session-derived
+// identity check below doesn't already provide on its own, since
+// customerId can never be spoofed or supplied by an unauthenticated
+// caller. Confirmed via grep that trends.my-edits.tsx is the only non-test
+// caller of this function.
+//
+// Changes behaviour only when ALL of the following hold on the SAME
+// request — fails closed (returns the unmodified real result) if any one
+// is false:
+//   1. VERCEL_ENV is "preview" or "development" (never production) —
+//      hard-coded here, same convention as api.vto-qa-fixture.tsx's
+//      resolveAuthorizedQaSessionCustomerId, not merely "we won't set the
+//      flag in Production" — a second, independent layer beyond #2 below;
+//   2. NAIA_PROJECT_VARIANT is exactly "staging" — same convention;
+//   3. TREND_EDIT_FIXTURE_ENABLED === "true" (already required to create
 //      the fixture rows in the first place);
-//   2. the request's x-trend-edit-fixture-preview header matches
-//      TREND_EDIT_FIXTURE_PREVIEW_SECRET — constant-time comparison
-//      (timingSafeStringEqual), not a plain `!==`, since this guards a
-//      real secret and a byte-by-byte early-exit compare leaks how many
-//      leading characters a guess got right; and
-//   3. the authenticated customer calling this is the one specific,
-//      founder-authorized QA customer (TREND_EDIT_FIXTURE_QA_CUSTOMER_ID)
-//      — a plain identity check, not a secret comparison, so no timing
-//      concern applies here. Fails closed (no match) whenever this env
-//      var is unset, exactly like the other two gates.
-// Without an exact match on all three, this returns byte-for-byte the same
+//   4. the authenticated customer calling this (customerId, always
+//      session-derived per above) is the one specific, founder-authorized
+//      QA customer (TREND_EDIT_FIXTURE_QA_CUSTOMER_ID).
+// Without an exact match on all four, this returns byte-for-byte the same
 // result as getPublishedEditorialReports() — i.e. the fixture rows (status:
 // DRAFT) stay invisible, same as they are to every other customer and
-// every other page, INCLUDING a customer who has the right secret but is
-// not the one authorized QA identity.
+// every other page, including a customer who is genuinely signed in but
+// is not the one authorized QA identity.
+//
+// TREND_EDIT_FIXTURE_PREVIEW_SECRET is no longer read anywhere — it does
+// not need to exist for this mechanism to work.
 const QA_FIXTURE_SLUGS = [
   "test-batch1-trend-edit-samemonth-a",
   "test-batch1-trend-edit-samemonth-b",
 ];
 
 export async function getPublishedEditorialReportsForQaPreview(
-  request: Request,
   customerId: string | null | undefined,
 ): Promise<TrendReportData[]> {
   const published = await getPublishedEditorialReports();
 
+  if (process.env.VERCEL_ENV !== "preview" && process.env.VERCEL_ENV !== "development") return published;
+  if (process.env.NAIA_PROJECT_VARIANT !== "staging") return published;
   const flagOn = process.env.TREND_EDIT_FIXTURE_ENABLED === "true";
-  const secret = process.env.TREND_EDIT_FIXTURE_PREVIEW_SECRET;
   const authorizedCustomerId = process.env.TREND_EDIT_FIXTURE_QA_CUSTOMER_ID;
-  if (!flagOn || !secret || !authorizedCustomerId) return published;
-
-  const provided = request.headers.get("x-trend-edit-fixture-preview");
-  if (!timingSafeStringEqual(provided, secret)) return published;
+  if (!flagOn || !authorizedCustomerId) return published;
 
   if (!customerId || customerId !== authorizedCustomerId) return published;
 
