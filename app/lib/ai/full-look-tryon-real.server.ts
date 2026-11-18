@@ -334,7 +334,13 @@ export async function uploadIntermediateStepResult(
   _getConfig: () => CloudinaryConfig | null = getCloudinaryConfig,
 ): Promise<{ ok: true } | { ok: false; errorCode: string }> {
   const publicId = deriveIntermediateStepPublicId(customerId, jobId);
-  const result = await uploadCloudinaryPrivate(publicId, outputDataUrl, "private", _fetch, _getConfig);
+  // buildIntermediateStepResultUrl / downloadIntermediateStepResult (below)
+  // both build the download URL with a hardcoded "png" — forcing Cloudinary
+  // to store the asset as real png on ingest (rather than whatever
+  // outputDataUrl's actual bytes happen to be, which validateFashnOutputDataUrl
+  // also accepts as jpeg/webp) makes that hardcoded assumption true by
+  // construction, never guessed.
+  const result = await uploadCloudinaryPrivate(publicId, outputDataUrl, "private", _fetch, _getConfig, undefined, "png");
   if (!result.ok) return { ok: false, errorCode: result.errorCode };
   return { ok: true };
 }
@@ -354,6 +360,9 @@ export function buildIntermediateStepResultUrl(
 ): string | null {
   const cfg = _getConfig();
   if (!cfg) return null;
+  // "png" is enforced at upload (uploadIntermediateStepResult passes
+  // targetFormat:"png" to uploadCloudinaryPrivate, which forces Cloudinary to
+  // transcode on ingest) — correct by construction, not assumed.
   return buildPrivateDownloadUrl(cfg, deriveIntermediateStepPublicId(customerId, jobId), "png", "private");
 }
 
@@ -392,7 +401,10 @@ export async function downloadIntermediateStepResult(
   const cfg = _getConfig();
   if (!cfg) return { ok: false, errorCode: "NOT_CONFIGURED" };
   const publicId = deriveIntermediateStepPublicId(customerId, jobId);
-  // Uploaded above via output_format:"png" (FASHN's own fixed output format).
+  // "png" is enforced at upload (uploadIntermediateStepResult passes
+  // targetFormat:"png" to uploadCloudinaryPrivate, which forces Cloudinary to
+  // transcode on ingest, regardless of what FASHN actually returned) —
+  // correct by construction, not assumed from FASHN's documented contract.
   const downloadUrl = buildPrivateDownloadUrl(cfg, publicId, "png", "private");
 
   let lastFailure: { ok: false; errorCode: string } = { ok: false, errorCode: "NETWORK_ERROR" };

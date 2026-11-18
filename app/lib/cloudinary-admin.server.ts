@@ -398,6 +398,13 @@ export async function uploadCloudinaryPrivate(
   _fetch: typeof fetch = fetch,
   _getConfig: () => CloudinaryConfig | null = getCloudinaryConfig,
   _sleep: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  // Optional: forces Cloudinary to transcode the uploaded asset to this exact
+  // format on ingest (server-side, Cloudinary's own infrastructure — not a
+  // guess about what the input bytes already are). Callers that later build a
+  // download URL with a hardcoded format (e.g. "png" for an AI-generated
+  // result) must pass that same format here so the hardcoded assumption is
+  // true by construction, never assumed.
+  targetFormat?: string,
 ): Promise<
   | { ok: true; publicId: string; format: string; version: string }
   | { ok: false; errorCode: string }
@@ -413,8 +420,9 @@ export async function uploadCloudinaryPrivate(
     // reuse the first attempt's signed body.
     const timestamp = Math.floor(Date.now() / 1000);
 
-    // type is included in signature when it is not the default "upload"
+    // Parameters sorted alphabetically for signing: format, public_id, timestamp, type.
     const sigString =
+      (targetFormat ? `format=${targetFormat}&` : "") +
       `public_id=${publicId}` +
       `&timestamp=${timestamp}` +
       (deliveryType && deliveryType !== "upload" ? `&type=${deliveryType}` : "") +
@@ -428,6 +436,9 @@ export async function uploadCloudinaryPrivate(
       timestamp: String(timestamp),
       signature,
     });
+    if (targetFormat) {
+      body.append("format", targetFormat);
+    }
     if (deliveryType && deliveryType !== "upload") {
       body.append("type", deliveryType);
     }
@@ -458,11 +469,17 @@ export async function uploadCloudinaryPrivate(
 
         if (json.error) {
           lastFailure = { ok: false, errorCode: "PROVIDER_REJECTED" };
+        } else if (!json.format) {
+          // A missing format in Cloudinary's own upload response must never
+          // be guessed at — a caller that builds a download URL with a
+          // hardcoded/guessed format off a false "it's definitely X" premise
+          // forces a real, cached format conversion on every later download.
+          lastFailure = { ok: false, errorCode: "MISSING_UPLOAD_FORMAT" };
         } else {
           return {
             ok: true,
             publicId: json.public_id ?? publicId,
-            format: json.format ?? "png",
+            format: json.format,
             version: json.version != null ? String(json.version) : "",
           };
         }

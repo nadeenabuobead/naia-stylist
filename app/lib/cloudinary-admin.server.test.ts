@@ -285,6 +285,54 @@ describe("uploadCloudinaryPrivate — error detail", () => {
   });
 });
 
+// 2026-11-18 — Cloudinary format-fallback sweep #2 (QA #36 follow-up):
+// uploadCloudinaryPrivate used to default a missing Cloudinary
+// upload-response format to "png" instead of failing closed, and had no way
+// to force a known target format at upload time — forcing
+// buildIntermediateStepResultUrl/downloadIntermediateStepResult/
+// buildTryOnResultUrl's hardcoded "png" download-side assumption to rest on
+// an unenforced guess about what FASHN actually returned.
+describe("uploadCloudinaryPrivate — targetFormat enforcement and format fallback (sweep #2)", () => {
+  it("a missing format in Cloudinary's upload response never guesses \"png\" — fails closed with MISSING_UPLOAD_FORMAT", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ public_id: "pub-1" }) }); // no format field
+    const result = await uploadCloudinaryPrivate("pub-1", "data:image/png;base64,x", "private", fetchMock as any, () => CONFIG, async () => {});
+    expect(result).toEqual({ ok: false, errorCode: "MISSING_UPLOAD_FORMAT" });
+  });
+
+  it("when targetFormat is passed, the signed upload request includes format=<targetFormat> in both the body and the signature", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ public_id: "pub-1", format: "png", version: 1 }) });
+    await uploadCloudinaryPrivate("pub-1", "data:image/jpeg;base64,x", "private", fetchMock as any, () => CONFIG, undefined, "png");
+
+    const [, init] = fetchMock.mock.calls[0];
+    const body = init.body as URLSearchParams;
+    expect(body.get("format")).toBe("png");
+
+    // Independently recompute the signature the same way buildPrivateDownloadUrl's
+    // sibling signing code does (alphabetical: format, public_id, timestamp, type)
+    // and confirm it matches what was actually sent.
+    const timestamp = body.get("timestamp");
+    const expectedSig = crypto
+      .createHash("sha1")
+      .update(`format=png&public_id=pub-1&timestamp=${timestamp}&type=private${CONFIG.apiSecret}`)
+      .digest("hex");
+    expect(body.get("signature")).toBe(expectedSig);
+  });
+
+  it("without targetFormat, no format param is added to the request — existing callers are unaffected", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ public_id: "pub-1", format: "jpg", version: 1 }) });
+    await uploadCloudinaryPrivate("pub-1", "data:image/jpeg;base64,x", "private", fetchMock as any, () => CONFIG);
+    const [, init] = fetchMock.mock.calls[0];
+    const body = init.body as URLSearchParams;
+    expect(body.has("format")).toBe(false);
+  });
+
+  it("a real, present format is returned verbatim, never coerced to \"png\"", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ public_id: "pub-1", format: "webp", version: 1 }) });
+    const result = await uploadCloudinaryPrivate("pub-1", "data:image/webp;base64,x", "private", fetchMock as any, () => CONFIG);
+    expect(result).toEqual({ ok: true, publicId: "pub-1", format: "webp", version: "1" });
+  });
+});
+
 // 2026-11-16 addition — confirmed gap: this call had no bounded timeout at
 // all (unlike submitTryOnToProvider's own), and no retry for a signature
 // that's plausibly transient. The chain's own full-look-tryon-real tests

@@ -581,6 +581,12 @@ describe("pollFullLookRealStep", () => {
       "private",
       expect.anything(),
       expect.anything(),
+      undefined,
+      // QA #36 sweep #2: targetFormat is now explicitly forced to "png" at
+      // upload (uploadCloudinaryPrivate transcodes on ingest via Cloudinary's
+      // own format param) — the hardcoded "png" the download side later
+      // requests is correct by construction, not assumed.
+      "png",
     );
     expect(mockUploadResult()).not.toHaveBeenCalled();
   });

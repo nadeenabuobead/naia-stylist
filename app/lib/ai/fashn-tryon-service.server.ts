@@ -178,7 +178,11 @@ export async function uploadTryOnResult(
   _getConfig: () => CloudinaryConfig | null = getCloudinaryConfig,
 ): Promise<{ ok: true } | { ok: false; errorCode: string }> {
   const publicId = deriveTryOnResultPublicId(customerId, jobId);
-  const result = await uploadCloudinaryPrivate(publicId, outputDataUrl, "private", _fetch, _getConfig);
+  // buildTryOnResultUrl (below) builds the download URL with a hardcoded
+  // "png" — forcing Cloudinary to store the asset as real png on ingest
+  // (rather than whatever outputDataUrl's actual bytes happen to be) makes
+  // that hardcoded assumption true by construction, never guessed.
+  const result = await uploadCloudinaryPrivate(publicId, outputDataUrl, "private", _fetch, _getConfig, undefined, "png");
   if (!result.ok) return { ok: false, errorCode: result.errorCode };
   return { ok: true };
 }
@@ -192,6 +196,9 @@ export function buildTryOnResultUrl(
   const cfg = _getConfig();
   if (!cfg) return null;
   const publicId = deriveTryOnResultPublicId(customerId, jobId);
+  // "png" is enforced at upload (uploadTryOnResult passes targetFormat:"png"
+  // to uploadCloudinaryPrivate, which forces Cloudinary to transcode on
+  // ingest) — correct by construction, not assumed.
   return buildPrivateDownloadUrl(cfg, publicId, "png", "private", nowFn);
 }
 
