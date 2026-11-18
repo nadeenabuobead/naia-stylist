@@ -50,6 +50,10 @@
 // own comment for its narrow scoping) — see deleteFixtureSuggestion below.
 // Never creates a ClosetItem, never creates a Customer, never touches any
 // customer other than the one named by QA_OVERRIDE_CUSTOMER_ID.
+//
+// POST body field fixtureKind: "styleme-result-view" (2026-11-18) switches
+// to a second, independent fixture shape — see createStyleMeResultViewFixture
+// below for why and how it differs from the Full-Look fixture above.
 
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { data } from "react-router";
@@ -119,12 +123,17 @@ export async function action({ request }: ActionFunctionArgs) {
   } catch {
     return data({ ok: false, code: "invalid_request" }, { status: 400 });
   }
-  const customerId = (body as Record<string, unknown> | null)?.customerId;
+  const parsedBody = body as Record<string, unknown> | null;
+  const customerId = parsedBody?.customerId;
 
   if (!isAuthorized(request, customerId)) {
     // Deliberately generic — never distinguishes "wrong secret" from "wrong
     // customer" from "wrong environment" in the response.
     return data({ ok: false, code: "forbidden" }, { status: 403 });
+  }
+
+  if (parsedBody?.fixtureKind === "styleme-result-view") {
+    return createStyleMeResultViewFixture(customerId);
   }
 
   const closetItems = await prisma.closetItem.findMany({
@@ -184,6 +193,84 @@ export async function action({ request }: ActionFunctionArgs) {
     suggestionId,
     chosenItems: chosen.map(({ slot, item }) => ({ slot, closetItemId: item.id, name: item.name })),
     totalEligibleCategoriesAvailable: chosen.length,
+  });
+}
+
+// ── StyleMe result-page fixture (2026-11-18) ────────────────────────────────
+//
+// POST /api/vto-qa-fixture, body: { customerId, fixtureKind: "styleme-result-view" }
+//
+// WHY THIS EXISTS: Five-Persona QA checks #26/#30/#31/#37 need the target
+// customer to have AT LEAST ONE existing StyleMe suggestion to view/navigate
+// to/test cross-customer isolation against — /style-me/result.tsx's loader
+// only requires session.suggestions[0] to exist (confirmed by reading it
+// directly; it does not gate on moodDescription or on Full-Look eligibility
+// at all). The existing fixture above (Full-Look VTO) is the wrong tool for
+// this: it refuses outright unless the customer's REAL closet already has 3+
+// categories with a resolvable image (Persona A's real closet has zero, not
+// "fewer than 3" — confirmed via that fixture's own response), so no choice
+// of threshold on that path can ever succeed from Persona A's actual data.
+//
+// This creates a StylingSession + OutfitSuggestion with 1-3 OutfitItem rows
+// that are entirely synthetic "nAia product" shop-style items (schema's own
+// documented "Source (either closet item OR nAia product)" shape on
+// OutfitItem — closetItemId left null, exactly like a real shop-recommended
+// item) — zero dependency on the target customer's real closet data, zero
+// Claude call, zero FASHN call. result.tsx's own item-hydration code only
+// attempts a live Cloudinary re-resolution when item.closetItemId AND
+// item.closetItem are BOTH present (confirmed by reading that code); a null
+// closetItemId item is passed through exactly as stored, so the placeholder
+// productImageUrl (null here — rendered as "no image", never a broken
+// signed-URL fetch) carries zero live-resolution risk.
+//
+// moodDescription is left null — the EXACT SAME convention the Full-Look
+// fixture above already uses, for the exact same two reasons: (1) it keeps
+// this fixture outside qualifyingStyleMeWhere's StyleMe-monthly-quota count
+// (entitlement.server.ts), and (2) it is what makes the EXISTING, already-
+// reviewed deleteFixtureSuggestion cleanup below work for this fixture kind
+// completely unmodified — same moodDescription-null check, same 1-suggestion-
+// per-session check, same zero-VirtualTryOnJob check. No separate cleanup
+// path was written or is needed.
+//
+// Every product name is prefixed "[QA FIXTURE]" and the Shopify product id
+// is a clearly-fake, non-existent-looking string — never confusable with a
+// real catalog item if ever seen directly.
+//
+// Same four-check authorization as every other action in this file —
+// VERCEL_ENV, NAIA_PROJECT_VARIANT, the dedicated secret header, and the
+// exact QA_OVERRIDE_CUSTOMER_ID match — already enforced by the caller
+// before this function is reached. No new secret, no new allowlist.
+const STYLEME_FIXTURE_ITEMS: { itemType: OutfitItemType; title: string }[] = [
+  { itemType: "TOP", title: "[QA FIXTURE] Synthetic top — not a real product" },
+  { itemType: "BOTTOM", title: "[QA FIXTURE] Synthetic bottom — not a real product" },
+  { itemType: "SHOES", title: "[QA FIXTURE] Synthetic shoes — not a real product" },
+];
+
+async function createStyleMeResultViewFixture(customerId: string) {
+  const { sessionId, suggestionId } = await prisma.$transaction(async (tx) => {
+    const session = await tx.stylingSession.create({ data: { customerId }, select: { id: true } });
+    // moodDescription left at its default (null) — see header comment above.
+    const suggestion = await tx.outfitSuggestion.create({ data: { sessionId: session.id }, select: { id: true } });
+    for (const { itemType, title } of STYLEME_FIXTURE_ITEMS) {
+      await tx.outfitItem.create({
+        data: {
+          suggestionId: suggestion.id,
+          itemType,
+          productTitle: title,
+          shopifyProductId: "qa-fixture-not-a-real-product-id",
+          productImageUrl: null,
+        },
+      });
+    }
+    return { sessionId: session.id, suggestionId: suggestion.id };
+  });
+
+  return data({
+    ok: true,
+    fixtureKind: "styleme-result-view",
+    sessionId,
+    suggestionId,
+    itemCount: STYLEME_FIXTURE_ITEMS.length,
   });
 }
 

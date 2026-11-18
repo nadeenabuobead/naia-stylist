@@ -376,6 +376,79 @@ describe("api.vto-qa-fixture action — eligibility and creation", () => {
   });
 });
 
+describe("api.vto-qa-fixture action — fixtureKind: styleme-result-view", () => {
+  function styleMeReq(overrides: Record<string, unknown> = {}, headers: Record<string, string> = {}) {
+    return req(
+      { customerId: QA_ID, fixtureKind: "styleme-result-view", ...overrides },
+      { "x-vto-qa-fixture-secret": "the-real-secret", ...headers },
+    );
+  }
+
+  it("rejects with the same generic 403 when unauthorized (wrong secret)", async () => {
+    setAuthorizedEnv();
+    const res = await action({ request: styleMeReq({}, { "x-vto-qa-fixture-secret": "wrong" }) } as any);
+    expect(res.init?.status).toBe(403);
+    expect(mockSessionCreate).not.toHaveBeenCalled();
+  });
+
+  it("rejects with the same generic 403 when the customerId does not match QA_OVERRIDE_CUSTOMER_ID", async () => {
+    setAuthorizedEnv();
+    const res = await action({ request: styleMeReq({ customerId: "some-other-customer" }) } as any);
+    expect(res.init?.status).toBe(403);
+    expect(mockSessionCreate).not.toHaveBeenCalled();
+  });
+
+  it("never touches closetItem.findMany — this fixture kind does not depend on the customer's real closet at all", async () => {
+    setAuthorizedEnv();
+    await action({ request: styleMeReq() } as any);
+    expect(mockFindMany).not.toHaveBeenCalled();
+  });
+
+  it("creates exactly one StylingSession, one OutfitSuggestion (moodDescription left null/default), and 3 OutfitItem rows", async () => {
+    setAuthorizedEnv();
+    const res = await action({ request: styleMeReq() } as any);
+    const payload = res.data as any;
+    expect(payload.ok).toBe(true);
+    expect(payload.fixtureKind).toBe("styleme-result-view");
+    expect(payload.sessionId).toBe("session-1");
+    expect(payload.suggestionId).toBe("suggestion-1");
+    expect(payload.itemCount).toBe(3);
+
+    expect(mockSessionCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { customerId: QA_ID } }),
+    );
+    // No moodDescription key at all — relies on the schema default (null),
+    // the exact same convention the Full-Look fixture above already uses.
+    const suggestionCreateArg = mockSuggestionCreate.mock.calls[0][0];
+    expect(suggestionCreateArg.data).not.toHaveProperty("moodDescription");
+
+    expect(mockItemCreate).toHaveBeenCalledTimes(3);
+  });
+
+  it("every created OutfitItem has closetItemId omitted (shop-style, not closet-sourced) and a clearly-fake, prefixed product identity", async () => {
+    setAuthorizedEnv();
+    await action({ request: styleMeReq() } as any);
+    for (const call of mockItemCreate.mock.calls) {
+      const itemData = call[0].data;
+      expect(itemData).not.toHaveProperty("closetItemId");
+      expect(itemData.productTitle).toMatch(/^\[QA FIXTURE\]/);
+      expect(itemData.shopifyProductId).toBe("qa-fixture-not-a-real-product-id");
+      expect(itemData.productImageUrl).toBeNull();
+    }
+  });
+
+  it("the existing DELETE cleanup action works unmodified against this fixture kind (same moodDescription-null + 1-suggestion-per-session + zero-VTO-job guards)", async () => {
+    setAuthorizedEnv();
+    mockSuggestionFindUnique.mockResolvedValueOnce(fixtureSuggestion());
+    const res = await action({ request: deleteReq({ customerId: QA_ID, suggestionId: "suggestion-1" }, { "x-vto-qa-fixture-secret": "the-real-secret" }) } as any);
+    const payload = res.data as any;
+    expect(payload.ok).toBe(true);
+    expect(mockItemDeleteMany).toHaveBeenCalledWith({ where: { suggestionId: "suggestion-1" } });
+    expect(mockSuggestionDelete).toHaveBeenCalledWith({ where: { id: "suggestion-1" } });
+    expect(mockSessionDelete).toHaveBeenCalledWith({ where: { id: "session-1" } });
+  });
+});
+
 describe("api.vto-qa-fixture loader (GET) — read-only verification, no duplicate creation", () => {
   function getReq(params: Record<string, string>, headers: Record<string, string> = {}) {
     const url = new URL("https://example.test/api/vto-qa-fixture");
