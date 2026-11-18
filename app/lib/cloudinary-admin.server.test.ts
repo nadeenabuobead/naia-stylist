@@ -23,6 +23,7 @@ import {
   uploadCloudinaryPrivate,
   createChunkedRawUploader,
   CHUNK_SIZE_BYTES,
+  validateImageUrlOwnership,
   type CloudinaryConfig,
 } from "./cloudinary-admin.server";
 import { downloadIntermediateStepResult, deriveIntermediateStepPublicId } from "./ai/full-look-tryon-real.server";
@@ -487,5 +488,71 @@ describe("uploadCloudinaryPrivate + downloadIntermediateStepResult — real inte
     const { fetchMock } = makeFakeCloudinary();
     const result = await downloadIntermediateStepResult("cust-1", "job-never-uploaded", fetchMock as any, () => CONFIG);
     expect(result).toEqual({ ok: false, errorCode: "PROVIDER_ERROR_404" });
+  });
+});
+
+// 2026-11-18 — QA #36 exposure review: ClosetItem.imageUrl (and the same
+// field on related models) is a pre-private-delivery-migration legacy field
+// — a genuine unsigned, non-expiring, publicly-fetchable Cloudinary URL
+// (confirmed via this codebase's own "legacy public imageUrl" comment in
+// customer-360.server.ts). Every call site that resolves a display image
+// already checks validatePublicIdOwnership() on the signed branch, but the
+// legacy-URL fallback had no equivalent check anywhere — this closes that
+// gap. validateImageUrlOwnership is the new helper; this covers its own
+// logic directly.
+//
+// Deliberately asymmetric (see the function's own comment): reject only on
+// POSITIVE evidence of a different customer's naia-wardrobe/ folder — an
+// ambiguous/no-prefix-at-all URL is allowed through, because the
+// naia-wardrobe/{customerId}/ convention itself was only made reliable on
+// 2026-08-11 (911c1cf) and a genuinely-owned pre-convention legacy URL may
+// not carry it at all. Blocking every unprefixed URL would be exactly the
+// "broken reference" regression this fix must not introduce.
+describe("validateImageUrlOwnership", () => {
+  it("accepts a URL whose path contains the requesting customer's own naia-wardrobe prefix", () => {
+    expect(
+      validateImageUrlOwnership(
+        "https://res.cloudinary.com/demo/image/upload/v123/naia-wardrobe/cust-A/item-1.jpg",
+        "cust-A",
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects a URL belonging to a DIFFERENT customer's naia-wardrobe prefix — the actual exposure this closes", () => {
+    expect(
+      validateImageUrlOwnership(
+        "https://res.cloudinary.com/demo/image/upload/v123/naia-wardrobe/cust-B/item-1.jpg",
+        "cust-A",
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects null", () => {
+    expect(validateImageUrlOwnership(null, "cust-A")).toBe(false);
+  });
+
+  it("rejects undefined", () => {
+    expect(validateImageUrlOwnership(undefined, "cust-A")).toBe(false);
+  });
+
+  it("rejects an empty string", () => {
+    expect(validateImageUrlOwnership("", "cust-A")).toBe(false);
+  });
+
+  it("allows a URL with no naia-wardrobe segment at all — a pre-2026-08-11 legacy format with no determinable owner, not evidence of mismatch", () => {
+    expect(validateImageUrlOwnership("https://res.cloudinary.com/demo/image/upload/abc123.jpg", "cust-A")).toBe(true);
+  });
+
+  it("rejects cust-A2's folder for customer cust-A — an exact-segment match, not a loose substring check", () => {
+    // Confirms the regex captures the full path segment ("cust-A2") rather
+    // than treating "naia-wardrobe/cust-A" as a literal substring match,
+    // which would wrongly accept a neighboring customer ID that happens to
+    // share a prefix.
+    expect(
+      validateImageUrlOwnership(
+        "https://res.cloudinary.com/demo/image/upload/naia-wardrobe/cust-A2/item-1.jpg",
+        "cust-A",
+      ),
+    ).toBe(false);
   });
 });

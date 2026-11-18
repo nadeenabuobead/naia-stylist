@@ -226,6 +226,21 @@ describe("T10: loader computes displayImageUrl from imagePublicId server-side", 
       "component must never use item.imagePublicId directly as an <img> src",
     );
   });
+
+  // 2026-11-18 — QA #36 exposure review: the legacy item.imageUrl fallback
+  // branch (reached when imagePublicId/imageFormat/cfg aren't all present)
+  // had no ownership check at all, unlike the signed-URL branch right above
+  // it. Confirms the fix is actually present in the loader, not just in the
+  // shared helper other routes use.
+  it("the legacy item.imageUrl fallback branch checks validateImageUrlOwnership before using it", () => {
+    const loaderIdx = closet.indexOf("export async function loader");
+    const loaderEndIdx = closet.indexOf("export async function action", loaderIdx);
+    const loaderBlock = closet.slice(loaderIdx, loaderEndIdx > loaderIdx ? loaderEndIdx : loaderIdx + 1500);
+    assert.ok(
+      loaderBlock.includes("validateImageUrlOwnership"),
+      "loader's legacy imageUrl fallback must verify ownership before using it, same as the signed branch",
+    );
+  });
 });
 
 // ── T11: Ownership validated before AI calls ──────────────────────────────────

@@ -32,6 +32,7 @@ import { loadStrongestConfirmedTendency } from "~/lib/ai/taste-reconcile.server"
 import {
   getCloudinaryConfig,
   validatePublicIdOwnership,
+  validateImageUrlOwnership,
   buildPrivateDownloadUrl,
 } from "~/lib/cloudinary-admin.server";
 import { resolveCollageImages, resolveItemImage, type ResolvableOutfitItem } from "~/lib/styleme/look-image-resolution.server";
@@ -147,7 +148,7 @@ function resolveClosetItemImageUrl(
     if (!ownership.ok) return null;
     return buildPrivateDownloadUrl(cfg, item.imagePublicId, item.imageFormat, "private", undefined, undefined, THUMBNAIL_TRANSFORMATION);
   }
-  if (item.imageUrl) return item.imageUrl;
+  if (item.imageUrl && validateImageUrlOwnership(item.imageUrl, customerId)) return item.imageUrl;
   return null;
 }
 

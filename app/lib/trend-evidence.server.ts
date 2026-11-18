@@ -1,6 +1,6 @@
 import prisma from "../db.server";
 import type { TrendReportData } from "./trend-reports";
-import { buildPrivateDownloadUrl, getCloudinaryConfig } from "./cloudinary-admin.server";
+import { buildPrivateDownloadUrl, getCloudinaryConfig, validateImageUrlOwnership } from "./cloudinary-admin.server";
 import { scoreItemAttributes, dimensionIdsForSlug } from "./trend-evidence-attribute-scoring.server";
 import { resolveItemImage } from "./styleme/look-image-resolution.server";
 // Used by buildColorMaterialSuffix (Colour Direction's neutral/accent copy
@@ -220,7 +220,7 @@ export async function getShopperEvidence(customerId: string): Promise<ShopperEvi
     closetItems: customer.closetItems.map((item) => ({
       id: item.id,
       name: item.name,
-      imageUrl: item.imageUrl
+      imageUrl: (item.imageUrl && validateImageUrlOwnership(item.imageUrl, customerId) ? item.imageUrl : null)
         ?? (item.imagePublicId && item.imageFormat && cloudinaryCfg
             ? buildPrivateDownloadUrl(cloudinaryCfg, item.imagePublicId, item.imageFormat, "private")
             : null),

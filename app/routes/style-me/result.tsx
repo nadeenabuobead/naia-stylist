@@ -12,6 +12,7 @@ import {
 import {
   getCloudinaryConfig,
   validatePublicIdOwnership,
+  validateImageUrlOwnership,
   buildPrivateDownloadUrl,
 } from "~/lib/cloudinary-admin.server";
 import { loadNaiaModel, computeModelReadinessFromRecord } from "~/lib/ai/my-naia-model.server";
@@ -248,7 +249,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
                     };
                   }
                 }
-                if (ci.imageUrl) return { ...item, productImageUrl: ci.imageUrl };
+                if (ci.imageUrl && validateImageUrlOwnership(ci.imageUrl, session.customerId)) {
+                  return { ...item, productImageUrl: ci.imageUrl };
+                }
               }
               return item;
             }),

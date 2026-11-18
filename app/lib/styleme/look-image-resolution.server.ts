@@ -8,6 +8,7 @@
 
 import {
   validatePublicIdOwnership,
+  validateImageUrlOwnership,
   buildPrivateDownloadUrl,
   type CloudinaryConfig,
 } from "~/lib/cloudinary-admin.server";
@@ -68,7 +69,7 @@ export function resolveItemImage(
     }
   }
   if (item.productImageUrl) return item.productImageUrl;
-  if (ci?.imageUrl) return ci.imageUrl;
+  if (ci?.imageUrl && validateImageUrlOwnership(ci.imageUrl, ctx.customerId)) return ci.imageUrl;
   return null;
 }
 

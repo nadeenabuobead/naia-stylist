@@ -70,6 +70,47 @@ describe("resolveItemImage() — canonical garment-image resolution", () => {
     assert.equal(url, "https://legacy.example.com/legacy.jpg");
   });
 
+  // 2026-11-18 — QA #36 exposure review: the legacy imageUrl fallback above
+  // had no ownership check at all (unlike the signed-URL branch, a few
+  // lines up, which calls validatePublicIdOwnership before ever using
+  // ci.imagePublicId). This closes that gap at the one point where it's
+  // actually detectable: a legacy URL that itself names a DIFFERENT
+  // customer's naia-wardrobe/ folder. An ambiguous/no-prefix legacy URL
+  // (the test immediately above this one) is unaffected — see
+  // validateImageUrlOwnership's own test file for why that's deliberate,
+  // not an oversight.
+  it("QA #36 — a legacy imageUrl naming a DIFFERENT customer's naia-wardrobe folder is rejected, not leaked", () => {
+    const url = resolveItemImage(
+      {
+        closetItemId: "ci-1",
+        productImageUrl: null,
+        closetItem: {
+          imageUrl: `https://res.cloudinary.com/demo/image/upload/naia-wardrobe/${OTHER_CUSTOMER_ID}/ci-1.jpg`,
+          imagePublicId: null,
+          imageFormat: null,
+        },
+      },
+      { customerId: CUSTOMER_ID, cloudinaryConfig: CONFIG },
+    );
+    assert.equal(url, null, "must never return another customer's legacy photo URL");
+  });
+
+  it("still returns a legacy imageUrl that correctly names THIS customer's own naia-wardrobe folder", () => {
+    const url = resolveItemImage(
+      {
+        closetItemId: "ci-1",
+        productImageUrl: null,
+        closetItem: {
+          imageUrl: `https://res.cloudinary.com/demo/image/upload/naia-wardrobe/${CUSTOMER_ID}/ci-1.jpg`,
+          imagePublicId: null,
+          imageFormat: null,
+        },
+      },
+      { customerId: CUSTOMER_ID, cloudinaryConfig: CONFIG },
+    );
+    assert.equal(url, `https://res.cloudinary.com/demo/image/upload/naia-wardrobe/${CUSTOMER_ID}/ci-1.jpg`);
+  });
+
   it("returns null — never a stale/broken placeholder string — when nothing can be resolved", () => {
     const url = resolveItemImage(
       { closetItemId: "ci-1", productImageUrl: null, closetItem: { imageUrl: null, imagePublicId: null, imageFormat: null } },

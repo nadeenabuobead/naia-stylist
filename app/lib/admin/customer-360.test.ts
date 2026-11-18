@@ -49,6 +49,7 @@ vi.mock("~/lib/editorial-reports.server", () => ({
 vi.mock("~/lib/cloudinary-admin.server", () => ({
   getCloudinaryConfig: vi.fn(() => null),
   validatePublicIdOwnership: vi.fn(() => ({ ok: true })),
+  validateImageUrlOwnership: vi.fn(() => true),
   buildPrivateDownloadUrl: vi.fn(() => "https://example.com/signed.jpg"),
 }));
 

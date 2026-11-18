@@ -9,7 +9,7 @@ import { assessClosetEligibility, CLOSET_ELIGIBILITY_DISPLAY, isVtoCategoryAllow
 import { emitClosetItemAdded, recordJourneyEventAwaited } from "~/lib/ai/journey-events.server";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
 import naiaStyles from "~/styles/naia-design-system.css?url";
-import { verifyCloudinaryAsset, buildPrivateDownloadUrl, getCloudinaryConfig, validatePublicIdOwnership } from "~/lib/cloudinary-admin.server";
+import { verifyCloudinaryAsset, buildPrivateDownloadUrl, getCloudinaryConfig, validatePublicIdOwnership, validateImageUrlOwnership } from "~/lib/cloudinary-admin.server";
 // H7: this route no longer calls deleteCloudinaryAsset directly — every
 // discard goes through the record-on-failure wrapper via discardUpload below,
 // so the bare deleter is deliberately no longer imported here.
@@ -211,7 +211,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     let displayImageUrl: string | null = null;
     if (item.imagePublicId && item.imageFormat && cfg) {
       displayImageUrl = buildPrivateDownloadUrl(cfg, item.imagePublicId, item.imageFormat, "private");
-    } else if (item.imageUrl) {
+    } else if (item.imageUrl && validateImageUrlOwnership(item.imageUrl, naiaCustomer.id)) {
       displayImageUrl = item.imageUrl;
     }
     return { ...base, displayImageUrl };

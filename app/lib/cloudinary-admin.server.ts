@@ -729,3 +729,44 @@ export function validatePublicIdOwnership(
   }
   return { ok: true };
 }
+
+// ── Legacy public imageUrl ownership validation ──────────────────────────────
+//
+// 2026-11-18 — QA #36 exposure review: ClosetItem.imageUrl (and the same
+// field on the handful of other models that share it) is a pre-private-
+// delivery-migration legacy field — a genuine unsigned, non-expiring,
+// publicly-fetchable Cloudinary URL, confirmed via this codebase's own
+// comment ("legacy public imageUrl") in customer-360.server.ts. Every call
+// site that resolves a display image already checks
+// validatePublicIdOwnership() on the SIGNED (imagePublicId) branch before
+// using it — the legacy-URL fallback branch did not have an equivalent
+// check anywhere, even though it carries the same "could this row belong to
+// someone else" risk the signed branch was explicitly written to guard
+// against. No caller found during this review currently passes a
+// mismatched item/customerId pair (every current query scopes by
+// customerId upstream) — this is deliberate defense-in-depth for that
+// invariant, not a fix for a confirmed live exploit.
+//
+// Deliberately asymmetric, NOT a simple "must match my prefix" check:
+// confirmed via git history (911c1cf, 2026-08-11) that the
+// naia-wardrobe/{customerId}/ public_id prefix convention itself was only
+// made reliable on that date — before it, Cloudinary's dynamic folder mode
+// (asset_folder) could produce a bare, unprefixed public_id. A legacy
+// imageUrl predating that fix may legitimately belong to its customer
+// without carrying any naia-wardrobe/ segment at all. Blocking every
+// unprefixed legacy URL outright would silently hide real photos for
+// whichever customers uploaded before that date — the exact "broken
+// reference" regression this fix must not introduce. So: reject only on
+// POSITIVE evidence the URL names a DIFFERENT customer's folder; an
+// ambiguous/pre-convention URL with no determinable owner is allowed
+// through here, relying on the same upstream customerId-scoped query every
+// current caller already uses to reach this value in the first place.
+export function validateImageUrlOwnership(
+  imageUrl: string | null | undefined,
+  customerId: string,
+): boolean {
+  if (!imageUrl || typeof imageUrl !== "string") return false;
+  const match = imageUrl.match(/\/naia-wardrobe\/([^/]+)\//);
+  if (!match) return true; // no determinable owner segment — pre-convention legacy format, not evidence of mismatch
+  return match[1] === customerId;
+}
