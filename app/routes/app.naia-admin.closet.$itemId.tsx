@@ -34,14 +34,18 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // Generate signed URL for the garment image if it's a private Cloudinary asset.
   // Fall through to thumbnailUrl for public assets or non-Cloudinary uploads.
   let garmentImageUrl: string | null = null;
-  if (item.imagePublicId) {
+  // item.imageFormat is nullable (ClosetItem.imageFormat String?) — a missing
+  // format must never be guessed at "jpg" (forces a real, cached Cloudinary
+  // format conversion); fall back to thumbnailUrl instead, same as the
+  // !cfg/catch branches below.
+  if (item.imagePublicId && item.imageFormat) {
     try {
       const cfg = getCloudinaryConfig();
       if (cfg) {
         garmentImageUrl = buildPrivateDownloadUrl(
           cfg,
           item.imagePublicId,
-          item.imageFormat ?? "jpg",
+          item.imageFormat,
           "private",
         );
       } else {
