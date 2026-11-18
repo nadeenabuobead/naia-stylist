@@ -360,9 +360,14 @@ export async function saveNaiaModelPhoto(
 
   // ── Layer 1: format allowlist, size cap, dimension bounds (Admin API only) ──
   const ALLOWED_FORMATS = new Set(["jpg", "jpeg", "png", "webp", "heic", "heif"]);
-  if (verifiedFormat && !ALLOWED_FORMATS.has(verifiedFormat)) {
+  // A null verifiedFormat (Cloudinary's own verification response omitted
+  // format) must be rejected here, not silently let through — the old
+  // `verifiedFormat && ...` guard skipped this check entirely when format
+  // was null, and null then got guessed at "jpg" below (Layer 2/3 moderation
+  // URLs), the exact format-guessing defect this QA item tracks.
+  if (!verifiedFormat || !ALLOWED_FORMATS.has(verifiedFormat)) {
     await deleteRejectedUpload(newPublicId, "private");
-    return { ok: false, error: `File type "${verifiedFormat}" is not accepted. Use JPG, PNG, WEBP, or HEIC.` };
+    return { ok: false, error: `File type "${verifiedFormat ?? "unknown"}" is not accepted. Use JPG, PNG, WEBP, or HEIC.` };
   }
   const MAX_BYTES = 5 * 1024 * 1024;
   if (asset.bytes && asset.bytes > MAX_BYTES) {
@@ -394,7 +399,7 @@ export async function saveNaiaModelPhoto(
     await deleteRejectedUpload(newPublicId, "private");
     return { ok: false, error: "Image service is not configured. Please try again." };
   }
-  const moderationUrl = buildPrivateDownloadUrl(cfg, newPublicId, verifiedFormat ?? "jpg", "private");
+  const moderationUrl = buildPrivateDownloadUrl(cfg, newPublicId, verifiedFormat, "private");
   const moderation = await _moderateContent(moderationUrl);
   if (moderation.status === "MODERATION_UNAVAILABLE") {
     await deleteRejectedUpload(newPublicId, "private");
@@ -409,7 +414,7 @@ export async function saveNaiaModelPhoto(
   // Reuses the selfie quality check to confirm the photo contains a clear,
   // forward-facing face — the same gate used during Selfie Style Analysis.
   if (slot === "face") {
-    const faceQualityUrl = buildPrivateDownloadUrl(cfg, newPublicId, verifiedFormat ?? "jpg", "private");
+    const faceQualityUrl = buildPrivateDownloadUrl(cfg, newPublicId, verifiedFormat, "private");
     const faceQuality = await _checkFaceQuality({ imageUrl: faceQualityUrl });
     if (!faceQuality.pass) {
       await deleteRejectedUpload(newPublicId, "private");

@@ -275,6 +275,72 @@ describe("saveNaiaModelPhoto", () => {
     assert.equal(upsertedData.facePublicId, null);
     assert.equal(upsertedData.bodyPublicId, null);
   });
+
+  it("MM.10 — QA #36 sweep #2: a null/empty verifiedFormat (Cloudinary's own verification response omitted format) is rejected before moderation — never guessed at \"jpg\"", async () => {
+    // Matches verifyCloudinaryAsset's real shape: a missing format comes back
+    // as "" (asset.format || null -> null inside saveNaiaModelPhoto), not
+    // undefined — the old `verifiedFormat && ...` guard skipped the allowlist
+    // check entirely for this case, and null then got guessed at "jpg" to
+    // build the moderation URL below.
+    const verifyEmptyFormat: VerifyAssetFn = async (pid) => ({
+      ok: true,
+      asset: { publicId: pid, resourceType: "image", type: "private", version: "1", format: "", bytes: 800_000, width: 1024, height: 1536 },
+    });
+    let moderationCalled = false;
+    const spyModeration: ModerateFn = async () => { moderationCalled = true; return { status: "PASS" }; };
+
+    const result = await saveNaiaModelPhoto(
+      CUST,
+      "face",
+      VALID_PUBLIC_ID,
+      "1234",
+      null,
+      "private",
+      async () => null,
+      async (_cid, data) => makeModel(data),
+      async () => ({ ok: true }),
+      verifyEmptyFormat,
+      spyModeration,
+      mockSuitabilityPass,
+      mockGetCfg,
+      mockFaceQualityPass,
+    );
+
+    assert.equal(result.ok, false);
+    if (result.ok) throw new Error("unreachable");
+    assert.ok(result.error.includes("not accepted"), "must reject with the format-rejection message, not proceed");
+    assert.equal(
+      moderationCalled,
+      false,
+      "must never reach moderation — a null/empty format must fail closed before a moderation URL is ever built with a guessed format",
+    );
+  });
+
+  it("MM.11 — a verifiedFormat present but not in the allowlist is still rejected (unaffected by the fix)", async () => {
+    const verifyBadFormat: VerifyAssetFn = async (pid) => ({
+      ok: true,
+      asset: { publicId: pid, resourceType: "image", type: "private", version: "1", format: "svg", bytes: 800_000, width: 1024, height: 1536 },
+    });
+    const result = await saveNaiaModelPhoto(
+      CUST,
+      "face",
+      VALID_PUBLIC_ID,
+      "1234",
+      null,
+      "private",
+      async () => null,
+      async (_cid, data) => makeModel(data),
+      async () => ({ ok: true }),
+      verifyBadFormat,
+      mockModerationPass,
+      mockSuitabilityPass,
+      mockGetCfg,
+      mockFaceQualityPass,
+    );
+    assert.equal(result.ok, false);
+    if (result.ok) throw new Error("unreachable");
+    assert.ok(result.error.includes("svg"), "error should name the actual rejected format");
+  });
 });
 
 // ── CL.1-7: Cloudinary validation ────────────────────────────────────────────
