@@ -13,9 +13,11 @@
 //       existing regression test (batch1-integration.test.ts "b1-53") requires
 //       it to stay live with real add/sync/delete logic, so it is patched in
 //       place instead: client-supplied image data is no longer trusted.
-//   §B  api.bodyscan.jsx requires authentication and resolves customer
-//       identity from the session only — Bodygram integration logic itself
-//       is unchanged (under product review, not rebuilt, not removed)
+//   §B  api.bodyscan.jsx (Bodygram), its session-binding helper, and the
+//       unreachable onboarding/body-scan.jsx capture page are fully removed
+//       (2026-11-18 Founder Decision: Bodygram permanently out of scope —
+//       the earlier BODYGRAM_ENABLED=false kill-switch was the interim
+//       safeguard, this is the final state)
 //   §C  regression — secure replacement routes and unrelated features are
 //       untouched
 //   §D  abuse-prevention — no remaining unauthenticated path to a paid
@@ -45,8 +47,6 @@ function readRootFile(rel: string): string {
 }
 
 const routesConfig = readRootFile("app/routes.ts");
-const bodyscan = readRoute("api.bodyscan.jsx");
-const bindingModule = readRootFile("app/lib/bodyscan-session-binding.server.ts");
 
 // ── §A: retired routes are gone and unregistered ──────────────────────────────
 
@@ -208,271 +208,89 @@ describe("§A — api.closet.jsx kept live, patched in place (see b1-53 in batch
   });
 });
 
-// ── §B0: 2026-11-18 Founder Decision — Bodygram excluded from launch ─────────
 
-describe("§B0 — BODYGRAM_ENABLED launch-exclusion gate runs before everything else", () => {
-  it("B0.1 — BODYGRAM_ENABLED is false", () => {
-    assert.ok(bodyscan.includes("export const BODYGRAM_ENABLED = false;"), "BODYGRAM_ENABLED must be false");
+// ── §B: Bodygram fully removed (2026-11-18 Founder Decision) ────────────────
+//
+// Supersedes the interim BODYGRAM_ENABLED=false kill-switch (86a66f8):
+// permanent removal, not just a disabled gate. Same "retired route" pattern
+// as §A above.
+
+describe("§B — api.bodyscan.jsx (Bodygram route) retired", () => {
+  it("B1 — route file no longer exists", () => {
+    assert.equal(existsSync(routePath("api.bodyscan.jsx")), false, "api.bodyscan.jsx must stay deleted");
   });
 
-  it("B0.2 — action() checks BODYGRAM_ENABLED before the auth check, before any fetch", () => {
-    const actionBody = bodyscan.slice(
-      bodyscan.indexOf("export async function action"),
-      bodyscan.indexOf("export async function loader"),
-    );
-    const gatePos = actionBody.indexOf("BODYGRAM_ENABLED");
-    const authPos = actionBody.indexOf("getCurrentNaiaCustomer");
-    const fetchPos = actionBody.indexOf("fetch(");
-    assert.ok(gatePos > -1 && authPos > -1 && fetchPos > -1, "gate, auth check, and fetch call must all be present");
-    assert.ok(gatePos < authPos, "BODYGRAM_ENABLED check must precede the auth check");
-    assert.ok(gatePos < fetchPos, "BODYGRAM_ENABLED check must precede the Bodygram fetch call");
-  });
-
-  it("B0.3 — loader() checks BODYGRAM_ENABLED before the auth check, before the ownership check, before any fetch or DB write", () => {
-    const loaderBody = bodyscan.slice(bodyscan.indexOf("export async function loader"));
-    const gatePos = loaderBody.indexOf("BODYGRAM_ENABLED");
-    const authPos = loaderBody.indexOf("getCurrentNaiaCustomer");
-    const sigCheckPos = loaderBody.indexOf("sessionOwnershipValid");
-    const fetchPos = loaderBody.indexOf("fetch(");
-    const upsertPos = loaderBody.indexOf("prisma.onboardingProfile.upsert");
-    assert.ok(gatePos > -1 && authPos > -1 && sigCheckPos > -1 && fetchPos > -1 && upsertPos > -1);
-    assert.ok(gatePos < authPos, "BODYGRAM_ENABLED check must precede the auth check");
-    assert.ok(gatePos < sigCheckPos, "BODYGRAM_ENABLED check must precede the ownership-signature check");
-    assert.ok(gatePos < fetchPos, "BODYGRAM_ENABLED check must precede the Bodygram fetch call");
-    assert.ok(gatePos < upsertPos, "BODYGRAM_ENABLED check must precede the OnboardingProfile write");
-  });
-
-  it("B0.4 — the disabled response is 503, not a generic error, and never touches Bodygram's response shape", () => {
-    assert.ok(bodyscan.includes("bodygramUnavailable"), "must use a dedicated unavailable response helper");
-    assert.ok(bodyscan.includes('status: 503'), "disabled response must be 503");
-  });
-});
-
-// ── §B: api.bodyscan.jsx requires authentication ──────────────────────────────
-
-describe("§B — api.bodyscan.jsx imports session auth", () => {
-  it("B1 — imports getCurrentNaiaCustomer from naia-session.server", () => {
-    assert.ok(bodyscan.includes("getCurrentNaiaCustomer"), "must import getCurrentNaiaCustomer");
-    assert.ok(bodyscan.includes("naia-session.server"), "must import from naia-session.server");
-  });
-});
-
-describe("§B — action() rejects unauthenticated requests before any Bodygram call", () => {
-  it("B2 — auth check precedes the scan-tokens fetch", () => {
-    const actionBody = bodyscan.slice(
-      bodyscan.indexOf("export async function action"),
-      bodyscan.indexOf("export async function loader"),
-    );
-    const authPos = actionBody.indexOf("getCurrentNaiaCustomer");
-    const fetchPos = actionBody.indexOf("fetch(");
-    assert.ok(authPos > -1 && fetchPos > -1, "both auth check and fetch call must be present");
-    assert.ok(authPos < fetchPos, "auth check must precede the Bodygram fetch call");
-  });
-
-  it("B3 — returns 401 when customer is null", () => {
-    const actionBody = bodyscan.slice(
-      bodyscan.indexOf("export async function action"),
-      bodyscan.indexOf("export async function loader"),
-    );
-    assert.ok(actionBody.includes("if (!customer) return authRequired();"));
-    assert.ok(bodyscan.includes("status: 401"), "must return 401 on null customer");
-  });
-});
-
-describe("§B — loader() rejects unauthenticated requests before any Bodygram call", () => {
-  it("B4 — auth check precedes the scan-result fetch", () => {
-    const loaderBody = bodyscan.slice(bodyscan.indexOf("export async function loader"));
-    const authPos = loaderBody.indexOf("getCurrentNaiaCustomer");
-    const fetchPos = loaderBody.indexOf("fetch(");
-    assert.ok(authPos > -1 && fetchPos > -1, "both auth check and fetch call must be present");
-    assert.ok(authPos < fetchPos, "auth check must precede the Bodygram fetch call");
-  });
-
-  it("B5 — returns 401 when customer is null", () => {
-    const loaderBody = bodyscan.slice(bodyscan.indexOf("export async function loader"));
-    assert.ok(loaderBody.includes("if (!customer) return authRequired();"));
-  });
-});
-
-describe("§B — cross-customer write vector closed", () => {
-  it("B6 — loader no longer reads customerId from the query string", () => {
+  it("B2 — route is not registered in app/routes.ts", () => {
     assert.ok(
-      !bodyscan.includes('searchParams.get("customerId")'),
-      "customerId must never be read from the request — it enabled writing to another customer's profile",
+      !routesConfig.includes(`"routes/api.bodyscan.jsx"`),
+      "app/routes.ts must not reference api.bodyscan.jsx",
     );
-  });
-
-  it("B7 — OnboardingProfile lookup is keyed to the session customer only", () => {
     assert.ok(
-      bodyscan.includes("where: { customerId: customer.id }"),
-      "upsert where-clause must use the session-derived customer.id",
+      !routesConfig.includes(`route("api/body-scan"`),
+      "the api/body-scan path must not be registered",
     );
   });
 
-  it("B8 — OnboardingProfile create is keyed to the session customer only", () => {
-    const createBlock = bodyscan.slice(bodyscan.indexOf("create: {"), bodyscan.indexOf("create: {") + 120);
-    assert.ok(
-      createBlock.includes("customerId: customer.id"),
-      "create block must use the session-derived customer.id, not a request-supplied value",
-    );
-  });
-
-  it("B9 — scan-token metadata is keyed to the session customer only", () => {
-    assert.ok(
-      bodyscan.includes("metadata: { naiaCustomerId: customer.id }"),
-      "Bodygram scan-token metadata must use the session-derived customer.id",
-    );
-  });
-});
-
-describe("§B — scan sessionId is cryptographically bound to the customer it was issued for", () => {
-  // Real behavioral tests (not string assertions) against the exported
-  // signSessionOwnership/sessionOwnershipValid helpers — these are what
-  // close the gap between "the DB write uses customer.id" (closes a write
-  // vector) and "this sessionId actually belongs to this customer" (closes
-  // a session-binding vector: customer A supplying customer B's sessionId).
-  process.env.SESSION_SECRET ||= "phase1-test-only-secret-do-not-use-in-prod";
-
-  it("B16 — action() response includes a sig alongside sessionId", () => {
-    const actionBody = bodyscan.slice(
-      bodyscan.indexOf("export async function action"),
-      bodyscan.indexOf("export async function loader"),
-    );
-    assert.ok(actionBody.includes("sessionId: data.token, sig"), "action must return sig with sessionId");
-    assert.ok(actionBody.includes("signSessionOwnership(data.token, customer.id)"));
-  });
-
-  it("B17 — loader() rejects a missing sig with 403 before calling Bodygram", async () => {
-    const { sessionOwnershipValid } = await import("../lib/bodyscan-session-binding.server");
-    assert.equal(sessionOwnershipValid("sess-1", "cust-A", undefined), false);
-    assert.equal(sessionOwnershipValid("sess-1", "cust-A", null), false);
-    assert.equal(sessionOwnershipValid("sess-1", "cust-A", ""), false);
-  });
-
-  it("B18 — a valid signature for (sessionId, customer) verifies", async () => {
-    const { signSessionOwnership, sessionOwnershipValid } = await import("../lib/bodyscan-session-binding.server");
-    const sig = signSessionOwnership("sess-1", "cust-A");
-    assert.equal(sessionOwnershipValid("sess-1", "cust-A", sig), true);
-  });
-
-  it("B19 — customer B cannot use a sig issued for customer A's session (the actual exploit this closes)", async () => {
-    const { signSessionOwnership, sessionOwnershipValid } = await import("../lib/bodyscan-session-binding.server");
-    // Customer A legitimately creates a scan and receives sig_A for sess-1.
-    const sigForA = signSessionOwnership("sess-1", "cust-A");
-    // Customer B authenticates as themselves and tries to poll A's sessionId,
-    // presenting the sig A received (e.g. obtained from A's network tab).
+  it("B3 — the route's own test file is gone too (it tested deleted code)", () => {
     assert.equal(
-      sessionOwnershipValid("sess-1", "cust-B", sigForA),
+      existsSync(routePath("api.bodyscan.launch-exclusion.test.ts")),
       false,
-      "a sig computed for customer A must not validate when checked against customer B",
+      "api.bodyscan.launch-exclusion.test.ts tested the now-deleted route and should not remain as a stale fixture",
+    );
+  });
+});
+
+describe("§B — bodyscan-session-binding.server.ts (Bodygram sessionId-binding helper) retired", () => {
+  it("B4 — module file no longer exists", () => {
+    assert.equal(
+      existsSync(join(ROOT, "app/lib/bodyscan-session-binding.server.ts")),
+      false,
+      "bodyscan-session-binding.server.ts must stay deleted — it had no caller other than the now-removed route",
+    );
+  });
+});
+
+describe("§B — onboarding/body-scan.jsx (unreachable Bodygram capture page) retired", () => {
+  it("B5 — page file no longer exists", () => {
+    assert.equal(
+      existsSync(join(ROOT, "app/routes/onboarding/body-scan.jsx")),
+      false,
+      "onboarding/body-scan.jsx must stay deleted — it was already unregistered and unreachable before this removal",
     );
   });
 
-  it("B20 — a sig for one sessionId does not transfer to a different sessionId for the same customer", async () => {
-    const { signSessionOwnership, sessionOwnershipValid } = await import("../lib/bodyscan-session-binding.server");
-    const sigForSessX = signSessionOwnership("sess-X", "cust-A");
-    assert.equal(sessionOwnershipValid("sess-Y", "cust-A", sigForSessX), false);
+  it("B6 — still not registered in app/routes.ts (it never was)", () => {
+    assert.ok(!routesConfig.includes("onboarding/body-scan"), "onboarding/body-scan must not be registered");
   });
+});
 
-  it("B21 — a tampered signature (same length, different bytes) is rejected", async () => {
-    const { signSessionOwnership, sessionOwnershipValid } = await import("../lib/bodyscan-session-binding.server");
-    const sig = signSessionOwnership("sess-1", "cust-A");
-    const tampered = sig.slice(0, -1) + (sig.at(-1) === "A" ? "B" : "A");
-    assert.equal(sessionOwnershipValid("sess-1", "cust-A", tampered), false);
-  });
-
-  it("B22 — loader checks ownership before the Bodygram scan-result fetch", () => {
-    const loaderBody = bodyscan.slice(bodyscan.indexOf("export async function loader"));
-    const sigCheckPos = loaderBody.indexOf("sessionOwnershipValid");
-    const fetchPos = loaderBody.indexOf("fetch(");
-    assert.ok(sigCheckPos > -1 && fetchPos > -1);
-    assert.ok(sigCheckPos < fetchPos, "ownership check must precede the Bodygram scan-result fetch");
-  });
-
-  it("B23 — ownership check precedes the OnboardingProfile write", () => {
-    const loaderBody = bodyscan.slice(bodyscan.indexOf("export async function loader"));
-    const sigCheckPos = loaderBody.indexOf("sessionOwnershipValid");
-    const upsertPos = loaderBody.indexOf("prisma.onboardingProfile.upsert");
-    assert.ok(sigCheckPos < upsertPos, "ownership check must precede the DB write");
-  });
-
-  it("B24 — comparison uses timingSafeEqual, not a plain string/== compare (no timing oracle)", () => {
-    assert.ok(bindingModule.includes("timingSafeEqual"));
-    assert.ok(!bindingModule.includes("providedSig === expected"), "must not use a non-constant-time comparison");
-  });
-
-  it("B24b — the binding logic lives in a .server.ts module, not exported from the route", () => {
-    // Confirmed by hitting it directly during this work: a named export from
-    // a route file is bundled into the CLIENT build by React Router's
-    // convention, which pulls Node's `crypto` into the browser bundle and
-    // breaks the production build. .server.ts is this codebase's existing
-    // convention for code that must never reach the client.
-    assert.ok(
-      bodyscan.includes('from "../lib/bodyscan-session-binding.server"'),
-      "api.bodyscan.jsx must import the binding functions, not define/export them itself",
-    );
-    assert.ok(!bodyscan.includes("createHmac"), "route file itself must not import Node's crypto module directly");
-  });
-
-  it("B25 — fails closed when SESSION_SECRET is not configured", async () => {
-    const { sessionOwnershipValid, signSessionOwnership } = await import("../lib/bodyscan-session-binding.server");
-    const saved = process.env.SESSION_SECRET;
-    try {
-      const sig = signSessionOwnership("sess-1", "cust-A"); // signed while secret present
-      delete process.env.SESSION_SECRET;
-      assert.equal(
-        sessionOwnershipValid("sess-1", "cust-A", sig),
-        false,
-        "verification must fail closed (not throw, not pass) when the secret is missing",
-      );
-    } finally {
-      if (saved !== undefined) process.env.SESSION_SECRET = saved;
+describe("§B — no remaining reference to the Bodygram provider anywhere live-reachable", () => {
+  it("B7 — no route file calls platform.bodygram.com", () => {
+    const routesDir = join(ROOT, "app/routes");
+    const offenders: string[] = [];
+    for (const entry of readdirSync(routesDir, { withFileTypes: true })) {
+      if (!entry.isFile()) continue;
+      if (!/\.(jsx?|tsx?)$/.test(entry.name)) continue;
+      if (entry.name.includes(".test.")) continue;
+      const src = readFileSync(join(routesDir, entry.name), "utf8");
+      if (src.includes("platform.bodygram.com")) offenders.push(entry.name);
     }
-  });
-});
-
-describe("§B — Bodygram integration logic preserved (not rebuilt, not removed)", () => {
-  it("B10 — scan-token creation call is unchanged", () => {
-    assert.ok(bodyscan.includes("/scan-tokens"));
-    assert.ok(bodyscan.includes("api.platform.bodygram.com/scans:create"));
+    assert.deepEqual(offenders, [], `unexpected remaining Bodygram call sites: ${offenders.join(", ")}`);
   });
 
-  it("B11 — scan-result polling and measurement mapping are unchanged", () => {
-    assert.ok(bodyscan.includes("/scans/${sessionId}"));
-    assert.ok(bodyscan.includes("BUST_GIRTH"));
-    assert.ok(bodyscan.includes("WAIST_GIRTH"));
-    assert.ok(bodyscan.includes("HIP_GIRTH"));
-    assert.ok(bodyscan.includes("HEIGHT"));
-  });
-
-  it("B12 — OnboardingProfile upsert is unchanged in shape", () => {
-    assert.ok(bodyscan.includes("prisma.onboardingProfile.upsert"));
-    assert.ok(bodyscan.includes("scanConfidence: 0.95"));
-  });
-
-  it("B13 — route registration itself is untouched (file kept, not retired)", () => {
-    assert.ok(
-      routesConfig.includes(`route("api/body-scan", "routes/api.bodyscan.jsx")`),
-      "api/body-scan must remain registered — Bodygram's future is a pending product decision, not resolved by deleting the route",
-    );
-  });
-});
-
-describe("§B — verbose measurement/scan logging trimmed", () => {
-  it("B14 — no longer logs the full Bodygram response payload", () => {
-    assert.ok(
-      !bodyscan.includes('console.log("Bodygram response:", JSON.stringify(data))'),
-      "must not log the full scan-token response (may include measurement-adjacent data)",
-    );
-    assert.ok(
-      !bodyscan.includes('console.log("Bodygram scan result:", JSON.stringify(data))'),
-      "must not log the full scan-result response (contains body measurements)",
-    );
-  });
-
-  it("B15 — still logs enough to debug (presence/status only)", () => {
-    assert.ok(bodyscan.includes("token present"));
-    assert.ok(bodyscan.includes("status ="));
+  it("B8 — no lib module references Bodygram's live API surface", () => {
+    const libDir = join(ROOT, "app/lib");
+    const offenders: string[] = [];
+    for (const entry of readdirSync(libDir, { withFileTypes: true })) {
+      if (!entry.isFile()) continue;
+      if (!/\.(jsx?|tsx?)$/.test(entry.name)) continue;
+      if (entry.name.includes(".test.")) continue;
+      const src = readFileSync(join(libDir, entry.name), "utf8");
+      if (src.includes("platform.bodygram.com") || src.includes("BODYGRAM_API_KEY") || src.includes("BODYGRAM_ORG_ID")) {
+        offenders.push(entry.name);
+      }
+    }
+    assert.deepEqual(offenders, [], `unexpected remaining Bodygram references: ${offenders.join(", ")}`);
   });
 });
 
@@ -515,16 +333,8 @@ describe("§C — unrelated dead UI code left in place (out of Phase 1 scope)", 
     );
   });
 
-  it("C7 — the unreachable onboarding/body-scan.jsx page is untouched, still unregistered", () => {
-    assert.ok(
-      existsSync(join(ROOT, "app/routes/onboarding/body-scan.jsx")),
-      "the Bodygram capture page is left in place pending the product decision",
-    );
-    assert.ok(
-      !routesConfig.includes("onboarding/body-scan"),
-      "it must remain unregistered — re-registering it is a feature decision, not part of this lockdown",
-    );
-  });
+  // C7 (onboarding/body-scan.jsx) removed 2026-11-18 — the page itself is
+  // now deleted, not just left unregistered. See §B5/§B6 above.
 });
 
 // ── §D: abuse-prevention — no unauthenticated path to a paid provider ─────────
@@ -574,11 +384,6 @@ describe("§D — no remaining unauthenticated fetch to a paid AI/scan provider"
     assert.equal(existsSync(routePath("api.style.jsx")), false);
   });
 
-  it("D3 — Bodygram's paid scan-token call is gated behind auth (see B2)", () => {
-    const actionBody = bodyscan.slice(
-      bodyscan.indexOf("export async function action"),
-      bodyscan.indexOf("export async function loader"),
-    );
-    assert.ok(actionBody.indexOf("getCurrentNaiaCustomer") < actionBody.indexOf("scan-tokens"));
-  });
+  // D3 (Bodygram auth-gating) removed 2026-11-18 — the route itself is gone,
+  // not merely gated. See §B above.
 });

@@ -147,7 +147,6 @@ export default [
   // (TryOnButton.tsx is never imported/rendered); had no auth, did an
   // unsigned public Cloudinary upload, and skipped all moderation. The
   // canonical, hardened VTO path is api/trigger-tryon + api/tryon-status.
-  route("api/body-scan", "routes/api.bodyscan.jsx"),
   route("account", "routes/account.jsx"),
   route("api/recommendation-feedback", "routes/api.recommendation-feedback.tsx"),
   route("api/naia-observation-feedback", "routes/api.naia-observation-feedback.tsx"),
