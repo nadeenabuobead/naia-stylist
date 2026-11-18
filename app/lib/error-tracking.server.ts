@@ -44,6 +44,71 @@ function extractPostgresSqlState(message: string): string | undefined {
   return POSTGRES_SQLSTATE_PATTERN.exec(message)?.[1];
 }
 
+// postgresSeverity / postgresRoutine (2026-11-18 — founder-requested
+// extension: the SQLSTATE alone doesn't distinguish competing root causes
+// for the same code). Postgres's own wire-protocol error carries several
+// more fields (confirmed via Postgres's own protocol-error-fields docs and
+// Prisma's own ConnectorError Debug output, which prints exactly
+// `PostgresError { code: "...", message: "...", severity: "...",
+// detail: ..., column: ..., hint: ... }`, with `routine` further along):
+//   - severity: always one of a small fixed set (ERROR/FATAL/PANIC/
+//     WARNING/NOTICE/DEBUG/INFO/LOG, or a localized translation of one) —
+//     no data, ever.
+//   - routine: the Postgres C source function that raised the error, e.g.
+//     "exec_bind_message" (a bind/prepared-statement-protocol failure) vs
+//     "ProcessStartupPacket" (a connection/startup-negotiation failure) vs
+//     "PostgresMain" (a generic top-level failure) — this is a source
+//     identifier, never a value, and it is exactly the signal needed to
+//     tell those root causes apart from one SQLSTATE code alone.
+//
+// Deliberately NOT extracted, even though Postgres exposes them: `detail`
+// and `hint` — Postgres's own docs describe `detail` as routinely echoing
+// the actual offending value (e.g. a duplicate-key detail message
+// literally contains the duplicated value), and `hint` is unstructured
+// advice text. Neither is a fixed, data-free field the way severity and
+// routine are, so neither is safe to capture generically here. The
+// Postgres-side `message` field (distinct from Prisma's own outer
+// error.message, already handled above) is also deliberately skipped for
+// the same reason: it is free text, not a bounded enum/identifier.
+//
+// Both patterns are independent of field order/position in the struct —
+// each scans the full, untruncated message on its own, so either field
+// surviving truncation never depends on how long any other field's value
+// happened to be.
+const POSTGRES_SEVERITY_PATTERN = /PostgresError\s*\{[^}]*?severity:\s*"([A-Za-z]{1,20})"/;
+const POSTGRES_ROUTINE_PATTERN = /routine:\s*(?:Some\()?"([A-Za-z0-9_]{1,64})"/;
+
+function extractPostgresSeverity(message: string): string | undefined {
+  return POSTGRES_SEVERITY_PATTERN.exec(message)?.[1];
+}
+
+function extractPostgresRoutine(message: string): string | undefined {
+  return POSTGRES_ROUTINE_PATTERN.exec(message)?.[1];
+}
+
+// redactPostgresDetailAndHint (2026-11-18 — found via this file's own new
+// test suite, not assumed): Prisma's PrismaClientUnknownRequestError.message
+// embeds the FULL Rust Debug-formatted PostgresError struct verbatim,
+// including `detail` and `hint` — and Postgres's own protocol-error-fields
+// documentation says `detail` routinely echoes the actual offending value
+// (e.g. a duplicate-key violation's detail literally contains the
+// duplicated value). The existing 200-char slice below does NOT reliably
+// protect against this: it only helps when the sensitive content happens
+// to fall past character 200, which depends on nothing more than how long
+// the rest of the message happens to be. A short enough message — which a
+// real query error can easily produce — would log the actual value today.
+//
+// Redacted here, unconditionally, BEFORE truncation, so the 200-char bound
+// can never expose it regardless of where it would otherwise land. Scoped
+// narrowly to exactly `detail: Some("...")` / `hint: Some("...")` — the
+// `None` case (the common, harmless one) is left untouched, and nothing
+// else in the message is modified.
+const POSTGRES_DETAIL_OR_HINT_VALUE_PATTERN = /((?:detail|hint):\s*Some\()"(?:[^"\\]|\\.)*"(\))/g;
+
+function redactPostgresDetailAndHint(message: string): string {
+  return message.replace(POSTGRES_DETAIL_OR_HINT_VALUE_PATTERN, '$1"[redacted]"$2');
+}
+
 function extractPrismaCode(error: Error): string | undefined {
   const code = (error as { code?: unknown }).code;
   return typeof code === "string" && code.length > 0 && code.length <= 10 ? code : undefined;
@@ -59,6 +124,8 @@ export interface ErrorCaptureEvent {
   name: string;
   prismaCode?: string;
   postgresSqlState?: string;
+  postgresSeverity?: string;
+  postgresRoutine?: string;
   meta?: ErrorCaptureMeta;
   occurredAt: string;
 }
@@ -74,12 +141,18 @@ export function captureError(
   meta?: ErrorCaptureMeta,
 ): ErrorCaptureEvent {
   const isError = error instanceof Error;
+  // Redact before anything else touches the message — both the logged
+  // slice and every extractor below operate on this sanitized text, so a
+  // detail/hint value can never reach the log via any path.
+  const sanitizedMessage = isError ? redactPostgresDetailAndHint(error.message) : "";
   const event: ErrorCaptureEvent = {
     context,
-    message: isError ? error.message.slice(0, 200) : "Non-Error thrown",
+    message: isError ? sanitizedMessage.slice(0, 200) : "Non-Error thrown",
     name: isError ? error.name : "UnknownError",
     ...(isError ? { prismaCode: extractPrismaCode(error) } : {}),
-    ...(isError ? { postgresSqlState: extractPostgresSqlState(error.message) } : {}),
+    ...(isError ? { postgresSqlState: extractPostgresSqlState(sanitizedMessage) } : {}),
+    ...(isError ? { postgresSeverity: extractPostgresSeverity(sanitizedMessage) } : {}),
+    ...(isError ? { postgresRoutine: extractPostgresRoutine(sanitizedMessage) } : {}),
     meta,
     occurredAt: new Date().toISOString(),
   };
