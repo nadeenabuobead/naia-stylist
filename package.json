@@ -104,6 +104,11 @@
     },
     "@react-router/fs-routes": {
       "minimatch": "^11.0.9"
+    },
+    "prisma": {
+      "@prisma/config": {
+        "deepmerge-ts": "^8.0.2"
+      }
     }
   },
   "author": "nadeenabuobead"
