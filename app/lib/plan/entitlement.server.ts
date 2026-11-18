@@ -413,7 +413,7 @@ export async function resolveEffectiveContext(
         closetItems: fallbackBase.closetItems,
         styleMePerMonth: getEffectiveStyleMeLimit(fallbackStatus),
         buySkipPerMonth: fallbackBase.buySkipPerMonth,
-        vtoPerMonth: getEffectiveVtoLimit(fallbackStatus),
+        vtoPerMonth: getEffectiveVtoLimit(fallbackStatus, customerId),
         personalisedTrendPerMonth: fallbackBase.personalisedTrendPerMonth,
       },
       effectiveMembershipStatus: fallbackStatus,
@@ -434,7 +434,7 @@ export async function resolveEffectiveContext(
   // apply to the base figure regardless of billing — they are a QA tool, not
   // a billing concept, and add-ons layer on top of whichever base is active.
   const effectiveStyleMeBase = getEffectiveStyleMeLimit("MEMBER");
-  const effectiveVtoBase = getEffectiveVtoLimit("MEMBER");
+  const effectiveVtoBase = getEffectiveVtoLimit("MEMBER", customerId);
   const addons = await _getAddonTotals(customerId, window);
   return {
     window,

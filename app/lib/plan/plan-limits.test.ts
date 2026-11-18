@@ -6,8 +6,11 @@
 // PL-03  getMembershipAllowances returns distinct objects for NONE and MEMBER
 // PL-08  getEffectiveVtoLimit NONE without override = 0
 // PL-09  getEffectiveVtoLimit MEMBER without override = 10
-// PL-10  VTO_MONTHLY_LIMIT_OVERRIDE=20 overrides limit for NONE and MEMBER
-// PL-11  invalid or empty VTO_MONTHLY_LIMIT_OVERRIDE falls back to membership limit
+// PL-10  VTO_MONTHLY_LIMIT_OVERRIDE=20 + matching customerId overrides limit for NONE and MEMBER
+// PL-10b override does NOT apply when no customerId argument is passed
+// PL-10c override does NOT apply when customerId argument doesn't match VTO_MONTHLY_LIMIT_OVERRIDE_CUSTOMER_ID
+// PL-10d override does NOT apply when VTO_MONTHLY_LIMIT_OVERRIDE_CUSTOMER_ID is unset
+// PL-11  invalid or empty VTO_MONTHLY_LIMIT_OVERRIDE falls back to membership limit (matching customerId)
 // PL-12  getEffectiveStyleMeLimit NONE without override = 0
 // PL-13  getEffectiveStyleMeLimit MEMBER without override = 8
 // PL-14  STYLEME_MONTHLY_LIMIT_OVERRIDE=100 overrides limit for NONE and MEMBER
@@ -61,27 +64,83 @@ describe("plan-limits", () => {
     }
   });
 
-  it("PL-10 VTO_MONTHLY_LIMIT_OVERRIDE=20 overrides limit for NONE and MEMBER", () => {
-    const prev = process.env.VTO_MONTHLY_LIMIT_OVERRIDE;
+  it("PL-10 VTO_MONTHLY_LIMIT_OVERRIDE=20 + matching customerId overrides limit for NONE and MEMBER", () => {
+    const prevLimit = process.env.VTO_MONTHLY_LIMIT_OVERRIDE;
+    const prevCustomer = process.env.VTO_MONTHLY_LIMIT_OVERRIDE_CUSTOMER_ID;
     process.env.VTO_MONTHLY_LIMIT_OVERRIDE = "20";
+    process.env.VTO_MONTHLY_LIMIT_OVERRIDE_CUSTOMER_ID = "qa-customer-1";
     try {
-      assert.equal(getEffectiveVtoLimit("NONE"), 20);
-      assert.equal(getEffectiveVtoLimit("MEMBER"), 20);
+      assert.equal(getEffectiveVtoLimit("NONE", "qa-customer-1"), 20);
+      assert.equal(getEffectiveVtoLimit("MEMBER", "qa-customer-1"), 20);
     } finally {
-      if (prev === undefined) delete process.env.VTO_MONTHLY_LIMIT_OVERRIDE;
-      else process.env.VTO_MONTHLY_LIMIT_OVERRIDE = prev;
+      if (prevLimit === undefined) delete process.env.VTO_MONTHLY_LIMIT_OVERRIDE;
+      else process.env.VTO_MONTHLY_LIMIT_OVERRIDE = prevLimit;
+      if (prevCustomer === undefined) delete process.env.VTO_MONTHLY_LIMIT_OVERRIDE_CUSTOMER_ID;
+      else process.env.VTO_MONTHLY_LIMIT_OVERRIDE_CUSTOMER_ID = prevCustomer;
     }
   });
 
-  it("PL-11 invalid VTO_MONTHLY_LIMIT_OVERRIDE falls back to membership limit", () => {
-    const prev = process.env.VTO_MONTHLY_LIMIT_OVERRIDE;
-    process.env.VTO_MONTHLY_LIMIT_OVERRIDE = "not-a-number";
+  it("PL-10b override does NOT apply when no customerId argument is passed", () => {
+    const prevLimit = process.env.VTO_MONTHLY_LIMIT_OVERRIDE;
+    const prevCustomer = process.env.VTO_MONTHLY_LIMIT_OVERRIDE_CUSTOMER_ID;
+    process.env.VTO_MONTHLY_LIMIT_OVERRIDE = "20";
+    process.env.VTO_MONTHLY_LIMIT_OVERRIDE_CUSTOMER_ID = "qa-customer-1";
     try {
       assert.equal(getEffectiveVtoLimit("NONE"), 0);
       assert.equal(getEffectiveVtoLimit("MEMBER"), 10);
     } finally {
-      if (prev === undefined) delete process.env.VTO_MONTHLY_LIMIT_OVERRIDE;
-      else process.env.VTO_MONTHLY_LIMIT_OVERRIDE = prev;
+      if (prevLimit === undefined) delete process.env.VTO_MONTHLY_LIMIT_OVERRIDE;
+      else process.env.VTO_MONTHLY_LIMIT_OVERRIDE = prevLimit;
+      if (prevCustomer === undefined) delete process.env.VTO_MONTHLY_LIMIT_OVERRIDE_CUSTOMER_ID;
+      else process.env.VTO_MONTHLY_LIMIT_OVERRIDE_CUSTOMER_ID = prevCustomer;
+    }
+  });
+
+  it("PL-10c override does NOT apply when customerId doesn't match VTO_MONTHLY_LIMIT_OVERRIDE_CUSTOMER_ID", () => {
+    const prevLimit = process.env.VTO_MONTHLY_LIMIT_OVERRIDE;
+    const prevCustomer = process.env.VTO_MONTHLY_LIMIT_OVERRIDE_CUSTOMER_ID;
+    process.env.VTO_MONTHLY_LIMIT_OVERRIDE = "20";
+    process.env.VTO_MONTHLY_LIMIT_OVERRIDE_CUSTOMER_ID = "qa-customer-1";
+    try {
+      assert.equal(getEffectiveVtoLimit("NONE", "some-other-customer"), 0);
+      assert.equal(getEffectiveVtoLimit("MEMBER", "some-other-customer"), 10);
+    } finally {
+      if (prevLimit === undefined) delete process.env.VTO_MONTHLY_LIMIT_OVERRIDE;
+      else process.env.VTO_MONTHLY_LIMIT_OVERRIDE = prevLimit;
+      if (prevCustomer === undefined) delete process.env.VTO_MONTHLY_LIMIT_OVERRIDE_CUSTOMER_ID;
+      else process.env.VTO_MONTHLY_LIMIT_OVERRIDE_CUSTOMER_ID = prevCustomer;
+    }
+  });
+
+  it("PL-10d override does NOT apply when VTO_MONTHLY_LIMIT_OVERRIDE_CUSTOMER_ID is unset", () => {
+    const prevLimit = process.env.VTO_MONTHLY_LIMIT_OVERRIDE;
+    const prevCustomer = process.env.VTO_MONTHLY_LIMIT_OVERRIDE_CUSTOMER_ID;
+    process.env.VTO_MONTHLY_LIMIT_OVERRIDE = "20";
+    delete process.env.VTO_MONTHLY_LIMIT_OVERRIDE_CUSTOMER_ID;
+    try {
+      assert.equal(getEffectiveVtoLimit("NONE", "qa-customer-1"), 0);
+      assert.equal(getEffectiveVtoLimit("MEMBER", "qa-customer-1"), 10);
+    } finally {
+      if (prevLimit === undefined) delete process.env.VTO_MONTHLY_LIMIT_OVERRIDE;
+      else process.env.VTO_MONTHLY_LIMIT_OVERRIDE = prevLimit;
+      if (prevCustomer === undefined) delete process.env.VTO_MONTHLY_LIMIT_OVERRIDE_CUSTOMER_ID;
+      else process.env.VTO_MONTHLY_LIMIT_OVERRIDE_CUSTOMER_ID = prevCustomer;
+    }
+  });
+
+  it("PL-11 invalid VTO_MONTHLY_LIMIT_OVERRIDE falls back to membership limit even with a matching customerId", () => {
+    const prevLimit = process.env.VTO_MONTHLY_LIMIT_OVERRIDE;
+    const prevCustomer = process.env.VTO_MONTHLY_LIMIT_OVERRIDE_CUSTOMER_ID;
+    process.env.VTO_MONTHLY_LIMIT_OVERRIDE = "not-a-number";
+    process.env.VTO_MONTHLY_LIMIT_OVERRIDE_CUSTOMER_ID = "qa-customer-1";
+    try {
+      assert.equal(getEffectiveVtoLimit("NONE", "qa-customer-1"), 0);
+      assert.equal(getEffectiveVtoLimit("MEMBER", "qa-customer-1"), 10);
+    } finally {
+      if (prevLimit === undefined) delete process.env.VTO_MONTHLY_LIMIT_OVERRIDE;
+      else process.env.VTO_MONTHLY_LIMIT_OVERRIDE = prevLimit;
+      if (prevCustomer === undefined) delete process.env.VTO_MONTHLY_LIMIT_OVERRIDE_CUSTOMER_ID;
+      else process.env.VTO_MONTHLY_LIMIT_OVERRIDE_CUSTOMER_ID = prevCustomer;
     }
   });
 
