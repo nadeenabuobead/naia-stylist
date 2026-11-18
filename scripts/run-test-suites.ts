@@ -30,6 +30,11 @@ const steps = [
   "test:taste-v1-completion",
   "test:styleme-ui",
   "test:legal-ops",
+  // 2026-11-18: app/lib/error-tracking.server.test.ts had the exact same
+  // unreachability problem C7/H7 found above — appeared in no npm script,
+  // so nothing ever ran it. Same node:test-vs-vitest reason it gets its
+  // own script rather than being appended to "test:security".
+  "test:error-tracking",
 ];
 
 const results: { script: string; exitCode: number }[] = [];

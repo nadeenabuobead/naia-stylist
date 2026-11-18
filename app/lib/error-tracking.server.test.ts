@@ -48,6 +48,47 @@ describe("captureError", () => {
     });
     assert.deepEqual(event.meta, { customerIdHash: "abc123", predictionId: "pred_1" });
   });
+
+  it("extracts a wrapped Postgres SQLSTATE even past the 200-char truncation boundary", () => {
+    const prefix = "x".repeat(250);
+    const message = `${prefix} ConnectorError(ConnectorError { user_facing_error: None, kind: QueryError(PostgresError { code: "08P01", message: "protocol violation" }) })`;
+    const event = captureError("request-handler", new Error(message));
+    assert.equal(event.postgresSqlState, "08P01");
+    assert.equal(event.message.length, 200);
+  });
+
+  it("leaves postgresSqlState undefined when no PostgresError wrapper is present", () => {
+    const event = captureError("ssr-render", new Error("a plain error with no postgres wrapper"));
+    assert.equal(event.postgresSqlState, undefined);
+  });
+
+  it("captures Prisma's own structured .code when present, regardless of message content", () => {
+    const err = new Error("Timed out fetching a new connection from the connection pool");
+    (err as { code?: string }).code = "P2024";
+    const event = captureError("db:lookup", err);
+    assert.equal(event.prismaCode, "P2024");
+  });
+
+  it("never captures an oversized or non-string .code value", () => {
+    const withLongCode = new Error("boom");
+    (withLongCode as { code?: string }).code = "x".repeat(50);
+    const longEvent = captureError("x", withLongCode);
+    assert.equal(longEvent.prismaCode, undefined);
+
+    const withNumericCode = new Error("boom");
+    (withNumericCode as { code?: unknown }).code = 42;
+    const numericEvent = captureError("x", withNumericCode);
+    assert.equal(numericEvent.prismaCode, undefined);
+  });
+
+  it("never leaks SQL text or parameter values even when they appear right next to the SQLSTATE", () => {
+    const message =
+      'QueryError(PostgresError { code: "08P01", message: "bind message supplies 4 parameters for customer_secret_token=abc123real-token" })';
+    const event = captureError("request-handler", new Error(message));
+    assert.equal(event.postgresSqlState, "08P01");
+    // The structured field itself must never carry anything beyond the 5-char code.
+    assert.equal(event.postgresSqlState?.length, 5);
+  });
 });
 
 describe("captureFailure", () => {
