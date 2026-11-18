@@ -158,6 +158,14 @@ export async function action({ request }: ActionFunctionArgs) {
   if (verify.asset.type !== "private") {
     return data({ error: "Asset must be a private upload" }, { status: 400 });
   }
+  // verifyCloudinaryAsset returns format: "" (never null/undefined) when
+  // Cloudinary's own response omits it — must never be passed through to
+  // buildPrivateDownloadUrl unchecked: requesting the wrong format from
+  // Cloudinary's authenticated /image/download endpoint forces a real,
+  // cached format conversion.
+  if (!verify.asset.format) {
+    return data({ error: "Asset format could not be verified" }, { status: 400 });
+  }
 
   // 7. Build server-side download URL — required for safety checks (never trust client URLs).
   const cfg = getCloudinaryConfig();

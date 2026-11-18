@@ -344,6 +344,21 @@ describe("api.closet-preview-analyze action — failure paths, no real provider 
     expect(mockPreview()).not.toHaveBeenCalled();
   });
 
+  it("QA #36 sweep #2 — a missing format (verifyCloudinaryAsset's own \"\" shape, matching Cloudinary omitting it) returns 400 before any download URL is built — never guessed", async () => {
+    const ownId = ownPublicId(CUSTOMER_A);
+    mockVerify().mockResolvedValue({ ok: true, asset: { type: "private", format: "" } });
+
+    const res: any = await action({
+      request: postAs(CUSTOMER_A, { publicId: ownId, photoConsentGiven: true }),
+      params: {},
+      context: {},
+    } as any);
+
+    expect(res.init.status).toBe(400);
+    expect(mockModerate()).not.toHaveBeenCalled();
+    expect(mockPreview()).not.toHaveBeenCalled();
+  });
+
   it("H7 completion — a RETRY_IMAGE suitability rejection deletes the (owned) asset with the shared recorder, same as the other 4 cleanup sites", async () => {
     const ownId = ownPublicId(CUSTOMER_A);
     mockVerify().mockResolvedValue({ ok: true, asset: { type: "private", format: "jpg" } });
