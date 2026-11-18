@@ -70,9 +70,9 @@ import type { OutfitSlot } from "~/lib/ai/styleme-recommendation.types";
 import type { OutfitItemType, PrismaClient } from "@prisma/client";
 
 const prisma: PrismaClient = dbServer;
-import { getCloudinaryConfig } from "~/lib/cloudinary-admin.server";
+import { getCloudinaryConfig, deleteCloudinaryAsset } from "~/lib/cloudinary-admin.server";
 import { selectFullLookGarments, type SelectableOutfitItem } from "~/lib/ai/full-look-vto-orchestrator.server";
-import { loadNaiaModel, computeModelReadinessFromRecord } from "~/lib/ai/my-naia-model.server";
+import { loadNaiaModel, computeModelReadinessFromRecord, POLICY_VERSION } from "~/lib/ai/my-naia-model.server";
 
 // Mirrors slotToItemType in app/lib/ai/styleme-result.server.ts exactly —
 // that function is private to a large, sensitive file this fixture has no
@@ -154,11 +154,11 @@ async function resolveAuthorizedQaSessionCustomerId(request: Request): Promise<s
 
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method === "DELETE") {
-    // Read the body exactly once here and pass it down — request.clone()
-    // is not implemented by this file's test mocks (and is unnecessary in
-    // the real Request object too), so every DELETE-side handler below
-    // takes the already-parsed body as a parameter instead of re-reading
-    // request.json() itself. See deleteFixtureSuggestion's own signature.
+    // Read the body exactly once here — a Request's body stream can only
+    // be consumed a single time, so deleteFixtureSuggestion and every
+    // dedicated real-session DELETE handler below take the already-parsed
+    // body (or, where they need nothing from it, just `request` itself)
+    // rather than reading request.json() a second time.
     let deleteBody: unknown;
     try {
       deleteBody = await request.json();
@@ -173,6 +173,12 @@ export async function action({ request }: ActionFunctionArgs) {
         return data({ ok: false, code: "forbidden" }, { status: 403 });
       }
       return deleteClosetLegacyImageOwnershipFixture(sessionCustomerId);
+    }
+    if (parsedDeleteBody?.fixtureKind === "my-naia-model") {
+      // deleteMyNaiaModelFixture never reads the body itself — it only
+      // needs the verified session — so passing the already-consumed
+      // request is safe here, not a second read of the same stream.
+      return deleteMyNaiaModelFixture(request);
     }
     return deleteFixtureSuggestion(request, parsedDeleteBody);
   }
@@ -208,6 +214,25 @@ export async function action({ request }: ActionFunctionArgs) {
       return data({ ok: false, code: "forbidden" }, { status: 403 });
     }
     return createClosetLegacyImageOwnershipFixture(sessionCustomerId);
+  }
+
+  if (parsedBody?.fixtureKind === "full-look-real-garments") {
+    // Same real-session auth as styleme-result-view — see
+    // resolveAuthorizedQaSessionCustomerId's own comment.
+    const sessionCustomerId = await resolveAuthorizedQaSessionCustomerId(request);
+    if (!sessionCustomerId) {
+      return data({ ok: false, code: "forbidden" }, { status: 403 });
+    }
+    return createFullLookRealGarmentsFixture(sessionCustomerId);
+  }
+
+  if (parsedBody?.fixtureKind === "my-naia-model") {
+    // Same real-session auth as the other real-session fixture kinds.
+    const sessionCustomerId = await resolveAuthorizedQaSessionCustomerId(request);
+    if (!sessionCustomerId) {
+      return data({ ok: false, code: "forbidden" }, { status: 403 });
+    }
+    return createMyNaiaModelFixture(sessionCustomerId);
   }
 
   const customerId = parsedBody?.customerId;
@@ -537,6 +562,396 @@ async function deleteClosetLegacyImageOwnershipFixture(customerId: string) {
   });
 }
 
+// ── Full-Look VTO real-garment fixture (2026-11-18) ─────────────────────────
+//
+// POST /api/vto-qa-fixture, body: { fixtureKind: "full-look-real-garments" },
+// while signed in (real Clerk session) as the one pre-designated
+// QA_OVERRIDE_CUSTOMER_ID account — identical authorization posture to
+// styleme-result-view above.
+//
+// WHY THIS EXISTS: Five-Persona QA #30/#31 need genuine end-to-end evidence
+// (a real FASHN submission, real entitlement deduction, real duplicate-
+// submission handling) against Persona A — but her real closet has zero
+// Full-Look-eligible categories (confirmed via the Full-Look fixture above's
+// own eligible-categories response), and the styleme-result-view fixture's
+// items are deliberately imageless (productImageUrl: null), so neither
+// existing mechanism can produce a suggestion selectFullLookGarments will
+// actually accept.
+//
+// This creates exactly FULL_LOOK_MIN_GARMENTS (3) synthetic OutfitItem rows
+// — closetItemId: null, same "nAia product" shape as styleme-result-view —
+// but with productImageUrl set to a REAL, already-public Shopify CDN URL
+// (resolveItemImage returns item.productImageUrl verbatim when set; see
+// look-image-resolution.server.ts — no Cloudinary call, no new upload).
+// The three URLs are drawn from naia-product-media.ts's own static
+// verified-media map, each entry marked eligibility: "ready" (approved via
+// visual review, GID-verified live against Shopify Admin API) — reusing
+// already-approved real assets, never fabricating one. One category each —
+// TOP, BOTTOM, OUTERWEAR — satisfies selectFullLookGarments's 3-category
+// floor without needing a dress/shoe/bag entry this map doesn't have.
+//
+// moodDescription is left null, matching both existing fixture kinds'
+// convention, for the same reason: it keeps this suggestion's CREATION step
+// outside the StyleMe-generation quota. It does NOT exempt a later real
+// Full-Look VTO run against this suggestion from the SEPARATE "vto"
+// entitlement check (checkEntitlement in entitlement.server.ts) — that
+// check counts live VirtualTryOnJob rows directly, independent of
+// moodDescription, so it genuinely applies once api.full-look-vto.tsx's
+// real action is invoked against this fixture. That is the point: this
+// fixture is scoped to let the REAL entitlement/duplicate-submission/
+// accounting logic run for real, not to bypass it.
+//
+// Every item's shopifyProductId is the clearly-fake, distinctly-prefixed
+// "qa-fixture-full-look-real-garment" — DIFFERENT from
+// styleme-result-view's own marker — so deleteFixtureSuggestion below can
+// tell the two fixture kinds apart and apply the right cleanup scope to
+// each. Every productTitle is "[QA FIXTURE] ..." per the established
+// convention.
+const FULL_LOOK_FIXTURE_SHOPIFY_PRODUCT_ID = "qa-fixture-full-look-real-garment";
+
+const FULL_LOOK_FIXTURE_ITEMS: { itemType: OutfitItemType; title: string; productImageUrl: string }[] = [
+  {
+    itemType: "TOP",
+    title: "[QA FIXTURE] Full-Look real-garment top — not a real customer item",
+    productImageUrl: "https://cdn.shopify.com/s/files/1/0998/1008/2948/files/0c950ae7-dfe3-4395-81c4-4d2663fa11bd.png?v=1784196037",
+  },
+  {
+    itemType: "BOTTOM",
+    title: "[QA FIXTURE] Full-Look real-garment bottom — not a real customer item",
+    productImageUrl: "https://cdn.shopify.com/s/files/1/0998/1008/2948/files/7d5d1e05-796a-45d9-b74a-4ddb0c9da3cf.png?v=1774533080",
+  },
+  {
+    itemType: "OUTERWEAR",
+    title: "[QA FIXTURE] Full-Look real-garment outerwear — not a real customer item",
+    productImageUrl: "https://cdn.shopify.com/s/files/1/0998/1008/2948/files/b7af3725-7048-4ead-8d04-d6fb42556eac.png?v=1774532277",
+  },
+];
+
+async function createFullLookRealGarmentsFixture(customerId: string) {
+  const { sessionId, suggestionId } = await prisma.$transaction(async (tx) => {
+    const session = await tx.stylingSession.create({ data: { customerId }, select: { id: true } });
+    const suggestion = await tx.outfitSuggestion.create({ data: { sessionId: session.id }, select: { id: true } });
+    for (const { itemType, title, productImageUrl } of FULL_LOOK_FIXTURE_ITEMS) {
+      await tx.outfitItem.create({
+        data: {
+          suggestionId: suggestion.id,
+          itemType,
+          productTitle: title,
+          shopifyProductId: FULL_LOOK_FIXTURE_SHOPIFY_PRODUCT_ID,
+          productImageUrl,
+        },
+      });
+    }
+    return { sessionId: session.id, suggestionId: suggestion.id };
+  });
+
+  return data({
+    ok: true,
+    fixtureKind: "full-look-real-garments",
+    sessionId,
+    suggestionId,
+    itemCount: FULL_LOOK_FIXTURE_ITEMS.length,
+  });
+}
+
+// ── My nAia Model fixture (2026-11-18) ──────────────────────────────────────
+//
+// POST /api/vto-qa-fixture, body: { fixtureKind: "my-naia-model" }, while
+// signed in (real Clerk session) as the one pre-designated
+// QA_OVERRIDE_CUSTOMER_ID account — same authorization posture as
+// full-look-real-garments / styleme-result-view above.
+//
+// WHY THIS EXISTS: Five-Persona QA #30/#31 found Persona A has no
+// configured My nAia Model at all — the real Full-Look VTO route rejects
+// before ever reaching FASHN (computeModelReadinessFromRecord's
+// isReadyForTryOn requires both a non-empty bodyPublicId AND a non-null
+// saveModelConsentAt; fashn-tryon-service.server.ts separately hard-
+// requires bodyModerationStatus === "APPROVED" before submitting). This
+// fixture satisfies BOTH checks for real — it does not weaken, mock, or
+// bypass either one; it writes a NaiaModel row whose fields are the exact
+// same shape and values a REAL, fully-onboarded, approved model has.
+//
+// NOT SAFE TO INVENT A FAKE bodyPublicId: downloadModelPhotoAsDataUrl
+// (fashn-tryon-service.server.ts) always builds a real, signed Cloudinary
+// private_download URL from bodyPublicId + bodyFormat and actually fetches
+// it — there is no plain-URL bypass here the way OutfitItem.productImageUrl
+// has one. A bodyPublicId with no real backing Cloudinary asset would pass
+// this fixture's own write but fail at actual FASHN-submission time with
+// PROVIDER_ERROR, which would misreport readiness as fixed when it isn't.
+//
+// THEREFORE: MY_NAIA_MODEL_FIXTURE_BODY_PUBLIC_ID below names a specific,
+// not-yet-uploaded Cloudinary asset path, naia-wardrobe/<customerId>/
+// prefixed per validatePublicIdOwnership's own convention (even though
+// this write goes directly through Prisma, bypassing saveNaiaModelPhoto's
+// own call to that check, for consistency with every real row's shape).
+// 2026-11-18 — the synthetic test image has now been generated (fully
+// AI-generated, non-identifiable, founder-confirmed — not a real
+// person's photograph) and uploaded to exactly this public_id, delivery
+// type private, via a disposable upload route reusing the same
+// uploadCloudinaryPrivate() saveNaiaModelPhoto itself calls. Independently
+// verified after upload, not assumed: listed at this exact public_id;
+// Cloudinary's own reported format is "png" (not guessed — the format
+// constant below was corrected from an initial "jpg" placeholder to
+// match); a real signed private_download fetch returns the complete
+// asset (content-length byte-for-byte identical to the original 1,894,571-
+// byte source file); a plausible plain/unsigned Cloudinary CDN URL for
+// this exact asset returns 404 — confirmed genuinely private, not public.
+//
+// bodyModerationStatus is set directly to "APPROVED" — the real value
+// saveNaiaModelPhoto only reaches after Layer 2+3 moderation (a real,
+// potentially-paid AI call) passes. Setting it directly here, for this
+// specific, already-generated, founder-reviewed synthetic test image
+// whose content is already known and controlled, is the same "skip the
+// AI-dependent creation pipeline, write the real resulting shape
+// directly" approach the StyleMe and Full-Look fixtures above already use
+// for Claude/FASHN generation — not a new pattern, and not a weakening of
+// the real check: the FIELD is still checked for real at submission time,
+// this fixture just supplies its value directly instead of deriving it
+// from a real moderation call, in place of the test-specific appropriateness
+// review this image already received before upload.
+//
+// consentPolicyVersion uses the real POLICY_VERSION constant — this is
+// the same value every real customer's consent record uses, not a fixture-
+// specific placeholder, so this row is structurally indistinguishable
+// from a real one to every downstream consumer.
+const MY_NAIA_MODEL_FIXTURE_FORMAT = "png";
+
+function myNaiaModelFixtureBodyPublicId(customerId: string): string {
+  return `naia-wardrobe/${customerId}/qa-fixture-synthetic-body`;
+}
+
+// 2026-11-18 — Persona A turned out to already have a NaiaModel row
+// (confirmed via a disposable, zero-PII-disclosure diagnostic: no
+// facePublicId, no bodyPublicId, no consent of any kind, zero
+// VirtualTryOnJob rows ever — but bodyFormat/bodyModerationStatus/
+// bodyModerationAt were non-null, an inconsistent remnant of some
+// earlier incomplete/failed attempt, not a usable photo or a real
+// customer's consent). The original overwrite-protection check (any
+// bodyPublicId mismatch → refuse) was stricter than necessary: it
+// correctly blocks a row with a REAL photo or REAL consent, but also
+// blocked this harmless, photo-less, consent-less remnant.
+//
+// ADOPTABLE is defined narrowly and exactly matches the concept this
+// codebase already uses for "nothing real here": no bodyPublicId AND no
+// saveModelConsentAt — computeModelReadinessFromRecord's own
+// isReadyForTryOn already treats a row failing either condition as not
+// usable, and neither field can mean anything to a real customer without
+// the other (a stray bodyFormat with no bodyPublicId describes no actual
+// photo; stray moderation fields describe no actual review of anything
+// real). A row with a REAL bodyPublicId OR REAL saveModelConsentAt is
+// never adoptable — refused exactly as before.
+function isAdoptableNaiaModelRow(model: { bodyPublicId: string | null; saveModelConsentAt: Date | null }): boolean {
+  return !model.bodyPublicId && model.saveModelConsentAt === null;
+}
+
+const NAIA_MODEL_ADOPTION_AUDIT_ACTION = "qa_fixture_naia_model_adoption";
+
+async function createMyNaiaModelFixture(customerId: string) {
+  const bodyPublicId = myNaiaModelFixtureBodyPublicId(customerId);
+  const now = new Date();
+  const fields = {
+    bodyPublicId,
+    bodyFormat: MY_NAIA_MODEL_FIXTURE_FORMAT,
+    deliveryType: "private",
+    bodyModerationStatus: "APPROVED",
+    bodyModerationAt: now,
+    saveModelConsentAt: now,
+    consentPolicyVersion: POLICY_VERSION,
+  };
+
+  let outcome: { mode: "created" | "updated-own" | "adopted" | "refused"; model?: { id: string; bodyPublicId: string | null } };
+  try {
+    outcome = await prisma.$transaction(async (tx) => {
+      const existing = await tx.naiaModel.findUnique({ where: { customerId } });
+
+      if (!existing) {
+        const created = await tx.naiaModel.create({
+          data: { customerId, ...fields },
+          select: { id: true, bodyPublicId: true },
+        });
+        return { mode: "created" as const, model: created };
+      }
+
+      if (existing.bodyPublicId === bodyPublicId) {
+        // Already this exact fixture's own prior record — safe repeat call.
+        const updated = await tx.naiaModel.update({
+          where: { customerId },
+          data: fields,
+          select: { id: true, bodyPublicId: true },
+        });
+        return { mode: "updated-own" as const, model: updated };
+      }
+
+      if (!isAdoptableNaiaModelRow(existing)) {
+        return { mode: "refused" as const };
+      }
+
+      // Adoptable: snapshot EVERY field before touching anything, so
+      // cleanup can restore it exactly — not just delete the row, which
+      // would lose a state that (even though not functionally meaningful)
+      // the founder asked to be precisely preserved and restored, not
+      // discarded by assumption. Written to AdminAuditLog directly
+      // (within this same transaction) rather than via
+      // recordAdminAction(), which hardcodes the top-level prisma client
+      // and so cannot participate in this transaction's atomicity.
+      await tx.adminAuditLog.create({
+        data: {
+          performedBy: "qa-fixture:my-naia-model",
+          action: NAIA_MODEL_ADOPTION_AUDIT_ACTION,
+          detail: {
+            customerId,
+            originalFields: {
+              facePublicId: existing.facePublicId,
+              faceVersion: existing.faceVersion,
+              faceFormat: existing.faceFormat,
+              bodyPublicId: existing.bodyPublicId,
+              bodyVersion: existing.bodyVersion,
+              bodyFormat: existing.bodyFormat,
+              deliveryType: existing.deliveryType,
+              photoAnalysisConsentAt: existing.photoAnalysisConsentAt?.toISOString() ?? null,
+              saveModelConsentAt: existing.saveModelConsentAt?.toISOString() ?? null,
+              consentPolicyVersion: existing.consentPolicyVersion,
+              bodyModerationStatus: existing.bodyModerationStatus,
+              bodyModerationAt: existing.bodyModerationAt?.toISOString() ?? null,
+            },
+          },
+        },
+      });
+
+      // Compare-and-swap: only proceed if the row still looks exactly as
+      // just read (no real photo, no real consent) at the moment of
+      // write — detects a concurrent writer between our read and this
+      // update instead of silently clobbering it. A lost race aborts the
+      // whole transaction (including the audit-log insert above) rather
+      // than leaving a snapshot with no corresponding adoption.
+      const cas = await tx.naiaModel.updateMany({
+        where: { customerId, bodyPublicId: existing.bodyPublicId, saveModelConsentAt: null },
+        data: fields,
+      });
+      if (cas.count !== 1) {
+        throw new Error("CONCURRENT_MODIFICATION");
+      }
+      const updated = await tx.naiaModel.findUniqueOrThrow({
+        where: { customerId },
+        select: { id: true, bodyPublicId: true },
+      });
+      return { mode: "adopted" as const, model: updated };
+    });
+  } catch (err) {
+    if (err instanceof Error && err.message === "CONCURRENT_MODIFICATION") {
+      return data({ ok: false, code: "concurrent_modification" }, { status: 409 });
+    }
+    throw err;
+  }
+
+  if (outcome.mode === "refused" || !outcome.model) {
+    return data({ ok: false, code: "existing_model_present" }, { status: 409 });
+  }
+
+  return data({
+    ok: true,
+    fixtureKind: "my-naia-model",
+    naiaModelId: outcome.model.id,
+    bodyPublicId: outcome.model.bodyPublicId,
+    adopted: outcome.mode === "adopted",
+  });
+}
+
+// ── My nAia Model fixture cleanup (2026-11-18) ──────────────────────────────
+//
+// DELETE /api/vto-qa-fixture, body: { fixtureKind: "my-naia-model" }
+//
+// Deliberately a SEPARATE cleanup path from deleteFixtureSuggestion below —
+// NaiaModel is a distinct, customerId-unique table, not reachable through
+// an OutfitSuggestion at all. Same real-session authorization. Refuses
+// (does nothing) unless the existing row's bodyPublicId exactly matches
+// this fixture's own deterministic value for this customer — never deletes
+// a real customer's genuinely-configured model, even if one happens to
+// exist for this same customerId by the time cleanup runs.
+async function deleteMyNaiaModelFixture(request: Request) {
+  const sessionCustomerId = await resolveAuthorizedQaSessionCustomerId(request);
+  if (!sessionCustomerId) {
+    return data({ ok: false, code: "forbidden" }, { status: 403 });
+  }
+
+  const model = await prisma.naiaModel.findUnique({
+    where: { customerId: sessionCustomerId },
+    select: { id: true, bodyPublicId: true },
+  });
+
+  if (!model || model.bodyPublicId !== myNaiaModelFixtureBodyPublicId(sessionCustomerId)) {
+    // Not found, or a real/different model — refuse rather than guess.
+    return data({ ok: false, code: "not_found" }, { status: 404 });
+  }
+
+  // 2026-11-18 — delete the actual Cloudinary asset too, not just the DB
+  // row. The styleme/full-look fixtures above never upload anything of
+  // their own to this app's Cloudinary account (synthetic items point at
+  // already-public, externally-hosted URLs), so there was nothing to
+  // clean up there — this fixture is the first to actually place a new
+  // asset in this app's own Cloudinary account, so secure, verified
+  // deletion is part of its cleanup contract, not left to the orphan
+  // sweep. Best-effort, reported but not fatal: the DB row (the only
+  // thing any readiness/entitlement check actually reads) is still
+  // removed either way, and a failed Cloudinary delete here is the same
+  // kind of residual the orphan sweep already exists to catch.
+  const assetDeletion = await deleteCloudinaryAsset(model.bodyPublicId, "private");
+
+  // 2026-11-18 — if this customer's row was ADOPTED (a pre-existing,
+  // photo-less/consent-less remnant this fixture temporarily overwrote,
+  // not a freshly-created row), restore its exact original field values
+  // instead of deleting it — a real row, however empty its practical
+  // content, must come back exactly as found, not vanish. Found by its
+  // own adoption audit-log entry, which only ever exists for this exact
+  // path (never written on a fresh create or a same-fixture re-run — see
+  // createMyNaiaModelFixture's own comment). Most recent entry for this
+  // customerId, since at most one adoption cycle is ever open per
+  // customer at a time under this fixture's own usage pattern.
+  const adoptionLog = await prisma.adminAuditLog.findFirst({
+    where: { action: NAIA_MODEL_ADOPTION_AUDIT_ACTION },
+    orderBy: { createdAt: "desc" },
+  });
+  const adoptionDetail = adoptionLog?.detail as { customerId?: string; originalFields?: Record<string, unknown> } | null;
+  const isThisCustomersAdoption = adoptionDetail?.customerId === sessionCustomerId;
+
+  if (isThisCustomersAdoption && adoptionDetail?.originalFields) {
+    const o = adoptionDetail.originalFields;
+    await prisma.naiaModel.update({
+      where: { customerId: sessionCustomerId },
+      data: {
+        facePublicId: (o.facePublicId as string | null) ?? null,
+        faceVersion: (o.faceVersion as string | null) ?? null,
+        faceFormat: (o.faceFormat as string | null) ?? null,
+        bodyPublicId: (o.bodyPublicId as string | null) ?? null,
+        bodyVersion: (o.bodyVersion as string | null) ?? null,
+        bodyFormat: (o.bodyFormat as string | null) ?? null,
+        deliveryType: (o.deliveryType as string | undefined) ?? "private",
+        photoAnalysisConsentAt: o.photoAnalysisConsentAt ? new Date(o.photoAnalysisConsentAt as string) : null,
+        saveModelConsentAt: o.saveModelConsentAt ? new Date(o.saveModelConsentAt as string) : null,
+        consentPolicyVersion: (o.consentPolicyVersion as string | null) ?? null,
+        bodyModerationStatus: (o.bodyModerationStatus as string | null) ?? null,
+        bodyModerationAt: o.bodyModerationAt ? new Date(o.bodyModerationAt as string) : null,
+      },
+    });
+
+    return data({
+      ok: true,
+      fixtureKind: "my-naia-model",
+      restoredNaiaModelId: model.id,
+      cloudinaryAssetDeleted: assetDeletion.ok,
+    });
+  }
+
+  await prisma.naiaModel.delete({ where: { customerId: sessionCustomerId } });
+
+  return data({
+    ok: true,
+    fixtureKind: "my-naia-model",
+    deletedNaiaModelId: model.id,
+    cloudinaryAssetDeleted: assetDeletion.ok,
+  });
+}
+
 // ── Cleanup — delete exactly one fixture-created suggestion (2026-11-17) ───
 //
 // DELETE /api/vto-qa-fixture, body: { customerId, suggestionId }
@@ -598,7 +1013,13 @@ async function deleteFixtureSuggestion(request: Request, parsed: Record<string, 
 
   const suggestion = await prisma.outfitSuggestion.findUnique({
     where: { id: suggestionId },
-    select: { id: true, moodDescription: true, sessionId: true, session: { select: { customerId: true } } },
+    select: {
+      id: true,
+      moodDescription: true,
+      sessionId: true,
+      session: { select: { customerId: true } },
+      items: { select: { shopifyProductId: true } },
+    },
   });
 
   if (!suggestion || suggestion.session.customerId !== customerId) {
@@ -616,17 +1037,47 @@ async function deleteFixtureSuggestion(request: Request, parsed: Record<string, 
   if (suggestionsOnSession !== 1) {
     return data({ ok: false, code: "session_not_isolated", suggestionsOnSession }, { status: 409 });
   }
-  if (dependentJobs > 0) {
+
+  // 2026-11-18 — the full-look-real-garments fixture above exists
+  // specifically so a REAL Full-Look VTO run can create real
+  // VirtualTryOnJob rows against it (that's the point: exercising the
+  // genuine entitlement/duplicate-submission/accounting logic). This
+  // cleanup must therefore be able to remove those jobs too — but ONLY for
+  // suggestions this exact fixture created, never for styleme-result-view
+  // or any real customer suggestion, where a dependent job existing is
+  // still an unexpected state this action refuses to touch. Distinguished
+  // by every one of the suggestion's own items carrying this fixture's
+  // distinct shopifyProductId marker (set only by
+  // createFullLookRealGarmentsFixture above) — not by moodDescription
+  // alone, since that's shared with styleme-result-view.
+  const isFullLookRealGarmentsFixture =
+    suggestion.items.length > 0 &&
+    suggestion.items.every((item) => item.shopifyProductId === FULL_LOOK_FIXTURE_SHOPIFY_PRODUCT_ID);
+
+  if (dependentJobs > 0 && !isFullLookRealGarmentsFixture) {
     return data({ ok: false, code: "has_dependent_jobs", dependentJobs }, { status: 409 });
   }
 
+  // No Cloudinary cleanup here: a completed real FASHN run uploads its
+  // result image(s) to Cloudinary independently of these DB rows. Deleting
+  // the VirtualTryOnJob row does not delete that asset — it is left for
+  // the existing, already-reviewed Cloudinary orphan-sweep mechanism to
+  // reclaim in the ordinary course, same as any other abandoned upload.
+  // Not a gap introduced here: no fixture or cleanup path in this file has
+  // ever deleted a Cloudinary asset directly.
   await prisma.$transaction([
+    ...(dependentJobs > 0 ? [prisma.virtualTryOnJob.deleteMany({ where: { outfitSuggestionId: suggestion.id } })] : []),
     prisma.outfitItem.deleteMany({ where: { suggestionId: suggestion.id } }),
     prisma.outfitSuggestion.delete({ where: { id: suggestion.id } }),
     prisma.stylingSession.delete({ where: { id: suggestion.sessionId } }),
   ]);
 
-  return data({ ok: true, deletedSuggestionId: suggestion.id, deletedSessionId: suggestion.sessionId });
+  return data({
+    ok: true,
+    deletedSuggestionId: suggestion.id,
+    deletedSessionId: suggestion.sessionId,
+    deletedJobCount: dependentJobs,
+  });
 }
 
 // ── Read-only FASHN credits check (2026-11-17) ──────────────────────────────

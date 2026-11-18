@@ -18,6 +18,15 @@ const mockItemCreate = vi.fn();
 const mockSuggestionFindUnique = vi.fn();
 const mockVtoJobCount = vi.fn();
 const mockVtoJobFindMany = vi.fn();
+const mockVtoJobDeleteMany = vi.fn();
+const mockNaiaModelCreate = vi.fn();
+const mockNaiaModelUpdate = vi.fn();
+const mockNaiaModelUpdateMany = vi.fn();
+const mockNaiaModelFindUnique = vi.fn();
+const mockNaiaModelFindUniqueOrThrow = vi.fn();
+const mockNaiaModelDelete = vi.fn();
+const mockAdminAuditLogCreate = vi.fn();
+const mockAdminAuditLogFindFirst = vi.fn();
 const mockSuggestionCount = vi.fn();
 const mockItemDeleteMany = vi.fn();
 const mockSuggestionDelete = vi.fn();
@@ -56,7 +65,23 @@ vi.mock("~/db.server", () => ({
     },
     outfitItem: { deleteMany: (...args: unknown[]) => mockItemDeleteMany(...args) },
     stylingSession: { delete: (...args: unknown[]) => mockSessionDelete(...args) },
-    virtualTryOnJob: { count: (...args: unknown[]) => mockVtoJobCount(...args), findMany: (...args: unknown[]) => mockVtoJobFindMany(...args) },
+    virtualTryOnJob: {
+      count: (...args: unknown[]) => mockVtoJobCount(...args),
+      findMany: (...args: unknown[]) => mockVtoJobFindMany(...args),
+      deleteMany: (...args: unknown[]) => mockVtoJobDeleteMany(...args),
+    },
+    naiaModel: {
+      create: (...args: unknown[]) => mockNaiaModelCreate(...args),
+      update: (...args: unknown[]) => mockNaiaModelUpdate(...args),
+      updateMany: (...args: unknown[]) => mockNaiaModelUpdateMany(...args),
+      findUnique: (...args: unknown[]) => mockNaiaModelFindUnique(...args),
+      findUniqueOrThrow: (...args: unknown[]) => mockNaiaModelFindUniqueOrThrow(...args),
+      delete: (...args: unknown[]) => mockNaiaModelDelete(...args),
+    },
+    adminAuditLog: {
+      create: (...args: unknown[]) => mockAdminAuditLogCreate(...args),
+      findFirst: (...args: unknown[]) => mockAdminAuditLogFindFirst(...args),
+    },
     // $transaction has two call shapes in the real code: a callback (the
     // POST action, creation) and a plain array of promises (the DELETE
     // cleanup action below) — mirrors both, same as the real Prisma client.
@@ -68,6 +93,14 @@ vi.mock("~/db.server", () => ({
         outfitItem: { create: (...args: unknown[]) => mockItemCreate(...args) },
         closetItem: { create: (...args: unknown[]) => mockClosetItemCreate(...args) },
         buyOrSkipAnalysis: { create: (...args: unknown[]) => mockBosCreate(...args) },
+        naiaModel: {
+          findUnique: (...args: unknown[]) => mockNaiaModelFindUnique(...args),
+          findUniqueOrThrow: (...args: unknown[]) => mockNaiaModelFindUniqueOrThrow(...args),
+          create: (...args: unknown[]) => mockNaiaModelCreate(...args),
+          update: (...args: unknown[]) => mockNaiaModelUpdate(...args),
+          updateMany: (...args: unknown[]) => mockNaiaModelUpdateMany(...args),
+        },
+        adminAuditLog: { create: (...args: unknown[]) => mockAdminAuditLogCreate(...args) },
       });
     },
   },
@@ -81,6 +114,10 @@ vi.mock("~/lib/ai/my-naia-model.server", () => ({
     hasFullBodyPhoto: Boolean(model),
     isReadyForTryOn: Boolean(model),
   }),
+  // Real value, not a fixture-specific placeholder — this fixture's own
+  // comment explains why the written row must use the exact same constant
+  // a real customer's consent record does.
+  POLICY_VERSION: "1.0",
 }));
 
 // getCloudinaryConfig is real code with real env-var reads — mocked here so
@@ -184,6 +221,10 @@ function fixtureSuggestion(overrides: Partial<Record<string, unknown>> = {}) {
     moodDescription: null,
     sessionId: "session-1",
     session: { customerId: QA_ID },
+    // Default marker matches styleme-result-view's own fixture items —
+    // most existing tests exercise that kind. Full-Look-real-garments
+    // tests override this explicitly with its own distinct marker.
+    items: [{ shopifyProductId: "qa-fixture-not-a-real-product-id" }],
     ...overrides,
   };
 }
@@ -206,6 +247,15 @@ beforeEach(() => {
   mockItemCreate.mockResolvedValue({ id: "outfititem-1" });
   mockVtoJobCount.mockResolvedValue(0);
   mockVtoJobFindMany.mockResolvedValue([]);
+  mockVtoJobDeleteMany.mockResolvedValue({ count: 0 });
+  mockNaiaModelCreate.mockResolvedValue({ id: "naiamodel-1", customerId: QA_ID, bodyPublicId: `naia-wardrobe/${QA_ID}/qa-fixture-synthetic-body` });
+  mockNaiaModelUpdate.mockResolvedValue({ id: "naiamodel-1", customerId: QA_ID, bodyPublicId: `naia-wardrobe/${QA_ID}/qa-fixture-synthetic-body` });
+  mockNaiaModelUpdateMany.mockResolvedValue({ count: 1 });
+  mockNaiaModelFindUnique.mockResolvedValue(null);
+  mockNaiaModelFindUniqueOrThrow.mockResolvedValue({ id: "naiamodel-1", bodyPublicId: `naia-wardrobe/${QA_ID}/qa-fixture-synthetic-body` });
+  mockNaiaModelDelete.mockResolvedValue({ id: "naiamodel-1" });
+  mockAdminAuditLogCreate.mockResolvedValue({ id: "auditlog-1" });
+  mockAdminAuditLogFindFirst.mockResolvedValue(null);
   mockSuggestionCount.mockResolvedValue(1);
   mockItemDeleteMany.mockResolvedValue({ count: 1 });
   mockSuggestionDelete.mockResolvedValue({ id: "suggestion-1" });
@@ -224,6 +274,7 @@ beforeEach(() => {
 afterEach(() => {
   process.env = { ...ORIGINAL_ENV };
 });
+
 
 describe("api.vto-qa-fixture action — authorization gate", () => {
   it("rejects a non-POST method", async () => {
@@ -551,6 +602,7 @@ describe("api.vto-qa-fixture action — fixtureKind: styleme-result-view (real-s
   });
 });
 
+
 describe("api.vto-qa-fixture action — fixtureKind: closet-legacy-image-ownership (QA #36, real-session auth)", () => {
   function closetOwnershipReq(overrides: Record<string, unknown> = {}, headers: Record<string, string> = {}) {
     // Deliberately NO x-vto-qa-fixture-secret header — real-session auth only.
@@ -738,6 +790,440 @@ describe("api.vto-qa-fixture action — fixtureKind: closet-legacy-image-ownersh
     }
   });
 });
+
+
+describe("api.vto-qa-fixture action — fixtureKind: full-look-real-garments (real-session auth, real images, no secret)", () => {
+  function fullLookReq(overrides: Record<string, unknown> = {}, headers: Record<string, string> = {}) {
+    return req({ fixtureKind: "full-look-real-garments", ...overrides }, headers);
+  }
+
+  it("rejects with the same generic 403 when there is no real session attached", async () => {
+    setAuthorizedEnv();
+    const res = await action({ request: fullLookReq() } as any);
+    expect(res.init?.status).toBe(403);
+    expect(mockSessionCreate).not.toHaveBeenCalled();
+  });
+
+  it("rejects even a genuinely-authenticated QA-account session when VERCEL_ENV is production", async () => {
+    setAuthorizedEnv();
+    process.env.VERCEL_ENV = "production";
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    const res = await action({ request: fullLookReq() } as any);
+    expect(res.init?.status).toBe(403);
+  });
+
+  it("ignores any customerId the body supplies — identity comes only from the verified session", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    const res = await action({ request: fullLookReq({ customerId: "attacker-supplied-id" }) } as any);
+    expect(res.init?.status).toBeUndefined();
+    expect(mockSessionCreate).toHaveBeenCalledWith(expect.objectContaining({ data: { customerId: QA_ID } }));
+  });
+
+  it("never touches closetItem.findMany — does not depend on the customer's real closet", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    await action({ request: fullLookReq() } as any);
+    expect(mockFindMany).not.toHaveBeenCalled();
+  });
+
+  it("creates exactly one StylingSession, one OutfitSuggestion (moodDescription left null), and exactly 3 OutfitItem rows — TOP, BOTTOM, OUTERWEAR", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    const res = await action({ request: fullLookReq() } as any);
+    const payload = res.data as any;
+    expect(payload.ok).toBe(true);
+    expect(payload.fixtureKind).toBe("full-look-real-garments");
+    expect(payload.itemCount).toBe(3);
+
+    const suggestionCreateArg = mockSuggestionCreate.mock.calls[0][0];
+    expect(suggestionCreateArg.data).not.toHaveProperty("moodDescription");
+
+    expect(mockItemCreate).toHaveBeenCalledTimes(3);
+    const itemTypes = mockItemCreate.mock.calls.map((call) => call[0].data.itemType).sort();
+    expect(itemTypes).toEqual(["BOTTOM", "OUTERWEAR", "TOP"]);
+  });
+
+  it("every created item has closetItemId omitted, a distinct fixture marker, a real https productImageUrl, and a [QA FIXTURE]-prefixed title", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    await action({ request: fullLookReq() } as any);
+    for (const call of mockItemCreate.mock.calls) {
+      const itemData = call[0].data;
+      expect(itemData).not.toHaveProperty("closetItemId");
+      expect(itemData.productTitle).toMatch(/^\[QA FIXTURE\]/);
+      expect(itemData.shopifyProductId).toBe("qa-fixture-full-look-real-garment");
+      expect(itemData.productImageUrl).toMatch(/^https:\/\/cdn\.shopify\.com\//);
+    }
+  });
+
+  it("uses a DIFFERENT shopifyProductId marker than styleme-result-view, so the two fixture kinds are distinguishable for cleanup", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    await action({ request: fullLookReq() } as any);
+    const marker = mockItemCreate.mock.calls[0][0].data.shopifyProductId;
+    expect(marker).not.toBe("qa-fixture-not-a-real-product-id");
+  });
+
+  it("cleanup CASCADES through dependent VirtualTryOnJob rows for this fixture kind — the whole point of this fixture", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockSuggestionFindUnique.mockResolvedValueOnce(
+      fixtureSuggestion({ items: [{ shopifyProductId: "qa-fixture-full-look-real-garment" }] }),
+    );
+    mockVtoJobCount.mockResolvedValueOnce(1); // a real job was created by a real Full-Look VTO run
+    const res = await action({ request: deleteReq({ suggestionId: "suggestion-1" }) } as any);
+    const payload = res.data as any;
+    expect(payload.ok).toBe(true);
+    expect(payload.deletedJobCount).toBe(1);
+    expect(mockVtoJobDeleteMany).toHaveBeenCalledWith({ where: { outfitSuggestionId: "suggestion-1" } });
+    expect(mockItemDeleteMany).toHaveBeenCalledWith({ where: { suggestionId: "suggestion-1" } });
+    expect(mockSuggestionDelete).toHaveBeenCalledWith({ where: { id: "suggestion-1" } });
+    expect(mockSessionDelete).toHaveBeenCalledWith({ where: { id: "session-1" } });
+  });
+
+  it("a styleme-result-view suggestion with a dependent job is still REFUSED — the cascade is scoped to this fixture kind only, not fixtures in general", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    // Default fixtureSuggestion() carries the styleme-result-view marker.
+    mockSuggestionFindUnique.mockResolvedValueOnce(fixtureSuggestion());
+    mockVtoJobCount.mockResolvedValueOnce(1);
+    const res = await action({ request: deleteReq({ suggestionId: "suggestion-1" }) } as any);
+    expect(res.init?.status).toBe(409);
+    const payload = res.data as any;
+    expect(payload.code).toBe("has_dependent_jobs");
+    expect(mockVtoJobDeleteMany).not.toHaveBeenCalled();
+    expect(mockSuggestionDelete).not.toHaveBeenCalled();
+  });
+
+  it("cleanup with zero dependent jobs never calls virtualTryOnJob.deleteMany at all (no-op, not an empty call)", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockSuggestionFindUnique.mockResolvedValueOnce(
+      fixtureSuggestion({ items: [{ shopifyProductId: "qa-fixture-full-look-real-garment" }] }),
+    );
+    mockVtoJobCount.mockResolvedValueOnce(0);
+    const res = await action({ request: deleteReq({ suggestionId: "suggestion-1" }) } as any);
+    const payload = res.data as any;
+    expect(payload.ok).toBe(true);
+    expect(payload.deletedJobCount).toBe(0);
+    expect(mockVtoJobDeleteMany).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("api.vto-qa-fixture action — fixtureKind: my-naia-model (real-session auth, real readiness fields)", () => {
+  function modelReq(overrides: Record<string, unknown> = {}) {
+    return req({ fixtureKind: "my-naia-model", ...overrides });
+  }
+
+  it("rejects with the same generic 403 when there is no real session attached", async () => {
+    setAuthorizedEnv();
+    const res = await action({ request: modelReq() } as any);
+    expect(res.init?.status).toBe(403);
+    expect(mockNaiaModelFindUnique).not.toHaveBeenCalled();
+    expect(mockNaiaModelCreate).not.toHaveBeenCalled();
+  });
+
+  it("rejects even a genuinely-authenticated QA-account session when VERCEL_ENV is production", async () => {
+    setAuthorizedEnv();
+    process.env.VERCEL_ENV = "production";
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    const res = await action({ request: modelReq() } as any);
+    expect(res.init?.status).toBe(403);
+    expect(mockNaiaModelCreate).not.toHaveBeenCalled();
+  });
+
+  it("ignores any customerId the body supplies — identity comes only from the verified session", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    await action({ request: modelReq({ customerId: "attacker-supplied-id" }) } as any);
+    expect(mockNaiaModelFindUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { customerId: QA_ID } }),
+    );
+    expect(mockNaiaModelCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ customerId: QA_ID }) }),
+    );
+  });
+
+  it("writes exactly the fields real readiness checks require: non-empty bodyPublicId, bodyFormat, APPROVED moderation, and a non-null saveModelConsentAt", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    await action({ request: modelReq() } as any);
+    const { data: fields } = mockNaiaModelCreate.mock.calls[0][0];
+    expect(fields.bodyPublicId).toBe(`naia-wardrobe/${QA_ID}/qa-fixture-synthetic-body`);
+    // Real, Cloudinary-reported format for the actual uploaded asset —
+    // not assumed.
+    expect(fields.bodyFormat).toBe("png");
+    expect(fields.deliveryType).toBe("private");
+    expect(fields.bodyModerationStatus).toBe("APPROVED");
+    expect(fields.saveModelConsentAt).toBeInstanceOf(Date);
+    // Same real constant a genuine customer's consent record uses — never
+    // a fixture-specific placeholder value.
+    expect(fields.consentPolicyVersion).toBe("1.0");
+  });
+
+  it("the written bodyPublicId satisfies validatePublicIdOwnership's own naia-wardrobe/<customerId>/ convention", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    await action({ request: modelReq() } as any);
+    const { bodyPublicId } = mockNaiaModelCreate.mock.calls[0][0].data;
+    expect(bodyPublicId.startsWith(`naia-wardrobe/${QA_ID}/`)).toBe(true);
+  });
+
+  it("OVERWRITE PROTECTION — refuses outright when a DIFFERENT (real or unrelated) NaiaModel row already exists for this customer, never touching it", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockNaiaModelFindUnique.mockResolvedValueOnce({
+      id: "real-model-1",
+      bodyPublicId: `naia-wardrobe/${QA_ID}/some-real-photo-from-onboarding`,
+    });
+    const res = await action({ request: modelReq() } as any);
+    expect(res.init?.status).toBe(409);
+    const payload = res.data as any;
+    expect(payload.code).toBe("existing_model_present");
+    expect(mockNaiaModelCreate).not.toHaveBeenCalled();
+    expect(mockNaiaModelUpdate).not.toHaveBeenCalled();
+  });
+
+  it("re-running this fixture when the existing row is already its OWN prior fixture record safely re-writes via update, not create, and still refuses nothing real", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockNaiaModelFindUnique.mockResolvedValueOnce({
+      id: "naiamodel-1",
+      bodyPublicId: `naia-wardrobe/${QA_ID}/qa-fixture-synthetic-body`,
+    });
+    const res = await action({ request: modelReq() } as any);
+    const payload = res.data as any;
+    expect(payload.ok).toBe(true);
+    expect(mockNaiaModelCreate).not.toHaveBeenCalled();
+    expect(mockNaiaModelUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { customerId: QA_ID } }),
+    );
+  });
+
+  it("OVERWRITE PROTECTION — a row with REAL consent but no bodyPublicId is still refused (consent alone is enough to block, not just a photo)", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockNaiaModelFindUnique.mockResolvedValueOnce({
+      id: "real-model-2",
+      bodyPublicId: null,
+      saveModelConsentAt: new Date("2026-10-01T00:00:00Z"),
+    });
+    const res = await action({ request: modelReq() } as any);
+    expect(res.init?.status).toBe(409);
+    expect(mockNaiaModelCreate).not.toHaveBeenCalled();
+    expect(mockNaiaModelUpdateMany).not.toHaveBeenCalled();
+    expect(mockAdminAuditLogCreate).not.toHaveBeenCalled();
+  });
+
+  it("ADOPTION — a pre-existing row with no real photo and no real consent is adoptable: snapshots every field to AdminAuditLog, then overwrites via a compare-and-swap update", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    const existingStub = {
+      id: "stub-model-1",
+      bodyPublicId: null,
+      bodyVersion: null,
+      bodyFormat: "jpg", // stray — no bodyPublicId backs it, not real data
+      facePublicId: null,
+      faceVersion: null,
+      faceFormat: null,
+      deliveryType: "private",
+      photoAnalysisConsentAt: null,
+      saveModelConsentAt: null,
+      consentPolicyVersion: null,
+      bodyModerationStatus: "APPROVED", // stray — same reasoning
+      bodyModerationAt: new Date("2026-11-16T11:06:39.235Z"),
+    };
+    mockNaiaModelFindUnique.mockResolvedValueOnce(existingStub);
+    mockNaiaModelFindUniqueOrThrow.mockResolvedValueOnce({
+      id: "stub-model-1",
+      bodyPublicId: `naia-wardrobe/${QA_ID}/qa-fixture-synthetic-body`,
+    });
+
+    const res = await action({ request: modelReq() } as any);
+    const payload = res.data as any;
+    expect(payload.ok).toBe(true);
+    expect(payload.adopted).toBe(true);
+    expect(mockNaiaModelCreate).not.toHaveBeenCalled();
+
+    // Snapshot written BEFORE the overwrite, capturing every field verbatim.
+    const auditCall = mockAdminAuditLogCreate.mock.calls[0][0];
+    expect(auditCall.data.action).toBe("qa_fixture_naia_model_adoption");
+    expect(auditCall.data.detail.customerId).toBe(QA_ID);
+    expect(auditCall.data.detail.originalFields.bodyFormat).toBe("jpg");
+    expect(auditCall.data.detail.originalFields.bodyModerationStatus).toBe("APPROVED");
+    expect(auditCall.data.detail.originalFields.bodyModerationAt).toBe("2026-11-16T11:06:39.235Z");
+    expect(auditCall.data.detail.originalFields.bodyPublicId).toBeNull();
+    expect(auditCall.data.detail.originalFields.saveModelConsentAt).toBeNull();
+
+    // Compare-and-swap re-asserts no-real-photo/no-real-consent at write time.
+    expect(mockNaiaModelUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { customerId: QA_ID, bodyPublicId: null, saveModelConsentAt: null } }),
+    );
+  });
+
+  it("ADOPTION — a concurrent modification between read and write is detected and refused with 409, never silently overwritten", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockNaiaModelFindUnique.mockResolvedValueOnce({
+      id: "stub-model-1",
+      bodyPublicId: null,
+      saveModelConsentAt: null,
+      bodyFormat: null,
+      bodyVersion: null,
+      facePublicId: null,
+      faceVersion: null,
+      faceFormat: null,
+      deliveryType: "private",
+      photoAnalysisConsentAt: null,
+      consentPolicyVersion: null,
+      bodyModerationStatus: null,
+      bodyModerationAt: null,
+    });
+    // Someone else wrote to this row between our read and our write.
+    mockNaiaModelUpdateMany.mockResolvedValueOnce({ count: 0 });
+
+    const res = await action({ request: modelReq() } as any);
+    expect(res.init?.status).toBe(409);
+    const payload = res.data as any;
+    expect(payload.code).toBe("concurrent_modification");
+  });
+
+  it("DELETE restores the exact original fields from the adoption audit log, rather than deleting the row, when an adoption occurred", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockNaiaModelFindUnique.mockResolvedValueOnce({
+      id: "stub-model-1",
+      bodyPublicId: `naia-wardrobe/${QA_ID}/qa-fixture-synthetic-body`,
+    });
+    mockAdminAuditLogFindFirst.mockResolvedValueOnce({
+      id: "auditlog-1",
+      action: "qa_fixture_naia_model_adoption",
+      detail: {
+        customerId: QA_ID,
+        originalFields: {
+          facePublicId: null,
+          faceVersion: null,
+          faceFormat: null,
+          bodyPublicId: null,
+          bodyVersion: null,
+          bodyFormat: "jpg",
+          deliveryType: "private",
+          photoAnalysisConsentAt: null,
+          saveModelConsentAt: null,
+          consentPolicyVersion: null,
+          bodyModerationStatus: "APPROVED",
+          bodyModerationAt: "2026-11-16T11:06:39.235Z",
+        },
+      },
+    });
+
+    const res = await action({ request: deleteReq({ fixtureKind: "my-naia-model" }) } as any);
+    const payload = res.data as any;
+    expect(payload.ok).toBe(true);
+    expect(payload.restoredNaiaModelId).toBe("stub-model-1");
+    expect(mockNaiaModelDelete).not.toHaveBeenCalled();
+
+    const restoreCall = mockNaiaModelUpdate.mock.calls.find((c: any) => c[0].where?.customerId === QA_ID);
+    expect(restoreCall).toBeDefined();
+    const restoreData = restoreCall![0].data;
+    expect(restoreData.bodyPublicId).toBeNull();
+    expect(restoreData.bodyFormat).toBe("jpg");
+    expect(restoreData.bodyModerationStatus).toBe("APPROVED");
+    expect(restoreData.bodyModerationAt).toEqual(new Date("2026-11-16T11:06:39.235Z"));
+    expect(restoreData.saveModelConsentAt).toBeNull();
+  });
+
+  it("DELETE still deletes the row entirely when no adoption log exists — i.e., the row was freshly created, not adopted", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockNaiaModelFindUnique.mockResolvedValueOnce({
+      id: "naiamodel-1",
+      bodyPublicId: `naia-wardrobe/${QA_ID}/qa-fixture-synthetic-body`,
+    });
+    mockAdminAuditLogFindFirst.mockResolvedValueOnce(null);
+
+    const res = await action({ request: deleteReq({ fixtureKind: "my-naia-model" }) } as any);
+    const payload = res.data as any;
+    expect(payload.ok).toBe(true);
+    expect(payload.deletedNaiaModelId).toBe("naiamodel-1");
+    expect(mockNaiaModelDelete).toHaveBeenCalledWith({ where: { customerId: QA_ID } });
+  });
+
+  it("DELETE never restores from a DIFFERENT customer's adoption log entry — matches on customerId inside the detail, not just the most recent row", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockNaiaModelFindUnique.mockResolvedValueOnce({
+      id: "naiamodel-1",
+      bodyPublicId: `naia-wardrobe/${QA_ID}/qa-fixture-synthetic-body`,
+    });
+    mockAdminAuditLogFindFirst.mockResolvedValueOnce({
+      id: "auditlog-2",
+      action: "qa_fixture_naia_model_adoption",
+      detail: { customerId: "a-completely-different-customer", originalFields: { bodyPublicId: "something" } },
+    });
+
+    const res = await action({ request: deleteReq({ fixtureKind: "my-naia-model" }) } as any);
+    const payload = res.data as any;
+    expect(payload.ok).toBe(true);
+    expect(payload.deletedNaiaModelId).toBe("naiamodel-1");
+    expect(mockNaiaModelDelete).toHaveBeenCalledWith({ where: { customerId: QA_ID } });
+  });
+
+  it("DELETE with fixtureKind my-naia-model removes exactly the fixture's own row, via the real-session path, no secret needed", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockNaiaModelFindUnique.mockResolvedValueOnce({
+      id: "naiamodel-1",
+      bodyPublicId: `naia-wardrobe/${QA_ID}/qa-fixture-synthetic-body`,
+    });
+    const res = await action({ request: deleteReq({ fixtureKind: "my-naia-model" }) } as any);
+    const payload = res.data as any;
+    expect(payload.ok).toBe(true);
+    expect(payload.deletedNaiaModelId).toBe("naiamodel-1");
+    expect(mockNaiaModelDelete).toHaveBeenCalledWith({ where: { customerId: QA_ID } });
+    // getCloudinaryConfig is mocked to null in this file (see its own
+    // comment) — deleteCloudinaryAsset is the REAL function, which fails
+    // closed with NOT_CONFIGURED (no network call) rather than crashing.
+    // Reported in the response, not fatal to the DB cleanup itself.
+    expect(payload.cloudinaryAssetDeleted).toBe(false);
+  });
+
+  it("DELETE refuses a model whose bodyPublicId does NOT match this fixture's own value — never deletes a real, genuinely-configured model", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockNaiaModelFindUnique.mockResolvedValueOnce({
+      id: "real-model-1",
+      bodyPublicId: `naia-wardrobe/${QA_ID}/some-real-customer-photo`,
+    });
+    const res = await action({ request: deleteReq({ fixtureKind: "my-naia-model" }) } as any);
+    expect(res.init?.status).toBe(404);
+    expect(mockNaiaModelDelete).not.toHaveBeenCalled();
+  });
+
+  it("DELETE refuses when no model exists at all for this customer", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockNaiaModelFindUnique.mockResolvedValueOnce(null);
+    const res = await action({ request: deleteReq({ fixtureKind: "my-naia-model" }) } as any);
+    expect(res.init?.status).toBe(404);
+    expect(mockNaiaModelDelete).not.toHaveBeenCalled();
+  });
+
+  it("DELETE with fixtureKind my-naia-model never touches the OutfitSuggestion cleanup path", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockNaiaModelFindUnique.mockResolvedValueOnce({
+      id: "naiamodel-1",
+      bodyPublicId: `naia-wardrobe/${QA_ID}/qa-fixture-synthetic-body`,
+    });
+    await action({ request: deleteReq({ fixtureKind: "my-naia-model" }) } as any);
+    expect(mockSuggestionFindUnique).not.toHaveBeenCalled();
+    expect(mockSuggestionDelete).not.toHaveBeenCalled();
+  });
+});
+
 
 describe("api.vto-qa-fixture loader (GET) — read-only verification, no duplicate creation", () => {
   function getReq(params: Record<string, string>, headers: Record<string, string> = {}) {
@@ -1094,7 +1580,7 @@ describe("api.vto-qa-fixture action — DELETE cleanup", () => {
     const res = await action({
       request: deleteReq({ customerId: QA_ID, suggestionId: "suggestion-1" }, AUTH_HEADERS),
     } as any);
-    expect(res.data).toEqual({ ok: true, deletedSuggestionId: "suggestion-1", deletedSessionId: "session-1" });
+    expect(res.data).toEqual({ ok: true, deletedSuggestionId: "suggestion-1", deletedSessionId: "session-1", deletedJobCount: 0 });
     expect(mockItemDeleteMany).toHaveBeenCalledWith({ where: { suggestionId: "suggestion-1" } });
     expect(mockSuggestionDelete).toHaveBeenCalledWith({ where: { id: "suggestion-1" } });
     expect(mockSessionDelete).toHaveBeenCalledWith({ where: { id: "session-1" } });
