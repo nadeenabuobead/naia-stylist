@@ -54,6 +54,11 @@
 // POST body field fixtureKind: "styleme-result-view" (2026-11-18) switches
 // to a second, independent fixture shape — see createStyleMeResultViewFixture
 // below for why and how it differs from the Full-Look fixture above.
+//
+// fixtureKind: "closet-legacy-image-ownership" (2026-11-18, same day) is a
+// third, independent fixture — see createClosetLegacyImageOwnershipFixture
+// below. Unlike the two above, it creates real ClosetItem/BuyOrSkipAnalysis
+// rows (not StyleMe sessions) to exercise QA #36's ownership/priority logic.
 
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { data } from "react-router";
@@ -149,7 +154,27 @@ async function resolveAuthorizedQaSessionCustomerId(request: Request): Promise<s
 
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method === "DELETE") {
-    return deleteFixtureSuggestion(request);
+    // Read the body exactly once here and pass it down — request.clone()
+    // is not implemented by this file's test mocks (and is unnecessary in
+    // the real Request object too), so every DELETE-side handler below
+    // takes the already-parsed body as a parameter instead of re-reading
+    // request.json() itself. See deleteFixtureSuggestion's own signature.
+    let deleteBody: unknown;
+    try {
+      deleteBody = await request.json();
+    } catch {
+      return data({ ok: false, code: "invalid_request" }, { status: 400 });
+    }
+    const parsedDeleteBody = deleteBody as Record<string, unknown> | null;
+
+    if (parsedDeleteBody?.fixtureKind === "closet-legacy-image-ownership") {
+      const sessionCustomerId = await resolveAuthorizedQaSessionCustomerId(request);
+      if (!sessionCustomerId) {
+        return data({ ok: false, code: "forbidden" }, { status: 403 });
+      }
+      return deleteClosetLegacyImageOwnershipFixture(sessionCustomerId);
+    }
+    return deleteFixtureSuggestion(request, parsedDeleteBody);
   }
   if (request.method !== "POST") {
     return data({ ok: false, code: "method_not_allowed" }, { status: 405 });
@@ -172,6 +197,17 @@ export async function action({ request }: ActionFunctionArgs) {
       return data({ ok: false, code: "forbidden" }, { status: 403 });
     }
     return createStyleMeResultViewFixture(sessionCustomerId);
+  }
+
+  if (parsedBody?.fixtureKind === "closet-legacy-image-ownership") {
+    // Real-session auth only — same reason as styleme-result-view: Five-
+    // Persona QA needs to invoke this directly and cannot be given
+    // VTO_QA_FIXTURE_SECRET. customerId comes from the verified session.
+    const sessionCustomerId = await resolveAuthorizedQaSessionCustomerId(request);
+    if (!sessionCustomerId) {
+      return data({ ok: false, code: "forbidden" }, { status: 403 });
+    }
+    return createClosetLegacyImageOwnershipFixture(sessionCustomerId);
   }
 
   const customerId = parsedBody?.customerId;
@@ -326,6 +362,153 @@ async function createStyleMeResultViewFixture(customerId: string) {
   });
 }
 
+// ── QA #36 — legacy imageUrl ownership/priority fixture (2026-11-18) ───────
+//
+// POST /api/vto-qa-fixture, body: { fixtureKind: "closet-legacy-image-ownership" },
+// while signed in (real Clerk session) as QA_OVERRIDE_CUSTOMER_ID — same
+// session-scoped auth as fixtureKind "styleme-result-view" above, for the
+// same reason: Five-Persona QA cannot be given VTO_QA_FIXTURE_SECRET.
+//
+// WHY THIS EXISTS: QA #36 (validateImageUrlOwnership + the signed-URL-
+// first priority order, both in cloudinary-admin.server.ts) could not be
+// exercised through any real route on the ovevg9dy0 Preview — confirmed by
+// QA's own retest — because the test persona's real ClosetItem/
+// BuyOrSkipAnalysis rows have no imageUrl/imagePublicId populated at all.
+// This creates exactly 4 synthetic rows (2 ClosetItem, 2 BuyOrSkipAnalysis)
+// under ONLY this one QA customer, covering the two behaviors that need a
+// real populated row to observe:
+//
+//   "signed priority" row — BOTH imagePublicId+imageFormat AND imageUrl are
+//     set, imageUrl pointing at THIS SAME customer's own folder. Every
+//     resolver in this codebase must now return the SIGNED
+//     buildPrivateDownloadUrl shape (starts with
+//     "https://api.cloudinary.com/v1_1/") — never the legacy imageUrl
+//     value verbatim, which is distinguishable by containing the literal
+//     substring "legacy-should-not-be-used".
+//   "ownership rejection" row — imagePublicId/imageFormat are left null;
+//     imageUrl names a DIFFERENT, clearly-synthetic folder segment
+//     (QA_FIXTURE_OTHER_CUSTOMER_MARKER below — never a real customer id).
+//     Every resolver must return null/no image for this row, never the
+//     legacy URL (distinguishable by containing "should-be-rejected").
+//
+// No real Cloudinary asset is uploaded or fetched by this fixture, and no
+// live Cloudinary call is made at any point: the imagePublicId values are
+// syntactically valid but reference nothing on Cloudinary, and
+// buildPrivateDownloadUrl only ever SIGNS a URL mathematically (HMAC over
+// known inputs) — it never makes a network call. Verifying which branch a
+// resolver took only ever requires reading the URL string a route's loader
+// returns, never fetching it.
+//
+// Creating 2 real ClosetItem rows deliberately bypasses the normal
+// reserveClosetSlot quota path, same as every other fixture in this file
+// bypasses its own normal business logic by design — this is a staging-
+// only QA mechanism, not a customer-facing write path. It temporarily
+// raises this one QA customer's visible closet count by 2 until cleanup
+// runs; no other customer's data or quota is touched.
+const QA_FIXTURE_OTHER_CUSTOMER_MARKER = "qa-fixture-other-customer-marker-not-a-real-customer";
+const QA_FIXTURE_IMAGE_MARKER = "qa-fixture-cloudinary-36";
+
+function qaFixtureLegacyImageUrl(folderSegment: string, filenameSuffix: string): string {
+  return `https://res.cloudinary.com/naia-staging-demo/image/upload/v1700000000/naia-wardrobe/${folderSegment}/${QA_FIXTURE_IMAGE_MARKER}-${filenameSuffix}.jpg`;
+}
+
+async function createClosetLegacyImageOwnershipFixture(customerId: string) {
+  const created = await prisma.$transaction(async (tx) => {
+    const signedPriorityItem = await tx.closetItem.create({
+      data: {
+        customerId,
+        name: "[QA FIXTURE] Signed-priority check — do not use",
+        category: "TOPS",
+        imagePublicId: `naia-wardrobe/${customerId}/${QA_FIXTURE_IMAGE_MARKER}-signed-priority`,
+        imageFormat: "jpg",
+        imageUrl: qaFixtureLegacyImageUrl(customerId, "legacy-should-not-be-used"),
+      },
+    });
+    const ownershipRejectionItem = await tx.closetItem.create({
+      data: {
+        customerId,
+        name: "[QA FIXTURE] Ownership-rejection check — do not use",
+        category: "TOPS",
+        imageUrl: qaFixtureLegacyImageUrl(QA_FIXTURE_OTHER_CUSTOMER_MARKER, "should-be-rejected"),
+      },
+    });
+    const signedPriorityAnalysis = await tx.buyOrSkipAnalysis.create({
+      data: {
+        customerId,
+        verdict: "MAYBE",
+        reasoning: "[QA FIXTURE] synthetic analysis for Cloudinary #36 signed-priority verification — not a real analysis",
+        imagePublicId: `naia-wardrobe/${customerId}/${QA_FIXTURE_IMAGE_MARKER}-signed-priority`,
+        imageFormat: "jpg",
+        imageUrl: qaFixtureLegacyImageUrl(customerId, "legacy-should-not-be-used"),
+      },
+    });
+    const ownershipRejectionAnalysis = await tx.buyOrSkipAnalysis.create({
+      data: {
+        customerId,
+        verdict: "MAYBE",
+        reasoning: "[QA FIXTURE] synthetic analysis for Cloudinary #36 ownership-rejection verification — not a real analysis",
+        imageUrl: qaFixtureLegacyImageUrl(QA_FIXTURE_OTHER_CUSTOMER_MARKER, "should-be-rejected"),
+      },
+    });
+    return { signedPriorityItem, ownershipRejectionItem, signedPriorityAnalysis, ownershipRejectionAnalysis };
+  });
+
+  return data({
+    ok: true,
+    fixtureKind: "closet-legacy-image-ownership",
+    closetItemIds: {
+      signedPriority: created.signedPriorityItem.id,
+      ownershipRejection: created.ownershipRejectionItem.id,
+    },
+    buyOrSkipAnalysisIds: {
+      signedPriority: created.signedPriorityAnalysis.id,
+      ownershipRejection: created.ownershipRejectionAnalysis.id,
+    },
+    howToVerify: {
+      signedPriority: "The resolved image URL must start with https://api.cloudinary.com/v1_1/ — never contain 'legacy-should-not-be-used'.",
+      ownershipRejection: "The resolved image URL must be null/absent — never contain 'should-be-rejected'.",
+    },
+  });
+}
+
+// DELETE /api/vto-qa-fixture, body: { fixtureKind: "closet-legacy-image-ownership" }
+// Same real-session auth as creation. Matches on QA_FIXTURE_IMAGE_MARKER
+// appearing in imagePublicId OR imageUrl, scoped by customerId from the
+// verified session — never a generic "delete this customer's closet"
+// primitive, and structurally incapable of touching another customer's
+// rows since customerId always comes from the session, never the body.
+// Idempotent: deleteMany matching zero rows (already cleaned up, or never
+// created) still returns ok:true with count 0, never an error.
+async function deleteClosetLegacyImageOwnershipFixture(customerId: string) {
+  const [deletedClosetItems, deletedAnalyses] = await prisma.$transaction([
+    prisma.closetItem.deleteMany({
+      where: {
+        customerId,
+        OR: [
+          { imagePublicId: { contains: QA_FIXTURE_IMAGE_MARKER } },
+          { imageUrl: { contains: QA_FIXTURE_IMAGE_MARKER } },
+        ],
+      },
+    }),
+    prisma.buyOrSkipAnalysis.deleteMany({
+      where: {
+        customerId,
+        OR: [
+          { imagePublicId: { contains: QA_FIXTURE_IMAGE_MARKER } },
+          { imageUrl: { contains: QA_FIXTURE_IMAGE_MARKER } },
+        ],
+      },
+    }),
+  ]);
+
+  return data({
+    ok: true,
+    fixtureKind: "closet-legacy-image-ownership",
+    deletedClosetItemCount: deletedClosetItems.count,
+    deletedBuyOrSkipAnalysisCount: deletedAnalyses.count,
+  });
+}
+
 // ── Cleanup — delete exactly one fixture-created suggestion (2026-11-17) ───
 //
 // DELETE /api/vto-qa-fixture, body: { customerId, suggestionId }
@@ -364,14 +547,7 @@ async function createStyleMeResultViewFixture(customerId: string) {
 // this codebase's migrations (same caution closet._index.tsx's own delete
 // path documents) — so OutfitItem is deleted explicitly, never assumed to
 // cascade.
-async function deleteFixtureSuggestion(request: Request) {
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return data({ ok: false, code: "invalid_request" }, { status: 400 });
-  }
-  const parsed = body as Record<string, unknown> | null;
+async function deleteFixtureSuggestion(request: Request, parsed: Record<string, unknown> | null) {
   const suggestionId = parsed?.suggestionId;
 
   // Try the secret-header path first (preserves exact existing behavior

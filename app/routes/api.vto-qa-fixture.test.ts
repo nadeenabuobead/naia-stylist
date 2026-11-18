@@ -22,6 +22,10 @@ const mockSuggestionCount = vi.fn();
 const mockItemDeleteMany = vi.fn();
 const mockSuggestionDelete = vi.fn();
 const mockSessionDelete = vi.fn();
+const mockClosetItemCreate = vi.fn();
+const mockClosetItemDeleteMany = vi.fn();
+const mockBosCreate = vi.fn();
+const mockBosDeleteMany = vi.fn();
 
 // 2026-11-17: this previously mocked "~/lib/prisma.server", a module that
 // does not exist in this codebase — the real route imports its default
@@ -36,7 +40,15 @@ const mockSessionDelete = vi.fn();
 // were never actually reproduced. Fixed here, not just worked around.
 vi.mock("~/db.server", () => ({
   default: {
-    closetItem: { findMany: (...args: unknown[]) => mockFindMany(...args) },
+    closetItem: {
+      findMany: (...args: unknown[]) => mockFindMany(...args),
+      create: (...args: unknown[]) => mockClosetItemCreate(...args),
+      deleteMany: (...args: unknown[]) => mockClosetItemDeleteMany(...args),
+    },
+    buyOrSkipAnalysis: {
+      create: (...args: unknown[]) => mockBosCreate(...args),
+      deleteMany: (...args: unknown[]) => mockBosDeleteMany(...args),
+    },
     outfitSuggestion: {
       findUnique: (...args: unknown[]) => mockSuggestionFindUnique(...args),
       count: (...args: unknown[]) => mockSuggestionCount(...args),
@@ -54,6 +66,8 @@ vi.mock("~/db.server", () => ({
         stylingSession: { create: (...args: unknown[]) => mockSessionCreate(...args) },
         outfitSuggestion: { create: (...args: unknown[]) => mockSuggestionCreate(...args) },
         outfitItem: { create: (...args: unknown[]) => mockItemCreate(...args) },
+        closetItem: { create: (...args: unknown[]) => mockClosetItemCreate(...args) },
+        buyOrSkipAnalysis: { create: (...args: unknown[]) => mockBosCreate(...args) },
       });
     },
   },
@@ -155,6 +169,10 @@ beforeEach(() => {
   mockItemDeleteMany.mockResolvedValue({ count: 1 });
   mockSuggestionDelete.mockResolvedValue({ id: "suggestion-1" });
   mockSessionDelete.mockResolvedValue({ id: "session-1" });
+  mockClosetItemCreate.mockResolvedValue({ id: "closet-item-1" });
+  mockClosetItemDeleteMany.mockResolvedValue({ count: 0 });
+  mockBosCreate.mockResolvedValue({ id: "bos-1" });
+  mockBosDeleteMany.mockResolvedValue({ count: 0 });
   mockLoadNaiaModel.mockResolvedValue({ bodyPublicId: "p", bodyFormat: "jpg", saveModelConsentAt: new Date() });
   // Default: no real Clerk session attached — matches every existing test's
   // assumption that the real-session fallback does not kick in unless a
@@ -489,6 +507,155 @@ describe("api.vto-qa-fixture action — fixtureKind: styleme-result-view (real-s
     expect(mockItemDeleteMany).toHaveBeenCalledWith({ where: { suggestionId: "suggestion-1" } });
     expect(mockSuggestionDelete).toHaveBeenCalledWith({ where: { id: "suggestion-1" } });
     expect(mockSessionDelete).toHaveBeenCalledWith({ where: { id: "session-1" } });
+  });
+});
+
+describe("api.vto-qa-fixture action — fixtureKind: closet-legacy-image-ownership (QA #36, real-session auth)", () => {
+  function closetOwnershipReq(overrides: Record<string, unknown> = {}, headers: Record<string, string> = {}) {
+    // Deliberately NO x-vto-qa-fixture-secret header — real-session auth only.
+    return req({ fixtureKind: "closet-legacy-image-ownership", ...overrides }, headers);
+  }
+  function closetOwnershipDeleteReq(headers: Record<string, string> = {}) {
+    return deleteReq({ fixtureKind: "closet-legacy-image-ownership" }, headers);
+  }
+
+  it("rejects with the same generic 403 when there is no real session attached", async () => {
+    setAuthorizedEnv();
+    const res = await action({ request: closetOwnershipReq() } as any);
+    expect(res.init?.status).toBe(403);
+    expect(mockClosetItemCreate).not.toHaveBeenCalled();
+    expect(mockBosCreate).not.toHaveBeenCalled();
+  });
+
+  it("rejects with the same generic 403 when genuinely signed in as a DIFFERENT customer", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: "some-other-real-customer" });
+    const res = await action({ request: closetOwnershipReq() } as any);
+    expect(res.init?.status).toBe(403);
+    expect(mockClosetItemCreate).not.toHaveBeenCalled();
+  });
+
+  it("rejects even a genuinely-authenticated QA-account session when VERCEL_ENV is production", async () => {
+    setAuthorizedEnv();
+    process.env.VERCEL_ENV = "production";
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    const res = await action({ request: closetOwnershipReq() } as any);
+    expect(res.init?.status).toBe(403);
+    expect(mockClosetItemCreate).not.toHaveBeenCalled();
+  });
+
+  it("creates exactly 2 ClosetItem rows and 2 BuyOrSkipAnalysis rows, all scoped to the session's own customerId", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockClosetItemCreate
+      .mockResolvedValueOnce({ id: "closet-signed-priority" })
+      .mockResolvedValueOnce({ id: "closet-ownership-rejection" });
+    mockBosCreate
+      .mockResolvedValueOnce({ id: "bos-signed-priority" })
+      .mockResolvedValueOnce({ id: "bos-ownership-rejection" });
+
+    const res = await action({ request: closetOwnershipReq() } as any);
+    const payload = res.data as any;
+    expect(payload.ok).toBe(true);
+    expect(payload.fixtureKind).toBe("closet-legacy-image-ownership");
+    expect(payload.closetItemIds).toEqual({ signedPriority: "closet-signed-priority", ownershipRejection: "closet-ownership-rejection" });
+    expect(payload.buyOrSkipAnalysisIds).toEqual({ signedPriority: "bos-signed-priority", ownershipRejection: "bos-ownership-rejection" });
+
+    expect(mockClosetItemCreate).toHaveBeenCalledTimes(2);
+    expect(mockBosCreate).toHaveBeenCalledTimes(2);
+    for (const call of [...mockClosetItemCreate.mock.calls, ...mockBosCreate.mock.calls]) {
+      expect(call[0].data.customerId).toBe(QA_ID);
+    }
+  });
+
+  it("the signed-priority row has BOTH imagePublicId+imageFormat AND a same-customer legacy imageUrl", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    await action({ request: closetOwnershipReq() } as any);
+    const signedPriorityCall = mockClosetItemCreate.mock.calls[0][0].data;
+    expect(signedPriorityCall.imagePublicId).toBe(`naia-wardrobe/${QA_ID}/qa-fixture-cloudinary-36-signed-priority`);
+    expect(signedPriorityCall.imageFormat).toBe("jpg");
+    expect(signedPriorityCall.imageUrl).toContain(`/naia-wardrobe/${QA_ID}/`);
+    expect(signedPriorityCall.imageUrl).toContain("legacy-should-not-be-used");
+  });
+
+  it("the ownership-rejection row has NO imagePublicId/imageFormat and an imageUrl naming a DIFFERENT, non-real customer folder", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    await action({ request: closetOwnershipReq() } as any);
+    const rejectionCall = mockClosetItemCreate.mock.calls[1][0].data;
+    expect(rejectionCall.imagePublicId).toBeUndefined();
+    expect(rejectionCall.imageFormat).toBeUndefined();
+    expect(rejectionCall.imageUrl).not.toContain(`/naia-wardrobe/${QA_ID}/`);
+    expect(rejectionCall.imageUrl).toContain("qa-fixture-other-customer-marker-not-a-real-customer");
+    expect(rejectionCall.imageUrl).toContain("should-be-rejected");
+  });
+
+  it("ignores any customerId the body supplies — identity comes only from the verified session", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    await action({ request: closetOwnershipReq({ customerId: "attacker-supplied-id" }) } as any);
+    for (const call of mockClosetItemCreate.mock.calls) {
+      expect(call[0].data.customerId).toBe(QA_ID);
+    }
+  });
+
+  it("DELETE removes only rows matching the QA image marker, scoped to the session's own customerId", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockClosetItemDeleteMany.mockResolvedValueOnce({ count: 2 });
+    mockBosDeleteMany.mockResolvedValueOnce({ count: 2 });
+
+    const res = await action({ request: closetOwnershipDeleteReq() } as any);
+    const payload = res.data as any;
+    expect(payload.ok).toBe(true);
+    expect(payload.deletedClosetItemCount).toBe(2);
+    expect(payload.deletedBuyOrSkipAnalysisCount).toBe(2);
+
+    expect(mockClosetItemDeleteMany).toHaveBeenCalledWith({
+      where: {
+        customerId: QA_ID,
+        OR: [
+          { imagePublicId: { contains: "qa-fixture-cloudinary-36" } },
+          { imageUrl: { contains: "qa-fixture-cloudinary-36" } },
+        ],
+      },
+    });
+    expect(mockBosDeleteMany).toHaveBeenCalledWith({
+      where: {
+        customerId: QA_ID,
+        OR: [
+          { imagePublicId: { contains: "qa-fixture-cloudinary-36" } },
+          { imageUrl: { contains: "qa-fixture-cloudinary-36" } },
+        ],
+      },
+    });
+  });
+
+  it("DELETE is idempotent — a second call with nothing left to delete still returns ok:true with count 0", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    // Defaults from beforeEach already resolve to { count: 0 } — simulates
+    // calling cleanup again after the fixture was already removed.
+    const res = await action({ request: closetOwnershipDeleteReq() } as any);
+    const payload = res.data as any;
+    expect(payload.ok).toBe(true);
+    expect(payload.deletedClosetItemCount).toBe(0);
+    expect(payload.deletedBuyOrSkipAnalysisCount).toBe(0);
+  });
+
+  it("DELETE rejects with 403 when there is no real session attached — cannot be invoked by secret alone", async () => {
+    setAuthorizedEnv();
+    const res = await action({ request: closetOwnershipDeleteReq({ "x-vto-qa-fixture-secret": "the-real-secret" }) } as any);
+    expect(res.init?.status).toBe(403);
+    expect(mockClosetItemDeleteMany).not.toHaveBeenCalled();
+  });
+
+  it("DELETE for this fixtureKind can never be scoped to a different customer — customerId always comes from the verified session, not the body", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    await action({ request: deleteReq({ fixtureKind: "closet-legacy-image-ownership", customerId: "attacker-supplied-id" }) } as any);
+    expect(mockClosetItemDeleteMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ customerId: QA_ID }) }));
   });
 });
 
