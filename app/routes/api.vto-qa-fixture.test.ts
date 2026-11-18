@@ -104,9 +104,50 @@ vi.mock("~/lib/clerk-session.server", () => ({
 }));
 
 import { action, loader, checkFashnCredits } from "./api.vto-qa-fixture";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 
 const QA_ID = "qa-disposable-customer-1";
 const ORIGINAL_ENV = { ...process.env };
+
+// ── Schema-driven guard against the class of defect this file's own
+// history now includes (2026-11-18): a fixture's create() call omitting
+// a field that prisma/schema.prisma declares required (no "?", no
+// @default), surfacing only as a live 500 — never caught by typecheck
+// (Prisma marks scalar-list fields optional in its generated CreateInput
+// types regardless of whether a database-level default actually exists)
+// and never caught by this file's own mocked Prisma (a mock has no NOT
+// NULL constraint to violate). Parses the model's own field list directly
+// out of the real schema file, so it also catches any FUTURE required
+// field added to either model that a fixture forgets to supply — not
+// just the one field (BuyOrSkipAnalysis.colors) that actually failed.
+const SCHEMA_SOURCE = readFileSync(path.resolve("prisma/schema.prisma"), "utf8");
+const SCALAR_BASE_TYPES = new Set(["String", "Int", "Float", "Boolean", "DateTime", "Json", "BigInt", "Decimal"]);
+
+function getRequiredFieldsWithoutDefault(modelName: string): string[] {
+  const modelMatch = SCHEMA_SOURCE.match(new RegExp(`model ${modelName} \\{([\\s\\S]*?)\\n\\}`));
+  if (!modelMatch) {
+    throw new Error(`model ${modelName} not found in prisma/schema.prisma — this test is out of date`);
+  }
+  const required: string[] = [];
+  for (const rawLine of modelMatch[1].split("\n")) {
+    const withoutComment = rawLine.split("//")[0].trim();
+    if (!withoutComment || withoutComment.startsWith("@@")) continue;
+    const fieldMatch = withoutComment.match(/^(\w+)\s+(\S+)(.*)$/);
+    if (!fieldMatch) continue;
+    const [, fieldName, fieldType, rest] = fieldMatch;
+    if (fieldType.endsWith("?")) continue; // optional
+    if (rest.includes("@relation")) continue; // FK-holder relation object field
+    if (rest.includes("@default(")) continue; // has its own default
+    if (rest.includes("@updatedAt")) continue; // managed by the query engine, not supplied by callers
+    if (rest.includes("@id")) continue; // primary key
+    const isArray = fieldType.endsWith("[]");
+    const baseType = isArray ? fieldType.slice(0, -2) : fieldType;
+    if (isArray && !SCALAR_BASE_TYPES.has(baseType)) continue; // back-relation list (e.g. OutfitItem[]), not a scalar
+    required.push(fieldName);
+  }
+  return required;
+}
 
 function closetItem(overrides: Partial<Record<string, unknown>> = {}) {
   return {
@@ -656,6 +697,45 @@ describe("api.vto-qa-fixture action — fixtureKind: closet-legacy-image-ownersh
     mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
     await action({ request: deleteReq({ fixtureKind: "closet-legacy-image-ownership", customerId: "attacker-supplied-id" }) } as any);
     expect(mockClosetItemDeleteMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ customerId: QA_ID }) }));
+  });
+
+  // 2026-11-18 — Five-Persona QA hit a live HTTP 500 on dpl_DC3RG7LiBsZUMyBxBVp2nsZJsFX6:
+  // both BuyOrSkipAnalysis.create() calls omitted the required, no-default
+  // `colors` field. Neither typecheck nor this file's own mocked Prisma
+  // caught it — a mock has no NOT NULL constraint to violate, and Prisma's
+  // generated CreateInput type marks scalar-list fields optional regardless
+  // of whether a database-level default actually exists. These tests parse
+  // the real schema instead of trusting the mock, so they also catch any
+  // FUTURE required field either model gains that a fixture forgets.
+  it("regression: every ClosetItem.create() call supplies every field prisma/schema.prisma declares required with no default", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    await action({ request: closetOwnershipReq() } as any);
+    const requiredFields = getRequiredFieldsWithoutDefault("ClosetItem");
+    expect(requiredFields.length).toBeGreaterThan(0);
+    expect(mockClosetItemCreate.mock.calls.length).toBeGreaterThan(0);
+    for (const call of mockClosetItemCreate.mock.calls) {
+      for (const field of requiredFields) {
+        expect(call[0].data, `ClosetItem.create() is missing required field "${field}"`).toHaveProperty(field);
+      }
+    }
+  });
+
+  it("regression: every BuyOrSkipAnalysis.create() call supplies every field prisma/schema.prisma declares required with no default", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    await action({ request: closetOwnershipReq() } as any);
+    const requiredFields = getRequiredFieldsWithoutDefault("BuyOrSkipAnalysis");
+    // Sanity check that the parser actually catches the exact field that
+    // caused the live 500 — if this ever stops being true, the parser
+    // itself has drifted from what it's meant to guard against.
+    expect(requiredFields).toContain("colors");
+    expect(mockBosCreate.mock.calls.length).toBeGreaterThan(0);
+    for (const call of mockBosCreate.mock.calls) {
+      for (const field of requiredFields) {
+        expect(call[0].data, `BuyOrSkipAnalysis.create() is missing required field "${field}"`).toHaveProperty(field);
+      }
+    }
   });
 });
 

@@ -419,6 +419,15 @@ async function createClosetLegacyImageOwnershipFixture(customerId: string) {
         customerId,
         name: "[QA FIXTURE] Signed-priority check — do not use",
         category: "TOPS",
+        // colors/styleTags/seasons/occasions: ClosetItem declares these
+        // String[] with no @default in schema.prisma (the DB happens to
+        // allow NULL here, a pre-existing drift — but schema.prisma's own
+        // stated contract is that they're required, so this fixture
+        // supplies them explicitly rather than relying on that drift).
+        colors: [],
+        styleTags: [],
+        seasons: [],
+        occasions: [],
         imagePublicId: `naia-wardrobe/${customerId}/${QA_FIXTURE_IMAGE_MARKER}-signed-priority`,
         imageFormat: "jpg",
         imageUrl: qaFixtureLegacyImageUrl(customerId, "legacy-should-not-be-used"),
@@ -429,6 +438,10 @@ async function createClosetLegacyImageOwnershipFixture(customerId: string) {
         customerId,
         name: "[QA FIXTURE] Ownership-rejection check — do not use",
         category: "TOPS",
+        colors: [],
+        styleTags: [],
+        seasons: [],
+        occasions: [],
         imageUrl: qaFixtureLegacyImageUrl(QA_FIXTURE_OTHER_CUSTOMER_MARKER, "should-be-rejected"),
       },
     });
@@ -437,6 +450,18 @@ async function createClosetLegacyImageOwnershipFixture(customerId: string) {
         customerId,
         verdict: "MAYBE",
         reasoning: "[QA FIXTURE] synthetic analysis for Cloudinary #36 signed-priority verification — not a real analysis",
+        // colors: required with NO default at the DB level — its default
+        // was deliberately dropped (20261103000004_sandbox_replay_schema_parity)
+        // to match schema.prisma's own lack of @default. Omitting it is a
+        // genuine 500 (NOT NULL violation), confirmed live by Five-Persona
+        // QA on dpl_DC3RG7LiBsZUMyBxBVp2nsZJsFX6 — this is the actual fix.
+        // wardrobeMatches/similarItems: nullable at the DB level (a
+        // separate, unrelated, pre-existing drift from schema.prisma's
+        // stated non-optional contract), but supplied anyway for the same
+        // reason as ClosetItem's array fields above.
+        colors: [],
+        wardrobeMatches: [],
+        similarItems: [],
         imagePublicId: `naia-wardrobe/${customerId}/${QA_FIXTURE_IMAGE_MARKER}-signed-priority`,
         imageFormat: "jpg",
         imageUrl: qaFixtureLegacyImageUrl(customerId, "legacy-should-not-be-used"),
@@ -447,6 +472,9 @@ async function createClosetLegacyImageOwnershipFixture(customerId: string) {
         customerId,
         verdict: "MAYBE",
         reasoning: "[QA FIXTURE] synthetic analysis for Cloudinary #36 ownership-rejection verification — not a real analysis",
+        colors: [],
+        wardrobeMatches: [],
+        similarItems: [],
         imageUrl: qaFixtureLegacyImageUrl(QA_FIXTURE_OTHER_CUSTOMER_MARKER, "should-be-rejected"),
       },
     });
