@@ -60,6 +60,7 @@ import { data } from "react-router";
 import { timingSafeEqual } from "crypto";
 import dbServer from "~/db.server";
 import { closetItemToSlot } from "~/lib/ai/closet-slot";
+import { getCurrentNaiaCustomer } from "~/lib/clerk-session.server";
 import type { OutfitSlot } from "~/lib/ai/styleme-recommendation.types";
 import type { OutfitItemType, PrismaClient } from "@prisma/client";
 
@@ -109,6 +110,43 @@ function isAuthorized(request: Request, customerId: unknown): customerId is stri
   return true;
 }
 
+// 2026-11-18 — the fixtureKind: "styleme-result-view" path below cannot be
+// gated by VTO_QA_FIXTURE_SECRET like everything else in this file:
+// confirmed directly with the founder that the secret genuinely cannot be
+// given to the Five-Persona QA session that needs to invoke it (it was
+// rotated into, and only ever existed in, this session's own local
+// Keychain — there was never an actual channel for QA to receive it). A
+// design requiring a secret neither party can supply is not executable;
+// building it anyway and discovering that at test time would have been
+// the real defect.
+//
+// Fix: gate this one mode on the SAME real, already-established
+// authentication every ordinary customer route already requires —
+// getCurrentNaiaCustomer (Clerk-backed, see clerk-session.server.ts) —
+// instead of a shared static secret. Five-Persona QA signs in as Persona A
+// through the real, unmodified Clerk sign-in flow (exactly how they already
+// test any other customer-facing behavior) and calls this route while that
+// session's cookie is attached. No secret is transmitted, held, or
+// revealed anywhere. This is NOT a weaker check than the secret-header
+// gate — it's the same production-grade identity verification already
+// trusted everywhere else in the app, and it still requires every one of:
+// VERCEL_ENV preview/development (never production), NAIA_PROJECT_VARIANT
+// exactly "staging", AND the resolved customer being the one single
+// pre-designated QA_OVERRIDE_CUSTOMER_ID account — a real customer's own
+// session can never satisfy the third condition, so this can never reach a
+// real customer's data regardless of environment. customerId is derived
+// ONLY from the verified session, never read from the request body — this
+// mode does not accept a client-supplied customerId at all.
+async function resolveAuthorizedQaSessionCustomerId(request: Request): Promise<string | null> {
+  if (process.env.VERCEL_ENV !== "preview" && process.env.VERCEL_ENV !== "development") return null;
+  if (process.env.NAIA_PROJECT_VARIANT !== "staging") return null;
+  const qaCustomerId = process.env.QA_OVERRIDE_CUSTOMER_ID;
+  if (!qaCustomerId) return null;
+  const customer = await getCurrentNaiaCustomer(request);
+  if (!customer || customer.id !== qaCustomerId) return null;
+  return customer.id;
+}
+
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method === "DELETE") {
     return deleteFixtureSuggestion(request);
@@ -124,16 +162,24 @@ export async function action({ request }: ActionFunctionArgs) {
     return data({ ok: false, code: "invalid_request" }, { status: 400 });
   }
   const parsedBody = body as Record<string, unknown> | null;
+
+  if (parsedBody?.fixtureKind === "styleme-result-view") {
+    // Real-session auth only — see resolveAuthorizedQaSessionCustomerId's
+    // own comment for why this mode cannot use the secret-header gate.
+    // customerId comes from the verified session, never from the body.
+    const sessionCustomerId = await resolveAuthorizedQaSessionCustomerId(request);
+    if (!sessionCustomerId) {
+      return data({ ok: false, code: "forbidden" }, { status: 403 });
+    }
+    return createStyleMeResultViewFixture(sessionCustomerId);
+  }
+
   const customerId = parsedBody?.customerId;
 
   if (!isAuthorized(request, customerId)) {
     // Deliberately generic — never distinguishes "wrong secret" from "wrong
     // customer" from "wrong environment" in the response.
     return data({ ok: false, code: "forbidden" }, { status: 403 });
-  }
-
-  if (parsedBody?.fixtureKind === "styleme-result-view") {
-    return createStyleMeResultViewFixture(customerId);
   }
 
   const closetItems = await prisma.closetItem.findMany({
@@ -198,7 +244,13 @@ export async function action({ request }: ActionFunctionArgs) {
 
 // ── StyleMe result-page fixture (2026-11-18) ────────────────────────────────
 //
-// POST /api/vto-qa-fixture, body: { customerId, fixtureKind: "styleme-result-view" }
+// POST /api/vto-qa-fixture, body: { fixtureKind: "styleme-result-view" },
+// while signed in (real Clerk session) as the one pre-designated
+// QA_OVERRIDE_CUSTOMER_ID account — see
+// resolveAuthorizedQaSessionCustomerId's own comment above for why this
+// mode is authenticated this way instead of the secret-header gate every
+// other action in this file uses. No customerId field in the body is read
+// or trusted for this mode; it is derived only from the verified session.
 //
 // WHY THIS EXISTS: Five-Persona QA checks #26/#30/#31/#37 need the target
 // customer to have AT LEAST ONE existing StyleMe suggestion to view/navigate
@@ -236,10 +288,10 @@ export async function action({ request }: ActionFunctionArgs) {
 // is a clearly-fake, non-existent-looking string — never confusable with a
 // real catalog item if ever seen directly.
 //
-// Same four-check authorization as every other action in this file —
-// VERCEL_ENV, NAIA_PROJECT_VARIANT, the dedicated secret header, and the
-// exact QA_OVERRIDE_CUSTOMER_ID match — already enforced by the caller
-// before this function is reached. No new secret, no new allowlist.
+// Authorization for this mode — real Clerk session, not the secret header
+// — already enforced by resolveAuthorizedQaSessionCustomerId before this
+// function is reached. See that function's own comment for why. No new
+// secret, no new allowlist, no weakening of any existing check.
 const STYLEME_FIXTURE_ITEMS: { itemType: OutfitItemType; title: string }[] = [
   { itemType: "TOP", title: "[QA FIXTURE] Synthetic top — not a real product" },
   { itemType: "BOTTOM", title: "[QA FIXTURE] Synthetic bottom — not a real product" },
@@ -282,9 +334,16 @@ async function createStyleMeResultViewFixture(customerId: string) {
 // own POST action creates (one StylingSession + one OutfitSuggestion + its
 // OutfitItem rows), never anything a real StyleMe session produced. Three
 // independent guards, each refusing rather than guessing:
-//   1. Same four-check authorization as every other action in this file —
-//      wrong secret, wrong environment, or wrong customerId all refuse
-//      before the suggestion is even looked up.
+//   1. Authorization — EITHER the secret-header path (wrong secret, wrong
+//      environment, or wrong customerId all refuse), OR the real-session
+//      path added 2026-11-18 for the styleme-result-view fixture kind (see
+//      resolveAuthorizedQaSessionCustomerId's own comment: Five-Persona QA
+//      cannot be given the secret, so their only way to delete their OWN
+//      fixture is to be genuinely signed in as the one pre-designated
+//      QA_OVERRIDE_CUSTOMER_ID account). Either path resolves to the same
+//      kind of value — a customerId already proven to be that one account
+//      — before the suggestion is even looked up. This is purely additive:
+//      every existing secret-header caller keeps working exactly as before.
 //   2. Ownership, same not-found-not-403 convention as the GET loader
 //      above — a suggestionId belonging to a different customer (fixture
 //      or real) is indistinguishable from one that doesn't exist.
@@ -313,10 +372,20 @@ async function deleteFixtureSuggestion(request: Request) {
     return data({ ok: false, code: "invalid_request" }, { status: 400 });
   }
   const parsed = body as Record<string, unknown> | null;
-  const customerId = parsed?.customerId;
   const suggestionId = parsed?.suggestionId;
 
-  if (!isAuthorized(request, customerId)) {
+  // Try the secret-header path first (preserves exact existing behavior
+  // for every caller that already holds the secret); fall back to the
+  // real-session path for the styleme-result-view fixture kind, which has
+  // no secret to present. Either way, customerId ends up proven to be the
+  // one pre-designated QA account before anything is looked up.
+  let customerId: string | null = null;
+  if (isAuthorized(request, parsed?.customerId)) {
+    customerId = parsed!.customerId as string;
+  } else {
+    customerId = await resolveAuthorizedQaSessionCustomerId(request);
+  }
+  if (!customerId) {
     return data({ ok: false, code: "forbidden" }, { status: 403 });
   }
   if (typeof suggestionId !== "string" || !suggestionId) {

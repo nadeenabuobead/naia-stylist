@@ -78,6 +78,17 @@ vi.mock("~/lib/cloudinary-admin.server", async (importOriginal) => {
   return { ...actual, getCloudinaryConfig: () => null };
 });
 
+// 2026-11-18 — the styleme-result-view fixture mode's real-session
+// authorization path (resolveAuthorizedQaSessionCustomerId) calls the real
+// getCurrentNaiaCustomer, which calls the real Clerk SDK. Mocked here the
+// same way every other external boundary in this file is: a controllable
+// vi.fn() standing in for "is there a real, authenticated Persona-A
+// session attached to this request" — never the actual Clerk network call.
+const mockGetCurrentNaiaCustomer = vi.fn();
+vi.mock("~/lib/clerk-session.server", () => ({
+  getCurrentNaiaCustomer: (...args: unknown[]) => mockGetCurrentNaiaCustomer(...args),
+}));
+
 import { action, loader, checkFashnCredits } from "./api.vto-qa-fixture";
 
 const QA_ID = "qa-disposable-customer-1";
@@ -145,6 +156,10 @@ beforeEach(() => {
   mockSuggestionDelete.mockResolvedValue({ id: "suggestion-1" });
   mockSessionDelete.mockResolvedValue({ id: "session-1" });
   mockLoadNaiaModel.mockResolvedValue({ bodyPublicId: "p", bodyFormat: "jpg", saveModelConsentAt: new Date() });
+  // Default: no real Clerk session attached — matches every existing test's
+  // assumption that the real-session fallback does not kick in unless a
+  // test explicitly sets up a session via mockGetCurrentNaiaCustomer.
+  mockGetCurrentNaiaCustomer.mockResolvedValue(null);
 });
 
 afterEach(() => {
@@ -376,36 +391,61 @@ describe("api.vto-qa-fixture action — eligibility and creation", () => {
   });
 });
 
-describe("api.vto-qa-fixture action — fixtureKind: styleme-result-view", () => {
+describe("api.vto-qa-fixture action — fixtureKind: styleme-result-view (real-session auth, no secret)", () => {
   function styleMeReq(overrides: Record<string, unknown> = {}, headers: Record<string, string> = {}) {
-    return req(
-      { customerId: QA_ID, fixtureKind: "styleme-result-view", ...overrides },
-      { "x-vto-qa-fixture-secret": "the-real-secret", ...headers },
-    );
+    // Deliberately NO x-vto-qa-fixture-secret header — this mode is
+    // authorized by a real Clerk session, never a secret. A test that
+    // wants the happy path must set up mockGetCurrentNaiaCustomer, not a
+    // header.
+    return req({ fixtureKind: "styleme-result-view", ...overrides }, headers);
   }
 
-  it("rejects with the same generic 403 when unauthorized (wrong secret)", async () => {
+  it("rejects with the same generic 403 when there is no real session attached (the no-session default)", async () => {
     setAuthorizedEnv();
-    const res = await action({ request: styleMeReq({}, { "x-vto-qa-fixture-secret": "wrong" }) } as any);
+    const res = await action({ request: styleMeReq() } as any);
     expect(res.init?.status).toBe(403);
     expect(mockSessionCreate).not.toHaveBeenCalled();
   });
 
-  it("rejects with the same generic 403 when the customerId does not match QA_OVERRIDE_CUSTOMER_ID", async () => {
+  it("rejects with the same generic 403 when genuinely signed in, but as a DIFFERENT customer than QA_OVERRIDE_CUSTOMER_ID", async () => {
     setAuthorizedEnv();
-    const res = await action({ request: styleMeReq({ customerId: "some-other-customer" }) } as any);
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: "some-other-real-customer" });
+    const res = await action({ request: styleMeReq() } as any);
     expect(res.init?.status).toBe(403);
     expect(mockSessionCreate).not.toHaveBeenCalled();
+  });
+
+  it("rejects even a genuinely-authenticated QA-account session when VERCEL_ENV is production — this can never reach a real environment", async () => {
+    setAuthorizedEnv();
+    process.env.VERCEL_ENV = "production";
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    const res = await action({ request: styleMeReq() } as any);
+    expect(res.init?.status).toBe(403);
+    expect(mockSessionCreate).not.toHaveBeenCalled();
+  });
+
+  it("ignores any customerId the body supplies — identity comes only from the verified session", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    // A client-supplied customerId claiming to be someone else must have
+    // zero effect — the real session is the only source of truth.
+    const res = await action({ request: styleMeReq({ customerId: "attacker-supplied-id" }) } as any);
+    expect(res.init?.status).toBeUndefined(); // 200 default — succeeded
+    expect(mockSessionCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { customerId: QA_ID } }),
+    );
   });
 
   it("never touches closetItem.findMany — this fixture kind does not depend on the customer's real closet at all", async () => {
     setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
     await action({ request: styleMeReq() } as any);
     expect(mockFindMany).not.toHaveBeenCalled();
   });
 
   it("creates exactly one StylingSession, one OutfitSuggestion (moodDescription left null/default), and 3 OutfitItem rows", async () => {
     setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
     const res = await action({ request: styleMeReq() } as any);
     const payload = res.data as any;
     expect(payload.ok).toBe(true);
@@ -427,6 +467,7 @@ describe("api.vto-qa-fixture action — fixtureKind: styleme-result-view", () =>
 
   it("every created OutfitItem has closetItemId omitted (shop-style, not closet-sourced) and a clearly-fake, prefixed product identity", async () => {
     setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
     await action({ request: styleMeReq() } as any);
     for (const call of mockItemCreate.mock.calls) {
       const itemData = call[0].data;
@@ -437,10 +478,12 @@ describe("api.vto-qa-fixture action — fixtureKind: styleme-result-view", () =>
     }
   });
 
-  it("the existing DELETE cleanup action works unmodified against this fixture kind (same moodDescription-null + 1-suggestion-per-session + zero-VTO-job guards)", async () => {
+  it("the existing DELETE cleanup action works against this fixture kind via the SAME real-session path, with no secret presented at all", async () => {
     setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
     mockSuggestionFindUnique.mockResolvedValueOnce(fixtureSuggestion());
-    const res = await action({ request: deleteReq({ customerId: QA_ID, suggestionId: "suggestion-1" }, { "x-vto-qa-fixture-secret": "the-real-secret" }) } as any);
+    // No x-vto-qa-fixture-secret header at all — this is the whole point.
+    const res = await action({ request: deleteReq({ suggestionId: "suggestion-1" }) } as any);
     const payload = res.data as any;
     expect(payload.ok).toBe(true);
     expect(mockItemDeleteMany).toHaveBeenCalledWith({ where: { suggestionId: "suggestion-1" } });
