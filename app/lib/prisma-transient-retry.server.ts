@@ -56,13 +56,25 @@ export class DatabaseUnavailableError extends Error {
   }
 }
 
+// 2026-11-18 — confirmed live via Five-Persona QA (a genuine
+// /style-me crash on quknuu0if, root-caused through vercel logs, not
+// assumed): Prisma also throws a codeless PrismaClientInitializationError
+// for a plain P1001 ("Can't reach database server") when the client fails
+// at connect time rather than mid-query — a different message shape from
+// the "connection pool" (P2024-as-initialization-error) case this file's
+// fallback already covered. Same underlying transient-connectivity
+// class, same safe-to-retry contract; the message text is just Prisma's
+// own P1001 wording (see TRANSIENT_PRISMA_ERROR_CODES's own comment on
+// that code above) instead of a pool-specific one.
+const TRANSIENT_INITIALIZATION_ERROR_MESSAGE = /connection pool|can't reach database server/i;
+
 export function isTransientDatabaseError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const code = (error as { code?: string }).code;
   if (code && TRANSIENT_PRISMA_ERROR_CODES.has(code)) return true;
   const name = (error as { name?: string }).name;
   const message = (error as { message?: string }).message ?? "";
-  if (name === "PrismaClientInitializationError" && /connection pool/i.test(message)) return true;
+  if (name === "PrismaClientInitializationError" && TRANSIENT_INITIALIZATION_ERROR_MESSAGE.test(message)) return true;
   return false;
 }
 

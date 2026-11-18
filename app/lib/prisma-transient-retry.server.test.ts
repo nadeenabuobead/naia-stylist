@@ -24,6 +24,16 @@ describe("isTransientDatabaseError", () => {
     expect(isTransientDatabaseError(initializationError("Timed out fetching a new connection from the connection pool"))).toBe(true);
   });
 
+  it("classifies a codeless 'Can't reach database server' PrismaClientInitializationError as transient (2026-11-18 QA finding — the exact real error captured from quknuu0if's /style-me crash)", () => {
+    const realMessage = "\nInvalid `prisma.customer.findUnique()` invocation:\n\n\nCan't reach database server at `pooled.db.prisma.io:5432`\n\nPlease make sure your database server is running at `pooled.db.prisma.io:5432`.";
+    expect(isTransientDatabaseError(initializationError(realMessage))).toBe(true);
+  });
+
+  it("is case-insensitive and matches the bare phrase regardless of surrounding text", () => {
+    expect(isTransientDatabaseError(initializationError("CAN'T REACH DATABASE SERVER at somewhere"))).toBe(true);
+    expect(isTransientDatabaseError(initializationError("some prefix text can't reach database server some suffix"))).toBe(true);
+  });
+
   it("does not classify an unrelated error as transient", () => {
     expect(isTransientDatabaseError(new Error("some other failure"))).toBe(false);
     expect(isTransientDatabaseError(prismaError("P2002"))).toBe(false);
