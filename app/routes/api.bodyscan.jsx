@@ -21,6 +21,15 @@ import { signSessionOwnership, sessionOwnershipValid } from "../lib/bodyscan-ses
 // be successfully polled under customer B's session, even if B obtains A's
 // raw sessionId. Reuses SESSION_SECRET (already present in every
 // environment) with a domain-separation label — no new secret required.
+//
+// 2026-11-18 — Founder Decision: Bodygram is NOT part of nAia's launch and
+// must not receive customer data. Same convention as
+// VIRTUAL_TRY_ON_ENABLED (naia-product-media.ts) — a literal constant,
+// flipped only when/if Bodygram is approved. Checked first in both
+// handlers, before authentication, any database operation, or the
+// outbound fetch to Bodygram — a disabled feature must fail closed
+// before any of those run, not merely before the provider call.
+export const BODYGRAM_ENABLED = false;
 
 const BODYGRAM_API_KEY = process.env.BODYGRAM_API_KEY;
 const BODYGRAM_ORG_ID = process.env.BODYGRAM_ORG_ID;
@@ -30,7 +39,13 @@ function authRequired() {
   return Response.json({ error: "Authentication required" }, { status: 401 });
 }
 
+function bodygramUnavailable() {
+  return Response.json({ error: "This feature is not available." }, { status: 503 });
+}
+
 export async function action({ request }) {
+  if (!BODYGRAM_ENABLED) return bodygramUnavailable();
+
   const customer = await getCurrentNaiaCustomer(request);
   if (!customer) return authRequired();
 
@@ -70,6 +85,8 @@ export async function action({ request }) {
 }
 
 export async function loader({ request }) {
+  if (!BODYGRAM_ENABLED) return bodygramUnavailable();
+
   const customer = await getCurrentNaiaCustomer(request);
   if (!customer) return authRequired();
 

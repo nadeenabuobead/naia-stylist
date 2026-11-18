@@ -208,6 +208,46 @@ describe("§A — api.closet.jsx kept live, patched in place (see b1-53 in batch
   });
 });
 
+// ── §B0: 2026-11-18 Founder Decision — Bodygram excluded from launch ─────────
+
+describe("§B0 — BODYGRAM_ENABLED launch-exclusion gate runs before everything else", () => {
+  it("B0.1 — BODYGRAM_ENABLED is false", () => {
+    assert.ok(bodyscan.includes("export const BODYGRAM_ENABLED = false;"), "BODYGRAM_ENABLED must be false");
+  });
+
+  it("B0.2 — action() checks BODYGRAM_ENABLED before the auth check, before any fetch", () => {
+    const actionBody = bodyscan.slice(
+      bodyscan.indexOf("export async function action"),
+      bodyscan.indexOf("export async function loader"),
+    );
+    const gatePos = actionBody.indexOf("BODYGRAM_ENABLED");
+    const authPos = actionBody.indexOf("getCurrentNaiaCustomer");
+    const fetchPos = actionBody.indexOf("fetch(");
+    assert.ok(gatePos > -1 && authPos > -1 && fetchPos > -1, "gate, auth check, and fetch call must all be present");
+    assert.ok(gatePos < authPos, "BODYGRAM_ENABLED check must precede the auth check");
+    assert.ok(gatePos < fetchPos, "BODYGRAM_ENABLED check must precede the Bodygram fetch call");
+  });
+
+  it("B0.3 — loader() checks BODYGRAM_ENABLED before the auth check, before the ownership check, before any fetch or DB write", () => {
+    const loaderBody = bodyscan.slice(bodyscan.indexOf("export async function loader"));
+    const gatePos = loaderBody.indexOf("BODYGRAM_ENABLED");
+    const authPos = loaderBody.indexOf("getCurrentNaiaCustomer");
+    const sigCheckPos = loaderBody.indexOf("sessionOwnershipValid");
+    const fetchPos = loaderBody.indexOf("fetch(");
+    const upsertPos = loaderBody.indexOf("prisma.onboardingProfile.upsert");
+    assert.ok(gatePos > -1 && authPos > -1 && sigCheckPos > -1 && fetchPos > -1 && upsertPos > -1);
+    assert.ok(gatePos < authPos, "BODYGRAM_ENABLED check must precede the auth check");
+    assert.ok(gatePos < sigCheckPos, "BODYGRAM_ENABLED check must precede the ownership-signature check");
+    assert.ok(gatePos < fetchPos, "BODYGRAM_ENABLED check must precede the Bodygram fetch call");
+    assert.ok(gatePos < upsertPos, "BODYGRAM_ENABLED check must precede the OnboardingProfile write");
+  });
+
+  it("B0.4 — the disabled response is 503, not a generic error, and never touches Bodygram's response shape", () => {
+    assert.ok(bodyscan.includes("bodygramUnavailable"), "must use a dedicated unavailable response helper");
+    assert.ok(bodyscan.includes('status: 503'), "disabled response must be 503");
+  });
+});
+
 // ── §B: api.bodyscan.jsx requires authentication ──────────────────────────────
 
 describe("§B — api.bodyscan.jsx imports session auth", () => {
