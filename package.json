@@ -98,7 +98,13 @@
     "archiver": {
       "readdir-glob": "^4.0.0"
     },
-    "graphql-config": "^6.0.0"
+    "graphql-config": {
+      ".": "^6.0.0",
+      "minimatch": "^11.0.9"
+    },
+    "@react-router/fs-routes": {
+      "minimatch": "^11.0.9"
+    }
   },
   "author": "nadeenabuobead"
 }
