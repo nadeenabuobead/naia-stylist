@@ -281,6 +281,70 @@ describe("closet._index action (add) — failure paths, no real database or imag
     vi.unstubAllGlobals();
   });
 
+  // Behavioral coverage for the ATOMIC reservation's at_capacity branch
+  // specifically — distinct from every test above this point, which only
+  // ever exercises the early, non-atomic checkEntitlement check (mocked to
+  // reject before Cloudinary verify/moderation/suitability ever run). Here
+  // the early check is mocked to ALLOW (as it would for a concurrent
+  // request that loses a genuine race at the last slot), so the route
+  // proceeds through verify/moderation/suitability — real work against a
+  // real, now-moderated upload — before reserveClosetSlot's own atomic
+  // re-check inside the Serializable transaction is what actually blocks
+  // it. This is the scenario closet._index.tsx's own comment calls out:
+  // "A concurrent upload won the race since the early check above — this
+  // asset was already verified/moderated but must not be kept orphaned."
+  // Unlike the early-checkpoint rejection (which deliberately preserves the
+  // asset for resubmission) and unlike asset_pending_deletion (which must
+  // not double-delete against the sweep), this branch must call
+  // discardUpload so the already-verified asset is not orphaned in storage.
+  it("the ATOMIC reserveClosetSlot at_capacity rejection (a concurrent request won the race after the early check passed) deletes the already-verified asset — no orphan, genuinely full member", async () => {
+    const ownId = ownPublicId(CUSTOMER_A);
+    mockEntitlement().mockResolvedValue({ allowed: true, limit: 250 });
+    mockVerify().mockResolvedValue({
+      ok: true,
+      asset: { type: "private", resourceType: "image", format: "jpg", bytes: 1000, width: 400, height: 400 },
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
+    (moderateImageContent as ReturnType<typeof vi.fn>).mockResolvedValue({ status: "PASS" });
+    (screenGarmentSuitability as ReturnType<typeof vi.fn>).mockResolvedValue({ status: "PASS" });
+    mockReserve().mockResolvedValue({ allowed: false, reason: "at_capacity", limit: 250 });
+
+    const res: any = await action({
+      request: addRequestAs(CUSTOMER_A, { publicId: ownId, photoConsentGiven: "true" }),
+      params: {},
+      context: {},
+    } as any);
+
+    expect(res.init.status).toBe(403);
+    expect(res.data.error).toBe("Your closet is full. Remove some items to add new ones.");
+    expect(mockDelete()).toHaveBeenCalledWith(ownId, "private");
+    vi.unstubAllGlobals();
+  });
+
+  it("the ATOMIC reserveClosetSlot at_capacity rejection with limit===0 still deletes the already-verified asset and uses the upgrade-oriented message", async () => {
+    const ownId = ownPublicId(CUSTOMER_A);
+    mockEntitlement().mockResolvedValue({ allowed: true, limit: 0 });
+    mockVerify().mockResolvedValue({
+      ok: true,
+      asset: { type: "private", resourceType: "image", format: "jpg", bytes: 1000, width: 400, height: 400 },
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
+    (moderateImageContent as ReturnType<typeof vi.fn>).mockResolvedValue({ status: "PASS" });
+    (screenGarmentSuitability as ReturnType<typeof vi.fn>).mockResolvedValue({ status: "PASS" });
+    mockReserve().mockResolvedValue({ allowed: false, reason: "at_capacity", limit: 0 });
+
+    const res: any = await action({
+      request: addRequestAs(CUSTOMER_A, { publicId: ownId, photoConsentGiven: "true" }),
+      params: {},
+      context: {},
+    } as any);
+
+    expect(res.init.status).toBe(403);
+    expect(res.data.error).toBe("Closet access is included with nAia Membership. Subscribe to start adding pieces.");
+    expect(mockDelete()).toHaveBeenCalledWith(ownId, "private");
+    vi.unstubAllGlobals();
+  });
+
   it("a customer record that no longer exists (deleted mid-session) is rejected as unauthenticated, not a crash", async () => {
     mockGetCustomer().mockResolvedValueOnce(CUSTOMER_A);
     mockFindCustomer().mockResolvedValueOnce(null);
