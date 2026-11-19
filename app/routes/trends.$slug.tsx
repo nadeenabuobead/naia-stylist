@@ -10,6 +10,11 @@ import {
   formatEditionNumber,
 } from "../lib/editorial-report-edition";
 import { reportVisual } from "../lib/report-visual";
+import { getCurrentNaiaCustomer } from "../lib/naia-session.server";
+import { loadReportSaveState, type ReportSaveState } from "../lib/saved-items.server";
+import { loadTrendFeedback } from "../lib/trend-feedback.server";
+import SaveControl, { NotForMeControl, saveControlCss } from "../components/SaveControl";
+import { slugify } from "../lib/saved-items";
 
 const FONTS =
   "https://fonts.googleapis.com/css2?family=Inter:wght@400&family=Oswald:wght@200;300;400&family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300;1,400&family=Space+Mono&display=swap";
@@ -27,13 +32,26 @@ function formatSourceDate(isoDate: string): string {
   return `${day} ${SOURCE_DATE_MONTHS[month - 1]} ${year}`;
 }
 
-export async function loader({ params }: LoaderFunctionArgs) {
+export async function loader({ request, params }: LoaderFunctionArgs) {
   const [report, allPublished] = await Promise.all([
     getEditorialReportBySlug(params.slug ?? ""),
     getPublishedEditorialReports(),
   ]);
   if (!report) throw new Response("Not Found", { status: 404 });
-  return { report, allPublished };
+
+  // The public report stays public. Auth is OPTIONAL here — it only decides
+  // whether a ♡ can already be filled in, never whether the page renders.
+  const customer = await getCurrentNaiaCustomer(request);
+  const saveState = await loadReportSaveState(customer?.id ?? null, report);
+  const feedback = customer?.id
+    ? await loadTrendFeedback(customer.id, report.slug)
+    : { notForMe: [], styled: [] };
+
+  return {
+    report, allPublished, saveState,
+    returnTo: `/trends/${report.slug}`,
+    notForMe: feedback.notForMe,
+  };
 }
 
 export function meta({ data }: { data?: { report: TrendReportData } }) {
@@ -45,6 +63,11 @@ export function meta({ data }: { data?: { report: TrendReportData } }) {
 }
 
 const css = `
+  /* ── Save affordance — quiet, at the edge of a block ── */
+  .psl-save-row { margin-top: 10px; }
+  .psl-save-inline { display: block; margin-top: 6px; }
+${saveControlCss}
+
   .psl-page {
     min-height: 100vh;
     background-color: #f0ebe2;
@@ -818,7 +841,45 @@ export function ErrorBoundary() {
 }
 
 export default function TrendReportDetail() {
-  const { report, allPublished } = useLoaderData() as { report: TrendReportData; allPublished: TrendReportData[] };
+  const loaderData = useLoaderData() as {
+    report: TrendReportData;
+    allPublished: TrendReportData[];
+    saveState?: ReportSaveState;
+    returnTo?: string;
+    notForMe?: string[];
+  };
+  const { report, allPublished } = loaderData;
+
+  // The editorial read is the primary experience. If save state is absent
+  // for any reason, the page renders without ♡ controls rather than failing
+  // — a personalisation layer must never be able to take the report down
+  // with it.
+  const saveState = loaderData.saveState ?? { itemKeys: {}, saved: [], canSave: false };
+  const returnTo = loaderData.returnTo ?? `/trends/${report.slug}`;
+
+  const savedSet = new Set(saveState.saved);
+  // Current explicit feedback. Separate from Saved: a dismissal is not an
+  // un-save, and the two can honestly coexist on the same content.
+  const dismissed = new Set(loaderData.notForMe ?? []);
+  const save = (
+    contentType: "TREND" | "SIGNAL" | "REFERENCE",
+    contentKey: string,
+    label: string,
+  ) => {
+    const itemKey = saveState.itemKeys[`${contentType}:${contentKey}`];
+    if (!itemKey) return null;
+    return (
+      <SaveControl
+        contentType={contentType}
+        contentKey={contentKey}
+        reportSlug={report.slug}
+        itemKey={itemKey}
+        initiallySaved={savedSet.has(itemKey)}
+        returnTo={returnTo}
+        label={label}
+      />
+    );
+  };
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "error">("idle");
 
   const reportIndex = allPublished.findIndex((r) => r.slug === report.slug);
@@ -1013,6 +1074,19 @@ export default function TrendReportDetail() {
                   {String(i + 1).padStart(2, "0")} / {t.name}
                 </div>
                 <p className="psl-body-text">{t.description}</p>
+                <div className="psl-save-row">
+                  {save("TREND", slugify(t.name), t.name)}
+                  {saveState.canSave && (
+                    <NotForMeControl
+                      contentType="TREND"
+                      contentKey={slugify(t.name)}
+                      reportSlug={report.slug}
+                      initiallyDismissed={dismissed.has(slugify(t.name))}
+                      returnTo={returnTo}
+                      label={t.name}
+                    />
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -1040,6 +1114,7 @@ export default function TrendReportDetail() {
                         {r.signal}
                         <span className="psl-signal-why">{r.why}</span>
                         {r.source && <span className="psl-signal-source">{r.source}</span>}
+                        <span className="psl-save-inline">{save("SIGNAL", slugify(r.signal), r.signal)}</span>
                       </li>
                     ))}
                   </ul>
@@ -1054,6 +1129,7 @@ export default function TrendReportDetail() {
                         {f.signal}
                         <span className="psl-signal-why">{f.why}</span>
                         {f.source && <span className="psl-signal-source">{f.source}</span>}
+                        <span className="psl-save-inline">{save("SIGNAL", slugify(f.signal), f.signal)}</span>
                       </li>
                     ))}
                   </ul>
@@ -1076,6 +1152,13 @@ export default function TrendReportDetail() {
                     <p className="psl-ref-signal">{ref.signal}</p>
                     <div className="psl-ref-naia-label">nAia</div>
                     <p className="psl-ref-naia">{ref.naiaRead}</p>
+                    <div className="psl-save-row">
+                      {save(
+                        "REFERENCE",
+                        slugify(ref.collection ? `${ref.brand} — ${ref.collection}` : ref.brand),
+                        ref.collection ? `${ref.brand} — ${ref.collection}` : ref.brand,
+                      )}
+                    </div>
                   </div>
                 ))
               : report.brandsToWatch?.map((b, i) => (
