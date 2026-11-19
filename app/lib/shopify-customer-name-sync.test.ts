@@ -10,6 +10,12 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, it } from "node:test";
 import { Prisma } from "@prisma/client";
+import {
+  usableName,
+  resolveNameUpdate,
+  usableEmail,
+  resolveEmailUpdate,
+  isEmailUniqueConstraintViolation,
 } from "./shopify-customer-name-sync.server.ts";
 
 const CALLBACK_PATH = resolve(import.meta.dirname, "../routes/auth.shopify.callback.tsx");
@@ -188,6 +194,42 @@ describe("auth.shopify.callback.tsx — name sync is actually wired in", () => {
     assert.ok(
       !/err\s*instanceof\s*Prisma\.PrismaClientKnownRequestError\s*&&\s*\n?\s*err\.code\s*===\s*"P2002"/.test(guardBlock),
       "the sync-retry guard no longer reacts to a bare P2002 code without confirming the field",
+    );
+  });
+
+  it("no code path infers a name from the email address", () => {
+    assert.ok(!callbackSrc.includes(".split(\"@\")"), "no email-splitting inference");
+    assert.ok(!callbackSrc.includes("email.split"), "no email-splitting inference");
+  });
+
+  it("no hard-coded name literal is written to the Customer row", () => {
+    const createIdx = callbackSrc.indexOf("prisma.customer.create(");
+    const createBlock = callbackSrc.slice(createIdx, createIdx + 300);
+    assert.ok(!/firstName:\s*"[A-Za-z]/.test(createBlock), "firstName is not a hard-coded string literal");
+  });
+
+  it("the create (new customer) path writes email from the Shopify profile via usableEmail", () => {
+    const createIdx = callbackSrc.indexOf("prisma.customer.create(");
+    const createBlock = callbackSrc.slice(createIdx, createIdx + 300);
+    assert.ok(createBlock.includes("email:     emailAtCreate"), "create writes the resolved emailAtCreate value");
+    assert.ok(
+      callbackSrc.includes("const emailAtCreate = usableEmail(shopifyProfile.email);"),
+      "emailAtCreate is derived via usableEmail, not the raw Shopify value",
+    );
+  });
+
+  it("no hard-coded email literal is written to the Customer row", () => {
+    const createIdx = callbackSrc.indexOf("prisma.customer.create(");
+    const createBlock = callbackSrc.slice(createIdx, createIdx + 300);
+    assert.ok(!/email:\s*"[^"]*@/.test(createBlock), "email is not a hard-coded string literal");
+  });
+
+  it("an email unique-constraint collision at creation time retries once without email instead of failing signup", () => {
+    const createIdx = callbackSrc.indexOf("prisma.customer.create(");
+    const rest = callbackSrc.slice(createIdx, createIdx + 1600);
+    assert.ok(
+      rest.includes("if (!customer && emailAtCreate && isEmailUniqueConstraintViolation(err)) {"),
+      "a still-missing customer row after the P2002 re-read is only treated as an email collision once the error's own meta.target confirms it",
     );
     assert.ok(
       /prisma\.customer\.create\(\{\s*data:\s*\{\s*shopifyCustomerId,\s*firstName: usableName\(shopifyProfile\.firstName\),\s*lastName:\s*usableName\(shopifyProfile\.lastName\),\s*\},/.test(rest),
