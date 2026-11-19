@@ -98,11 +98,23 @@ export interface ReportSaveState {
 
 type ReportForSaveState = {
   slug: string;
-  keyTrends?: Array<{ name: string }> | null;
-  rising?: Array<{ signal: string }> | null;
-  fading?: Array<{ signal: string }> | null;
-  referencesBehindThisEdit?: Array<{ brand: string; collection?: string }> | null;
+  keyTrends?: Array<{ id?: string; name: string }> | null;
+  rising?: Array<{ id?: string; signal: string }> | null;
+  fading?: Array<{ id?: string; signal: string }> | null;
+  referencesBehindThisEdit?: Array<{ id?: string; brand: string; collection?: string }> | null;
 };
+
+/**
+ * The contentKey to pass into buildItemKey for one entry — id when present,
+ * else slugify(displayText) as before. MUST stay in exact lockstep with
+ * saved-items-resolve.ts's findEntry()/matchesContentKey() match order: a
+ * mismatch between the two would itself reintroduce the orphaning bug this
+ * id scheme exists to close.
+ */
+function entryContentKey(id: string | undefined, displayText: string): string | null {
+  if (id) return id;
+  return displayText ? slugify(displayText) : null;
+}
 
 /**
  * Every saveable object on a report, with its itemKey, plus which of them
@@ -122,22 +134,30 @@ export async function loadReportSaveState(
 
   for (const t of report.keyTrends ?? []) {
     if (!t.name) continue;
-    const contentKey = slugify(t.name);
-    if (!contentKey) continue;
-    itemKeys[`TREND:${contentKey}`] = buildItemKey({ contentType: "TREND", contentKey, reportSlug });
+    // The map's outer key stays text-slugify-based — that's what every
+    // caller independently recomputes from the entry's own rendered text
+    // (see trends.$slug.tsx) to look this entry up. Only the contentKey fed
+    // into buildItemKey (the value) prefers the stable id, matching
+    // findEntry's own match order exactly.
+    const lookupKey = slugify(t.name);
+    const contentKey = entryContentKey(t.id, t.name);
+    if (!lookupKey || !contentKey) continue;
+    itemKeys[`TREND:${lookupKey}`] = buildItemKey({ contentType: "TREND", contentKey, reportSlug });
   }
   for (const s of [...(report.rising ?? []), ...(report.fading ?? [])]) {
     if (!s.signal) continue;
-    const contentKey = slugify(s.signal);
-    if (!contentKey) continue;
-    itemKeys[`SIGNAL:${contentKey}`] = buildItemKey({ contentType: "SIGNAL", contentKey, reportSlug });
+    const lookupKey = slugify(s.signal);
+    const contentKey = entryContentKey(s.id, s.signal);
+    if (!lookupKey || !contentKey) continue;
+    itemKeys[`SIGNAL:${lookupKey}`] = buildItemKey({ contentType: "SIGNAL", contentKey, reportSlug });
   }
   for (const r of report.referencesBehindThisEdit ?? []) {
     const label = r.collection ? `${r.brand} — ${r.collection}` : r.brand;
     if (!label) continue;
-    const contentKey = slugify(label);
-    if (!contentKey) continue;
-    itemKeys[`REFERENCE:${contentKey}`] = buildItemKey({ contentType: "REFERENCE", contentKey, reportSlug });
+    const lookupKey = slugify(label);
+    const contentKey = entryContentKey(r.id, label);
+    if (!lookupKey || !contentKey) continue;
+    itemKeys[`REFERENCE:${lookupKey}`] = buildItemKey({ contentType: "REFERENCE", contentKey, reportSlug });
   }
 
   // Global — identity does not include the report it was found in.

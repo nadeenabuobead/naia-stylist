@@ -13,19 +13,22 @@
 // snapshot is guaranteed to match what the report actually says.
 //
 // contentKey itself is also re-derived and checked here, not trusted: for
-// TREND/SIGNAL/REFERENCE, the caller's contentKey must equal slugify() of
-// some entry's own display text in the report RIGHT NOW, or the save is
-// rejected as content_not_found. That re-check is what stands in for the
-// frozen identity module's id lookup.
+// TREND/SIGNAL/REFERENCE, the caller's contentKey must match some entry in
+// the report RIGHT NOW — either that entry's own persisted id (preferred,
+// stable across a later text edit), or, only for an entry with no id at all
+// (legacy content), slugify() of its display text — or the save is rejected
+// as content_not_found. See findEntry()/matchesContentKey() below.
 
 import { getProductByHandle } from "./ai/naia-catalog";
 import {
-  isTakeawaySectionKey,
   slugify,
   type SaveItemRequest,
-  type TakeawaySectionKey,
   type TrendContentType,
 } from "./saved-items";
+import {
+  isTakeawaySectionKey,
+  type TakeawaySectionKey,
+} from "./trend-takeaway-sections";
 import type {
   TrendReportData,
   TrendReportKeyTrend,
@@ -70,28 +73,45 @@ function referenceLabel(entry: TrendReportReferenceCard): string {
 }
 
 /**
- * Finds the entry whose own display text slugifies to `contentKey`, scoped to
- * the arrays that belong to `contentType`. SIGNAL searches both rising and
- * fading — on trunk today both are rendered identically and neither carries
- * an id, so there is no honest way to distinguish them by type alone, same
- * as the frozen branch's own SIGNAL handling.
+ * Finds the entry matching `contentKey`, scoped to the arrays that belong to
+ * `contentType`.
+ *
+ * Match order, per entry:
+ *   1. entry.id === contentKey — checked FIRST. This is what makes an
+ *      id-bearing entry immune to a later text edit: ids are minted once
+ *      (see ensureContentIds in editorial-reports.server.ts) and never
+ *      regenerated, so editing name/signal/brand/collection/description/
+ *      why/naiaRead does not change which entry a save resolves to.
+ *   2. Only when the entry has no id at all: slugify(displayText) ===
+ *      contentKey — the pre-existing, display-text-derived key. This is the
+ *      legacy-content path and behaves EXACTLY as it did before ids
+ *      existed, for every report written before this change.
+ *
+ * SIGNAL searches both rising and fading — on trunk today both are rendered
+ * identically, so there is no honest way to distinguish them by type alone,
+ * same as the frozen branch's own SIGNAL handling.
  */
+function matchesContentKey(id: string | undefined, displayText: string, contentKey: string): boolean {
+  if (id) return id === contentKey;
+  return Boolean(displayText) && slugify(displayText) === contentKey;
+}
+
 function findEntry(
   report: TrendReportData,
   contentType: "TREND" | "SIGNAL" | "REFERENCE",
   contentKey: string,
 ): FoundEntry | null {
   if (contentType === "TREND") {
-    const entry = (report.keyTrends ?? []).find((t) => t.name && slugify(t.name) === contentKey);
+    const entry = (report.keyTrends ?? []).find((t) => matchesContentKey(t.id, t.name, contentKey));
     return entry ? { contentType, entry } : null;
   }
   if (contentType === "SIGNAL") {
     const pools = [...(report.rising ?? []), ...(report.fading ?? [])];
-    const entry = pools.find((s) => s.signal && slugify(s.signal) === contentKey);
+    const entry = pools.find((s) => matchesContentKey(s.id, s.signal, contentKey));
     return entry ? { contentType, entry } : null;
   }
   const entry = (report.referencesBehindThisEdit ?? []).find(
-    (r) => referenceLabel(r) && slugify(referenceLabel(r)) === contentKey,
+    (r) => matchesContentKey(r.id, referenceLabel(r), contentKey),
   );
   return entry ? { contentType, entry } : null;
 }

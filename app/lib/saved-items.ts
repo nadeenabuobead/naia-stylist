@@ -26,6 +26,14 @@
 //
 // This module is pure: no DB, no I/O.
 
+import {
+  TAKEAWAY_SECTION_KEYS,
+  isTakeawaySectionKey,
+  type TakeawaySectionKey,
+} from "./trend-takeaway-sections";
+
+export { TAKEAWAY_SECTION_KEYS, isTakeawaySectionKey, type TakeawaySectionKey };
+
 // ── Content types ────────────────────────────────────────────────────────────
 
 export const TREND_CONTENT_TYPES = [
@@ -50,37 +58,11 @@ export function isReportScopedContentType(contentType: TrendContentType): boolea
 }
 
 // ── Takeaway sections ─────────────────────────────────────────────────────────
-
-/**
- * Every prose field of a personalised edit (ShopperEdit, see
- * trend-evidence.server.ts) that could ever be pointed at by a TAKEAWAY save
- * or feedback row — 11 fixed strings. Copied as plain data from ShopperEdit's
- * own field names, not read from or derived from the frozen identity module
- * (which isn't available in this worktree at all).
- *
- * Only a subset currently has a rendered Save control (see
- * trends.my-edits.$slug.tsx) — the rest are reserved so a future UI addition
- * doesn't need a schema or validation change.
- */
-export const TAKEAWAY_SECTION_KEYS = [
-  "yourVersion",
-  "evidenceStyleDna",
-  "evidencePassportSays",
-  "evidenceReviews",
-  "lowDataNotice",
-  "yourBestRouteIn",
-  "aLookToTry",
-  "theBalanceToProtect",
-  "worthInvestingStatement",
-  "partToTake",
-  "partToLeave",
-] as const;
-
-export type TakeawaySectionKey = (typeof TAKEAWAY_SECTION_KEYS)[number];
-
-export function isTakeawaySectionKey(value: unknown): value is TakeawaySectionKey {
-  return typeof value === "string" && (TAKEAWAY_SECTION_KEYS as readonly string[]).includes(value);
-}
+//
+// TAKEAWAY_SECTION_KEYS / TakeawaySectionKey / isTakeawaySectionKey now live
+// in ./trend-takeaway-sections.ts (a type-checked single source, verified
+// against ShopperEdit's actual field names) and are re-exported above for
+// every existing importer of this module.
 
 // ── Slugify ───────────────────────────────────────────────────────────────────
 

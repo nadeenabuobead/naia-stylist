@@ -137,4 +137,36 @@ describe("loadReportSaveState", () => {
     expect(state.itemKeys["PRODUCT:navy-blazer"]).toBe("PRODUCT:navy-blazer");
     expect(state.itemKeys["TAKEAWAY:yourBestRouteIn"]).toBe("TAKEAWAY:spring-2026-soft-structure:yourBestRouteIn");
   });
+
+  describe("content ids — the itemKey a save resolves to must track findEntry's own match order", () => {
+    it("an entry WITH an id builds its itemKey from the id, not from slugify(text) — identical before/after a text edit", async () => {
+      findMany.mockResolvedValueOnce([]);
+      const withId = {
+        ...report,
+        keyTrends: [{ id: "trend-id-1", name: "Softened Tailoring" }],
+      };
+      const before = await loadReportSaveState("customer-A", withId);
+
+      findMany.mockResolvedValueOnce([]);
+      const editedText = {
+        ...report,
+        keyTrends: [{ id: "trend-id-1", name: "Softened Tailoring (retitled)" }],
+      };
+      const after = await loadReportSaveState("customer-A", editedText);
+
+      // The map's outer lookup key still tracks the CURRENT rendered text
+      // (what the caller independently recomputes to look this entry up),
+      // but the itemKey VALUE it resolves to — the one actually checked
+      // against the DB — is identical either side of the edit.
+      expect(before.itemKeys["TREND:softened-tailoring"]).toBe("TREND:spring-2026-soft-structure:trend-id-1");
+      expect(after.itemKeys["TREND:softened-tailoring-retitled"]).toBe("TREND:spring-2026-soft-structure:trend-id-1");
+      expect(before.itemKeys["TREND:softened-tailoring"]).toBe(after.itemKeys["TREND:softened-tailoring-retitled"]);
+    });
+
+    it("an entry WITHOUT an id still builds its itemKey from slugify(text) — legacy behaviour, unchanged", async () => {
+      findMany.mockResolvedValueOnce([]);
+      const state = await loadReportSaveState("customer-A", report); // report's keyTrends entry has no id
+      expect(state.itemKeys["TREND:softened-tailoring"]).toBe("TREND:spring-2026-soft-structure:softened-tailoring");
+    });
+  });
 });

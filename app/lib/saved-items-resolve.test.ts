@@ -95,6 +95,103 @@ describe("resolveSaveTargetFromReport — TREND/SIGNAL/REFERENCE", () => {
   });
 });
 
+describe("resolveSaveTargetFromReport — stable content id survives a text edit", () => {
+  const REPORT_WITH_ID: TrendReportData = {
+    ...REPORT,
+    keyTrends: [{ id: "trend-id-1", name: "Softened Tailoring", description: "A longline blazer." }],
+  };
+
+  it("an entry WITH an id resolves by id — the itemKey is identical before and after an in-place text edit", () => {
+    const before = resolveSaveTargetFromReport(
+      { contentType: "TREND", contentKey: "trend-id-1", reportSlug: REPORT_WITH_ID.slug },
+      REPORT_WITH_ID,
+    );
+    expect(before.ok).toBe(true);
+
+    // Simulate an admin text edit: name/description change, id is untouched.
+    const editedReport: TrendReportData = {
+      ...REPORT_WITH_ID,
+      keyTrends: [{ id: "trend-id-1", name: "Softened Tailoring (retitled)", description: "A new description entirely." }],
+    };
+    const after = resolveSaveTargetFromReport(
+      { contentType: "TREND", contentKey: "trend-id-1", reportSlug: editedReport.slug },
+      editedReport,
+    );
+    expect(after.ok).toBe(true);
+
+    if (before.ok && after.ok) {
+      // Same contentKey (the id) + same reportSlug => buildItemKey would
+      // produce the identical itemKey in both cases — the save does not
+      // orphan despite the text having changed underneath it.
+      expect(before.request.contentKey).toBe(after.request.contentKey);
+      expect(before.request.reportSlug).toBe(after.request.reportSlug);
+      // The resolved label DOES reflect the live text (display is never
+      // frozen) — only identity is stable.
+      expect(after.request.label).toBe("Softened Tailoring (retitled)");
+    }
+  });
+
+  it("a stale slugified-text contentKey no longer matches once the entry has an id — the legacy key is retired, not dual-honoured", () => {
+    const result = resolveSaveTargetFromReport(
+      { contentType: "TREND", contentKey: "softened-tailoring", reportSlug: REPORT_WITH_ID.slug },
+      REPORT_WITH_ID,
+    );
+    expect(result).toEqual({ ok: false, reason: "content_not_found" });
+  });
+});
+
+describe("resolveSaveTargetFromReport — legacy content (no id) behaves exactly as before", () => {
+  it("an entry WITHOUT an id still resolves by slugify(displayText) — the pre-fix behaviour, unchanged", () => {
+    const result = resolveSaveTargetFromReport(
+      { contentType: "TREND", contentKey: "softened-tailoring", reportSlug: REPORT.slug },
+      REPORT,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.request.label).toBe("Softened Tailoring");
+  });
+
+  it("a legacy entry's key still changes if its text changes — the known pre-fix limitation, confirmed unchanged for id-less content", () => {
+    const edited: TrendReportData = {
+      ...REPORT,
+      keyTrends: [{ name: "Softened Tailoring (retitled)", description: "x" }],
+    };
+    const result = resolveSaveTargetFromReport(
+      { contentType: "TREND", contentKey: "softened-tailoring", reportSlug: edited.slug },
+      edited,
+    );
+    expect(result).toEqual({ ok: false, reason: "content_not_found" });
+  });
+});
+
+describe("resolveSaveTargetFromReport — the same trend name across two report editions never collides", () => {
+  it("two different reportSlugs produce two distinct, non-colliding resolutions, with or without an id", () => {
+    const editionA: TrendReportData = { ...REPORT, slug: "edition-a" };
+    const editionB: TrendReportData = {
+      ...REPORT,
+      slug: "edition-b",
+      keyTrends: [{ id: "trend-id-b", name: "Softened Tailoring", description: "A longline blazer." }],
+    };
+
+    const resultA = resolveSaveTargetFromReport(
+      { contentType: "TREND", contentKey: "softened-tailoring", reportSlug: editionA.slug },
+      editionA,
+    );
+    const resultB = resolveSaveTargetFromReport(
+      { contentType: "TREND", contentKey: "trend-id-b", reportSlug: editionB.slug },
+      editionB,
+    );
+
+    expect(resultA.ok).toBe(true);
+    expect(resultB.ok).toBe(true);
+    if (resultA.ok && resultB.ok) {
+      expect(resultA.request.reportSlug).not.toBe(resultB.request.reportSlug);
+      // Different contentKey derivations too (slugified text vs id) —
+      // doubly non-colliding.
+      expect(resultA.request.contentKey).not.toBe(resultB.request.contentKey);
+    }
+  });
+});
+
 describe("resolveSaveTargetFromReport — PRODUCT (global, keyed by NADINE handle)", () => {
   it("resolves from the catalog handle, independent of any report", () => {
     const result = resolveSaveTargetFromReport({ contentType: "PRODUCT", contentKey: "navy-blazer" }, null);
