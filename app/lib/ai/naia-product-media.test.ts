@@ -63,11 +63,17 @@ function makeMinimalNadineRec(handle: string): StyleMeRecommendationResult {
       handle,
       title: "Test Product",
       slot: "top",
-      anchorCompatibility: { score: 1, pairingNote: null },
+      totalScore: 1,
+      positiveEvidence: [],
+      negativeEvidence: [],
+      provisionalEvidenceUsed: false,
+      anchorCompatibility: { status: "compatible", isHardExclusion: false },
     },
     alternatives: [],
     anchor: null,
-    evidenceCodes: [],
+    outfitPlan: { anchorSlot: null, recommendedSlot: null, compatibilityStatus: "compatible", notes: [] },
+    evaluatedProducts: [],
+    coverage: { totalCatalogProducts: 1, eligibleCandidates: 1, excludedCandidates: 0 },
   };
 }
 
@@ -275,8 +281,11 @@ describe("CTA — StyleMe try-on CTA integration", () => {
         id: "closet-item-1",
         label: "My Black Blazer",
         slot: "top",
+        colors: [],
       } as never,
-      evidenceCodes: [],
+      outfitPlan: { anchorSlot: "top", recommendedSlot: null, compatibilityStatus: "closet-led", notes: [] },
+      evaluatedProducts: [],
+      coverage: { totalCatalogProducts: 0, eligibleCandidates: 0, excludedCandidates: 0 },
     });
     const mockMedia = (_: string) => READY_ENTRY;
 
@@ -293,7 +302,9 @@ describe("CTA — StyleMe try-on CTA integration", () => {
       primary: null,
       alternatives: [],
       anchor: null,
-      evidenceCodes: [],
+      outfitPlan: { anchorSlot: null, recommendedSlot: null, compatibilityStatus: "insufficient-anchor-evidence", notes: [] },
+      evaluatedProducts: [],
+      coverage: { totalCatalogProducts: 0, eligibleCandidates: 0, excludedCandidates: 0 },
     });
     const mockMedia = (_: string) => READY_ENTRY;
 
@@ -312,13 +323,26 @@ describe("CTA — StyleMe try-on CTA integration", () => {
         handle: "trench-coat",
         title: "Becoming Seen",
         slot: "outerwear",
-        anchorCompatibility: { score: 0.9, pairingNote: "Pairs well with straight trousers." },
+        totalScore: 0.9,
+        positiveEvidence: [],
+        negativeEvidence: [],
+        provisionalEvidenceUsed: false,
+        anchorCompatibility: { status: "compatible", isHardExclusion: false, pairingNote: "Pairs well with straight trousers." },
       },
       alternatives: [
-        { handle: "collar-shirt", title: "Becoming Real", slot: "top", anchorCompatibility: { score: 0.7, pairingNote: null } },
+        {
+          handle: "collar-shirt", title: "Becoming Real", slot: "top",
+          totalScore: 0.7,
+          positiveEvidence: [],
+          negativeEvidence: [],
+          provisionalEvidenceUsed: false,
+          anchorCompatibility: { status: "compatible", isHardExclusion: false },
+        },
       ],
       anchor: null,
-      evidenceCodes: ["mood:confident"],
+      outfitPlan: { anchorSlot: "outerwear", recommendedSlot: "top", compatibilityStatus: "compatible", notes: [] },
+      evaluatedProducts: [],
+      coverage: { totalCatalogProducts: 2, eligibleCandidates: 2, excludedCandidates: 0 },
     };
     const mockRec = (_: unknown) => { recCallCount++; return fixedRec; };
     const mockMedia = (_: string) => undefined;
@@ -381,6 +405,8 @@ describe("CTA — StyleMe try-on CTA integration", () => {
       closetAnchorLabel: null,
       pairingNote: null,
       finishingLayer: { shoes: "x", bag: "x", accessories: "x", hair: "x", beauty: null, colourDirection: "x" },
+      completionLayer: [],
+      resultDirections: [],
       songReason: "x",
       song,
       rawRecommendation: { outcome: "nadine-recommendation" as const, primary: null, alternatives: [], anchor: null, evidenceCodes: [] },

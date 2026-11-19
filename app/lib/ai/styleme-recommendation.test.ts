@@ -1471,7 +1471,7 @@ describe("§12  Closet anchor compatibility evaluation", () => {
     // None of the products should be hard-excluded due to a bag slot conflict
     // (bag has empty exclusion list)
     const excludedBySlot = result.evaluatedProducts.filter(
-      (e) => e.isHardExcluded && e.negativeEvidence.some((n) => n.code?.startsWith("slot-conflict")),
+      (e) => e.isHardExcluded && e.hardExclusionReasons.some((code) => code.startsWith("slot-conflict")),
     );
     assert.equal(excludedBySlot.length, 0, "BAGS anchor must not hard-exclude any product via slot conflict");
   });
@@ -1525,7 +1525,7 @@ describe("§12  Closet anchor compatibility evaluation", () => {
   // ─── C.11  All 11 products still reachable after the correction ───────────
   it("C.11  All 11 V8 products remain reachable (no regression from Closet correction)", () => {
     // Re-run all 11 reachability scenarios without anchor (same as §11 but post-correction)
-    const HANDLES_TO_WIN = [
+    const HANDLES_TO_WIN: Array<{ handle: string; session: StyleMeSessionInput; profile?: StyleMeProfileSignals }> = [
       // playful->adventurous mood rename intentionally NOT migrated for double-top's
       // catalog data (see §11's REACHABILITY_SCENARIOS comment) — confident+feel-good
       // dual-mood + waist-definition used instead of confident+adventurous.
@@ -1548,7 +1548,7 @@ describe("§12  Closet anchor compatibility evaluation", () => {
       { handle: "leather-suede-jacket", session: makeSession({ moods: ["need-reset", "overwhelmed"], desiredFeelings: ["more-effortless", "more-confident"], bodyNeeds: ["relaxed", "more-coverage"], occasion: "girls-night", practicalIds: ["quick-to-style"] }), profile: { stylePersonalities: ["effortlessly-chic", "artsy"] } },
       { handle: "midi-dress",           session: makeSession({ moods: ["tired", "low-energy"], desiredFeelings: ["more-feminine", "more-attractive"], bodyNeeds: ["waist-definition", "balances"], coverageConditional: "coverage-non-negotiable", occasion: "date-night", formalityConditional: "formality-smart", practicalIds: ["quick-to-style"] }), profile: { stylePersonalities: ["feminine"] } },
       { handle: "dress-set",            session: makeSession({ moods: ["confident", "powerful"], desiredFeelings: ["more-confident", "more-powerful", "more-feminine"], occasion: "girls-night", formalityConditional: "formality-occasion" }), profile: { stylePersonalities: ["feminine", "trendy"] } },
-    ] as const;
+    ];
 
     for (const { handle, session, profile } of HANDLES_TO_WIN) {
       const result = runRecommendation({ session, profile });
@@ -1566,7 +1566,7 @@ describe("§12  Closet anchor compatibility evaluation", () => {
     );
     // shoe slot has empty exclusion list — all products eligible, no slot conflict hard-exclusions
     const excluded = result.evaluatedProducts.filter(
-      (e) => e.isHardExcluded && e.negativeEvidence.some((n) => n.code?.startsWith("slot-conflict")),
+      (e) => e.isHardExcluded && e.hardExclusionReasons.some((code) => code.startsWith("slot-conflict")),
     );
     assert.equal(excluded.length, 0, "SHOES anchor must not hard-exclude any product via slot conflict");
     // Confidence must not be "insufficient" — hasStrongEvidence is true for shoe slot
@@ -1586,7 +1586,7 @@ describe("§12  Closet anchor compatibility evaluation", () => {
       { anchor: makeClosetAnchor("ACCESSORIES") },
     );
     const excluded = result.evaluatedProducts.filter(
-      (e) => e.isHardExcluded && e.negativeEvidence.some((n) => n.code?.startsWith("slot-conflict")),
+      (e) => e.isHardExcluded && e.hardExclusionReasons.some((code) => code.startsWith("slot-conflict")),
     );
     assert.equal(excluded.length, 0, "ACCESSORIES anchor must not hard-exclude any product via slot conflict");
     for (const ev of result.evaluatedProducts) {
@@ -1601,7 +1601,7 @@ describe("§12  Closet anchor compatibility evaluation", () => {
       { anchor: makeClosetAnchor("JEWELRY") },
     );
     const excluded = result.evaluatedProducts.filter(
-      (e) => e.isHardExcluded && e.negativeEvidence.some((n) => n.code?.startsWith("slot-conflict")),
+      (e) => e.isHardExcluded && e.hardExclusionReasons.some((code) => code.startsWith("slot-conflict")),
     );
     assert.equal(excluded.length, 0, "JEWELRY anchor must not hard-exclude any product via slot conflict");
     for (const ev of result.evaluatedProducts) {

@@ -86,6 +86,7 @@ describe("resolveActionAnchor — naia-piece", () => {
     const result = await resolveActionAnchor("naia-piece", "cust-1", "collar-shirt", null);
     assert.equal(result.ok, true);
     if (!result.ok) throw new Error("unreachable");
+        if (!result.anchor) throw new Error("unreachable");
     assert.equal(result.anchor.type, "nadine");
     assert.equal((result.anchor as { handle: string }).handle, "collar-shirt");
   });
@@ -124,6 +125,7 @@ describe("resolveActionAnchor — naia-piece", () => {
       const result = await resolveActionAnchor("naia-piece", "cust-1", handle, null);
       assert.equal(result.ok, true, `Expected ok=true for handle ${handle}`);
       if (!result.ok) throw new Error("unreachable");
+            if (!result.anchor) throw new Error("unreachable");
       assert.equal(result.anchor.type, "nadine");
     }
   });
@@ -173,6 +175,7 @@ describe("resolveActionAnchor — my-closet and both (DI resolver)", () => {
     const result = await resolveActionAnchor("my-closet", "cust-1", null, "ci-owned", fakeResolver);
     assert.equal(result.ok, true);
     if (!result.ok) throw new Error("unreachable");
+        if (!result.anchor) throw new Error("unreachable");
     assert.equal(result.anchor.type, "closet");
     assert.equal((result.anchor as ClosetAnchorInput).id, "ci-owned");
   });
@@ -218,6 +221,7 @@ describe("resolveActionAnchor — my-closet and both (DI resolver)", () => {
     const result = await resolveActionAnchor("both", "cust-1", null, "ci-owned", fakeResolver);
     assert.equal(result.ok, true);
     if (!result.ok) throw new Error("unreachable");
+        if (!result.anchor) throw new Error("unreachable");
     assert.equal(result.anchor.type, "closet");
   });
 
@@ -322,7 +326,6 @@ describe("scoreClosetItemForSession", () => {
 describe("§REV2 autoSelectClosetAnchor formality tier-sort", () => {
   function makeAutoItem(overrides: Partial<AutoSelectItem> & { id: string }): AutoSelectItem {
     return {
-      id: overrides.id,
       name: null,
       category: "TOPS",
       subcategory: null,
@@ -335,6 +338,13 @@ describe("§REV2 autoSelectClosetAnchor formality tier-sort", () => {
       imageUrl: "https://example.com/test-garment.jpg",
       garmentRelationships: [],
       formality: null,
+      waistShape: null,
+      hemLength: null,
+      topLength: null,
+      sleeveLength: null,
+      necklineCoverage: null,
+      shoulderCoverage: null,
+      midriffExposed: null,
       styleMeProfile: null,
       ...overrides,
     };
@@ -454,6 +464,13 @@ describe("§AR autoSelectClosetAnchor intention awareness", () => {
       imageUrl: "https://example.com/test-garment.jpg",
       garmentRelationships: [],
       formality: "casual",
+      waistShape: null,
+      hemLength: null,
+      topLength: null,
+      sleeveLength: null,
+      necklineCoverage: null,
+      shoulderCoverage: null,
+      midriffExposed: null,
       styleMeProfile: null,
       ...overrides,
     };
@@ -607,6 +624,13 @@ describe("§BNA autoSelectClosetAnchor body-need (structured-shape) awareness", 
       imageUrl: "https://example.com/test-garment.jpg",
       garmentRelationships: [],
       formality: "casual",
+      waistShape: null,
+      hemLength: null,
+      topLength: null,
+      sleeveLength: null,
+      necklineCoverage: null,
+      shoulderCoverage: null,
+      midriffExposed: null,
       styleMeProfile: construction !== null
         ? { profileStatus: "approved", intentionPotentials: {}, occasionFit: null, construction }
         : null,
@@ -901,6 +925,13 @@ describe("§RCT5-ANC RC-T5 autoSelectClosetAnchor loose-comfortable awareness", 
       imageUrl: "https://example.com/test-garment.jpg",
       garmentRelationships: [],
       formality: "casual",
+      waistShape: null,
+      hemLength: null,
+      topLength: null,
+      sleeveLength: null,
+      necklineCoverage: null,
+      shoulderCoverage: null,
+      midriffExposed: null,
       styleMeProfile: {
         profileStatus: "approved",
         intentionPotentials: {},

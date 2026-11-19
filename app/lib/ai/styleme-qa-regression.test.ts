@@ -55,6 +55,12 @@ function makeAutoItem(
     garmentRelationships: [],
     formality: "casual",
     waistShape: null,
+    hemLength: null,
+    topLength: null,
+    sleeveLength: null,
+    necklineCoverage: null,
+    shoulderCoverage: null,
+    midriffExposed: null,
     styleMeProfile: null,
     ...overrides,
   };
@@ -79,6 +85,35 @@ function makeClosetItem(overrides: Partial<ClosetAnchorInput> = {}): ClosetAncho
   };
 }
 
+type AnchorScoringProfile = NonNullable<ClosetAnchorInput["approvedProfile"]>;
+
+// Full-shape helper for the approvedProfile fixtures below, which previously
+// specified only the 3-4 fields each test actually cares about — correct at
+// runtime (scoreBodyNeedForClosetItem only reads those fields) but not
+// type-complete, since AnchorScoringProfile has no optional fields. Mirrors
+// makeAutoItem/makeClosetItem's own Partial<...>-plus-defaults pattern.
+function makeApprovedProfile(overrides: Partial<AnchorScoringProfile> = {}): AnchorScoringProfile {
+  return {
+    exactSlot: null,
+    outfitFunction: null,
+    dressRegister: null,
+    fabricBehaviour: [],
+    silhouetteCharacter: [],
+    visualWeight: null,
+    construction: null,
+    stylingEffort: null,
+    layeringBehaviour: null,
+    waistComfort: null,
+    statementLevel: null,
+    occasionFit: null,
+    intentionPotentials: null,
+    naturalPairings: null,
+    intentionalMix: null,
+    avoidInStyleMe: null,
+    ...overrides,
+  };
+}
+
 // ── A. scoreBodyNeedForClosetItem unit tests ──────────────────────────────────
 
 describe("A. scoreBodyNeedForClosetItem — loose-comfortable", () => {
@@ -87,7 +122,7 @@ describe("A. scoreBodyNeedForClosetItem — loose-comfortable", () => {
       fitProfile: null,
       waistShape: null,
       styleTags: [],
-      approvedProfile: { silhouetteCharacter: ["fitted"], waistComfort: null, construction: null, fabricBehaviour: [] },
+      approvedProfile: makeApprovedProfile({ silhouetteCharacter: ["fitted"], waistComfort: null, construction: null, fabricBehaviour: [] }),
     });
     assert.equal(result.violation, true, "fitted silhouette must be a violation for loose-comfortable");
   });
@@ -97,7 +132,7 @@ describe("A. scoreBodyNeedForClosetItem — loose-comfortable", () => {
       fitProfile: null,
       waistShape: null,
       styleTags: [],
-      approvedProfile: { silhouetteCharacter: ["relaxed"], waistComfort: null, construction: null, fabricBehaviour: [] },
+      approvedProfile: makeApprovedProfile({ silhouetteCharacter: ["relaxed"], waistComfort: null, construction: null, fabricBehaviour: [] }),
     });
     assert.equal(result.violation, false);
     assert.ok(result.fitScore !== null && result.fitScore > 0.5, `relaxed → fitScore > 0.5, got ${result.fitScore}`);
@@ -108,7 +143,7 @@ describe("A. scoreBodyNeedForClosetItem — loose-comfortable", () => {
       fitProfile: null,
       waistShape: null,
       styleTags: [],
-      approvedProfile: { silhouetteCharacter: ["oversized"], waistComfort: "elastic", construction: null, fabricBehaviour: [] },
+      approvedProfile: makeApprovedProfile({ silhouetteCharacter: ["oversized"], waistComfort: "elastic", construction: null, fabricBehaviour: [] }),
     });
     assert.equal(result.violation, false);
     assert.equal(result.fitScore, 1.0, "oversized + elastic waist → top fitScore");
@@ -119,7 +154,7 @@ describe("A. scoreBodyNeedForClosetItem — loose-comfortable", () => {
       fitProfile: null,
       waistShape: null,
       styleTags: [],
-      approvedProfile: { silhouetteCharacter: [], waistComfort: null, construction: "soft", fabricBehaviour: [] },
+      approvedProfile: makeApprovedProfile({ silhouetteCharacter: [], waistComfort: null, construction: "soft", fabricBehaviour: [] }),
     });
     assert.equal(result.violation, false);
     assert.equal(result.fitScore, null, "soft construction alone must not produce a loose fitScore");
@@ -142,7 +177,7 @@ describe("A. scoreBodyNeedForClosetItem — less-body-conscious", () => {
       fitProfile: null,
       waistShape: null,
       styleTags: [],
-      approvedProfile: { silhouetteCharacter: ["fitted"], waistComfort: null, construction: null, fabricBehaviour: [] },
+      approvedProfile: makeApprovedProfile({ silhouetteCharacter: ["fitted"], waistComfort: null, construction: null, fabricBehaviour: [] }),
     });
     assert.equal(result.violation, true, "fitted silhouette is a violation for less-body-conscious");
   });
@@ -152,7 +187,7 @@ describe("A. scoreBodyNeedForClosetItem — less-body-conscious", () => {
       fitProfile: null,
       waistShape: null,
       styleTags: [],
-      approvedProfile: { silhouetteCharacter: ["relaxed"], waistComfort: null, construction: null, fabricBehaviour: [] },
+      approvedProfile: makeApprovedProfile({ silhouetteCharacter: ["relaxed"], waistComfort: null, construction: null, fabricBehaviour: [] }),
     });
     assert.equal(result.violation, false);
     assert.equal(result.fitScore, 1);
@@ -163,7 +198,7 @@ describe("A. scoreBodyNeedForClosetItem — less-body-conscious", () => {
       fitProfile: null,
       waistShape: null,
       styleTags: [],
-      approvedProfile: { silhouetteCharacter: ["A-line"], waistComfort: null, construction: null, fabricBehaviour: [] },
+      approvedProfile: makeApprovedProfile({ silhouetteCharacter: ["A-line"], waistComfort: null, construction: null, fabricBehaviour: [] }),
     });
     assert.equal(result.violation, false);
     assert.equal(result.fitScore, 0.5, "A-line (neutral silhouette) → 0.5, not cling but not loose");
@@ -213,7 +248,7 @@ describe("A. scoreBodyNeedForClosetItem — waist-definition", () => {
       fitProfile: "tailored",
       waistShape: null,
       styleTags: [],
-      approvedProfile: { silhouetteCharacter: [], waistComfort: null, construction: "tailored", fabricBehaviour: [] },
+      approvedProfile: makeApprovedProfile({ silhouetteCharacter: [], waistComfort: null, construction: "tailored", fabricBehaviour: [] }),
     });
     assert.equal(result.fitScore, null, "tailored construction alone must not produce a waist-definition score");
   });
@@ -234,7 +269,7 @@ describe("A. scoreBodyNeedForClosetItem — softer-easier-fabrics", () => {
       fitProfile: null,
       waistShape: null,
       styleTags: [],
-      approvedProfile: { silhouetteCharacter: [], waistComfort: null, construction: null, fabricBehaviour: ["soft"] },
+      approvedProfile: makeApprovedProfile({ silhouetteCharacter: [], waistComfort: null, construction: null, fabricBehaviour: ["soft"] }),
     });
     assert.equal(result.fitScore, 0.8);
   });
@@ -244,7 +279,7 @@ describe("A. scoreBodyNeedForClosetItem — softer-easier-fabrics", () => {
       fitProfile: null,
       waistShape: null,
       styleTags: [],
-      approvedProfile: { silhouetteCharacter: [], waistComfort: null, construction: null, fabricBehaviour: ["fluid"] },
+      approvedProfile: makeApprovedProfile({ silhouetteCharacter: [], waistComfort: null, construction: null, fabricBehaviour: ["fluid"] }),
     });
     assert.equal(result.fitScore, 0.8);
   });
@@ -254,7 +289,7 @@ describe("A. scoreBodyNeedForClosetItem — softer-easier-fabrics", () => {
       fitProfile: null,
       waistShape: null,
       styleTags: [],
-      approvedProfile: { silhouetteCharacter: [], waistComfort: null, construction: null, fabricBehaviour: ["rigid"] },
+      approvedProfile: makeApprovedProfile({ silhouetteCharacter: [], waistComfort: null, construction: null, fabricBehaviour: ["rigid"] }),
     });
     assert.equal(result.fitScore, 0.2, "rigid fabric → 0.2, not soft");
   });
@@ -273,10 +308,10 @@ describe("A. scoreBodyNeedForClosetItem — softer-easier-fabrics", () => {
       fitProfile: null,
       waistShape: null,
       styleTags: [],
-      approvedProfile: {
+      approvedProfile: makeApprovedProfile({
         silhouetteCharacter: [], waistComfort: null, construction: null, fabricBehaviour: [],
         intentionPotentials: { "feel-softer": "Strong" },
-      },
+      }),
     });
     assert.equal(result.fitScore, null, "feel-softer intention alone must not produce a softer-fabrics score");
   });
@@ -288,7 +323,7 @@ describe("A. scoreBodyNeedForClosetItem — nothing-tight-waist", () => {
       fitProfile: null,
       waistShape: null,
       styleTags: [],
-      approvedProfile: { silhouetteCharacter: [], waistComfort: "elastic", construction: null, fabricBehaviour: [] },
+      approvedProfile: makeApprovedProfile({ silhouetteCharacter: [], waistComfort: "elastic", construction: null, fabricBehaviour: [] }),
     });
     assert.equal(result.violation, false);
     assert.equal(result.fitScore, 1);
@@ -299,7 +334,7 @@ describe("A. scoreBodyNeedForClosetItem — nothing-tight-waist", () => {
       fitProfile: null,
       waistShape: null,
       styleTags: [],
-      approvedProfile: { silhouetteCharacter: [], waistComfort: "restrictive", construction: null, fabricBehaviour: [] },
+      approvedProfile: makeApprovedProfile({ silhouetteCharacter: [], waistComfort: "restrictive", construction: null, fabricBehaviour: [] }),
     });
     assert.equal(result.fitScore, 0.1, "restrictive waistband → near-zero fitScore");
   });
@@ -941,7 +976,7 @@ describe("F. Real-like QA fixture analogs", () => {
     });
     const tailoredResult = scoreBodyNeedForClosetItem("waist-definition", {
       fitProfile: "tailored", waistShape: null, styleTags: [],
-      approvedProfile: { silhouetteCharacter: [], waistComfort: null, construction: "tailored", fabricBehaviour: [] },
+      approvedProfile: makeApprovedProfile({ silhouetteCharacter: [], waistComfort: null, construction: "tailored", fabricBehaviour: [] }),
     });
     assert.equal(beltedResult.fitScore, 1, "belted must give fitScore=1");
     assert.equal(tailoredResult.fitScore, null, "tailored alone must give fitScore=null");
@@ -950,15 +985,15 @@ describe("F. Real-like QA fixture analogs", () => {
   it("F4 Test-17 analog: softer-easier-fabrics scores soft/fluid fabric items positively", () => {
     const softResult = scoreBodyNeedForClosetItem("softer-easier-fabrics", {
       fitProfile: null, waistShape: null, styleTags: [],
-      approvedProfile: { silhouetteCharacter: [], waistComfort: null, construction: null, fabricBehaviour: ["soft"] },
+      approvedProfile: makeApprovedProfile({ silhouetteCharacter: [], waistComfort: null, construction: null, fabricBehaviour: ["soft"] }),
     });
     const fluidResult = scoreBodyNeedForClosetItem("softer-easier-fabrics", {
       fitProfile: null, waistShape: null, styleTags: [],
-      approvedProfile: { silhouetteCharacter: [], waistComfort: null, construction: null, fabricBehaviour: ["fluid"] },
+      approvedProfile: makeApprovedProfile({ silhouetteCharacter: [], waistComfort: null, construction: null, fabricBehaviour: ["fluid"] }),
     });
     const stretchResult = scoreBodyNeedForClosetItem("softer-easier-fabrics", {
       fitProfile: null, waistShape: null, styleTags: [],
-      approvedProfile: { silhouetteCharacter: [], waistComfort: null, construction: null, fabricBehaviour: ["stretch"] },
+      approvedProfile: makeApprovedProfile({ silhouetteCharacter: [], waistComfort: null, construction: null, fabricBehaviour: ["stretch"] }),
     });
     assert.ok(softResult.fitScore !== null && softResult.fitScore > 0.5, "soft fabric → fitScore > 0.5");
     assert.ok(fluidResult.fitScore !== null && fluidResult.fitScore > 0.5, "fluid fabric → fitScore > 0.5");
@@ -970,11 +1005,11 @@ describe("F. Real-like QA fixture analogs", () => {
     // A hoodie with feel-softer=None and fabricBehaviour=[] → null (no score).
     const result = scoreBodyNeedForClosetItem("softer-easier-fabrics", {
       fitProfile: null, waistShape: null, styleTags: ["cosy"],
-      approvedProfile: {
+      approvedProfile: makeApprovedProfile({
         silhouetteCharacter: ["relaxed"], waistComfort: null, construction: "soft",
         fabricBehaviour: [], // no fabricBehaviour data → null fitScore
         intentionPotentials: { "feel-softer": "None" },
-      },
+      }),
     });
     assert.equal(result.fitScore, null, "feel-softer=None + no fabricBehaviour → fitScore must be null");
   });

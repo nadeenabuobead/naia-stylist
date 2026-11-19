@@ -4462,8 +4462,9 @@ describe("§QA-T1-REG — positive-score gown excluded from everyday by architec
 
   it("REG.2 — computeNaiaResultDirections with bottom anchor: gown absent from all directions", () => {
     const closet = [
-      { id: "skirt-reg", name: "Black Mini Skirt", category: "BOTTOMS", occasions: ["everyday"],
-        styleTags: ["casual"], colors: ["black"], primaryColor: "black", imageUrl: "https://example.com/test-garment.jpg", garmentRelationships: [] },
+      { type: "closet" as const, id: "skirt-reg", name: "Black Mini Skirt", category: "BOTTOMS", occasions: ["everyday"],
+        styleTags: ["casual"], colors: ["black"], primaryColor: "black", pattern: null, material: null,
+        imageUrl: "https://example.com/test-garment.jpg", garmentRelationships: [] },
       GOWN_WITH_MOOD,
       EVERYDAY_TOP,
     ];
@@ -4594,6 +4595,10 @@ describe("§QA-ANCHOR-DI — autoSelectClosetAnchor via DI seam (no Prisma)", ()
     colors: ["ivory"], primaryColor: "ivory",
     pattern: null, material: null, imageUrl: "https://example.com/test-garment.jpg",
     garmentRelationships: ["occasion-only", "favourite"],
+    subcategory: null, formality: null, waistShape: null,
+    hemLength: null, topLength: null, sleeveLength: null,
+    necklineCoverage: null, shoulderCoverage: null, midriffExposed: null,
+    styleMeProfile: null,
     // isCompatible("work"): "work" ∉ occasions, length>0, has "occasion-only" → INCOMPATIBLE
   };
   // WORK_TOP: occasions: ["work","everyday"], no tags matching moods.
@@ -4605,6 +4610,10 @@ describe("§QA-ANCHOR-DI — autoSelectClosetAnchor via DI seam (no Prisma)", ()
     styleTags: ["classic"], colors: ["white"], primaryColor: "white",
     pattern: null, material: null, imageUrl: "https://example.com/test-garment.jpg",
     garmentRelationships: [],
+    subcategory: null, formality: null, waistShape: null,
+    hemLength: null, topLength: null, sleeveLength: null,
+    necklineCoverage: null, shoulderCoverage: null, midriffExposed: null,
+    styleMeProfile: null,
     // isCompatible("work"): "work" ∈ occasions → COMPATIBLE
   };
   // VERSATILE: no occasion tags at all — incomplete metadata, not a restriction.
@@ -4616,6 +4625,10 @@ describe("§QA-ANCHOR-DI — autoSelectClosetAnchor via DI seam (no Prisma)", ()
     styleTags: ["casual"], colors: ["cream"], primaryColor: "cream",
     pattern: null, material: null, imageUrl: "https://example.com/test-garment.jpg",
     garmentRelationships: [],
+    subcategory: null, formality: null, waistShape: null,
+    hemLength: null, topLength: null, sleeveLength: null,
+    necklineCoverage: null, shoulderCoverage: null, midriffExposed: null,
+    styleMeProfile: null,
     // isCompatible("everyday"): occasions.length===0 → COMPATIBLE (versatile)
   };
   // GOWN_EVENT: occasion-only for special-event — incompatible for everyday, compatible for event.
@@ -4630,6 +4643,10 @@ describe("§QA-ANCHOR-DI — autoSelectClosetAnchor via DI seam (no Prisma)", ()
     colors: ["black"], primaryColor: "black",
     pattern: null, material: null, imageUrl: "https://example.com/test-garment.jpg",
     garmentRelationships: ["occasion-only", "favourite"],
+    subcategory: null, formality: null, waistShape: null,
+    hemLength: null, topLength: null, sleeveLength: null,
+    necklineCoverage: null, shoulderCoverage: null, midriffExposed: null,
+    styleMeProfile: null,
     // isCompatible("everyday"): "everyday" ∉ occasions, has "occasion-only" → INCOMPATIBLE
     // isCompatible("special-event"): "special-event" ∈ occasions → COMPATIBLE
   };
@@ -6742,7 +6759,6 @@ describe("§FA.8 — Fix B: occasion evidence is passed into the model selection
         occasions: ["everyday", "work"], imageUrl: "",
       },
       mode: "naia" as const,
-      profile: null,
       recentlyShownClosetIds: [],
     };
 
@@ -6792,7 +6808,6 @@ describe("§FA.8 — Fix B: occasion evidence is passed into the model selection
         occasions: ["everyday", "work"], imageUrl: "",
       },
       mode: "naia" as const,
-      profile: null,
       recentlyShownClosetIds: [],
     };
 
@@ -6859,7 +6874,6 @@ describe("§FA.NEW.1 — occasionTier: bag (OPTIONAL) has no T1 effect; both A a
         occasions: ["everyday", "work"], imageUrl: "",
       },
       mode: "naia" as const,
-      profile: null,
       recentlyShownClosetIds: [],
     };
 
@@ -6912,7 +6926,6 @@ describe("§FA.NEW.2 — No-metadata optional layer is neutral: same fallback ou
         occasions: ["everyday", "work"], imageUrl: "",
       },
       mode: "naia" as const,
-      profile: null,
       recentlyShownClosetIds: [],
     };
 
@@ -6965,7 +6978,6 @@ describe("§FA.9 — Tie-break: equal scores, candidate with fewer non-matching 
         occasions: ["everyday", "work"], imageUrl: "",
       },
       mode: "naia" as const,
-      profile: null,
       recentlyShownClosetIds: [],
     };
 
@@ -7379,7 +7391,6 @@ describe("§WO.9 — Fallback: model fails → highest-compositeScore candidate 
         occasions: ["everyday"], imageUrl: "", formality: "casual" as string | null | undefined,
       },
       mode: "naia" as const,
-      profile: null,
       recentlyShownClosetIds: [],
     };
 
@@ -8873,19 +8884,19 @@ describe("§SARA.2 — Sara work/polished: same closet, work session → structu
 
 describe("§WORDING.1 — deterministicWording: title format for null-model fallback", () => {
   it("WORDING.1.1 — no primaryTitle + everyday → 'Your everyday look'", () => {
-    const w = deterministicWording("closet", ["like-myself"], ["comfortable"], "everyday", null, null);
+    const w = deterministicWording("closet-led", ["like-myself"], ["comfortable"], "everyday", null, null);
     assert.strictEqual(w.outfitName, "Your everyday look",
       "Fallback title must be 'Your everyday look', not raw mood ID fragments");
   });
 
   it("WORDING.1.2 — no primaryTitle + work → 'Your work look'", () => {
-    const w = deterministicWording("closet", ["confident"], ["put-together"], "work", null, null);
+    const w = deterministicWording("closet-led", ["confident"], ["put-together"], "work", null, null);
     assert.strictEqual(w.outfitName, "Your work look",
       "Fallback title for work must be 'Your work look'");
   });
 
   it("WORDING.1.3 — no primaryTitle + date-night → 'Your date night look' (hyphen replaced with space)", () => {
-    const w = deterministicWording("closet", ["romantic"], ["confident"], "date-night", null, null);
+    const w = deterministicWording("closet-led", ["romantic"], ["confident"], "date-night", null, null);
     assert.strictEqual(w.outfitName, "Your date night look",
       "Fallback title must replace hyphens with spaces for readability");
   });
@@ -8893,7 +8904,7 @@ describe("§WORDING.1 — deterministicWording: title format for null-model fall
   it("WORDING.1.4 — title does NOT contain raw mood-signal ID fragments", () => {
     // Moods like "like-myself", "feel-powerful" must never appear in the title.
     // The old bug: moodStr = "like myself" → outfitName = "Like myself for everyday"
-    const w = deterministicWording("closet", ["like-myself", "feel-powerful"], [], "everyday", null, null);
+    const w = deterministicWording("closet-led", ["like-myself", "feel-powerful"], [], "everyday", null, null);
     assert.ok(
       !w.outfitName.toLowerCase().includes("like myself"),
       `outfitName must not contain raw mood ID; got: "${w.outfitName}"`,
@@ -8905,7 +8916,7 @@ describe("§WORDING.1 — deterministicWording: title format for null-model fall
   });
 
   it("WORDING.1.5 — whyThisWorks does NOT contain the word 'mood' for standard fallback", () => {
-    const w = deterministicWording("closet", ["like-myself"], ["comfortable"], "everyday", null, null);
+    const w = deterministicWording("closet-led", ["like-myself"], ["comfortable"], "everyday", null, null);
     assert.ok(
       !w.whyThisWorks.toLowerCase().includes("mood"),
       `whyThisWorks must not reference 'mood' language; got: "${w.whyThisWorks}"`,
@@ -8913,7 +8924,7 @@ describe("§WORDING.1 — deterministicWording: title format for null-model fall
   });
 
   it("WORDING.1.6 — primaryTitle present → title is 'Primary Title for occasion'", () => {
-    const w = deterministicWording("closet", [], [], "everyday", "The Easy Edit", null);
+    const w = deterministicWording("closet-led", [], [], "everyday", "The Easy Edit", null);
     assert.strictEqual(w.outfitName, "The Easy Edit for everyday");
   });
 
@@ -8928,7 +8939,7 @@ describe("§WORDING.1 — deterministicWording: title format for null-model fall
 
   it("WORDING.1.8 — anchor label is referenced in whyThisWorks when anchor is provided", () => {
     const w = deterministicWording(
-      "closet", [], [], "everyday", null, null, [],
+      "closet-led", [], [], "everyday", null, null, [],
       { label: "Black Long-Sleeve Top", slot: "top", colors: ["black"] },
     );
     assert.ok(
@@ -10703,8 +10714,12 @@ describe("§CE Candidate E", () => {
       slot: slot as import("./styleme-recommendation.types.ts").OutfitSlot,
       label: `Anchor ${id}`,
       colors: [],
+      normalizedColorIds: [],
       material: null,
       styleTags: [],
+      occasions: [],
+      hasStrongEvidence: false,
+      evidenceFields: [],
       imageUrl: "https://example.com/img.jpg",
     };
   }
@@ -10826,8 +10841,12 @@ describe("§CE.B Anchor immutability and integrity gate", () => {
       slot: slot as import("./styleme-recommendation.types.ts").OutfitSlot,
       label: `Anchor ${id}`,
       colors: [],
+      normalizedColorIds: [],
       material: null,
       styleTags: [],
+      occasions: [],
+      hasStrongEvidence: false,
+      evidenceFields: [],
       imageUrl: "https://example.com/img.jpg",
     };
   }
