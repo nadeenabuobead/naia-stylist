@@ -829,19 +829,126 @@ async function createFullLookRealGarmentsMaxFixture(customerId: string) {
 // exact broken "DB says ready, no bytes exist" state this gap produced.
 const MY_NAIA_MODEL_FIXTURE_FORMAT = "png";
 
-// A minimal, valid, synthetic 1x1 PNG (68 bytes, decodes to a real image —
-// not a placeholder string) — generated inline, not read from a checked-in
-// asset file, so there is no separate file to keep in sync with this
-// constant. This is never going to be customer-identifying (it is a single
-// solid pixel) and is already clearly namespaced under
-// "qa-fixture-synthetic-body" below. It only needs to pass through
-// Cloudinary's own upload validation and FASHN's own image-input
-// validation as *some* real photo — the Full-Look VTO chain this fixture
-// exists to exercise never inspects the photo's visual content, only that
-// downloadModelPhotoAsDataUrl can actually fetch real bytes at this
-// public_id.
-const SYNTHETIC_FIXTURE_PHOTO_DATA_URL =
-  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+// A valid, synthetic PNG — hand-built here from raw pixels via Node's
+// built-in zlib (no new dependency, no network fetch, no AI-generation
+// call) — depicting a simple humanoid silhouette: a head circle, a torso
+// rectangle, two arm rectangles, and two leg rectangles in a flat dark
+// gray against a light gray background, 180x320px. Generated inline, not
+// read from a checked-in asset file, so there is no separate file to keep
+// in sync with this constant.
+//
+// 2026-11-20 — upgraded from an earlier single-solid-pixel placeholder.
+// A 1x1 pixel passes Cloudinary's own upload validation but gives FASHN's
+// pose/body-detection step nothing to find — in the real paid Full-Look
+// VTO flow this fixture exists to exercise, that risks either a NEW
+// failure mode (PROVIDER_REJECTED) or, worse, acceptance followed by a
+// real-credit-spending, guaranteed-garbage generation. This image is
+// still fully synthetic and non-identifiable (geometric shapes, not a
+// real photo of a real person) but has actual head/torso/limb structure
+// for a pose-detection step to act on.
+function buildSyntheticHumanoidSilhouettePng(): Buffer {
+  const width = 180;
+  const height = 320;
+
+  const background: [number, number, number] = [230, 230, 230];
+  const foreground: [number, number, number] = [60, 60, 60];
+
+  const headCenterX = width / 2;
+  const headCenterY = 54;
+  const headRadius = 32;
+  const torso = { x0: 62, y0: 86, x1: 118, y1: 190 };
+  const armLeft = { x0: 40, y0: 92, x1: 62, y1: 178 };
+  const armRight = { x0: 118, y0: 92, x1: 140, y1: 178 };
+  const legLeft = { x0: 68, y0: 190, x1: 88, y1: 304 };
+  const legRight = { x0: 92, y0: 190, x1: 112, y1: 304 };
+
+  const inRect = (x: number, y: number, r: { x0: number; y0: number; x1: number; y1: number }) =>
+    x >= r.x0 && x < r.x1 && y >= r.y0 && y < r.y1;
+
+  const isForeground = (x: number, y: number): boolean => {
+    const dx = x - headCenterX;
+    const dy = y - headCenterY;
+    if (dx * dx + dy * dy <= headRadius * headRadius) return true;
+    return (
+      inRect(x, y, torso) ||
+      inRect(x, y, armLeft) ||
+      inRect(x, y, armRight) ||
+      inRect(x, y, legLeft) ||
+      inRect(x, y, legRight)
+    );
+  };
+
+  // Raw PNG scanlines: each row is a filter-type byte (0 = "None")
+  // followed by width * 3 RGB bytes — exactly what zlib-deflating and
+  // wrapping in IDAT below expects.
+  const stride = 1 + width * 3;
+  const raw = Buffer.alloc(stride * height);
+  for (let y = 0; y < height; y++) {
+    const rowStart = y * stride;
+    raw[rowStart] = 0;
+    for (let x = 0; x < width; x++) {
+      const [r, g, b] = isForeground(x, y) ? foreground : background;
+      const px = rowStart + 1 + x * 3;
+      raw[px] = r;
+      raw[px + 1] = g;
+      raw[px + 2] = b;
+    }
+  }
+
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 2; // color type: truecolor (RGB)
+  ihdr[10] = 0; // compression method
+  ihdr[11] = 0; // filter method
+  ihdr[12] = 0; // interlace method
+
+  const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  return Buffer.concat([
+    signature,
+    pngChunk("IHDR", ihdr),
+    pngChunk("IDAT", zlib.deflateSync(raw)),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+// Standard PNG/zlib CRC-32 table, used only to checksum the chunks this
+// file hand-builds above — no external dependency, this is the same
+// well-known polynomial every PNG encoder/decoder uses.
+const PNG_CRC_TABLE: Uint32Array = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) {
+      c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    }
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+
+function pngCrc32(buf: Buffer): number {
+  let crc = 0xffffffff;
+  for (let i = 0; i < buf.length; i++) {
+    crc = PNG_CRC_TABLE[(crc ^ buf[i]) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function pngChunk(type: string, chunkData: Buffer): Buffer {
+  const typeBuf = Buffer.from(type, "ascii");
+  const lenBuf = Buffer.alloc(4);
+  lenBuf.writeUInt32BE(chunkData.length, 0);
+  const crcBuf = Buffer.alloc(4);
+  crcBuf.writeUInt32BE(pngCrc32(Buffer.concat([typeBuf, chunkData])), 0);
+  return Buffer.concat([lenBuf, typeBuf, chunkData, crcBuf]);
+}
+
+// Built once at module load (cheap: a few hundred KB of in-memory pixel
+// math, not a network call) and reused for every fixture invocation,
+// rather than re-encoding the same PNG bytes on every request.
+const SYNTHETIC_FIXTURE_PHOTO_DATA_URL = `data:image/png;base64,${buildSyntheticHumanoidSilhouettePng().toString("base64")}`;
 
 function myNaiaModelFixtureBodyPublicId(customerId: string): string {
   return `naia-wardrobe/${customerId}/qa-fixture-synthetic-body`;
