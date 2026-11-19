@@ -1744,9 +1744,10 @@ describe("P — StyleMe historical image hydration", () => {
   });
 
   it("style-me/result.tsx falls back to legacy imageUrl when imagePublicId unavailable", () => {
+    // Same fallback, now also ownership-checked (QA #36 follow-up security fix).
     const src = route("style-me/result.tsx");
     assert.ok(
-      src.includes("if (ci.imageUrl) return { ...item, productImageUrl: ci.imageUrl }"),
+      src.includes("if (ci.imageUrl && validateImageUrlOwnership(ci.imageUrl, session.customerId))"),
       "legacy imageUrl used as fallback"
     );
   });

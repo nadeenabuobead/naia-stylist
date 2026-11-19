@@ -52,9 +52,17 @@ describe("loader auth gate — contract assertions", () => {
   });
 
   it("closet._index.tsx loader: requireCurrentNaiaCustomer called before any DB operation", () => {
+    // closet._index.tsx has grown a helper function (garment-metadata
+    // refresh) defined ABOVE the loader that makes its own unrelated
+    // prisma.closetItem.findUnique call — a whole-file indexOf("prisma.")
+    // now finds that one first, which has nothing to do with loader auth
+    // ordering. Scope the check to the loader function's own body.
     const code = src("closet._index.tsx");
-    const authIdx = code.indexOf("await requireCurrentNaiaCustomer(request)");
-    const prismaIdx = code.indexOf("prisma.");
+    const loaderIdx = code.indexOf("export async function loader");
+    const loaderEnd = code.indexOf("\nexport ", loaderIdx + 1);
+    const loaderBody = code.slice(loaderIdx, loaderEnd === -1 ? undefined : loaderEnd);
+    const authIdx = loaderBody.indexOf("await requireCurrentNaiaCustomer(request)");
+    const prismaIdx = loaderBody.indexOf("prisma.");
     assert.ok(authIdx !== -1, "requireCurrentNaiaCustomer call must exist");
     if (prismaIdx !== -1) {
       assert.ok(authIdx < prismaIdx, "auth must precede any prisma call");

@@ -61,10 +61,11 @@ describe("Technical Debt 1 — Buy/Skip DB-backed idempotency (b2-1 to b2-5)", (
 
   it("b2-4: prisma schema adds idempotencyKey to BuyOrSkipAnalysis", () => {
     const schema = readSrc("../../../prisma/schema.prisma");
-    const bosBlock = schema.slice(
-      schema.indexOf("model BuyOrSkipAnalysis"),
-      schema.indexOf("model BuyOrSkipAnalysis") + 2000,
-    );
+    const modelStart = schema.indexOf("model BuyOrSkipAnalysis");
+    // The model has grown past the previous fixed 2000-char window (now
+    // ~3200 chars) as fields were added — slice to the model's own closing
+    // brace instead of a hardcoded length, so this can't drift again.
+    const bosBlock = schema.slice(modelStart, schema.indexOf("\n}", modelStart));
     assert.ok(bosBlock.includes("idempotencyKey"), "BuyOrSkipAnalysis must have idempotencyKey field");
     assert.ok(bosBlock.includes("@unique"), "BuyOrSkipAnalysis.idempotencyKey must be unique");
   });
@@ -588,10 +589,13 @@ describe("Deduplication key format (b2-47 to b2-50)", () => {
     );
   });
 
-  it("b2-49: closet_item_added key includes newItem.id", () => {
+  it("b2-49: closet_item_added key includes the new closet item's id", () => {
+    // The local variable holding the newly-created item was renamed from
+    // newItem to createdItem — the key format itself (still embedding the
+    // item's own id) is unchanged.
     const src = readRoute("closet._index.tsx");
     assert.ok(
-      src.includes("closet_item_added:${newItem.id}:v1"),
+      src.includes("closet_item_added:${createdItem.id}:v1"),
       "closet_item_added key must embed the new closet item ID",
     );
   });

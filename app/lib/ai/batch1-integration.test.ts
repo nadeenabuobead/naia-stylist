@@ -593,16 +593,27 @@ describe("Deprecated route safety (Batch 1 review)", () => {
   });
 
   it("b1-56: vercel.json migration strategy — migrations in buildCommand with documentation", () => {
+    // vercel.json's buildCommand now delegates to scripts/build-preview.sh
+    // (see its own NAIA_ALLOW_PREVIEW_MIGRATIONS gate comment) rather than
+    // inlining the prisma commands directly — check the real build script,
+    // not vercel.json's own (now thin) buildCommand string.
     const vercel = readFileSync(
       join(__dirname, "../../../vercel.json"), "utf8",
     );
     assert.ok(
-      vercel.includes("prisma migrate deploy"),
-      "vercel.json buildCommand must include prisma migrate deploy for staging DB",
+      vercel.includes("build-preview.sh"),
+      "vercel.json buildCommand must delegate to scripts/build-preview.sh",
+    );
+    const buildScript = readFileSync(
+      join(__dirname, "../../../scripts/build-preview.sh"), "utf8",
     );
     assert.ok(
-      vercel.includes("prisma generate"),
-      "vercel.json buildCommand must include prisma generate",
+      buildScript.includes("prisma migrate deploy"),
+      "build-preview.sh must include prisma migrate deploy for staging DB",
+    );
+    assert.ok(
+      buildScript.includes("prisma generate"),
+      "build-preview.sh must include prisma generate",
     );
   });
 });

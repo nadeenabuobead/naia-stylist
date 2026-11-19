@@ -326,8 +326,10 @@ describe("T12: result page generates server-side signed URL", () => {
 // ── T13: legacy records remain readable ──────────────────────────────────────
 describe("T13: existing legacy BOS records continue to display", () => {
   it("loader falls back to imageUrl when imagePublicId is null", () => {
+    // The legacy fallback now also requires validateImageUrlOwnership (QA #36
+    // follow-up security fix) — same fallback behavior, now ownership-checked.
     assert.ok(
-      result.includes("} else if (analysis.imageUrl)"),
+      result.includes("} else if (analysis.imageUrl && validateImageUrlOwnership("),
       "loader must fall back to legacy imageUrl when imagePublicId is absent",
     );
   });
