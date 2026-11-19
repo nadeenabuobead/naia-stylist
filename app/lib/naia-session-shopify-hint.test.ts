@@ -77,11 +77,36 @@ describe("auth.shopify.callback.tsx — wires tokens.id_token through to createN
     expect(validateIdx).toBeLessThan(createIdx);
   });
 
+  it("the cross-domain handoff branch also passes tokens.id_token through createNaiaSession (with its extra pendingExpiresAt argument), after the same id_token validation", () => {
+    const validateIdx = callbackSrc.indexOf("await validateIdToken(tokens.id_token");
+    const handoffCreateIdx = callbackSrc.indexOf("createNaiaSession(customer.id, request, tokens.id_token, pendingExpiresAt)");
+    assertPresent(handoffCreateIdx, "createNaiaSession call with tokens.id_token and pendingExpiresAt (handoff branch)");
+    expect(validateIdx).toBeLessThan(handoffCreateIdx);
+  });
+
   it("never logs the id_token and never returns it in any loader/response data", () => {
     expect(/console\.(log|error|warn|info)\([^)]*id_token/i.test(callbackSrc)).toBe(false);
-    // The only two places id_token may appear: validateIdToken's call and
-    // createNaiaSession's call — never inside the final redirect's data/headers.
-    const finalRedirect = callbackSrc.slice(callbackSrc.indexOf("const headers = new Headers()"));
+
+    // Past this point, id_token may ONLY appear as an argument to the two
+    // known-safe createNaiaSession calls (the cross-domain handoff branch,
+    // which passes a pendingExpiresAt 4th argument, and the normal branch,
+    // which doesn't) — createNaiaSession stores it solely in the dedicated
+    // shopifyIdTokenHint DB column (see the describe block above), never
+    // logs it, never returns it. Strip exactly those two call expressions,
+    // then assert id_token appears nowhere else at all — in a header, a
+    // redirect URL (handoffUrl/finalReturnTarget), a cookie value, or any
+    // new third call site this file doesn't already know about. This is
+    // the real security property (no leak) rather than "nothing after one
+    // fixed line," which breaks every time a legitimate branch is added
+    // after that line — exactly what happened with the handoff branch.
+    const finalRedirect = callbackSrc
+      .slice(callbackSrc.indexOf("const headers = new Headers()"))
+      // Strip // line comments first — this route's own explanatory prose
+      // (e.g. "tokens.id_token is already validated above...") legitimately
+      // mentions id_token without that being a leak; only executable code
+      // matters for this assertion.
+      .replace(/\/\/.*$/gm, "")
+      .replace(/createNaiaSession\(customer\.id, request, tokens\.id_token(?:, pendingExpiresAt)?\)/g, "createNaiaSession(/* safe */)");
     expect(finalRedirect.includes("id_token")).toBe(false);
   });
 
