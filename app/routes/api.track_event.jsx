@@ -2,10 +2,27 @@ import prisma from "../db.server";
 import { authenticateCustomer } from "../customer-auth.server";
 import { buildCorsHeaders } from "../lib/storefront-cors.server";
 
+// React Router (and this project's every other dual-method API route, e.g.
+// api.outfit-history.jsx) dispatches an OPTIONS preflight to the route's
+// loader, never its action — this file had only an action, so its own
+// `if (request.method === "OPTIONS")` branch inside action() was dead code,
+// never reached. Preflight requests fell through to React Router's default
+// no-loader handling instead, producing an inconsistent 400/500 instead of
+// the intended 204. This loader exists solely to answer OPTIONS correctly;
+// every real (non-preflight) call to this endpoint is a POST and still goes
+// through action() exactly as before.
+export async function loader({ request }) {
+  const CORS = buildCorsHeaders(request, "POST, OPTIONS");
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: CORS });
+  }
+  return new Response(null, { status: 405, headers: CORS });
+}
+
 export async function action({ request }) {
   const CORS = buildCorsHeaders(request, "POST, OPTIONS");
   if (request.method === "OPTIONS") {
-    return new Response(null, { headers: CORS });
+    return new Response(null, { status: 204, headers: CORS });
   }
 
   try {
