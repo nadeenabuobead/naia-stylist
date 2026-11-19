@@ -45,25 +45,12 @@ describe("isTransientDatabaseError", () => {
     expect(isTransientDatabaseError(prismaError("P2002"))).toBe(false);
   });
 
-  it("classifies 08P01 (protocol_violation) on a PrismaClientUnknownRequestError as transient (2026-11-19 — prisma/orm#30275: Prisma's own managed pooler acknowledged handing out stale connections on pooled.db.prisma.io, surfacing as this exact SQLSTATE)", () => {
+  it("SAFETY BOUNDARY (2026-11-19 founder safety review): does NOT classify 08P01 as transient at the isTransientDatabaseError level — this is the function the WRITE-transaction retry loops in entitlement.server.ts and api.closet.jsx call directly. 08P01 retry is deliberately scoped to withTransientRetry's read-only callers only (see isTransientOnUnknownRequestError in the source) so a reservation's count-check-then-create transaction is never blindly retried on a protocol error that could, under the newly-evidenced stale-pooled-connection mechanism, occur after a commit already reached the server", () => {
     const realMessage =
       'ConnectorError(ConnectorError { user_facing_error: None, kind: QueryError(PostgresError { code: "08P01", message: "protocol violation", severity: "ERROR", detail: None, hint: None, routine: Some("exec_bind_message") }) })';
-    expect(isTransientDatabaseError(unknownRequestError(realMessage))).toBe(true);
-  });
-
-  it("classifies 08P01 regardless of which Postgres routine raised it (the newly-evidenced stale-pooled-connection path doesn't always surface as exec_bind_message)", () => {
-    const message = 'PostgresError { code: "08P01", message: "server conn crashed?", routine: Some("SocketBackend") }';
-    expect(isTransientDatabaseError(unknownRequestError(message))).toBe(true);
-  });
-
-  it("does not classify a different SQLSTATE on a PrismaClientUnknownRequestError as transient", () => {
-    const message = 'PostgresError { code: "23505", message: "duplicate key value", severity: "ERROR" }';
-    expect(isTransientDatabaseError(unknownRequestError(message))).toBe(false);
-  });
-
-  it("does not classify an 08P01-shaped message as transient unless the error name is actually PrismaClientUnknownRequestError (narrow, name-gated match — not a bare substring check)", () => {
-    const message = 'PostgresError { code: "08P01", message: "protocol violation" }';
-    expect(isTransientDatabaseError(new Error(message))).toBe(false);
+    expect(isTransientDatabaseError(unknownRequestError(realMessage))).toBe(false);
+    const staleConnMessage = 'PostgresError { code: "08P01", message: "server conn crashed?", routine: Some("SocketBackend") }';
+    expect(isTransientDatabaseError(unknownRequestError(staleConnMessage))).toBe(false);
   });
 
   it("does not throw on null/non-object input", () => {
@@ -97,7 +84,7 @@ describe("withTransientRetry", () => {
     expect(sleep).toHaveBeenCalledWith(200);
   });
 
-  it("retries exactly once on 08P01, then returns the second attempt's result (the new stale-pooled-connection mitigation)", async () => {
+  it("retries exactly once on 08P01, then returns the second attempt's result (the new stale-pooled-connection mitigation, read-only callers only)", async () => {
     const op = vi
       .fn()
       .mockRejectedValueOnce(unknownRequestError('PostgresError { code: "08P01", message: "server conn crashed?" }'))
@@ -108,6 +95,76 @@ describe("withTransientRetry", () => {
 
     expect(result).toBe("recovered");
     expect(op).toHaveBeenCalledTimes(2);
+  });
+
+  it("08P01 retry is bounded exactly like every other transient error — a second 08P01 throws DatabaseUnavailableError, not a third attempt, and never silently conceals the persistent failure", async () => {
+    const op = vi.fn().mockRejectedValue(unknownRequestError('PostgresError { code: "08P01", message: "server conn crashed?" }'));
+    const sleep = vi.fn().mockResolvedValue(undefined);
+
+    await expect(withTransientRetry(op, { _sleep: sleep })).rejects.toBeInstanceOf(DatabaseUnavailableError);
+    expect(op).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry an unrelated SQLSTATE on a PrismaClientUnknownRequestError, exercised through withTransientRetry itself (not just the classifier in isolation)", async () => {
+    const notTransient = unknownRequestError('PostgresError { code: "23505", message: "duplicate key value" }');
+    const op = vi.fn().mockRejectedValue(notTransient);
+    const sleep = vi.fn().mockResolvedValue(undefined);
+
+    await expect(withTransientRetry(op, { _sleep: sleep })).rejects.toBe(notTransient);
+    expect(op).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it("does not retry an 08P01-shaped message on a plain Error whose name isn't PrismaClientUnknownRequestError, exercised through withTransientRetry itself", async () => {
+    const notTransient = new Error('PostgresError { code: "08P01", message: "protocol violation" }');
+    const op = vi.fn().mockRejectedValue(notTransient);
+    const sleep = vi.fn().mockResolvedValue(undefined);
+
+    await expect(withTransientRetry(op, { _sleep: sleep })).rejects.toBe(notTransient);
+    expect(op).toHaveBeenCalledTimes(1);
+  });
+
+  it("logs the original error's diagnostics (via captureError) before retrying — the only place a recovered retry's occurrence is observable at all, and the only place the original SQLSTATE/routine survive if the retry also fails", async () => {
+    const originalConsoleError = console.error;
+    const logs: string[] = [];
+    console.error = (...args: unknown[]) => {
+      logs.push(args.map(String).join(" "));
+    };
+    try {
+      const op = vi
+        .fn()
+        .mockRejectedValueOnce(
+          unknownRequestError('PostgresError { code: "08P01", message: "server conn crashed?", routine: Some("SocketBackend") }'),
+        )
+        .mockResolvedValueOnce("recovered");
+      const sleep = vi.fn().mockResolvedValue(undefined);
+
+      await withTransientRetry(op, { _sleep: sleep });
+
+      const captureLine = logs.find((l) => l.includes("[error-capture]"));
+      expect(captureLine).toBeDefined();
+      const event = JSON.parse(captureLine!.replace("[error-capture] ", ""));
+      expect(event.context).toBe("transient-retry");
+      expect(event.postgresSqlState).toBe("08P01");
+      expect(event.postgresRoutine).toBe("SocketBackend");
+    } finally {
+      console.error = originalConsoleError;
+    }
+  });
+
+  it("does NOT log anything when the first attempt simply succeeds (no retry, no noise)", async () => {
+    const originalConsoleError = console.error;
+    const logs: string[] = [];
+    console.error = (...args: unknown[]) => {
+      logs.push(args.map(String).join(" "));
+    };
+    try {
+      const op = vi.fn().mockResolvedValue("ok");
+      await withTransientRetry(op, { _sleep: vi.fn().mockResolvedValue(undefined) });
+      expect(logs.some((l) => l.includes("[error-capture]"))).toBe(false);
+    } finally {
+      console.error = originalConsoleError;
+    }
   });
 
   it("never retries more than once — a second transient failure throws DatabaseUnavailableError, not a third attempt", async () => {

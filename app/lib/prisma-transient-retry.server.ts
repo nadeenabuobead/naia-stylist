@@ -29,6 +29,8 @@
 // retry implementation now, called explicitly once per call site — nothing
 // here auto-applies to a query a caller didn't explicitly wrap.
 
+import { captureError } from "./error-tracking.server";
+
 const TRANSIENT_PRISMA_ERROR_CODES = new Set([
   "P1001", // Can't reach database server
   "P1002", // The database server was reached but timed out
@@ -68,43 +70,6 @@ export class DatabaseUnavailableError extends Error {
 // that code above) instead of a pool-specific one.
 const TRANSIENT_INITIALIZATION_ERROR_MESSAGE = /connection pool|can't reach database server/i;
 
-// 2026-11-19 — 08P01 (protocol_violation), PrismaClientUnknownRequestError.
-//
-// This SQLSTATE was deliberately EXCLUDED from retry up to now (see this
-// incident's own history in project memory): the original theory was a
-// client/pooler prepared-statement desync under PgBouncer transaction-mode
-// pooling, where retrying the SAME broken session seemed unlikely to help.
-//
-// New, independent, Prisma-maintainer-acknowledged evidence changes that
-// assessment (not a repeat of the same hypothesis — a different one, found
-// by investigating alternatives rather than assuming PgBouncer): Prisma's
-// own tracker (prisma/orm#30275) documents the managed Prisma Postgres
-// pooler itself (pooled.db.prisma.io — the exact endpoint this app uses)
-// handing a client a half-dead/stale backend connection after an idle
-// period, with Prisma's own team replying "the stall comes from the Prisma
-// Postgres pooler... we've reproduced it on our side" — and one reporter's
-// own failure on that exact endpoint was literally
-// `Code: 08P01. Message: server conn crashed?`, on a plain SELECT, with no
-// fix shipped yet (issue open, fix described as rolling out "in stages").
-// The only workaround anyone in that thread found was exactly this: treat
-// it as retryable and reacquire a connection.
-//
-// This is NOT a certainty that 08P01 is always safe to retry (a genuine
-// bind/parameter-count mismatch, if that is instead what occurs on a given
-// call, would plausibly just fail the same way again) — but retrying costs
-// nothing beyond this file's existing bounded single-retry + eventual
-// DatabaseUnavailableError, and a stale-pooled-connection failure (now
-// independently corroborated as a real, current, Prisma-side condition on
-// this exact endpoint) is very plausibly resolved by the pool simply
-// handing out a fresh connection on the next attempt. Matches only
-// PrismaClientUnknownRequestError carrying this specific SQLSTATE in
-// Prisma's own embedded PostgresError debug struct — never a bare
-// substring match against any error's message.
-const TRANSIENT_POSTGRES_SQLSTATE = new Set([
-  "08P01", // protocol_violation — see comment above
-]);
-const POSTGRES_SQLSTATE_PATTERN = /PostgresError\s*\{\s*code:\s*"([0-9A-Za-z]{5})"/;
-
 export function isTransientDatabaseError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const code = (error as { code?: string }).code;
@@ -112,11 +77,76 @@ export function isTransientDatabaseError(error: unknown): boolean {
   const name = (error as { name?: string }).name;
   const message = (error as { message?: string }).message ?? "";
   if (name === "PrismaClientInitializationError" && TRANSIENT_INITIALIZATION_ERROR_MESSAGE.test(message)) return true;
-  if (name === "PrismaClientUnknownRequestError") {
-    const sqlState = POSTGRES_SQLSTATE_PATTERN.exec(message)?.[1];
-    if (sqlState && TRANSIENT_POSTGRES_SQLSTATE.has(sqlState)) return true;
-  }
   return false;
+}
+
+// 2026-11-19 — 08P01 (protocol_violation), PrismaClientUnknownRequestError.
+//
+// Deliberately NOT added to isTransientDatabaseError itself, even though
+// the evidence below is real and new — that function is also consulted
+// directly (not via withTransientRetry) by the TRANSACTIONAL write-retry
+// loops in entitlement.server.ts (reserveClosetSlot / reserveStyleMeSlot /
+// reserveBuySkipSlot / reservePersonalisedTrendSlot) and api.closet.jsx's
+// sync action. Those loops retry a count-check-then-create transaction
+// FROM SCRATCH, and their own existing comments explain why that's safe
+// for P2024/P2034: both mean the client never even got a connection, or
+// Postgres itself guarantees a full rollback, so nothing executed to
+// duplicate. 08P01 does NOT have that same guarantee — it fires on an
+// established connection, potentially after some statements in a
+// transaction already ran, and (per the new evidence below) one known
+// cause is the pool handing out a connection whose underlying backend
+// already died, which cannot be ruled out as having happened *after* a
+// commit was sent but before the acknowledgment reached the client.
+// Retrying a reservation's create in that scenario could create a
+// duplicate row. isTransientDatabaseError's existing two write callers
+// must stay exactly as they already are — unaffected by this change.
+//
+// This SQLSTATE was deliberately EXCLUDED from retry up to now for a
+// DIFFERENT reason too (see this incident's own history in project
+// memory): the original theory was a client/pooler prepared-statement
+// desync under PgBouncer transaction-mode pooling, where retrying the
+// SAME broken session seemed unlikely to help.
+//
+// New, independent, Prisma-maintainer-acknowledged evidence changes that
+// assessment for the STANDALONE-READ case specifically (not a repeat of
+// the same hypothesis — a different one, found by investigating
+// alternatives rather than assuming PgBouncer): Prisma's own tracker
+// (prisma/orm#30275) documents the managed Prisma Postgres pooler itself
+// (pooled.db.prisma.io — the exact endpoint this app uses) handing a
+// client a half-dead/stale backend connection after an idle period, with
+// Prisma's own team replying "the stall comes from the Prisma Postgres
+// pooler... we've reproduced it on our side" — and one reporter's own
+// failure on that exact endpoint was literally
+// `Code: 08P01. Message: server conn crashed?`, on a plain SELECT, with no
+// fix shipped yet (issue open, fix described as rolling out "in stages").
+// The only workaround anyone in that thread found was exactly this: treat
+// it as retryable and reacquire a connection.
+//
+// For a pure, standalone READ (withTransientRetry's own caller contract —
+// see below) this carries none of the duplicate-write risk above: a
+// SELECT has no side effect to duplicate regardless of which exact
+// mechanism produced the 08P01, so it is scoped to ONLY the callers that
+// go through withTransientRetry, via the separate check below rather than
+// widening isTransientDatabaseError itself.
+const TRANSIENT_POSTGRES_SQLSTATE = new Set([
+  "08P01", // protocol_violation — see comment above. Read-only retry ONLY.
+]);
+const POSTGRES_SQLSTATE_PATTERN = /PostgresError\s*\{\s*code:\s*"([0-9A-Za-z]{5})"/;
+
+function isTransientOnUnknownRequestError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  if ((error as { name?: string }).name !== "PrismaClientUnknownRequestError") return false;
+  const message = (error as { message?: string }).message ?? "";
+  const sqlState = POSTGRES_SQLSTATE_PATTERN.exec(message)?.[1];
+  return !!sqlState && TRANSIENT_POSTGRES_SQLSTATE.has(sqlState);
+}
+
+// Only withTransientRetry (standalone reads) treats 08P01 as transient —
+// see the comment above isTransientOnUnknownRequestError. Every other
+// consumer of this file must keep calling isTransientDatabaseError
+// directly, unaffected.
+function isRetryableForStandaloneRead(error: unknown): boolean {
+  return isTransientDatabaseError(error) || isTransientOnUnknownRequestError(error);
 }
 
 const TRANSIENT_RETRY_DELAY_MS = 200;
@@ -152,14 +182,24 @@ export async function withTransientRetry<T>(
   try {
     return await operation();
   } catch (firstError) {
-    if (!isTransientDatabaseError(firstError)) throw firstError;
+    if (!isRetryableForStandaloneRead(firstError)) throw firstError;
+
+    // Logged BEFORE retrying, not after — this is the only place a
+    // transient error's real diagnostics (Postgres SQLSTATE/severity/
+    // routine, extracted by captureError itself) survive at all: if the
+    // retry also fails, the caller only ever sees DatabaseUnavailableError,
+    // whose own .message is the generic "Database temporarily unavailable"
+    // string, not the original error's. It's also the only signal that a
+    // successful retry recovery ever happened — a recovered retry
+    // otherwise produces no other observable trace.
+    captureError("transient-retry", firstError);
 
     await sleep(TRANSIENT_RETRY_DELAY_MS);
 
     try {
       return await operation();
     } catch (secondError) {
-      if (isTransientDatabaseError(secondError)) throw new DatabaseUnavailableError(secondError);
+      if (isRetryableForStandaloneRead(secondError)) throw new DatabaseUnavailableError(secondError);
       throw secondError;
     }
   }
