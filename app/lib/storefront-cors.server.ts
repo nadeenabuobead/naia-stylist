@@ -34,16 +34,27 @@
 // an unapproved origin's JavaScript cannot read the response. A same-origin
 // request, or a non-browser caller (curl, server-to-server), is unaffected
 // either way — CORS headers are irrelevant to those.
+//
+// 2026-11-19 — extended to 6 more authenticated customer-facing routes found
+// with the same unconditional wildcard, during a follow-up audit of this
+// hotfix's own scope (api.closet.jsx, api.confidence-dashboard.jsx,
+// api.customer-profile.jsx, api.track_event.jsx, api.wishlist.jsx; a 6th,
+// api.wardrobe-insights.jsx, exists only on main/production, not on this
+// trunk lineage — see that commit's own message). Each needs its own
+// allowed-methods set (GET-only, POST-only, or GET+POST+DELETE depending on
+// the route), so `methods` is now an optional parameter — every existing
+// caller that doesn't pass it keeps the exact same "GET, POST, OPTIONS" it
+// already had, unchanged.
 
 const ALLOWED_ORIGINS = [
   "https://naiabynadine.com", // production Shopify storefront
   "https://naia-test-store.myshopify.com", // staging Shopify test store
 ];
 
-export function buildCorsHeaders(request: Request): Record<string, string> {
+export function buildCorsHeaders(request: Request, methods: string = "GET, POST, OPTIONS"): Record<string, string> {
   const origin = request.headers.get("Origin");
   const headers: Record<string, string> = {
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Methods": methods,
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
   };
   if (origin && ALLOWED_ORIGINS.includes(origin)) {

@@ -1,13 +1,9 @@
 import prisma from "../db.server";
 import { authenticateCustomer } from "../customer-auth.server";
-
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization",
-};
+import { buildCorsHeaders } from "../lib/storefront-cors.server";
 
 export async function action({ request }) {
+  const CORS = buildCorsHeaders(request, "POST, OPTIONS");
   if (request.method === "OPTIONS") {
     return new Response(null, { headers: CORS });
   }
