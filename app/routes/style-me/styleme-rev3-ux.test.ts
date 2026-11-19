@@ -27,6 +27,8 @@ import {
   STYLEME_STATE_LABELS,
   STYLEME_FIT_COMFORT_OPTIONS,
   STYLEME_FIT_COMFORT_LABELS,
+  STYLEME_OCCASION_OPTIONS,
+  STYLEME_OCCASION_REV3_TO_CANONICAL,
 } from "~/lib/styleme/session-vocabulary";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -155,27 +157,30 @@ describe("SM-REV3-B3 — 'other' option label is 'Other'", () => {
 
 // ── C: Occasion — 8 options, "other" removed ─────────────────────────────────
 
+// C1-C3 read STYLEME_OCCASION_OPTIONS/STYLEME_OCCASION_REV3_TO_CANONICAL directly
+// (imported above) rather than slicing occasion.tsx's source for "const occasions
+// = [" / "const REV3_OCCASION_MAP" — both moved into session-vocabulary.ts (see
+// the comment above the `occasions` declaration in occasion.tsx), so occasion.tsx
+// itself no longer contains either literal to slice against. SM-REV3-G1/G2 below
+// test the same real values; kept separate here since C1-C3 and G1/G2 predate
+// each other and both describe blocks still carry useful, distinctly-worded intent.
+
 describe("SM-REV3-C1 — occasions array has exactly 8 items", () => {
   it("occasions array contains exactly 8 { id: ... } entries", () => {
-    const matches = [...occasion.matchAll(/\{ id: "/g)];
-    // Subtract formality options (they are also { id: "formality-... })
-    const occasionMatches = [...occasion.matchAll(/\{ id: "(?!formality)/g)];
     assert.strictEqual(
-      occasionMatches.length,
+      STYLEME_OCCASION_OPTIONS.length,
       8,
-      `Expected 8 occasion entries, got ${occasionMatches.length}`,
+      `Expected 8 occasion entries, got ${STYLEME_OCCASION_OPTIONS.length}`,
     );
   });
 });
 
 describe("SM-REV3-C2 — 'other' occasion is not exposed in the UI options array", () => {
   it("{ id: \"other\" } is not in occasions array", () => {
-    // Use id: "other" to avoid matching comments that mention "other"
-    const occasionsBlock = occasion.slice(
-      occasion.indexOf("const occasions = ["),
-      occasion.indexOf("const REV3_OCCASION_MAP"),
+    assert.ok(
+      !STYLEME_OCCASION_OPTIONS.some((o) => o.id === "other"),
+      "id: other removed from occasions",
     );
-    assert.ok(!occasionsBlock.includes('id: "other"'), "id: other removed from occasions");
   });
   it("'Something else' label is not in occasion.tsx", () => {
     assert.ok(!occasion.includes("Something else"), "Something else removed from occasion");
@@ -186,11 +191,11 @@ describe("SM-REV3-C3 — REV3_OCCASION_MAP retains 'other' for legacy internal c
   it("'other' key is present in REV3_OCCASION_MAP (legacy/internal compat, not UI)", () => {
     // The 'other' UI option is removed from occasions[], but the mapping is intentionally
     // kept so old sessions or internally constructed requests still normalize safely.
-    const mapBlock = occasion.slice(
-      occasion.indexOf("const REV3_OCCASION_MAP"),
-      occasion.indexOf("const OCCASION_REVERSE_MAP"),
+    assert.strictEqual(
+      STYLEME_OCCASION_REV3_TO_CANONICAL["other"],
+      "not-sure",
+      "legacy other→not-sure mapping retained",
     );
-    assert.ok(mapBlock.includes('"other": "not-sure"'), "legacy other→not-sure mapping retained");
   });
 });
 
@@ -403,21 +408,22 @@ describe("SM-REV3-F6 — physical-need.tsx component hydrates from loader", () =
 // ── G: Occasion legacy compatibility ─────────────────────────────────────────
 
 describe("SM-REV3-G1 — REV3_OCCASION_MAP retains 'other' → 'not-sure' for legacy compat", () => {
+  // Behavioral: REV3_OCCASION_MAP is now `const REV3_OCCASION_MAP =
+  // STYLEME_OCCASION_REV3_TO_CANONICAL;` (moved into session-vocabulary.ts, the
+  // same consolidation occasion.tsx's comments describe for the options array
+  // in SM-REV3-G2) — slicing occasion.tsx's own source no longer finds the
+  // "other": "not-sure" entry itself, only a prose comment that happens to
+  // contain both words. Reading the real map directly tests the actual value.
   it("'other' key is present in REV3_OCCASION_MAP", () => {
-    const mapBlock = occasion.slice(
-      occasion.indexOf("const REV3_OCCASION_MAP"),
-      occasion.indexOf("const OCCASION_REVERSE_MAP"),
+    assert.ok(
+      "other" in STYLEME_OCCASION_REV3_TO_CANONICAL,
+      "'other' key retained in REV3_OCCASION_MAP",
     );
-    assert.ok(mapBlock.includes('"other"'), "'other' key retained in REV3_OCCASION_MAP");
-    assert.ok(mapBlock.includes('"not-sure"'), "'not-sure' value retained");
   });
   it("'other' → 'not-sure' mapping entry is present", () => {
-    const mapBlock = occasion.slice(
-      occasion.indexOf("const REV3_OCCASION_MAP"),
-      occasion.indexOf("const OCCASION_REVERSE_MAP"),
-    );
-    assert.ok(
-      mapBlock.includes('"other": "not-sure"'),
+    assert.strictEqual(
+      STYLEME_OCCASION_REV3_TO_CANONICAL["other"],
+      "not-sure",
       "'other': 'not-sure' mapping intact",
     );
   });
@@ -425,14 +431,20 @@ describe("SM-REV3-G1 — REV3_OCCASION_MAP retains 'other' → 'not-sure' for le
 
 describe("SM-REV3-G2 — fresh Rev 3 UI still has exactly 8 visible options", () => {
   it("occasions array has 8 entries (other not visible)", () => {
-    const occasionsBlock = occasion.slice(
-      occasion.indexOf("const occasions = ["),
-      occasion.indexOf("const REV3_OCCASION_MAP"),
+    // Behavioral: read the real options array directly, rather than slicing
+    // occasion.tsx's source for "const occasions = [" — that broke when the
+    // array moved into session-vocabulary.ts (occasion.tsx now imports
+    // STYLEME_OCCASION_OPTIONS instead of declaring its own copy), even
+    // though the UI still shows exactly the same 8 options.
+    assert.strictEqual(
+      STYLEME_OCCASION_OPTIONS.length,
+      8,
+      `UI occasions must be 8, got ${STYLEME_OCCASION_OPTIONS.length}`,
     );
-    const ids = [...occasionsBlock.matchAll(/\{ id: "/g)];
-    assert.strictEqual(ids.length, 8, `UI occasions must be 8, got ${ids.length}`);
-    // Check id: "other" specifically — not just the word "other" in comments
-    assert.ok(!occasionsBlock.includes('id: "other"'), "other id not in UI occasions");
+    assert.ok(
+      !STYLEME_OCCASION_OPTIONS.some((o) => o.id === "other"),
+      "other id not in UI occasions",
+    );
   });
 });
 
