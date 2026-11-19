@@ -119,7 +119,12 @@ beforeEach(() => {
 
 const RESTRICTED_ROUTES: Array<{
   name: string;
-  call: (origin?: string) => Promise<Response>;
+  // Each route's real loader/action return type varies (some return a plain
+  // Response, others react-router's DataWithResponseInit<T> via data()) —
+  // every call site below immediately casts the result `as Response` before
+  // reading .headers, so the array itself only needs to carry the call
+  // through, not narrow its type.
+  call: (origin?: string) => Promise<unknown>;
 }> = [
   {
     name: "api.closet (GET)",
