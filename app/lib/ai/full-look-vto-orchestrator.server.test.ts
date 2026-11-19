@@ -217,6 +217,56 @@ describe("selectFullLookGarments", () => {
     const result = selectFullLookGarments(items, { customerId: "cust-1", cloudinaryConfig: null });
     expect(result).toBeNull();
   });
+
+  // ── Same-category omission disclosure (2026-11-20 BUG FIX) ──────────────
+  //
+  // Before this fix, `.find()` only ever surfaced the FIRST item of each
+  // category — a second item of the SAME category (e.g. two ACCESSORY
+  // pieces) never reached `eligible` at all, so it never reached `omitted`
+  // either: it vanished from the response with no disclosure whatsoever,
+  // violating omittedLabels' own "nAia must disclose this" requirement.
+  // These prove the fix: the first same-category item is still the one
+  // chosen (selection behavior unchanged), but every other same-category
+  // item is now disclosed in omittedLabels.
+
+  it("two ACCESSORY items (cap + scarf): only the first (cap, input order) is chosen — the second (scarf) is disclosed in omittedLabels, never silently dropped", () => {
+    const items = [
+      item("TOP", "shirt"), item("BOTTOM", "trousers"),
+      item("ACCESSORY", "cap"), item("ACCESSORY", "scarf"),
+    ];
+    const result = selectFullLookGarments(items, { customerId: "cust-1", cloudinaryConfig: null });
+    expect(result?.garments.map((g) => g.label)).toEqual(["shirt", "trousers", "cap"]);
+    expect(result?.omittedLabels).toEqual(["scarf"]);
+  });
+
+  it("the exact historical full-look-real-garments-max fixture composition (2 TOP + 1 BOTTOM + 2 OUTERWEAR) — selects exactly 3, and both same-category runners-up are disclosed", () => {
+    const items = [
+      item("TOP", "Top A"), item("TOP", "Top B"),
+      item("BOTTOM", "Bottom A"),
+      item("OUTERWEAR", "Outerwear A"), item("OUTERWEAR", "Outerwear B"),
+    ];
+    const result = selectFullLookGarments(items, { customerId: "cust-1", cloudinaryConfig: null });
+    expect(result?.garments.length).toBe(3);
+    expect(result?.garments.map((g) => g.label)).toEqual(["Top A", "Bottom A", "Outerwear A"]);
+    expect(result?.omittedLabels).toEqual(expect.arrayContaining(["Top B", "Outerwear B"]));
+    expect(result?.omittedLabels).toHaveLength(2);
+  });
+
+  // The pure happy-path regression guard the fix must not break — already
+  // covered above ("5-item outfit (black sweater, jeans, wool jacket, brown
+  // Chelsea boots, baseball cap): ALL FIVE pieces are included, nothing
+  // omitted", 5 genuinely distinct categories, empty omittedLabels) — not
+  // duplicated here.
+
+  it("computeGarmentFingerprint is unaffected by this fix — same chosen set (cap wins over scarf) produces the same fingerprint as calling it directly on that exact chosen array", () => {
+    const items = [
+      item("TOP", "shirt"), item("BOTTOM", "trousers"),
+      item("ACCESSORY", "cap"), item("ACCESSORY", "scarf"),
+    ];
+    const result = selectFullLookGarments(items, { customerId: "cust-1", cloudinaryConfig: null });
+    const chosenItems = [items[0], items[1], items[2]]; // shirt, trousers, cap — exactly what was chosen
+    expect(result?.fingerprint).toBe(computeGarmentFingerprint(chosenItems));
+  });
 });
 
 // ── Attempt scope ────────────────────────────────────────────────────────────

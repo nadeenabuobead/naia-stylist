@@ -670,7 +670,7 @@ async function createFullLookRealGarmentsFixture(customerId: string) {
   });
 }
 
-// ── Full-Look VTO real-garment MAX fixture (2026-11-19) ─────────────────────
+// ── Full-Look VTO real-garment MAX fixture (2026-11-19, corrected 2026-11-20) ─
 //
 // POST /api/vto-qa-fixture, body: { fixtureKind: "full-look-real-garments-max" },
 // same authorization posture as full-look-real-garments above.
@@ -682,45 +682,109 @@ async function createFullLookRealGarmentsFixture(customerId: string) {
 // a change to the 3-garment one above, so #30/#31's existing passed
 // evidence is never put at risk by this addition.
 //
-// Exactly FULL_LOOK_MAX_GARMENTS (5) synthetic OutfitItem rows, same shape
-// as the 3-garment fixture (closetItemId: null, real already-public
-// Shopify CDN productImageUrl, no Cloudinary call, no new upload). Draws 2
-// additional real "ready" entries from naia-product-media.ts beyond the
-// original 3 (TOP/BOTTOM/OUTERWEAR): a second TOP (cropped-top /
-// "Becoming Fragmented") and a second OUTERWEAR (kimono-jacket /
-// "Becoming Whole") — both already eligibility:"ready", GID-verified,
-// reused as-is, nothing fabricated. Repeats two categories rather than
-// inventing a DRESS/SHOES/BAG entry this map doesn't have approved media
-// for; selectFullLookGarments's category floor only requires >=3 distinct
-// categories, which the original 3 already satisfy, so this is a safe way
-// to reach exactly 5 total items without approving new media out-of-band.
+// 2026-11-20 CORRECTED — this fixture originally reached 5 items by
+// repeating two categories already present in the base 3 (a second TOP, a
+// second OUTERWEAR). That is not 5 genuinely distinct categories, and
+// selectFullLookGarments's own (now-fixed, see full-look-vto-orchestrator.
+// server.ts) same-category-omission-disclosure logic means a repeated
+// category's second item was never actually selected anyway — so this
+// fixture never truly exercised the max-boundary (5-distinct-category)
+// selection path at all. Fixed: the 5 items are now the 3 base categories
+// (TOP/BOTTOM/OUTERWEAR, untouched real Shopify CDN media, unchanged below)
+// PLUS a genuine SHOES item and a genuine ACCESSORY item — 5 distinct
+// categories, the actual max-boundary case this fixture exists to
+// represent.
+//
+// No real Shopify CDN image for a shoe or a cap exists anywhere in this
+// repo (the extracted NADINE catalog is dresses-only; the storefront is
+// password-protected and must not be bypassed to go looking for one).
+// Founder-authorized synthetic alternative instead — see
+// buildSyntheticShoeSilhouettePng/buildSyntheticCapSilhouettePng above.
+// "cap" is drawn from closet-eligibility.ts's VTO_ACCESSORY_SUBCATEGORY_
+// ALLOWLIST (scarf, belt, earrings, hat, cap, beanie, beret) — used here
+// only as the product's own stated definition of "intended-to-work"
+// accessory types, for an honest choice of test data; that allowlist
+// governs the real-closet-upload eligibility pipeline, which this
+// fixture's synthetic OutfitItem rows bypass entirely (confirmed:
+// selectFullLookGarments/submitFullLookRealStep never reference it).
+//
+// Uploaded with Cloudinary delivery type "upload" (public), NOT "private":
+// unlike the My nAia Model body photo below (genuinely private, fetched via
+// a signed buildPrivateDownloadUrl), a garment's productImageUrl is fetched
+// directly by FASHN as a plain, non-expiring public URL (see
+// buildPublicCloudinaryDeliveryUrl's own comment above for the full
+// reasoning). Uploaded BEFORE either OutfitItem row is written, mirroring
+// createMyNaiaModelFixture's own upload-then-write discipline below: no row
+// ever claims an image exists if the upload actually failed.
 //
 // Every item's shopifyProductId is the distinctly-prefixed
 // "qa-fixture-full-look-real-garment-max" — different from both other
 // fixture kinds' markers — so deleteFixtureSuggestion below can scope
-// cleanup correctly. Every productTitle is "[QA FIXTURE] ..." per
-// convention.
+// cleanup correctly (including deleting the 2 synthetic Cloudinary assets
+// this fixture now creates — see deleteFixtureSuggestion's own comment).
+// Every productTitle is "[QA FIXTURE] ..." per convention.
 const FULL_LOOK_MAX_FIXTURE_SHOPIFY_PRODUCT_ID = "qa-fixture-full-look-real-garment-max";
 
-const FULL_LOOK_MAX_FIXTURE_ITEMS: { itemType: OutfitItemType; title: string; productImageUrl: string }[] = [
-  ...FULL_LOOK_FIXTURE_ITEMS,
-  {
-    itemType: "TOP",
-    title: "[QA FIXTURE] Full-Look real-garment top #2 (max-boundary) — not a real customer item",
-    productImageUrl: "https://cdn.shopify.com/s/files/1/0998/1008/2948/files/3614927b-4685-4df3-aeff-b3d5a950cbd2.png?v=1774533037",
-  },
-  {
-    itemType: "OUTERWEAR",
-    title: "[QA FIXTURE] Full-Look real-garment outerwear #2 (max-boundary) — not a real customer item",
-    productImageUrl: "https://cdn.shopify.com/s/files/1/0998/1008/2948/files/77d61b97-37da-4e57-8297-aa5207b35d07.png?v=1774533134",
-  },
-];
-
 async function createFullLookRealGarmentsMaxFixture(customerId: string) {
+  const shoePublicId = fullLookMaxFixtureShoePublicId(customerId);
+  const capPublicId = fullLookMaxFixtureCapPublicId(customerId);
+
+  // Both synthetic images uploaded BEFORE any DB write — see this
+  // function's own header comment for why (same discipline as
+  // createMyNaiaModelFixture below).
+  const [shoeUpload, capUpload] = await Promise.all([
+    uploadCloudinaryPrivate(
+      shoePublicId,
+      SYNTHETIC_FIXTURE_SHOE_DATA_URL,
+      "upload",
+      undefined,
+      undefined,
+      undefined,
+      FULL_LOOK_MAX_FIXTURE_SYNTHETIC_FORMAT,
+    ),
+    uploadCloudinaryPrivate(
+      capPublicId,
+      SYNTHETIC_FIXTURE_CAP_DATA_URL,
+      "upload",
+      undefined,
+      undefined,
+      undefined,
+      FULL_LOOK_MAX_FIXTURE_SYNTHETIC_FORMAT,
+    ),
+  ]);
+  if (!shoeUpload.ok) {
+    return data({ ok: false, code: "upload_failed", asset: "shoe", errorCode: shoeUpload.errorCode }, { status: 502 });
+  }
+  if (!capUpload.ok) {
+    return data({ ok: false, code: "upload_failed", asset: "cap", errorCode: capUpload.errorCode }, { status: 502 });
+  }
+
+  const cloudinaryConfig = getCloudinaryConfig();
+  if (!cloudinaryConfig) {
+    // Both uploads above already required a valid config to succeed at
+    // all — this branch should be unreachable, but refuse explicitly
+    // rather than build a malformed URL if it ever somehow is.
+    return data({ ok: false, code: "cloudinary_not_configured" }, { status: 502 });
+  }
+
+  const items: { itemType: OutfitItemType; title: string; productImageUrl: string }[] = [
+    ...FULL_LOOK_FIXTURE_ITEMS,
+    {
+      itemType: "SHOES",
+      title: "[QA FIXTURE] Full-Look synthetic shoes (max-boundary) — not a real customer item",
+      productImageUrl: buildPublicCloudinaryDeliveryUrl(cloudinaryConfig, shoeUpload.publicId, shoeUpload.version, shoeUpload.format),
+    },
+    {
+      itemType: "ACCESSORY",
+      title: "[QA FIXTURE] Full-Look synthetic cap/accessory (max-boundary) — not a real customer item",
+      productImageUrl: buildPublicCloudinaryDeliveryUrl(cloudinaryConfig, capUpload.publicId, capUpload.version, capUpload.format),
+    },
+  ];
+
   const { sessionId, suggestionId } = await prisma.$transaction(async (tx) => {
     const session = await tx.stylingSession.create({ data: { customerId }, select: { id: true } });
     const suggestion = await tx.outfitSuggestion.create({ data: { sessionId: session.id }, select: { id: true } });
-    for (const { itemType, title, productImageUrl } of FULL_LOOK_MAX_FIXTURE_ITEMS) {
+    for (const { itemType, title, productImageUrl } of items) {
       await tx.outfitItem.create({
         data: {
           suggestionId: suggestion.id,
@@ -739,7 +803,7 @@ async function createFullLookRealGarmentsMaxFixture(customerId: string) {
     fixtureKind: "full-look-real-garments-max",
     sessionId,
     suggestionId,
-    itemCount: FULL_LOOK_MAX_FIXTURE_ITEMS.length,
+    itemCount: items.length,
   });
 }
 
@@ -949,6 +1013,155 @@ function pngChunk(type: string, chunkData: Buffer): Buffer {
 // math, not a network call) and reused for every fixture invocation,
 // rather than re-encoding the same PNG bytes on every request.
 const SYNTHETIC_FIXTURE_PHOTO_DATA_URL = `data:image/png;base64,${buildSyntheticHumanoidSilhouettePng().toString("base64")}`;
+
+// ── Synthetic shoe/cap fixture images (2026-11-20) ──────────────────────────
+//
+// WHY THESE EXIST: the full-look-real-garments-max fixture below (SHOES +
+// ACCESSORY slots) needs a real, fetchable productImageUrl for each item —
+// no real Shopify CDN image for a shoe or a cap exists anywhere in this
+// repo (the extracted NADINE catalog is dresses-only; the storefront is
+// password-protected and must not be bypassed to go look for one). Founder-
+// authorized synthetic alternative, same spirit as
+// buildSyntheticHumanoidSilhouettePng above: hand-built, zero-dependency,
+// non-identifiable, visually-meaningful (not a trivial placeholder) PNGs.
+//
+// Shared raw-pixel-to-PNG renderer, factored out so the shoe and cap
+// builders below don't each duplicate the scanline/IHDR/IDAT assembly —
+// reuses the SAME pngChunk/PNG_CRC_TABLE helpers buildSyntheticHumanoid
+// SilhouettePng already uses (via pngChunk below); that function itself is
+// left untouched, not refactored to call this, so its own already-verified
+// output can never change as a side effect of adding this.
+function renderSilhouettePng(
+  width: number,
+  height: number,
+  background: [number, number, number],
+  foreground: [number, number, number],
+  isForeground: (x: number, y: number) => boolean,
+): Buffer {
+  const stride = 1 + width * 3;
+  const raw = Buffer.alloc(stride * height);
+  for (let y = 0; y < height; y++) {
+    const rowStart = y * stride;
+    raw[rowStart] = 0;
+    for (let x = 0; x < width; x++) {
+      const [r, g, b] = isForeground(x, y) ? foreground : background;
+      const px = rowStart + 1 + x * 3;
+      raw[px] = r;
+      raw[px + 1] = g;
+      raw[px + 2] = b;
+    }
+  }
+
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 2; // color type: truecolor (RGB)
+  ihdr[10] = 0; // compression method
+  ihdr[11] = 0; // filter method
+  ihdr[12] = 0; // interlace method
+
+  const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  return Buffer.concat([
+    signature,
+    pngChunk("IHDR", ihdr),
+    pngChunk("IDAT", zlib.deflateSync(raw)),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+// Shoe-profile silhouette: a long, thin sole strip along the bottom, a
+// rounded toe box (circle), a raised heel block at the back, and a vamp
+// (rectangle) connecting them — clearly shoe-shaped, not an abstract block.
+// 160x100px, same small scale as the body-photo fixture above.
+function buildSyntheticShoeSilhouettePng(): Buffer {
+  const width = 160;
+  const height = 100;
+  const background: [number, number, number] = [235, 235, 235];
+  const foreground: [number, number, number] = [92, 64, 51]; // shoe-leather brown
+
+  const sole = { x0: 14, y0: 78, x1: 146, y1: 92 };
+  const heel = { x0: 118, y0: 38, x1: 146, y1: 90 };
+  const vamp = { x0: 36, y0: 52, x1: 120, y1: 86 };
+  const toeCenterX = 40;
+  const toeCenterY = 68;
+  const toeRadius = 26;
+
+  const inRect = (x: number, y: number, r: { x0: number; y0: number; x1: number; y1: number }) =>
+    x >= r.x0 && x < r.x1 && y >= r.y0 && y < r.y1;
+
+  const isForeground = (x: number, y: number): boolean => {
+    const dx = x - toeCenterX;
+    const dy = y - toeCenterY;
+    if (dx * dx + dy * dy <= toeRadius * toeRadius) return true;
+    return inRect(x, y, sole) || inRect(x, y, heel) || inRect(x, y, vamp);
+  };
+
+  return renderSilhouettePng(width, height, background, foreground, isForeground);
+}
+
+// Cap silhouette: a rounded dome (upper half of a circle, flattened at the
+// head-opening line) with a brim projecting from one side (front) at that
+// same line — clearly cap-shaped, not an abstract blob. 140x100px.
+function buildSyntheticCapSilhouettePng(): Buffer {
+  const width = 140;
+  const height = 100;
+  const background: [number, number, number] = [235, 235, 235];
+  const foreground: [number, number, number] = [40, 60, 90]; // cap-navy
+
+  const domeCenterX = 65;
+  const domeCenterY = 52;
+  const domeRadius = 42;
+  const baseY = 52; // flat bottom edge of the dome (head-opening line)
+  const brim = { x0: domeCenterX - 8, y0: baseY, x1: domeCenterX + domeRadius + 26, y1: baseY + 12 };
+
+  const inRect = (x: number, y: number, r: { x0: number; y0: number; x1: number; y1: number }) =>
+    x >= r.x0 && x < r.x1 && y >= r.y0 && y < r.y1;
+
+  const isForeground = (x: number, y: number): boolean => {
+    const dx = x - domeCenterX;
+    const dy = y - domeCenterY;
+    if (y <= baseY && dx * dx + dy * dy <= domeRadius * domeRadius) return true; // dome, trimmed flat
+    return inRect(x, y, brim); // brim projecting to one side
+  };
+
+  return renderSilhouettePng(width, height, background, foreground, isForeground);
+}
+
+const SYNTHETIC_FIXTURE_SHOE_DATA_URL = `data:image/png;base64,${buildSyntheticShoeSilhouettePng().toString("base64")}`;
+const SYNTHETIC_FIXTURE_CAP_DATA_URL = `data:image/png;base64,${buildSyntheticCapSilhouettePng().toString("base64")}`;
+const FULL_LOOK_MAX_FIXTURE_SYNTHETIC_FORMAT = "png";
+
+function fullLookMaxFixtureShoePublicId(customerId: string): string {
+  return `naia-wardrobe/${customerId}/qa-fixture-synthetic-shoe`;
+}
+
+function fullLookMaxFixtureCapPublicId(customerId: string): string {
+  return `naia-wardrobe/${customerId}/qa-fixture-synthetic-cap`;
+}
+
+// Plain PUBLIC Cloudinary delivery URL — deliberately NOT buildPrivateDownloadUrl
+// (that signs a time-limited, Admin-API "download" URL meant for THIS app's
+// own authenticated preview surfaces) and NOT buildSignedDeliveryUrl (that
+// signs a CDN path, also for private/authenticated delivery types). A
+// garment's productImageUrl is fetched directly by FASHN
+// (submitTryOnToProvider, fashn-try-on.server.ts: `product_image:
+// input.productImageUrl`) exactly like every real Shopify CDN URL this
+// fixture otherwise uses — it must be a plain, non-expiring public URL, not
+// a signed one. This is the standard, well-documented Cloudinary delivery
+// URL shape for assets uploaded with type "upload" (public): res.cloudinary.
+// com/{cloud_name}/image/upload/v{version}/{public_id}.{format} — built
+// here from the real cloudName (CloudinaryConfig) and the real
+// version/format Cloudinary's own upload response returned, never guessed.
+function buildPublicCloudinaryDeliveryUrl(
+  config: { cloudName: string },
+  publicId: string,
+  version: string,
+  format: string,
+): string {
+  const vPart = version ? `v${version}/` : "";
+  return `https://res.cloudinary.com/${config.cloudName}/image/upload/${vPart}${publicId}.${format}`;
+}
 
 function myNaiaModelFixtureBodyPublicId(customerId: string): string {
   return `naia-wardrobe/${customerId}/qa-fixture-synthetic-body`;
@@ -1337,17 +1550,25 @@ async function deleteFixtureSuggestion(request: Request, parsed: Record<string, 
     (suggestion.items.every((item) => item.shopifyProductId === FULL_LOOK_FIXTURE_SHOPIFY_PRODUCT_ID) ||
       suggestion.items.every((item) => item.shopifyProductId === FULL_LOOK_MAX_FIXTURE_SHOPIFY_PRODUCT_ID));
 
+  // 2026-11-20 — narrower than isFullLookRealGarmentsFixture above: ONLY the
+  // max-boundary fixture kind ever uploads its own Cloudinary assets (the
+  // synthetic shoe/cap images — see createFullLookRealGarmentsMaxFixture's
+  // own comment); the 3-item fixture's items are all real, already-public
+  // Shopify CDN URLs with nothing of this fixture's own to clean up.
+  const isFullLookMaxGarmentsFixture =
+    suggestion.items.length > 0 &&
+    suggestion.items.every((item) => item.shopifyProductId === FULL_LOOK_MAX_FIXTURE_SHOPIFY_PRODUCT_ID);
+
   if (dependentJobs > 0 && !isFullLookRealGarmentsFixture) {
     return data({ ok: false, code: "has_dependent_jobs", dependentJobs }, { status: 409 });
   }
 
-  // No Cloudinary cleanup here: a completed real FASHN run uploads its
-  // result image(s) to Cloudinary independently of these DB rows. Deleting
-  // the VirtualTryOnJob row does not delete that asset — it is left for
-  // the existing, already-reviewed Cloudinary orphan-sweep mechanism to
-  // reclaim in the ordinary course, same as any other abandoned upload.
-  // Not a gap introduced here: no fixture or cleanup path in this file has
-  // ever deleted a Cloudinary asset directly.
+  // No Cloudinary cleanup here for a completed real FASHN run's OWN result
+  // image(s) — those are uploaded independently of these DB rows, and
+  // deleting the VirtualTryOnJob row does not delete that asset; it is
+  // left for the existing, already-reviewed Cloudinary orphan-sweep
+  // mechanism to reclaim in the ordinary course, same as any other
+  // abandoned upload. That is unchanged.
   await prisma.$transaction([
     ...(dependentJobs > 0 ? [prisma.virtualTryOnJob.deleteMany({ where: { outfitSuggestionId: suggestion.id } })] : []),
     prisma.outfitItem.deleteMany({ where: { suggestionId: suggestion.id } }),
@@ -1355,11 +1576,35 @@ async function deleteFixtureSuggestion(request: Request, parsed: Record<string, 
     prisma.stylingSession.delete({ where: { id: suggestion.sessionId } }),
   ]);
 
+  // 2026-11-20 — the max-boundary fixture's own 2 synthetic assets (shoe +
+  // cap, uploaded by createFullLookRealGarmentsMaxFixture with delivery
+  // type "upload", public) ARE this fixture's own content, unlike a real
+  // FASHN result image — so, unlike the comment above, this cleanup does
+  // own them. Best-effort and non-fatal, same posture as
+  // deleteMyNaiaModelFixture's own Cloudinary deletion above: the DB rows
+  // are already gone by this point regardless of whether this succeeds,
+  // and a failed delete here is the same kind of residual the orphan
+  // sweep already exists to catch — never a reason to fail this request
+  // after the real (DB) cleanup already succeeded.
+  let cloudinaryAssetsDeleted: boolean | null = null;
+  if (isFullLookMaxGarmentsFixture) {
+    try {
+      const [shoeDeletion, capDeletion] = await Promise.all([
+        deleteCloudinaryAsset(fullLookMaxFixtureShoePublicId(customerId), "upload"),
+        deleteCloudinaryAsset(fullLookMaxFixtureCapPublicId(customerId), "upload"),
+      ]);
+      cloudinaryAssetsDeleted = shoeDeletion.ok && capDeletion.ok;
+    } catch {
+      cloudinaryAssetsDeleted = false;
+    }
+  }
+
   return data({
     ok: true,
     deletedSuggestionId: suggestion.id,
     deletedSessionId: suggestion.sessionId,
     deletedJobCount: dependentJobs,
+    ...(cloudinaryAssetsDeleted !== null ? { cloudinaryAssetsDeleted } : {}),
   });
 }
 

@@ -95,11 +95,14 @@ export interface SelectableOutfitItem extends Omit<ResolvableOutfitItem, "closet
 export interface GarmentSelectionResult {
   garments: FullLookRealGarmentInput[];
   // Labels of recommended, available pieces that did NOT make it into this
-  // chain because the outfit had more eligible categories than
-  // FULL_LOOK_MAX_GARMENTS allows — never because of a resolution failure
-  // (an unresolvable image still declines the whole chain, see below).
-  // Requirement: nAia must disclose this, never present the result as if
-  // it were the complete recommended look. Empty when nothing was omitted.
+  // chain — either because the outfit had more eligible CATEGORIES than
+  // FULL_LOOK_MAX_GARMENTS allows, or because a category had more than one
+  // matching item and only the first was selected (2026-11-20 — see the
+  // sameCategoryOmitted comment below). Both are real, available pieces;
+  // never because of a resolution failure (an unresolvable image still
+  // declines the whole chain, see below). Requirement: nAia must disclose
+  // this, never present the result as if it were the complete recommended
+  // look. Empty when nothing was omitted.
   omittedLabels: string[];
   // 2026-11-15 — a short, stable identity for THIS exact chosen garment
   // set, baked into the reservation scope (see scopeFor) so a chain whose
@@ -138,15 +141,33 @@ export function selectFullLookGarments(
 ): GarmentSelectionResult | null {
   const hasDress = items.some((i) => i.itemType === "DRESS");
   const eligible: SelectableOutfitItem[] = [];
+  // 2026-11-20 BUG FIX — a SECOND item of the same category (e.g. two
+  // ACCESSORY pieces, a cap and a scarf) used to vanish with no disclosure
+  // at all: the old `.find()` only ever looked at the FIRST match per
+  // category, so a same-category runner-up was never added to `eligible`
+  // and therefore never reached `omitted`/`omittedLabels` either. It just
+  // disappeared from the response, violating omittedLabels' own disclosure
+  // requirement (below) for any customer whose outfit genuinely has 2+
+  // items of one category — not an edge case. Selection itself is
+  // unchanged: `matches[0]` is the exact same "first in input order" item
+  // `.find()` already picked, so `chosen`/the fingerprint are unaffected —
+  // only which same-category runners-up get disclosed as omitted changes.
+  const sameCategoryOmitted: SelectableOutfitItem[] = [];
   for (const category of CATEGORY_PRIORITY) {
     if (hasDress && (category === "TOP" || category === "BOTTOM")) continue;
-    const match = items.find((i) => i.itemType === category && !eligible.includes(i));
-    if (match) eligible.push(match);
+    const matches = items.filter((i) => i.itemType === category);
+    if (matches.length === 0) continue;
+    eligible.push(matches[0]);
+    if (matches.length > 1) sameCategoryOmitted.push(...matches.slice(1));
   }
   if (eligible.length < 3) return null;
 
   const chosen = eligible.slice(0, FULL_LOOK_MAX_GARMENTS);
-  const omitted = eligible.slice(FULL_LOOK_MAX_GARMENTS);
+  // Ceiling-dropped pieces (outfit had more eligible CATEGORIES than the
+  // 5-slot ceiling allows) plus same-category runners-up (above) — both
+  // are real, available pieces that didn't make it into the chain, and
+  // omittedLabels' own contract (below) covers both equally.
+  const omitted = [...eligible.slice(FULL_LOOK_MAX_GARMENTS), ...sameCategoryOmitted];
 
   const garments: FullLookRealGarmentInput[] = [];
   for (const item of chosen) {
@@ -156,6 +177,9 @@ export function selectFullLookGarments(
     garments.push({ label, productImageUrl: imageUrl });
   }
   const omittedLabels = omitted.map((item) => item.productTitle ?? item.closetItem?.name ?? item.itemType);
+  // computeGarmentFingerprint(chosen) — unchanged input (chosen is
+  // identical to before this fix), so the fingerprint, and therefore the
+  // reservation scope it feeds, are unaffected by this disclosure-only fix.
   return { garments, omittedLabels, fingerprint: computeGarmentFingerprint(chosen) };
 }
 

@@ -123,7 +123,11 @@ vi.mock("~/lib/ai/my-naia-model.server", () => ({
 // getCloudinaryConfig is real code with real env-var reads — mocked here so
 // the GET loader's call into the real selectFullLookGarments resolves
 // images via the plain imageUrl fallback deterministically in tests,
-// without needing real Cloudinary credentials.
+// without needing real Cloudinary credentials. Defaults to null in every
+// test (see beforeEach below) — the SAME behavior this file has always
+// had — and is only overridden to a real-shaped config inside the
+// full-look-real-garments-max describe block, which actually needs a
+// cloudName to build the two synthetic items' public delivery URLs.
 //
 // 2026-11-20 — uploadCloudinaryPrivate is ALSO mocked here now (it was
 // not before this fixture-photo-upload fix, because the route never
@@ -137,13 +141,26 @@ vi.mock("~/lib/ai/my-naia-model.server", () => ({
 // reaching Prisma. Mirrors this file's own house style: a controllable
 // vi.fn() standing in for the real Cloudinary network call, which must
 // never actually happen in this suite.
+//
+// 2026-11-20 (same day) — deleteCloudinaryAsset converted from "the real
+// function, which fails closed with NOT_CONFIGURED since getCloudinaryConfig
+// is null" to the SAME controllable-mock style as uploadCloudinaryPrivate,
+// so the new full-look-real-garments-max cleanup path (two synthetic
+// Cloudinary assets) can be asserted on precisely (which publicId, which
+// deliveryType) rather than only inferred from a fixed fail-closed outcome.
+// Defaults to the exact same NOT_CONFIGURED-shaped failure the real
+// function previously produced, so every pre-existing test's expectations
+// (e.g. the my-naia-model deletion test below) are unaffected.
+const mockGetCloudinaryConfig = vi.fn();
 const mockUploadCloudinaryPrivate = vi.fn();
+const mockDeleteCloudinaryAsset = vi.fn();
 vi.mock("~/lib/cloudinary-admin.server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("~/lib/cloudinary-admin.server")>();
   return {
     ...actual,
-    getCloudinaryConfig: () => null,
+    getCloudinaryConfig: () => mockGetCloudinaryConfig(),
     uploadCloudinaryPrivate: (...args: unknown[]) => mockUploadCloudinaryPrivate(...args),
+    deleteCloudinaryAsset: (...args: unknown[]) => mockDeleteCloudinaryAsset(...args),
   };
 });
 
@@ -161,6 +178,10 @@ vi.mock("~/lib/clerk-session.server", () => ({
 import { action, loader, checkFashnCredits } from "./api.vto-qa-fixture";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+// Real, unmocked — proves the corrected fixture's items actually clear the
+// real (now-fixed) selection logic end-to-end, not just that 5 OutfitItem
+// rows got written. See the "selects 5 distinct items" test below.
+import { selectFullLookGarments, type SelectableOutfitItem } from "~/lib/ai/full-look-vto-orchestrator.server";
 
 const QA_ID = "qa-disposable-customer-1";
 const ORIGINAL_ENV = { ...process.env };
@@ -293,6 +314,15 @@ beforeEach(() => {
     format: "png",
     version: "1",
   });
+  // getCloudinaryConfig defaults to null, same as this file has always
+  // used — only the full-look-real-garments-max describe block below
+  // overrides this to a real-shaped config.
+  mockGetCloudinaryConfig.mockReturnValue(null);
+  // deleteCloudinaryAsset defaults to the exact NOT_CONFIGURED-shaped
+  // failure the real function always produced in this suite (getCloudinary
+  // Config has always been null here) — preserves every pre-existing
+  // test's expectation unchanged.
+  mockDeleteCloudinaryAsset.mockResolvedValue({ ok: false, errorCode: "NOT_CONFIGURED" });
   // Default: no real Clerk session attached — matches every existing test's
   // assumption that the real-session fallback does not kick in unless a
   // test explicitly sets up a session via mockGetCurrentNaiaCustomer.
@@ -944,14 +974,38 @@ describe("api.vto-qa-fixture action — fixtureKind: full-look-real-garments-max
     return req({ fixtureKind: "full-look-real-garments-max", ...overrides }, headers);
   }
 
+  const SHOE_PUBLIC_ID = `naia-wardrobe/${QA_ID}/qa-fixture-synthetic-shoe`;
+  const CAP_PUBLIC_ID = `naia-wardrobe/${QA_ID}/qa-fixture-synthetic-cap`;
+
+  // 2026-11-20 — this fixture now uploads 2 synthetic images (a shoe, a
+  // cap) via uploadCloudinaryPrivate before writing any OutfitItem row (no
+  // real Shopify CDN image for either exists anywhere in this repo — see
+  // createFullLookRealGarmentsMaxFixture's own comment). getCloudinaryConfig
+  // defaults to null everywhere else in this file (see its own comment) —
+  // overridden here to a real-shaped config so this block's URL-building
+  // step has a cloudName to work with, exactly like a real staging
+  // environment would. mockUploadCloudinaryPrivate resolves per-publicId so
+  // the shoe and cap each get a genuinely distinct version/publicId, same
+  // as two real, independent Cloudinary uploads would.
+  beforeEach(() => {
+    mockGetCloudinaryConfig.mockReturnValue({ cloudName: "naia-test-cloud", apiKey: "test-key", apiSecret: "test-secret" });
+    mockUploadCloudinaryPrivate.mockImplementation(async (publicId: string) => ({
+      ok: true,
+      publicId,
+      format: "png",
+      version: publicId === SHOE_PUBLIC_ID ? "100" : "101",
+    }));
+  });
+
   it("rejects with the same generic 403 when there is no real session attached", async () => {
     setAuthorizedEnv();
     const res = await action({ request: fullLookMaxReq() } as any);
     expect(res.init?.status).toBe(403);
     expect(mockSessionCreate).not.toHaveBeenCalled();
+    expect(mockUploadCloudinaryPrivate).not.toHaveBeenCalled();
   });
 
-  it("creates exactly one StylingSession, one OutfitSuggestion (moodDescription left null), and exactly 5 OutfitItem rows — 2 TOP, 1 BOTTOM, 2 OUTERWEAR", async () => {
+  it("creates exactly one StylingSession, one OutfitSuggestion (moodDescription left null), and exactly 5 OutfitItem rows — TOP, BOTTOM, OUTERWEAR, SHOES, ACCESSORY (5 genuinely distinct categories, not a repeated one)", async () => {
     setAuthorizedEnv();
     mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
     const res = await action({ request: fullLookMaxReq() } as any);
@@ -965,10 +1019,22 @@ describe("api.vto-qa-fixture action — fixtureKind: full-look-real-garments-max
 
     expect(mockItemCreate).toHaveBeenCalledTimes(5);
     const itemTypes = mockItemCreate.mock.calls.map((call) => call[0].data.itemType).sort();
-    expect(itemTypes).toEqual(["BOTTOM", "OUTERWEAR", "OUTERWEAR", "TOP", "TOP"]);
+    expect(itemTypes).toEqual(["ACCESSORY", "BOTTOM", "OUTERWEAR", "SHOES", "TOP"]);
   });
 
-  it("every created item has closetItemId omitted, the MAX fixture's distinct marker (different from the 3-garment fixture's), a real https productImageUrl, and a [QA FIXTURE]-prefixed title", async () => {
+  it("uploads the shoe and cap images BEFORE writing any OutfitItem row, with the deterministic per-customer public ids and delivery type 'upload' (public, not private)", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    await action({ request: fullLookMaxReq() } as any);
+    expect(mockUploadCloudinaryPrivate).toHaveBeenCalledTimes(2);
+    const publicIds = mockUploadCloudinaryPrivate.mock.calls.map((call) => call[0]).sort();
+    expect(publicIds).toEqual([CAP_PUBLIC_ID, SHOE_PUBLIC_ID]);
+    for (const call of mockUploadCloudinaryPrivate.mock.calls) {
+      expect(call[2]).toBe("upload"); // deliveryType — public, never "private"
+    }
+  });
+
+  it("the 3 base items (TOP/BOTTOM/OUTERWEAR) keep their real, untouched Shopify CDN URLs; the SHOES and ACCESSORY items use the newly-uploaded public Cloudinary delivery URL, never a fabricated Shopify URL", async () => {
     setAuthorizedEnv();
     mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
     await action({ request: fullLookMaxReq() } as any);
@@ -978,16 +1044,69 @@ describe("api.vto-qa-fixture action — fixtureKind: full-look-real-garments-max
       expect(itemData.productTitle).toMatch(/^\[QA FIXTURE\]/);
       expect(itemData.shopifyProductId).toBe("qa-fixture-full-look-real-garment-max");
       expect(itemData.shopifyProductId).not.toBe("qa-fixture-full-look-real-garment");
-      expect(itemData.productImageUrl).toMatch(/^https:\/\/cdn\.shopify\.com\//);
+      if (itemData.itemType === "SHOES" || itemData.itemType === "ACCESSORY") {
+        expect(itemData.productImageUrl).toMatch(/^https:\/\/res\.cloudinary\.com\/naia-test-cloud\/image\/upload\//);
+        expect(itemData.productImageUrl).not.toMatch(/cdn\.shopify\.com/);
+      } else {
+        expect(itemData.productImageUrl).toMatch(/^https:\/\/cdn\.shopify\.com\//);
+      }
     }
   });
 
-  it("every item's productImageUrl is unique — no duplicate asset reused across the 5 slots", async () => {
+  it("every item's productImageUrl is unique — no duplicate asset reused across the 5 slots (shoe and cap resolve to genuinely distinct URLs too)", async () => {
     setAuthorizedEnv();
     mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
     await action({ request: fullLookMaxReq() } as any);
     const urls = mockItemCreate.mock.calls.map((call) => call[0].data.productImageUrl);
     expect(new Set(urls).size).toBe(urls.length);
+  });
+
+  it("if the shoe upload fails, NO OutfitItem/OutfitSuggestion/StylingSession row is ever written — never claim an image exists that was never actually uploaded", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockUploadCloudinaryPrivate.mockImplementation(async (publicId: string) =>
+      publicId === SHOE_PUBLIC_ID ? { ok: false, errorCode: "PROVIDER_ERROR_500" } : { ok: true, publicId, format: "png", version: "101" },
+    );
+    const res = await action({ request: fullLookMaxReq() } as any);
+    expect(res.init?.status).toBe(502);
+    const payload = res.data as any;
+    expect(payload.ok).toBe(false);
+    expect(payload.code).toBe("upload_failed");
+    expect(mockSessionCreate).not.toHaveBeenCalled();
+    expect(mockSuggestionCreate).not.toHaveBeenCalled();
+    expect(mockItemCreate).not.toHaveBeenCalled();
+  });
+
+  it("if the cap upload fails (shoe succeeds), NO row is written either — same discipline regardless of which of the two uploads failed", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockUploadCloudinaryPrivate.mockImplementation(async (publicId: string) =>
+      publicId === CAP_PUBLIC_ID ? { ok: false, errorCode: "PROVIDER_REJECTED" } : { ok: true, publicId, format: "png", version: "100" },
+    );
+    const res = await action({ request: fullLookMaxReq() } as any);
+    expect(res.init?.status).toBe(502);
+    const payload = res.data as any;
+    expect(payload.ok).toBe(false);
+    expect(payload.code).toBe("upload_failed");
+    expect(mockSessionCreate).not.toHaveBeenCalled();
+    expect(mockItemCreate).not.toHaveBeenCalled();
+  });
+
+  it("the corrected fixture's 5 items actually clear the REAL (now-fixed) selectFullLookGarments end-to-end: garments.length === 5, omittedLabels empty — proving the fix at the selection-logic level, not just that 5 rows got written", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    await action({ request: fullLookMaxReq() } as any);
+
+    const items: SelectableOutfitItem[] = mockItemCreate.mock.calls.map((call) => ({
+      itemType: call[0].data.itemType,
+      productTitle: call[0].data.productTitle,
+      productImageUrl: call[0].data.productImageUrl,
+    }));
+
+    const result = selectFullLookGarments(items, { customerId: QA_ID, cloudinaryConfig: null });
+    expect(result).not.toBeNull();
+    expect(result?.garments.length).toBe(5);
+    expect(result?.omittedLabels).toEqual([]);
   });
 
   it("cleanup CASCADES through dependent VirtualTryOnJob rows for the MAX fixture kind too", async () => {
@@ -1002,6 +1121,54 @@ describe("api.vto-qa-fixture action — fixtureKind: full-look-real-garments-max
     expect(payload.ok).toBe(true);
     expect(payload.deletedJobCount).toBe(1);
     expect(mockVtoJobDeleteMany).toHaveBeenCalledWith({ where: { outfitSuggestionId: "suggestion-1" } });
+  });
+
+  it("cleanup ALSO best-effort deletes the 2 synthetic Cloudinary assets (shoe + cap), delivery type 'upload', scoped to this customer — never for the 3-item fixture kind, which has no assets of its own", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockDeleteCloudinaryAsset.mockResolvedValue({ ok: true });
+    mockSuggestionFindUnique.mockResolvedValueOnce(
+      fixtureSuggestion({ items: [{ shopifyProductId: "qa-fixture-full-look-real-garment-max" }] }),
+    );
+    mockVtoJobCount.mockResolvedValueOnce(0);
+    const res = await action({ request: deleteReq({ suggestionId: "suggestion-1" }) } as any);
+    const payload = res.data as any;
+    expect(payload.ok).toBe(true);
+    expect(payload.cloudinaryAssetsDeleted).toBe(true);
+    const deletedArgs = mockDeleteCloudinaryAsset.mock.calls.map((call) => call as [string, string]).sort();
+    expect(deletedArgs).toEqual([
+      [CAP_PUBLIC_ID, "upload"],
+      [SHOE_PUBLIC_ID, "upload"],
+    ]);
+  });
+
+  it("a failed Cloudinary cleanup is reported but NEVER fails the request — the DB rows are already gone by that point regardless", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockDeleteCloudinaryAsset.mockResolvedValue({ ok: false, errorCode: "PROVIDER_ERROR_500" });
+    mockSuggestionFindUnique.mockResolvedValueOnce(
+      fixtureSuggestion({ items: [{ shopifyProductId: "qa-fixture-full-look-real-garment-max" }] }),
+    );
+    mockVtoJobCount.mockResolvedValueOnce(0);
+    const res = await action({ request: deleteReq({ suggestionId: "suggestion-1" }) } as any);
+    const payload = res.data as any;
+    expect(payload.ok).toBe(true);
+    expect(payload.cloudinaryAssetsDeleted).toBe(false);
+    expect(mockSuggestionDelete).toHaveBeenCalled();
+  });
+
+  it("cleanup of the 3-item (non-max) fixture kind never touches deleteCloudinaryAsset at all — it has no synthetic assets of its own", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockSuggestionFindUnique.mockResolvedValueOnce(
+      fixtureSuggestion({ items: [{ shopifyProductId: "qa-fixture-full-look-real-garment" }] }),
+    );
+    mockVtoJobCount.mockResolvedValueOnce(0);
+    const res = await action({ request: deleteReq({ suggestionId: "suggestion-1" }) } as any);
+    const payload = res.data as any;
+    expect(payload.ok).toBe(true);
+    expect(payload).not.toHaveProperty("cloudinaryAssetsDeleted");
+    expect(mockDeleteCloudinaryAsset).not.toHaveBeenCalled();
   });
 });
 
@@ -1277,10 +1444,10 @@ describe("api.vto-qa-fixture action — fixtureKind: my-naia-model (real-session
     expect(payload.ok).toBe(true);
     expect(payload.deletedNaiaModelId).toBe("naiamodel-1");
     expect(mockNaiaModelDelete).toHaveBeenCalledWith({ where: { customerId: QA_ID } });
-    // getCloudinaryConfig is mocked to null in this file (see its own
-    // comment) — deleteCloudinaryAsset is the REAL function, which fails
-    // closed with NOT_CONFIGURED (no network call) rather than crashing.
-    // Reported in the response, not fatal to the DB cleanup itself.
+    // deleteCloudinaryAsset's mock defaults to the same NOT_CONFIGURED-
+    // shaped failure the real function always produced here (getCloudinary
+    // Config has always been null in this suite) — reported in the
+    // response, not fatal to the DB cleanup itself.
     expect(payload.cloudinaryAssetDeleted).toBe(false);
   });
 
