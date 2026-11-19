@@ -22,6 +22,8 @@ import {
   STYLEME_STATE_LABELS,
   STYLEME_INTENTION_LABELS,
   STYLEME_FIT_COMFORT_LABELS,
+  STYLEME_OCCASION_OPTIONS,
+  STYLEME_OCCASION_REV3_TO_CANONICAL,
 } from "../styleme/session-vocabulary.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -611,30 +613,39 @@ describe("R3.12 — occasion.tsx: Rev 3 occasion IDs and normalization", () => {
     assert.ok(occasionSrc.includes("REV3_OCCASION_MAP"), "occasion.tsx must define REV3_OCCASION_MAP");
   });
 
+  // occasion.tsx's REV3_OCCASION_MAP is now an alias for
+  // STYLEME_OCCASION_REV3_TO_CANONICAL (moved into session-vocabulary.ts) —
+  // the four checks below assert against the real exported data rather
+  // than occasion.tsx's source text, which no longer holds this map inline.
+
   it('"date" maps to "date-night" in normalization', () => {
-    assert.ok(
-      occasionSrc.includes('"date": "date-night"') || occasionSrc.includes("'date': 'date-night'"),
+    assert.strictEqual(
+      STYLEME_OCCASION_REV3_TO_CANONICAL["date"],
+      "date-night",
       'REV3_OCCASION_MAP must map date → date-night',
     );
   });
 
   it('"event" maps to "special-event" in normalization', () => {
-    assert.ok(
-      occasionSrc.includes('"event": "special-event"') || occasionSrc.includes("'event': 'special-event'"),
+    assert.strictEqual(
+      STYLEME_OCCASION_REV3_TO_CANONICAL["event"],
+      "special-event",
       'REV3_OCCASION_MAP must map event → special-event',
     );
   });
 
   it('"night-out" maps to "girls-night" in normalization', () => {
-    assert.ok(
-      occasionSrc.includes('"night-out": "girls-night"') || occasionSrc.includes("'night-out': 'girls-night'"),
+    assert.strictEqual(
+      STYLEME_OCCASION_REV3_TO_CANONICAL["night-out"],
+      "girls-night",
       'REV3_OCCASION_MAP must map night-out → girls-night',
     );
   });
 
   it('"active-busy-day" maps to "active" in normalization', () => {
-    assert.ok(
-      occasionSrc.includes('"active-busy-day": "active"') || occasionSrc.includes("'active-busy-day': 'active'"),
+    assert.strictEqual(
+      STYLEME_OCCASION_REV3_TO_CANONICAL["active-busy-day"],
+      "active",
       'REV3_OCCASION_MAP must map active-busy-day → active (not everyday)',
     );
   });
@@ -1514,7 +1525,20 @@ describe("R3.23 — Fit / Comfort UI: exact 9 approved IDs, correct labels", () 
 // see occasion-active-copy-cleanup.test.ts and anchor-occasion-incompatibility.test.ts).
 
 describe("R3.24 — Occasion UI: exactly 8 approved Rev 3 customer-facing IDs", () => {
+  // Still needed below for the back-navigation check, which looks at a real
+  // literal (the /style-me/physical-need redirect path) that genuinely still
+  // lives in occasion.tsx's own source — unlike the occasions array/map.
   const occasionSrc = readFileSync(join(ROOT, "app/routes/style-me/occasion.tsx"), "utf8");
+
+  // occasion.tsx's `occasions` const is now an alias for
+  // STYLEME_OCCASION_OPTIONS and its REV3_OCCASION_MAP an alias for
+  // STYLEME_OCCASION_REV3_TO_CANONICAL (both moved into
+  // session-vocabulary.ts) — asserting against occasion.tsx's own source
+  // text no longer finds either literal inline. The REJECTED_FROM_UI loop
+  // below was a silent false pass under the old source-text check (an
+  // empty/missing slice trivially satisfies `!includes(...)`); checking the
+  // real exported options array makes it a genuine assertion.
+  const occasionIds = STYLEME_OCCASION_OPTIONS.map((o) => o.id);
 
   const APPROVED_OCCASION_IDS = [
     "work", "dinner", "date", "everyday", "event", "night-out", "family", "travel",
@@ -1523,7 +1547,7 @@ describe("R3.24 — Occasion UI: exactly 8 approved Rev 3 customer-facing IDs", 
   for (const id of APPROVED_OCCASION_IDS) {
     it(`occasion UI contains approved ID "${id}"`, () => {
       assert.ok(
-        occasionSrc.includes(`id: "${id}"`),
+        occasionIds.includes(id),
         `occasion.tsx occasions array must include "${id}"`,
       );
     });
@@ -1534,18 +1558,18 @@ describe("R3.24 — Occasion UI: exactly 8 approved Rev 3 customer-facing IDs", 
   for (const id of REJECTED_FROM_UI) {
     it(`occasion UI occasions array must NOT expose "${id}" as a selectable option`, () => {
       assert.ok(
-        !occasionSrc.includes(`id: "${id}"`),
+        !occasionIds.includes(id),
         `"${id}" must not be a selectable occasion in the Rev 3 UI`,
       );
     });
   }
 
   it("REV3_OCCASION_MAP still maps date → date-night (internal canonical)", () => {
-    assert.ok(occasionSrc.includes('"date": "date-night"') || occasionSrc.includes("'date': 'date-night'"));
+    assert.strictEqual(STYLEME_OCCASION_REV3_TO_CANONICAL["date"], "date-night");
   });
 
   it("REV3_OCCASION_MAP still maps event → special-event (internal canonical)", () => {
-    assert.ok(occasionSrc.includes('"event": "special-event"') || occasionSrc.includes("'event': 'special-event'"));
+    assert.strictEqual(STYLEME_OCCASION_REV3_TO_CANONICAL["event"], "special-event");
   });
 
   it("back navigation uses /style-me/physical-need for Rev 3 path", () => {

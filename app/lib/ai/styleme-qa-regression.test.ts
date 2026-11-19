@@ -30,6 +30,9 @@ import type { ClosetAnchorInput } from "./styleme-recommendation.types.ts";
 import {
   SESSION_OCCASION_TO_CLOSET_TOKENS,
 } from "./styleme-occasion-tokens.ts";
+import {
+  STYLEME_OCCASION_REV3_TO_CANONICAL,
+} from "../styleme/session-vocabulary.ts";
 
 const ROOT = join(import.meta.dirname ?? __dirname, "../../..");
 const RESULT_SRC = readFileSync(join(ROOT, "app/lib/ai/styleme-result.server.ts"), "utf8");
@@ -579,10 +582,13 @@ describe("B. autoSelectClosetAnchor — body need scoring", () => {
 
 describe("C. Active occasion", () => {
   it("C1 REV3_OCCASION_MAP maps active-busy-day → 'active' (not everyday)", () => {
-    const occasionSrc = readFileSync(join(ROOT, "app/routes/style-me/occasion.tsx"), "utf8");
-    assert.ok(
-      occasionSrc.includes('"active-busy-day": "active"') ||
-      occasionSrc.includes("'active-busy-day': 'active'"),
+    // occasion.tsx's REV3_OCCASION_MAP is now an alias for
+    // STYLEME_OCCASION_REV3_TO_CANONICAL (moved into session-vocabulary.ts) —
+    // assert against the real exported data rather than occasion.tsx's
+    // source text, which no longer holds this mapping inline.
+    assert.strictEqual(
+      STYLEME_OCCASION_REV3_TO_CANONICAL["active-busy-day"],
+      "active",
       'REV3_OCCASION_MAP must map active-busy-day → active (not everyday)',
     );
   });
