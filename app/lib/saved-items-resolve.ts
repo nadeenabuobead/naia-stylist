@@ -14,10 +14,18 @@
 //
 // contentKey itself is also re-derived and checked here, not trusted: for
 // TREND/SIGNAL/REFERENCE, the caller's contentKey must match some entry in
-// the report RIGHT NOW — either that entry's own persisted id (preferred,
-// stable across a later text edit), or, only for an entry with no id at all
-// (legacy content), slugify() of its display text — or the save is rejected
-// as content_not_found. See findEntry()/matchesContentKey() below.
+// the report RIGHT NOW — either that entry's own persisted id, or
+// slugify() of its CURRENT display text, for ANY entry regardless of
+// whether it also has an id — or the save is rejected as content_not_found.
+// See findEntry()/matchesContentKey() below.
+//
+// Matching is deliberately tolerant (id OR text-slug), not id-exclusive:
+// the UI (trends.$slug.tsx) prefers sending an entry's id when one exists,
+// but nothing here requires every caller to have been updated to do that —
+// a text-slug request against an id-bearing entry whose text has not
+// changed must still succeed. The real edit-immunity guarantee comes from
+// the UI actually sending the id (see trends.$slug.tsx's contentKeyFor()),
+// not from this function refusing the legacy path.
 
 import { getProductByHandle } from "./ai/naia-catalog";
 import {
@@ -76,23 +84,28 @@ function referenceLabel(entry: TrendReportReferenceCard): string {
  * Finds the entry matching `contentKey`, scoped to the arrays that belong to
  * `contentType`.
  *
- * Match order, per entry:
- *   1. entry.id === contentKey — checked FIRST. This is what makes an
- *      id-bearing entry immune to a later text edit: ids are minted once
- *      (see ensureContentIds in editorial-reports.server.ts) and never
- *      regenerated, so editing name/signal/brand/collection/description/
- *      why/naiaRead does not change which entry a save resolves to.
- *   2. Only when the entry has no id at all: slugify(displayText) ===
- *      contentKey — the pre-existing, display-text-derived key. This is the
- *      legacy-content path and behaves EXACTLY as it did before ids
- *      existed, for every report written before this change.
+ * Match, per entry — EITHER, checked for every entry regardless of whether
+ * it has an id:
+ *   - entry.id === contentKey. This is what makes an id-bearing entry
+ *     immune to a later text edit: ids are minted once (see
+ *     ensureContentIds in editorial-reports.server.ts) and never
+ *     regenerated, so editing name/signal/brand/collection/description/
+ *     why/naiaRead does not change which entry a save resolves to, PROVIDED
+ *     the caller actually sent the id (see trends.$slug.tsx).
+ *   - slugify(displayText) === contentKey — the pre-existing,
+ *     display-text-derived key. Kept live for EVERY entry, not just
+ *     id-less ones, so a caller that still sends the text slug (today's
+ *     client, before contentKeyFor() lands everywhere; any future caller
+ *     that hasn't been updated) keeps working exactly as it did before ids
+ *     existed. This is what a text-edit silently orphans — the id path is
+ *     the only one immune to that.
  *
  * SIGNAL searches both rising and fading — on trunk today both are rendered
  * identically, so there is no honest way to distinguish them by type alone,
  * same as the frozen branch's own SIGNAL handling.
  */
 function matchesContentKey(id: string | undefined, displayText: string, contentKey: string): boolean {
-  if (id) return id === contentKey;
+  if (id && id === contentKey) return true;
   return Boolean(displayText) && slugify(displayText) === contentKey;
 }
 

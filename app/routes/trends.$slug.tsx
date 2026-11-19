@@ -861,17 +861,31 @@ export default function TrendReportDetail() {
   // Current explicit feedback. Separate from Saved: a dismissal is not an
   // un-save, and the two can honestly coexist on the same content.
   const dismissed = new Set(loaderData.notForMe ?? []);
+  // The identity this control submits as `contentKey` in its save/feedback
+  // POST — id when the entry has one, else slugify(displayText). MUST stay
+  // in exact lockstep with saved-items.server.ts's entryContentKey() (the
+  // same preference order, used to compute the itemKey this maps to) and
+  // with saved-items-resolve.ts's matchesContentKey() (what the server
+  // accepts). Sending the id here — not just allowing it server-side — is
+  // what actually makes a save on id-bearing content survive a later text
+  // edit: the itemKey lookup below is always text-slug keyed (that part
+  // never changes), but the VALUE submitted to the server is what gets
+  // persisted as this save's durable identity.
+  const contentKeyFor = (id: string | undefined, displayText: string): string =>
+    id ?? slugify(displayText);
   const save = (
     contentType: "TREND" | "SIGNAL" | "REFERENCE",
-    contentKey: string,
+    id: string | undefined,
+    displayText: string,
     label: string,
   ) => {
-    const itemKey = saveState.itemKeys[`${contentType}:${contentKey}`];
+    const lookupKey = slugify(displayText);
+    const itemKey = saveState.itemKeys[`${contentType}:${lookupKey}`];
     if (!itemKey) return null;
     return (
       <SaveControl
         contentType={contentType}
-        contentKey={contentKey}
+        contentKey={contentKeyFor(id, displayText)}
         reportSlug={report.slug}
         itemKey={itemKey}
         initiallySaved={savedSet.has(itemKey)}
@@ -1075,13 +1089,13 @@ export default function TrendReportDetail() {
                 </div>
                 <p className="psl-body-text">{t.description}</p>
                 <div className="psl-save-row">
-                  {save("TREND", slugify(t.name), t.name)}
+                  {save("TREND", t.id, t.name, t.name)}
                   {saveState.canSave && (
                     <NotForMeControl
                       contentType="TREND"
-                      contentKey={slugify(t.name)}
+                      contentKey={contentKeyFor(t.id, t.name)}
                       reportSlug={report.slug}
-                      initiallyDismissed={dismissed.has(slugify(t.name))}
+                      initiallyDismissed={dismissed.has(contentKeyFor(t.id, t.name))}
                       returnTo={returnTo}
                       label={t.name}
                     />
@@ -1114,7 +1128,7 @@ export default function TrendReportDetail() {
                         {r.signal}
                         <span className="psl-signal-why">{r.why}</span>
                         {r.source && <span className="psl-signal-source">{r.source}</span>}
-                        <span className="psl-save-inline">{save("SIGNAL", slugify(r.signal), r.signal)}</span>
+                        <span className="psl-save-inline">{save("SIGNAL", r.id, r.signal, r.signal)}</span>
                       </li>
                     ))}
                   </ul>
@@ -1129,7 +1143,7 @@ export default function TrendReportDetail() {
                         {f.signal}
                         <span className="psl-signal-why">{f.why}</span>
                         {f.source && <span className="psl-signal-source">{f.source}</span>}
-                        <span className="psl-save-inline">{save("SIGNAL", slugify(f.signal), f.signal)}</span>
+                        <span className="psl-save-inline">{save("SIGNAL", f.id, f.signal, f.signal)}</span>
                       </li>
                     ))}
                   </ul>
@@ -1155,7 +1169,8 @@ export default function TrendReportDetail() {
                     <div className="psl-save-row">
                       {save(
                         "REFERENCE",
-                        slugify(ref.collection ? `${ref.brand} — ${ref.collection}` : ref.brand),
+                        ref.id,
+                        ref.collection ? `${ref.brand} — ${ref.collection}` : ref.brand,
                         ref.collection ? `${ref.brand} — ${ref.collection}` : ref.brand,
                       )}
                     </div>

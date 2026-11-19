@@ -23,6 +23,7 @@ vi.mock("./ai/naia-catalog", () => ({
 }));
 
 import { resolveSaveTargetFromReport } from "./saved-items-resolve";
+import { buildItemKey, buildSaveItemRow } from "./saved-items";
 import type { TrendReportData } from "./trend-reports";
 
 const REPORT: TrendReportData = {
@@ -131,12 +132,68 @@ describe("resolveSaveTargetFromReport — stable content id survives a text edit
     }
   });
 
-  it("a stale slugified-text contentKey no longer matches once the entry has an id — the legacy key is retired, not dual-honoured", () => {
+  it("REGRESSION: a save POST built exactly the way today's client actually builds it — contentKey: slugify(currentDisplayText) — still succeeds against an entry that already has an id", () => {
+    // This is the exact shape of request trends.$slug.tsx sent before its
+    // contentKeyFor() wiring landed, and what any not-yet-updated caller
+    // still sends today: a text-slug contentKey, not the entry's id. Once
+    // ensureContentIds mints an id into every entry of a report (on its
+    // very next create/update), this must NOT start failing — that was the
+    // regression in 0d531dae: matchesContentKey() became id-exclusive the
+    // instant an entry had an id, so this exact request returned
+    // content_not_found even though the entry's display text had not
+    // changed at all.
     const result = resolveSaveTargetFromReport(
       { contentType: "TREND", contentKey: "softened-tailoring", reportSlug: REPORT_WITH_ID.slug },
       REPORT_WITH_ID,
     );
-    expect(result).toEqual({ ok: false, reason: "content_not_found" });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.request.label).toBe("Softened Tailoring");
+  });
+
+  it("the happy path once the UI is wired: contentKey: entry.id succeeds and resolves to that same id", () => {
+    const result = resolveSaveTargetFromReport(
+      { contentType: "TREND", contentKey: "trend-id-1", reportSlug: REPORT_WITH_ID.slug },
+      REPORT_WITH_ID,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.request.contentKey).toBe("trend-id-1");
+      expect(result.request.label).toBe("Softened Tailoring");
+    }
+  });
+
+  it("end-to-end: a save sent with contentKey: entry.id persists an itemKey derived from the id, identical across a later text edit", () => {
+    // Walks the full chain a real POST to /api/saved-items walks: resolve,
+    // then buildSaveItemRow (which is what computes the itemKey actually
+    // written to SavedItem). No DB — buildSaveItemRow is pure.
+    const resolved = resolveSaveTargetFromReport(
+      { contentType: "TREND", contentKey: "trend-id-1", reportSlug: REPORT_WITH_ID.slug },
+      REPORT_WITH_ID,
+    );
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+
+    const row = buildSaveItemRow(resolved.request);
+    expect(row.itemKey).toBe(
+      buildItemKey({ contentType: "TREND", contentKey: "trend-id-1", reportSlug: REPORT_WITH_ID.slug }),
+    );
+
+    // Now the admin edits the name/description in place. The id is
+    // untouched, so a repeat of the SAME request (contentKey: entry.id)
+    // against the edited report resolves to the identical itemKey — the
+    // save survives the edit instead of orphaning.
+    const editedReport: TrendReportData = {
+      ...REPORT_WITH_ID,
+      keyTrends: [{ id: "trend-id-1", name: "Softened Tailoring (retitled)", description: "A new description entirely." }],
+    };
+    const resolvedAfterEdit = resolveSaveTargetFromReport(
+      { contentType: "TREND", contentKey: "trend-id-1", reportSlug: editedReport.slug },
+      editedReport,
+    );
+    expect(resolvedAfterEdit.ok).toBe(true);
+    if (!resolvedAfterEdit.ok) return;
+    const rowAfterEdit = buildSaveItemRow(resolvedAfterEdit.request);
+    expect(rowAfterEdit.itemKey).toBe(row.itemKey);
   });
 });
 
