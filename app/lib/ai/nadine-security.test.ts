@@ -16,7 +16,7 @@ import {
   computeTryOnStatus,
 } from "./nadine-product-assessment.ts";
 import { LOCKED_CATALOGUE_HANDLES, VIRTUAL_TRY_ON_ENABLED } from "./naia-product-media.ts";
-import { HANDOFF_ENTRY_PATH } from "../styleme/handoff.js";
+import { HANDOFF_ENTRY_PATH, isAllowedHandoffOrigin } from "../styleme/handoff.js";
 import type {
   CustomerAssessmentProfile,
   ClosetItemSummary,
@@ -143,13 +143,34 @@ describe("§S2 styleme-handoff origin and POST enforcement", () => {
   });
 
   it("S09 — handoff route validates Origin header", () => {
+    // Behavioral: exercise the real allowlist function (isAllowedHandoffOrigin,
+    // app/lib/styleme/handoff.ts) directly, rather than string-matching the
+    // route's source text for "naiabynadine.com" — that broke when the origin
+    // check was refactored out of the route into its own named function, even
+    // though the actual protection was unchanged.
+    assert.equal(
+      isAllowedHandoffOrigin(ALLOWED_ORIGIN),
+      true,
+      "the documented production storefront origin must be allowed",
+    );
+    assert.equal(
+      isAllowedHandoffOrigin("https://naiabynadine.com.evil.com"),
+      false,
+      "a look-alike subdomain must not be allowed",
+    );
+    assert.equal(
+      isAllowedHandoffOrigin(null),
+      false,
+      "a missing Origin header must not be allowed",
+    );
+
     const routeFile = fs.readFileSync(
       path.resolve("app/routes/api.styleme-handoff.tsx"),
       "utf8",
     );
     assert.ok(
-      routeFile.includes("naiabynadine.com"),
-      "allowed origin must be naiabynadine.com",
+      routeFile.includes("isAllowedHandoffOrigin"),
+      "route must delegate Origin validation to isAllowedHandoffOrigin",
     );
     assert.ok(
       routeFile.includes('status: 403') || routeFile.includes("status:403"),
