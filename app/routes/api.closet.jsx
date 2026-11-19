@@ -4,6 +4,7 @@ import { deleteClosetItemWithImage } from "../lib/closet-item-deletion.server.js
 import { checkEntitlement, reserveClosetSlot } from "../lib/plan/entitlement.server";
 import { getMembershipAllowances } from "../lib/plan/plan-limits.server";
 import { isTransientDatabaseError } from "../lib/prisma-transient-retry.server";
+import { buildCorsHeaders } from "../lib/storefront-cors.server";
 
 function isSerializationError(e) {
   return e?.code === "P2034";
@@ -16,12 +17,6 @@ function isRetryableSyncTxError(e) {
   return isSerializationError(e) || isTransientDatabaseError(e);
 }
 const MAX_SYNC_TX_RETRIES = 2;
-
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization",
-};
 
 // Maps legacy lowercase category strings from stylist.jsx to Prisma ClosetCategory enum values.
 // The canonical closet UI (closet._index.tsx) uses correct enum values directly.
@@ -48,6 +43,7 @@ function normalizeCategory(raw) {
  * Used by stylist.jsx (legacy JWT auth path).
  */
 export async function loader({ request }) {
+  const CORS = buildCorsHeaders(request, "GET, POST, DELETE, OPTIONS");
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS });
   }
@@ -72,6 +68,7 @@ export async function loader({ request }) {
  * The canonical write path for new closet UIs is closet._index.tsx (NaiaSession auth).
  */
 export async function action({ request }) {
+  const CORS = buildCorsHeaders(request, "GET, POST, DELETE, OPTIONS");
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS });
   }

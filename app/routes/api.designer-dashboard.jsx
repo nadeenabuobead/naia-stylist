@@ -2,17 +2,17 @@ import prisma from "../db.server";
 import { requireStaffAccess } from "../lib/staff-auth.server";
 export const config = { runtime: 'nodejs' };
 
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization",
-};
+// 2026-11-19 — removed an unconditional "Access-Control-Allow-Origin: *"
+// that served no legitimate purpose: this is a staff-only internal
+// dashboard (requireStaffAccess gates it to an allowlisted Shopify Admin
+// session), exposing aggregate review/customer data across ALL customers.
+// No other requireStaffAccess-gated route in this codebase sets any CORS
+// header at all — this was the one anomaly, not an intentional cross-origin
+// surface. No OPTIONS/preflight handling is needed either: without any
+// Access-Control-Allow-Origin header, this route is same-origin only by
+// default, matching every sibling staff route's own convention.
 
 export async function loader({ request }) {
-  if (request.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: CORS });
-  }
-
   await requireStaffAccess(request);
 
   try {
@@ -141,9 +141,9 @@ export async function loader({ request }) {
         bestMoodShifts,
         topBodyPrefs,
       },
-    }, { headers: CORS });
+    });
   } catch (err) {
     console.error("Designer dashboard error:", err);
-    return Response.json({ error: "Failed to load dashboard" }, { status: 500, headers: CORS });
+    return Response.json({ error: "Failed to load dashboard" }, { status: 500 });
   }
 }

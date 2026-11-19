@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { data as json } from "react-router";
 import { getCurrentNaiaCustomer } from "../lib/naia-session.server";
 import prisma from "../db.server";
+import { buildCorsHeaders } from "../lib/storefront-cors.server";
 import { extractBuySkipEvidence } from "../lib/ai/taste-extraction.server";
 import { writeSourceEvidence } from "../lib/ai/taste-reconcile.server";
 import {
@@ -101,12 +102,6 @@ const BOS_NECKLINE_COVERAGE_TOKENS = [...NECKLINE_COVERAGE_VALUES]
 // deliberate change ("synthetic" -> "polyester") can never silently drift.
 const BOS_MATERIAL_TOKENS = ["denim", "silk", "cotton", "linen", "leather", "wool", "knit", "polyester", "satin"].join(" / ");
 const BOS_PATTERN_TOKENS = [...GARMENT_PATTERN_VALUES, "textured", "print"].join(" / ");
-
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization",
-};
 
 /**
  * GET /api/wishlist — fetch all wishlist items
@@ -1344,6 +1339,7 @@ async function recordOutcome(request) {
 // WishlistItem model does not exist in schema.prisma; this loader crashed with P2021.
 // Saved Looks (style-me/result.tsx intent=save) is the current nAia-owned save mechanism.
 export async function loader({ request }) {
+  const CORS = buildCorsHeaders(request, "GET, POST, DELETE, OPTIONS");
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS });
   }
@@ -1363,7 +1359,8 @@ export async function action({ request }) {
   if (url.searchParams.get("action") === "outcome") {
     return recordOutcome(request);
   }
-  
+
+  const CORS = buildCorsHeaders(request, "GET, POST, DELETE, OPTIONS");
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS });
   }
