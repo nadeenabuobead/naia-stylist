@@ -13,6 +13,12 @@ function initializationError(message: string) {
   return err;
 }
 
+function unknownRequestError(message: string) {
+  const err = new Error(message);
+  err.name = "PrismaClientUnknownRequestError";
+  return err;
+}
+
 describe("isTransientDatabaseError", () => {
   for (const code of ["P1001", "P1002", "P1008", "P1017", "P2024"]) {
     it(`classifies ${code} as transient`, () => {
@@ -37,6 +43,27 @@ describe("isTransientDatabaseError", () => {
   it("does not classify an unrelated error as transient", () => {
     expect(isTransientDatabaseError(new Error("some other failure"))).toBe(false);
     expect(isTransientDatabaseError(prismaError("P2002"))).toBe(false);
+  });
+
+  it("classifies 08P01 (protocol_violation) on a PrismaClientUnknownRequestError as transient (2026-11-19 — prisma/orm#30275: Prisma's own managed pooler acknowledged handing out stale connections on pooled.db.prisma.io, surfacing as this exact SQLSTATE)", () => {
+    const realMessage =
+      'ConnectorError(ConnectorError { user_facing_error: None, kind: QueryError(PostgresError { code: "08P01", message: "protocol violation", severity: "ERROR", detail: None, hint: None, routine: Some("exec_bind_message") }) })';
+    expect(isTransientDatabaseError(unknownRequestError(realMessage))).toBe(true);
+  });
+
+  it("classifies 08P01 regardless of which Postgres routine raised it (the newly-evidenced stale-pooled-connection path doesn't always surface as exec_bind_message)", () => {
+    const message = 'PostgresError { code: "08P01", message: "server conn crashed?", routine: Some("SocketBackend") }';
+    expect(isTransientDatabaseError(unknownRequestError(message))).toBe(true);
+  });
+
+  it("does not classify a different SQLSTATE on a PrismaClientUnknownRequestError as transient", () => {
+    const message = 'PostgresError { code: "23505", message: "duplicate key value", severity: "ERROR" }';
+    expect(isTransientDatabaseError(unknownRequestError(message))).toBe(false);
+  });
+
+  it("does not classify an 08P01-shaped message as transient unless the error name is actually PrismaClientUnknownRequestError (narrow, name-gated match — not a bare substring check)", () => {
+    const message = 'PostgresError { code: "08P01", message: "protocol violation" }';
+    expect(isTransientDatabaseError(new Error(message))).toBe(false);
   });
 
   it("does not throw on null/non-object input", () => {
@@ -68,6 +95,19 @@ describe("withTransientRetry", () => {
     expect(op).toHaveBeenCalledTimes(2);
     expect(sleep).toHaveBeenCalledTimes(1);
     expect(sleep).toHaveBeenCalledWith(200);
+  });
+
+  it("retries exactly once on 08P01, then returns the second attempt's result (the new stale-pooled-connection mitigation)", async () => {
+    const op = vi
+      .fn()
+      .mockRejectedValueOnce(unknownRequestError('PostgresError { code: "08P01", message: "server conn crashed?" }'))
+      .mockResolvedValueOnce("recovered");
+    const sleep = vi.fn().mockResolvedValue(undefined);
+
+    const result = await withTransientRetry(op, { _sleep: sleep });
+
+    expect(result).toBe("recovered");
+    expect(op).toHaveBeenCalledTimes(2);
   });
 
   it("never retries more than once — a second transient failure throws DatabaseUnavailableError, not a third attempt", async () => {
