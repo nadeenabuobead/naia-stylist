@@ -124,9 +124,27 @@ vi.mock("~/lib/ai/my-naia-model.server", () => ({
 // the GET loader's call into the real selectFullLookGarments resolves
 // images via the plain imageUrl fallback deterministically in tests,
 // without needing real Cloudinary credentials.
+//
+// 2026-11-20 — uploadCloudinaryPrivate is ALSO mocked here now (it was
+// not before this fixture-photo-upload fix, because the route never
+// called it before). Overriding the exported binding is required, not
+// optional: the real uploadCloudinaryPrivate's own default _getConfig
+// parameter closes over this SAME module's real (unmocked, env-var-
+// reading) getCloudinaryConfig — not the overridden export above — so
+// without this, every call would see no real CLOUDINARY_* env vars in
+// the test process and fail closed with NOT_CONFIGURED, making every
+// my-naia-model creation test fail the new upload step before ever
+// reaching Prisma. Mirrors this file's own house style: a controllable
+// vi.fn() standing in for the real Cloudinary network call, which must
+// never actually happen in this suite.
+const mockUploadCloudinaryPrivate = vi.fn();
 vi.mock("~/lib/cloudinary-admin.server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("~/lib/cloudinary-admin.server")>();
-  return { ...actual, getCloudinaryConfig: () => null };
+  return {
+    ...actual,
+    getCloudinaryConfig: () => null,
+    uploadCloudinaryPrivate: (...args: unknown[]) => mockUploadCloudinaryPrivate(...args),
+  };
 });
 
 // 2026-11-18 — the styleme-result-view fixture mode's real-session
@@ -265,6 +283,16 @@ beforeEach(() => {
   mockBosCreate.mockResolvedValue({ id: "bos-1" });
   mockBosDeleteMany.mockResolvedValue({ count: 0 });
   mockLoadNaiaModel.mockResolvedValue({ bodyPublicId: "p", bodyFormat: "jpg", saveModelConsentAt: new Date() });
+  // Default: the synthetic-photo upload succeeds, matching every existing
+  // happy-path test's assumption that creation proceeds to write a
+  // NaiaModel row. Individual tests override this to simulate an upload
+  // failure.
+  mockUploadCloudinaryPrivate.mockResolvedValue({
+    ok: true,
+    publicId: `naia-wardrobe/${QA_ID}/qa-fixture-synthetic-body`,
+    format: "png",
+    version: "1",
+  });
   // Default: no real Clerk session attached — matches every existing test's
   // assumption that the real-session fallback does not kick in unless a
   // test explicitly sets up a session via mockGetCurrentNaiaCustomer.
@@ -1287,6 +1315,175 @@ describe("api.vto-qa-fixture action — fixtureKind: my-naia-model (real-session
     await action({ request: deleteReq({ fixtureKind: "my-naia-model" }) } as any);
     expect(mockSuggestionFindUnique).not.toHaveBeenCalled();
     expect(mockSuggestionDelete).not.toHaveBeenCalled();
+  });
+
+  // ── 2026-11-20 fixture-photo-upload fix ────────────────────────────────
+  //
+  // Root cause this covers: createMyNaiaModelFixture previously wrote
+  // bodyPublicId/bodyFormat/APPROVED/consent fields straight to the DB
+  // without ever uploading a real photo to that public_id — so a real
+  // Full-Look VTO submission's downloadModelPhotoAsDataUrl (which
+  // actually fetches the asset from Cloudinary) failed with
+  // PROVIDER_ERROR before FASHN was ever reached. These tests prove the
+  // fix: a real upload call happens, happens BEFORE any DB write claiming
+  // readiness, and a failed upload never leaves that false state behind
+  // — on every path that can write the row (fresh create, re-run/update-
+  // own, and adopt).
+  describe("fixtureKind: my-naia-model — synthetic photo upload (2026-11-20 fix)", () => {
+    it("fresh create — uploads the synthetic photo with the exact publicId/deliveryType/targetFormat BEFORE writing the NaiaModel row", async () => {
+      setAuthorizedEnv();
+      mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+      mockNaiaModelFindUnique.mockResolvedValueOnce(null);
+
+      const res = await action({ request: modelReq() } as any);
+      const payload = res.data as any;
+      expect(payload.ok).toBe(true);
+
+      expect(mockUploadCloudinaryPrivate).toHaveBeenCalledTimes(1);
+      const [publicId, dataUrl, deliveryType, , , , targetFormat] = mockUploadCloudinaryPrivate.mock.calls[0];
+      expect(publicId).toBe(`naia-wardrobe/${QA_ID}/qa-fixture-synthetic-body`);
+      expect(typeof dataUrl).toBe("string");
+      expect(dataUrl.startsWith("data:image/png;base64,")).toBe(true);
+      expect(deliveryType).toBe("private");
+      expect(targetFormat).toBe("png");
+
+      // Upload happened before the DB write, not after or in parallel.
+      expect(mockUploadCloudinaryPrivate.mock.invocationCallOrder[0]).toBeLessThan(
+        mockNaiaModelCreate.mock.invocationCallOrder[0],
+      );
+    });
+
+    it("fresh create — an upload failure returns upload_failed and writes no NaiaModel row at all", async () => {
+      setAuthorizedEnv();
+      mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+      mockNaiaModelFindUnique.mockResolvedValueOnce(null);
+      mockUploadCloudinaryPrivate.mockResolvedValueOnce({ ok: false, errorCode: "PROVIDER_REJECTED" });
+
+      const res = await action({ request: modelReq() } as any);
+      const payload = res.data as any;
+      expect(payload.ok).toBe(false);
+      expect(payload.code).toBe("upload_failed");
+      expect(res.init?.status).toBe(502);
+
+      expect(mockNaiaModelCreate).not.toHaveBeenCalled();
+      expect(mockNaiaModelUpdate).not.toHaveBeenCalled();
+      expect(mockNaiaModelUpdateMany).not.toHaveBeenCalled();
+      expect(mockAdminAuditLogCreate).not.toHaveBeenCalled();
+    });
+
+    it("re-run (updated-own) — re-uploads the synthetic photo before updating the row again", async () => {
+      setAuthorizedEnv();
+      mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+      mockNaiaModelFindUnique.mockResolvedValueOnce({
+        id: "naiamodel-1",
+        bodyPublicId: `naia-wardrobe/${QA_ID}/qa-fixture-synthetic-body`,
+      });
+
+      const res = await action({ request: modelReq() } as any);
+      expect((res.data as any).ok).toBe(true);
+
+      expect(mockUploadCloudinaryPrivate).toHaveBeenCalledTimes(1);
+      expect(mockUploadCloudinaryPrivate.mock.calls[0][0]).toBe(`naia-wardrobe/${QA_ID}/qa-fixture-synthetic-body`);
+      expect(mockUploadCloudinaryPrivate.mock.invocationCallOrder[0]).toBeLessThan(
+        mockNaiaModelUpdate.mock.invocationCallOrder[0],
+      );
+    });
+
+    it("re-run (updated-own) — an upload failure leaves the existing row untouched (no update attempted)", async () => {
+      setAuthorizedEnv();
+      mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+      mockNaiaModelFindUnique.mockResolvedValueOnce({
+        id: "naiamodel-1",
+        bodyPublicId: `naia-wardrobe/${QA_ID}/qa-fixture-synthetic-body`,
+      });
+      mockUploadCloudinaryPrivate.mockResolvedValueOnce({ ok: false, errorCode: "NETWORK_ERROR" });
+
+      const res = await action({ request: modelReq() } as any);
+      expect((res.data as any).ok).toBe(false);
+      expect((res.data as any).code).toBe("upload_failed");
+      expect(mockNaiaModelUpdate).not.toHaveBeenCalled();
+    });
+
+    it("adopt path — also uploads the synthetic photo before the compare-and-swap update, not just DB field changes", async () => {
+      setAuthorizedEnv();
+      mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+      const existingStub = {
+        id: "stub-model-1",
+        bodyPublicId: null,
+        bodyVersion: null,
+        bodyFormat: "jpg",
+        facePublicId: null,
+        faceVersion: null,
+        faceFormat: null,
+        deliveryType: "private",
+        photoAnalysisConsentAt: null,
+        saveModelConsentAt: null,
+        consentPolicyVersion: null,
+        bodyModerationStatus: "APPROVED",
+        bodyModerationAt: new Date("2026-11-16T11:06:39.235Z"),
+      };
+      mockNaiaModelFindUnique.mockResolvedValueOnce(existingStub);
+      mockNaiaModelFindUniqueOrThrow.mockResolvedValueOnce({
+        id: "stub-model-1",
+        bodyPublicId: `naia-wardrobe/${QA_ID}/qa-fixture-synthetic-body`,
+      });
+
+      const res = await action({ request: modelReq() } as any);
+      const payload = res.data as any;
+      expect(payload.ok).toBe(true);
+      expect(payload.adopted).toBe(true);
+
+      expect(mockUploadCloudinaryPrivate).toHaveBeenCalledTimes(1);
+      expect(mockUploadCloudinaryPrivate.mock.calls[0][0]).toBe(`naia-wardrobe/${QA_ID}/qa-fixture-synthetic-body`);
+      // Upload happened before the CAS update (and before the audit-log
+      // snapshot's corresponding overwrite takes effect).
+      expect(mockUploadCloudinaryPrivate.mock.invocationCallOrder[0]).toBeLessThan(
+        mockNaiaModelUpdateMany.mock.invocationCallOrder[0],
+      );
+    });
+
+    it("adopt path — an upload failure never adopts the row: no audit-log snapshot, no CAS update, row left exactly as found", async () => {
+      setAuthorizedEnv();
+      mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+      mockNaiaModelFindUnique.mockResolvedValueOnce({
+        id: "stub-model-1",
+        bodyPublicId: null,
+        bodyVersion: null,
+        bodyFormat: "jpg",
+        facePublicId: null,
+        faceVersion: null,
+        faceFormat: null,
+        deliveryType: "private",
+        photoAnalysisConsentAt: null,
+        saveModelConsentAt: null,
+        consentPolicyVersion: null,
+        bodyModerationStatus: "APPROVED",
+        bodyModerationAt: new Date("2026-11-16T11:06:39.235Z"),
+      });
+      mockUploadCloudinaryPrivate.mockResolvedValueOnce({ ok: false, errorCode: "PROVIDER_REJECTED" });
+
+      const res = await action({ request: modelReq() } as any);
+      const payload = res.data as any;
+      expect(payload.ok).toBe(false);
+      expect(payload.code).toBe("upload_failed");
+
+      expect(mockAdminAuditLogCreate).not.toHaveBeenCalled();
+      expect(mockNaiaModelUpdateMany).not.toHaveBeenCalled();
+      expect(mockNaiaModelCreate).not.toHaveBeenCalled();
+    });
+
+    it("refused path (a real, different model already present) never attempts the upload at all", async () => {
+      setAuthorizedEnv();
+      mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+      mockNaiaModelFindUnique.mockResolvedValueOnce({
+        id: "real-model-1",
+        bodyPublicId: `naia-wardrobe/${QA_ID}/some-real-photo-from-onboarding`,
+      });
+
+      const res = await action({ request: modelReq() } as any);
+      expect(res.init?.status).toBe(409);
+      expect(mockUploadCloudinaryPrivate).not.toHaveBeenCalled();
+    });
   });
 });
 
