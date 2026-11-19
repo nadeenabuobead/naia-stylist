@@ -226,6 +226,21 @@ export async function action({ request }: ActionFunctionArgs) {
     return createFullLookRealGarmentsFixture(sessionCustomerId);
   }
 
+  if (parsedBody?.fixtureKind === "full-look-real-garments-max") {
+    // Same real-session auth as full-look-real-garments above — see
+    // resolveAuthorizedQaSessionCustomerId's own comment. A SEPARATE
+    // fixtureKind, not a modification of the 3-garment one above: that
+    // fixture is relied on by already-passed Five-Persona QA #30/#31
+    // evidence and must stay exactly as it is. This one exists solely to
+    // exercise FULL_LOOK_MAX_GARMENTS (5) — the maximum-boundary case,
+    // never yet run against a real provider.
+    const sessionCustomerId = await resolveAuthorizedQaSessionCustomerId(request);
+    if (!sessionCustomerId) {
+      return data({ ok: false, code: "forbidden" }, { status: 403 });
+    }
+    return createFullLookRealGarmentsMaxFixture(sessionCustomerId);
+  }
+
   if (parsedBody?.fixtureKind === "my-naia-model") {
     // Same real-session auth as the other real-session fixture kinds.
     const sessionCustomerId = await resolveAuthorizedQaSessionCustomerId(request);
@@ -654,6 +669,79 @@ async function createFullLookRealGarmentsFixture(customerId: string) {
   });
 }
 
+// ── Full-Look VTO real-garment MAX fixture (2026-11-19) ─────────────────────
+//
+// POST /api/vto-qa-fixture, body: { fixtureKind: "full-look-real-garments-max" },
+// same authorization posture as full-look-real-garments above.
+//
+// WHY THIS EXISTS: the only real-provider evidence on record for Full-Look
+// VTO (Five-Persona QA #30/#31) exercised exactly FULL_LOOK_MIN_GARMENTS
+// (3) — the minimum-boundary case. FULL_LOOK_MAX_GARMENTS (5) has never
+// been run against the real provider. This is a SEPARATE fixtureKind, not
+// a change to the 3-garment one above, so #30/#31's existing passed
+// evidence is never put at risk by this addition.
+//
+// Exactly FULL_LOOK_MAX_GARMENTS (5) synthetic OutfitItem rows, same shape
+// as the 3-garment fixture (closetItemId: null, real already-public
+// Shopify CDN productImageUrl, no Cloudinary call, no new upload). Draws 2
+// additional real "ready" entries from naia-product-media.ts beyond the
+// original 3 (TOP/BOTTOM/OUTERWEAR): a second TOP (cropped-top /
+// "Becoming Fragmented") and a second OUTERWEAR (kimono-jacket /
+// "Becoming Whole") — both already eligibility:"ready", GID-verified,
+// reused as-is, nothing fabricated. Repeats two categories rather than
+// inventing a DRESS/SHOES/BAG entry this map doesn't have approved media
+// for; selectFullLookGarments's category floor only requires >=3 distinct
+// categories, which the original 3 already satisfy, so this is a safe way
+// to reach exactly 5 total items without approving new media out-of-band.
+//
+// Every item's shopifyProductId is the distinctly-prefixed
+// "qa-fixture-full-look-real-garment-max" — different from both other
+// fixture kinds' markers — so deleteFixtureSuggestion below can scope
+// cleanup correctly. Every productTitle is "[QA FIXTURE] ..." per
+// convention.
+const FULL_LOOK_MAX_FIXTURE_SHOPIFY_PRODUCT_ID = "qa-fixture-full-look-real-garment-max";
+
+const FULL_LOOK_MAX_FIXTURE_ITEMS: { itemType: OutfitItemType; title: string; productImageUrl: string }[] = [
+  ...FULL_LOOK_FIXTURE_ITEMS,
+  {
+    itemType: "TOP",
+    title: "[QA FIXTURE] Full-Look real-garment top #2 (max-boundary) — not a real customer item",
+    productImageUrl: "https://cdn.shopify.com/s/files/1/0998/1008/2948/files/3614927b-4685-4df3-aeff-b3d5a950cbd2.png?v=1774533037",
+  },
+  {
+    itemType: "OUTERWEAR",
+    title: "[QA FIXTURE] Full-Look real-garment outerwear #2 (max-boundary) — not a real customer item",
+    productImageUrl: "https://cdn.shopify.com/s/files/1/0998/1008/2948/files/77d61b97-37da-4e57-8297-aa5207b35d07.png?v=1774533134",
+  },
+];
+
+async function createFullLookRealGarmentsMaxFixture(customerId: string) {
+  const { sessionId, suggestionId } = await prisma.$transaction(async (tx) => {
+    const session = await tx.stylingSession.create({ data: { customerId }, select: { id: true } });
+    const suggestion = await tx.outfitSuggestion.create({ data: { sessionId: session.id }, select: { id: true } });
+    for (const { itemType, title, productImageUrl } of FULL_LOOK_MAX_FIXTURE_ITEMS) {
+      await tx.outfitItem.create({
+        data: {
+          suggestionId: suggestion.id,
+          itemType,
+          productTitle: title,
+          shopifyProductId: FULL_LOOK_MAX_FIXTURE_SHOPIFY_PRODUCT_ID,
+          productImageUrl,
+        },
+      });
+    }
+    return { sessionId: session.id, suggestionId: suggestion.id };
+  });
+
+  return data({
+    ok: true,
+    fixtureKind: "full-look-real-garments-max",
+    sessionId,
+    suggestionId,
+    itemCount: FULL_LOOK_MAX_FIXTURE_ITEMS.length,
+  });
+}
+
 // ── My nAia Model fixture (2026-11-18) ──────────────────────────────────────
 //
 // POST /api/vto-qa-fixture, body: { fixtureKind: "my-naia-model" }, while
@@ -1046,13 +1134,15 @@ async function deleteFixtureSuggestion(request: Request, parsed: Record<string, 
   // suggestions this exact fixture created, never for styleme-result-view
   // or any real customer suggestion, where a dependent job existing is
   // still an unexpected state this action refuses to touch. Distinguished
-  // by every one of the suggestion's own items carrying this fixture's
-  // distinct shopifyProductId marker (set only by
-  // createFullLookRealGarmentsFixture above) — not by moodDescription
-  // alone, since that's shared with styleme-result-view.
+  // by every one of the suggestion's own items carrying one of these two
+  // fixtures' distinct shopifyProductId markers (set only by
+  // createFullLookRealGarmentsFixture / createFullLookRealGarmentsMaxFixture
+  // above) — not by moodDescription alone, since that's shared with
+  // styleme-result-view.
   const isFullLookRealGarmentsFixture =
     suggestion.items.length > 0 &&
-    suggestion.items.every((item) => item.shopifyProductId === FULL_LOOK_FIXTURE_SHOPIFY_PRODUCT_ID);
+    (suggestion.items.every((item) => item.shopifyProductId === FULL_LOOK_FIXTURE_SHOPIFY_PRODUCT_ID) ||
+      suggestion.items.every((item) => item.shopifyProductId === FULL_LOOK_MAX_FIXTURE_SHOPIFY_PRODUCT_ID));
 
   if (dependentJobs > 0 && !isFullLookRealGarmentsFixture) {
     return data({ ok: false, code: "has_dependent_jobs", dependentJobs }, { status: 409 });

@@ -911,6 +911,72 @@ describe("api.vto-qa-fixture action — fixtureKind: full-look-real-garments (re
   });
 });
 
+describe("api.vto-qa-fixture action — fixtureKind: full-look-real-garments-max (FULL_LOOK_MAX_GARMENTS boundary, real images, no secret)", () => {
+  function fullLookMaxReq(overrides: Record<string, unknown> = {}, headers: Record<string, string> = {}) {
+    return req({ fixtureKind: "full-look-real-garments-max", ...overrides }, headers);
+  }
+
+  it("rejects with the same generic 403 when there is no real session attached", async () => {
+    setAuthorizedEnv();
+    const res = await action({ request: fullLookMaxReq() } as any);
+    expect(res.init?.status).toBe(403);
+    expect(mockSessionCreate).not.toHaveBeenCalled();
+  });
+
+  it("creates exactly one StylingSession, one OutfitSuggestion (moodDescription left null), and exactly 5 OutfitItem rows — 2 TOP, 1 BOTTOM, 2 OUTERWEAR", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    const res = await action({ request: fullLookMaxReq() } as any);
+    const payload = res.data as any;
+    expect(payload.ok).toBe(true);
+    expect(payload.fixtureKind).toBe("full-look-real-garments-max");
+    expect(payload.itemCount).toBe(5);
+
+    const suggestionCreateArg = mockSuggestionCreate.mock.calls[0][0];
+    expect(suggestionCreateArg.data).not.toHaveProperty("moodDescription");
+
+    expect(mockItemCreate).toHaveBeenCalledTimes(5);
+    const itemTypes = mockItemCreate.mock.calls.map((call) => call[0].data.itemType).sort();
+    expect(itemTypes).toEqual(["BOTTOM", "OUTERWEAR", "OUTERWEAR", "TOP", "TOP"]);
+  });
+
+  it("every created item has closetItemId omitted, the MAX fixture's distinct marker (different from the 3-garment fixture's), a real https productImageUrl, and a [QA FIXTURE]-prefixed title", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    await action({ request: fullLookMaxReq() } as any);
+    for (const call of mockItemCreate.mock.calls) {
+      const itemData = call[0].data;
+      expect(itemData).not.toHaveProperty("closetItemId");
+      expect(itemData.productTitle).toMatch(/^\[QA FIXTURE\]/);
+      expect(itemData.shopifyProductId).toBe("qa-fixture-full-look-real-garment-max");
+      expect(itemData.shopifyProductId).not.toBe("qa-fixture-full-look-real-garment");
+      expect(itemData.productImageUrl).toMatch(/^https:\/\/cdn\.shopify\.com\//);
+    }
+  });
+
+  it("every item's productImageUrl is unique — no duplicate asset reused across the 5 slots", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    await action({ request: fullLookMaxReq() } as any);
+    const urls = mockItemCreate.mock.calls.map((call) => call[0].data.productImageUrl);
+    expect(new Set(urls).size).toBe(urls.length);
+  });
+
+  it("cleanup CASCADES through dependent VirtualTryOnJob rows for the MAX fixture kind too", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockSuggestionFindUnique.mockResolvedValueOnce(
+      fixtureSuggestion({ items: [{ shopifyProductId: "qa-fixture-full-look-real-garment-max" }] }),
+    );
+    mockVtoJobCount.mockResolvedValueOnce(1);
+    const res = await action({ request: deleteReq({ suggestionId: "suggestion-1" }) } as any);
+    const payload = res.data as any;
+    expect(payload.ok).toBe(true);
+    expect(payload.deletedJobCount).toBe(1);
+    expect(mockVtoJobDeleteMany).toHaveBeenCalledWith({ where: { outfitSuggestionId: "suggestion-1" } });
+  });
+});
+
 
 describe("api.vto-qa-fixture action — fixtureKind: my-naia-model (real-session auth, real readiness fields)", () => {
   function modelReq(overrides: Record<string, unknown> = {}) {
