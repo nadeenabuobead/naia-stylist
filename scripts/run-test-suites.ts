@@ -35,6 +35,20 @@ const steps = [
   // so nothing ever ran it. Same node:test-vs-vitest reason it gets its
   // own script rather than being appended to "test:security".
   "test:error-tracking",
+  // 2026-11-19 (08P01 investigation follow-up): found while re-verifying
+  // coverage around the intermittent 08P01/protocol_violation incident —
+  // app/lib/clerk-session.test.ts, clerk-session.server.key-guard.test.ts,
+  // clerk-session-db-resilience.test.ts, clerk-session.server
+  // .authorized-parties.test.ts, and prisma-transient-retry.server.test.ts
+  // (the exact DatabaseUnavailableError / isTransientDatabaseError /
+  // getCurrentNaiaCustomer DB-resilience coverage this incident depends
+  // on) had the same unreachability problem as C7/H7/error-tracking above:
+  // none of them appeared in any npm script, so `npm test` never ran them.
+  // All 5 files pass today (51 tests) — this just makes that visible to
+  // every future run instead of silently skipping them. They are vitest
+  // files (unlike the node:test suites above), so they're combined into
+  // one new "test:clerk-session" script rather than node:test's own runner.
+  "test:clerk-session",
 ];
 
 const results: { script: string; exitCode: number }[] = [];
