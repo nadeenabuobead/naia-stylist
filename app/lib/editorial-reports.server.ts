@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import prisma from "../db.server";
 import {
   trendReports,
@@ -196,12 +197,52 @@ type ReportInput = {
   visualTreatment?: string | null;
 };
 
+// ── Content ids ──────────────────────────────────────────────────────────────
+//
+// keyTrends/rising/fading/referencesBehindThisEdit are plain Json columns
+// with no embedded id field. That meant a SavedItem/TrendContentFeedback row
+// — keyed by reportSlug + slugify(the entry's own display text) — silently
+// orphaned the moment an admin edited that entry's text, even a typo fix:
+// the slugified key changed, and there was no way for the customer to find
+// or remove the now-unreachable save.
+//
+// Fix: mint a stable, persistent id into each entry's own JSON object, at
+// the one real choke point for content writes — createEditorialReport and
+// updateEditorialReport below. No Prisma migration needed: adding an `id`
+// field inside an existing Json array's objects is a pure data-shape
+// evolution, not a schema change.
+//
+// ensureContentIds is pure and defensive: `entries` is `unknown` (raw JSON
+// from whatever caller — admin UI or seed script) precisely so a malformed
+// shape must never throw here, only pass through unchanged.
+export function ensureContentIds(entries: unknown): unknown {
+  if (!Array.isArray(entries)) return entries;
+  return entries.map((entry) => {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return entry;
+    const record = entry as Record<string, unknown>;
+    const existingId = record.id;
+    if (typeof existingId === "string" && existingId.trim() !== "") return entry;
+    return { ...record, id: randomUUID() };
+  });
+}
+
+/** Applies ensureContentIds to every JSON content field a ReportInput carries. */
+function withContentIds(data: ReportInput): ReportInput {
+  return {
+    ...data,
+    keyTrends: ensureContentIds(data.keyTrends),
+    rising: ensureContentIds(data.rising),
+    fading: ensureContentIds(data.fading),
+    referencesBehindThisEdit: ensureContentIds(data.referencesBehindThisEdit),
+  };
+}
+
 export async function createEditorialReport(data: ReportInput) {
-  return prisma.editorialTrendReport.create({ data });
+  return prisma.editorialTrendReport.create({ data: withContentIds(data) });
 }
 
 export async function updateEditorialReport(id: string, data: ReportInput) {
-  return prisma.editorialTrendReport.update({ where: { id }, data });
+  return prisma.editorialTrendReport.update({ where: { id }, data: withContentIds(data) });
 }
 
 export async function deleteEditorialReport(id: string) {
@@ -233,10 +274,13 @@ export async function seedEditorialReportsFromStatic() {
         naiaVerdict: r.naiaVerdict ?? null,
         wardrobeNote: r.wardrobeNote ?? null,
         investmentNotes: r.investmentNotes ?? null,
-        keyTrends: r.keyTrends as object[],
-        rising: (r.rising ?? []) as object[],
-        fading: (r.fading ?? []) as object[],
-        referencesBehindThisEdit: (r.referencesBehindThisEdit ?? []) as object[],
+        // This upsert writes the Json content fields directly (it is not
+        // routed through createEditorialReport), so it mints ids itself via
+        // the same ensureContentIds helper — every write path must mint.
+        keyTrends: ensureContentIds(r.keyTrends) as object[],
+        rising: ensureContentIds(r.rising ?? []) as object[],
+        fading: ensureContentIds(r.fading ?? []) as object[],
+        referencesBehindThisEdit: ensureContentIds(r.referencesBehindThisEdit ?? []) as object[],
         howToWear: (r.howToWear ?? []) as object[],
         sources: r.sources as object[],
         spendSaveSkip: (r.spendSaveSkip ?? {}) as object,
@@ -246,4 +290,54 @@ export async function seedEditorialReportsFromStatic() {
     });
   }
   return trendReports.length;
+}
+
+// ── Backfill (explicit, separate action — NOT run by this change) ──────────
+//
+// Existing reports in the database today (seeded before this fix) have no
+// ids on their entries at all. This function mints them for every report
+// that is missing one, by routing each report's current content through
+// the exact same ensureContentIds helper used on every create/update, then
+// writing back only when something was actually missing an id — idempotent,
+// safe to re-run, safe to run never.
+//
+// NOT auto-run on app start, NOT called from any request path, and NOT
+// invoked anywhere in this change. Running it against a real (staging or
+// production) database is a separate, explicit action requiring its own
+// founder approval — the same posture as every other production data write
+// in this project (see memory: Founder Decision conventions). The coding
+// agent that wrote this function did NOT invoke it against any real
+// database — it is exercised only under test, against in-memory/mocked
+// Prisma data.
+export async function backfillContentIds(): Promise<{ scanned: number; updated: number }> {
+  const reports = await prisma.editorialTrendReport.findMany();
+  let updated = 0;
+
+  for (const r of reports) {
+    const keyTrends = ensureContentIds(r.keyTrends);
+    const rising = ensureContentIds(r.rising);
+    const fading = ensureContentIds(r.fading);
+    const referencesBehindThisEdit = ensureContentIds(r.referencesBehindThisEdit);
+
+    const changed =
+      JSON.stringify(keyTrends) !== JSON.stringify(r.keyTrends) ||
+      JSON.stringify(rising) !== JSON.stringify(r.rising) ||
+      JSON.stringify(fading) !== JSON.stringify(r.fading) ||
+      JSON.stringify(referencesBehindThisEdit) !== JSON.stringify(r.referencesBehindThisEdit);
+
+    if (!changed) continue;
+
+    await prisma.editorialTrendReport.update({
+      where: { id: r.id },
+      data: {
+        keyTrends: keyTrends as object[],
+        rising: rising as object[],
+        fading: fading as object[],
+        referencesBehindThisEdit: referencesBehindThisEdit as object[],
+      },
+    });
+    updated += 1;
+  }
+
+  return { scanned: reports.length, updated };
 }

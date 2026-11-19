@@ -127,6 +127,8 @@ model Customer {
   styleTendencies         StyleTendency[]
   wardrobeSnapshots       WardrobeSnapshot[]
   personalisedTrendEditUsage PersonalisedTrendEditUsage[]
+  savedItems              SavedItem[]
+  trendContentFeedback    TrendContentFeedback[]
   // Billing — Phase 1 (schema only, no activation, no payment collection).
   // No new scalar field added to Customer itself: provider customer/
   // subscription identifiers live on Subscription/BillingTransaction, not
@@ -2530,4 +2532,82 @@ model ApiRateLimitCounter {
 
   @@unique([customerId, routeKey, windowStart])
   @@index([windowStart])
+}
+
+// ============================================
+// SAVED ITEMS + TREND FEEDBACK (2026-11-19)
+// ============================================
+//
+// Reconciled onto trunk from the frozen fix/trend-product-completion branch,
+// with the facet/content-identity scheme (trend-content-identity.ts,
+// trend-facets.ts) deliberately NOT ported — that redesign stays frozen per
+// Founder Decision. Content here is keyed by a trivial, inline, stateless
+// derivation (reportSlug + contentType + a slugified snapshot of the item's
+// own display text, or the NADINE product handle for PRODUCT, or a fixed
+// takeaway-section key for TAKEAWAY) — see app/lib/saved-items.ts. There is
+// no separate identity table, no mint/recover/backfill step, and no FACET
+// content type in this v1.
+
+/// One saved object — a trend, a signal, a reference, a NADINE piece, or a
+/// section of a customer's personalised edit. SavedLook (StyleMe outfits)
+/// is untouched and stays a separate store; the two are merged only at
+/// render time by whichever page lists them.
+///
+/// itemKey is the deterministic, customer-scoped identity:
+///   PRODUCT  → "PRODUCT:<handle>"                         (global — not report-scoped)
+///   other    → "<contentType>:<reportSlug>:<contentKey>"  (report-scoped)
+/// Computed inline by buildItemKey() in app/lib/saved-items.ts — never
+/// persisted anywhere else, never minted/recovered/backfilled.
+model SavedItem {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  itemKey     String  // see comment above — unique per customer
+  contentType String  // TREND | SIGNAL | REFERENCE | PRODUCT | TAKEAWAY
+  contentKey  String  // slugified name/signal/brand, the NADINE handle, or a takeaway section key
+  reportSlug  String? // EditorialTrendReport.slug — null only for the global PRODUCT type
+
+  // Display snapshot — for rendering the card only, never re-derived from it.
+  label    String
+  sublabel String?
+  imageUrl String?
+
+  // Provenance — where the customer discovered this. Belongs to the save
+  // that CREATED the row; never overwritten by a later encounter with the
+  // same object (see saveItem() in saved-items.server.ts).
+  sourceKind         String
+  sourceReportTitle  String?
+  sourceSeason       String?
+  sourceContentKey   String?
+  sourceContentLabel String?
+  sourcePath         String?
+
+  @@unique([customerId, itemKey], name: "customerId_itemKey")
+  @@index([customerId])
+}
+
+/// A deliberate, non-save action on one Trend Report content unit —
+/// currently "Not for me" (api.trend-feedback.tsx). "Styled" is a reserved
+/// action value for a future StyleMe-handoff signal and is not written by
+/// any route in this change.
+///
+/// Unique on (customer, report, content, action): clicking the same action
+/// repeatedly is one row, not a growing log — see setTrendFeedback() in
+/// trend-feedback.server.ts.
+model TrendContentFeedback {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  reportSlug   String
+  contentType  String // TREND | SIGNAL | REFERENCE
+  contentKey   String
+  contentLabel String?
+  action       String // NOT_FOR_ME | STYLED
+
+  @@unique([customerId, reportSlug, contentType, contentKey, action], name: "customerId_reportSlug_contentType_contentKey_action")
+  @@index([customerId, reportSlug])
 }

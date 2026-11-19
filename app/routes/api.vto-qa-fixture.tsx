@@ -63,6 +63,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { data } from "react-router";
 import { timingSafeEqual } from "crypto";
+import zlib from "zlib";
 import dbServer from "~/db.server";
 import { closetItemToSlot } from "~/lib/ai/closet-slot";
 import { getCurrentNaiaCustomer } from "~/lib/clerk-session.server";
@@ -70,7 +71,7 @@ import type { OutfitSlot } from "~/lib/ai/styleme-recommendation.types";
 import type { OutfitItemType, PrismaClient } from "@prisma/client";
 
 const prisma: PrismaClient = dbServer;
-import { getCloudinaryConfig, deleteCloudinaryAsset } from "~/lib/cloudinary-admin.server";
+import { getCloudinaryConfig, deleteCloudinaryAsset, uploadCloudinaryPrivate } from "~/lib/cloudinary-admin.server";
 import { selectFullLookGarments, type SelectableOutfitItem } from "~/lib/ai/full-look-vto-orchestrator.server";
 import { loadNaiaModel, computeModelReadinessFromRecord, POLICY_VERSION } from "~/lib/ai/my-naia-model.server";
 
@@ -802,7 +803,152 @@ async function createFullLookRealGarmentsMaxFixture(customerId: string) {
 // the same value every real customer's consent record uses, not a fixture-
 // specific placeholder, so this row is structurally indistinguishable
 // from a real one to every downstream consumer.
+//
+// 2026-11-20 CONFIRMED GAP, FIXED — the paragraph above describes a single
+// manual upload performed once, out-of-band, for the one disposable QA
+// account this fixture has always targeted. That manual step is NOT part
+// of this function's own code path, so it only ever covered that one
+// account's one bodyPublicId — any other invocation (a different
+// QA_OVERRIDE_CUSTOMER_ID, or this same asset having since been deleted,
+// e.g. by this fixture's own cleanup below) writes a bodyPublicId with no
+// real Cloudinary asset behind it. A real Full-Look VTO submission then
+// calls downloadModelPhotoAsDataUrl (fashn-tryon-service.server.ts), which
+// actually fetches the asset — and fails with PROVIDER_ERROR before FASHN
+// is ever reached (full-look-tryon-real.server.ts's submitFullLookRealStep
+// marks the job FAILED on that download failure), exactly matching a real
+// staging acceptance-test failure with zero FASHN credits spent. Confirmed
+// by direct code tracing of that exact path, not by assumption.
+//
+// Fixed here: this function now ACTUALLY uploads a real (synthetic,
+// generated inline, non-identifying) photo to bodyPublicId via the same
+// uploadCloudinaryPrivate() saveNaiaModelPhoto itself calls, every time it
+// runs, for every customer — never relying on a prior manual step. The
+// NaiaModel row is only written (create, update, or the adopt-path's CAS
+// update) after that upload has actually succeeded; a failed upload
+// returns a clear failure and writes nothing, rather than repeating the
+// exact broken "DB says ready, no bytes exist" state this gap produced.
 const MY_NAIA_MODEL_FIXTURE_FORMAT = "png";
+
+// A valid, synthetic PNG — hand-built here from raw pixels via Node's
+// built-in zlib (no new dependency, no network fetch, no AI-generation
+// call) — depicting a simple humanoid silhouette: a head circle, a torso
+// rectangle, two arm rectangles, and two leg rectangles in a flat dark
+// gray against a light gray background, 180x320px. Generated inline, not
+// read from a checked-in asset file, so there is no separate file to keep
+// in sync with this constant.
+//
+// 2026-11-20 — upgraded from an earlier single-solid-pixel placeholder.
+// A 1x1 pixel passes Cloudinary's own upload validation but gives FASHN's
+// pose/body-detection step nothing to find — in the real paid Full-Look
+// VTO flow this fixture exists to exercise, that risks either a NEW
+// failure mode (PROVIDER_REJECTED) or, worse, acceptance followed by a
+// real-credit-spending, guaranteed-garbage generation. This image is
+// still fully synthetic and non-identifiable (geometric shapes, not a
+// real photo of a real person) but has actual head/torso/limb structure
+// for a pose-detection step to act on.
+function buildSyntheticHumanoidSilhouettePng(): Buffer {
+  const width = 180;
+  const height = 320;
+
+  const background: [number, number, number] = [230, 230, 230];
+  const foreground: [number, number, number] = [60, 60, 60];
+
+  const headCenterX = width / 2;
+  const headCenterY = 54;
+  const headRadius = 32;
+  const torso = { x0: 62, y0: 86, x1: 118, y1: 190 };
+  const armLeft = { x0: 40, y0: 92, x1: 62, y1: 178 };
+  const armRight = { x0: 118, y0: 92, x1: 140, y1: 178 };
+  const legLeft = { x0: 68, y0: 190, x1: 88, y1: 304 };
+  const legRight = { x0: 92, y0: 190, x1: 112, y1: 304 };
+
+  const inRect = (x: number, y: number, r: { x0: number; y0: number; x1: number; y1: number }) =>
+    x >= r.x0 && x < r.x1 && y >= r.y0 && y < r.y1;
+
+  const isForeground = (x: number, y: number): boolean => {
+    const dx = x - headCenterX;
+    const dy = y - headCenterY;
+    if (dx * dx + dy * dy <= headRadius * headRadius) return true;
+    return (
+      inRect(x, y, torso) ||
+      inRect(x, y, armLeft) ||
+      inRect(x, y, armRight) ||
+      inRect(x, y, legLeft) ||
+      inRect(x, y, legRight)
+    );
+  };
+
+  // Raw PNG scanlines: each row is a filter-type byte (0 = "None")
+  // followed by width * 3 RGB bytes — exactly what zlib-deflating and
+  // wrapping in IDAT below expects.
+  const stride = 1 + width * 3;
+  const raw = Buffer.alloc(stride * height);
+  for (let y = 0; y < height; y++) {
+    const rowStart = y * stride;
+    raw[rowStart] = 0;
+    for (let x = 0; x < width; x++) {
+      const [r, g, b] = isForeground(x, y) ? foreground : background;
+      const px = rowStart + 1 + x * 3;
+      raw[px] = r;
+      raw[px + 1] = g;
+      raw[px + 2] = b;
+    }
+  }
+
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 2; // color type: truecolor (RGB)
+  ihdr[10] = 0; // compression method
+  ihdr[11] = 0; // filter method
+  ihdr[12] = 0; // interlace method
+
+  const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  return Buffer.concat([
+    signature,
+    pngChunk("IHDR", ihdr),
+    pngChunk("IDAT", zlib.deflateSync(raw)),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+// Standard PNG/zlib CRC-32 table, used only to checksum the chunks this
+// file hand-builds above — no external dependency, this is the same
+// well-known polynomial every PNG encoder/decoder uses.
+const PNG_CRC_TABLE: Uint32Array = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) {
+      c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    }
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+
+function pngCrc32(buf: Buffer): number {
+  let crc = 0xffffffff;
+  for (let i = 0; i < buf.length; i++) {
+    crc = PNG_CRC_TABLE[(crc ^ buf[i]) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function pngChunk(type: string, chunkData: Buffer): Buffer {
+  const typeBuf = Buffer.from(type, "ascii");
+  const lenBuf = Buffer.alloc(4);
+  lenBuf.writeUInt32BE(chunkData.length, 0);
+  const crcBuf = Buffer.alloc(4);
+  crcBuf.writeUInt32BE(pngCrc32(Buffer.concat([typeBuf, chunkData])), 0);
+  return Buffer.concat([lenBuf, typeBuf, chunkData, crcBuf]);
+}
+
+// Built once at module load (cheap: a few hundred KB of in-memory pixel
+// math, not a network call) and reused for every fixture invocation,
+// rather than re-encoding the same PNG bytes on every request.
+const SYNTHETIC_FIXTURE_PHOTO_DATA_URL = `data:image/png;base64,${buildSyntheticHumanoidSilhouettePng().toString("base64")}`;
 
 function myNaiaModelFixtureBodyPublicId(customerId: string): string {
   return `naia-wardrobe/${customerId}/qa-fixture-synthetic-body`;
@@ -847,12 +993,60 @@ async function createMyNaiaModelFixture(customerId: string) {
     consentPolicyVersion: POLICY_VERSION,
   };
 
-  let outcome: { mode: "created" | "updated-own" | "adopted" | "refused"; model?: { id: string; bodyPublicId: string | null } };
+  // Single read, OUTSIDE any DB transaction, deciding which of the four
+  // outcomes this call is — before any upload or any write is attempted.
+  // This is the ONLY read of the row this function performs; the write
+  // below (whichever branch) does not re-read it, so there is nothing to
+  // keep in sync with a second query. Not reachable at all for "refused":
+  // that branch returns immediately below, writing nothing and uploading
+  // nothing — a real/foreign model is never touched, exactly as before.
+  const existing = await prisma.naiaModel.findUnique({ where: { customerId } });
+
+  let mode: "created" | "updated-own" | "adopted";
+  if (!existing) {
+    mode = "created";
+  } else if (existing.bodyPublicId === bodyPublicId) {
+    // Already this exact fixture's own prior record — safe repeat call.
+    mode = "updated-own";
+  } else if (isAdoptableNaiaModelRow(existing)) {
+    mode = "adopted";
+  } else {
+    return data({ ok: false, code: "existing_model_present" }, { status: 409 });
+  }
+
+  // Upload the synthetic fixture photo BEFORE writing (or updating) any
+  // NaiaModel row that claims a photo exists at bodyPublicId — see this
+  // function's own header comment (2026-11-20) for exactly why a DB-only
+  // write here is the defect this fixes. Deliberately NOT inside the
+  // prisma.$transaction below: this is a real network call (Cloudinary),
+  // and holding an interactive-transaction connection open across it would
+  // risk the transaction's own (much shorter) timeout — a concern that
+  // doesn't apply to a plain sequential await here.
+  const uploadResult = await uploadCloudinaryPrivate(
+    bodyPublicId,
+    SYNTHETIC_FIXTURE_PHOTO_DATA_URL,
+    "private",
+    undefined,
+    undefined,
+    undefined,
+    MY_NAIA_MODEL_FIXTURE_FORMAT,
+  );
+  if (!uploadResult.ok) {
+    // No DB write of any kind happens past this point — never leave a
+    // NaiaModel row (new, updated, or adopted) claiming a photo exists
+    // that in fact was never actually uploaded. This is exactly the
+    // "server_error PROVIDER_ERROR, zero FASHN credits spent" failure
+    // mode this fix exists to prevent from recurring.
+    return data(
+      { ok: false, code: "upload_failed", errorCode: uploadResult.errorCode },
+      { status: 502 },
+    );
+  }
+
+  let outcome: { mode: "created" | "updated-own" | "adopted"; model: { id: string; bodyPublicId: string | null } };
   try {
     outcome = await prisma.$transaction(async (tx) => {
-      const existing = await tx.naiaModel.findUnique({ where: { customerId } });
-
-      if (!existing) {
+      if (mode === "created") {
         const created = await tx.naiaModel.create({
           data: { customerId, ...fields },
           select: { id: true, bodyPublicId: true },
@@ -860,8 +1054,7 @@ async function createMyNaiaModelFixture(customerId: string) {
         return { mode: "created" as const, model: created };
       }
 
-      if (existing.bodyPublicId === bodyPublicId) {
-        // Already this exact fixture's own prior record — safe repeat call.
+      if (mode === "updated-own") {
         const updated = await tx.naiaModel.update({
           where: { customerId },
           data: fields,
@@ -870,18 +1063,18 @@ async function createMyNaiaModelFixture(customerId: string) {
         return { mode: "updated-own" as const, model: updated };
       }
 
-      if (!isAdoptableNaiaModelRow(existing)) {
-        return { mode: "refused" as const };
-      }
+      // mode === "adopted". `existing` is guaranteed non-null here (only
+      // "adopted" is reachable when existing is set and adoptable).
+      const adoptable = existing!;
 
-      // Adoptable: snapshot EVERY field before touching anything, so
-      // cleanup can restore it exactly — not just delete the row, which
-      // would lose a state that (even though not functionally meaningful)
-      // the founder asked to be precisely preserved and restored, not
-      // discarded by assumption. Written to AdminAuditLog directly
-      // (within this same transaction) rather than via
-      // recordAdminAction(), which hardcodes the top-level prisma client
-      // and so cannot participate in this transaction's atomicity.
+      // Snapshot EVERY field before touching anything, so cleanup can
+      // restore it exactly — not just delete the row, which would lose a
+      // state that (even though not functionally meaningful) the founder
+      // asked to be precisely preserved and restored, not discarded by
+      // assumption. Written to AdminAuditLog directly (within this same
+      // transaction) rather than via recordAdminAction(), which hardcodes
+      // the top-level prisma client and so cannot participate in this
+      // transaction's atomicity.
       await tx.adminAuditLog.create({
         data: {
           performedBy: "qa-fixture:my-naia-model",
@@ -889,18 +1082,18 @@ async function createMyNaiaModelFixture(customerId: string) {
           detail: {
             customerId,
             originalFields: {
-              facePublicId: existing.facePublicId,
-              faceVersion: existing.faceVersion,
-              faceFormat: existing.faceFormat,
-              bodyPublicId: existing.bodyPublicId,
-              bodyVersion: existing.bodyVersion,
-              bodyFormat: existing.bodyFormat,
-              deliveryType: existing.deliveryType,
-              photoAnalysisConsentAt: existing.photoAnalysisConsentAt?.toISOString() ?? null,
-              saveModelConsentAt: existing.saveModelConsentAt?.toISOString() ?? null,
-              consentPolicyVersion: existing.consentPolicyVersion,
-              bodyModerationStatus: existing.bodyModerationStatus,
-              bodyModerationAt: existing.bodyModerationAt?.toISOString() ?? null,
+              facePublicId: adoptable.facePublicId,
+              faceVersion: adoptable.faceVersion,
+              faceFormat: adoptable.faceFormat,
+              bodyPublicId: adoptable.bodyPublicId,
+              bodyVersion: adoptable.bodyVersion,
+              bodyFormat: adoptable.bodyFormat,
+              deliveryType: adoptable.deliveryType,
+              photoAnalysisConsentAt: adoptable.photoAnalysisConsentAt?.toISOString() ?? null,
+              saveModelConsentAt: adoptable.saveModelConsentAt?.toISOString() ?? null,
+              consentPolicyVersion: adoptable.consentPolicyVersion,
+              bodyModerationStatus: adoptable.bodyModerationStatus,
+              bodyModerationAt: adoptable.bodyModerationAt?.toISOString() ?? null,
             },
           },
         },
@@ -908,12 +1101,16 @@ async function createMyNaiaModelFixture(customerId: string) {
 
       // Compare-and-swap: only proceed if the row still looks exactly as
       // just read (no real photo, no real consent) at the moment of
-      // write — detects a concurrent writer between our read and this
-      // update instead of silently clobbering it. A lost race aborts the
-      // whole transaction (including the audit-log insert above) rather
-      // than leaving a snapshot with no corresponding adoption.
+      // write — detects a concurrent writer between our read (and the
+      // upload we just performed) and this update instead of silently
+      // clobbering it. A lost race aborts the whole transaction
+      // (including the audit-log insert above) rather than leaving a
+      // snapshot with no corresponding adoption. The now-uploaded
+      // Cloudinary asset is harmless orphaned fixture content either way
+      // — left for the existing orphan-sweep mechanism, same as any other
+      // abandoned upload in this file.
       const cas = await tx.naiaModel.updateMany({
-        where: { customerId, bodyPublicId: existing.bodyPublicId, saveModelConsentAt: null },
+        where: { customerId, bodyPublicId: adoptable.bodyPublicId, saveModelConsentAt: null },
         data: fields,
       });
       if (cas.count !== 1) {
@@ -930,10 +1127,6 @@ async function createMyNaiaModelFixture(customerId: string) {
       return data({ ok: false, code: "concurrent_modification" }, { status: 409 });
     }
     throw err;
-  }
-
-  if (outcome.mode === "refused" || !outcome.model) {
-    return data({ ok: false, code: "existing_model_present" }, { status: 409 });
   }
 
   return data({

@@ -7,17 +7,24 @@ export type TrendReportSource = {
 };
 
 export type TrendReportKeyTrend = {
+  // Stable content id, minted once on write (see ensureContentIds in
+  // editorial-reports.server.ts) and never regenerated. Optional so
+  // pre-existing/legacy content with no id still typechecks — those entries
+  // fall back to a display-text-derived key (see saved-items-resolve.ts).
+  id?: string;
   name: string;
   description: string;
 };
 
 export type TrendSignal = {
+  id?: string;
   signal: string;
   why: string;
   source: string;
 };
 
 export type TrendReportReferenceCard = {
+  id?: string;
   brand: string;
   collection?: string;
   signal: string;   // only what the cited source explicitly states or clearly shows
