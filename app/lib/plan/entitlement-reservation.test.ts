@@ -502,6 +502,14 @@ describe("reserveClosetSlot", () => {
     return Object.assign(new Error("Timed out fetching a new connection from the connection pool"), { code: "P2024" });
   }
 
+  function protocolViolation08P01() {
+    const err = new Error(
+      'ConnectorError(ConnectorError { user_facing_error: None, kind: QueryError(PostgresError { code: "08P01", message: "server conn crashed?" }) })',
+    );
+    err.name = "PrismaClientUnknownRequestError";
+    return err;
+  }
+
   it("RSV.31 — retries once on a P2024 connection-pool-exhaustion error, then succeeds, with no duplicate create", async () => {
     let txCalls = 0;
     let createCalls = 0;
@@ -544,6 +552,19 @@ describe("reserveClosetSlot", () => {
       (e: any) => e.code === "P2002",
     );
     assert.equal(txCalls, 1, "a non-retryable error must not trigger the retry loop");
+  });
+
+  it("RSV.35 — SAFETY BOUNDARY (2026-11-19 founder safety review, prog-1): a Postgres 08P01 protocol_violation (PrismaClientUnknownRequestError) is NEVER retried here, even though it IS now retried for standalone reads elsewhere (withTransientRetry) — this transaction's count-check-then-create must not be blindly re-run on an error that could, under the stale-pooled-connection mechanism, occur after a commit already reached the server; retrying here could create a duplicate ClosetItem row", async () => {
+    let txCalls = 0;
+    const mockTx: RunReservationFn = async (_fn) => {
+      txCalls++;
+      throw protocolViolation08P01();
+    };
+    await assert.rejects(
+      () => reserveClosetSlot(CUSTOMER_ID, "MEMBER", itemData, mockTx, NO_SUBSCRIPTION),
+      (e: any) => e.name === "PrismaClientUnknownRequestError",
+    );
+    assert.equal(txCalls, 1, "08P01 must not trigger the retry loop at this call site — unlike P2024, it is not provably safe to retry a write transaction on this error");
   });
 
   it("RSV.34 — simultaneous Closet saves: one customer's two concurrent uploads, the first transiently pool-exhausted then recovering, the second succeeding outright — both land, neither is lost nor duplicated, and the final count is exactly right", async () => {
