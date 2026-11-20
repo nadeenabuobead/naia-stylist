@@ -77,22 +77,29 @@ describe("UX-1 — Save Look confirmation points at the real Saved Looks destina
 // ── 2. Wardrobe Intelligence "Complete This Look" CTA ──────────────────────
 
 describe("UX-2 — the multi-garment combination CTA is relabelled without affecting the single-piece CTA", () => {
-  test("UX-2.1 the moodboard combination dialog's CTA now reads 'Complete This Look'", () => {
+  test("UX-2.1 the moodboard combination dialog's CTA now reads 'Complete This Look' (2026-11-20: the inline markup this test originally checked was refactored into the shared CompleteLookForm component — same button text, just no longer duplicated per call site)", () => {
     const src = closetIntelSrc();
     const moodboardAt = src.indexOf('dialog.kind === "moodboardLook"');
     assert.ok(moodboardAt > -1, "the moodboard combination dialog must still exist");
     const scope = src.slice(moodboardAt, src.indexOf("</DialogShell>", moodboardAt));
-    assert.match(scope, /Complete This Look →/);
-    assert.doesNotMatch(scope, /Style this look in StyleMe/, "the old label must not survive alongside the new one");
+    assert.match(scope, /<CompleteLookForm garmentIds=\{look\.garmentIds\}\s*\/>/, "the dialog must render the shared CompleteLookForm component with every garment id");
+    const formDefAt = src.indexOf("function CompleteLookForm");
+    assert.ok(formDefAt > -1, "the shared CompleteLookForm component must exist");
+    const formScope = src.slice(formDefAt, src.indexOf("\n}", formDefAt));
+    assert.match(formScope, /Complete This Look →/, "the component's own button text must read 'Complete This Look'");
+    assert.doesNotMatch(formScope, /Style this look in StyleMe/, "the old single-piece label must not have leaked into the shared multi-garment component");
   });
 
-  test("UX-2.2 the multi-garment handoff mechanism itself is unchanged: every garment id is still submitted to /api/wi-style-this", () => {
+  test("UX-2.2 the multi-garment handoff mechanism itself is unchanged: every garment id is still submitted to /api/wi-style-this (2026-11-20: now via the shared CompleteLookForm component instead of an inline <Form>)", () => {
     const src = closetIntelSrc();
     const moodboardAt = src.indexOf('dialog.kind === "moodboardLook"');
     const scope = src.slice(moodboardAt, src.indexOf("</DialogShell>", moodboardAt));
-    assert.match(scope, /<Form method="post" action="\/api\/wi-style-this">/);
-    assert.match(scope, /\{look\.garmentIds\.map\(/, "every garment id must still be submitted — only the label changed");
-    assert.doesNotMatch(scope, /value=\{look\.garmentIds\[0\]\}/, "must not regress to submitting only the first garment");
+    assert.match(scope, /<CompleteLookForm garmentIds=\{look\.garmentIds\}\s*\/>/, "the dialog must pass the FULL garmentIds array (not a single index) to the shared form");
+    assert.doesNotMatch(scope, /garmentIds=\{\s*\[?\s*look\.garmentIds\[0\]/, "must not regress to submitting only the first garment");
+    const formDefAt = src.indexOf("function CompleteLookForm");
+    const formScope = src.slice(formDefAt, src.indexOf("\n}", formDefAt));
+    assert.match(formScope, /<fetcher\.Form method="post" action="\/api\/wi-style-this"/, "the shared form component must still post to the real multi-garment handoff endpoint");
+    assert.match(formScope, /garmentIds\.map\(/, "every garment id must still be submitted — only the label/structure changed, not the mechanism");
   });
 
   test("UX-2.3 the SEPARATE single-piece Rediscover CTA ('Style this in StyleMe') is a distinct string and was not touched", () => {
@@ -132,9 +139,9 @@ describe("UX-3 — the Save QA Page debug control is gated by an explicit, serve
     assert.doesNotMatch(before, /\{loaderData\.isStagingProject && \(/, "must no longer be gated by the broad staging flag — staging now also hosts real customer acceptance checks");
   });
 
-  test("UX-3.3 the UNRELATED staging-gated block (full-look VTO trigger) is untouched — this fix is scoped to the QA export button only", () => {
+  test("UX-3.3 the UNRELATED staging-gated block (full-look VTO trigger) is untouched — this fix is scoped to the QA export button only (2026-11-20: the section comment's wording was later updated from 'Staging QA: full-look VTO trigger' to '── Virtual Try-On ──' — a cosmetic rename, not a behavioral change; the gate below is unchanged)", () => {
     const src = resultSrc();
-    const vtoAt = src.indexOf("Staging QA: full-look VTO trigger");
+    const vtoAt = src.indexOf("── Virtual Try-On ──");
     assert.ok(vtoAt > -1, "the unrelated VTO trigger feature must still exist");
     const jsxAt = src.indexOf("loaderData.isStagingProject && suggestion?.id", vtoAt);
     assert.ok(jsxAt > -1, "it must remain gated by isStagingProject — only the Save QA Page control's gate changed");
