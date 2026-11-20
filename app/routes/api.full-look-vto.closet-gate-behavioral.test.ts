@@ -107,4 +107,22 @@ describe("POST /api/full-look-vto — closet eligibility gate wiring", () => {
     expect(startFullLookOutfit).not.toHaveBeenCalled();
     expect(gateFullLookClosetGarments).not.toHaveBeenCalled();
   });
+
+  it("a screening_unavailable refusal (the piece check could not complete) is HTTP 503 screening_unavailable — transient, distinct from the deterministic 400 not_eligible — and carries no internal details", async () => {
+    (startFullLookOutfit as any).mockResolvedValue({ status: "NOT_ELIGIBLE", reason: "screening_unavailable", label: "Scarf" });
+    const res = await call();
+    expect(res.init.status).toBe(503);
+    expect(res.data).toMatchObject({ ok: false, code: "screening_unavailable" });
+    expect(JSON.stringify(res.data)).not.toMatch(/Scarf|reason/);
+  });
+
+  it("the not_eligible 400 response never changes shape for the other reasons", async () => {
+    for (const reason of ["category_not_allowed", "photo_flagged", "unsuitable_image", "unresolved_closet_item", "image_unresolved"]) {
+      (startFullLookOutfit as any).mockResolvedValue({ status: "NOT_ELIGIBLE", reason, label: "Piece" });
+      const res = await call();
+      expect(res.init.status).toBe(400);
+      expect(res.data).toMatchObject({ ok: false, code: "not_eligible", reason, label: "Piece" });
+    }
+  });
 });
+

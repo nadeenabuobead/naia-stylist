@@ -2218,7 +2218,18 @@ export default function StyleMeResult() {
               </>
             )}
 
-            {fullLookQA.status === "error" && fullLookQA.message !== "busy" && (
+            {fullLookQA.status === "error" && fullLookQA.message === "not_eligible" && (
+              <>
+                <h2 className="sm-vto-heading">See this look on you.</h2>
+                <p className="sm-vto-body">One of the pieces in this look can't be tried on yet.</p>
+                <p className="sm-vto-body-note">A clearer, front-on photo of each piece in My Closet helps. Your StyleMe look is still saved here — and you haven't been charged for this attempt.</p>
+                <Link to="/closet" className="sm-result-action-btn sm-vto-cta">
+                  Open My Closet
+                </Link>
+              </>
+            )}
+
+            {fullLookQA.status === "error" && fullLookQA.message !== "busy" && fullLookQA.message !== "not_eligible" && (
               <>
                 <h2 className="sm-vto-heading">See this look on you.</h2>
                 <p className="sm-vto-body">We couldn't create your try-on this time.</p>

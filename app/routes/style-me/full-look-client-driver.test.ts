@@ -345,3 +345,22 @@ describe("createFullLookDriver", () => {
     expect(scheduler.lastIntervalMs()).toBe(3000);
   });
 });
+
+
+describe("createFullLookDriver — refusal codes from the eligibility gate", () => {
+  it.each([
+    [{ ok: false, code: "not_eligible", reason: "category_not_allowed", label: "Swim top", message: "internal copy" }, "not_eligible"],
+    [{ ok: false, code: "screening_unavailable", message: "internal copy" }, "screening_unavailable"],
+  ])("surfaces ONLY the code to the UI callback (never reason, label or server message): %j", async (body, expected) => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(body));
+    const scheduler = makeManualScheduler();
+    const driver = createFullLookDriver({ fetchImpl: fetchMock as unknown as typeof fetch, scheduleNext: scheduler.scheduleNext, cancelNext: scheduler.cancelNext, nowIso: () => "2026-11-21T12:00:00.000Z" });
+    const { callbacks, errors, done } = makeCallbacks();
+    driver.start("sugg-1", callbacks, { retry: false });
+    await flush();
+    expect(errors).toEqual([expected]);
+    expect(errors.join(" ")).not.toMatch(/category_not_allowed|Swim top|internal copy/);
+    expect(done).toEqual([]);
+    expect(scheduler.hasPending()).toBe(false); // stops: no auto-retry loop against a deterministic refusal
+  });
+});

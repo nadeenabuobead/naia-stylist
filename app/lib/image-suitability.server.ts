@@ -169,13 +169,15 @@ async function suitabilityAnalyze(args: {
 
 export async function screenGarmentSuitability(
   imageUrl: string,
-  context: { declaredCategory?: string } = {},
+  context: { declaredCategory?: string; timeoutMs?: number } = {},
   _analyze: AnalyzeForSuitabilityFn = suitabilityAnalyze,
 ): Promise<GarmentSuitabilityResult> {
   const prompt = buildGarmentPrompt(context.declaredCategory);
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), SUITABILITY_TIMEOUT_MS);
+  // 2026-11-21 — optional per-call override; every existing caller omits it
+  // and keeps the 3 s default exactly as before.
+  const timeoutId = setTimeout(() => controller.abort(), context.timeoutMs ?? SUITABILITY_TIMEOUT_MS);
 
   let raw: string | null;
   try {
