@@ -1,0 +1,22 @@
+name: TEMP — regenerate lockfile on Linux/Node 22 (diagnostic only, not for merge)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  regen:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: npm install (not ci — regenerating, not validating)
+        run: npm install
+      - name: Diff summary
+        run: git diff --stat package-lock.json || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: regenerated-package-lock
+          path: package-lock.json
+          retention-days: 1
