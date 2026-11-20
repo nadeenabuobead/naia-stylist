@@ -7,6 +7,7 @@ import type { PrismaClient } from "@prisma/client";
 // (e.g. .map callbacks below) doesn't silently degrade to implicit any.
 import dbServer from "~/db.server";
 const prisma: PrismaClient = dbServer;
+import { withTransientRetry } from "~/lib/prisma-transient-retry.server";
 import { writeSourceEvidence } from "~/lib/ai/taste-reconcile.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
@@ -106,6 +107,13 @@ export async function action({ request }: ActionFunctionArgs) {
   });
 }
 
+// Every read below is standalone and read-only — never inside a
+// $transaction, never followed by a write — so each is safe to retry
+// once on a transient connection failure (P2024/P1001/08P01, see
+// prisma-transient-retry.server.ts's own caller contract). A retry
+// re-runs only the single failed query, never any other query on this
+// page, and never turns into a duplicate write since none of these
+// calls write anything.
 export async function loader({ request }: LoaderFunctionArgs) {
   const customer = await getCurrentNaiaCustomer(request);
   const customerId = customer?.id ?? null;
@@ -120,29 +128,40 @@ export async function loader({ request }: LoaderFunctionArgs) {
     closetItem: { select: { name: true, imageUrl: true, imagePublicId: true, imageFormat: true, category: true } },
   } as const;
 
+  // Each of these three queries is wrapped with its own independent
+  // withTransientRetry call rather than wrapping the whole Promise.all —
+  // this preserves the existing concurrency exactly (all three still run
+  // in parallel; one query's retry delay never blocks the other two,
+  // which may already be resolving or resolved while it waits) and means
+  // a transient failure on one query doesn't force an unrelated,
+  // already-succeeded query to be silently retried too.
   const [profile, closetCount, recentRaw] = await Promise.all([
-    prisma.onboardingProfile.findUnique({
-      where: { customerId },
-      select: { stylePersonalities: true },
-    }),
-    prisma.closetItem.count({ where: { customerId } }),
-    prisma.stylingSession.findMany({
-      // "Your StyleMe Looks" means completed looks, not every StylingSession
-      // row — a session with no suggestion (or a suggestion with no items)
-      // never finished generating a look and has nothing to show. Filtering
-      // here lets Prisma naturally reach further back to fill the 20-card
-      // window with real results, same fix as Overview's Latest StyleMe.
-      where: { customerId, suggestions: { some: { items: { some: {} } } } },
-      take: 20,
-      orderBy: { createdAt: "desc" },
-      include: {
-        suggestions: {
-          take: 1,
-          orderBy: { createdAt: "desc" },
-          select: { id: true, outfitName: true, createdAt: true, items: { take: 5, select: itemImageSelect } },
+    withTransientRetry(() =>
+      prisma.onboardingProfile.findUnique({
+        where: { customerId },
+        select: { stylePersonalities: true },
+      }),
+    ),
+    withTransientRetry(() => prisma.closetItem.count({ where: { customerId } })),
+    withTransientRetry(() =>
+      prisma.stylingSession.findMany({
+        // "Your StyleMe Looks" means completed looks, not every StylingSession
+        // row — a session with no suggestion (or a suggestion with no items)
+        // never finished generating a look and has nothing to show. Filtering
+        // here lets Prisma naturally reach further back to fill the 20-card
+        // window with real results, same fix as Overview's Latest StyleMe.
+        where: { customerId, suggestions: { some: { items: { some: {} } } } },
+        take: 20,
+        orderBy: { createdAt: "desc" },
+        include: {
+          suggestions: {
+            take: 1,
+            orderBy: { createdAt: "desc" },
+            select: { id: true, outfitName: true, createdAt: true, items: { take: 5, select: itemImageSelect } },
+          },
         },
-      },
-    }),
+      }),
+    ),
   ]);
 
   // Resolve each displayed suggestion's real collage imagery server-side —
@@ -175,16 +194,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // card happens to display. SavedLook.fromSuggestionId has no FK cascade: a
   // stale/deleted suggestion simply finds no match below, failing safe (no
   // crash, no phantom card).
-  const savedLooks = await prisma.savedLook.findMany({
-    where: { customerId, fromSuggestionId: { not: null } },
-    select: { fromSuggestionId: true },
-  });
+  const savedLooks = await withTransientRetry(() =>
+    prisma.savedLook.findMany({
+      where: { customerId, fromSuggestionId: { not: null } },
+      select: { fromSuggestionId: true },
+    }),
+  );
   const rawSavedSuggestionIds = [...new Set(savedLooks.map((l) => l.fromSuggestionId!))];
   const resolvedSuggestions = rawSavedSuggestionIds.length > 0
-    ? await prisma.outfitSuggestion.findMany({
-        where: { id: { in: rawSavedSuggestionIds } },
-        select: { id: true, sessionId: true },
-      })
+    ? await withTransientRetry(() =>
+        prisma.outfitSuggestion.findMany({
+          where: { id: { in: rawSavedSuggestionIds } },
+          select: { id: true, sessionId: true },
+        }),
+      )
     : [];
   const savedSuggestions = resolveSavedSuggestions(savedLooks, resolvedSuggestions);
   const savedSuggestionIds = new Set(savedSuggestions.map((s) => s.suggestionId));
@@ -193,17 +216,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const extraSavedSuggestions = selectExtraSavedSuggestions(savedSuggestions, displayedSuggestionBySession);
   const extraSuggestionIds = extraSavedSuggestions.map((s) => s.suggestionId);
   const extraSuggestionRows = extraSuggestionIds.length > 0
-    ? await prisma.outfitSuggestion.findMany({
-        where: { id: { in: extraSuggestionIds }, session: { customerId } },
-        select: {
-          id: true,
-          outfitName: true,
-          createdAt: true,
-          sessionId: true,
-          session: { select: { occasion: true } },
-          items: { take: 5, select: itemImageSelect },
-        },
-      })
+    ? await withTransientRetry(() =>
+        prisma.outfitSuggestion.findMany({
+          where: { id: { in: extraSuggestionIds }, session: { customerId } },
+          select: {
+            id: true,
+            outfitName: true,
+            createdAt: true,
+            sessionId: true,
+            session: { select: { occasion: true } },
+            items: { take: 5, select: itemImageSelect },
+          },
+        }),
+      )
     : [];
   const extraSuggestionInputs: ExtraSuggestionInput[] = extraSuggestionRows.map((s) => {
     const { resolvedImages, extraCount } = resolveCollageImages(s.items, { customerId, cloudinaryConfig });
@@ -228,15 +253,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...extraSuggestionIds,
   ];
   const fullLookJobs = displayedSuggestionIds.length > 0
-    ? await prisma.virtualTryOnJob.findMany({
-        where: {
-          customerId,
-          status: "COMPLETED",
-          outfitSuggestionId: { in: displayedSuggestionIds },
-          productHandle: { startsWith: FULL_LOOK_FINAL_STEP_HANDLE_PREFIX },
-        },
-        select: { outfitSuggestionId: true },
-      })
+    ? await withTransientRetry(() =>
+        prisma.virtualTryOnJob.findMany({
+          where: {
+            customerId,
+            status: "COMPLETED",
+            outfitSuggestionId: { in: displayedSuggestionIds },
+            productHandle: { startsWith: FULL_LOOK_FINAL_STEP_HANDLE_PREFIX },
+          },
+          select: { outfitSuggestionId: true },
+        }),
+      )
     : [];
   const fullLookSuggestionIds = new Set(
     fullLookJobs.map((j) => j.outfitSuggestionId).filter((id): id is string => Boolean(id)),
