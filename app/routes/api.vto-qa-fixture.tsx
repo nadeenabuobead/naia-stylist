@@ -713,6 +713,14 @@ async function deleteClosetLegacyImageOwnershipFixture(customerId: string) {
 // that satisfies "prevent duplicate fixture items" — a repeat POST (retry,
 // double-submit, re-running this test later) is always a no-op after the
 // first successful run.
+// Try-on eligibility states that mean "no photo problem flagged": Stage A
+// passed (pending Stage-B visual assessment) or fully ready. "needs-clearer-
+// photo" (e.g. < 300px on a side), "not-supported" and null/unassessed all
+// fail the five-real-item acceptance path closed — a real photo that the
+// product itself says is not good enough for try-on must not be reported as
+// a VTO-eligible real accessory.
+const QA_USABLE_TRY_ON_ELIGIBILITY: ReadonlySet<string> = new Set(["pending-assessment", "ready-for-try-on"]);
+
 const QA_REAL_SHOE_FIXTURE_MARKER = "[QA FIXTURE] Real shoe (customer-supplied photo)";
 
 function detectImageFormatFromBytesQaCopy(header: Uint8Array): string | null {
@@ -738,7 +746,7 @@ async function createQaRealClosetFixture(customerId: string, imageDataUrl: strin
   // Cloudinary at all, let alone creates a second item.
   const existing = await prisma.closetItem.findFirst({
     where: { customerId, category: spec.category, name: spec.marker },
-    select: { id: true, imagePublicId: true, imageFormat: true },
+    select: { id: true, imagePublicId: true, imageFormat: true, subcategory: true, tryOnEligibility: true },
   });
   if (existing && existing.imagePublicId && existing.imageFormat) {
     return data({
@@ -748,6 +756,17 @@ async function createQaRealClosetFixture(customerId: string, imageDataUrl: strin
       imagePublicId: existing.imagePublicId,
       imageFormat: existing.imageFormat,
       reused: true,
+      ...(spec.accessoryType
+        ? {
+            accessoryType: spec.accessoryType,
+            subcategory: existing.subcategory ?? null,
+            vtoAllowed: isVtoCategoryAllowed(spec.category, existing.subcategory ?? null),
+            tryOnEligibility: existing.tryOnEligibility ?? null,
+            tryOnEligible:
+              isVtoCategoryAllowed(spec.category, existing.subcategory ?? null) &&
+              QA_USABLE_TRY_ON_ELIGIBILITY.has(existing.tryOnEligibility ?? ""),
+          }
+        : {}),
     });
   }
 
@@ -942,13 +961,17 @@ async function createQaRealClosetFixture(customerId: string, imageDataUrl: strin
   // eligibility. Report the FINAL state honestly rather than the declared
   // one, so a QA run can see whether the item is genuinely VTO-eligible.
   let finalSubcategory: string | null = spec.subcategory;
+  let finalEligibility: string | null = stageA.eligible;
   try {
     const refreshed = await prisma.closetItem.findUnique({
       where: { id: createdItem.id },
-      select: { subcategory: true },
+      select: { subcategory: true, tryOnEligibility: true },
     });
-    if (refreshed) finalSubcategory = refreshed.subcategory ?? null;
-  } catch { /* report declared subcategory if re-read fails */ }
+    if (refreshed) {
+      finalSubcategory = refreshed.subcategory ?? null;
+      finalEligibility = refreshed.tryOnEligibility ?? null;
+    }
+  } catch { /* report declared values if re-read fails */ }
 
   return data({
     ok: true,
@@ -962,6 +985,11 @@ async function createQaRealClosetFixture(customerId: string, imageDataUrl: strin
           accessoryType: spec.accessoryType,
           subcategory: finalSubcategory,
           vtoAllowed: isVtoCategoryAllowed(spec.category, finalSubcategory),
+          tryOnEligibility: finalEligibility,
+          tryOnEligible:
+            isVtoCategoryAllowed(spec.category, finalSubcategory) &&
+            QA_USABLE_TRY_ON_ELIGIBILITY.has(finalEligibility ?? ""),
+          ...(stageA.customerHint ? { photoHint: stageA.customerHint } : {}),
         }
       : {}),
   });
@@ -1233,8 +1261,9 @@ async function findRealShoeClosetItem(customerId: string) {
 //    with already-recorded evidence. Its response states
 //    accessorySource:"synthetic-cap" and syntheticPlaceholderCount:1 so it can
 //    never be mistaken for an all-real result.
-// Items the pipeline marked tryOnEligibility "not-supported" are excluded
-// even if their subcategory is allowlisted.
+// Only items whose tryOnEligibility is pending-assessment or ready-for-try-on
+// count: "needs-clearer-photo", "not-supported" and unassessed items are
+// excluded even if their subcategory is allowlisted.
 async function findRealAccessoryClosetItem(customerId: string) {
   const candidates = await prisma.closetItem.findMany({
     where: {
@@ -1249,7 +1278,7 @@ async function findRealAccessoryClosetItem(customerId: string) {
   return (
     (candidates ?? []).find(
       (c: { subcategory: string | null; tryOnEligibility?: string | null }) =>
-        c.tryOnEligibility !== "not-supported" && isVtoCategoryAllowed("ACCESSORIES", c.subcategory),
+        QA_USABLE_TRY_ON_ELIGIBILITY.has(c.tryOnEligibility ?? "") && isVtoCategoryAllowed("ACCESSORIES", c.subcategory),
     ) ?? null
   );
 }

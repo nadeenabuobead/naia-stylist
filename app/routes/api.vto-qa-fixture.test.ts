@@ -2736,6 +2736,8 @@ describe("api.vto-qa-fixture action — five-real-item acceptance path (full-loo
     ["only a non-allowlisted subcategory", [{ id: "s", name: "Shades", subcategory: "sunglasses", tryOnEligibility: "pending-assessment" }]],
     ["allowlisted subcategory but marked not-supported", [{ id: "h", name: "Hat", subcategory: "hat", tryOnEligibility: "not-supported" }]],
     ["null subcategory", [{ id: "n", name: "Thing", subcategory: null, tryOnEligibility: null }]],
+    ["allowlisted subcategory but needs-clearer-photo (e.g. under 300px)", [{ id: "c", name: "Scarf", subcategory: "scarf", tryOnEligibility: "needs-clearer-photo" }]],
+    ["allowlisted subcategory but never assessed (null eligibility)", [{ id: "u", name: "Scarf", subcategory: "scarf", tryOnEligibility: null }]],
   ])("strict FAILS CLOSED with no_real_accessory_closet_item when %s — no upload, no rows, no synthetic substitution", async (_label, rows) => {
     setAuthorizedEnv();
     mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
@@ -2774,5 +2776,66 @@ describe("api.vto-qa-fixture action — five-real-item acceptance path (full-loo
     expect(payload.accessoryClosetItemId).toBeUndefined();
     expect(mockUploadCloudinaryPrivate).toHaveBeenCalledTimes(1);
     expect(mockFindMany).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("api.vto-qa-fixture action — closet-real-accessory reports real try-on eligibility (not just category allowance)", () => {
+  const URL_ = "data:image/png;base64,iVBORw0KGgo=";
+  const body = (o: Record<string, unknown> = {}) => req({ fixtureKind: "closet-real-accessory", accessoryType: "scarf", imageDataUrl: URL_, ...o });
+
+  beforeEach(() => {
+    mockGetCloudinaryConfig.mockReturnValue({ cloudName: "naia-test-cloud", apiKey: "k", apiSecret: "s" });
+    mockClosetItemFindFirst.mockResolvedValue(null);
+    mockClosetItemFindUnique.mockResolvedValue(null);
+    mockClosetItemCreate.mockResolvedValue({ id: "acc-1", category: "ACCESSORIES", tryOnEligibility: "x" });
+    mockUploadCloudinaryPrivate.mockImplementation(async (publicId: string) => ({ ok: true, publicId, format: "png", version: "1" }));
+    mockModerateImageContent.mockResolvedValue({ status: "SAFE" });
+    mockScreenGarmentSuitability.mockResolvedValue({ status: "PASS", subCode: null });
+    mockAnalyzeClosetGarment.mockResolvedValue(undefined);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, arrayBuffer: async () => new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 0, 0, 0, 0, 0, 0, 0]).buffer }));
+  });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  const verifyWith = (width: number, height: number) =>
+    mockVerifyCloudinaryAsset.mockResolvedValue({ ok: true, asset: { publicId: "p", resourceType: "image", type: "private", version: "1", format: "png", bytes: 155233, width, height } });
+
+  it("a 274x310 photo (below the 300px Stage-A minimum) is saved but reported tryOnEligible:false / needs-clearer-photo with a hint", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    verifyWith(274, 310);
+    mockClosetItemFindUnique.mockResolvedValue({ subcategory: "scarf", tryOnEligibility: "needs-clearer-photo" });
+    const p = (await action({ request: body() } as any)).data as any;
+    expect(p).toMatchObject({ ok: true, vtoAllowed: true, tryOnEligibility: "needs-clearer-photo", tryOnEligible: false });
+    expect(typeof p.photoHint).toBe("string");
+    expect(mockClosetItemCreate.mock.calls[0][0].data.tryOnEligibility).toBe("needs-clearer-photo");
+  });
+
+  it("a 1200x1200 photo passes Stage A: tryOnEligible:true", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    verifyWith(1200, 1200);
+    mockClosetItemFindUnique.mockResolvedValue({ subcategory: "scarf", tryOnEligibility: "pending-assessment" });
+    const p = (await action({ request: body() } as any)).data as any;
+    expect(p).toMatchObject({ ok: true, tryOnEligibility: "pending-assessment", tryOnEligible: true });
+    expect(p.photoHint).toBeUndefined();
+  });
+
+  it("falls back to the Stage-A value if the post-analysis re-read fails", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    verifyWith(1200, 1200);
+    mockClosetItemFindUnique.mockRejectedValue(new Error("db"));
+    const p = (await action({ request: body() } as any)).data as any;
+    expect(p).toMatchObject({ ok: true, tryOnEligibility: "pending-assessment", tryOnEligible: true });
+  });
+
+  it("the idempotent reuse path reports the stored eligibility too", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockClosetItemFindFirst.mockResolvedValue({ id: "acc-1", imagePublicId: "pid", imageFormat: "png", subcategory: "scarf", tryOnEligibility: "needs-clearer-photo" });
+    const p = (await action({ request: body() } as any)).data as any;
+    expect(p).toMatchObject({ ok: true, reused: true, accessoryType: "scarf", vtoAllowed: true, tryOnEligibility: "needs-clearer-photo", tryOnEligible: false });
+    expect(mockUploadCloudinaryPrivate).not.toHaveBeenCalled();
   });
 });
