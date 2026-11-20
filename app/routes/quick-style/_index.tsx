@@ -34,6 +34,27 @@ import {
   buildStyleDirection,
 } from "~/lib/quick-style/insight";
 
+// Title follows this app's existing "<Page Name> | nAia" convention (see
+// e.g. closet._index.tsx, my-naia-model.tsx, auth.signed-out.tsx).
+// Description and og:description reuse this page's own hero subcopy
+// verbatim (below, in the component) rather than new marketing language —
+// it is already the approved, accurate positioning: free, no sign-up, no
+// AI call, not a full styled look. Keeping the two in sync by hand (no
+// shared constant) is a deliberate, small duplication — this string is
+// customer-facing copy a product/content reviewer should be able to read
+// and edit directly in context, not refactor to find.
+export function meta() {
+  const title = "Quick Style | nAia";
+  const description = "Three quick questions, one free style direction — no sign-up, no AI call, no cost.";
+  return [
+    { title },
+    { name: "description", content: description },
+    { property: "og:title", content: title },
+    { property: "og:description", content: description },
+    { property: "og:type", content: "website" },
+  ];
+}
+
 type StepId = 1 | 2 | 3 | 4;
 
 export default function QuickStyle() {
