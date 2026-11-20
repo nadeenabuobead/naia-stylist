@@ -725,54 +725,80 @@ async function createFullLookRealGarmentsFixture(customerId: string) {
 // Every productTitle is "[QA FIXTURE] ..." per convention.
 const FULL_LOOK_MAX_FIXTURE_SHOPIFY_PRODUCT_ID = "qa-fixture-full-look-real-garment-max";
 
+// 2026-11-20 — the SHOES slot now prefers a REAL closet photo over the
+// synthetic silhouette, if the customer has actually uploaded one. Same
+// motivation as the rest of this fixture's "genuine 5-distinct-category"
+// correction: a hand-drawn silhouette can't answer the real visual-
+// acceptance question (does the provider actually render real shoes, and
+// do they survive the later compositing steps?) the way a real photo can.
+// SHOES is one of isVtoCategoryAllowed's always-allowed main categories
+// (closet-eligibility.ts) — no subcategory gating, so ANY real SHOES
+// closet item that passed the real upload pipeline's own suitability
+// screening is already VTO-eligible exactly like a real customer's would
+// be. Deliberately does NOT fall back to the synthetic image when none
+// exists — silently substituting it would misreport what was actually
+// tested, the opposite of this fixture's own purpose.
+async function findRealShoeClosetItem(customerId: string) {
+  return prisma.closetItem.findFirst({
+    where: {
+      customerId,
+      category: "SHOES",
+      imagePublicId: { not: null },
+      imageFormat: { not: null },
+    },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, name: true },
+  });
+}
+
 async function createFullLookRealGarmentsMaxFixture(customerId: string) {
-  const shoePublicId = fullLookMaxFixtureShoePublicId(customerId);
+  const realShoeClosetItem = await findRealShoeClosetItem(customerId);
+  if (!realShoeClosetItem) {
+    return data(
+      {
+        ok: false,
+        code: "no_real_shoe_closet_item",
+        message:
+          "Upload a real shoe photo to your closet first (category SHOES, at /closet), then re-run this fixture.",
+      },
+      { status: 400 },
+    );
+  }
+
   const capPublicId = fullLookMaxFixtureCapPublicId(customerId);
 
-  // Both synthetic images uploaded BEFORE any DB write — see this
-  // function's own header comment for why (same discipline as
-  // createMyNaiaModelFixture below).
-  const [shoeUpload, capUpload] = await Promise.all([
-    uploadCloudinaryPrivate(
-      shoePublicId,
-      SYNTHETIC_FIXTURE_SHOE_DATA_URL,
-      "upload",
-      undefined,
-      undefined,
-      undefined,
-      FULL_LOOK_MAX_FIXTURE_SYNTHETIC_FORMAT,
-    ),
-    uploadCloudinaryPrivate(
-      capPublicId,
-      SYNTHETIC_FIXTURE_CAP_DATA_URL,
-      "upload",
-      undefined,
-      undefined,
-      undefined,
-      FULL_LOOK_MAX_FIXTURE_SYNTHETIC_FORMAT,
-    ),
-  ]);
-  if (!shoeUpload.ok) {
-    return data({ ok: false, code: "upload_failed", asset: "shoe", errorCode: shoeUpload.errorCode }, { status: 502 });
-  }
+  // Cap image uploaded BEFORE any DB write — see this function's own
+  // original header comment for why (same discipline as
+  // createMyNaiaModelFixture below). The shoe item needs no upload of its
+  // own now — it reuses the customer's own already-uploaded real photo.
+  const capUpload = await uploadCloudinaryPrivate(
+    capPublicId,
+    SYNTHETIC_FIXTURE_CAP_DATA_URL,
+    "upload",
+    undefined,
+    undefined,
+    undefined,
+    FULL_LOOK_MAX_FIXTURE_SYNTHETIC_FORMAT,
+  );
   if (!capUpload.ok) {
     return data({ ok: false, code: "upload_failed", asset: "cap", errorCode: capUpload.errorCode }, { status: 502 });
   }
 
   const cloudinaryConfig = getCloudinaryConfig();
   if (!cloudinaryConfig) {
-    // Both uploads above already required a valid config to succeed at
+    // The cap upload above already required a valid config to succeed at
     // all — this branch should be unreachable, but refuse explicitly
     // rather than build a malformed URL if it ever somehow is.
     return data({ ok: false, code: "cloudinary_not_configured" }, { status: 502 });
   }
 
-  const items: { itemType: OutfitItemType; title: string; productImageUrl: string }[] = [
+  type FixtureItem = { itemType: OutfitItemType; title: string; productImageUrl?: string; closetItemId?: string };
+  const items: FixtureItem[] = [
     ...FULL_LOOK_FIXTURE_ITEMS,
     {
       itemType: "SHOES",
-      title: "[QA FIXTURE] Full-Look synthetic shoes (max-boundary) — not a real customer item",
-      productImageUrl: buildPublicCloudinaryDeliveryUrl(cloudinaryConfig, shoeUpload.publicId, shoeUpload.version, shoeUpload.format),
+      title: `[QA FIXTURE] Full-Look real shoe (max-boundary) — customer's own closet item${realShoeClosetItem.name ? `: ${realShoeClosetItem.name}` : ""}`,
+      closetItemId: realShoeClosetItem.id,
     },
     {
       itemType: "ACCESSORY",
@@ -784,14 +810,21 @@ async function createFullLookRealGarmentsMaxFixture(customerId: string) {
   const { sessionId, suggestionId } = await prisma.$transaction(async (tx) => {
     const session = await tx.stylingSession.create({ data: { customerId }, select: { id: true } });
     const suggestion = await tx.outfitSuggestion.create({ data: { sessionId: session.id }, select: { id: true } });
-    for (const { itemType, title, productImageUrl } of items) {
+    for (const { itemType, title, productImageUrl, closetItemId } of items) {
       await tx.outfitItem.create({
         data: {
           suggestionId: suggestion.id,
           itemType,
           productTitle: title,
+          // Both the fixture marker AND closetItemId can be set together —
+          // resolveItemImage (look-image-resolution.server.ts) checks
+          // closetItemId first regardless, exactly as it does for a real
+          // customer's own outfit item, so this item's real photo is what
+          // actually gets resolved; shopifyProductId stays only as this
+          // fixture's own cleanup/identification marker.
           shopifyProductId: FULL_LOOK_MAX_FIXTURE_SHOPIFY_PRODUCT_ID,
-          productImageUrl,
+          ...(closetItemId ? { closetItemId } : {}),
+          ...(productImageUrl ? { productImageUrl } : {}),
         },
       });
     }
@@ -804,6 +837,8 @@ async function createFullLookRealGarmentsMaxFixture(customerId: string) {
     sessionId,
     suggestionId,
     itemCount: items.length,
+    shoeSource: "real-closet-item",
+    shoeClosetItemId: realShoeClosetItem.id,
   });
 }
 

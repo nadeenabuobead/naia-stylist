@@ -33,6 +33,7 @@ const mockSuggestionDelete = vi.fn();
 const mockSessionDelete = vi.fn();
 const mockClosetItemCreate = vi.fn();
 const mockClosetItemDeleteMany = vi.fn();
+const mockClosetItemFindFirst = vi.fn();
 const mockBosCreate = vi.fn();
 const mockBosDeleteMany = vi.fn();
 
@@ -51,6 +52,7 @@ vi.mock("~/db.server", () => ({
   default: {
     closetItem: {
       findMany: (...args: unknown[]) => mockFindMany(...args),
+      findFirst: (...args: unknown[]) => mockClosetItemFindFirst(...args),
       create: (...args: unknown[]) => mockClosetItemCreate(...args),
       deleteMany: (...args: unknown[]) => mockClosetItemDeleteMany(...args),
     },
@@ -976,19 +978,21 @@ describe("api.vto-qa-fixture action — fixtureKind: full-look-real-garments-max
 
   const SHOE_PUBLIC_ID = `naia-wardrobe/${QA_ID}/qa-fixture-synthetic-shoe`;
   const CAP_PUBLIC_ID = `naia-wardrobe/${QA_ID}/qa-fixture-synthetic-cap`;
+  const REAL_SHOE_CLOSET_ITEM_ID = "closet-item-real-shoes-1";
 
-  // 2026-11-20 — this fixture now uploads 2 synthetic images (a shoe, a
-  // cap) via uploadCloudinaryPrivate before writing any OutfitItem row (no
-  // real Shopify CDN image for either exists anywhere in this repo — see
-  // createFullLookRealGarmentsMaxFixture's own comment). getCloudinaryConfig
+  // 2026-11-20 — the SHOES slot now requires a REAL closet photo (no
+  // synthetic fallback — see createFullLookRealGarmentsMaxFixture's own
+  // comment on why). Default here: a real, eligible SHOES closet item IS
+  // on record, so the happy-path tests below exercise the normal case;
+  // the "no real shoe item" tests override this per-test. Only the cap
+  // still uses the synthetic-upload path (unchanged). getCloudinaryConfig
   // defaults to null everywhere else in this file (see its own comment) —
   // overridden here to a real-shaped config so this block's URL-building
   // step has a cloudName to work with, exactly like a real staging
-  // environment would. mockUploadCloudinaryPrivate resolves per-publicId so
-  // the shoe and cap each get a genuinely distinct version/publicId, same
-  // as two real, independent Cloudinary uploads would.
+  // environment would.
   beforeEach(() => {
     mockGetCloudinaryConfig.mockReturnValue({ cloudName: "naia-test-cloud", apiKey: "test-key", apiSecret: "test-secret" });
+    mockClosetItemFindFirst.mockResolvedValue({ id: REAL_SHOE_CLOSET_ITEM_ID, name: "Real Test Sneakers" });
     mockUploadCloudinaryPrivate.mockImplementation(async (publicId: string) => ({
       ok: true,
       publicId,
@@ -1003,6 +1007,7 @@ describe("api.vto-qa-fixture action — fixtureKind: full-look-real-garments-max
     expect(res.init?.status).toBe(403);
     expect(mockSessionCreate).not.toHaveBeenCalled();
     expect(mockUploadCloudinaryPrivate).not.toHaveBeenCalled();
+    expect(mockClosetItemFindFirst).not.toHaveBeenCalled();
   });
 
   it("creates exactly one StylingSession, one OutfitSuggestion (moodDescription left null), and exactly 5 OutfitItem rows — TOP, BOTTOM, OUTERWEAR, SHOES, ACCESSORY (5 genuinely distinct categories, not a repeated one)", async () => {
@@ -1013,6 +1018,8 @@ describe("api.vto-qa-fixture action — fixtureKind: full-look-real-garments-max
     expect(payload.ok).toBe(true);
     expect(payload.fixtureKind).toBe("full-look-real-garments-max");
     expect(payload.itemCount).toBe(5);
+    expect(payload.shoeSource).toBe("real-closet-item");
+    expect(payload.shoeClosetItemId).toBe(REAL_SHOE_CLOSET_ITEM_ID);
 
     const suggestionCreateArg = mockSuggestionCreate.mock.calls[0][0];
     expect(suggestionCreateArg.data).not.toHaveProperty("moodDescription");
@@ -1022,62 +1029,82 @@ describe("api.vto-qa-fixture action — fixtureKind: full-look-real-garments-max
     expect(itemTypes).toEqual(["ACCESSORY", "BOTTOM", "OUTERWEAR", "SHOES", "TOP"]);
   });
 
-  it("uploads the shoe and cap images BEFORE writing any OutfitItem row, with the deterministic per-customer public ids and delivery type 'upload' (public, not private)", async () => {
+  it("looks up a real SHOES closet item (imagePublicId/imageFormat present) for this exact customer before doing anything else", async () => {
     setAuthorizedEnv();
     mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
     await action({ request: fullLookMaxReq() } as any);
-    expect(mockUploadCloudinaryPrivate).toHaveBeenCalledTimes(2);
-    const publicIds = mockUploadCloudinaryPrivate.mock.calls.map((call) => call[0]).sort();
-    expect(publicIds).toEqual([CAP_PUBLIC_ID, SHOE_PUBLIC_ID]);
-    for (const call of mockUploadCloudinaryPrivate.mock.calls) {
-      expect(call[2]).toBe("upload"); // deliveryType — public, never "private"
-    }
-  });
-
-  it("the 3 base items (TOP/BOTTOM/OUTERWEAR) keep their real, untouched Shopify CDN URLs; the SHOES and ACCESSORY items use the newly-uploaded public Cloudinary delivery URL, never a fabricated Shopify URL", async () => {
-    setAuthorizedEnv();
-    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
-    await action({ request: fullLookMaxReq() } as any);
-    for (const call of mockItemCreate.mock.calls) {
-      const itemData = call[0].data;
-      expect(itemData).not.toHaveProperty("closetItemId");
-      expect(itemData.productTitle).toMatch(/^\[QA FIXTURE\]/);
-      expect(itemData.shopifyProductId).toBe("qa-fixture-full-look-real-garment-max");
-      expect(itemData.shopifyProductId).not.toBe("qa-fixture-full-look-real-garment");
-      if (itemData.itemType === "SHOES" || itemData.itemType === "ACCESSORY") {
-        expect(itemData.productImageUrl).toMatch(/^https:\/\/res\.cloudinary\.com\/naia-test-cloud\/image\/upload\//);
-        expect(itemData.productImageUrl).not.toMatch(/cdn\.shopify\.com/);
-      } else {
-        expect(itemData.productImageUrl).toMatch(/^https:\/\/cdn\.shopify\.com\//);
-      }
-    }
-  });
-
-  it("every item's productImageUrl is unique — no duplicate asset reused across the 5 slots (shoe and cap resolve to genuinely distinct URLs too)", async () => {
-    setAuthorizedEnv();
-    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
-    await action({ request: fullLookMaxReq() } as any);
-    const urls = mockItemCreate.mock.calls.map((call) => call[0].data.productImageUrl);
-    expect(new Set(urls).size).toBe(urls.length);
-  });
-
-  it("if the shoe upload fails, NO OutfitItem/OutfitSuggestion/StylingSession row is ever written — never claim an image exists that was never actually uploaded", async () => {
-    setAuthorizedEnv();
-    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
-    mockUploadCloudinaryPrivate.mockImplementation(async (publicId: string) =>
-      publicId === SHOE_PUBLIC_ID ? { ok: false, errorCode: "PROVIDER_ERROR_500" } : { ok: true, publicId, format: "png", version: "101" },
+    expect(mockClosetItemFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          customerId: QA_ID,
+          category: "SHOES",
+          imagePublicId: { not: null },
+          imageFormat: { not: null },
+        }),
+      }),
     );
+  });
+
+  it("if no real SHOES closet item exists for this customer, fails clearly with no_real_shoe_closet_item and writes nothing — never silently falls back to a synthetic image", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockClosetItemFindFirst.mockResolvedValueOnce(null);
     const res = await action({ request: fullLookMaxReq() } as any);
-    expect(res.init?.status).toBe(502);
+    expect(res.init?.status).toBe(400);
     const payload = res.data as any;
     expect(payload.ok).toBe(false);
-    expect(payload.code).toBe("upload_failed");
+    expect(payload.code).toBe("no_real_shoe_closet_item");
+    expect(mockUploadCloudinaryPrivate).not.toHaveBeenCalled();
     expect(mockSessionCreate).not.toHaveBeenCalled();
     expect(mockSuggestionCreate).not.toHaveBeenCalled();
     expect(mockItemCreate).not.toHaveBeenCalled();
   });
 
-  it("if the cap upload fails (shoe succeeds), NO row is written either — same discipline regardless of which of the two uploads failed", async () => {
+  it("uploads only the cap image (not a synthetic shoe) BEFORE writing any OutfitItem row, with the deterministic per-customer public id and delivery type 'upload' (public, not private)", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    await action({ request: fullLookMaxReq() } as any);
+    expect(mockUploadCloudinaryPrivate).toHaveBeenCalledTimes(1);
+    const call = mockUploadCloudinaryPrivate.mock.calls[0];
+    expect(call[0]).toBe(CAP_PUBLIC_ID);
+    expect(call[2]).toBe("upload"); // deliveryType — public, never "private"
+  });
+
+  it("the SHOES item uses closetItemId (the customer's own real photo), never productImageUrl; the 3 base items and ACCESSORY are unaffected by this change", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    await action({ request: fullLookMaxReq() } as any);
+    for (const call of mockItemCreate.mock.calls) {
+      const itemData = call[0].data;
+      expect(itemData.productTitle).toMatch(/^\[QA FIXTURE\]/);
+      expect(itemData.shopifyProductId).toBe("qa-fixture-full-look-real-garment-max");
+      expect(itemData.shopifyProductId).not.toBe("qa-fixture-full-look-real-garment");
+      if (itemData.itemType === "SHOES") {
+        expect(itemData.closetItemId).toBe(REAL_SHOE_CLOSET_ITEM_ID);
+        expect(itemData).not.toHaveProperty("productImageUrl");
+      } else if (itemData.itemType === "ACCESSORY") {
+        expect(itemData).not.toHaveProperty("closetItemId");
+        expect(itemData.productImageUrl).toMatch(/^https:\/\/res\.cloudinary\.com\/naia-test-cloud\/image\/upload\//);
+        expect(itemData.productImageUrl).not.toMatch(/cdn\.shopify\.com/);
+      } else {
+        expect(itemData).not.toHaveProperty("closetItemId");
+        expect(itemData.productImageUrl).toMatch(/^https:\/\/cdn\.shopify\.com\//);
+      }
+    }
+  });
+
+  it("every item with a productImageUrl has a unique one — no duplicate asset reused across the slots that have one (the SHOES slot has none, it resolves via closetItemId instead)", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    await action({ request: fullLookMaxReq() } as any);
+    const urls = mockItemCreate.mock.calls
+      .map((call) => call[0].data.productImageUrl)
+      .filter((url: string | undefined) => url !== undefined);
+    expect(urls.length).toBe(4); // TOP, BOTTOM, OUTERWEAR, ACCESSORY — SHOES has none
+    expect(new Set(urls).size).toBe(urls.length);
+  });
+
+  it("if the cap upload fails, NO row is written either — same discipline as before, now with only one upload to fail", async () => {
     setAuthorizedEnv();
     mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
     mockUploadCloudinaryPrivate.mockImplementation(async (publicId: string) =>
@@ -1097,13 +1124,27 @@ describe("api.vto-qa-fixture action — fixtureKind: full-look-real-garments-max
     mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
     await action({ request: fullLookMaxReq() } as any);
 
+    // Mirrors what a real read-back (suggestion.items.include.closetItem,
+    // same shape api.full-look-vto.tsx's own loader uses) would return for
+    // the SHOES item's closetItemId — resolveItemImage needs the relation
+    // object itself, not just the id, to resolve a real photo.
     const items: SelectableOutfitItem[] = mockItemCreate.mock.calls.map((call) => ({
       itemType: call[0].data.itemType,
       productTitle: call[0].data.productTitle,
       productImageUrl: call[0].data.productImageUrl,
+      closetItemId: call[0].data.closetItemId,
+      closetItem: call[0].data.closetItemId
+        ? { name: "Real Test Sneakers", imagePublicId: `naia-wardrobe/${QA_ID}/real-shoe-photo`, imageFormat: "jpg", category: "SHOES" }
+        : null,
     }));
 
-    const result = selectFullLookGarments(items, { customerId: QA_ID, cloudinaryConfig: null });
+    // cloudinaryConfig must be real-shaped (not null) here — resolveItemImage's
+    // closetItemId path (used by the SHOES item above) requires it to build
+    // the signed private-download URL, exactly as it would in production.
+    const result = selectFullLookGarments(items, {
+      customerId: QA_ID,
+      cloudinaryConfig: { cloudName: "naia-test-cloud", apiKey: "test-key", apiSecret: "test-secret" },
+    });
     expect(result).not.toBeNull();
     expect(result?.garments.length).toBe(5);
     expect(result?.omittedLabels).toEqual([]);
