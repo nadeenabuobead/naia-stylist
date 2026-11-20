@@ -2839,3 +2839,182 @@ describe("api.vto-qa-fixture action — closet-real-accessory reports real try-o
     expect(mockUploadCloudinaryPrivate).not.toHaveBeenCalled();
   });
 });
+
+// ── full-look-gate-negative (2026-11-21) ─────────────────────────────────────
+describe("api.vto-qa-fixture action — fixtureKind: full-look-gate-negative (throwaway fixture for the pre-FASHN eligibility gate)", () => {
+  const body = () => req({ fixtureKind: "full-look-gate-negative" });
+  const NAME = "[QA FIXTURE] Gate-negative swimwear (throwaway, never rendered)";
+  const MARKER = "qa-fixture-full-look-gate-negative";
+
+  beforeEach(() => {
+    mockClosetItemFindFirst.mockResolvedValue(null);
+    mockClosetItemCreate.mockResolvedValue({ id: "gate-closet-1" });
+    mockSessionCreate.mockResolvedValue({ id: "gate-session-1" });
+    mockSuggestionCreate.mockResolvedValue({ id: "gate-suggestion-1" });
+  });
+
+  it("403 with no real session, creating nothing", async () => {
+    setAuthorizedEnv();
+    expect((await action({ request: body() } as any)).init?.status).toBe(403);
+    expect(mockClosetItemCreate).not.toHaveBeenCalled();
+    expect(mockSessionCreate).not.toHaveBeenCalled();
+  });
+
+  it("403 for a different real customer, and in production", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: "someone-else" });
+    expect((await action({ request: body() } as any)).init?.status).toBe(403);
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    process.env.VERCEL_ENV = "production";
+    expect((await action({ request: body() } as any)).init?.status).toBe(403);
+    expect(mockClosetItemCreate).not.toHaveBeenCalled();
+  });
+
+  it("creates one SWIMWEAR closet item (never uploaded, Stage-A not-supported), one moodDescription-null suggestion, and exactly 3 marked items of 3 distinct categories", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    const res = await action({ request: body() } as any);
+    expect(res.data).toMatchObject({ ok: true, fixtureKind: "full-look-gate-negative", closetItemId: "gate-closet-1", sessionId: "gate-session-1", suggestionId: "gate-suggestion-1", itemCount: 3 });
+
+    const closet = mockClosetItemCreate.mock.calls[0][0].data;
+    expect(closet).toMatchObject({ customerId: QA_ID, name: NAME, category: "SWIMWEAR", tryOnEligibility: "not-supported", imageUrl: null });
+    expect(closet.imagePublicId).toBe(`naia-wardrobe/${QA_ID}/qa-fixture-gate-negative-never-uploaded`);
+
+    expect(mockSessionCreate).toHaveBeenCalledWith({ data: { customerId: QA_ID }, select: { id: true } });
+    expect(mockSuggestionCreate).toHaveBeenCalledWith({ data: { sessionId: "gate-session-1" }, select: { id: true } }); // moodDescription left null
+
+    const items = mockItemCreate.mock.calls.map((c) => c[0].data);
+    expect(items).toHaveLength(3);
+    expect(items.map((i) => i.itemType).sort()).toEqual(["BOTTOM", "OUTERWEAR", "TOP"]);
+    expect(items.every((i) => i.shopifyProductId === MARKER && i.suggestionId === "gate-suggestion-1")).toBe(true);
+    expect(items.find((i) => i.itemType === "OUTERWEAR").closetItemId).toBe("gate-closet-1");
+    // distinct from every approved real-garment marker
+    expect(MARKER).not.toBe("qa-fixture-full-look-real-garment-max");
+  });
+
+  it("uploads nothing to Cloudinary and creates no VirtualTryOnJob", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    await action({ request: body() } as any);
+    expect(mockUploadCloudinaryPrivate).not.toHaveBeenCalled();
+    expect(mockVtoJobDeleteMany).not.toHaveBeenCalled();
+  });
+
+  it("409 already_exists (no duplicate rows) when a previous throwaway closet item is still present", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockClosetItemFindFirst.mockResolvedValue({ id: "old-1" });
+    const res = await action({ request: body() } as any);
+    expect(res.init?.status).toBe(409);
+    expect(mockClosetItemCreate).not.toHaveBeenCalled();
+    expect(mockSessionCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("api.vto-qa-fixture action — DELETE fixtureKind: full-look-gate-negative (tightly scoped)", () => {
+  const del = (o: Record<string, unknown> = {}) => deleteReq({ fixtureKind: "full-look-gate-negative", suggestionId: "gate-suggestion-1", ...o });
+  const MARKER = "qa-fixture-full-look-gate-negative";
+  const owned = (items: { shopifyProductId: string }[]) => ({ id: "gate-suggestion-1", session: { customerId: QA_ID }, items });
+  // deleteFixtureSuggestion's own read (second findUnique call)
+  const inner = { id: "gate-suggestion-1", moodDescription: null, sessionId: "gate-session-1", session: { customerId: QA_ID }, items: [{ shopifyProductId: MARKER }] };
+
+  beforeEach(() => {
+    mockVtoJobCount.mockResolvedValue(0);
+    mockSuggestionCount.mockResolvedValue(1);
+    mockClosetItemDeleteMany.mockResolvedValue({ count: 1 });
+  });
+
+  it("403 without a real session; nothing read or deleted", async () => {
+    setAuthorizedEnv();
+    expect((await action({ request: del() } as any)).init?.status).toBe(403);
+    expect(mockSuggestionFindUnique).not.toHaveBeenCalled();
+    expect(mockClosetItemDeleteMany).not.toHaveBeenCalled();
+  });
+
+  it("deletes the marked suggestion via the existing cleanup, then ONLY the throwaway swimwear closet item (customer + category + exact name)", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockSuggestionFindUnique.mockResolvedValueOnce(owned([{ shopifyProductId: MARKER }, { shopifyProductId: MARKER }, { shopifyProductId: MARKER }])).mockResolvedValueOnce(inner);
+    const res = await action({ request: del() } as any);
+    expect(res.data).toMatchObject({ ok: true, fixtureKind: "full-look-gate-negative", deletedSuggestionId: "gate-suggestion-1", closetItemsDeleted: 1 });
+    expect(mockClosetItemDeleteMany).toHaveBeenCalledWith({
+      where: { customerId: QA_ID, category: "SWIMWEAR", name: "[QA FIXTURE] Gate-negative swimwear (throwaway, never rendered)" },
+    });
+  });
+
+  it.each([
+    ["the approved five-item fixture's marker", [{ shopifyProductId: "qa-fixture-full-look-real-garment-max" }]],
+    ["a mixed set (one foreign item)", [{ shopifyProductId: MARKER }, { shopifyProductId: "something-else" }]],
+    ["no items", []],
+  ])("404 and NO deletion for %s", async (_l, items) => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockSuggestionFindUnique.mockResolvedValueOnce(owned(items as any));
+    const res = await action({ request: del() } as any);
+    expect(res.init?.status).toBe(404);
+    expect(mockItemDeleteMany).not.toHaveBeenCalled();
+    expect(mockSuggestionDelete).not.toHaveBeenCalled();
+    expect(mockClosetItemDeleteMany).not.toHaveBeenCalled();
+  });
+
+  it("404 for a suggestion that belongs to another customer or does not exist", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockSuggestionFindUnique.mockResolvedValueOnce({ ...owned([{ shopifyProductId: MARKER }]), session: { customerId: "other" } });
+    expect((await action({ request: del() } as any)).init?.status).toBe(404);
+    mockSuggestionFindUnique.mockResolvedValueOnce(null);
+    expect((await action({ request: del() } as any)).init?.status).toBe(404);
+    expect(mockClosetItemDeleteMany).not.toHaveBeenCalled();
+  });
+
+  it("refuses (409 has_dependent_jobs) and deletes NEITHER the suggestion NOR the closet item if any VirtualTryOnJob exists for it", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockVtoJobCount.mockResolvedValue(1);
+    mockSuggestionFindUnique.mockResolvedValueOnce(owned([{ shopifyProductId: MARKER }])).mockResolvedValueOnce(inner);
+    const res = await action({ request: del() } as any);
+    expect(res.init?.status).toBe(409);
+    expect(mockVtoJobDeleteMany).not.toHaveBeenCalled();
+    expect(mockSuggestionDelete).not.toHaveBeenCalled();
+    expect(mockClosetItemDeleteMany).not.toHaveBeenCalled();
+  });
+
+  it("400 when suggestionId is missing", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    expect((await action({ request: deleteReq({ fixtureKind: "full-look-gate-negative" }) } as any)).init?.status).toBe(400);
+  });
+});
+
+describe("full-look-gate-negative — the fixture really reaches the gate and is refused by it (not by selection or any other check)", () => {
+  it("selectFullLookGarments accepts the exact item shapes the fixture writes (3 distinct categories, all images resolvable), and the real gate refuses it with category_not_allowed before any screening", async () => {
+    const { selectFullLookGarments } = await import("~/lib/ai/full-look-vto-orchestrator.server");
+    const { gateFullLookClosetGarments } = await import("~/lib/ai/full-look-closet-gate.server");
+    const cfg = { cloudName: "naia-test-cloud", apiKey: "k", apiSecret: "s" } as any;
+    const items = [
+      { itemType: "TOP", productTitle: "t", closetItemId: null, productImageUrl: "https://cdn.shopify.com/a.png", closetItem: null },
+      { itemType: "BOTTOM", productTitle: "b", closetItemId: null, productImageUrl: "https://cdn.shopify.com/b.png", closetItem: null },
+      {
+        itemType: "OUTERWEAR",
+        productTitle: "swim",
+        closetItemId: "gate-closet-1",
+        closetItem: {
+          name: "[QA FIXTURE] Gate-negative swimwear (throwaway, never rendered)",
+          imagePublicId: `naia-wardrobe/${QA_ID}/qa-fixture-gate-negative-never-uploaded`,
+          imageFormat: "jpg",
+          category: "SWIMWEAR",
+          subcategory: null,
+          tryOnEligibility: "not-supported",
+        },
+      },
+    ] as any;
+    const selection = selectFullLookGarments(items, { customerId: QA_ID, cloudinaryConfig: cfg });
+    expect(selection).not.toBeNull();
+    expect(selection!.garments).toHaveLength(3);
+    expect(selection!.chosenItems).toHaveLength(3);
+    const screen = vi.fn();
+    const gate = await gateFullLookClosetGarments({ customerId: QA_ID, chosenItems: selection!.chosenItems, cloudinaryConfig: cfg, screen });
+    expect(gate).toMatchObject({ ok: false, reason: "category_not_allowed" });
+    expect(screen).not.toHaveBeenCalled();
+  });
+});

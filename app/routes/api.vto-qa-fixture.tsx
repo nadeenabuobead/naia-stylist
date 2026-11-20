@@ -214,6 +214,13 @@ export async function action({ request }: ActionFunctionArgs) {
       }
       return deleteQaRealAccessoryClosetFixture(sessionCustomerId, accessoryType);
     }
+    if (parsedDeleteBody?.fixtureKind === "full-look-gate-negative") {
+      const sessionCustomerId = await resolveAuthorizedQaSessionCustomerId(request);
+      if (!sessionCustomerId) {
+        return data({ ok: false, code: "forbidden" }, { status: 403 });
+      }
+      return deleteFullLookGateNegativeFixture(request, parsedDeleteBody, sessionCustomerId);
+    }
     if (parsedDeleteBody?.fixtureKind === "my-naia-model") {
       // deleteMyNaiaModelFixture never reads the body itself — it only
       // needs the verified session — so passing the already-consumed
@@ -287,6 +294,17 @@ export async function action({ request }: ActionFunctionArgs) {
       return data({ ok: false, code: "image_data_url_required" }, { status: 400 });
     }
     return createQaRealAccessoryClosetFixture(sessionCustomerId, imageDataUrl, accessoryType);
+  }
+
+  if (parsedBody?.fixtureKind === "full-look-gate-negative") {
+    // Same real-session auth as every other real-session fixtureKind. NEVER
+    // run a Full-Look POST against this fixture expecting a render: it exists
+    // only to prove the pre-FASHN eligibility gate refuses it.
+    const sessionCustomerId = await resolveAuthorizedQaSessionCustomerId(request);
+    if (!sessionCustomerId) {
+      return data({ ok: false, code: "forbidden" }, { status: 403 });
+    }
+    return createFullLookGateNegativeFixture(sessionCustomerId);
   }
 
   if (parsedBody?.fixtureKind === "full-look-real-garments") {
@@ -1396,6 +1414,135 @@ async function createFullLookRealGarmentsMaxFixture(customerId: string, opts: { 
     syntheticPlaceholderCount: realAccessoryClosetItem ? 0 : 1,
     ...(realAccessoryClosetItem ? { accessoryClosetItemId: realAccessoryClosetItem.id } : {}),
   });
+}
+
+// ── Full-Look eligibility-gate NEGATIVE fixture (2026-11-21) ─────────────────
+//
+// POST /api/vto-qa-fixture, body: { fixtureKind: "full-look-gate-negative" }
+// (real Persona-A session only — resolveAuthorizedQaSessionCustomerId).
+//
+// WHY: proves on staging, WITHOUT spending FASHN credits, that Full-Look's
+// pre-FASHN eligibility gate (full-look-closet-gate.server.ts) refuses an
+// ineligible closet garment with HTTP 400 not_eligible before any job is
+// reserved or submitted. There is no other way to build such a suggestion
+// without running real StyleMe/AI flows or secret-gated seeding.
+//
+// WHAT IT CREATES (all throwaway, all marked):
+//  - one ClosetItem, category SWIMWEAR (never VTO-allowed), Stage-A
+//    "not-supported", named GATE_NEGATIVE_CLOSET_NAME. It points at a
+//    customer-scoped publicId that was NEVER uploaded: nothing is written to
+//    Cloudinary, and the gate refuses on category before any image is fetched.
+//  - one StylingSession + OutfitSuggestion (moodDescription null, so the
+//    existing deleteFixtureSuggestion cleanup works unmodified, including its
+//    refusal to delete anything that has dependent VirtualTryOnJob rows).
+//  - three OutfitItems (TOP, BOTTOM from the existing Full-Look fixture media,
+//    OUTERWEAR backed by the swimwear closet item) — three distinct categories,
+//    the minimum selectFullLookGarments needs to proceed to the gate. Every
+//    item carries GATE_NEGATIVE_PRODUCT_ID, deliberately DIFFERENT from the
+//    real-garments markers so it can never be mistaken for, or cleaned up as,
+//    the approved five-item fixture.
+//
+// It creates no VirtualTryOnJob, reserves nothing, touches no billing.
+// Refuses (409) if a previous throwaway closet item still exists, so it can
+// never silently duplicate.
+const GATE_NEGATIVE_PRODUCT_ID = "qa-fixture-full-look-gate-negative";
+const GATE_NEGATIVE_CLOSET_NAME = "[QA FIXTURE] Gate-negative swimwear (throwaway, never rendered)";
+
+async function createFullLookGateNegativeFixture(customerId: string) {
+  const existing = await prisma.closetItem.findFirst({
+    where: { customerId, category: "SWIMWEAR", name: GATE_NEGATIVE_CLOSET_NAME },
+    select: { id: true },
+  });
+  if (existing) {
+    return data({ ok: false, code: "already_exists", closetItemId: existing.id }, { status: 409 });
+  }
+
+  const result = await prisma.$transaction(async (tx) => {
+    const closetItem = await tx.closetItem.create({
+      data: {
+        customerId,
+        name: GATE_NEGATIVE_CLOSET_NAME,
+        category: "SWIMWEAR",
+        imageUrl: null,
+        imagePublicId: `naia-wardrobe/${customerId}/qa-fixture-gate-negative-never-uploaded`,
+        imageFormat: "jpg",
+        colors: [],
+        primaryColor: null,
+        pattern: null,
+        brand: null,
+        occasions: [],
+        seasons: [],
+        tryOnEligibility: "not-supported",
+        tryOnAssessedAt: new Date(),
+        tryOnCustomerHint: null,
+        tryOnInternalNote: "QA gate-negative fixture: SWIMWEAR is never VTO-allowed.",
+        garmentRelationships: [],
+        customerNote: null,
+        ...buildConsentStamp(true),
+      },
+      select: { id: true },
+    });
+    const session = await tx.stylingSession.create({ data: { customerId }, select: { id: true } });
+    const suggestion = await tx.outfitSuggestion.create({ data: { sessionId: session.id }, select: { id: true } });
+    const rows: { itemType: OutfitItemType; title: string; productImageUrl?: string; closetItemId?: string }[] = [
+      { itemType: "TOP", title: "[QA FIXTURE] Gate-negative top — never rendered", productImageUrl: FULL_LOOK_FIXTURE_ITEMS[0].productImageUrl },
+      { itemType: "BOTTOM", title: "[QA FIXTURE] Gate-negative bottom — never rendered", productImageUrl: FULL_LOOK_FIXTURE_ITEMS[1].productImageUrl },
+      { itemType: "OUTERWEAR", title: "[QA FIXTURE] Gate-negative closet swimwear — never rendered", closetItemId: closetItem.id },
+    ];
+    for (const { itemType, title, productImageUrl, closetItemId } of rows) {
+      await tx.outfitItem.create({
+        data: {
+          suggestionId: suggestion.id,
+          itemType,
+          productTitle: title,
+          shopifyProductId: GATE_NEGATIVE_PRODUCT_ID,
+          ...(productImageUrl ? { productImageUrl } : {}),
+          ...(closetItemId ? { closetItemId } : {}),
+        },
+      });
+    }
+    return { closetItemId: closetItem.id, sessionId: session.id, suggestionId: suggestion.id };
+  });
+
+  return data({ ok: true, fixtureKind: "full-look-gate-negative", ...result, itemCount: 3 });
+}
+
+// DELETE body: { fixtureKind: "full-look-gate-negative", suggestionId }.
+// Tightly scoped: the suggestion must belong to the verified-session customer
+// AND every one of its items must carry GATE_NEGATIVE_PRODUCT_ID — it can
+// never delete the approved five-item fixture or any other suggestion. The
+// suggestion itself is removed by the EXISTING deleteFixtureSuggestion
+// (unmodified; it refuses with has_dependent_jobs if any VirtualTryOnJob
+// exists), and only after it succeeds is the throwaway swimwear closet item
+// removed, matched on customer + category + exact marker name.
+async function deleteFullLookGateNegativeFixture(
+  request: Request,
+  parsed: Record<string, unknown> | null,
+  customerId: string,
+) {
+  const suggestionId = parsed?.suggestionId;
+  if (typeof suggestionId !== "string" || !suggestionId) {
+    return data({ ok: false, code: "invalid_request", message: "suggestionId required" }, { status: 400 });
+  }
+  const suggestion = await prisma.outfitSuggestion.findUnique({
+    where: { id: suggestionId },
+    select: { id: true, session: { select: { customerId: true } }, items: { select: { shopifyProductId: true } } },
+  });
+  if (
+    !suggestion ||
+    suggestion.session.customerId !== customerId ||
+    suggestion.items.length === 0 ||
+    !suggestion.items.every((i) => i.shopifyProductId === GATE_NEGATIVE_PRODUCT_ID)
+  ) {
+    return data({ ok: false, code: "not_found" }, { status: 404 });
+  }
+  const res = await deleteFixtureSuggestion(request, parsed);
+  const body = res.data as { ok?: boolean } | undefined;
+  if (!body?.ok) return res;
+  const closet = await prisma.closetItem.deleteMany({
+    where: { customerId, category: "SWIMWEAR", name: GATE_NEGATIVE_CLOSET_NAME },
+  });
+  return data({ ...(body as object), fixtureKind: "full-look-gate-negative", closetItemsDeleted: closet.count });
 }
 
 // ── My nAia Model fixture (2026-11-18) ──────────────────────────────────────
