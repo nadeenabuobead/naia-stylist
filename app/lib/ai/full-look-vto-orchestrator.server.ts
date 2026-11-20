@@ -90,11 +90,19 @@ export interface SelectableOutfitItem extends Omit<ResolvableOutfitItem, "closet
     imagePublicId?: string | null;
     imageFormat?: string | null;
     category?: string | null;
+    // 2026-11-21 — read by full-look-closet-gate.server.ts (the pre-FASHN
+    // eligibility gate); optional so every other caller/test is unaffected.
+    subcategory?: string | null;
+    tryOnEligibility?: string | null;
   } | null;
 }
 
 export interface GarmentSelectionResult {
   garments: FullLookRealGarmentInput[];
+  // The exact OutfitItems that produced `garments`, in the same order
+  // (2026-11-21, additive). Lets the pre-FASHN eligibility gate inspect the
+  // SAME pieces the chain will submit, never a re-derived guess.
+  chosenItems: SelectableOutfitItem[];
   // Labels of recommended, available pieces that did NOT make it into this
   // chain — either because the outfit had more eligible CATEGORIES than
   // FULL_LOOK_MAX_GARMENTS allows, or because a category had more than one
@@ -181,7 +189,7 @@ export function selectFullLookGarments(
   // computeGarmentFingerprint(chosen) — unchanged input (chosen is
   // identical to before this fix), so the fingerprint, and therefore the
   // reservation scope it feeds, are unaffected by this disclosure-only fix.
-  return { garments, omittedLabels, fingerprint: computeGarmentFingerprint(chosen) };
+  return { garments, chosenItems: chosen, omittedLabels, fingerprint: computeGarmentFingerprint(chosen) };
 }
 
 // ── Attempt scope — retry-safe idempotency ───────────────────────────────────
@@ -331,6 +339,9 @@ export type OrchestratorStatus =
   // failed.
   | { status: "BUSY"; reason: "ACTIVE_JOB" | "COOLDOWN" }
   | { status: "ERROR"; reason: string }
+  // 2026-11-21 — refused by the pre-FASHN eligibility gate (see
+  // full-look-closet-gate.server.ts); no FASHN call was made.
+  | { status: "NOT_ELIGIBLE"; reason: string; label: string }
   // 2026-11-16 — CONFIRMED DEFECT FIX. A step just completed (its result
   // was recovered/persisted from FASHN regardless — see
   // advanceFullLookChain's own STEP_COMPLETE_AWAITING_AUTHORIZATION
@@ -441,10 +452,19 @@ async function advanceAutomatically(
 // happen here," not "something happened here."
 const TERMINAL_DEAD_STATUSES = new Set(["FAILED", "CANCELED", "TIMED_OUT"]);
 
+// 2026-11-21 — `beforeNewAttempt` (optional) is awaited ONLY when this call is
+// about to start a brand-new attempt (explicit retry, no jobs yet, or a dead
+// last job being replaced) — i.e. exactly when new FASHN credits could be
+// spent — and never on the continuation POSTs of an in-flight chain, where a
+// refusal would strand credits already spent. Returning a refusal object
+// aborts with NOT_ELIGIBLE before anything is reserved or submitted.
+export type BeforeNewAttemptCheck = () => Promise<{ reason: string; label: string } | null>;
+
 export async function startFullLookOutfit(
   baseCtx: Omit<FullLookChainContext, "reservationScope">,
   fingerprint: string,
   opts: { forceNewAttempt?: boolean } = {},
+  beforeNewAttempt?: BeforeNewAttemptCheck,
 ): Promise<OrchestratorStatus> {
   let scope = opts.forceNewAttempt
     ? await startNewAttemptScope(baseCtx.customerId, baseCtx.outfitSuggestionId, fingerprint)
@@ -462,12 +482,19 @@ export async function startFullLookOutfit(
   // here too — it already computes a genuinely new scope unconditionally,
   // so this check would be redundant (and the existingJobs read for the
   // brand-new scope would always be empty anyway).
+  let startsNewAttempt = !!opts.forceNewAttempt;
   if (!opts.forceNewAttempt) {
     const existingJobs = await walkFullLookChainJobs(baseCtx.customerId, undefined, scope);
     const lastJob = existingJobs[existingJobs.length - 1];
+    if (!lastJob) startsNewAttempt = true;
     if (lastJob && TERMINAL_DEAD_STATUSES.has(lastJob.status)) {
+      startsNewAttempt = true;
       scope = await startNewAttemptScope(baseCtx.customerId, baseCtx.outfitSuggestionId, fingerprint);
     }
+  }
+  if (startsNewAttempt && beforeNewAttempt) {
+    const refusal = await beforeNewAttempt();
+    if (refusal) return { status: "NOT_ELIGIBLE", reason: refusal.reason, label: refusal.label };
   }
 
   const ctx: FullLookChainContext = { ...baseCtx, reservationScope: scope };

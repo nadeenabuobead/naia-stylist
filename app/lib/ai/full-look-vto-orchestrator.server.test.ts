@@ -863,3 +863,68 @@ describe("findCompletedFullLookForSuggestion — never regenerate on revisit", (
     expect(result).toBeNull();
   });
 });
+
+
+// 2026-11-21 — pre-FASHN eligibility gate hook (beforeNewAttempt). Proves it
+// is consulted ONLY when a new attempt would spend credits, and that a
+// refusal means nothing is reserved or submitted.
+describe("startFullLookOutfit — beforeNewAttempt eligibility gate", () => {
+  beforeEach(() => {
+    mockCount().mockResolvedValue(0);
+    vi.mocked(startOrResumeFullLookChain).mockResolvedValue({ ok: true, stepIndex: 0 });
+    vi.mocked(advanceFullLookChain).mockResolvedValue({ status: "PROCESSING", stepIndex: 0 } as any);
+  });
+  const refuse = () => vi.fn().mockResolvedValue({ reason: "category_not_allowed", label: "Swim top" });
+  const allow = () => vi.fn().mockResolvedValue(null);
+
+  it("a first start (no jobs yet) consults the gate, and a refusal returns NOT_ELIGIBLE without reserving or submitting anything", async () => {
+    const gate = refuse();
+    const result = await startFullLookOutfit(BASE_CTX, BASE_FP, {}, gate);
+    expect(result).toEqual({ status: "NOT_ELIGIBLE", reason: "category_not_allowed", label: "Swim top" });
+    expect(gate).toHaveBeenCalledOnce();
+    expect(startOrResumeFullLookChain).not.toHaveBeenCalled();
+    expect(advanceFullLookChain).not.toHaveBeenCalled();
+  });
+
+  it("a passing gate lets the chain start normally", async () => {
+    const gate = allow();
+    const result = await startFullLookOutfit(BASE_CTX, BASE_FP, {}, gate);
+    expect(gate).toHaveBeenCalledOnce();
+    expect(startOrResumeFullLookChain).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({ status: "PROCESSING" });
+  });
+
+  it("an explicit retry (forceNewAttempt) consults the gate and a refusal blocks it", async () => {
+    mockCount().mockResolvedValue(1);
+    const gate = refuse();
+    const result = await startFullLookOutfit(BASE_CTX, BASE_FP, { forceNewAttempt: true }, gate);
+    expect(result.status).toBe("NOT_ELIGIBLE");
+    expect(startOrResumeFullLookChain).not.toHaveBeenCalled();
+  });
+
+  it.each(["FAILED", "CANCELED", "TIMED_OUT"])("a plain start that will replace a dead (%s) last job with a new attempt consults the gate", async (status) => {
+    mockCount().mockResolvedValue(1);
+    vi.mocked(walkFullLookChainJobs).mockResolvedValueOnce([{ status } as any]);
+    const gate = refuse();
+    const result = await startFullLookOutfit(BASE_CTX, BASE_FP, {}, gate);
+    expect(result.status).toBe("NOT_ELIGIBLE");
+    expect(gate).toHaveBeenCalledOnce();
+    expect(startOrResumeFullLookChain).not.toHaveBeenCalled();
+  });
+
+  it.each(["PROCESSING", "COMPLETED", "PENDING"])("a continuation POST on an in-flight chain (last job %s) NEVER consults the gate — a refusal must not strand credits already spent", async (status) => {
+    mockCount().mockResolvedValue(1);
+    vi.mocked(walkFullLookChainJobs).mockResolvedValueOnce([{ status } as any]);
+    const gate = refuse();
+    const result = await startFullLookOutfit(BASE_CTX, BASE_FP, {}, gate);
+    expect(gate).not.toHaveBeenCalled();
+    expect(startOrResumeFullLookChain).toHaveBeenCalledOnce();
+    expect(result.status).not.toBe("NOT_ELIGIBLE");
+  });
+
+  it("omitting the gate preserves the previous behavior exactly", async () => {
+    const result = await startFullLookOutfit(BASE_CTX, BASE_FP);
+    expect(startOrResumeFullLookChain).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({ status: "PROCESSING" });
+  });
+});

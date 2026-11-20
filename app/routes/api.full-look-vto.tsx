@@ -46,6 +46,7 @@ import prisma from "~/db.server";
 import { loadNaiaModel, computeModelReadinessFromRecord } from "~/lib/ai/my-naia-model.server";
 import { checkEntitlement } from "~/lib/plan/entitlement.server";
 import { getCloudinaryConfig } from "~/lib/cloudinary-admin.server";
+import { gateFullLookClosetGarments } from "~/lib/ai/full-look-closet-gate.server";
 import {
   selectFullLookGarments,
   startFullLookOutfit,
@@ -96,7 +97,7 @@ async function loadOwnedSuggestion(customerId: string, suggestionId: string) {
       session: { select: { customerId: true } },
       items: {
         include: {
-          closetItem: { select: { name: true, imageUrl: true, imagePublicId: true, imageFormat: true, category: true } },
+          closetItem: { select: { name: true, imageUrl: true, imagePublicId: true, imageFormat: true, category: true, subcategory: true, tryOnEligibility: true } },
         },
       },
     },
@@ -214,6 +215,7 @@ export async function action({ request }: ActionFunctionArgs) {
     return badRequest("not_eligible", "This look doesn't have enough try-on–eligible pieces for a full-look preview.");
   }
   const { garments, omittedLabels, fingerprint } = selection;
+  const chosenItems = selection.chosenItems;
 
   // A retry is only meaningful after the current attempt actually failed —
   // never a way to bypass "never regenerate" for a result that's already
@@ -292,8 +294,27 @@ export async function action({ request }: ActionFunctionArgs) {
     },
     fingerprint,
     { forceNewAttempt: retry === true },
+    // 2026-11-21 — pre-FASHN closet eligibility gate; the orchestrator awaits
+    // it only when a NEW attempt would spend credits (see
+    // full-look-closet-gate.server.ts). A refusal means zero FASHN calls.
+    async () => {
+      const gate = await gateFullLookClosetGarments({ customerId: customer.id, chosenItems, cloudinaryConfig });
+      return gate.ok ? null : { reason: gate.reason, label: gate.label };
+    },
   );
 
+  if (result.status === "NOT_ELIGIBLE") {
+    return data(
+      {
+        ok: false,
+        code: "not_eligible",
+        reason: result.reason,
+        label: result.label,
+        message: "One of the pieces in this look isn't suitable for a virtual try-on. Try a clearer photo of that piece on its own.",
+      },
+      { status: 400 },
+    );
+  }
   if (result.status === "BUSY") return busy(result.reason);
   if (result.status === "ERROR") return serverError(result.reason);
   return data({ ok: true, ...result, omittedLabels });
