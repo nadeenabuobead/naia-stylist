@@ -128,17 +128,41 @@ describe("gateFullLookClosetGarments — live suitability screening is enforced 
   it.each([
     [{ status: "RETRY_IMAGE", subCode: "image_too_blurry" }, "image_too_blurry"],
     [{ status: "NEEDS_CLARIFICATION", subCode: "category_mismatch" }, "category_mismatch"],
-    [{ status: "RETRY_IMAGE", subCode: "assessment_failed" }, "assessment_failed"],
-  ])("a non-PASS screening result %j refuses the look", async (result, subCode) => {
+  ])("a genuine non-PASS verdict %j refuses the look as unsuitable_image", async (result, subCode) => {
     const screen = vi.fn().mockResolvedValue(result);
     const r = await run([closetItem()], screen);
     expect(r).toMatchObject({ ok: false, reason: "unsuitable_image", subCode });
   });
 
-  it("a screening call that throws is treated as NOT passed", async () => {
+  it("a check that could not complete (assessment_failed: timeout/API error/unparseable) still refuses (fail closed) but is reported as screening_unavailable, not as a bad photo", async () => {
+    const screen = vi.fn().mockResolvedValue({ status: "RETRY_IMAGE", subCode: "assessment_failed" });
+    const r = await run([closetItem()], screen);
+    expect(r).toMatchObject({ ok: false, reason: "screening_unavailable", subCode: "assessment_failed" });
+  });
+
+  it("a screening call that throws is treated as NOT passed (screening_unavailable)", async () => {
     const screen = vi.fn().mockRejectedValue(new Error("anthropic down"));
     const r = await run([closetItem()], screen);
-    expect(r).toMatchObject({ ok: false, reason: "unsuitable_image", subCode: "assessment_failed" });
+    expect(r).toMatchObject({ ok: false, reason: "screening_unavailable", subCode: "assessment_failed" });
+  });
+
+  it("every screening is started concurrently (all calls issued before any resolves) with the gate's longer timeout", async () => {
+    let started = 0;
+    let maxInFlight = 0;
+    let inFlight = 0;
+    const screen = vi.fn().mockImplementation(async () => {
+      started++;
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((r) => setTimeout(r, 5));
+      inFlight--;
+      return { status: "PASS" };
+    });
+    const items = ["a", "b", "c", "d", "e"].map((id) => closetItem({}, id));
+    expect(await run(items, screen)).toEqual({ ok: true, screened: 5 });
+    expect(started).toBe(5);
+    expect(maxInFlight).toBe(5); // concurrent, not sequential
+    expect(screen.mock.calls.every((c: any[]) => c[1].timeoutMs === 10_000)).toBe(true);
   });
 
   it("reports the failing piece's label when only one of several fails screening", async () => {

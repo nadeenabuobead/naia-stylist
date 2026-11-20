@@ -41,7 +41,15 @@ import type { CloudinaryConfig } from "~/lib/cloudinary-admin.server";
 // Stage A outcomes that mean "this photo/category is known not usable".
 const BLOCKED_STAGE_A: ReadonlySet<string> = new Set(["not-supported", "needs-clearer-photo"]);
 
+// 2026-11-21 — the default 3 s suitability timeout is tuned for a single
+// check inside one customer action. Full-Look runs up to five checks
+// concurrently right before real credits are spent, and a timeout there would
+// refuse a perfectly good look, so the gate allows more headroom. Still fail
+// closed: a check that does not finish is "screening_unavailable", never a pass.
+export const FULL_LOOK_GATE_SCREEN_TIMEOUT_MS = 10_000;
+
 export type FullLookGateFailureReason =
+  | "screening_unavailable"
   | "unresolved_closet_item"
   | "category_not_allowed"
   | "photo_flagged"
@@ -52,7 +60,7 @@ export type FullLookGateResult =
   | { ok: true; screened: number }
   | { ok: false; reason: FullLookGateFailureReason; label: string; subCode?: string };
 
-type ScreenFn = (imageUrl: string, opts: { declaredCategory?: string }) => Promise<GarmentSuitabilityResult>;
+type ScreenFn = (imageUrl: string, opts: { declaredCategory?: string; timeoutMs?: number }) => Promise<GarmentSuitabilityResult>;
 
 export async function gateFullLookClosetGarments(args: {
   customerId: string;
@@ -84,7 +92,7 @@ export async function gateFullLookClosetGarments(args: {
   const results = await Promise.all(
     prepared.map(async (p) => {
       try {
-        return await screen(p.url, { declaredCategory: p.category });
+        return await screen(p.url, { declaredCategory: p.category, timeoutMs: FULL_LOOK_GATE_SCREEN_TIMEOUT_MS });
       } catch {
         // Screening threw: treat as not-passed (fail closed).
         return { status: "RETRY_IMAGE", subCode: "assessment_failed" } as GarmentSuitabilityResult;
@@ -94,7 +102,18 @@ export async function gateFullLookClosetGarments(args: {
   for (let i = 0; i < results.length; i++) {
     const r = results[i];
     if (r.status !== "PASS") {
-      return { ok: false, reason: "unsuitable_image", label: labelOf(prepared[i].item), subCode: "subCode" in r ? r.subCode : undefined };
+      const subCode = "subCode" in r ? r.subCode : undefined;
+      // assessment_failed = the check itself did not complete (timeout, API
+      // error, unparseable reply) — a TRANSIENT service condition, not a
+      // verdict about the piece. Still refused (fail closed), but reported
+      // separately so the customer is told to try again instead of being told
+      // their photo is bad.
+      return {
+        ok: false,
+        reason: subCode === "assessment_failed" ? "screening_unavailable" : "unsuitable_image",
+        label: labelOf(prepared[i].item),
+        subCode,
+      };
     }
   }
   return { ok: true, screened: prepared.length };

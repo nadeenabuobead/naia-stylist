@@ -9,7 +9,11 @@
 // and returns the raw result for manual inspection.
 //
 // Safety:
-//   - Blocked in production (VERCEL_ENV guard).
+//   - Blocked outside the staging project (NAIA_PROJECT_VARIANT guard — not
+//     VERCEL_ENV, which is "production" on promoted staging deployments too).
+//   - Allowlisted staging QA accounts only (isAuthorizedStagingTestAccount,
+//     added 2026-11-21): no entitlement/job accounting happens here, so it must
+//     never be open to every signed-in staging customer.
 //   - Requires authenticated customer.
 //   - Requires per-generation VTO consent (same 15-min window as single-item flow).
 //   - Customer may only access their own OutfitSuggestions.
@@ -39,6 +43,7 @@ import {
   type CompositeSlot,
 } from "~/lib/ai/full-look-composite.server";
 import prisma from "~/db.server";
+import { isAuthorizedStagingTestAccount } from "./staging.full-look-vto-test";
 import type { OutfitItemType } from "@prisma/client";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -84,6 +89,17 @@ export async function action({ request }: ActionFunctionArgs) {
   const customer = await getCurrentNaiaCustomer(request);
   if (!customer) {
     return data({ ok: false, code: "auth_required" }, { status: 401 });
+  }
+
+  // 2026-11-21 — allowlist gate. This prototype makes a real, billable FASHN
+  // call with NO VirtualTryOnJob row, NO entitlement check and NO cooldown, so
+  // it must never be reachable by an arbitrary signed-in customer. Same
+  // dedicated allowlist (FULL_LOOK_VTO_TEST_CUSTOMER_IDS, empty => nobody) the
+  // other staging Full-Look harness uses; a non-listed customer gets the same
+  // 404 as a route that does not exist. Nothing below runs for them: no model
+  // load, no photo download, no FASHN request.
+  if (!isAuthorizedStagingTestAccount(customer)) {
+    return data({ ok: false, code: "not_found" }, { status: 404 });
   }
 
   // ── 2. Parse body ────────────────────────────────────────────────────────

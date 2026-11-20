@@ -239,3 +239,34 @@ describe("T14: taxonomy covers other falsely-rejected subtypes", () => {
     assert.ok(shoesEntry.includes("loafers") || shoesEntry.includes("sandals"), "SHOES must list common subtypes");
   });
 });
+
+
+// ── T15 (2026-11-21): optional per-call timeout override ─────────────────────
+describe("T15: screenGarmentSuitability timeoutMs override", () => {
+  const slowAnalyzer = (ms: number, body: string): AnalyzeForSuitabilityFn => async ({ signal }) =>
+    new Promise<string>((resolve, reject) => {
+      const t = setTimeout(() => resolve(body), ms);
+      signal?.addEventListener("abort", () => {
+        clearTimeout(t);
+        reject(new Error("aborted"));
+      });
+    });
+
+  it("a short override aborts a slow analyzer as assessment_failed (fail-closed, much sooner than the 3 s default)", async () => {
+    const t0 = Date.now();
+    const r = await screenGarmentSuitability(FAKE_URL, { timeoutMs: 20 }, slowAnalyzer(500, garmentJson("PASS")));
+    assert.equal(r.status, "RETRY_IMAGE");
+    assert.equal((r as { subCode: string }).subCode, "assessment_failed");
+    assert.ok(Date.now() - t0 < 400);
+  });
+
+  it("a longer override lets a slower-than-default-would-allow analyzer finish and PASS", async () => {
+    const r = await screenGarmentSuitability(FAKE_URL, { timeoutMs: 2000 }, slowAnalyzer(50, garmentJson("PASS")));
+    assert.equal(r.status, "PASS");
+  });
+
+  it("omitting the override keeps the previous behavior (a fast analyzer passes)", async () => {
+    const r = await screenGarmentSuitability(FAKE_URL, {}, slowAnalyzer(10, garmentJson("PASS")));
+    assert.equal(r.status, "PASS");
+  });
+});

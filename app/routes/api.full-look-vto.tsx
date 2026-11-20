@@ -303,6 +303,14 @@ export async function action({ request }: ActionFunctionArgs) {
     },
   );
 
+  if (result.status === "NOT_ELIGIBLE" && result.reason === "screening_unavailable") {
+    // Transient: the piece check could not complete. Nothing was reserved or
+    // submitted; safe for the customer to try again.
+    return data(
+      { ok: false, code: "screening_unavailable", message: "We couldn't check your pieces just now — please try again in a moment." },
+      { status: 503 },
+    );
+  }
   if (result.status === "NOT_ELIGIBLE") {
     return data(
       {
