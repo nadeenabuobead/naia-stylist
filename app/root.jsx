@@ -1,10 +1,20 @@
-import { Links, Meta, Outlet, Scripts, ScrollRestoration } from "react-router";
+import { Links, Meta, Outlet, Scripts, ScrollRestoration, useRouteError, isRouteErrorResponse } from "react-router";
 
 export function meta() {
   return [{ title: "nAia" }];
 }
 
-export default function App() {
+// Split into Layout (the document shell) + App (just the route tree) so the
+// ErrorBoundary below has a real <html>/<head>/<body> to render into --
+// React Router's documented pattern. Without this split, an uncaught
+// loader/action error anywhere in the route tree (e.g. a transient
+// database failure surviving its own retry -- see
+// app/lib/prisma-transient-retry.server.ts) falls through to React
+// Router's own bare default error screen instead of this app's branded
+// page, since there would be no shell for a route-level ErrorBoundary to
+// mount into at all. Content and behavior of the document shell itself are
+// unchanged from before this split -- only given a name and reused.
+export function Layout({ children }) {
   return (
     <html lang="en">
       <head>
@@ -51,10 +61,80 @@ export default function App() {
       </head>
       <body>
         <script dangerouslySetInnerHTML={{ __html: `(function(){document.cookie='naia_customer_data=; path=/; max-age=0; SameSite=Lax';try{sessionStorage.removeItem('naia_token');}catch(e){}if(window.self!==window.top){document.addEventListener('click',function(e){var a=e.target.closest('a');if(a&&a.href&&a.href.startsWith(window.location.origin)){e.preventDefault();window.location.href=a.href;}});}})();` }} />
-        <Outlet />
+        {children}
         <ScrollRestoration />
         <Scripts />
       </body>
     </html>
+  );
+}
+
+export default function App() {
+  return <Outlet />;
+}
+
+// Root-level ErrorBoundary -- catches any uncaught loader/action/render
+// error from anywhere in the route tree that doesn't have its own more
+// specific boundary. Deliberately the ONE shared boundary for the whole
+// app rather than one per route.
+//
+// Never renders error.message, error.stack, a Prisma error, or any
+// internal ID -- a transient database outage and any other unexpected
+// exception both get the exact same generic, branded copy. TRY AGAIN does
+// a full page reload of the current URL -- the simplest, most reliable
+// retry: it re-runs every loader fresh, including whatever failed the
+// first time (and, for a transient database error, its own retry logic).
+export function ErrorBoundary() {
+  const error = useRouteError();
+  const is404 = isRouteErrorResponse(error) && error.status === 404;
+
+  const heading = is404 ? "Page not found" : "Something went wrong";
+  const message = is404
+    ? "This page doesn't exist."
+    : "We couldn't load this right now. Please try again.";
+
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "24px",
+        textAlign: "center",
+        fontFamily: "var(--ff-body)",
+        background: "var(--c-bg)",
+        color: "var(--c-ink)",
+      }}
+    >
+      <div>
+        <p style={{ fontFamily: "var(--ff-display)", fontSize: "1.1rem", fontWeight: 600, opacity: 0.85, margin: "0 0 8px" }}>
+          {heading}
+        </p>
+        <p style={{ fontSize: "0.95rem", opacity: 0.7, margin: "0 0 28px" }}>
+          {message}
+        </p>
+        {!is404 && (
+          <button
+            type="button"
+            onClick={() => { if (typeof window !== "undefined") window.location.reload(); }}
+            style={{
+              fontFamily: "var(--ff-ui)",
+              fontSize: "0.85rem",
+              fontWeight: 600,
+              letterSpacing: "0.02em",
+              color: "var(--c-burg)",
+              background: "transparent",
+              border: "1px solid var(--c-burg)",
+              borderRadius: "999px",
+              padding: "11px 28px",
+              cursor: "pointer",
+            }}
+          >
+            TRY AGAIN
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
