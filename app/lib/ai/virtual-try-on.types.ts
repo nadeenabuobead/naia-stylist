@@ -93,6 +93,26 @@ export const POLICY_VERSION = "1.0";
 export const PROVIDER_DISCLAIMER =
   "A visual preview generated from your photo. Fit, scale and fabric behaviour may differ in person.";
 
+// 2026-11-20 — Full-Look-specific addition, shown ONLY on a completed
+// Full-Look result (never single-item VTO, which has no multi-step
+// compositing to disclose). Root cause: a real five-garment acceptance
+// test found shoes successfully predicted by the provider at their own
+// step, but absent from the final composited image, with no code defect
+// found in the chain/intermediate-image wiring (verified: each step
+// correctly receives the prior step's own real output). This is the
+// generation PROCESS's own known characteristic — a multi-step AI
+// compositing chain cannot guarantee every earlier addition remains
+// visible once later steps regenerate the image, and this was not ruled
+// out as specific to the synthetic (hand-drawn, not photographic) QA
+// source image either. There is no way to detect, per request, whether a
+// specific piece is actually visible in the final image without a
+// separate vision-model check (out of scope here) — so this discloses
+// the real, general risk honestly rather than claiming a false
+// per-request guarantee. PROVIDER_DISCLAIMER above is left unchanged
+// (shared with single-item VTO, where this risk does not exist).
+export const FULL_LOOK_COMPOSITING_DISCLAIMER =
+  "Combining several pieces into one preview can mean an individual piece — especially smaller items like shoes or accessories — doesn't always appear clearly in the final image, even when it rendered correctly on its own.";
+
 // ── NaiaModel DB record shape (mirrors Prisma NaiaModel) ─────────────────────
 
 export interface NaiaModelRecord {

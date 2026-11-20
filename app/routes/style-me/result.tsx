@@ -48,7 +48,7 @@ import {
 } from "~/lib/styleme/commerce-cta";
 import { issueImageToken } from "~/lib/dev-tryon-image-tokens.server";
 import { isTryOnEligible } from "~/lib/ai/tryon-product-eligibility";
-import { PROVIDER_DISCLAIMER } from "~/lib/ai/virtual-try-on.types";
+import { PROVIDER_DISCLAIMER, FULL_LOOK_COMPOSITING_DISCLAIMER } from "~/lib/ai/virtual-try-on.types";
 import { TryOnPanel } from "~/components/TryOnPanel";
 import { VtoExperience } from "~/components/VtoExperience";
 import { RecommendationFeedbackWidget } from "~/components/RecommendationFeedbackWidget";
@@ -2185,6 +2185,16 @@ export default function StyleMeResult() {
                     exactly this category of content, already shown adjacent to the
                     generated image in VtoExperience.tsx and TryOnPanel.tsx. */}
                 <p className="sm-vto-body-note sm-vto-ai-disclaimer">{PROVIDER_DISCLAIMER}</p>
+                {/* 2026-11-20 — Full-Look-specific, in addition to the shared
+                    PROVIDER_DISCLAIMER above. See FULL_LOOK_COMPOSITING_
+                    DISCLAIMER's own comment (virtual-try-on.types.ts) for the
+                    real evidence behind this: a confirmed real-provider test
+                    where a piece predicted successfully at its own step was
+                    not visible in the final composited image, with no code
+                    defect found. omittedLabels (below) discloses pieces that
+                    were never submitted at all — a different, narrower case
+                    this does not replace. */}
+                <p className="sm-vto-body-note sm-vto-ai-disclaimer">{FULL_LOOK_COMPOSITING_DISCLAIMER}</p>
                 {fullLookQA.omittedLabels && fullLookQA.omittedLabels.length > 0 && (
                   <p className="sm-vto-body-note">
                     Shown without: {fullLookQA.omittedLabels.join(", ")}.
