@@ -2689,34 +2689,90 @@ describe("api.vto-qa-fixture action — DELETE fixtureKind: closet-real-accessor
   });
 });
 
-describe("api.vto-qa-fixture action — full-look-real-garments-max accessory source", () => {
+describe("api.vto-qa-fixture action — five-real-item acceptance path (full-look-real-garments-max-all-real) fails closed; legacy max kind stays synthetic-cap and says so", () => {
+  const strictReq = () => req({ fixtureKind: "full-look-real-garments-max-all-real" });
+  const legacyReq = () => req({ fixtureKind: "full-look-real-garments-max" });
+
   beforeEach(() => {
     mockGetCloudinaryConfig.mockReturnValue({ cloudName: "naia-test-cloud", apiKey: "k", apiSecret: "s" });
     mockClosetItemFindFirst.mockResolvedValue({ id: "shoe-1", name: "Real Shoe" });
     mockUploadCloudinaryPrivate.mockImplementation(async (publicId: string) => ({ ok: true, publicId, format: "png", version: "101" }));
   });
 
-  it("uses a real VTO-allowed ACCESSORIES closet item (no synthetic upload) and reports accessorySource real-closet-item", async () => {
+  it("strict: 403 without a real session, touches nothing", async () => {
+    setAuthorizedEnv();
+    expect((await action({ request: strictReq() } as any)).init?.status).toBe(403);
+    expect(mockFindMany).not.toHaveBeenCalled();
+    expect(mockSessionCreate).not.toHaveBeenCalled();
+  });
+
+  it("strict: uses a real VTO-allowed ACCESSORIES closet item, uploads nothing, writes 5 rows with zero synthetic placeholders", async () => {
     setAuthorizedEnv();
     mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
     mockFindMany.mockResolvedValueOnce([
-      { id: "sunglasses-1", name: "Shades", subcategory: "sunglasses" },
-      { id: "hat-1", name: "[QA FIXTURE] Real hat (customer-supplied photo)", subcategory: "hat" },
+      { id: "shades-1", name: "Shades", subcategory: "sunglasses", tryOnEligibility: "pending-assessment" },
+      { id: "hat-1", name: "[QA FIXTURE] Real hat (customer-supplied photo)", subcategory: "hat", tryOnEligibility: "pending-assessment" },
     ]);
-    const payload = (await action({ request: req({ fixtureKind: "full-look-real-garments-max" }) } as any)).data as any;
-    expect(payload).toMatchObject({ ok: true, itemCount: 5, accessorySource: "real-closet-item", accessoryClosetItemId: "hat-1" });
+    const payload = (await action({ request: strictReq() } as any)).data as any;
+    expect(payload).toMatchObject({
+      ok: true,
+      fixtureKind: "full-look-real-garments-max-all-real",
+      fixtureMode: "all-real",
+      itemCount: 5,
+      shoeSource: "real-closet-item",
+      accessorySource: "real-closet-item",
+      accessoryClosetItemId: "hat-1",
+      syntheticPlaceholderCount: 0,
+    });
     expect(mockUploadCloudinaryPrivate).not.toHaveBeenCalled();
-    const accessoryRow = mockItemCreate.mock.calls.map((c) => c[0].data).find((d) => d.itemType === "ACCESSORY");
-    expect(accessoryRow.closetItemId).toBe("hat-1");
-    expect(accessoryRow.productImageUrl).toBeUndefined();
+    const rows = mockItemCreate.mock.calls.map((c) => c[0].data);
+    expect(rows).toHaveLength(5);
+    expect(rows.find((d) => d.itemType === "ACCESSORY").closetItemId).toBe("hat-1");
+    expect(rows.find((d) => d.itemType === "ACCESSORY").productImageUrl).toBeUndefined();
   });
 
-  it("falls back to the synthetic cap when no real accessory exists, and says so", async () => {
+  it.each([
+    ["no accessory rows at all", []],
+    ["only a non-allowlisted subcategory", [{ id: "s", name: "Shades", subcategory: "sunglasses", tryOnEligibility: "pending-assessment" }]],
+    ["allowlisted subcategory but marked not-supported", [{ id: "h", name: "Hat", subcategory: "hat", tryOnEligibility: "not-supported" }]],
+    ["null subcategory", [{ id: "n", name: "Thing", subcategory: null, tryOnEligibility: null }]],
+  ])("strict FAILS CLOSED with no_real_accessory_closet_item when %s — no upload, no rows, no synthetic substitution", async (_label, rows) => {
     setAuthorizedEnv();
     mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
-    mockFindMany.mockResolvedValueOnce([{ id: "sunglasses-1", name: "Shades", subcategory: "sunglasses" }]);
-    const payload = (await action({ request: req({ fixtureKind: "full-look-real-garments-max" }) } as any)).data as any;
-    expect(payload).toMatchObject({ ok: true, itemCount: 5, accessorySource: "synthetic-cap" });
+    mockFindMany.mockResolvedValueOnce(rows);
+    const res = await action({ request: strictReq() } as any);
+    expect(res.init?.status).toBe(400);
+    expect((res.data as any)).toMatchObject({ ok: false, code: "no_real_accessory_closet_item" });
+    expect(mockUploadCloudinaryPrivate).not.toHaveBeenCalled();
+    expect(mockSessionCreate).not.toHaveBeenCalled();
+    expect(mockSuggestionCreate).not.toHaveBeenCalled();
+    expect(mockItemCreate).not.toHaveBeenCalled();
+  });
+
+  it("strict still requires the real shoe first (no_real_shoe_closet_item) and never reaches the accessory lookup", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockClosetItemFindFirst.mockResolvedValueOnce(null);
+    const res = await action({ request: strictReq() } as any);
+    expect((res.data as any).code).toBe("no_real_shoe_closet_item");
+    expect(mockFindMany).not.toHaveBeenCalled();
+  });
+
+  it("legacy max kind is unchanged: ignores any real accessory, uploads the synthetic cap, and honestly reports it (syntheticPlaceholderCount 1)", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockFindMany.mockResolvedValue([{ id: "hat-1", name: "Hat", subcategory: "hat", tryOnEligibility: "pending-assessment" }]);
+    const payload = (await action({ request: legacyReq() } as any)).data as any;
+    expect(payload).toMatchObject({
+      ok: true,
+      fixtureKind: "full-look-real-garments-max",
+      fixtureMode: "legacy-synthetic-cap",
+      itemCount: 5,
+      accessorySource: "synthetic-cap",
+      syntheticPlaceholderCount: 1,
+    });
+    expect(payload.accessoryClosetItemId).toBeUndefined();
     expect(mockUploadCloudinaryPrivate).toHaveBeenCalledTimes(1);
+    expect(mockFindMany).not.toHaveBeenCalled();
   });
 });

@@ -311,7 +311,20 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!sessionCustomerId) {
       return data({ ok: false, code: "forbidden" }, { status: 403 });
     }
-    return createFullLookRealGarmentsMaxFixture(sessionCustomerId);
+    return createFullLookRealGarmentsMaxFixture(sessionCustomerId, { requireRealAccessory: false });
+  }
+
+  if (parsedBody?.fixtureKind === "full-look-real-garments-max-all-real") {
+    // STRICT five-real-item acceptance path (2026-11-20). Same auth as the
+    // legacy max kind above. Fails CLOSED with no_real_accessory_closet_item
+    // when no real VTO-eligible accessory exists — never substitutes the
+    // synthetic cap. The legacy "full-look-real-garments-max" kind keeps its
+    // synthetic-cap behavior for compatibility with earlier evidence.
+    const sessionCustomerId = await resolveAuthorizedQaSessionCustomerId(request);
+    if (!sessionCustomerId) {
+      return data({ ok: false, code: "forbidden" }, { status: 403 });
+    }
+    return createFullLookRealGarmentsMaxFixture(sessionCustomerId, { requireRealAccessory: true });
   }
 
   if (parsedBody?.fixtureKind === "my-naia-model") {
@@ -1209,13 +1222,19 @@ async function findRealShoeClosetItem(customerId: string) {
   });
 }
 
-// 2026-11-20 — the ACCESSORY slot prefers a REAL VTO-allowed accessory closet
-// photo (hat/scarf/belt via the closet-real-accessory fixture, or any real
-// upload the customer made) over the synthetic cap. Unlike shoes, there is
-// no hard refusal when none exists: the synthetic cap remains as a
-// backward-compatible fallback, but the response ALWAYS states which source
-// was used (accessorySource) so a synthetic placeholder can never be
-// misreported as a real-accessory result.
+// 2026-11-20 — real VTO-allowed accessory closet photo (hat/scarf/belt via
+// the closet-real-accessory fixture, or any real upload the customer made).
+// Two modes, selected by the caller's fixtureKind:
+//  - "full-look-real-garments-max-all-real" (requireRealAccessory: true):
+//    FAILS CLOSED — no_real_accessory_closet_item, nothing uploaded or
+//    written — when none exists. This is the five-real-item acceptance path.
+//  - legacy "full-look-real-garments-max" (false): behavior unchanged from
+//    before this work — always the synthetic cap — kept for compatibility
+//    with already-recorded evidence. Its response states
+//    accessorySource:"synthetic-cap" and syntheticPlaceholderCount:1 so it can
+//    never be mistaken for an all-real result.
+// Items the pipeline marked tryOnEligibility "not-supported" are excluded
+// even if their subcategory is allowlisted.
 async function findRealAccessoryClosetItem(customerId: string) {
   const candidates = await prisma.closetItem.findMany({
     where: {
@@ -1225,12 +1244,17 @@ async function findRealAccessoryClosetItem(customerId: string) {
       imageFormat: { not: null },
     },
     orderBy: { createdAt: "desc" },
-    select: { id: true, name: true, subcategory: true },
+    select: { id: true, name: true, subcategory: true, tryOnEligibility: true },
   });
-  return (candidates ?? []).find((c: { subcategory: string | null }) => isVtoCategoryAllowed("ACCESSORIES", c.subcategory)) ?? null;
+  return (
+    (candidates ?? []).find(
+      (c: { subcategory: string | null; tryOnEligibility?: string | null }) =>
+        c.tryOnEligibility !== "not-supported" && isVtoCategoryAllowed("ACCESSORIES", c.subcategory),
+    ) ?? null
+  );
 }
 
-async function createFullLookRealGarmentsMaxFixture(customerId: string) {
+async function createFullLookRealGarmentsMaxFixture(customerId: string, opts: { requireRealAccessory: boolean }) {
   const realShoeClosetItem = await findRealShoeClosetItem(customerId);
   if (!realShoeClosetItem) {
     return data(
@@ -1244,7 +1268,18 @@ async function createFullLookRealGarmentsMaxFixture(customerId: string) {
     );
   }
 
-  const realAccessoryClosetItem = await findRealAccessoryClosetItem(customerId);
+  const realAccessoryClosetItem = opts.requireRealAccessory ? await findRealAccessoryClosetItem(customerId) : null;
+  if (opts.requireRealAccessory && !realAccessoryClosetItem) {
+    return data(
+      {
+        ok: false,
+        code: "no_real_accessory_closet_item",
+        message:
+          "No real VTO-eligible accessory (hat/scarf/belt) found in your closet. Run the closet-real-accessory fixture with a real photo first, then re-run this fixture. No synthetic placeholder is substituted.",
+      },
+      { status: 400 },
+    );
+  }
   const capPublicId = fullLookMaxFixtureCapPublicId(customerId);
 
   // Cap image uploaded BEFORE any DB write — see this function's own
@@ -1321,13 +1356,15 @@ async function createFullLookRealGarmentsMaxFixture(customerId: string) {
 
   return data({
     ok: true,
-    fixtureKind: "full-look-real-garments-max",
+    fixtureKind: opts.requireRealAccessory ? "full-look-real-garments-max-all-real" : "full-look-real-garments-max",
     sessionId,
     suggestionId,
     itemCount: items.length,
     shoeSource: "real-closet-item",
     shoeClosetItemId: realShoeClosetItem.id,
+    fixtureMode: opts.requireRealAccessory ? "all-real" : "legacy-synthetic-cap",
     accessorySource: realAccessoryClosetItem ? "real-closet-item" : "synthetic-cap",
+    syntheticPlaceholderCount: realAccessoryClosetItem ? 0 : 1,
     ...(realAccessoryClosetItem ? { accessoryClosetItemId: realAccessoryClosetItem.id } : {}),
   });
 }
