@@ -36,6 +36,7 @@ import {
   REAL_RESERVATION_KEY_PREFIX,
   type FullLookChainContext,
   type FullLookRealGarmentInput,
+  type IntermediateStepPreview,
 } from "./full-look-tryon-real.server.js";
 import { FULL_LOOK_MAX_GARMENTS, FULL_LOOK_FINAL_STEP_HANDLE_PREFIX } from "./full-look-handle-constants.js";
 import { buildTryOnResultUrl } from "./fashn-tryon-service.server.js";
@@ -339,7 +340,23 @@ export type OrchestratorStatus =
   // confuse this with PROCESSING: nothing is in flight at FASHN right now.
   // Only startFullLookOutfit (the POST action, consent-checked) can move
   // the chain past this.
-  | { status: "AWAITING_AUTHORIZATION"; stepIndex: number; totalSteps: number };
+  // intermediatePreviewUrls (2026-11-20) — ONLY ever populated for the one
+  // pre-final AWAITING_CONTINUE pause (see advanceAutomatically's
+  // AWAITING_CONTINUE case below): advanceFullLookChain's own
+  // buildIntermediatePreviews already computes a signed, short-lived,
+  // customer-scoped Cloudinary URL per completed-so-far step specifically
+  // for that pause ("these are exactly the images the tester needs to
+  // see" — full-look-tryon-real.server.ts), and this field stops the GET
+  // loader from discarding it. The ordinary STEP_COMPLETE_AWAITING_
+  // AUTHORIZATION pause (ctx.advanceAutomatically's other branch landing
+  // here) has no intermediates computed for it at all — this field is
+  // deliberately absent/undefined there, not a gap: that pause has no
+  // intermediate image of its own waiting to be seen that isn't already
+  // the customer's own displayed step result. Read-only/additive: never
+  // set when allowSubmitNext is true (the POST/start path always
+  // continues past this pause in the same request instead of surfacing
+  // it — see below).
+  | { status: "AWAITING_AUTHORIZATION"; stepIndex: number; totalSteps: number; intermediatePreviewUrls?: IntermediateStepPreview[] };
 
 const BUSY_REASONS = new Set(["ACTIVE_JOB", "COOLDOWN"]);
 
@@ -369,8 +386,19 @@ async function advanceAutomatically(
       if (!opts.allowSubmitNext) {
         // The pause itself is just information (nothing submitted to
         // reach it) — only continuing PAST it (continueToFinalStep, a new
-        // FASHN submission) needs authorization.
-        return { status: "AWAITING_AUTHORIZATION", stepIndex: ctx.garments.length - 2, totalSteps: ctx.garments.length };
+        // FASHN submission) needs authorization. result.intermediates is
+        // already computed by advanceFullLookChain specifically for this
+        // pause (see buildIntermediatePreviews) — surface it instead of
+        // discarding it, so a GET/poll hitting this exact state is finally
+        // the one place a tester (or a real customer's own client) can see
+        // the "one before final" step's own output image before it is
+        // deleted at chain completion (cleanupIntermediateStepResults).
+        return {
+          status: "AWAITING_AUTHORIZATION",
+          stepIndex: ctx.garments.length - 2,
+          totalSteps: ctx.garments.length,
+          intermediatePreviewUrls: result.intermediates,
+        };
       }
       const cont = await continueToFinalStep(ctx);
       if (!cont.ok) return { status: "ERROR", reason: cont.reason };

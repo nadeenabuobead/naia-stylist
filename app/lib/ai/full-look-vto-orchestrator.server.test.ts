@@ -516,7 +516,32 @@ describe("startFullLookOutfit / pollFullLookOutfit — auto-advance past the hum
       const result = await pollFullLookOutfit(BASE_CTX, BASE_FP);
 
       expect(continueToFinalStep).not.toHaveBeenCalled();
-      expect(result).toEqual({ status: "AWAITING_AUTHORIZATION", stepIndex: 1, totalSteps: 3 });
+      expect(result).toEqual({ status: "AWAITING_AUTHORIZATION", stepIndex: 1, totalSteps: 3, intermediatePreviewUrls: [] });
+    });
+
+    // 2026-11-20 — the real gap this fix closes: a five-garment chain's
+    // shoes step (index 3 of 5) was successfully predicted by FASHN at
+    // this exact pre-final pause, but there was previously no API surface
+    // by which anyone could see that step's own output image before
+    // cleanupIntermediateStepResults deletes it at chain completion.
+    // advanceFullLookChain's own buildIntermediatePreviews already computes
+    // these signed URLs for this exact pause — this test confirms the GET
+    // path now surfaces them instead of discarding them.
+    it("reaching the human-review pause via GET includes the server-computed intermediatePreviewUrls (one before final) — the exact images the investigation found no way to see", async () => {
+      const intermediates = [
+        { stepIndex: 0, label: "a", url: "https://signed/a.png" },
+        { stepIndex: 1, label: "b", url: "https://signed/b.png" },
+      ];
+      vi.mocked(advanceFullLookChain).mockResolvedValueOnce({ status: "AWAITING_CONTINUE", intermediates } as any);
+
+      const result = await pollFullLookOutfit(BASE_CTX, BASE_FP);
+
+      expect(result).toEqual({
+        status: "AWAITING_AUTHORIZATION",
+        stepIndex: 1,
+        totalSteps: 3,
+        intermediatePreviewUrls: intermediates,
+      });
     });
 
     it("an intermediate step completing via GET returns AWAITING_AUTHORIZATION — never silently submits the next garment", async () => {
@@ -526,6 +551,10 @@ describe("startFullLookOutfit / pollFullLookOutfit — auto-advance past the hum
 
       const result = await pollFullLookOutfit(BASE_CTX, BASE_FP);
 
+      // 2026-11-20 — confirms no accidental over-broadening: this ordinary
+      // per-step pause has no intermediates computed for it at all (unlike
+      // the pre-final AWAITING_CONTINUE pause above), so intermediatePreviewUrls
+      // must stay absent. toEqual (exact shape, no extra keys) enforces this.
       expect(result).toEqual({ status: "AWAITING_AUTHORIZATION", stepIndex: 0, totalSteps: 3 });
     });
 
