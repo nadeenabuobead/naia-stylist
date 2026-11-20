@@ -89,7 +89,7 @@ import {
 import { deleteCloudinaryAssetOrRecord } from "~/lib/cloudinary-deletion-record.server";
 import { moderateImageContent } from "~/lib/image-moderation.server";
 import { screenGarmentSuitability } from "~/lib/image-suitability.server";
-import { assessClosetEligibility } from "~/lib/ai/closet-eligibility";
+import { assessClosetEligibility, isVtoCategoryAllowed } from "~/lib/ai/closet-eligibility";
 import { analyzeClosetGarment } from "~/lib/ai/closet-garment-analysis.server";
 import { buildConsentStamp } from "~/lib/photo-consent.server";
 import { emitClosetItemAdded, recordJourneyEventAwaited } from "~/lib/ai/journey-events.server";
@@ -203,6 +203,17 @@ export async function action({ request }: ActionFunctionArgs) {
       }
       return deleteQaRealShoeClosetFixture(sessionCustomerId);
     }
+    if (parsedDeleteBody?.fixtureKind === "closet-real-accessory") {
+      const sessionCustomerId = await resolveAuthorizedQaSessionCustomerId(request);
+      if (!sessionCustomerId) {
+        return data({ ok: false, code: "forbidden" }, { status: 403 });
+      }
+      const accessoryType = parseQaAccessoryType(parsedDeleteBody?.accessoryType);
+      if (!accessoryType) {
+        return data({ ok: false, code: "invalid_accessory_type" }, { status: 400 });
+      }
+      return deleteQaRealAccessoryClosetFixture(sessionCustomerId, accessoryType);
+    }
     if (parsedDeleteBody?.fixtureKind === "my-naia-model") {
       // deleteMyNaiaModelFixture never reads the body itself — it only
       // needs the verified session — so passing the already-consumed
@@ -260,6 +271,24 @@ export async function action({ request }: ActionFunctionArgs) {
     return createQaRealShoeClosetFixture(sessionCustomerId, imageDataUrl);
   }
 
+  if (parsedBody?.fixtureKind === "closet-real-accessory") {
+    // Same real-session auth as closet-real-shoe — see
+    // createQaRealAccessoryClosetFixture's header comment.
+    const sessionCustomerId = await resolveAuthorizedQaSessionCustomerId(request);
+    if (!sessionCustomerId) {
+      return data({ ok: false, code: "forbidden" }, { status: 403 });
+    }
+    const accessoryType = parseQaAccessoryType(parsedBody?.accessoryType);
+    if (!accessoryType) {
+      return data({ ok: false, code: "invalid_accessory_type" }, { status: 400 });
+    }
+    const imageDataUrl = parsedBody?.imageDataUrl;
+    if (typeof imageDataUrl !== "string") {
+      return data({ ok: false, code: "image_data_url_required" }, { status: 400 });
+    }
+    return createQaRealAccessoryClosetFixture(sessionCustomerId, imageDataUrl, accessoryType);
+  }
+
   if (parsedBody?.fixtureKind === "full-look-real-garments") {
     // Same real-session auth as styleme-result-view — see
     // resolveAuthorizedQaSessionCustomerId's own comment.
@@ -282,7 +311,20 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!sessionCustomerId) {
       return data({ ok: false, code: "forbidden" }, { status: 403 });
     }
-    return createFullLookRealGarmentsMaxFixture(sessionCustomerId);
+    return createFullLookRealGarmentsMaxFixture(sessionCustomerId, { requireRealAccessory: false });
+  }
+
+  if (parsedBody?.fixtureKind === "full-look-real-garments-max-all-real") {
+    // STRICT five-real-item acceptance path (2026-11-20). Same auth as the
+    // legacy max kind above. Fails CLOSED with no_real_accessory_closet_item
+    // when no real VTO-eligible accessory exists — never substitutes the
+    // synthetic cap. The legacy "full-look-real-garments-max" kind keeps its
+    // synthetic-cap behavior for compatibility with earlier evidence.
+    const sessionCustomerId = await resolveAuthorizedQaSessionCustomerId(request);
+    if (!sessionCustomerId) {
+      return data({ ok: false, code: "forbidden" }, { status: 403 });
+    }
+    return createFullLookRealGarmentsMaxFixture(sessionCustomerId, { requireRealAccessory: true });
   }
 
   if (parsedBody?.fixtureKind === "my-naia-model") {
@@ -687,7 +729,7 @@ function detectImageFormatFromBytesQaCopy(header: Uint8Array): string | null {
   return null;
 }
 
-async function createQaRealShoeClosetFixture(customerId: string, imageDataUrl: string) {
+async function createQaRealClosetFixture(customerId: string, imageDataUrl: string, spec: QaRealClosetFixtureSpec) {
   if (typeof imageDataUrl !== "string" || !imageDataUrl.startsWith("data:image/")) {
     return data({ ok: false, code: "invalid_image_data_url" }, { status: 400 });
   }
@@ -695,13 +737,13 @@ async function createQaRealShoeClosetFixture(customerId: string, imageDataUrl: s
   // Idempotency check FIRST — before any upload — so a retry never touches
   // Cloudinary at all, let alone creates a second item.
   const existing = await prisma.closetItem.findFirst({
-    where: { customerId, category: "SHOES", name: QA_REAL_SHOE_FIXTURE_MARKER },
+    where: { customerId, category: spec.category, name: spec.marker },
     select: { id: true, imagePublicId: true, imageFormat: true },
   });
   if (existing && existing.imagePublicId && existing.imageFormat) {
     return data({
       ok: true,
-      fixtureKind: "closet-real-shoe",
+      fixtureKind: spec.fixtureKind,
       closetItemId: existing.id,
       imagePublicId: existing.imagePublicId,
       imageFormat: existing.imageFormat,
@@ -712,7 +754,7 @@ async function createQaRealShoeClosetFixture(customerId: string, imageDataUrl: s
   // Stable, customer-scoped publicId — naia-wardrobe/{customerId}/... is the
   // exact convention validatePublicIdOwnership (below) enforces for every
   // real customer upload.
-  const publicId = `naia-wardrobe/${customerId}/qa-fixture-real-shoe`;
+  const publicId = `naia-wardrobe/${customerId}/${spec.publicIdSuffix}`;
 
   const discardUpload = (uploadPublicId: string, context: string) =>
     deleteCloudinaryAssetOrRecord({ customerId, publicId: uploadPublicId, deliveryType: "private", context });
@@ -740,7 +782,7 @@ async function createQaRealShoeClosetFixture(customerId: string, imageDataUrl: s
   // declared format.
   const verify = await verifyCloudinaryAsset(publicId, "private");
   if (!verify.ok) {
-    await discardUpload(publicId, "qa-real-shoe-fixture-verify-failed");
+    await discardUpload(publicId, `${spec.contextPrefix}-verify-failed`);
     return data({ ok: false, code: "verify_failed", errorCode: verify.errorCode }, { status: 400 });
   }
   const serverFormat = verify.asset.format.toLowerCase();
@@ -749,25 +791,25 @@ async function createQaRealShoeClosetFixture(customerId: string, imageDataUrl: s
   const serverHeight = verify.asset.height;
 
   if (verify.asset.type !== "private") {
-    await discardUpload(publicId, "qa-real-shoe-fixture-wrong-type");
+    await discardUpload(publicId, `${spec.contextPrefix}-wrong-type`);
     return data({ ok: false, code: "wrong_delivery_type" }, { status: 400 });
   }
   if (verify.asset.resourceType !== "image") {
-    await discardUpload(publicId, "qa-real-shoe-fixture-not-image");
+    await discardUpload(publicId, `${spec.contextPrefix}-not-image`);
     return data({ ok: false, code: "not_an_image" }, { status: 400 });
   }
 
   // 4. Format allowlist — identical set to the real action.
   const ALLOWED_FORMATS = new Set(["jpg", "jpeg", "png", "webp", "heic", "heif"]);
   if (!ALLOWED_FORMATS.has(serverFormat)) {
-    await discardUpload(publicId, "qa-real-shoe-fixture-format-rejected");
+    await discardUpload(publicId, `${spec.contextPrefix}-format-rejected`);
     return data({ ok: false, code: "format_not_allowed", format: serverFormat }, { status: 400 });
   }
 
   // 5. Size cap — identical 5 MB limit.
   const SERVER_MAX_BYTES = 5 * 1024 * 1024;
   if (serverBytes > SERVER_MAX_BYTES) {
-    await discardUpload(publicId, "qa-real-shoe-fixture-too-large");
+    await discardUpload(publicId, `${spec.contextPrefix}-too-large`);
     return data({ ok: false, code: "image_too_large", bytes: serverBytes }, { status: 400 });
   }
 
@@ -778,7 +820,7 @@ async function createQaRealShoeClosetFixture(customerId: string, imageDataUrl: s
     (serverWidth !== null && (serverWidth < MIN_DIM || serverWidth > MAX_DIM)) ||
     (serverHeight !== null && (serverHeight < MIN_DIM || serverHeight > MAX_DIM))
   ) {
-    await discardUpload(publicId, "qa-real-shoe-fixture-dimensions-rejected");
+    await discardUpload(publicId, `${spec.contextPrefix}-dimensions-rejected`);
     return data({ ok: false, code: "dimensions_out_of_range", width: serverWidth, height: serverHeight }, { status: 400 });
   }
 
@@ -786,7 +828,7 @@ async function createQaRealShoeClosetFixture(customerId: string, imageDataUrl: s
   // own comment above.
   const cfg = getCloudinaryConfig();
   if (!cfg) {
-    await discardUpload(publicId, "qa-real-shoe-fixture-not-configured");
+    await discardUpload(publicId, `${spec.contextPrefix}-not-configured`);
     return data({ ok: false, code: "cloudinary_not_configured" }, { status: 502 });
   }
   const downloadUrl = buildPrivateDownloadUrl(cfg, publicId, serverFormat, "private");
@@ -796,12 +838,12 @@ async function createQaRealShoeClosetFixture(customerId: string, imageDataUrl: s
       const buf = await byteRes.arrayBuffer();
       const header = new Uint8Array(buf);
       if (!detectImageFormatFromBytesQaCopy(header)) {
-        await discardUpload(publicId, "qa-real-shoe-fixture-bad-signature");
+        await discardUpload(publicId, `${spec.contextPrefix}-bad-signature`);
         return data({ ok: false, code: "bad_file_signature" }, { status: 400 });
       }
     }
   } catch {
-    await discardUpload(publicId, "qa-real-shoe-fixture-verify-timeout");
+    await discardUpload(publicId, `${spec.contextPrefix}-verify-timeout`);
     return data({ ok: false, code: "verification_timed_out" }, { status: 400 });
   }
 
@@ -811,28 +853,29 @@ async function createQaRealShoeClosetFixture(customerId: string, imageDataUrl: s
   // moderation would have rejected.
   const moderation = await moderateImageContent(downloadUrl);
   if (moderation.status === "MODERATION_UNAVAILABLE") {
-    await discardUpload(publicId, "qa-real-shoe-fixture-moderation-unavailable");
+    await discardUpload(publicId, `${spec.contextPrefix}-moderation-unavailable`);
     return data({ ok: false, code: "moderation_unavailable" }, { status: 503 });
   }
   if (moderation.status === "SAFETY_REJECT") {
-    await discardUpload(publicId, "qa-real-shoe-fixture-safety-reject");
+    await discardUpload(publicId, `${spec.contextPrefix}-safety-reject`);
     return data({ ok: false, code: "safety_reject", reasonCode: moderation.reasonCode }, { status: 422 });
   }
 
   // 9. Layer 3 — garment suitability, declared category SHOES.
-  const suitability = await screenGarmentSuitability(downloadUrl, { declaredCategory: "SHOES" });
+  const suitability = await screenGarmentSuitability(downloadUrl, { declaredCategory: spec.category });
   if (suitability.status === "RETRY_IMAGE") {
-    await discardUpload(publicId, "qa-real-shoe-fixture-retry-image");
+    await discardUpload(publicId, `${spec.contextPrefix}-retry-image`);
     return data({ ok: false, code: "retry_image", subCode: suitability.subCode }, { status: 422 });
   }
   if (suitability.status === "NEEDS_CLARIFICATION" && suitability.subCode !== "category_mismatch") {
-    await discardUpload(publicId, "qa-real-shoe-fixture-needs-clarification");
+    await discardUpload(publicId, `${spec.contextPrefix}-needs-clarification`);
     return data({ ok: false, code: "needs_clarification", subCode: suitability.subCode }, { status: 422 });
   }
 
   // 10. Stage-A VTO eligibility — identical call.
   const stageA = assessClosetEligibility({
-    prismaCategory: "SHOES",
+    prismaCategory: spec.category,
+    subcategory: spec.subcategory,
     width: serverWidth ?? undefined,
     height: serverHeight ?? undefined,
     format: serverFormat,
@@ -847,8 +890,9 @@ async function createQaRealShoeClosetFixture(customerId: string, imageDataUrl: s
   const createdItem = await prisma.closetItem.create({
     data: {
       customerId,
-      name: QA_REAL_SHOE_FIXTURE_MARKER,
-      category: "SHOES",
+      name: spec.marker,
+      category: spec.category,
+      subcategory: spec.subcategory,
       imageUrl: null,
       imagePublicId: publicId,
       imageFormat: serverFormat,
@@ -886,7 +930,7 @@ async function createQaRealShoeClosetFixture(customerId: string, imageDataUrl: s
   await analyzeClosetGarment({
     closetItemId: createdItem.id,
     imagePublicId: publicId,
-    category: "SHOES",
+    category: spec.category,
     imageFormat: serverFormat,
     userPrimaryColor: null,
     userPattern: null,
@@ -894,14 +938,100 @@ async function createQaRealShoeClosetFixture(customerId: string, imageDataUrl: s
     userSeasons: [],
   }).catch(() => {});
 
+  // Garment analysis may rewrite subcategory (AI-derived) and re-evaluate
+  // eligibility. Report the FINAL state honestly rather than the declared
+  // one, so a QA run can see whether the item is genuinely VTO-eligible.
+  let finalSubcategory: string | null = spec.subcategory;
+  try {
+    const refreshed = await prisma.closetItem.findUnique({
+      where: { id: createdItem.id },
+      select: { subcategory: true },
+    });
+    if (refreshed) finalSubcategory = refreshed.subcategory ?? null;
+  } catch { /* report declared subcategory if re-read fails */ }
+
   return data({
     ok: true,
-    fixtureKind: "closet-real-shoe",
+    fixtureKind: spec.fixtureKind,
     closetItemId: createdItem.id,
     imagePublicId: publicId,
     imageFormat: serverFormat,
     reused: false,
+    ...(spec.accessoryType
+      ? {
+          accessoryType: spec.accessoryType,
+          subcategory: finalSubcategory,
+          vtoAllowed: isVtoCategoryAllowed(spec.category, finalSubcategory),
+        }
+      : {}),
   });
+}
+
+type QaRealClosetFixtureSpec = {
+  fixtureKind: "closet-real-shoe" | "closet-real-accessory";
+  marker: string;
+  category: "SHOES" | "BAGS" | "ACCESSORIES";
+  subcategory: string | null;
+  publicIdSuffix: string;
+  contextPrefix: string;
+  accessoryType?: QaAccessoryType;
+};
+
+const QA_REAL_SHOE_SPEC: QaRealClosetFixtureSpec = {
+  fixtureKind: "closet-real-shoe",
+  marker: QA_REAL_SHOE_FIXTURE_MARKER,
+  category: "SHOES",
+  subcategory: null,
+  publicIdSuffix: "qa-fixture-real-shoe",
+  contextPrefix: "qa-real-shoe-fixture",
+};
+
+async function createQaRealShoeClosetFixture(customerId: string, imageDataUrl: string) {
+  return createQaRealClosetFixture(customerId, imageDataUrl, QA_REAL_SHOE_SPEC);
+}
+
+// ── QA real-accessory Closet fixture (2026-11-20) ────────────────────────────
+//
+// Reusable counterpart of the real-shoe fixture for hats, scarves, handbags
+// and belts. Runs the IDENTICAL pipeline (createQaRealClosetFixture above:
+// ownership, private Cloudinary ingestion, Admin-API verification, format/
+// size/dimension/magic-byte checks, Layer 2 moderation, Layer 3 suitability,
+// Stage-A eligibility, garment analysis) — only the category/subcategory/
+// marker differ. Same single bypass: reserveClosetSlot's membership/capacity
+// gate. Never touches membershipStatus, billing, or entitlements.
+//
+// Category mapping follows closet-eligibility.ts's isVtoCategoryAllowed:
+// handbag → BAGS (always VTO-allowed); hat/scarf/belt → ACCESSORIES with the
+// allowlisted subcategory. Each type has its own marker + publicId so
+// idempotency is per (customer, type) and types never collide.
+type QaAccessoryType = "hat" | "scarf" | "handbag" | "belt";
+
+const QA_ACCESSORY_SPECS: Record<QaAccessoryType, QaRealClosetFixtureSpec> = {
+  hat: { fixtureKind: "closet-real-accessory", marker: "[QA FIXTURE] Real hat (customer-supplied photo)", category: "ACCESSORIES", subcategory: "hat", publicIdSuffix: "qa-fixture-real-hat", contextPrefix: "qa-real-hat-fixture", accessoryType: "hat" },
+  scarf: { fixtureKind: "closet-real-accessory", marker: "[QA FIXTURE] Real scarf (customer-supplied photo)", category: "ACCESSORIES", subcategory: "scarf", publicIdSuffix: "qa-fixture-real-scarf", contextPrefix: "qa-real-scarf-fixture", accessoryType: "scarf" },
+  handbag: { fixtureKind: "closet-real-accessory", marker: "[QA FIXTURE] Real handbag (customer-supplied photo)", category: "BAGS", subcategory: "handbag", publicIdSuffix: "qa-fixture-real-handbag", contextPrefix: "qa-real-handbag-fixture", accessoryType: "handbag" },
+  belt: { fixtureKind: "closet-real-accessory", marker: "[QA FIXTURE] Real belt (customer-supplied photo)", category: "ACCESSORIES", subcategory: "belt", publicIdSuffix: "qa-fixture-real-belt", contextPrefix: "qa-real-belt-fixture", accessoryType: "belt" },
+};
+
+function parseQaAccessoryType(value: unknown): QaAccessoryType | null {
+  return typeof value === "string" && Object.prototype.hasOwnProperty.call(QA_ACCESSORY_SPECS, value)
+    ? (value as QaAccessoryType)
+    : null;
+}
+
+async function createQaRealAccessoryClosetFixture(customerId: string, imageDataUrl: string, accessoryType: QaAccessoryType) {
+  return createQaRealClosetFixture(customerId, imageDataUrl, QA_ACCESSORY_SPECS[accessoryType]);
+}
+
+// DELETE body: { fixtureKind: "closet-real-accessory", accessoryType }.
+// Scoped by verified-session customerId + this type's marker + category —
+// never a generic closet delete. Idempotent (count 0 is still ok:true).
+async function deleteQaRealAccessoryClosetFixture(customerId: string, accessoryType: QaAccessoryType) {
+  const spec = QA_ACCESSORY_SPECS[accessoryType];
+  const deleted = await prisma.closetItem.deleteMany({
+    where: { customerId, category: spec.category, name: spec.marker },
+  });
+  return data({ ok: true, fixtureKind: "closet-real-accessory", accessoryType, deletedCount: deleted.count });
 }
 
 // DELETE /api/vto-qa-fixture, body: { fixtureKind: "closet-real-shoe" }
@@ -1092,7 +1222,39 @@ async function findRealShoeClosetItem(customerId: string) {
   });
 }
 
-async function createFullLookRealGarmentsMaxFixture(customerId: string) {
+// 2026-11-20 — real VTO-allowed accessory closet photo (hat/scarf/belt via
+// the closet-real-accessory fixture, or any real upload the customer made).
+// Two modes, selected by the caller's fixtureKind:
+//  - "full-look-real-garments-max-all-real" (requireRealAccessory: true):
+//    FAILS CLOSED — no_real_accessory_closet_item, nothing uploaded or
+//    written — when none exists. This is the five-real-item acceptance path.
+//  - legacy "full-look-real-garments-max" (false): behavior unchanged from
+//    before this work — always the synthetic cap — kept for compatibility
+//    with already-recorded evidence. Its response states
+//    accessorySource:"synthetic-cap" and syntheticPlaceholderCount:1 so it can
+//    never be mistaken for an all-real result.
+// Items the pipeline marked tryOnEligibility "not-supported" are excluded
+// even if their subcategory is allowlisted.
+async function findRealAccessoryClosetItem(customerId: string) {
+  const candidates = await prisma.closetItem.findMany({
+    where: {
+      customerId,
+      category: "ACCESSORIES",
+      imagePublicId: { not: null },
+      imageFormat: { not: null },
+    },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, name: true, subcategory: true, tryOnEligibility: true },
+  });
+  return (
+    (candidates ?? []).find(
+      (c: { subcategory: string | null; tryOnEligibility?: string | null }) =>
+        c.tryOnEligibility !== "not-supported" && isVtoCategoryAllowed("ACCESSORIES", c.subcategory),
+    ) ?? null
+  );
+}
+
+async function createFullLookRealGarmentsMaxFixture(customerId: string, opts: { requireRealAccessory: boolean }) {
   const realShoeClosetItem = await findRealShoeClosetItem(customerId);
   if (!realShoeClosetItem) {
     return data(
@@ -1106,27 +1268,41 @@ async function createFullLookRealGarmentsMaxFixture(customerId: string) {
     );
   }
 
+  const realAccessoryClosetItem = opts.requireRealAccessory ? await findRealAccessoryClosetItem(customerId) : null;
+  if (opts.requireRealAccessory && !realAccessoryClosetItem) {
+    return data(
+      {
+        ok: false,
+        code: "no_real_accessory_closet_item",
+        message:
+          "No real VTO-eligible accessory (hat/scarf/belt) found in your closet. Run the closet-real-accessory fixture with a real photo first, then re-run this fixture. No synthetic placeholder is substituted.",
+      },
+      { status: 400 },
+    );
+  }
   const capPublicId = fullLookMaxFixtureCapPublicId(customerId);
 
   // Cap image uploaded BEFORE any DB write — see this function's own
   // original header comment for why (same discipline as
   // createMyNaiaModelFixture below). The shoe item needs no upload of its
   // own now — it reuses the customer's own already-uploaded real photo.
-  const capUpload = await uploadCloudinaryPrivate(
-    capPublicId,
-    SYNTHETIC_FIXTURE_CAP_DATA_URL,
-    "upload",
-    undefined,
-    undefined,
-    undefined,
-    FULL_LOOK_MAX_FIXTURE_SYNTHETIC_FORMAT,
-  );
-  if (!capUpload.ok) {
+  const capUpload = realAccessoryClosetItem
+    ? null
+    : await uploadCloudinaryPrivate(
+        capPublicId,
+        SYNTHETIC_FIXTURE_CAP_DATA_URL,
+        "upload",
+        undefined,
+        undefined,
+        undefined,
+        FULL_LOOK_MAX_FIXTURE_SYNTHETIC_FORMAT,
+      );
+  if (capUpload && !capUpload.ok) {
     return data({ ok: false, code: "upload_failed", asset: "cap", errorCode: capUpload.errorCode }, { status: 502 });
   }
 
   const cloudinaryConfig = getCloudinaryConfig();
-  if (!cloudinaryConfig) {
+  if (capUpload && !cloudinaryConfig) {
     // The cap upload above already required a valid config to succeed at
     // all — this branch should be unreachable, but refuse explicitly
     // rather than build a malformed URL if it ever somehow is.
@@ -1141,11 +1317,17 @@ async function createFullLookRealGarmentsMaxFixture(customerId: string) {
       title: `[QA FIXTURE] Full-Look real shoe (max-boundary) — customer's own closet item${realShoeClosetItem.name ? `: ${realShoeClosetItem.name}` : ""}`,
       closetItemId: realShoeClosetItem.id,
     },
-    {
-      itemType: "ACCESSORY",
-      title: "[QA FIXTURE] Full-Look synthetic cap/accessory (max-boundary) — not a real customer item",
-      productImageUrl: buildPublicCloudinaryDeliveryUrl(cloudinaryConfig, capUpload.publicId, capUpload.version, capUpload.format),
-    },
+    realAccessoryClosetItem
+      ? {
+          itemType: "ACCESSORY" as OutfitItemType,
+          title: `[QA FIXTURE] Full-Look real accessory (max-boundary) — customer's own closet item${realAccessoryClosetItem.name ? `: ${realAccessoryClosetItem.name}` : ""}`,
+          closetItemId: realAccessoryClosetItem.id,
+        }
+      : {
+          itemType: "ACCESSORY" as OutfitItemType,
+          title: "[QA FIXTURE] Full-Look synthetic cap/accessory (max-boundary) — not a real customer item",
+          productImageUrl: buildPublicCloudinaryDeliveryUrl(cloudinaryConfig!, capUpload!.publicId, capUpload!.version, capUpload!.format),
+        },
   ];
 
   const { sessionId, suggestionId } = await prisma.$transaction(async (tx) => {
@@ -1174,12 +1356,16 @@ async function createFullLookRealGarmentsMaxFixture(customerId: string) {
 
   return data({
     ok: true,
-    fixtureKind: "full-look-real-garments-max",
+    fixtureKind: opts.requireRealAccessory ? "full-look-real-garments-max-all-real" : "full-look-real-garments-max",
     sessionId,
     suggestionId,
     itemCount: items.length,
     shoeSource: "real-closet-item",
     shoeClosetItemId: realShoeClosetItem.id,
+    fixtureMode: opts.requireRealAccessory ? "all-real" : "legacy-synthetic-cap",
+    accessorySource: realAccessoryClosetItem ? "real-closet-item" : "synthetic-cap",
+    syntheticPlaceholderCount: realAccessoryClosetItem ? 0 : 1,
+    ...(realAccessoryClosetItem ? { accessoryClosetItemId: realAccessoryClosetItem.id } : {}),
   });
 }
 
