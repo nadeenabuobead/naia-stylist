@@ -1,6 +1,7 @@
 import { Link, useLoaderData, type LinksFunction, type LoaderFunctionArgs } from "react-router";
 import { data, redirect } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
+import { withTransientRetry } from "~/lib/prisma-transient-retry.server";
 import prisma from "~/db.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
@@ -20,26 +21,32 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   if (!id) return redirect("/buyskip");
 
-  const analysis = await prisma.buyOrSkipAnalysis.findUnique({
-    where: { id },
-    select: {
-      id: true,
-      customerId: true,
-      createdAt: true,
-      imageUrl: true,
-      verdict: true,
-      reasoning: true,
-      confidence: true,
-      category: true,
-      colors: true,
-      forOccasion: true,
-      whatLike: true,
-      unsureAbout: true,
-      colorNote: true,
-      itemSize: true,
-      fullAnalysis: true,
-    },
-  });
+  // Plain, standalone, read-only lookup by unique key — never inside a
+  // $transaction, never followed by a write in this branch — safe to
+  // retry once on a transient connection-pool error (see
+  // prisma-transient-retry.server.ts's own caller contract).
+  const analysis = await withTransientRetry(() =>
+    prisma.buyOrSkipAnalysis.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        customerId: true,
+        createdAt: true,
+        imageUrl: true,
+        verdict: true,
+        reasoning: true,
+        confidence: true,
+        category: true,
+        colors: true,
+        forOccasion: true,
+        whatLike: true,
+        unsureAbout: true,
+        colorNote: true,
+        itemSize: true,
+        fullAnalysis: true,
+      },
+    }),
+  );
 
   // Not found or belongs to another customer — redirect rather than 404 to avoid leaking existence
   if (!analysis || analysis.customerId !== naiaCustomer.id) {

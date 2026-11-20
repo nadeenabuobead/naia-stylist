@@ -1,6 +1,7 @@
 import { Link, useLoaderData, type LinksFunction, type LoaderFunctionArgs } from "react-router";
 import { data } from "react-router";
 import { requireCurrentNaiaCustomer } from "~/lib/naia-session.server";
+import { withTransientRetry } from "~/lib/prisma-transient-retry.server";
 import prisma from "~/db.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
 import MyNaiaLayout from "~/components/my-naia/MyNaiaLayout";
@@ -16,20 +17,26 @@ export function meta() {
 export async function loader({ request }: LoaderFunctionArgs) {
   const naiaCustomer = await requireCurrentNaiaCustomer(request);
 
-  const analyses = await prisma.buyOrSkipAnalysis.findMany({
-    where: { customerId: naiaCustomer.id },
-    orderBy: { createdAt: "desc" },
-    take: 50,
-    select: {
-      id: true,
-      createdAt: true,
-      imageUrl: true,
-      verdict: true,
-      confidence: true,
-      category: true,
-      reasoning: true,
-    },
-  });
+  // Plain, standalone, read-only list query — never inside a
+  // $transaction, never followed by a write in this branch — safe to
+  // retry once on a transient connection-pool error (see
+  // prisma-transient-retry.server.ts's own caller contract).
+  const analyses = await withTransientRetry(() =>
+    prisma.buyOrSkipAnalysis.findMany({
+      where: { customerId: naiaCustomer.id },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+      select: {
+        id: true,
+        createdAt: true,
+        imageUrl: true,
+        verdict: true,
+        confidence: true,
+        category: true,
+        reasoning: true,
+      },
+    }),
+  );
 
   return data({
     decisions: analyses.map(a => ({

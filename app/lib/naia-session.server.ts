@@ -1,6 +1,21 @@
 import { createHash, randomBytes } from "crypto";
 import { redirect } from "react-router";
 import prisma from "~/db.server";
+import { DatabaseUnavailableError, withTransientRetry } from "./prisma-transient-retry.server";
+
+// ---------------------------------------------------------------------------
+// Transient database connectivity -- a live staging incident proved this
+// must NEVER be collapsed into "no session". The two are different states:
+// "not authenticated" (a real, valid DB answer: no row) must send the
+// customer to sign in; "couldn't even check" (the DB itself was
+// unreachable) must not -- a currently-signed-in customer must never be
+// bounced into fresh Shopify authentication just because the database had
+// a bad moment. DatabaseUnavailableError exists so the distinction survives
+// all the way up to wherever it's actually handled (the root ErrorBoundary,
+// not requireCurrentNaiaCustomer's login-redirect branch).
+// ---------------------------------------------------------------------------
+
+export { DatabaseUnavailableError };
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -68,19 +83,41 @@ export async function createNaiaSession(
 
 // ---------------------------------------------------------------------------
 // Resolve a session from an inbound request.
-// Returns the Customer (with onboardingProfile) or null.
+// Returns the Customer (with onboardingProfile), or null -- strictly for the
+// case where the database was successfully reached and genuinely has no
+// matching, unexpired row. A transient connectivity failure throws
+// DatabaseUnavailableError instead of returning null, so a caller can never
+// mistake "couldn't check" for "not signed in". Any other, unclassified
+// error is rethrown as-is -- only the known transient-connectivity class
+// gets this special treatment.
 // ---------------------------------------------------------------------------
 
-export async function resolveNaiaSession(request: Request) {
+export interface ResolveNaiaSessionDeps {
+  _sleep?: (ms: number) => Promise<void>;
+}
+
+function lookupNaiaSession(tokenHash: string) {
+  return prisma.naiaSession.findUnique({
+    where:   { tokenHash },
+    include: { customer: { include: { onboardingProfile: true } } },
+  });
+}
+
+export async function resolveNaiaSession(request: Request, deps: ResolveNaiaSessionDeps = {}) {
   const rawToken = extractRawToken(request);
   if (!rawToken) return null;
 
   const tokenHash = hashToken(rawToken);
 
-  const session = await prisma.naiaSession.findUnique({
-    where:   { tokenHash },
-    include: { customer: { include: { onboardingProfile: true } } },
-  });
+  // Explicit type argument, not inferred -- TypeScript's inference fails to
+  // resolve withTransientRetry's generic through this Prisma payload type
+  // (a nested `include`-derived conditional type) when left implicit,
+  // silently collapsing the whole call site's type to `{}` with no runtime
+  // symptom at all.
+  const session = await withTransientRetry<Awaited<ReturnType<typeof lookupNaiaSession>>>(
+    () => lookupNaiaSession(tokenHash),
+    deps,
+  );
 
   if (!session) return null;
 
@@ -113,12 +150,12 @@ export async function deleteNaiaSession(request: Request): Promise<void> {
 // Exported auth helpers for use in loaders / actions
 // ---------------------------------------------------------------------------
 
-export async function getCurrentNaiaCustomer(request: Request) {
-  return resolveNaiaSession(request);
+export async function getCurrentNaiaCustomer(request: Request, deps: ResolveNaiaSessionDeps = {}) {
+  return resolveNaiaSession(request, deps);
 }
 
-export async function requireCurrentNaiaCustomer(request: Request) {
-  const customer = await getCurrentNaiaCustomer(request);
+export async function requireCurrentNaiaCustomer(request: Request, deps: ResolveNaiaSessionDeps = {}) {
+  const customer = await getCurrentNaiaCustomer(request, deps);
   if (!customer) {
     const url      = new URL(request.url);
     const returnTo = encodeURIComponent(url.pathname);
