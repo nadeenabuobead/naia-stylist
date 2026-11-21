@@ -13,7 +13,7 @@
 
 ## 2. What does NOT exist yet (⚪)
 
-- **No alerting.** Nobody gets paged. The only way to learn about an incident today is: a customer reports it, someone is actively watching Vercel's dashboard/logs, or a future external monitor (see the separate `naia-ops-monitoring` repo workstream, tracked in memory as not yet activated) catches it.
+- **No paging; one narrow scheduled scan exists.** Nobody gets paged for a general incident. `naia-ops-monitoring` (separate repo) runs a 6-hourly scheduled scan for the Postgres 08P01 pattern specifically (confirmed operational 2026-11-21 — this is a correction from this document's earlier "not yet activated" framing) and writes a GitHub Actions run result, which still requires someone to go look; it does not page, email, or alert in real time, and it covers only that one failure signature, not incidents generally. Everything else still relies on: a customer reports it, or someone is actively watching Vercel's dashboard/logs.
 - **No on-call rotation, and no second authorized decision-maker.** §4 documents the real current structure (founder as sole handler) rather than inventing a rotation that doesn't exist — that structure itself is still a real gap, not a tool this document can build.
 - **No status page or customer-communication template.** If customers need to be told something is degraded, that copy and channel do not exist yet.
 - **No automated rollback trigger.** Rolling back is a manual decision + manual command — see `deployment-rollback.md`.
