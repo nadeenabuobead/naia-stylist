@@ -61,6 +61,92 @@ describe("validateReturnTo()", () => {
   it("rejects a value with no leading slash and falls back to MY nAia Overview", () => {
     assert.equal(validateReturnTo("evil.com/path"), "/my-naia");
   });
+
+  // 2026-11-21 — Lovable staging handoff reported a backslash-fronted value
+  // passing the old check while a real browser resolves it off-site, since
+  // WHATWG "special" schemes (http/https) treat a leading backslash the
+  // same as a forward slash. See validateReturnTo's own comment for the fix
+  // (resolve against a fixed local base, compare origins).
+  describe("backslash / protocol-relative bypass variants (2026-11-21 security fix)", () => {
+    it("rejects the exact reported payload (/\\example.com)", () => {
+      assert.equal(validateReturnTo("/\\example.com"), "/my-naia");
+    });
+
+    it("rejects a bare double-backslash host (\\\\evil.com)", () => {
+      assert.equal(validateReturnTo("\\\\evil.com"), "/my-naia");
+    });
+
+    it("rejects a slash-backslash-slash variant (/\\/evil.com)", () => {
+      assert.equal(validateReturnTo("/\\/evil.com"), "/my-naia");
+    });
+
+    it("rejects a backslash appearing after a valid-looking prefix (/my-naia\\@evil.com)", () => {
+      assert.equal(validateReturnTo("/my-naia\\@evil.com"), "/my-naia");
+    });
+
+    it("rejects a leading-tab bypass that some browsers strip before parsing (/\\t/evil.com)", () => {
+      assert.equal(validateReturnTo("/\t/evil.com"), "/my-naia");
+    });
+
+    it("rejects a leading-newline/CR variant the same way", () => {
+      assert.equal(validateReturnTo("/\n/evil.com"), "/my-naia");
+      assert.equal(validateReturnTo("/\r/evil.com"), "/my-naia");
+    });
+
+    it("rejects a null byte embedded in the path", () => {
+      assert.equal(validateReturnTo("/\u0000/evil.com"), "/my-naia");
+    });
+
+    it("does NOT reject a percent-encoded backslash/slash — the parser keeps encoding intact, it is not a bypass here", () => {
+      assert.equal(validateReturnTo("/%5cevil.com"), "/%5cevil.com");
+      assert.equal(validateReturnTo("/path%2fsegment"), "/path%2fsegment");
+    });
+
+    it("still passes through ordinary valid local paths unchanged, including nested routes", () => {
+      assert.equal(validateReturnTo("/my-naia"), "/my-naia");
+      assert.equal(validateReturnTo("/my-naia/closet"), "/my-naia/closet");
+      assert.equal(validateReturnTo("/trends/my-edits/spring-2026"), "/trends/my-edits/spring-2026");
+    });
+
+    // Every real redirect sink built from this value shares this one
+    // validated return — proven directly against it rather than mocking
+    // each sink's own surrounding machinery (Clerk's getAuth/clerkClient,
+    // the signed-cookie handoff verification, the DB-backed session
+    // lookup) just to reach code that would behave identically either way:
+    //   - auth.clerk-callback.tsx ("already-linked" case, the live,
+    //     primary Clerk sign-in sink): `return redirect(returnTo)` — bare,
+    //     no origin composition.
+    //   - auth.shopify.handoff.tsx (the live cross-domain preview-handoff
+    //     sink): `return redirect(returnTo, { headers })` — also bare.
+    //   - auth.shopify.callback.tsx (the pre-Clerk OIDC flow — per its own
+    //     SUPERSEDED banner, unreachable in normal operation since nothing
+    //     currently links into auth.shopify.login to start a fresh OAuth
+    //     attempt, but not deleted): builds `originHost ? \`https://
+    //     ${originHost}${returnTo}\` : returnTo` before redirecting — kept
+    //     covered here too, for defense in depth, since the file itself is
+    //     still live code, just currently unreachable.
+    it("every real sink stays safe for a malicious return_to, bare or composed with an originHost", () => {
+      const sanitized = validateReturnTo("/\\example.com");
+      assert.equal(sanitized, "/my-naia");
+
+      const bareSink = sanitized; // auth.clerk-callback.tsx / auth.shopify.handoff.tsx: `redirect(returnTo)`
+      assert.equal(bareSink, "/my-naia");
+
+      const withOriginHost = `https://naia-stylist-staging.vercel.app${sanitized}`;
+      const resolved = new URL(withOriginHost);
+      assert.equal(resolved.hostname, "naia-stylist-staging.vercel.app");
+      assert.equal(resolved.pathname, "/my-naia");
+    });
+
+    it("a VALID return_to composes safely the same way, landing on the intended path either with or without an originHost", () => {
+      const sanitized = validateReturnTo("/my-naia/closet");
+      assert.equal(sanitized, "/my-naia/closet");
+      const withOriginHost = `https://naia-stylist-staging.vercel.app${sanitized}`;
+      const resolved = new URL(withOriginHost);
+      assert.equal(resolved.hostname, "naia-stylist-staging.vercel.app");
+      assert.equal(resolved.pathname, "/my-naia/closet");
+    });
+  });
 });
 
 // ── auth/logout — destination must stay on nAia's own host ────────────────

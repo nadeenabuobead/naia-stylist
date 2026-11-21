@@ -131,6 +131,22 @@ describe("auth.clerk-callback loader", () => {
     expect(res.headers.get("Location")).toBe("/my-naia");
   });
 
+  it("2026-11-21 security fix — returning sign-in with a backslash-fronted return_to (/\\example.com) — the Lovable-reported bypass that passed the old check, falls back to /my-naia, never redirects off-site", async () => {
+    // WHATWG "special" schemes (http/https) normalize a leading backslash
+    // the same as a forward slash, so a real browser would have resolved
+    // this as //example.com (protocol-relative) even though the raw string
+    // never literally starts with "//" — see validateReturnTo's own
+    // comment in shopify-customer-oauth.server.ts for the full explanation
+    // and fix. This is this route's own end-to-end proof, on the real,
+    // live, primary sign-in sink — not just the shared helper in isolation.
+    getAuthMock.mockResolvedValue({ userId: "clerk_returning_3" });
+    getUserMock.mockResolvedValue({ primaryEmailAddress: { emailAddress: "returning3@example.com" }, emailAddresses: [] });
+    resolveMock.mockResolvedValue({ status: "already-linked", customerId: "cust-3" });
+
+    const res: any = await loader(args("?return_to=" + encodeURIComponent("/\\example.com")));
+    expect(res.headers.get("Location")).toBe("/my-naia");
+  });
+
   it("brand-new registration with a return_to present — still lands on /my-naia, not the inherited deep link", async () => {
     getAuthMock.mockResolvedValue({ userId: "clerk_new_3" });
     getUserMock.mockResolvedValue({ primaryEmailAddress: { emailAddress: "fresh2@example.com" }, emailAddresses: [] });
