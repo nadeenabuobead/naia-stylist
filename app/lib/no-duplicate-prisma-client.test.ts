@@ -84,9 +84,41 @@ describe("no-duplicate-prisma-client — app/lib/prisma.server.ts must stay dele
     );
   });
 
-  it("app/db.server.js (the one true client) still caps its connection_limit — unchanged by this fix", () => {
+  it("app/db.server.js (the one true client) still caps its connection_limit — unchanged by this fix", async () => {
+    // 2026-11-21 — prog-1's pgbouncer=true fix (see db.server.js's own
+    // header) refactored this from a single literal query-string onto the
+    // shared appendQueryParamIfMissing(url, param, value) helper, used
+    // twice now (connection_limit, then pgbouncer). The cap is still
+    // applied — just no longer as one contiguous "connection_limit=2"
+    // substring in the source for a regex to find. Asserting the helper's
+    // actual behavior, not its source text, so this survives the next
+    // param this file appends the same way too.
+    const { appendQueryParamIfMissing } = await import(join(REPO_ROOT, "app/db.server.js"));
+    assert.equal(typeof appendQueryParamIfMissing, "function", "db.server.js must still export appendQueryParamIfMissing for this guard to mean anything");
+    assert.equal(
+      appendQueryParamIfMissing("postgres://host/db", "connection_limit", "2"),
+      "postgres://host/db?connection_limit=2",
+      "must append connection_limit=2 when absent",
+    );
+    assert.equal(
+      appendQueryParamIfMissing("postgres://host/db?connection_limit=2", "connection_limit", "2"),
+      "postgres://host/db?connection_limit=2",
+      "must not duplicate the param when already present",
+    );
+  });
+
+  it("app/db.server.js's real connection URL actually carries both connection_limit=2 and pgbouncer=true — not just the helper function in isolation", () => {
     const src = readFileSync(join(REPO_ROOT, "app/db.server.js"), "utf8");
-    assert.match(src, /connection_limit=2/, "db.server.js must keep its connection_limit=2 cap — this fix must not touch it");
+    assert.match(
+      src,
+      /appendQueryParamIfMissing\(\s*rawUrl\s*,\s*["']connection_limit["']\s*,\s*["']2["']\s*\)/,
+      "makeClient() must apply the connection_limit=2 cap to the real connection URL via the helper",
+    );
+    assert.match(
+      src,
+      /appendQueryParamIfMissing\(\s*withConnectionLimit\s*,\s*["']pgbouncer["']\s*,\s*["']true["']\s*\)/,
+      "makeClient() must also apply pgbouncer=true, chained after the connection_limit cap",
+    );
   });
 });
 
