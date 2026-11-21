@@ -27,6 +27,7 @@ const {
   postOutfitReviewUpsert,
   savedLookCreate,
   resolveActionAnchor,
+  checkRateLimit,
 } = vi.hoisted(() => ({
   getCurrentNaiaCustomer: vi.fn(),
   stylingSessionFindUnique: vi.fn(),
@@ -35,9 +36,17 @@ const {
   postOutfitReviewUpsert: vi.fn(),
   savedLookCreate: vi.fn(),
   resolveActionAnchor: vi.fn(),
+  // H2 (2026-11-21) — shadow-mode velocity check on "regenerate". Default:
+  // always allowed, same as real shadow mode — individual tests below
+  // override this to prove the enforce-mode path (route code, not the
+  // shared module, already covered by api-rate-limit.test.ts) is wired
+  // correctly end to end.
+  checkRateLimit: vi.fn().mockResolvedValue({ allowed: true, overLimit: false, mode: "shadow", count: 1, limit: 20, retryAfterSeconds: 0 }),
 }));
 
 vi.mock("~/lib/naia-session.server", () => ({ getCurrentNaiaCustomer }));
+
+vi.mock("~/lib/api-rate-limit.server", () => ({ checkRateLimit }));
 
 // Was "~/lib/prisma.server" (a separate, uncapped PrismaClient) until the
 // 2026-11-17 fix retargeted result.tsx at the shared, connection-capped
@@ -158,6 +167,10 @@ function unwrap(result: any): { data: any; status: number | undefined } {
 beforeEach(() => {
   vi.clearAllMocks();
   resolveActionAnchor.mockResolvedValue({ ok: true, anchor: { kind: "closet", id: "anchor-1" } });
+  // vi.clearAllMocks() wipes the vi.hoisted default implementation too — reset
+  // it here so every test starts from "shadow mode, always allowed" unless it
+  // explicitly overrides this to exercise the enforce-mode 429 path.
+  checkRateLimit.mockResolvedValue({ allowed: true, overLimit: false, mode: "shadow", count: 1, limit: 20, retryAfterSeconds: 0 });
 });
 
 describe('"generate" — behavioral, real action(), mocked dependencies', () => {
@@ -228,6 +241,46 @@ describe('"regenerate" — behavioral, real action(), mocked dependencies', () =
     expect(res.status).toBeUndefined();
     expect(res.data.error).toBeNull();
     expect(outfitSuggestionCreate).toHaveBeenCalledTimes(1);
+  });
+
+  // H2 (2026-11-21) — regenerate has no StyleMe quota (by design — only the
+  // first "generate" on a session counts) and no cooldown of its own, so it
+  // had zero velocity protection of any kind before this shadow-mode check.
+  it("checkRateLimit is called with the authenticated customer's id, after ownership, before any paid generation call", async () => {
+    getCurrentNaiaCustomer.mockResolvedValueOnce(CUSTOMER_A);
+    stylingSessionFindUnique.mockResolvedValueOnce(SESSION_OWNED_BY_A);
+    outfitSuggestionCreate.mockResolvedValueOnce({ id: "suggestion-2", items: [] });
+
+    await action(makeRequest({ intent: "regenerate", sessionId: SESSION_OWNED_BY_A.id }));
+
+    expect(checkRateLimit).toHaveBeenCalledTimes(1);
+    expect(checkRateLimit).toHaveBeenCalledWith(
+      CUSTOMER_A.id,
+      expect.objectContaining({ routeKey: "styleme-regenerate", mode: "shadow" }),
+    );
+  });
+
+  it("shadow mode never blocks — overLimit true but allowed true still regenerates normally", async () => {
+    getCurrentNaiaCustomer.mockResolvedValueOnce(CUSTOMER_A);
+    stylingSessionFindUnique.mockResolvedValueOnce(SESSION_OWNED_BY_A);
+    outfitSuggestionCreate.mockResolvedValueOnce({ id: "suggestion-2", items: [] });
+    checkRateLimit.mockResolvedValueOnce({ allowed: true, overLimit: true, mode: "shadow", count: 99, limit: 20, retryAfterSeconds: 42 });
+
+    const res = unwrap(await action(makeRequest({ intent: "regenerate", sessionId: SESSION_OWNED_BY_A.id })));
+
+    expect(res.status).toBeUndefined();
+    expect(outfitSuggestionCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("the route-level wiring correctly rejects when checkRateLimit reports allowed:false (proves enforce mode would work if ever turned on)", async () => {
+    getCurrentNaiaCustomer.mockResolvedValueOnce(CUSTOMER_A);
+    stylingSessionFindUnique.mockResolvedValueOnce(SESSION_OWNED_BY_A);
+    checkRateLimit.mockResolvedValueOnce({ allowed: false, overLimit: true, mode: "enforce", count: 21, limit: 20, retryAfterSeconds: 42 });
+
+    const res = unwrap(await action(makeRequest({ intent: "regenerate", sessionId: SESSION_OWNED_BY_A.id })));
+
+    expect(res.status).toBe(429);
+    expect(outfitSuggestionCreate).not.toHaveBeenCalled();
   });
 });
 

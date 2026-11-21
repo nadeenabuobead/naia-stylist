@@ -56,6 +56,7 @@ import { loadSessionFeedback } from "~/lib/ai/feedback-persistence.server";
 import { loadOutcomeForSuggestion } from "~/lib/ai/outcome-persistence.server";
 import type { Prisma } from "@prisma/client";
 import { reserveStyleMeSlot } from "~/lib/plan/entitlement.server";
+import { checkRateLimit } from "~/lib/api-rate-limit.server";
 import { buildCustomerJourneyContext, buildEphemeralContextSignals } from "~/lib/ai/journey-context.server";
 import { emitSessionStarted, emitRecommendationServed, emitLookSaved, emitInSessionReviewSubmitted, recordJourneyEvent, recordJourneyEventAwaited } from "~/lib/ai/journey-events.server";
 import naiaStyles from "~/styles/naia-design-system.css?url";
@@ -790,6 +791,33 @@ export async function action({ request }: ActionFunctionArgs) {
       // customer's session. Now requires naiaCustomer to be present too.
       if (!naiaCustomer || session.customerId !== naiaCustomer.id) {
         return data({ error: "Not found" }, { status: 404 });
+      }
+
+      // 2026-11-21 (H2) — "New Look, Same Vibe" regenerations on an existing
+      // session are a real, paid computeStyleMeResult/Claude call, but unlike
+      // the first "generate" (gated by reserveStyleMeSlot) they are
+      // deliberately NOT counted against the monthly StyleMe quota —
+      // qualifyingStyleMeWhere counts qualifying root sessions, not individual
+      // regenerate calls, so a customer can browse several looks on one
+      // session for free, by design. Nothing else throttled this call at
+      // all: no quota, no cooldown. Shadow mode only, same discipline as
+      // every other limit in this module (see CLOUDINARY_SIGNATURE_RATE_LIMIT) —
+      // this observes real velocity before any customer is ever blocked;
+      // rl.allowed is always true in shadow mode.
+      const regenerateRl = await checkRateLimit(naiaCustomer.id, {
+        routeKey: "styleme-regenerate",
+        limit: 20,
+        windowSeconds: 60,
+        mode: "shadow",
+      });
+      if (!regenerateRl.allowed) {
+        // data(), not the shared rateLimitResponse() helper — every other
+        // response in this action uses react-router's data() wrapper, and a
+        // raw Response here would be the one inconsistent shape in the file.
+        return data(
+          { error: "Too many requests. Please try again shortly." },
+          { status: 429, headers: { "Retry-After": String(regenerateRl.retryAfterSeconds) } },
+        );
       }
 
       const sessionSource = styleSourceToSessionSource(session.styleFrom);
