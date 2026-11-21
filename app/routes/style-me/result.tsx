@@ -832,7 +832,19 @@ export async function action({ request }: ActionFunctionArgs) {
         windowSeconds: 60,
         mode: "enforce",
       });
-      if (!regenerateRl.allowed) {
+      // 2026-11-21 — checkRateLimit fails OPEN on its own DB error (see its
+      // own header comment: "a rate-limiter outage must never take down a
+      // feature that the separate, already-atomic entitlement system still
+      // independently caps"). That assumption is true for this module's
+      // other callers (admin.login's own lockout table, etc.) but FALSE
+      // here: regenerate has no quota, no cooldown, nothing else capping it
+      // (see above) — it IS the entitlement system for this call. Failing
+      // open here would mean a transient rate-limit-store outage turns back
+      // into exactly the unlimited-paid-call exposure this fix exists to
+      // close. Caller-specific override, not a change to the shared
+      // module's behavior (its other callers keep failing open correctly):
+      // treat failedOpen as not-allowed for this one call site only.
+      if (!regenerateRl.allowed || regenerateRl.failedOpen) {
         // A distinct `rateLimited` field, never `error` — same convention as
         // sameCombination/companionRecoveryBlocked above: the error-state
         // guard further down treats a truthy `error` as a full-page failure
@@ -841,9 +853,13 @@ export async function action({ request }: ActionFunctionArgs) {
         // data(), not the shared rateLimitResponse() helper — every other
         // response in this action uses react-router's data() wrapper, and a
         // raw Response here would be the one inconsistent shape in the file.
+        // retryAfterSeconds is 0 on a failedOpen result (the module has no
+        // real window to report) — floor it so the customer still gets a
+        // short, sane wait instead of "retry immediately" during an outage.
+        const retryAfterSeconds = Math.max(regenerateRl.retryAfterSeconds, 5);
         return data(
-          { rateLimited: true, retryAfterSeconds: regenerateRl.retryAfterSeconds },
-          { status: 429, headers: { "Retry-After": String(regenerateRl.retryAfterSeconds) } },
+          { rateLimited: true, retryAfterSeconds },
+          { status: 429, headers: { "Retry-After": String(retryAfterSeconds) } },
         );
       }
 

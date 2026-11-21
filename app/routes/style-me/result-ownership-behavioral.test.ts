@@ -372,6 +372,29 @@ describe('"regenerate" — behavioral, real action(), mocked dependencies', () =
     expect(checkRateLimit).not.toHaveBeenCalledWith(CUSTOMER_A.id, expect.anything());
   });
 
+  // 2026-11-21 — checkRateLimit's own real fail-open behavior (its internal
+  // DB call throws, it catches that internally, and resolves with
+  // allowed:true, failedOpen:true — never a rejected promise). Regenerate
+  // has no other cap, so this route overrides that to fail CLOSED: a
+  // rate-limit-store outage must not become unlimited paid Claude calls.
+  it("checkRateLimit's real failedOpen:true result (rate-limit store unavailable) is treated as NOT allowed — fails closed, not unlimited calls", async () => {
+    getCurrentNaiaCustomer.mockResolvedValueOnce(CUSTOMER_A);
+    stylingSessionFindUnique.mockResolvedValueOnce(SESSION_OWNED_BY_A);
+    checkRateLimit.mockResolvedValueOnce({ allowed: true, overLimit: false, mode: "enforce", count: 0, limit: 20, retryAfterSeconds: 0, failedOpen: true });
+
+    const res = unwrapFull(await action(makeRequest({ intent: "regenerate", sessionId: SESSION_OWNED_BY_A.id })));
+
+    expect(res.status).toBe(429);
+    expect(res.data.rateLimited).toBe(true);
+    // The module itself reports 0 (no real window during an outage) — the
+    // route floors this to a sane minimum so the customer isn't told to
+    // retry instantly into the same outage.
+    expect(res.data.retryAfterSeconds).toBeGreaterThanOrEqual(5);
+    expect(res.headers["Retry-After"]).toBe(String(res.data.retryAfterSeconds));
+    expect(computeStyleMeResult).not.toHaveBeenCalled();
+    expect(outfitSuggestionCreate).not.toHaveBeenCalled();
+  });
+
   it("checkRateLimit rejecting (DB/infra error surfaced as a thrown promise, not the module's own fail-open) is caught by the route's existing outer try/catch, not left unhandled", async () => {
     getCurrentNaiaCustomer.mockResolvedValueOnce(CUSTOMER_A);
     stylingSessionFindUnique.mockResolvedValueOnce(SESSION_OWNED_BY_A);
