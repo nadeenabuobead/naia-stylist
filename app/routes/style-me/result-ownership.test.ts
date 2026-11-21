@@ -70,3 +70,32 @@ test('"review": client-supplied sessionId is checked before the PostOutfitReview
   const upsertIdx = block.indexOf("postOutfitReview.upsert");
   assert.ok(guardIdx !== -1 && upsertIdx !== -1 && guardIdx < upsertIdx, "ownership guard must run before the upsert");
 });
+
+// H2 (2026-11-21) — the action-level behavioral tests (result-ownership-behavioral.test.ts)
+// already prove a rate-limited regenerate response never sets `.error`. This test closes
+// the other half: that the COMPONENT actually renders a retry message for it, and that the
+// message sits in the same render path as sameCombination/companionRecoveryBlocked (i.e.
+// outside the `if (error || !suggestion)` early-return that would otherwise discard the
+// customer's current, still-good suggestion and show the full error-page takeover).
+test('"regenerate" rate-limit hit: component renders a retry message, not the error-page takeover', () => {
+  assert.ok(
+    /generateFetcher\.data\?\.rateLimited\s*&&/.test(source),
+    "component must render something conditioned on generateFetcher.data?.rateLimited",
+  );
+  // Same guard that gates companionRecoveryBlocked's sibling message — confirms this
+  // isn't a second, parallel mechanism that could diverge from the established pattern.
+  const rateLimitedBlockIdx = source.indexOf("generateFetcher.data?.rateLimited &&");
+  const companionBlockIdx = source.indexOf("generateFetcher.data?.companionRecoveryBlocked &&");
+  const errorGuardIdx = source.indexOf("if (error || !suggestion)");
+  assert.ok(rateLimitedBlockIdx !== -1 && companionBlockIdx !== -1 && errorGuardIdx !== -1);
+  // Both sibling-message blocks render AFTER (i.e. at a higher line position than) the
+  // early-return error guard in source order, meaning the error guard — which only fires
+  // on a truthy `.error` field — cannot be what's gating this message; a rateLimited
+  // response never sets `.error` (proven at the action level), so it reaches this render
+  // path with the prior suggestion still intact, same as companionRecoveryBlocked.
+  assert.ok(errorGuardIdx < companionBlockIdx, "error guard must run before the companionRecoveryBlocked render");
+  assert.ok(errorGuardIdx < rateLimitedBlockIdx, "error guard must run before the rateLimited render — same convention");
+  // A real, non-empty retry message string is present near the rateLimited check.
+  const nearby = source.slice(rateLimitedBlockIdx, rateLimitedBlockIdx + 300);
+  assert.ok(/wait a few seconds|try New Look again/i.test(nearby), "a human-readable retry message must accompany rateLimited");
+});
