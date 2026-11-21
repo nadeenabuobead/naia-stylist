@@ -37,6 +37,8 @@ const mockClosetItemFindFirst = vi.fn();
 const mockClosetItemFindUnique = vi.fn();
 const mockBosCreate = vi.fn();
 const mockBosDeleteMany = vi.fn();
+const mockRateLimitCounterUpsert = vi.fn();
+const mockRateLimitCounterDeleteMany = vi.fn();
 
 // 2026-11-17: this previously mocked "~/lib/prisma.server", a module that
 // does not exist in this codebase — the real route imports its default
@@ -85,6 +87,10 @@ vi.mock("~/db.server", () => ({
     adminAuditLog: {
       create: (...args: unknown[]) => mockAdminAuditLogCreate(...args),
       findFirst: (...args: unknown[]) => mockAdminAuditLogFindFirst(...args),
+    },
+    apiRateLimitCounter: {
+      upsert: (...args: unknown[]) => mockRateLimitCounterUpsert(...args),
+      deleteMany: (...args: unknown[]) => mockRateLimitCounterDeleteMany(...args),
     },
     // $transaction has two call shapes in the real code: a callback (the
     // POST action, creation) and a plain array of promises (the DELETE
@@ -703,6 +709,107 @@ describe("api.vto-qa-fixture action — fixtureKind: styleme-result-view (real-s
     expect(mockItemDeleteMany).toHaveBeenCalledWith({ where: { suggestionId: "suggestion-1" } });
     expect(mockSuggestionDelete).toHaveBeenCalledWith({ where: { id: "suggestion-1" } });
     expect(mockSessionDelete).toHaveBeenCalledWith({ where: { id: "session-1" } });
+  });
+});
+
+describe("api.vto-qa-fixture action — fixtureKind: styleme-regenerate-rate-limit-seed (real-session auth, no secret)", () => {
+  function seedReq(overrides: Record<string, unknown> = {}, headers: Record<string, string> = {}) {
+    // Same real-session-only auth as styleme-result-view — deliberately no
+    // x-vto-qa-fixture-secret header.
+    return req({ fixtureKind: "styleme-regenerate-rate-limit-seed", ...overrides }, headers);
+  }
+
+  it("rejects with the same generic 403 when there is no real session attached", async () => {
+    setAuthorizedEnv();
+    const res = await action({ request: seedReq() } as any);
+    expect(res.init?.status).toBe(403);
+    expect(mockRateLimitCounterUpsert).not.toHaveBeenCalled();
+  });
+
+  it("rejects with the same generic 403 when genuinely signed in, but as a DIFFERENT customer than QA_OVERRIDE_CUSTOMER_ID", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: "some-other-real-customer" });
+    const res = await action({ request: seedReq() } as any);
+    expect(res.init?.status).toBe(403);
+    expect(mockRateLimitCounterUpsert).not.toHaveBeenCalled();
+  });
+
+  it("rejects even a genuinely-authenticated QA-account session when VERCEL_ENV is production — unreachable there regardless of deployed code", async () => {
+    setAuthorizedEnv();
+    process.env.VERCEL_ENV = "production";
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    const res = await action({ request: seedReq() } as any);
+    expect(res.init?.status).toBe(403);
+    expect(mockRateLimitCounterUpsert).not.toHaveBeenCalled();
+  });
+
+  it("ignores any customerId the body supplies — identity comes only from the verified session", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockRateLimitCounterUpsert.mockResolvedValueOnce({});
+    const res = await action({ request: seedReq({ customerId: "attacker-supplied-id" }) } as any);
+    expect(res.init?.status).toBeUndefined();
+    expect(mockRateLimitCounterUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          customerId_routeKey_windowStart: expect.objectContaining({ customerId: QA_ID, routeKey: "styleme-regenerate" }),
+        }),
+      }),
+    );
+  });
+
+  it("seeds a count strictly over the real 20/60s limit even when the body asks for less", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockRateLimitCounterUpsert.mockResolvedValueOnce({});
+    const res = await action({ request: seedReq({ count: 1 }) } as any);
+    const payload = res.data as any;
+    expect(payload.ok).toBe(true);
+    expect(payload.count).toBeGreaterThan(20);
+    expect(mockRateLimitCounterUpsert.mock.calls[0][0].create.count).toBeGreaterThan(20);
+    expect(mockRateLimitCounterUpsert.mock.calls[0][0].update.count).toBeGreaterThan(20);
+  });
+
+  it("caps an absurdly large requested count rather than writing an unbounded value", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockRateLimitCounterUpsert.mockResolvedValueOnce({});
+    const res = await action({ request: seedReq({ count: 999_999_999 }) } as any);
+    const payload = res.data as any;
+    expect(payload.count).toBeLessThanOrEqual(1000);
+  });
+
+  it("writes to the SAME windowStart bucket checkRateLimit's own real logic would compute right now", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockRateLimitCounterUpsert.mockResolvedValueOnce({});
+    const before = Math.floor(Date.now() / 60_000) * 60_000;
+    const res = await action({ request: seedReq() } as any);
+    const after = Math.floor(Date.now() / 60_000) * 60_000;
+    const payload = res.data as any;
+    const writtenMs = new Date(payload.windowStart).getTime();
+    expect(writtenMs).toBeGreaterThanOrEqual(before);
+    expect(writtenMs).toBeLessThanOrEqual(after);
+  });
+
+  it("DELETE cleanup removes rows scoped to this customer AND this routeKey only — never another route's counter", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockRateLimitCounterDeleteMany.mockResolvedValueOnce({ count: 1 });
+    const res = await action({ request: deleteReq({ fixtureKind: "styleme-regenerate-rate-limit-seed" }) } as any);
+    const payload = res.data as any;
+    expect(payload.ok).toBe(true);
+    expect(payload.deletedCount).toBe(1);
+    expect(mockRateLimitCounterDeleteMany).toHaveBeenCalledWith({
+      where: { customerId: QA_ID, routeKey: "styleme-regenerate" },
+    });
+  });
+
+  it("DELETE cleanup also requires the real-session gate — not a secret, not an arbitrary customerId", async () => {
+    setAuthorizedEnv();
+    const res = await action({ request: deleteReq({ fixtureKind: "styleme-regenerate-rate-limit-seed" }) } as any);
+    expect(res.init?.status).toBe(403);
+    expect(mockRateLimitCounterDeleteMany).not.toHaveBeenCalled();
   });
 });
 
