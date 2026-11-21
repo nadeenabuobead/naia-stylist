@@ -509,6 +509,47 @@ async function createStyleMeResultViewFixture(customerId: string) {
   });
 }
 
+// GET /api/vto-qa-fixture?mode=my-fixture-suggestions — see the loader's own
+// comment above for the real-session auth and why this exists. Read-only:
+// lists every OutfitSuggestion with moodDescription === null (the existing
+// fixture marker) owned by the one Clerk-session-resolved customerId, most
+// recent first. Capped at 100 — this is a QA diagnostic for one synthetic
+// identity's own handful of fixture rows, never a general admin listing.
+async function listOwnFixtureSuggestions(customerId: string) {
+  const suggestions = await prisma.outfitSuggestion.findMany({
+    where: { moodDescription: null, session: { customerId } },
+    select: {
+      id: true,
+      sessionId: true,
+      createdAt: true,
+      items: { select: { shopifyProductId: true } },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+  });
+
+  const fixtures = suggestions.map((suggestion) => {
+    const productIds = suggestion.items.map((item) => item.shopifyProductId);
+    let kind: string = "unknown";
+    if (productIds.length > 0 && productIds.every((id) => id === FULL_LOOK_FIXTURE_SHOPIFY_PRODUCT_ID)) {
+      kind = "full-look-real-garments";
+    } else if (productIds.length > 0 && productIds.every((id) => id === FULL_LOOK_MAX_FIXTURE_SHOPIFY_PRODUCT_ID)) {
+      kind = "full-look-real-garments-max";
+    } else if (productIds.length > 0 && productIds.every((id) => id === "qa-fixture-not-a-real-product-id")) {
+      kind = "styleme-result-view";
+    }
+    return {
+      suggestionId: suggestion.id,
+      sessionId: suggestion.sessionId,
+      createdAt: suggestion.createdAt,
+      kind,
+      itemCount: productIds.length,
+    };
+  });
+
+  return data({ ok: true, fixtures });
+}
+
 // ── H2 staging verification — StyleMe regenerate rate-limit counter seed (2026-11-21) ──
 //
 // POST /api/vto-qa-fixture, body: { fixtureKind: "styleme-regenerate-rate-limit-seed",
@@ -2349,6 +2390,40 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const customerId = url.searchParams.get("customerId") ?? undefined;
   const suggestionId = url.searchParams.get("suggestionId");
   const mode = url.searchParams.get("mode");
+
+  // mode === "my-fixture-suggestions" (2026-11-21) — read-only, deterministic
+  // lookup of the CALLING QA session's own fixture-created OutfitSuggestion
+  // rows. Checked before isAuthorized's secret-header gate below: this mode
+  // uses the same real-Clerk-session auth as styleme-result-view/
+  // styleme-regenerate-rate-limit-seed above (Five-Persona QA — and any
+  // other Clerk-session-only QA caller — has no VTO_QA_FIXTURE_SECRET to
+  // present), never the secret header, never a caller-supplied customerId.
+  //
+  // WHY THIS EXISTS: every styleme-result-view call creates a new
+  // StylingSession/OutfitSuggestion but, until now, handed the caller its
+  // sessionId/suggestionId exactly once, in that one response — if a caller
+  // loses that value (whether by a genuine bug, a crashed script, or a
+  // client-side tool redacting it on the way back) there was no way to
+  // re-discover it short of a direct database query, which left orphaned
+  // fixture rows with no deterministic cleanup path. This closes that gap
+  // without inventing a new identifier scheme: it just makes the EXISTING
+  // fixture marker (moodDescription === null, already the sole thing
+  // deleteFixtureSuggestion below keys its own authorization on) queryable
+  // for the first time, scoped to exactly the one customerId the verified
+  // session resolves to — never broader, never by title/string matching.
+  //
+  // Classifies each row by its items' shopifyProductId marker (the same
+  // markers deleteFixtureSuggestion already uses to distinguish fixture
+  // kinds with real dependent jobs from the rest) purely so a caller juggling
+  // more than one fixture kind for the same identity can tell them apart
+  // before deleting — this endpoint itself never deletes anything.
+  if (mode === "my-fixture-suggestions") {
+    const sessionCustomerId = await resolveAuthorizedQaSessionCustomerId(request);
+    if (!sessionCustomerId) {
+      return data({ ok: false, code: "forbidden" }, { status: 403 });
+    }
+    return listOwnFixtureSuggestions(sessionCustomerId);
+  }
 
   if (!isAuthorized(request, customerId)) {
     return data({ ok: false, code: "forbidden" }, { status: 403 });

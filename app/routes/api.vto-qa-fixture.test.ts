@@ -16,6 +16,7 @@ const mockSessionCreate = vi.fn();
 const mockSuggestionCreate = vi.fn();
 const mockItemCreate = vi.fn();
 const mockSuggestionFindUnique = vi.fn();
+const mockSuggestionFindMany = vi.fn();
 const mockVtoJobCount = vi.fn();
 const mockVtoJobFindMany = vi.fn();
 const mockVtoJobDeleteMany = vi.fn();
@@ -66,6 +67,7 @@ vi.mock("~/db.server", () => ({
     },
     outfitSuggestion: {
       findUnique: (...args: unknown[]) => mockSuggestionFindUnique(...args),
+      findMany: (...args: unknown[]) => mockSuggestionFindMany(...args),
       count: (...args: unknown[]) => mockSuggestionCount(...args),
       delete: (...args: unknown[]) => mockSuggestionDelete(...args),
     },
@@ -327,6 +329,7 @@ beforeEach(() => {
   mockItemCreate.mockResolvedValue({ id: "outfititem-1" });
   mockVtoJobCount.mockResolvedValue(0);
   mockVtoJobFindMany.mockResolvedValue([]);
+  mockSuggestionFindMany.mockResolvedValue([]);
   mockVtoJobDeleteMany.mockResolvedValue({ count: 0 });
   mockNaiaModelCreate.mockResolvedValue({ id: "naiamodel-1", customerId: QA_ID, bodyPublicId: `naia-wardrobe/${QA_ID}/qa-fixture-synthetic-body` });
   mockNaiaModelUpdate.mockResolvedValue({ id: "naiamodel-1", customerId: QA_ID, bodyPublicId: `naia-wardrobe/${QA_ID}/qa-fixture-synthetic-body` });
@@ -1978,6 +1981,109 @@ describe("api.vto-qa-fixture loader (GET) — read-only verification, no duplica
     expect(json.ok).toBe(true);
     expect(json.fullLookEligible).toBe(false);
     expect(json.eligibleGarmentCount).toBe(0);
+  });
+});
+
+// ── mode=my-fixture-suggestions — deterministic fixture lookup (2026-11-21) ──
+// Real-session auth, same as styleme-result-view/styleme-regenerate-rate-
+// limit-seed — no secret header, no caller-supplied customerId. Exists so a
+// QA session that creates a styleme-result-view fixture and loses track of
+// its sessionId/suggestionId (the exact gap an H2 staging run hit live) has
+// a safe, read-only, deterministic way to find and then clean up its own
+// fixture rows, instead of either a broad title/string match or a direct
+// database query.
+describe("api.vto-qa-fixture loader — mode=my-fixture-suggestions (real-session auth, read-only)", () => {
+  function listReq(headers: Record<string, string> = {}) {
+    const url = new URL("https://example.test/api/vto-qa-fixture");
+    url.searchParams.set("mode", "my-fixture-suggestions");
+    return { url: url.toString(), headers: new Headers(headers) } as unknown as Request;
+  }
+
+  it("rejects with the same generic 403 when there is no real session attached", async () => {
+    setAuthorizedEnv();
+    const res = await loader({ request: listReq() } as any);
+    expect(res.init?.status).toBe(403);
+    expect(mockSuggestionFindMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects with the same generic 403 when genuinely signed in, but as a DIFFERENT customer than QA_OVERRIDE_CUSTOMER_ID", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: "some-other-real-customer" });
+    const res = await loader({ request: listReq() } as any);
+    expect(res.init?.status).toBe(403);
+    expect(mockSuggestionFindMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects even a genuinely-authenticated QA-account session when VERCEL_ENV is production — unreachable there regardless of deployed code", async () => {
+    setAuthorizedEnv();
+    process.env.VERCEL_ENV = "production";
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    const res = await loader({ request: listReq() } as any);
+    expect(res.init?.status).toBe(403);
+    expect(mockSuggestionFindMany).not.toHaveBeenCalled();
+  });
+
+  it("never takes a customerId from the request — scopes the query to the verified session's own id", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockSuggestionFindMany.mockResolvedValue([]);
+    await loader({ request: listReq() } as any);
+    expect(mockSuggestionFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ moodDescription: null, session: { customerId: QA_ID } }),
+      }),
+    );
+  });
+
+  it("classifies a styleme-result-view fixture row by its items' marker", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockSuggestionFindMany.mockResolvedValue([
+      {
+        id: "sugg-orphan",
+        sessionId: "session-orphan",
+        createdAt: new Date("2026-11-21T09:00:00Z"),
+        items: [
+          { shopifyProductId: "qa-fixture-not-a-real-product-id" },
+          { shopifyProductId: "qa-fixture-not-a-real-product-id" },
+          { shopifyProductId: "qa-fixture-not-a-real-product-id" },
+        ],
+      },
+    ]);
+
+    const res = await loader({ request: listReq() } as any);
+    const json = res.data as any;
+
+    expect(json.ok).toBe(true);
+    expect(json.fixtures).toEqual([
+      { suggestionId: "sugg-orphan", sessionId: "session-orphan", createdAt: expect.any(Date), kind: "styleme-result-view", itemCount: 3 },
+    ]);
+  });
+
+  it("classifies full-look-real-garments and full-look-real-garments-max fixture rows distinctly, never confusing them with styleme-result-view", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    mockSuggestionFindMany.mockResolvedValue([
+      { id: "sugg-a", sessionId: "session-a", createdAt: new Date(), items: [{ shopifyProductId: "qa-fixture-full-look-real-garment" }] },
+      { id: "sugg-b", sessionId: "session-b", createdAt: new Date(), items: [{ shopifyProductId: "qa-fixture-full-look-real-garment-max" }] },
+    ]);
+
+    const res = await loader({ request: listReq() } as any);
+    const json = res.data as any;
+
+    expect(json.fixtures.find((f: any) => f.suggestionId === "sugg-a").kind).toBe("full-look-real-garments");
+    expect(json.fixtures.find((f: any) => f.suggestionId === "sugg-b").kind).toBe("full-look-real-garments-max");
+  });
+
+  it("never returns another customer's suggestions — the query itself is scoped, not filtered client-side", async () => {
+    setAuthorizedEnv();
+    mockGetCurrentNaiaCustomer.mockResolvedValue({ id: QA_ID });
+    // The mock's job here is just to prove the ROUTE passed the right
+    // customerId into the where clause (asserted above) — this test proves
+    // the loader doesn't ALSO do some separate, broader fetch.
+    mockSuggestionFindMany.mockResolvedValue([]);
+    await loader({ request: listReq() } as any);
+    expect(mockSuggestionFindMany).toHaveBeenCalledTimes(1);
   });
 });
 
