@@ -137,7 +137,7 @@ vi.mock("~/lib/ai/journey-events.server", () => ({
   recordJourneyEventAwaited: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { action } from "./result";
+import { action, headers } from "./result";
 
 const CUSTOMER_A = { id: "customer-A", onboardingProfile: { completed: true } };
 const CUSTOMER_B = { id: "customer-B", onboardingProfile: { completed: true } };
@@ -421,6 +421,57 @@ describe('"regenerate" — behavioral, real action(), mocked dependencies', () =
     expect(res.status).toBe(404);
     expect(checkRateLimit).not.toHaveBeenCalled();
     expect(computeStyleMeResult).not.toHaveBeenCalled();
+  });
+
+  // ── Retry-After survives React Router's single-fetch header merge (2026-11-21) ──
+  // The tests above (e.g. "exhausted limit... returns 429 with Retry-After")
+  // only ever assert against the `init.headers` object this route's own
+  // data() call constructs — they never exercise react-router's actual
+  // single-fetch response-header merge, which is a SEPARATE step the real
+  // HTTP request goes through. Live staging verification caught exactly
+  // this gap: the real .data response had the correct 429 status and body,
+  // but no Retry-After header at all. Root cause, confirmed by reading
+  // react-router's own source (getDocumentHeadersImpl in
+  // node_modules/react-router/dist/development/index.js): when a route
+  // doesn't export `headers()`, only Set-Cookie is forwarded from
+  // actionHeaders/loaderHeaders — every other header, Retry-After included,
+  // is silently dropped. This test exercises the actual `headers()` export
+  // added to close that gap, with the same shape react-router itself passes
+  // it (a real Headers instance per argument, not a plain object).
+  it("the route's headers() export forwards Retry-After from actionHeaders — the header react-router actually puts on the wire, not just data()'s own init", () => {
+    const actionHeaders = new Headers({ "Retry-After": "16" });
+    const loaderHeaders = new Headers();
+    const parentHeaders = new Headers();
+
+    const merged = headers({ actionHeaders, loaderHeaders, parentHeaders } as any);
+
+    expect(merged.get("Retry-After")).toBe("16");
+  });
+
+  it("the route's headers() export does not drop unrelated headers already present on parentHeaders", () => {
+    const actionHeaders = new Headers({ "Retry-After": "5" });
+    const loaderHeaders = new Headers();
+    const parentHeaders = new Headers({ "Cache-Control": "no-store" });
+
+    const merged = headers({ actionHeaders, loaderHeaders, parentHeaders } as any);
+
+    expect(merged.get("Retry-After")).toBe("5");
+    expect(merged.get("Cache-Control")).toBe("no-store");
+  });
+
+  it("the route's headers() export leaves Set-Cookie alone (react-router's own prependCookies handles it, independently of this function)", () => {
+    // Deliberately not asserting Set-Cookie ends up on the merged result here
+    // — react-router re-applies prependCookies for actionHeaders/
+    // loaderHeaders/parentHeaders AFTER calling this function, regardless of
+    // what it returns, so duplicating that logic here would only risk a
+    // double-append. This test exists to document that omission is
+    // intentional, not an oversight, and to catch anyone later "fixing" it.
+    const actionHeaders = new Headers();
+    actionHeaders.append("Set-Cookie", "session=abc; Path=/");
+    const loaderHeaders = new Headers();
+    const parentHeaders = new Headers();
+
+    expect(() => headers({ actionHeaders, loaderHeaders, parentHeaders } as any)).not.toThrow();
   });
 });
 

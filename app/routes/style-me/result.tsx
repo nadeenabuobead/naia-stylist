@@ -1,6 +1,6 @@
 // app/routes/style-me/result.tsx
 import { Form, Link, useLoaderData, useFetcher } from "react-router";
-import { data, redirect, type LoaderFunctionArgs, type ActionFunctionArgs, type ShouldRevalidateFunctionArgs, type LinksFunction } from "react-router";
+import { data, redirect, type LoaderFunctionArgs, type ActionFunctionArgs, type ShouldRevalidateFunctionArgs, type LinksFunction, type HeadersArgs } from "react-router";
 import { useState, useEffect, useRef } from "react";
 import { createFullLookDriver, type FullLookDriver } from "./full-look-client-driver";
 import { getCurrentNaiaCustomer } from "~/lib/naia-session.server";
@@ -67,6 +67,33 @@ export const links: LinksFunction = () => [
 
 export function meta() {
   return [{ title: "Your Styling | nAia" }];
+}
+
+// H2 (2026-11-21) — React Router's single-fetch `.data` protocol only
+// forwards Set-Cookie from a route's action/loader headers by default
+// (getDocumentHeadersImpl's no-headers-export branch calls prependCookies,
+// nothing else: node_modules/react-router/dist/development/index.js).
+// Every other header set via data(payload, { headers }) — including this
+// route's 429 Retry-After — is silently dropped from the actual HTTP
+// response unless the route exports its own `headers()`, the documented
+// way to opt back in: https://reactrouter.com/en/main/route/headers.
+// Confirmed by direct observation on staging: the response carried the
+// correct status (429) and body (rateLimited/retryAfterSeconds), but no
+// Retry-After header at all. Set-Cookie itself is unaffected by this —
+// react-router re-applies prependCookies for actionHeaders/loaderHeaders/
+// parentHeaders after this function runs regardless of what it returns,
+// so cookies are deliberately left alone here rather than copied twice.
+export function headers({ actionHeaders, loaderHeaders, parentHeaders }: HeadersArgs) {
+  const merged = new Headers(parentHeaders);
+  for (const [key, value] of loaderHeaders) {
+    if (key.toLowerCase() === "set-cookie") continue;
+    merged.set(key, value);
+  }
+  for (const [key, value] of actionHeaders) {
+    if (key.toLowerCase() === "set-cookie") continue;
+    merged.set(key, value);
+  }
+  return merged;
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
