@@ -307,12 +307,45 @@ export async function fetchCustomerProfile(accessToken: string): Promise<Shopify
 // linked from customer-facing navigation).
 const DEFAULT_RETURN_TO = "/my-naia";
 
+// 2026-11-21 security fix: the previous check (`startsWith("/") &&
+// !startsWith("//")`) let a backslash-fronted value like `/\example.com`
+// through — WHATWG-URL "special" schemes (http/https) normalize a leading
+// backslash the same as a forward slash, so a real browser resolves that
+// value as `//example.com`, a protocol-relative redirect to an external
+// host, while the string itself never literally starts with "//". The same
+// normalization affects any backslash anywhere early in the value (e.g.
+// `\\evil.com`, `/\/evil.com`), and separately, some browsers strip leading
+// tab/newline/CR characters before parsing, which can reconstruct a bypass
+// the same way.
+//
+// Fix: resolve the candidate against a fixed, local-only, unresolvable base
+// using Node's URL class — the same WHATWG URL parser (including its
+// backslash normalization for special schemes) a real browser uses — and
+// reject anything whose resolved origin differs from that base. This is
+// authoritative rather than another pattern to extend piecemeal: it decides
+// exactly the way a browser's own navigation would, so it cannot be fooled
+// by a bypass variant not yet thought of. Percent-encoded separators
+// (`%5c`, `%2f`) are NOT a bypass here — the URL parser keeps a path's
+// percent-encoding intact rather than decoding it back into a literal
+// separator before normalizing.
+const RETURN_TO_PARSE_BASE = "http://return-to.invalid";
+
 export function validateReturnTo(raw: string | null): string {
   if (!raw) return DEFAULT_RETURN_TO;
-  if (raw.startsWith("/") && !raw.startsWith("//") && raw.length <= 200) {
-    return raw;
+  if (raw.length > 200) return DEFAULT_RETURN_TO;
+  if (!raw.startsWith("/") || raw.startsWith("//")) return DEFAULT_RETURN_TO;
+  // Belt-and-suspenders ahead of the authoritative parse below: reject the
+  // backslash itself and any control character outright, rather than
+  // relying solely on the origin comparison to catch every variant.
+  if (/[\x00-\x1f\\]/.test(raw)) return DEFAULT_RETURN_TO;
+  try {
+    const base = new URL(RETURN_TO_PARSE_BASE);
+    const resolved = new URL(raw, base);
+    if (resolved.origin !== base.origin) return DEFAULT_RETURN_TO;
+  } catch {
+    return DEFAULT_RETURN_TO;
   }
-  return DEFAULT_RETURN_TO;
+  return raw;
 }
 
 // ---------------------------------------------------------------------------
