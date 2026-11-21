@@ -800,22 +800,49 @@ export async function action({ request }: ActionFunctionArgs) {
       // qualifyingStyleMeWhere counts qualifying root sessions, not individual
       // regenerate calls, so a customer can browse several looks on one
       // session for free, by design. Nothing else throttled this call at
-      // all: no quota, no cooldown. Shadow mode only, same discipline as
-      // every other limit in this module (see CLOUDINARY_SIGNATURE_RATE_LIMIT) —
-      // this observes real velocity before any customer is ever blocked;
-      // rl.allowed is always true in shadow mode.
+      // all: no quota, no cooldown — before this fix, this path allowed a
+      // genuinely unlimited number of paid Claude calls per customer.
+      //
+      // ENFORCE, not shadow (2026-11-21, upgraded same day): shadow mode
+      // alone recorded the abuse pattern without stopping it, which leaves
+      // the actual cost exposure open. threshold justification, grounded in
+      // this feature's own real UI/behavior, not a guess:
+      //   - the "New Look" button is `disabled={generateFetcher.state !==
+      //     "idle"}` (see the button below) — a real browser can submit at
+      //     most once per full round trip, and computeStyleMeResult is a
+      //     Claude call, never near-instant. Even an aggressive customer
+      //     clicking the instant the button re-enables cannot realistically
+      //     exceed a handful of regenerations per minute.
+      //   - 20 requests / 60s is therefore comfortably above anything a real
+      //     customer's browser can produce (so this can't false-positive
+      //     block legitimate "New Look" browsing) while still turning
+      //     "unlimited" into a hard, specific ceiling: at most 20 paid Claude
+      //     calls per minute per customer, down from none at all.
+      //   - deliberately a per-minute velocity cap, not a monthly quota —
+      //     regenerate staying free-within-a-session is the existing,
+      //     intentional product behavior (see qualifyingStyleMeWhere above);
+      //     this fix closes the velocity gap without changing that.
+      //   - no real production traffic has been observed yet (this check
+      //     was shadow-only until today) — this number comes from the
+      //     feature's own UI/latency constraints, not measured usage. Revisit
+      //     once real enforce-mode logs exist.
       const regenerateRl = await checkRateLimit(naiaCustomer.id, {
         routeKey: "styleme-regenerate",
         limit: 20,
         windowSeconds: 60,
-        mode: "shadow",
+        mode: "enforce",
       });
       if (!regenerateRl.allowed) {
+        // A distinct `rateLimited` field, never `error` — same convention as
+        // sameCombination/companionRecoveryBlocked above: the error-state
+        // guard further down treats a truthy `error` as a full-page failure
+        // takeover that would blow away the customer's current, perfectly
+        // good suggestion over what is really just "wait a few seconds."
         // data(), not the shared rateLimitResponse() helper — every other
         // response in this action uses react-router's data() wrapper, and a
         // raw Response here would be the one inconsistent shape in the file.
         return data(
-          { error: "Too many requests. Please try again shortly." },
+          { rateLimited: true, retryAfterSeconds: regenerateRl.retryAfterSeconds },
           { status: 429, headers: { "Retry-After": String(regenerateRl.retryAfterSeconds) } },
         );
       }
@@ -1404,7 +1431,7 @@ interface StyleMeGenerationLoaderData {
 
 export default function StyleMeResult() {
   const loaderData = useLoaderData<typeof loader>();
-  const generateFetcher = useFetcher<{ suggestion?: any; error?: string; sameCombination?: boolean; companionRecoveryBlocked?: boolean; companionRecoveryMessage?: string }>();
+  const generateFetcher = useFetcher<{ suggestion?: any; error?: string; sameCombination?: boolean; companionRecoveryBlocked?: boolean; companionRecoveryMessage?: string; rateLimited?: boolean; retryAfterSeconds?: number }>();
   const saveFetcher = useFetcher<{ saved?: boolean; error?: string; code?: string; pending?: boolean; next?: string; cleared?: boolean; alreadySaved?: boolean }>();
   const [msgIndex, setMsgIndex] = useState(0);
   const [isSaved, setIsSaved] = useState(false);
@@ -2359,6 +2386,15 @@ export default function StyleMeResult() {
             <p className="sm-same-combination-msg" role="alert">
               {generateFetcher.data.companionRecoveryMessage}{" "}
               <Link to="/closet/intelligence">Go to Wardrobe Intelligence →</Link>
+            </p>
+          )}
+          {/* H2 (2026-11-21) — regenerate rate limit hit. Same sibling-message
+              convention as sameCombination/companionRecoveryBlocked above: the
+              current look stays on screen, nothing is lost, the customer is
+              just told to slow down for a moment. */}
+          {generateFetcher.data?.rateLimited && (
+            <p className="sm-same-combination-msg" role="alert">
+              You&rsquo;re regenerating looks a little fast — please wait a few seconds and try New Look again.
             </p>
           )}
           {suggestionMeta?.outcome !== "closet-led" && (

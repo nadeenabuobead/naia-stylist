@@ -28,6 +28,7 @@ const {
   savedLookCreate,
   resolveActionAnchor,
   checkRateLimit,
+  computeStyleMeResult,
 } = vi.hoisted(() => ({
   getCurrentNaiaCustomer: vi.fn(),
   stylingSessionFindUnique: vi.fn(),
@@ -36,12 +37,16 @@ const {
   postOutfitReviewUpsert: vi.fn(),
   savedLookCreate: vi.fn(),
   resolveActionAnchor: vi.fn(),
-  // H2 (2026-11-21) — shadow-mode velocity check on "regenerate". Default:
-  // always allowed, same as real shadow mode — individual tests below
-  // override this to prove the enforce-mode path (route code, not the
-  // shared module, already covered by api-rate-limit.test.ts) is wired
-  // correctly end to end.
-  checkRateLimit: vi.fn().mockResolvedValue({ allowed: true, overLimit: false, mode: "shadow", count: 1, limit: 20, retryAfterSeconds: 0 }),
+  // H2 (2026-11-21, upgraded to enforce same day) — velocity check on
+  // "regenerate". Default: within limit — individual tests below override
+  // this to exercise the over-limit 429 path. The underlying atomicity/
+  // fail-open/windowing behavior of checkRateLimit itself is already
+  // covered by api-rate-limit.test.ts and api-rate-limit-sql.test.ts; these
+  // tests cover only this ROUTE's own wiring (called with the right
+  // customer/routeKey, rejects correctly, never calls the paid generation
+  // path when rejected).
+  checkRateLimit: vi.fn().mockResolvedValue({ allowed: true, overLimit: false, mode: "enforce", count: 1, limit: 20, retryAfterSeconds: 0 }),
+  computeStyleMeResult: vi.fn().mockResolvedValue({}),
 }));
 
 vi.mock("~/lib/naia-session.server", () => ({ getCurrentNaiaCustomer }));
@@ -88,7 +93,7 @@ vi.mock("~/lib/pending-save.server", () => ({
 vi.mock("~/lib/ai/styleme-result.server", () => ({
   buildEngineInput: vi.fn().mockReturnValue({}),
   buildProfileSignals: vi.fn().mockReturnValue({}),
-  computeStyleMeResult: vi.fn().mockResolvedValue({}),
+  computeStyleMeResult,
   // Added after the companion-recovery feature landed — pure decision logic,
   // database-free; default to "nothing to recover, proceed unblocked".
   resolveRegenCompanionIds: vi.fn().mockReturnValue({ blocked: false, companionIds: [] }),
@@ -164,13 +169,24 @@ function unwrap(result: any): { data: any; status: number | undefined } {
   return { data: result?.data, status: result?.init?.status };
 }
 
+// Same shape as unwrap, plus headers — for the H2 429 tests that need to
+// assert on Retry-After. `any`-typed on purpose: action()'s real return
+// type is a big union (data() wrappers for every intent branch plus a
+// plain Response for redirects), and narrowing it per-call-site here would
+// just be noise — the real route code stays fully typed, only this test
+// helper widens.
+function unwrapFull(result: any): { data: any; status: number | undefined; headers: Record<string, string> } {
+  return { data: result?.data, status: result?.init?.status, headers: result?.init?.headers ?? {} };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   resolveActionAnchor.mockResolvedValue({ ok: true, anchor: { kind: "closet", id: "anchor-1" } });
   // vi.clearAllMocks() wipes the vi.hoisted default implementation too — reset
-  // it here so every test starts from "shadow mode, always allowed" unless it
-  // explicitly overrides this to exercise the enforce-mode 429 path.
-  checkRateLimit.mockResolvedValue({ allowed: true, overLimit: false, mode: "shadow", count: 1, limit: 20, retryAfterSeconds: 0 });
+  // it here so every test starts from "within limit, allowed" unless it
+  // explicitly overrides this to exercise the over-limit 429 path.
+  checkRateLimit.mockResolvedValue({ allowed: true, overLimit: false, mode: "enforce", count: 1, limit: 20, retryAfterSeconds: 0 });
+  computeStyleMeResult.mockResolvedValue({});
 });
 
 describe('"generate" — behavioral, real action(), mocked dependencies', () => {
@@ -243,10 +259,12 @@ describe('"regenerate" — behavioral, real action(), mocked dependencies', () =
     expect(outfitSuggestionCreate).toHaveBeenCalledTimes(1);
   });
 
-  // H2 (2026-11-21) — regenerate has no StyleMe quota (by design — only the
-  // first "generate" on a session counts) and no cooldown of its own, so it
-  // had zero velocity protection of any kind before this shadow-mode check.
-  it("checkRateLimit is called with the authenticated customer's id, after ownership, before any paid generation call", async () => {
+  // H2 (2026-11-21, upgraded to ENFORCE same day) — regenerate has no
+  // StyleMe quota (by design — only the first "generate" on a session
+  // counts) and no cooldown of its own, so it had zero velocity protection
+  // of any kind before this check. mode: "enforce" in the route's own config
+  // (not just shadow observation) actually blocks once the limit is hit.
+  it("checkRateLimit is called with the authenticated customer's id and enforce mode, after ownership, before any paid generation call", async () => {
     getCurrentNaiaCustomer.mockResolvedValueOnce(CUSTOMER_A);
     stylingSessionFindUnique.mockResolvedValueOnce(SESSION_OWNED_BY_A);
     outfitSuggestionCreate.mockResolvedValueOnce({ id: "suggestion-2", items: [] });
@@ -256,31 +274,130 @@ describe('"regenerate" — behavioral, real action(), mocked dependencies', () =
     expect(checkRateLimit).toHaveBeenCalledTimes(1);
     expect(checkRateLimit).toHaveBeenCalledWith(
       CUSTOMER_A.id,
-      expect.objectContaining({ routeKey: "styleme-regenerate", mode: "shadow" }),
+      expect.objectContaining({ routeKey: "styleme-regenerate", mode: "enforce", limit: 20, windowSeconds: 60 }),
     );
+    // Called strictly before the paid call — if the ordering ever regressed
+    // (rate limit checked after generation), this would still pass, which
+    // is exactly why the dedicated "exhausted limit" tests below assert
+    // computeStyleMeResult was never invoked at all in that case.
+    expect(computeStyleMeResult).toHaveBeenCalledTimes(1);
   });
 
-  it("shadow mode never blocks — overLimit true but allowed true still regenerates normally", async () => {
+  it("within the limit: regenerates normally, exactly one paid call, current suggestion replaced", async () => {
     getCurrentNaiaCustomer.mockResolvedValueOnce(CUSTOMER_A);
     stylingSessionFindUnique.mockResolvedValueOnce(SESSION_OWNED_BY_A);
     outfitSuggestionCreate.mockResolvedValueOnce({ id: "suggestion-2", items: [] });
-    checkRateLimit.mockResolvedValueOnce({ allowed: true, overLimit: true, mode: "shadow", count: 99, limit: 20, retryAfterSeconds: 42 });
+    checkRateLimit.mockResolvedValueOnce({ allowed: true, overLimit: false, mode: "enforce", count: 5, limit: 20, retryAfterSeconds: 0 });
 
     const res = unwrap(await action(makeRequest({ intent: "regenerate", sessionId: SESSION_OWNED_BY_A.id })));
 
     expect(res.status).toBeUndefined();
+    expect(res.data.rateLimited).toBeUndefined();
+    expect(computeStyleMeResult).toHaveBeenCalledTimes(1);
     expect(outfitSuggestionCreate).toHaveBeenCalledTimes(1);
   });
 
-  it("the route-level wiring correctly rejects when checkRateLimit reports allowed:false (proves enforce mode would work if ever turned on)", async () => {
+  // ── Exhausted limit: safe 429, zero paid calls, appropriate retry messaging ──
+  it("exhausted limit (allowed:false) returns 429 with Retry-After BEFORE computeStyleMeResult runs — zero paid calls", async () => {
     getCurrentNaiaCustomer.mockResolvedValueOnce(CUSTOMER_A);
     stylingSessionFindUnique.mockResolvedValueOnce(SESSION_OWNED_BY_A);
     checkRateLimit.mockResolvedValueOnce({ allowed: false, overLimit: true, mode: "enforce", count: 21, limit: 20, retryAfterSeconds: 42 });
 
-    const res = unwrap(await action(makeRequest({ intent: "regenerate", sessionId: SESSION_OWNED_BY_A.id })));
+    const res = unwrapFull(await action(makeRequest({ intent: "regenerate", sessionId: SESSION_OWNED_BY_A.id })));
 
     expect(res.status).toBe(429);
+    expect(res.headers["Retry-After"]).toBe("42");
+    // Distinct field, never `error` — the error-state guard in the
+    // component would otherwise blow away the customer's current,
+    // perfectly good suggestion over a transient rate-limit hit.
+    expect(res.data.rateLimited).toBe(true);
+    expect(res.data.retryAfterSeconds).toBe(42);
+    expect(res.data.error).toBeUndefined();
+    // The actual guarantee this fix exists for: no paid call, no DB write,
+    // when the limit is exhausted.
+    expect(computeStyleMeResult).not.toHaveBeenCalled();
     expect(outfitSuggestionCreate).not.toHaveBeenCalled();
+  });
+
+  it("repeat requests: once exhausted, every subsequent regenerate call in the same burst is rejected the same way", async () => {
+    getCurrentNaiaCustomer.mockResolvedValue(CUSTOMER_A);
+    stylingSessionFindUnique.mockResolvedValue(SESSION_OWNED_BY_A);
+    // Simulates checkRateLimit's own real behavior once a customer is over
+    // the window's limit: every call in the same window keeps reporting
+    // not-allowed, not just the one that tipped it over.
+    checkRateLimit.mockResolvedValue({ allowed: false, overLimit: true, mode: "enforce", count: 25, limit: 20, retryAfterSeconds: 10 });
+
+    for (let i = 0; i < 5; i++) {
+      const res = unwrapFull(await action(makeRequest({ intent: "regenerate", sessionId: SESSION_OWNED_BY_A.id })));
+      expect(res.status).toBe(429);
+    }
+
+    expect(computeStyleMeResult).not.toHaveBeenCalled();
+    expect(outfitSuggestionCreate).not.toHaveBeenCalled();
+    expect(checkRateLimit).toHaveBeenCalledTimes(5);
+  });
+
+  it("concurrent requests: parallel regenerate calls each independently respect whatever checkRateLimit reports for that call", async () => {
+    getCurrentNaiaCustomer.mockResolvedValue(CUSTOMER_A);
+    stylingSessionFindUnique.mockResolvedValue(SESSION_OWNED_BY_A);
+    outfitSuggestionCreate.mockResolvedValue({ id: "suggestion-2", items: [] });
+    // First two calls land inside the window (allowed), the third is the
+    // one that tips it over — exercises the route under concurrency without
+    // re-testing the shared module's own atomic DB counter (already covered
+    // by api-rate-limit-sql.test.ts).
+    checkRateLimit
+      .mockResolvedValueOnce({ allowed: true, overLimit: false, mode: "enforce", count: 18, limit: 20, retryAfterSeconds: 0 })
+      .mockResolvedValueOnce({ allowed: true, overLimit: false, mode: "enforce", count: 19, limit: 20, retryAfterSeconds: 0 })
+      .mockResolvedValueOnce({ allowed: false, overLimit: true, mode: "enforce", count: 21, limit: 20, retryAfterSeconds: 5 });
+
+    const results = await Promise.all([
+      action(makeRequest({ intent: "regenerate", sessionId: SESSION_OWNED_BY_A.id })),
+      action(makeRequest({ intent: "regenerate", sessionId: SESSION_OWNED_BY_A.id })),
+      action(makeRequest({ intent: "regenerate", sessionId: SESSION_OWNED_BY_A.id })),
+    ]);
+    const statuses = results.map((r) => (r as any).init?.status).sort();
+
+    expect(statuses).toEqual([429, undefined, undefined]);
+    expect(computeStyleMeResult).toHaveBeenCalledTimes(2);
+  });
+
+  it("account isolation: checkRateLimit is always called with THIS request's authenticated customer, never a different one", async () => {
+    getCurrentNaiaCustomer.mockResolvedValueOnce(CUSTOMER_B);
+    stylingSessionFindUnique.mockResolvedValueOnce({ ...SESSION_OWNED_BY_A, customerId: CUSTOMER_B.id });
+    outfitSuggestionCreate.mockResolvedValueOnce({ id: "suggestion-3", items: [] });
+
+    await action(makeRequest({ intent: "regenerate", sessionId: SESSION_OWNED_BY_A.id }));
+
+    expect(checkRateLimit).toHaveBeenCalledWith(CUSTOMER_B.id, expect.anything());
+    expect(checkRateLimit).not.toHaveBeenCalledWith(CUSTOMER_A.id, expect.anything());
+  });
+
+  it("checkRateLimit rejecting (DB/infra error surfaced as a thrown promise, not the module's own fail-open) is caught by the route's existing outer try/catch, not left unhandled", async () => {
+    getCurrentNaiaCustomer.mockResolvedValueOnce(CUSTOMER_A);
+    stylingSessionFindUnique.mockResolvedValueOnce(SESSION_OWNED_BY_A);
+    // api-rate-limit.server.ts's real checkRateLimit never rejects (it fails
+    // open internally and always resolves) — this proves that if it ever
+    // did, for any reason, the existing action-level try/catch still returns
+    // a clean 500 rather than crashing the request, and still never reaches
+    // the paid call.
+    checkRateLimit.mockRejectedValueOnce(new Error("simulated rate-limit infra failure"));
+
+    const res = unwrapFull(await action(makeRequest({ intent: "regenerate", sessionId: SESSION_OWNED_BY_A.id })));
+
+    expect(res.status).toBe(500);
+    expect(computeStyleMeResult).not.toHaveBeenCalled();
+    expect(outfitSuggestionCreate).not.toHaveBeenCalled();
+  });
+
+  it("ownership is still checked first — a different customer's session 404s before checkRateLimit is ever called", async () => {
+    getCurrentNaiaCustomer.mockResolvedValueOnce(CUSTOMER_B);
+    stylingSessionFindUnique.mockResolvedValueOnce(SESSION_OWNED_BY_A);
+
+    const res = unwrap(await action(makeRequest({ intent: "regenerate", sessionId: SESSION_OWNED_BY_A.id })));
+
+    expect(res.status).toBe(404);
+    expect(checkRateLimit).not.toHaveBeenCalled();
+    expect(computeStyleMeResult).not.toHaveBeenCalled();
   });
 });
 
