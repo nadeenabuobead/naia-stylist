@@ -197,3 +197,111 @@ export async function requireCurrentNaiaCustomer(request: Request, deps: GetCurr
   }
   return customer;
 }
+
+// ---------------------------------------------------------------------------
+// 2026-11-21 (H4, closing the real gap) — revoke a Clerk user's live
+// sessions through Clerk's own Backend API.
+//
+// naia-session.server.ts's revokeAllSessionsForCustomer only ever deletes
+// NaiaSession rows, which this module's getCurrentNaiaCustomer never reads
+// (see this file's own header). Since Clerk became the PRIMARY customer-auth
+// provider, that left a real incident-response hole: an admin "revoking" a
+// Clerk-authenticated customer's sessions had zero effect on their actual,
+// current ability to use the app. This function is the fix — it is the one
+// place that actually ends a customer's live Clerk session(s), via Clerk's
+// own revokeSession call, the same mechanism Clerk's own dashboard uses.
+//
+// Fail-closed by design: any session Clerk doesn't confirm back as
+// status "revoked" — including a thrown API/network error on either the
+// list or the revoke call — throws ClerkSessionRevocationError rather than
+// returning a partial count. An incident-response control that reports
+// "done" while a session may still be live is worse than one that visibly
+// fails and makes the operator retry. See customer-session-revocation.server
+// for the orchestrator that calls this alongside the legacy NaiaSession
+// teardown, and admin.maintenance.tsx for the one caller.
+//
+// Paginated defensively (a real customer will have a handful of sessions at
+// most) so a customer with more than one page of sessions can never have
+// only the first page revoked while the rest stay live.
+// ---------------------------------------------------------------------------
+
+export class ClerkSessionRevocationError extends Error {
+  constructor(message: string, public readonly cause?: unknown) {
+    super(message);
+    this.name = "ClerkSessionRevocationError";
+  }
+}
+
+export interface ClerkSessionRevocationDeps {
+  // Narrowed to exactly the two SessionAPI methods actually used, rather
+  // than Pick<ClerkClient, "sessions"> (which demands the full SessionAPI
+  // shape on `.sessions` and so can't be satisfied by a minimal test
+  // double) — same narrowing rationale as this file's own ClerkAuthDeps.
+  _clerkClient?: {
+    sessions: Pick<ReturnType<typeof createClerkClient>["sessions"], "getSessionList" | "revokeSession">;
+  };
+}
+
+const CLERK_SESSION_LIST_PAGE_SIZE = 100;
+const CLERK_SESSION_LIST_MAX_PAGES = 10; // 1,000 sessions — far beyond any real customer; a defensive cap, not an expected limit.
+
+// A session in any of these statuses is already unusable for sign-in — no
+// need to call revoke on it, and Clerk's API may reject revoking a session
+// that isn't currently active/pending anyway.
+const CLERK_LIVE_SESSION_STATUSES = new Set(["active", "pending"]);
+
+export async function revokeClerkSessionsForCustomer(
+  clerkUserId: string,
+  deps: ClerkSessionRevocationDeps = {},
+): Promise<{ revokedCount: number; alreadyInactiveCount: number }> {
+  const client = deps._clerkClient ?? defaultClerkClient();
+
+  const allSessions: { id: string; status: string }[] = [];
+  for (let page = 0; page < CLERK_SESSION_LIST_MAX_PAGES; page++) {
+    let listResult;
+    try {
+      listResult = await client.sessions.getSessionList({
+        userId: clerkUserId,
+        limit: CLERK_SESSION_LIST_PAGE_SIZE,
+        offset: page * CLERK_SESSION_LIST_PAGE_SIZE,
+      });
+    } catch (error) {
+      throw new ClerkSessionRevocationError(
+        `Failed to list Clerk sessions for user ${clerkUserId}`,
+        error,
+      );
+    }
+    allSessions.push(...listResult.data);
+    if (allSessions.length >= listResult.totalCount || listResult.data.length < CLERK_SESSION_LIST_PAGE_SIZE) {
+      break;
+    }
+  }
+
+  const liveSessions = allSessions.filter((s) => CLERK_LIVE_SESSION_STATUSES.has(s.status));
+  const alreadyInactiveCount = allSessions.length - liveSessions.length;
+
+  let revokedCount = 0;
+  for (const session of liveSessions) {
+    let revoked;
+    try {
+      revoked = await client.sessions.revokeSession(session.id);
+    } catch (error) {
+      throw new ClerkSessionRevocationError(
+        `Failed to revoke Clerk session ${session.id} for user ${clerkUserId}`,
+        error,
+      );
+    }
+    if (revoked.status !== "revoked") {
+      // The API call didn't throw, but didn't confirm revocation either —
+      // treated the same as a thrown error, per this function's fail-closed
+      // contract. This is exactly the case the founder's instruction named:
+      // "do not report success when sessions remain active."
+      throw new ClerkSessionRevocationError(
+        `Clerk session ${session.id} for user ${clerkUserId} did not report status "revoked" after the revoke call (got "${revoked.status}")`,
+      );
+    }
+    revokedCount++;
+  }
+
+  return { revokedCount, alreadyInactiveCount };
+}
