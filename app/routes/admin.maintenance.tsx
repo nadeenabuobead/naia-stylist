@@ -37,7 +37,7 @@ import {
   purgeResolvedCloudinaryDeletions,
 } from "~/lib/cloudinary-deletion-claim.server";
 import { runBoundedSweep } from "~/lib/cloudinary-orphan-sweep.server";
-import { revokeAllSessionsForCustomer } from "~/lib/naia-session.server";
+import { revokeAllCustomerSessions } from "~/lib/customer-session-revocation.server";
 
 async function requireOwner(request: Request) {
   const session = await requireAdminSession(request);
@@ -158,15 +158,32 @@ export async function action({ request }: ActionFunctionArgs) {
     return { ok: true as const, intent, message: `Purged ${result.count} resolved Cloudinary deletion record(s) past retention.` };
   }
 
-  // 2026-11-17 (H4) — incident response: end every live nAia session for one
+  // 2026-11-17 (H4) — incident response: end every live session for one
   // customer, for a reported/suspected compromise. Requires the exact
   // confirmation value as well as the intent, same discipline as the
   // Cloudinary execute path above.
   //
-  // Deliberately NOT described to the operator as locking the account: it
-  // revokes nAia's own sessions only, not the upstream Clerk or Shopify
-  // identity session, so someone holding the customer's credentials can sign
-  // in again. See revokeAllSessionsForCustomer's own header.
+  // 2026-11-21 — this now genuinely locks the customer out, not just out of
+  // nAia's own legacy session store. revokeAllCustomerSessions
+  // (customer-session-revocation.server.ts) ends BOTH the legacy NaiaSession
+  // rows (naia-session.server.ts — still live for the not-yet-removed
+  // Shopify OAuth routes) AND, since Clerk is the current PRIMARY customer-
+  // auth provider, every live Clerk session for the same customer, through
+  // Clerk's own Backend API. Earlier, this call only ever touched the first
+  // of those two — a real gap, since the vast majority of live customers
+  // authenticate via Clerk and were completely unaffected by this control.
+  //
+  // Still not an account lockout in the broader sense: this ends existing
+  // sessions, it does not change or block the customer's credentials, so
+  // they can sign in again immediately if they still hold them. For a
+  // credential-compromise response (not just a stolen session token), that
+  // follow-up step is still the operator's to take separately.
+  //
+  // Fail-closed: if the customer has a linked Clerk identity and Clerk
+  // revocation does not fully succeed, revokeAllCustomerSessions throws
+  // rather than returning a partial result — this intentionally propagates
+  // past this handler (same as it always has for a NaiaSession DB failure)
+  // rather than ever reporting success while a session might still be live.
   if (intent === "revoke-customer-sessions") {
     const customerId = String(form.get("customerId") ?? "").trim();
     if (!customerId) {
@@ -176,22 +193,32 @@ export async function action({ request }: ActionFunctionArgs) {
       return { ok: false as const, error: "Confirmation value missing — nothing was revoked." };
     }
 
-    const result = await revokeAllSessionsForCustomer(customerId);
+    const result = await revokeAllCustomerSessions(customerId);
+    const totalRevoked = result.legacyRevokedCount + result.clerkRevokedCount;
     await recordAdminAction(identity.email, "revoke-customer-sessions", {
       customerId,
-      revokedCount: result.revokedCount,
+      legacyRevokedCount: result.legacyRevokedCount,
+      clerkRevokedCount: result.clerkRevokedCount,
+      clerkLinked: result.clerkLinked,
     });
 
     // 0 is reported honestly rather than as a bland success: for an
     // incident-response action, "nothing was there to revoke" and "sessions
     // were revoked" must not look the same to the operator — the former
     // usually means a wrong customer ID was pasted.
+    if (totalRevoked === 0) {
+      return {
+        ok: true as const,
+        intent,
+        message: `No active sessions found for ${customerId} — nothing to revoke (checked both the legacy nAia session store and${result.clerkLinked ? "" : " — no linked Clerk identity for this customer —"} Clerk). Check the customer ID is correct.`,
+      };
+    }
     return {
       ok: true as const,
       intent,
-      message: result.revokedCount === 0
-        ? `No active nAia sessions found for ${customerId} — nothing to revoke. Check the customer ID is correct.`
-        : `Revoked ${result.revokedCount} active nAia session(s) for ${customerId}. This does NOT end their Clerk/Shopify identity session — they can sign in again with their credentials.`,
+      message: result.clerkLinked
+        ? `Revoked ${result.legacyRevokedCount} legacy nAia session(s) and ${result.clerkRevokedCount} Clerk session(s) for ${customerId}. Their current sign-in is ended — they will need to sign in again, though they can do so immediately if they still hold valid credentials.`
+        : `Revoked ${result.legacyRevokedCount} legacy nAia session(s) for ${customerId}. No linked Clerk identity was found for this customer, so there was no Clerk-side session to end.`,
     };
   }
 

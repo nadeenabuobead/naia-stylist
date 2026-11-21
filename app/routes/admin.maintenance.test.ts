@@ -53,9 +53,13 @@ vi.mock("~/lib/cloudinary-orphan-sweep.server", () => ({
 }));
 
 // 2026-11-17 (H4) — admin-facing session revocation for a suspected
-// compromised customer account.
-vi.mock("~/lib/naia-session.server", () => ({
-  revokeAllSessionsForCustomer: vi.fn(),
+// compromised customer account. 2026-11-21: now calls the orchestrator
+// (customer-session-revocation.server.ts) instead of naia-session.server's
+// function directly — see that module's own test file for coverage of the
+// legacy-NaiaSession + Clerk combination itself; this route-level test only
+// needs to verify the route calls it correctly and handles its result.
+vi.mock("~/lib/customer-session-revocation.server", () => ({
+  revokeAllCustomerSessions: vi.fn(),
 }));
 
 import { requireAdminSession } from "~/lib/internal-auth.server";
@@ -65,7 +69,7 @@ import { listPendingClerkCleanups, retryPendingClerkCleanup } from "~/lib/clerk-
 import { listPendingCustomerErasureFailures, retryPendingCustomerErasureFailure } from "~/lib/customer-erasure-failures.server";
 import { listPendingCloudinaryDeletions, retryPendingCloudinaryDeletion, purgeResolvedCloudinaryDeletions } from "~/lib/cloudinary-deletion-claim.server";
 import { runBoundedSweep } from "~/lib/cloudinary-orphan-sweep.server";
-import { revokeAllSessionsForCustomer } from "~/lib/naia-session.server";
+import { revokeAllCustomerSessions } from "~/lib/customer-session-revocation.server";
 
 const mockRequireAdmin = () => requireAdminSession as ReturnType<typeof vi.fn>;
 const mockPurgeJourney = () => purgeExpiredJourneyEvents as ReturnType<typeof vi.fn>;
@@ -81,7 +85,7 @@ const mockListPendingCloudinaryDeletions = () => listPendingCloudinaryDeletions 
 const mockRetryCloudinaryDeletion = () => retryPendingCloudinaryDeletion as ReturnType<typeof vi.fn>;
 const mockPurgeResolvedCloudinaryDeletions = () => purgeResolvedCloudinaryDeletions as ReturnType<typeof vi.fn>;
 const mockRunBoundedSweep = () => runBoundedSweep as ReturnType<typeof vi.fn>;
-const mockRevokeSessions = () => revokeAllSessionsForCustomer as ReturnType<typeof vi.fn>;
+const mockRevokeSessions = () => revokeAllCustomerSessions as ReturnType<typeof vi.fn>;
 
 function actionRequest(intent: string) {
   const body = new URLSearchParams({ intent });
@@ -413,8 +417,8 @@ function revokeRequest(fields: Record<string, string>) {
 }
 
 describe("admin.maintenance — revoke-customer-sessions action (H4)", () => {
-  it("revokes every session for the named customer and records it", async () => {
-    mockRevokeSessions().mockResolvedValueOnce({ revokedCount: 3 });
+  it("revokes both legacy and Clerk sessions for the named customer and records both counts", async () => {
+    mockRevokeSessions().mockResolvedValueOnce({ legacyRevokedCount: 2, clerkRevokedCount: 3, clerkLinked: true });
     const { action } = await import("./admin.maintenance");
 
     const result = await action({
@@ -423,16 +427,17 @@ describe("admin.maintenance — revoke-customer-sessions action (H4)", () => {
 
     expect(mockRevokeSessions()).toHaveBeenCalledWith("cust-1");
     expect((result as any).ok).toBe(true);
+    expect((result as any).message).toMatch(/2/);
     expect((result as any).message).toMatch(/3/);
     expect(mockRecordAction()).toHaveBeenCalledWith(
       "owner@naiabynadine.com",
       "revoke-customer-sessions",
-      { customerId: "cust-1", revokedCount: 3 },
+      { customerId: "cust-1", legacyRevokedCount: 2, clerkRevokedCount: 3, clerkLinked: true },
     );
   });
 
   it("attributes the action to the admin session, never to request input", async () => {
-    mockRevokeSessions().mockResolvedValueOnce({ revokedCount: 1 });
+    mockRevokeSessions().mockResolvedValueOnce({ legacyRevokedCount: 1, clerkRevokedCount: 0, clerkLinked: false });
     const { action } = await import("./admin.maintenance");
 
     await action({
@@ -487,46 +492,63 @@ describe("admin.maintenance — revoke-customer-sessions action (H4)", () => {
     // For an incident-response control, "nothing was there to revoke" and
     // "sessions were revoked" must not read the same — a 0 usually means a
     // wrong customer ID was pasted.
-    mockRevokeSessions().mockResolvedValueOnce({ revokedCount: 0 });
+    mockRevokeSessions().mockResolvedValueOnce({ legacyRevokedCount: 0, clerkRevokedCount: 0, clerkLinked: false });
     const { action } = await import("./admin.maintenance");
 
     const result = await action({
       request: revokeRequest({ customerId: "typo-id", confirmRevoke: "REVOKE" }),
     } as any);
 
-    expect((result as any).message).toMatch(/No active nAia sessions/i);
+    expect((result as any).message).toMatch(/No active sessions/i);
     expect((result as any).message).toMatch(/customer ID is correct/i);
     // Still audited — an attempted revocation against a wrong id is itself
     // worth a record.
     expect(mockRecordAction()).toHaveBeenCalledWith(
       "owner@naiabynadine.com",
       "revoke-customer-sessions",
-      { customerId: "typo-id", revokedCount: 0 },
+      { customerId: "typo-id", legacyRevokedCount: 0, clerkRevokedCount: 0, clerkLinked: false },
     );
   });
 
-  it("does not overstate its effect — the success message says the identity session survives", async () => {
-    // Guards against this control being presented as an account lockout. It
-    // ends nAia sessions only; Clerk/Shopify identity sessions are untouched,
-    // so the operator must know to follow up with a credential reset.
-    mockRevokeSessions().mockResolvedValueOnce({ revokedCount: 2 });
+  // 2026-11-21 — replaces the old "does not overstate its effect" test,
+  // which asserted the PREVIOUS (incomplete) contract: that the message
+  // told the operator the Clerk/Shopify identity session survives. That
+  // was true when this only touched the legacy NaiaSession table; it no
+  // longer is, now that this also ends live Clerk sessions. The new
+  // contract is the opposite: the message must say the customer's current
+  // sign-in IS ended when a Clerk identity was found and revoked, and must
+  // say plainly when no Clerk identity exists for this customer at all —
+  // never imply more or less than what actually happened.
+  it("tells the operator the customer's current sign-in is ended, when a Clerk identity was found and revoked", async () => {
+    mockRevokeSessions().mockResolvedValueOnce({ legacyRevokedCount: 2, clerkRevokedCount: 1, clerkLinked: true });
     const { action } = await import("./admin.maintenance");
 
     const result = await action({
       request: revokeRequest({ customerId: "cust-1", confirmRevoke: "REVOKE" }),
     } as any);
 
-    expect((result as any).message).toMatch(/Clerk\/Shopify/);
-    expect((result as any).message).toMatch(/sign in again/i);
+    expect((result as any).message).toMatch(/current sign-in is ended/i);
+    expect((result as any).message).not.toMatch(/does not end/i);
   });
 
-  it("a revocation DB failure is not swallowed as success", async () => {
-    mockRevokeSessions().mockRejectedValueOnce(new Error("db down"));
+  it("tells the operator plainly when the customer has no linked Clerk identity at all", async () => {
+    mockRevokeSessions().mockResolvedValueOnce({ legacyRevokedCount: 1, clerkRevokedCount: 0, clerkLinked: false });
+    const { action } = await import("./admin.maintenance");
+
+    const result = await action({
+      request: revokeRequest({ customerId: "cust-legacy-only", confirmRevoke: "REVOKE" }),
+    } as any);
+
+    expect((result as any).message).toMatch(/No linked Clerk identity/i);
+  });
+
+  it("a revocation failure (legacy or Clerk) is not swallowed as success", async () => {
+    mockRevokeSessions().mockRejectedValueOnce(new Error("Clerk API unreachable"));
     const { action } = await import("./admin.maintenance");
 
     await expect(
       action({ request: revokeRequest({ customerId: "cust-1", confirmRevoke: "REVOKE" }) } as any),
-    ).rejects.toThrow("db down");
+    ).rejects.toThrow("Clerk API unreachable");
 
     expect(mockRecordAction()).not.toHaveBeenCalled();
   });
