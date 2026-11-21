@@ -220,6 +220,13 @@ export async function action({ request }: ActionFunctionArgs) {
       // request is safe here, not a second read of the same stream.
       return deleteMyNaiaModelFixture(request);
     }
+    if (parsedDeleteBody?.fixtureKind === "styleme-regenerate-rate-limit-seed") {
+      const sessionCustomerId = await resolveAuthorizedQaSessionCustomerId(request);
+      if (!sessionCustomerId) {
+        return data({ ok: false, code: "forbidden" }, { status: 403 });
+      }
+      return deleteStyleMeRegenerateRateLimitCounter(sessionCustomerId);
+    }
     return deleteFixtureSuggestion(request, parsedDeleteBody);
   }
   if (request.method !== "POST") {
@@ -243,6 +250,20 @@ export async function action({ request }: ActionFunctionArgs) {
       return data({ ok: false, code: "forbidden" }, { status: 403 });
     }
     return createStyleMeResultViewFixture(sessionCustomerId);
+  }
+
+  if (parsedBody?.fixtureKind === "styleme-regenerate-rate-limit-seed") {
+    // H2 staging verification (2026-11-21) — same real-session auth as
+    // every other fixtureKind above: customerId comes ONLY from the
+    // verified Clerk session, never from the request body, so this can
+    // never act on an arbitrary/different customer. See
+    // seedStyleMeRegenerateRateLimitCounter's own header comment for the
+    // full rationale and exact DB scope.
+    const sessionCustomerId = await resolveAuthorizedQaSessionCustomerId(request);
+    if (!sessionCustomerId) {
+      return data({ ok: false, code: "forbidden" }, { status: 403 });
+    }
+    return seedStyleMeRegenerateRateLimitCounter(sessionCustomerId, parsedBody?.count);
   }
 
   if (parsedBody?.fixtureKind === "closet-legacy-image-ownership") {
@@ -486,6 +507,128 @@ async function createStyleMeResultViewFixture(customerId: string) {
     suggestionId,
     itemCount: STYLEME_FIXTURE_ITEMS.length,
   });
+}
+
+// GET /api/vto-qa-fixture?mode=my-fixture-suggestions — see the loader's own
+// comment above for the real-session auth and why this exists. Read-only:
+// lists every OutfitSuggestion with moodDescription === null (the existing
+// fixture marker) owned by the one Clerk-session-resolved customerId, most
+// recent first. Capped at 100 — this is a QA diagnostic for one synthetic
+// identity's own handful of fixture rows, never a general admin listing.
+async function listOwnFixtureSuggestions(customerId: string) {
+  const suggestions = await prisma.outfitSuggestion.findMany({
+    where: { moodDescription: null, session: { customerId } },
+    select: {
+      id: true,
+      sessionId: true,
+      createdAt: true,
+      items: { select: { shopifyProductId: true } },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+  });
+
+  const fixtures = suggestions.map((suggestion) => {
+    const productIds = suggestion.items.map((item) => item.shopifyProductId);
+    let kind: string = "unknown";
+    if (productIds.length > 0 && productIds.every((id) => id === FULL_LOOK_FIXTURE_SHOPIFY_PRODUCT_ID)) {
+      kind = "full-look-real-garments";
+    } else if (productIds.length > 0 && productIds.every((id) => id === FULL_LOOK_MAX_FIXTURE_SHOPIFY_PRODUCT_ID)) {
+      kind = "full-look-real-garments-max";
+    } else if (productIds.length > 0 && productIds.every((id) => id === "qa-fixture-not-a-real-product-id")) {
+      kind = "styleme-result-view";
+    }
+    return {
+      suggestionId: suggestion.id,
+      sessionId: suggestion.sessionId,
+      createdAt: suggestion.createdAt,
+      kind,
+      itemCount: productIds.length,
+    };
+  });
+
+  return data({ ok: true, fixtures });
+}
+
+// ── H2 staging verification — StyleMe regenerate rate-limit counter seed (2026-11-21) ──
+//
+// POST /api/vto-qa-fixture, body: { fixtureKind: "styleme-regenerate-rate-limit-seed",
+// count?: number }, while signed in (real Clerk session) as QA_OVERRIDE_CUSTOMER_ID —
+// same real-session auth as styleme-result-view above, for the same reason.
+//
+// WHY THIS EXISTS: fix/styleme-regenerate-rate-limit-shadow-20261121 (merged to
+// integrate/trunk as f290efb8) added a real, enforced rate limit — 20 requests/60s —
+// on style-me/result.tsx's "regenerate" intent, specifically so an unbounded loop of
+// real, paid computeStyleMeResult/Claude calls can no longer happen. Verifying that the
+// LIVE deployed 429 path actually fires requires the counter to already be at/over the
+// limit for the calling customer — reaching that for real would mean making the 20
+// real, paid Claude calls this whole fix exists to prevent, which is explicitly
+// prohibited for this verification. This fixture closes that gap the only way that
+// doesn't cost a single real provider call: it writes directly into the SAME
+// ApiRateLimitCounter row checkRateLimit itself reads, using the identical atomic
+// upsert the real module uses (api-rate-limit.server.ts's own
+// INSERT ... ON CONFLICT ... DO UPDATE pattern, reused here via Prisma's upsert, which
+// compiles to the same construct) — so the very next live regenerate call from this
+// same customer sees exactly the state a real 21st request would have produced, and
+// 429s before ever reaching computeStyleMeResult.
+//
+// EXACT SCOPE, nothing broader:
+//   - customerId: ONLY the verified session's own id (QA_OVERRIDE_CUSTOMER_ID),
+//     resolved by resolveAuthorizedQaSessionCustomerId before this function is ever
+//     called — never a body-supplied id, never any other customer's row.
+//   - routeKey: hardcoded "styleme-regenerate" — this fixture cannot touch any other
+//     route's rate-limit counter (Cloudinary signing, billing checkout, admin login).
+//   - windowStart: computed identically to checkRateLimit's own real logic
+//     (Math.floor(Date.now() / windowMs) * windowMs, windowMs = 60_000 — the same
+//     60s window styleme-regenerate's real config uses) — this writes into the SAME
+//     bucket a real request right now would land in, not an arbitrary one.
+//   - count: clamped to [21, 1000] regardless of what the body requests — always
+//     strictly over the real limit (20), so the next regenerate call is deterministically
+//     rejected; never set low enough to accidentally leave the counter under the limit.
+//
+// Gated off entirely in production the same way every other fixture in this file is:
+// resolveAuthorizedQaSessionCustomerId's own VERCEL_ENV/NAIA_PROJECT_VARIANT checks run
+// first, so this function is never reachable there regardless of what's deployed.
+//
+// Cleanup: deleteStyleMeRegenerateRateLimitCounter below removes every row this fixture
+// could have written for this customer+routeKey — not scoped to one exact windowStart,
+// so a seed-then-wait-past-the-window-then-cleanup sequence still fully cleans up.
+const STYLEME_REGENERATE_ROUTE_KEY = "styleme-regenerate";
+const STYLEME_REGENERATE_WINDOW_MS = 60_000;
+const STYLEME_REGENERATE_REAL_LIMIT = 20;
+
+async function seedStyleMeRegenerateRateLimitCounter(customerId: string, requestedCount: unknown) {
+  const parsedCount = typeof requestedCount === "number" ? requestedCount : NaN;
+  const count = Number.isFinite(parsedCount)
+    ? Math.min(Math.max(Math.trunc(parsedCount), STYLEME_REGENERATE_REAL_LIMIT + 1), 1000)
+    : STYLEME_REGENERATE_REAL_LIMIT + 5;
+
+  const bucketStartMs = Math.floor(Date.now() / STYLEME_REGENERATE_WINDOW_MS) * STYLEME_REGENERATE_WINDOW_MS;
+  const windowStart = new Date(bucketStartMs);
+  const retryAfterSeconds = Math.max(1, Math.ceil((bucketStartMs + STYLEME_REGENERATE_WINDOW_MS - Date.now()) / 1000));
+
+  await prisma.apiRateLimitCounter.upsert({
+    where: { customerId_routeKey_windowStart: { customerId, routeKey: STYLEME_REGENERATE_ROUTE_KEY, windowStart } },
+    create: { customerId, routeKey: STYLEME_REGENERATE_ROUTE_KEY, windowStart, count },
+    update: { count },
+  });
+
+  return data({
+    ok: true,
+    fixtureKind: "styleme-regenerate-rate-limit-seed",
+    routeKey: STYLEME_REGENERATE_ROUTE_KEY,
+    windowStart: windowStart.toISOString(),
+    count,
+    realLimit: STYLEME_REGENERATE_REAL_LIMIT,
+    retryAfterSeconds,
+  });
+}
+
+async function deleteStyleMeRegenerateRateLimitCounter(customerId: string) {
+  const result = await prisma.apiRateLimitCounter.deleteMany({
+    where: { customerId, routeKey: STYLEME_REGENERATE_ROUTE_KEY },
+  });
+  return data({ ok: true, fixtureKind: "styleme-regenerate-rate-limit-seed", deletedCount: result.count });
 }
 
 // ── QA #36 — legacy imageUrl ownership/priority fixture (2026-11-18) ───────
@@ -2247,6 +2390,40 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const customerId = url.searchParams.get("customerId") ?? undefined;
   const suggestionId = url.searchParams.get("suggestionId");
   const mode = url.searchParams.get("mode");
+
+  // mode === "my-fixture-suggestions" (2026-11-21) — read-only, deterministic
+  // lookup of the CALLING QA session's own fixture-created OutfitSuggestion
+  // rows. Checked before isAuthorized's secret-header gate below: this mode
+  // uses the same real-Clerk-session auth as styleme-result-view/
+  // styleme-regenerate-rate-limit-seed above (Five-Persona QA — and any
+  // other Clerk-session-only QA caller — has no VTO_QA_FIXTURE_SECRET to
+  // present), never the secret header, never a caller-supplied customerId.
+  //
+  // WHY THIS EXISTS: every styleme-result-view call creates a new
+  // StylingSession/OutfitSuggestion but, until now, handed the caller its
+  // sessionId/suggestionId exactly once, in that one response — if a caller
+  // loses that value (whether by a genuine bug, a crashed script, or a
+  // client-side tool redacting it on the way back) there was no way to
+  // re-discover it short of a direct database query, which left orphaned
+  // fixture rows with no deterministic cleanup path. This closes that gap
+  // without inventing a new identifier scheme: it just makes the EXISTING
+  // fixture marker (moodDescription === null, already the sole thing
+  // deleteFixtureSuggestion below keys its own authorization on) queryable
+  // for the first time, scoped to exactly the one customerId the verified
+  // session resolves to — never broader, never by title/string matching.
+  //
+  // Classifies each row by its items' shopifyProductId marker (the same
+  // markers deleteFixtureSuggestion already uses to distinguish fixture
+  // kinds with real dependent jobs from the rest) purely so a caller juggling
+  // more than one fixture kind for the same identity can tell them apart
+  // before deleting — this endpoint itself never deletes anything.
+  if (mode === "my-fixture-suggestions") {
+    const sessionCustomerId = await resolveAuthorizedQaSessionCustomerId(request);
+    if (!sessionCustomerId) {
+      return data({ ok: false, code: "forbidden" }, { status: 403 });
+    }
+    return listOwnFixtureSuggestions(sessionCustomerId);
+  }
 
   if (!isAuthorized(request, customerId)) {
     return data({ ok: false, code: "forbidden" }, { status: 403 });
