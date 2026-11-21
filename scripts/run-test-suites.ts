@@ -49,6 +49,14 @@ const steps = [
   // files (unlike the node:test suites above), so they're combined into
   // one new "test:clerk-session" script rather than node:test's own runner.
   "test:clerk-session",
+  // 2026-11-21 (C6 investigation): app/lib/ai/selfie-analysis.test.ts (68
+  // tests — quality checks, consent gating, the new third-party-AI
+  // disclosure containment, re-analysis, deletion, security invariants)
+  // had the exact same unreachability problem as C7/H7/error-tracking/
+  // clerk-session above — it appeared in no npm script, so `npm test`
+  // never ran it. It is a node:test file, same reason it gets its own
+  // script rather than being appended to "test:security".
+  "test:selfie-analysis",
 ];
 
 const results: { script: string; exitCode: number }[] = [];

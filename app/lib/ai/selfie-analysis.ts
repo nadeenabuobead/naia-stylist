@@ -114,7 +114,11 @@ export type SelfieAnalysisOutcome =
   | { status: "consent-missing" }
   | { status: "invalid-input"; reason: string }
   | { status: "safety-rejected" }
-  | { status: "moderation-unavailable" };
+  | { status: "moderation-unavailable" }
+  // C6 interim containment (2026-11-21) — see analyseSelfie's own header
+  // comment. Never a provider call, never a crash: an ordinary graceful
+  // failure outcome, same shape as the others above.
+  | { status: "disclosure-not-confirmed" };
 
 // ── Persistence record ────────────────────────────────────────────────────────
 //

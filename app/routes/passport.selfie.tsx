@@ -584,6 +584,7 @@ export default function SelfieUploadPage() {
     photoExists && !analysisPending && !analysisCompleted &&
     (freshOutcome?.status === "system-failure" ||
       freshOutcome?.status === "timeout" ||
+      freshOutcome?.status === "disclosure-not-confirmed" ||
       (dbStatus === "failed" && !freshOutcome));
 
   const showDeletedSection =
@@ -623,7 +624,7 @@ export default function SelfieUploadPage() {
     freshOutcome?.status === "quality-failed" ? "Photo needs adjustment" :
     freshOutcome?.status === "consent-missing" ? "Consent required" :
     freshOutcome?.status === "invalid-input" ? "Cannot proceed" :
-    (freshOutcome?.status === "system-failure" || freshOutcome?.status === "timeout") ? "Analysis unavailable" :
+    (freshOutcome?.status === "system-failure" || freshOutcome?.status === "timeout" || freshOutcome?.status === "disclosure-not-confirmed") ? "Analysis unavailable" :
     analysisPending ? "Analysis in progress" :
     dbStatus === "failed" ? (photoExists ? "Selfie saved" : "Analysis unavailable") :
     dbStatus === "deleted" ? "Analysis removed" :
@@ -631,7 +632,7 @@ export default function SelfieUploadPage() {
     "Not started";
 
   const statusDescription: string | null = successIntent ? null :
-    (freshOutcome?.status === "system-failure" || freshOutcome?.status === "timeout")
+    (freshOutcome?.status === "system-failure" || freshOutcome?.status === "timeout" || freshOutcome?.status === "disclosure-not-confirmed")
       ? "We couldn't complete your analysis this time." :
     (dbStatus === "failed" && !freshOutcome && !photoExists)
       ? "We couldn't complete your analysis this time." :
@@ -644,6 +645,7 @@ export default function SelfieUploadPage() {
     freshOutcome.status !== "completed" &&
     freshOutcome.status !== "system-failure" &&
     freshOutcome.status !== "timeout" &&
+    freshOutcome.status !== "disclosure-not-confirmed" &&
     freshOutcome.status !== "moderation-unavailable";
 
   // ── Effects ───────────────────────────────────────────────────────────────
@@ -1223,7 +1225,7 @@ function UploadForm({
 }
 
 function OutcomeFeedback({ outcome }: { outcome: SelfieAnalysisOutcome }) {
-  // system-failure and timeout: handled by statusDescription (no separate card)
+  // system-failure, timeout, disclosure-not-confirmed: handled by statusDescription (no separate card)
   // moderation-unavailable: handled by the retry section
   // completed: no feedback needed
   let title = "";

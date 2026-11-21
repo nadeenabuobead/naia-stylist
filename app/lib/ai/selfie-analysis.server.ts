@@ -6,6 +6,10 @@
 //
 // Flow:
 //   1. Guard: consent required
+//   1b. Guard (2026-11-21, C6 interim containment): third-party AI
+//       disclosure must be explicitly confirmed via
+//       SELFIE_THIRD_PARTY_AI_DISCLOSURE_CONFIRMED — fails closed by
+//       default in every environment. See analyseSelfie's own comment.
 //   2. Quality check (blurry, obstructed, multiple-faces, strong-filter, etc.)
 //   3. If quality passes: styling analysis returning SelfieStyleSignals
 //   4. Timeout wraps both calls as a unit
@@ -444,6 +448,32 @@ export async function analyseSelfie(
 ): Promise<SelfieAnalysisOutcome> {
   if (!options?.consentAt) {
     return { status: "consent-missing" };
+  }
+
+  // C6 interim containment (2026-11-21, founder-requested fail-closed
+  // protection pending a legal/product decision — see the reconciliation
+  // memory for full context, not restated here).
+  //
+  // This route's own consent checkbox ("I consent to nAia analysing this
+  // photo to offer me personal styling guidance.") never names Anthropic,
+  // Claude, or any third-party AI vendor, and the Privacy Policy link is
+  // still a placeholder ("#", pending: true — see C1). The function-level
+  // consent gate above is real but does not, by itself, make that
+  // disclosure sufficient — this is a separate check for a separate
+  // problem (disclosure content, not presence of SOME consent).
+  //
+  // Fails closed by default in every environment, including production:
+  // the env var must be explicitly set to exactly "true" to proceed. No
+  // caller, including this file's own tests, is exempted — tests set the
+  // var explicitly rather than bypassing this check in code, so the real
+  // production default is never weakened for convenience.
+  //
+  // This is a holding pattern, not the fix: the actual fix is updating the
+  // consent copy and/or Privacy Policy to name the specific third-party AI
+  // processing, which needs legal/product sign-off (same gate as C1's
+  // Privacy Policy text) — not something to draft unilaterally here.
+  if (process.env.SELFIE_THIRD_PARTY_AI_DISCLOSURE_CONFIRMED !== "true") {
+    return { status: "disclosure-not-confirmed" };
   }
 
   const hasContent =

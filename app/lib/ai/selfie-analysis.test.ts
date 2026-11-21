@@ -14,6 +14,14 @@ import {
 } from "./selfie-analysis.server.ts";
 import type { SelfieAnalysisRecord, SelfieStyleSignals } from "./selfie-analysis.ts";
 
+// C6 interim containment (2026-11-21) — analyseSelfie fails closed on this
+// var by default; every test in this file except the dedicated
+// "disclosure-not-confirmed" tests below exercises the ordinary happy/
+// failure paths that existed before that change, so they opt IN to the
+// confirmed state here rather than the real production default being
+// weakened anywhere in the implementation itself.
+process.env.SELFIE_THIRD_PARTY_AI_DISCLOSURE_CONFIRMED = "true";
+
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
 const CONSENT_AT = "2026-07-17T10:00:00.000Z";
@@ -166,6 +174,64 @@ describe("analyseSelfie", () => {
     const result = await analyseSelfie(IMAGE_URL, { consentAt: null, _analyzer: analyzer });
     assert.equal(result.status, "consent-missing");
     assert.equal(analyzerCalled, false, "analyzer should not be called when consent is missing");
+  });
+
+  // ── C6 interim containment: third-party-AI disclosure gate ────────────────
+  // See selfie-analysis.server.ts's own header comment for the full
+  // rationale. These tests restore the module-level default (set at the top
+  // of this file) in a `finally` so they can't leak into any other test.
+  describe("third-party AI disclosure gate (C6, 2026-11-21)", () => {
+    it("disclosure not confirmed (env var unset) → disclosure-not-confirmed, before any provider call, even with valid consent", async () => {
+      const original = process.env.SELFIE_THIRD_PARTY_AI_DISCLOSURE_CONFIRMED;
+      delete process.env.SELFIE_THIRD_PARTY_AI_DISCLOSURE_CONFIRMED;
+      try {
+        let analyzerCalled = false;
+        const analyzer: SelfieAnalyzerFn = async () => { analyzerCalled = true; return ""; };
+
+        const result = await analyseSelfie(IMAGE_URL, { consentAt: CONSENT_AT, _analyzer: analyzer });
+
+        assert.equal(result.status, "disclosure-not-confirmed");
+        assert.equal(analyzerCalled, false, "analyzer must not be called while disclosure is unconfirmed");
+      } finally {
+        process.env.SELFIE_THIRD_PARTY_AI_DISCLOSURE_CONFIRMED = original;
+      }
+    });
+
+    it("disclosure not confirmed (env var set to a non-'true' value) → still fails closed", async () => {
+      const original = process.env.SELFIE_THIRD_PARTY_AI_DISCLOSURE_CONFIRMED;
+      // Anything other than the exact string "true" must fail closed —
+      // truthy-but-not-"true" (e.g. a stray "1" or "yes" from a
+      // misconfigured env) must never be silently treated as confirmed.
+      process.env.SELFIE_THIRD_PARTY_AI_DISCLOSURE_CONFIRMED = "1";
+      try {
+        let analyzerCalled = false;
+        const analyzer: SelfieAnalyzerFn = async () => { analyzerCalled = true; return ""; };
+
+        const result = await analyseSelfie(IMAGE_URL, { consentAt: CONSENT_AT, _analyzer: analyzer });
+
+        assert.equal(result.status, "disclosure-not-confirmed");
+        assert.equal(analyzerCalled, false);
+      } finally {
+        process.env.SELFIE_THIRD_PARTY_AI_DISCLOSURE_CONFIRMED = original;
+      }
+    });
+
+    it("consent-missing still takes priority over disclosure-not-confirmed when both are true", async () => {
+      const original = process.env.SELFIE_THIRD_PARTY_AI_DISCLOSURE_CONFIRMED;
+      delete process.env.SELFIE_THIRD_PARTY_AI_DISCLOSURE_CONFIRMED;
+      try {
+        const result = await analyseSelfie(IMAGE_URL, { consentAt: null });
+        assert.equal(result.status, "consent-missing", "the existing consent gate must be checked first, not superseded");
+      } finally {
+        process.env.SELFIE_THIRD_PARTY_AI_DISCLOSURE_CONFIRMED = original;
+      }
+    });
+
+    it("disclosure confirmed ('true') with valid consent proceeds normally — this containment does not break the happy path", async () => {
+      const analyzer = twoCallAnalyzer(makeQualityPass(), JSON.stringify(makeStyleSignals()));
+      const result = await analyseSelfie(IMAGE_URL, { consentAt: CONSENT_AT, _analyzer: analyzer });
+      assert.equal(result.status, "completed");
+    });
   });
 
   it("test 10: clearSelfieAnalysisRecord sets status to deleted and clears signals", () => {
