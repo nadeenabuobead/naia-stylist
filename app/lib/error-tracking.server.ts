@@ -2,6 +2,20 @@
 //
 // Phase 1 ops prep — a single, central seam for application error capture.
 //
+// routeErrorResponse handling (2026-11-21 — found investigating an
+// unrelated PostgreSQL monitoring task): React Router throws its own
+// internal route-error-response object — never an Error instance — for
+// an unmatched route (no `routes.ts`/flat-route file matches the request
+// path at all) or for a route's own `throw new Response(...)`/`data(...,
+// {status})`. Confirmed live: three bot/scanner `curl` probes against
+// nonexistent production paths (e.g. /staging/full-look-vto-real) each
+// returned a correct 404 response, yet every one of them logged here as
+// `name: "UnknownError", message: "Non-Error thrown"` — indistinguishable
+// from a genuine unknown-shaped application crash. Not a security issue
+// (the 404 is correct and nothing executes), but it degrades this exact
+// log pipeline's signal quality — the same pipeline the 08P01 live
+// monitor depends on to tell a real incident from noise.
+//
 // Today this only writes a structured line to stdout via console.error, so
 // existing Vercel log retention is the only place these events land. It
 // exists so that wiring in a real provider (Sentry or similar) later is a
@@ -38,6 +52,8 @@
 //     connection string: those never appear inside this specific
 //     capture group even when present elsewhere in the full message).
 // Neither field is ever populated from unbounded/free-form error text.
+import { isRouteErrorResponse } from "react-router";
+
 const POSTGRES_SQLSTATE_PATTERN = /PostgresError\s*\{\s*code:\s*"([0-9A-Za-z]{5})"/;
 
 function extractPostgresSqlState(message: string): string | undefined {
@@ -140,6 +156,27 @@ export function captureError(
   error: unknown,
   meta?: ErrorCaptureMeta,
 ): ErrorCaptureEvent {
+  // Checked first, and not folded into the isError branch below: a route
+  // error response is never `instanceof Error`, so without this check it
+  // falls into the generic "Non-Error thrown" / "UnknownError" shape —
+  // indistinguishable from a real unknown-shaped crash. status/statusText
+  // are a bounded, fixed-shape pair (an HTTP status code plus React
+  // Router's own short reason phrase), never free-form error text, so
+  // nothing here needs truncation or redaction the way a thrown Error's
+  // message does.
+  if (isRouteErrorResponse(error)) {
+    const event: ErrorCaptureEvent = {
+      context,
+      message: `${error.status} ${error.statusText}`.trim(),
+      name: "RouteErrorResponse",
+      meta,
+      occurredAt: new Date().toISOString(),
+    };
+    // eslint-disable-next-line no-console
+    console.error("[error-capture]", JSON.stringify(event));
+    return event;
+  }
+
   const isError = error instanceof Error;
   // Redact before anything else touches the message — both the logged
   // slice and every extractor below operate on this sanitized text, so a

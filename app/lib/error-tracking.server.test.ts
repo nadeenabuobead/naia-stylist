@@ -1,6 +1,7 @@
 // app/lib/error-tracking.server.test.ts
 import assert from "node:assert/strict";
 import { describe, it, beforeEach, afterEach } from "node:test";
+import { UNSAFE_ErrorResponseImpl } from "react-router";
 import { captureError, captureFailure } from "./error-tracking.server.ts";
 
 let logs: string[] = [];
@@ -33,6 +34,34 @@ describe("captureError", () => {
     const event = captureError("fashn:poll", "a string, not an Error");
     assert.equal(event.name, "UnknownError");
     assert.equal(event.message, "Non-Error thrown");
+  });
+
+  it("logs a real React Router route-error-response (e.g. an unmatched-route 404) distinctly, not as a generic Non-Error thrown", () => {
+    const routeError = new UNSAFE_ErrorResponseImpl(404, "Not Found", null);
+    const event = captureError("request-handler", routeError, { method: "GET", pathname: "/staging/full-look-vto-real" });
+    assert.equal(event.name, "RouteErrorResponse");
+    assert.equal(event.message, "404 Not Found");
+    assert.notEqual(event.name, "UnknownError");
+    assert.notEqual(event.message, "Non-Error thrown");
+    assert.deepEqual(event.meta, { method: "GET", pathname: "/staging/full-look-vto-real" });
+    assert.match(logs[0], /"name":"RouteErrorResponse"/);
+    assert.match(logs[0], /"message":"404 Not Found"/);
+  });
+
+  it("logs a non-404 route-error-response (e.g. a route's own throw new Response with a custom status) with its real status", () => {
+    const routeError = new UNSAFE_ErrorResponseImpl(503, "Service Unavailable", null);
+    const event = captureError("request-handler", routeError);
+    assert.equal(event.name, "RouteErrorResponse");
+    assert.equal(event.message, "503 Service Unavailable");
+  });
+
+  it("never applies Prisma/Postgres field extraction to a route-error-response", () => {
+    const routeError = new UNSAFE_ErrorResponseImpl(404, "Not Found", null);
+    const event = captureError("request-handler", routeError);
+    assert.equal(event.prismaCode, undefined);
+    assert.equal(event.postgresSqlState, undefined);
+    assert.equal(event.postgresSeverity, undefined);
+    assert.equal(event.postgresRoutine, undefined);
   });
 
   it("truncates long error messages to 200 chars", () => {
